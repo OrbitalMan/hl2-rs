@@ -1,3 +1,4 @@
+mod console;
 mod entities;
 mod gameplay;
 mod hud;
@@ -37,7 +38,7 @@ fn options() -> Result<Options> {
     let mut a = std::env::args().skip(1);
     let command = a.next().unwrap_or("view".into());
     if command == "--help" || command == "help" {
-        println!("HL2-RS experimental Rust runtime\n\nCommands: view (default), inspect, verify, export\nOptions: --game <HL2 folder> --map <map> --all (verify every map)\n         --capture <PNG> --frames <N> --position <x,y,z> --yaw <degrees> --pitch <degrees>\n         --output <JSON> --mods <sandbox.json> --smoke (scripted movement/mod test)\n         --input-script <JSON> (timed regression inputs) --time-scale <factor> (default 1)\n\nStandalone partial reconstruction using installed assets; campaign and NPC AI are incomplete.\nWASD move; click to capture mouse, Esc releases; arrows look; Q/E fly up/down;\nShift faster; F1 debug HUD; F2 fly/walk; Space jump; Tab entity markers; B place block; F5 reload mod; Ctrl crouch; E use; R reload; 1-6 slots/mousewheel weapon selection; Q previous weapon; F3 developer loadout; F4 reset; F12 screenshot; F10 quit.");
+        println!("HL2-RS experimental Rust runtime\n\nCommands: view (default), inspect, verify, export\nOptions: --game <HL2 folder> --map <map> --all (verify every map)\n         --capture <PNG> --frames <N> --position <x,y,z> --yaw <degrees> --pitch <degrees>\n         --output <JSON> --mods <sandbox.json> --smoke (scripted movement/mod test)\n         --input-script <JSON> (timed regression inputs) --time-scale <factor> (default 1)\n\nStandalone partial reconstruction using installed assets; campaign and NPC AI are incomplete.\nWASD move; click to capture mouse; Esc cancels selection or opens pause; tilde opens console;\nShift faster; F1 debug HUD; F2 fly/walk; Space jump; Tab entity markers; B place block; F5 reload mod; Ctrl crouch; E use; R reload; 1-6 slots/mousewheel weapon selection; Q previous weapon; F3 developer loadout; F4 reset; F12 screenshot; F10 quit.");
         std::process::exit(0);
     }
     if !["view", "inspect", "verify", "export"].contains(&command.as_str()) {

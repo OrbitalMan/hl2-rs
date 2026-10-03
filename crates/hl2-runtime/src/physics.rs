@@ -1,9 +1,12 @@
 //! Rapier collision/rigid-body adapter. This is not Valve's proprietary VPhysics solver.
 use glam::{Quat, Vec3};
-use modkit_core::{movement::CollisionWorld, Brush, Surface, Trace, World};
+use modkit_core::{movement::CollisionWorld, trace_brushes, Brush, Surface, Trace, World};
 use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::*;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
+#[path = "player_convex.rs"]
+mod player_convex;
 #[derive(Clone, Copy, Debug)]
 pub struct RayHit {
     pub entity: usize,
@@ -105,12 +108,17 @@ pub struct Physics {
     ccd: CCDSolver,
     entity_colliders: BTreeMap<usize, Vec<ColliderHandle>>,
     world_brush_contents: HashMap<ColliderHandle, u32>,
+    player_world_brushes: Vec<Brush>,
+    player_convex_cache: Mutex<player_convex::ConvexCache>,
     pub dynamic: BTreeMap<usize, RigidBodyHandle>,
     pub skipped: usize,
 }
 impl Physics {
     pub fn new(world: &World) -> Self {
-        let mut p = Self::default();
+        let mut p = Self {
+            player_world_brushes: world.brushes.clone(),
+            ..Self::default()
+        };
         for brush in &world.brushes {
             if let Some(shape) = brush_shape(brush) {
                 let collider = p
@@ -246,6 +254,10 @@ impl Physics {
         }
     }
     pub fn tick(&mut self, dt: f32) {
+        self.player_convex_cache
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(&self.colliders);
         self.pipeline.step(
             &vector![0., 0., -600. * SCALE],
             &IntegrationParameters {
@@ -352,38 +364,107 @@ impl CollisionWorld for Physics {
         let center = (maxs + mins) * 0.5;
         let delta = end - start;
         let stationary = delta.length_squared() < 0.000001;
+        // World brushes use their real planes below. Retain Rapier colliders for
+        // weapons/rigid bodies, but do not approximate these player normals with GJK.
         let player_contents_filter = |handle: ColliderHandle, collider: &Collider| {
             collider.is_enabled()
-                && self
-                    .world_brush_contents
-                    .get(&handle)
-                    .is_none_or(|contents| contents & PLAYER_BRUSH_MASK != 0)
+                && !self.world_brush_contents.contains_key(&handle)
+                && !player_convex::supported(collider)
         };
         let filter = QueryFilter::default()
             .exclude_sensors()
             .predicate(&player_contents_filter);
         // A standing hull merely touching the floor must not prevent uncrouching.
         // Shrink a stationary overlap probe by half the Source collision epsilon.
-        let shape = Cuboid::new(vector(if stationary {
-            (half - Vec3::splat(0.015625)).max(Vec3::splat(0.001))
-        } else {
-            half
-        }));
+        let shape = Cuboid::new(vector(half));
+        let overlap_shape = Cuboid::new(vector(
+            (half - Vec3::splat(0.015625)).max(Vec3::splat(0.001)),
+        ));
         let position = Isometry::translation(
             (start.x + center.x) * SCALE,
             (start.y + center.y) * SCALE,
             (start.z + center.z) * SCALE,
         );
-        if stationary {
-            let start_solid = self
-                .query
-                .intersection_with_shape(&self.bodies, &self.colliders, &position, &shape, filter)
-                .is_some();
-            return Trace {
-                fraction: if start_solid { 0. } else { 1. },
-                normal: Vec3::ZERO,
-                start_solid,
-            };
+        let mut result = trace_brushes(
+            &self.player_world_brushes,
+            start,
+            end,
+            mins,
+            maxs,
+            PLAYER_BRUSH_MASK,
+        );
+        // Continuous SAT for cuboids/convex polyhedra includes their face planes,
+        // player box face axes, and every convex-edge/box-edge bevel axis. Cache
+        // planes by current shape/pose and only query broadphase candidates.
+        let margin = Vec3::splat(0.03125);
+        let bounds = rapier3d::parry::bounding_volume::Aabb::new(
+            Point::from(vector(start.min(end) + mins - margin)),
+            Point::from(vector(start.max(end) + maxs + margin)),
+        );
+        let mut cache = self
+            .player_convex_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.query
+            .colliders_with_aabb_intersecting_aabb(&bounds, |handle| {
+                let collider = &self.colliders[*handle];
+                if collider.is_enabled()
+                    && !collider.is_sensor()
+                    && !self.world_brush_contents.contains_key(handle)
+                {
+                    if let Some(brush) = cache.brush(*handle, collider) {
+                        let hit =
+                            trace_brushes(std::slice::from_ref(brush), start, end, mins, maxs, 1);
+                        result.start_solid |= hit.start_solid;
+                        result.all_solid |= hit.all_solid;
+                        if hit.fraction < result.fraction {
+                            result.fraction = hit.fraction;
+                            result.normal = hit.normal;
+                        }
+                    }
+                }
+                true
+            });
+        drop(cache);
+        let mut overlapping = Vec::new();
+        self.query.intersections_with_shape(
+            &self.bodies,
+            &self.colliders,
+            &position,
+            &overlap_shape,
+            filter,
+            |handle| {
+                overlapping.push(handle);
+                true
+            },
+        );
+        result.start_solid |= !overlapping.is_empty();
+        // The overlap region of a convex collider and a translating hull is
+        // convex: overlapping both endpoints proves this entire segment is solid.
+        // The same inference is invalid for concave meshes, whose sweep remains
+        // handled by Parry rather than inventing an all-solid result.
+        let end_position = Isometry::translation(
+            (end.x + center.x) * SCALE,
+            (end.y + center.y) * SCALE,
+            (end.z + center.z) * SCALE,
+        );
+        result.all_solid |= overlapping.iter().any(|handle| {
+            let collider = &self.colliders[*handle];
+            stationary
+                || (collider.shape().is_convex()
+                    && rapier3d::parry::query::intersection_test(
+                        collider.position(),
+                        collider.shape(),
+                        &end_position,
+                        &overlap_shape,
+                    )
+                    .unwrap_or(false))
+        });
+        if result.all_solid {
+            result.fraction = 0.;
+        }
+        if stationary || result.all_solid {
+            return result;
         }
         let options = ShapeCastOptions {
             max_time_of_impact: 1.,
@@ -401,24 +482,266 @@ impl CollisionWorld for Physics {
             filter,
         ) {
             let n = hit.normal1;
-            Trace {
-                fraction: hit.time_of_impact.clamp(0., 1.),
-                normal: Vec3::new(n.x, n.y, n.z),
-                start_solid: false,
-            }
-        } else {
-            Trace {
-                fraction: 1.,
-                normal: Vec3::ZERO,
-                start_solid: false,
+            let fraction = hit.time_of_impact.clamp(0., 1.);
+            if fraction < result.fraction {
+                result.fraction = fraction;
+                result.normal = Vec3::new(n.x, n.y, n.z);
             }
         }
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use modkit_core::movement::{Input, Player, TICK};
+    fn bounds_brush(min: Vec3, max: Vec3) -> Brush {
+        Brush {
+            contents: 1,
+            planes: [
+                (Vec3::X, max.x),
+                (-Vec3::X, -min.x),
+                (Vec3::Y, max.y),
+                (-Vec3::Y, -min.y),
+                (Vec3::Z, max.z),
+                (-Vec3::Z, -min.z),
+            ]
+            .into_iter()
+            .map(|(normal, distance)| modkit_core::Plane { normal, distance })
+            .collect(),
+        }
+    }
+    #[test]
+    fn brush_wall_tangent_sweep_has_no_false_vertical_contact() {
+        let physics = Physics::new(&World {
+            brushes: vec![bounds_brush(
+                Vec3::new(32., -1000., 0.),
+                Vec3::new(100., 1000., 300.),
+            )],
+            ..Default::default()
+        });
+        let start = Vec3::new(15.96875, 0., 100.);
+        let hit = physics.trace_hull(
+            start,
+            start + Vec3::new(0., 2., 1.),
+            Vec3::new(-16., -16., 0.),
+            Vec3::new(16., 16., 72.),
+        );
+        assert_eq!(hit.fraction, 1.);
+        assert!(!hit.start_solid);
+        assert!(!hit.all_solid);
+    }
+    #[test]
+    fn pressing_into_brush_wall_does_not_interrupt_jump_or_inject_sideways_motion() {
+        let floor = bounds_brush(
+            Vec3::new(-1000., -1000., -100.),
+            Vec3::new(1000., 1000., 0.),
+        );
+        let open = Physics::new(&World {
+            brushes: vec![floor.clone()],
+            ..Default::default()
+        });
+        let walled = Physics::new(&World {
+            brushes: vec![
+                floor,
+                bounds_brush(Vec3::new(32., -1000., 0.), Vec3::new(100., 1000., 300.)),
+            ],
+            ..Default::default()
+        });
+        let mut free_player = Player::new(Vec3::new(0., 0., 64.03125));
+        let mut wall_player = Player::new(Vec3::new(15.96875, 0., 64.03125));
+        free_player.step(Input::default(), &open, TICK);
+        wall_player.step(Input::default(), &walled, TICK);
+        for tick in 0..45 {
+            let input = Input {
+                forward: 1.,
+                jump: tick == 0,
+                ..Default::default()
+            };
+            free_player.step(input, &open, TICK);
+            wall_player.step(input, &walled, TICK);
+            assert!(
+                (wall_player.feet.z - free_player.feet.z).abs() < 0.001,
+                "tick {tick}: wall={wall_player:?}, open={free_player:?}"
+            );
+            assert!(wall_player.feet.y.abs() < 0.0001);
+            assert!(wall_player.feet.x <= 15.969);
+        }
+    }
+    #[test]
+    fn moving_overlap_reports_start_solid_and_allows_an_exit() {
+        let mins = Vec3::new(-1., -1., 0.);
+        let maxs = Vec3::new(1., 1., 2.);
+        let mut rapier = Physics::default();
+        rapier.colliders.insert(
+            ColliderBuilder::cuboid(5. * SCALE, 8. * SCALE, 50. * SCALE).translation(vector![
+                15. * SCALE,
+                0.,
+                50. * SCALE
+            ]),
+        );
+        rapier.query.update(&rapier.colliders);
+        for physics in [Physics::new(&clip_box(1)), rapier] {
+            let start = Vec3::new(15., 0., 40.);
+            let exit = physics.trace_hull(start, Vec3::new(-5., 0., 40.), mins, maxs);
+            assert!(exit.start_solid);
+            assert!(!exit.all_solid);
+            assert_eq!(exit.fraction, 1.);
+            let inside = physics.trace_hull(start, start + Vec3::Y, mins, maxs);
+            assert!(inside.start_solid);
+            assert!(inside.all_solid);
+            assert_eq!(inside.fraction, 0.);
+        }
+    }
+    fn convex_box(min: Vec3, max: Vec3, polyhedron: bool) -> ColliderBuilder {
+        let half = (max - min) * 0.5;
+        let shape = if polyhedron {
+            let mut vertices = Vec::new();
+            for x in [-half.x, half.x] {
+                for y in [-half.y, half.y] {
+                    for z in [-half.z, half.z] {
+                        vertices.push(Point::from(vector(Vec3::new(x, y, z))));
+                    }
+                }
+            }
+            SharedShape::convex_hull(&vertices).unwrap()
+        } else {
+            SharedShape::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
+        };
+        ColliderBuilder::new(shape).position(pose((min + max) * 0.5, Quat::IDENTITY))
+    }
+    #[test]
+    fn convex_prop_wall_preserves_jump_and_tangent_motion() {
+        for polyhedron in [false, true] {
+            let mut open = Physics::default();
+            open.colliders.insert(convex_box(
+                Vec3::new(-1000., -1000., -100.),
+                Vec3::new(1000., 1000., 0.),
+                polyhedron,
+            ));
+            open.query.update(&open.colliders);
+            let mut walled = Physics::default();
+            walled.colliders.insert(convex_box(
+                Vec3::new(-1000., -1000., -100.),
+                Vec3::new(1000., 1000., 0.),
+                polyhedron,
+            ));
+            walled.colliders.insert(convex_box(
+                Vec3::new(32., -1000., 0.),
+                Vec3::new(100., 1000., 300.),
+                polyhedron,
+            ));
+            walled.query.update(&walled.colliders);
+            let start = Vec3::new(15.96875, 0., 100.);
+            let tangent = walled.trace_hull(
+                start,
+                start + Vec3::new(0., 2., 1.),
+                Vec3::new(-16., -16., 0.),
+                Vec3::new(16., 16., 72.),
+            );
+            assert_eq!(tangent.fraction, 1.);
+            assert!(!tangent.start_solid);
+            let mut free_player = Player::new(Vec3::new(0., 0., 64.03125));
+            let mut wall_player = Player::new(Vec3::new(15.96875, 0., 64.03125));
+            free_player.step(Input::default(), &open, TICK);
+            wall_player.step(Input::default(), &walled, TICK);
+            for tick in 0..45 {
+                let input = Input {
+                    forward: 1.,
+                    jump: tick == 0,
+                    ..Default::default()
+                };
+                free_player.step(input, &open, TICK);
+                wall_player.step(input, &walled, TICK);
+                assert!(
+                    (wall_player.feet.z - free_player.feet.z).abs() < 0.001,
+                    "polyhedron {polyhedron}, tick {tick}: {wall_player:?}"
+                );
+                assert!(wall_player.feet.y.abs() < 0.0001);
+                assert!(wall_player.feet.x <= 15.969);
+            }
+        }
+    }
+    #[test]
+    fn rotated_convex_edge_bevel_allows_clearance_and_blocks_fast_crossing() {
+        let rotation = Quat::from_rotation_z(35f32.to_radians())
+            * Quat::from_rotation_y(40f32.to_radians())
+            * Quat::from_rotation_x(25f32.to_radians());
+        for polyhedron in [false, true] {
+            let mut physics = Physics::default();
+            let handle = physics.colliders.insert(
+                convex_box(Vec3::new(-2., -4., -6.), Vec3::new(2., 4., 6.), polyhedron)
+                    .position(pose(Vec3::ZERO, rotation)),
+            );
+            physics.query.update(&physics.colliders);
+            let start = Vec3::new(5.968779, 5.9419513, 6.3287473);
+            let half = Vec3::new(1., 2., 3.);
+            // This box is separated by an edge-cross-edge axis by .4119 units,
+            // while all convex-face and player XYZ projections overlap.
+            let collider = &physics.colliders[handle];
+            assert!(!rapier3d::parry::query::intersection_test(
+                collider.position(),
+                collider.shape(),
+                &pose(start, Quat::IDENTITY),
+                &Cuboid::new(vector(half)),
+            )
+            .unwrap());
+            assert!(!physics.trace_hull(start, start, -half, half).start_solid);
+            let enter = physics.trace_hull(start, Vec3::ZERO, -half, half);
+            assert!((enter.fraction - 0.05053343).abs() < 0.00001);
+            assert!(enter.normal.distance(Vec3::new(0.94934547, 0.31423426, 0.)) < 0.0001);
+            let crossing = physics.trace_hull(-Vec3::X * 200., Vec3::X * 200., -half, half);
+            assert!(crossing.fraction > 0. && crossing.fraction < 0.5);
+            assert!(!crossing.start_solid);
+        }
+    }
+    #[test]
+    fn convex_cache_tracks_translation_rotation_shape_and_disabled_state() {
+        let mut physics = Physics::default();
+        let handle = physics
+            .colliders
+            .insert(convex_box(Vec3::splat(-2.), Vec3::splat(2.), false));
+        let start = Vec3::X * 20.;
+        let mins = -Vec3::ONE;
+        let maxs = Vec3::ONE;
+        physics.query.update(&physics.colliders);
+        let initial = physics.trace_hull(start, Vec3::ZERO, mins, maxs);
+        for i in 0..1000 {
+            let t = Vec3::new((i as f32 * 0.17).sin() * 4., (i as f32 * 0.09).cos(), 0.);
+            physics.colliders[handle].set_position(pose(t, Quat::IDENTITY));
+            physics.query.update(&physics.colliders);
+            physics.trace_hull(start + t, t, mins, maxs);
+        }
+        physics.colliders[handle].set_position(pose(Vec3::ZERO, Quat::IDENTITY));
+        physics.query.update(&physics.colliders);
+        assert_eq!(
+            physics.trace_hull(start, Vec3::ZERO, mins, maxs).fraction,
+            initial.fraction
+        );
+        physics.colliders[handle].set_shape(SharedShape::cuboid(
+            4. * SCALE,
+            2. * SCALE,
+            2. * SCALE,
+        ));
+        physics.query.update(&physics.colliders);
+        assert!(physics.trace_hull(start, Vec3::ZERO, mins, maxs).fraction < initial.fraction);
+        physics.colliders[handle].set_position(pose(
+            Vec3::ZERO,
+            Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+        ));
+        physics.query.update(&physics.colliders);
+        assert!(
+            (physics.trace_hull(start, Vec3::ZERO, mins, maxs).fraction - initial.fraction).abs()
+                < 0.00001
+        );
+        physics.colliders[handle].set_enabled(false);
+        physics.query.update(&physics.colliders);
+        assert_eq!(
+            physics.trace_hull(start, Vec3::ZERO, mins, maxs).fraction,
+            1.
+        );
+    }
     fn clip_box(contents: u32) -> World {
         let mut world = World::default();
         world.brushes.push(Brush {

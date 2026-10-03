@@ -33,9 +33,33 @@ impl AttackSuppression {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
+    Move {
+        #[serde(default)]
+        forward: f32,
+        #[serde(default)]
+        side: f32,
+        #[serde(default)]
+        jump: bool,
+        #[serde(default)]
+        crouch: bool,
+        #[serde(default)]
+        sprint: bool,
+        #[serde(default)]
+        slow: bool,
+    },
+    Escape,
+    ToggleConsole,
+    Resume,
+    Console {
+        command: String,
+    },
     Loadout,
-    Slot { slot: usize },
-    Wheel { delta: i32 },
+    Slot {
+        slot: usize,
+    },
+    Wheel {
+        delta: i32,
+    },
     Confirm,
     Cancel,
     Previous,
@@ -45,9 +69,14 @@ pub enum Action {
     Secondary,
     SecondaryDown,
     SecondaryUp,
-    Look { yaw: f32, pitch: f32 },
+    Look {
+        yaw: f32,
+        pitch: f32,
+    },
     Reload,
-    Capture { name: String },
+    Capture {
+        name: String,
+    },
     Quit,
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -79,6 +108,20 @@ impl Playback {
             bail!("input playback must contain at most 4096 events with ascending finite times");
         }
         for e in &events {
+            if let Action::Move { forward, side, .. } = &e.action {
+                if !forward.is_finite()
+                    || !side.is_finite()
+                    || forward.abs() > 1.
+                    || side.abs() > 1.
+                {
+                    bail!("playback movement components must be finite and within [-1, 1]");
+                }
+            }
+            if let Action::Console { command } = &e.action {
+                if command.len() > 1024 {
+                    bail!("playback console command exceeds 1024 bytes");
+                }
+            }
             if let Action::Look { yaw, pitch } = &e.action {
                 if !yaw.is_finite() || !pitch.is_finite() {
                     bail!("playback look angles must be finite");
@@ -182,5 +225,20 @@ mod tests {
             Playback::parse(br#"[{"time":0,"action":"capture","name":"../outside"}]"#).is_err()
         );
         assert!(Playback::parse(br#"[{"time":-1,"action":"fire"}]"#).is_err());
+        assert!(Playback::parse(br#"[{"time":0,"action":"move","forward":1.1}]"#).is_err());
+        assert!(Playback::parse(br#"[{"time":0,"action":"move","side":-2}]"#).is_err());
+        let mut movement =
+            Playback::parse(br#"[{"time":0,"action":"move","jump":true,"crouch":true}]"#).unwrap();
+        assert!(matches!(
+            movement.poll(0.)[0],
+            Action::Move {
+                forward: 0.,
+                side: 0.,
+                jump: true,
+                crouch: true,
+                sprint: false,
+                slow: false
+            }
+        ));
     }
 }

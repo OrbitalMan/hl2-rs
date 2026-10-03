@@ -88,7 +88,7 @@ A source-only snapshot of the 112 intended public files passed universal-modder 
 
 NPC navigation/schedules/combat, player damage/death, remaining weapons and other secondary/projectile attacks, recoil/muzzle effects, VCD choreography/dialogue, HEV sentence scheduling, animation blends/IK/attachments, vehicles, save/load and complete campaign state remain missing. Rapier shapes/mass, movement, door blocking, scripted movement and shaders remain partial. Numeric damage-message dispatch and several HUD panels/gates/animation commands are incomplete. The README lists the current boundaries.
 
-Trainstation still reports unsupported inputs including SetPoliceGoal, SetParentAttachment, act-busy queues, tone-map controls, template NPC spawning and logic_choreographed_scene.Start. These prevent faithful campaign progression even though the map loads, renders and the test weapons function. No FAL or crossover was used. A user-authorized Codex continuation is configured for 09:26 Canary time on 2026-10-03, then every five hours and one minute; availability and account limits still determine whether a scheduled run can execute.
+Trainstation still reports unsupported inputs including SetPoliceGoal, SetParentAttachment, act-busy queues, tone-map controls, template NPC spawning and logic_choreographed_scene.Start. These prevent faithful campaign progression even though the map loads, renders and the test weapons function. No FAL or crossover was used.
 
 
 ## Earlier LDR sky loader foundation
@@ -108,3 +108,11 @@ Three new movement tests cover crouched jump boost using independent maximum spe
 The owned original game confirmed the reported three-shell secondary sequence as 3→1→0, with reserve unchanged: a double shot followed by a one-shell primary fallback. Accepted screenshots and rejected setup trials are documented in the separate original-oracle/three-shell-check.md. All six stock configuration entries still matched afterward, and the original process was closed.
 
 The private Database Method audit and exact-byte catalogue are documented in research.md. Full export accounting passes; native/Rust semantic parity is not inferred from it. No database, pseudocode, decompiler tool or game-derived asset was added to this repository.
+
+## Iteration10: air crouch, contacts and console
+
+139 workspace tests passed (74 runtime, 30 core, 35 asset readers), along with strict all-target Clippy, formatting and diff checks. New regressions exercise the one-time air crouch lift, blocked unducking, a 40-unit ledge, sequential/corner plane clipping, overlap escape, rotated convex bevels and translated collider-cache invalidation. Controlled wall-jump probes now retain the unobstructed apex instead of stopping on false contacts; these are not complete original-engine movement traces.
+
+The E11C2795 package repeated all three weapon fixtures with all 27 report assertions passing, and completed pause/console and bench movement fixtures with 20 additional assertions passing. Captures show crouched apex feet approximately 36 units above an ordinary jump while head height stays nearly equal; both jumps land back on the bench. Console/menu freeze simulation, reject disabled cheats and unknown commands, grant six supported weapons, prevent focused/held-resume firing and return to gameplay. A separate direct-map fixture loaded d1_trainstation_01 and retained it after a missing-map request. Captures/reports remain in ignored artifacts/iteration10-final-*. The final packaged fingerprint is recorded in bin/build-info.json.
+
+The owned pause-menu capture guided title/font/spacing corrections. This remains a partial working menu: Resume, Console and Quit. Ambient audio does not pause; save/load/options and the complete command registry are missing. Original bench-height evidence corroborates private PHY decoding, not public integration. Latest playtest reports of double-door pose/collision disagreement and missing SMG/AR2 secondary-ammo HUD remain open and are next priorities.

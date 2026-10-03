@@ -355,6 +355,87 @@ fn confirm_held_selection(
     true
 }
 
+struct ConsoleContext<'a> {
+    inventory: &'a mut crate::gameplay::Inventory,
+    weapons: &'a std::collections::BTreeMap<String, crate::gameplay::Weapon>,
+    scene: &'a mut Scene,
+    player: &'a mut Player,
+    position: &'a mut glam::Vec3,
+    yaw: &'a mut f32,
+    pitch: &'a mut f32,
+    fly: &'a mut bool,
+    vfs: &'a Vfs,
+    map: &'a mut Option<String>,
+    quit: &'a mut bool,
+}
+fn apply_console_effects(
+    console: &mut crate::console::Console,
+    effects: Vec<crate::console::Effect>,
+    context: ConsoleContext<'_>,
+) {
+    use crate::console::Effect;
+    for effect in effects {
+        match effect {
+            Effect::Loadout => {
+                for name in context.weapons.keys() {
+                    context
+                        .inventory
+                        .give(name, context.weapons, context.scene.time);
+                }
+                context.inventory.refill_ammo(context.weapons);
+                context.inventory.suit = true;
+                context
+                    .inventory
+                    .give("weapon_crowbar", context.weapons, context.scene.time);
+                console.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
+            }
+            Effect::Noclip(value) => {
+                *context.fly = value.unwrap_or(!*context.fly);
+                *context.player = Player::new(*context.position);
+                console.log(format!("noclip {}", u8::from(*context.fly)));
+            }
+            Effect::Getpos => {
+                // Retail GetPos defaults to the rendered camera origin, not feet.
+                let feet = *context.position;
+                console.log(format!(
+                    "setpos {:.6} {:.6} {:.6}; setang {:.6} {:.6} 0",
+                    feet.x,
+                    feet.y,
+                    feet.z,
+                    -context.pitch.to_degrees(),
+                    context.yaw.to_degrees()
+                ));
+            }
+            Effect::Setpos { x, y, z } => {
+                let feet = glam::Vec3::new(x, y, z.unwrap_or(context.player.feet.z));
+                context.player.feet = feet;
+                // Retail setpos calls SetAbsOrigin: it does not clear velocity.
+                *context.position = context.player.eye();
+                console.log(format!("Player origin: {} {} {}", feet.x, feet.y, feet.z));
+            }
+            Effect::Setang(angles) => {
+                *context.pitch = -angles.x.to_radians().clamp(-1.53, 1.53);
+                *context.yaw = angles.y.to_radians();
+                console.log(format!(
+                    "View angles: {} {} 0",
+                    -context.pitch.to_degrees(),
+                    context.yaw.to_degrees()
+                ));
+            }
+            Effect::Map(map) => match context.vfs.read(&format!("maps/{map}.bsp")) {
+                Ok(Some(bytes)) if !bytes.is_empty() => {
+                    *context.map = Some(map);
+                }
+                Ok(_) => console.log(format!(
+                    "Map not found or empty in mounted owned content: {map}"
+                )),
+                Err(error) => console.log(format!("Map lookup failed: {error:#}")),
+            },
+            Effect::Quit => *context.quit = true,
+        }
+    }
+}
+
 pub async fn run(mut o: Options) -> Result<()> {
     clear_background(BLACK);
     draw_text("Reading your HL2 map and textures...", 35., 75., 30., WHITE);
@@ -412,12 +493,18 @@ pub async fn run(mut o: Options) -> Result<()> {
     let mut playback = crate::playback::Playback::read(o.input_script.as_deref())?;
     let playback_enabled = o.input_script.is_some();
     let mut input_events = Vec::new();
+    let mut capture_snapshots = Vec::new();
+    let mut playback_movement: Option<MoveInput> = None;
     let mut animation_events = Vec::new();
     let mut previous_animation: Option<(String, String, f64, f32)> = None;
     let mut debug_hud = false;
     let mut sky_2d_frames = 0u64;
     let mut sky_3d_frames = 0u64;
     let mut sky_visibility_error: Option<String> = None;
+    let mut console = crate::console::Console::load(&vfs);
+    let mut playback_time = 0f64;
+    let mut jump_suppressed = false;
+    let mut pending_console_map: Option<String> = None;
     let input_trace = std::env::var_os("HL2_RS_INPUT_TRACE").is_some();
 
     let mut frame = 0u32;
@@ -437,6 +524,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     }
     loop {
         let dt = (get_frame_time() * o.time_scale).clamp(0.0001, 0.05);
+        playback_time += f64::from(dt);
         frame += 1;
         if input_trace {
             for key in get_keys_pressed() {
@@ -450,25 +538,54 @@ pub async fn run(mut o: Options) -> Result<()> {
             }
         }
         selection.tick(&inventory, &weapons, scene.time);
-        let mut actions = playback.poll(scene.time);
+        // Playback uses a host clock so a script can resume a paused simulation.
+        let mut actions = playback.poll(playback_time);
         let mut requested_captures = Vec::new();
         let mut requested_quit = false;
         attack_suppression.update(
             is_mouse_button_down(MouseButton::Left) || playback.held,
             is_mouse_button_down(MouseButton::Right) || playback.secondary_held,
         );
-        let cancel_selection = is_key_pressed(KeyCode::Escape) && selection.pending.is_some();
+        let mode_before_input = console.mode;
+        let cancel_selection =
+            is_key_pressed(KeyCode::Escape) && !console.paused() && selection.pending.is_some();
         if cancel_selection {
             actions.push(Action::Cancel);
         }
         if is_key_pressed(KeyCode::Escape) && !cancel_selection {
-            grabbed = false;
+            console.escape();
+        }
+        if is_key_pressed(KeyCode::GraveAccent) {
+            console.toggle();
+        }
+        let mode_key_changed = console.mode != mode_before_input;
+        let mut console_effects = if mode_key_changed {
+            while get_char_pressed().is_some() {}
+            Vec::new()
+        } else {
+            console.input()
+        };
+        // Drain character events in gameplay too: they must not reappear in a later console.
+        if console.mode != crate::console::Mode::Console {
+            while get_char_pressed().is_some() {}
+        }
+        let mut ui_transition = console.mode != mode_before_input;
+        if ui_transition {
+            grabbed = !console.paused();
             queued_attack = false;
             queued_secondary = false;
-            set_cursor_grab(false);
-            show_mouse(true);
+            attack_suppression.consume();
+            jump_suppressed = true;
+            set_cursor_grab(grabbed);
+            show_mouse(!grabbed);
         }
-        let capturing = is_mouse_button_pressed(MouseButton::Left) && !grabbed;
+        if !is_key_down(KeyCode::Space) && !playback_movement.is_some_and(|input| input.jump) {
+            jump_suppressed = false;
+        }
+        let capturing = !console.paused()
+            && !ui_transition
+            && is_mouse_button_pressed(MouseButton::Left)
+            && !grabbed;
         if capturing {
             grabbed = true;
             set_cursor_grab(true);
@@ -476,6 +593,8 @@ pub async fn run(mut o: Options) -> Result<()> {
         }
         if grabbed
             && !capturing
+            && !console.paused()
+            && !ui_transition
             && is_mouse_button_pressed(MouseButton::Left)
             && selection.pending.is_none()
             && attack_suppression.primary_allowed()
@@ -484,13 +603,15 @@ pub async fn run(mut o: Options) -> Result<()> {
         }
         if grabbed
             && !capturing
+            && !console.paused()
+            && !ui_transition
             && is_mouse_button_pressed(MouseButton::Right)
             && selection.pending.is_none()
             && attack_suppression.secondary_allowed()
         {
             queued_secondary = true;
         }
-        if grabbed && !capturing {
+        if grabbed && !capturing && !console.paused() && !ui_transition {
             let d = mouse_delta_position();
             if input_trace && d.length_squared() > 0. {
                 println!("Input frame {frame}: motion {d:?}");
@@ -499,20 +620,20 @@ pub async fn run(mut o: Options) -> Result<()> {
             // macroquad returns previous - current: moving up is a positive Y delta.
             pitch += d.y * screen_height() * 0.5 * 0.001152;
         }
-        if is_key_down(KeyCode::Left) {
+        if !console.paused() && is_key_down(KeyCode::Left) {
             yaw += dt * 1.5;
         }
-        if is_key_down(KeyCode::Right) {
+        if !console.paused() && is_key_down(KeyCode::Right) {
             yaw -= dt * 1.5;
         }
-        if is_key_down(KeyCode::Up) {
+        if !console.paused() && is_key_down(KeyCode::Up) {
             pitch += dt;
         }
-        if is_key_down(KeyCode::Down) {
+        if !console.paused() && is_key_down(KeyCode::Down) {
             pitch -= dt;
         }
         pitch = pitch.clamp(-1.53, 1.53);
-        if is_key_pressed(KeyCode::F2) {
+        if !console.paused() && is_key_pressed(KeyCode::F2) {
             fly = !fly;
             player = Player::new(position);
             message = if fly {
@@ -522,19 +643,19 @@ pub async fn run(mut o: Options) -> Result<()> {
             }
             .into();
         }
-        if is_key_pressed(KeyCode::Tab) {
+        if !console.paused() && is_key_pressed(KeyCode::Tab) {
             markers = !markers;
         }
-        if is_key_pressed(KeyCode::F1) {
+        if !console.paused() && is_key_pressed(KeyCode::F1) {
             debug_hud = !debug_hud;
         }
-        if is_key_pressed(KeyCode::F4) {
+        if !console.paused() && is_key_pressed(KeyCode::F4) {
             position = spawn;
             yaw = spawn_yaw;
             pitch = 0.;
             player = Player::new(position);
         }
-        if is_key_pressed(KeyCode::F5) {
+        if !console.paused() && is_key_pressed(KeyCode::F5) {
             match Sandbox::read(&o.mods) {
                 Ok(mut s) => {
                     s.on_load(&world);
@@ -576,7 +697,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                 movement -= glam::Vec3::Z;
             }
         }
-        if fly {
+        if fly && !console.paused() && !ui_transition {
             let speed = if is_key_down(KeyCode::LeftShift) {
                 600.
             } else {
@@ -585,20 +706,20 @@ pub async fn run(mut o: Options) -> Result<()> {
             position += movement.normalize_or_zero() * speed * dt;
             player = Player::new(position);
         }
-        let input = MoveInput {
+        let mut input = MoveInput {
             forward: f32::from(is_key_down(KeyCode::W)) - f32::from(is_key_down(KeyCode::S)),
             side: f32::from(is_key_down(KeyCode::D)) - f32::from(is_key_down(KeyCode::A)),
             yaw,
-            jump: is_key_down(KeyCode::Space),
+            jump: !jump_suppressed && is_key_down(KeyCode::Space),
             crouch: is_key_down(KeyCode::LeftControl),
             sprint: is_key_down(KeyCode::LeftShift),
             slow: is_key_down(KeyCode::LeftAlt),
         };
-        if is_key_pressed(KeyCode::F3) {
+        if !console.paused() && is_key_pressed(KeyCode::F3) {
             actions.push(Action::Loadout);
         }
         let wheel = mouse_wheel().1;
-        if wheel != 0. {
+        if !console.paused() && wheel != 0. {
             actions.push(Action::Wheel {
                 delta: if wheel > 0. { -1 } else { 1 },
             });
@@ -614,19 +735,74 @@ pub async fn run(mut o: Options) -> Result<()> {
         .into_iter()
         .enumerate()
         {
-            if is_key_pressed(key) {
+            if !console.paused() && is_key_pressed(key) {
                 actions.push(Action::Slot { slot });
             }
         }
-        if !fly && is_key_pressed(KeyCode::Q) {
+        if !console.paused() && !fly && is_key_pressed(KeyCode::Q) {
             actions.push(Action::Previous);
         }
-        if is_key_pressed(KeyCode::R) {
+        if !console.paused() && is_key_pressed(KeyCode::R) {
             actions.push(Action::Reload);
         }
         for action in actions {
-            let before = serde_json::json!({"active":inventory.active,"shots":inventory.shots,"pending":selection.pending});
+            let before = serde_json::json!({"active":inventory.active,"shots":inventory.shots,"pending":selection.pending,"ui":console.mode,"scene_time":scene.time,"player":player});
+            let previous_mode = console.mode;
+            // UI focus consumes gameplay actions, but releases still rearm held buttons.
+            let blocked = console.paused()
+                && !matches!(
+                    action,
+                    Action::Escape
+                        | Action::ToggleConsole
+                        | Action::Resume
+                        | Action::Console { .. }
+                        | Action::Capture { .. }
+                        | Action::Quit
+                        | Action::FireUp
+                        | Action::SecondaryUp
+                );
+            if blocked {
+                if matches!(action, Action::FireDown) {
+                    playback.held = true;
+                    attack_suppression.consume();
+                }
+                if matches!(action, Action::SecondaryDown) {
+                    playback.secondary_held = true;
+                    attack_suppression.consume();
+                }
+                input_events.push(serde_json::json!({"time":scene.time,"playback_time":playback_time,"action":action,"blocked_by_ui":true,"before":before,"after":before}));
+                continue;
+            }
             match &action {
+                Action::Move {
+                    forward,
+                    side,
+                    jump,
+                    crouch,
+                    sprint,
+                    slow,
+                } => {
+                    playback_movement = Some(MoveInput {
+                        forward: *forward,
+                        side: *side,
+                        yaw,
+                        jump: *jump,
+                        crouch: *crouch,
+                        sprint: *sprint,
+                        slow: *slow,
+                    });
+                }
+                Action::Escape => {
+                    if !console.paused() && selection.pending.is_some() {
+                        let result = selection.cancel();
+                        apply_selection(result, &mut inventory, &weapons, &mut scene);
+                    } else {
+                        console.escape();
+                    }
+                }
+                Action::ToggleConsole => console.toggle(),
+                Action::Resume => console.mode = crate::console::Mode::Gameplay,
+                Action::Console { command } => console_effects.extend(console.submit(command)),
                 Action::Loadout => {
                     for name in weapons.keys() {
                         inventory.give(name, &weapons, scene.time);
@@ -709,6 +885,33 @@ pub async fn run(mut o: Options) -> Result<()> {
                     requested_quit = true;
                 }
             }
+            if console.mode != previous_mode {
+                ui_transition = true;
+                grabbed = !console.paused();
+                queued_attack = false;
+                queued_secondary = false;
+                attack_suppression.consume();
+                jump_suppressed = true;
+                set_cursor_grab(grabbed);
+                show_mouse(!grabbed);
+            }
+            apply_console_effects(
+                &mut console,
+                std::mem::take(&mut console_effects),
+                ConsoleContext {
+                    inventory: &mut inventory,
+                    weapons: &weapons,
+                    scene: &mut scene,
+                    player: &mut player,
+                    position: &mut position,
+                    yaw: &mut yaw,
+                    pitch: &mut pitch,
+                    fly: &mut fly,
+                    vfs: &vfs,
+                    map: &mut pending_console_map,
+                    quit: &mut requested_quit,
+                },
+            );
             // Observe each ordered script transition, so an up/down pair in one
             // poll rearms the button before its new press is dispatched.
             let held = (
@@ -716,36 +919,74 @@ pub async fn run(mut o: Options) -> Result<()> {
                 is_mouse_button_down(MouseButton::Right) || playback.secondary_held,
             );
             attack_suppression.update(held.0, held.1);
+            if !console.paused() && !ui_transition {
+                confirm_held_selection(
+                    &mut selection,
+                    &mut inventory,
+                    &weapons,
+                    &mut scene,
+                    &mut attack_suppression,
+                    held,
+                    (&mut queued_attack, &mut queued_secondary),
+                );
+            }
+            input_events.push(serde_json::json!({"time":scene.time,"playback_time":playback_time,"action":action,"before":before,"after":{"active":inventory.active,"shots":inventory.shots,"pending":selection.pending,"clips":inventory.owned,"reloading":inventory.is_reloading(),"ui":console.mode,"sv_cheats":console.cheats,"scene_time":scene.time,"player":player,"fly":fly}}));
+        }
+        apply_console_effects(
+            &mut console,
+            console_effects,
+            ConsoleContext {
+                inventory: &mut inventory,
+                weapons: &weapons,
+                scene: &mut scene,
+                player: &mut player,
+                position: &mut position,
+                yaw: &mut yaw,
+                pitch: &mut pitch,
+                fly: &mut fly,
+                vfs: &vfs,
+                map: &mut pending_console_map,
+                quit: &mut requested_quit,
+            },
+        );
+        if let Some(command) = playback_movement {
+            input = MoveInput {
+                yaw,
+                jump: command.jump && !jump_suppressed,
+                ..command
+            };
+        }
+        if !console.paused() && !ui_transition {
             confirm_held_selection(
                 &mut selection,
                 &mut inventory,
                 &weapons,
                 &mut scene,
                 &mut attack_suppression,
-                held,
+                (
+                    is_mouse_button_down(MouseButton::Left) || playback.held,
+                    is_mouse_button_down(MouseButton::Right) || playback.secondary_held,
+                ),
                 (&mut queued_attack, &mut queued_secondary),
             );
-            input_events.push(serde_json::json!({"time":scene.time,"action":action,"before":before,"after":{"active":inventory.active,"shots":inventory.shots,"pending":selection.pending,"clips":inventory.owned,"reloading":inventory.is_reloading()}}));
         }
-        confirm_held_selection(
-            &mut selection,
-            &mut inventory,
-            &weapons,
-            &mut scene,
-            &mut attack_suppression,
-            (
-                is_mouse_button_down(MouseButton::Left) || playback.held,
-                is_mouse_button_down(MouseButton::Right) || playback.secondary_held,
-            ),
-            (&mut queued_attack, &mut queued_secondary),
-        );
         // Playback look commands enter the same camera state before that frame's simulation.
         let direction = glam::Vec3::new(
             yaw.cos() * pitch.cos(),
             yaw.sin() * pitch.cos(),
             pitch.sin(),
         );
-        accumulator += dt;
+        let simulation_dt = if console.paused() || ui_transition {
+            0.
+        } else {
+            dt
+        };
+        if simulation_dt == 0. {
+            accumulator = 0.;
+            queued_attack = false;
+            queued_secondary = false;
+        }
+        accumulator += simulation_dt;
         while accumulator >= TICK {
             scene.tick(&world, player.feet, TICK);
             let input_allowed = (grabbed || playback_enabled)
@@ -850,18 +1091,27 @@ pub async fn run(mut o: Options) -> Result<()> {
         for sound in scene.sounds.drain(..) {
             audio.play(&vfs, &sound, false, 0.4).await?;
         }
-        if is_key_pressed(KeyCode::E) && !fly {
+        if !console.paused() && !ui_transition && is_key_pressed(KeyCode::E) && !fly {
             if let Some((id, _)) = physics.ray(position, direction, 96.) {
                 scene.use_entity(&world, id);
             }
         }
-        if is_mouse_button_pressed(MouseButton::Middle) && grabbed {
+        if !console.paused()
+            && !ui_transition
+            && is_mouse_button_pressed(MouseButton::Middle)
+            && grabbed
+        {
             if let Some((id, _)) = physics.ray(position, direction, 128.) {
                 physics.impulse(id, direction, 6.);
                 message = "Applied a prop impulse".into();
             }
         }
-        if let Some((map, landmark)) = scene.transition.take() {
+        let console_map = pending_console_map.take();
+        let direct_map = console_map.is_some();
+        if let Some((map, landmark)) = console_map
+            .map(|map| (map, String::new()))
+            .or_else(|| scene.transition.take())
+        {
             let old_landmark = world
                 .entities
                 .iter()
@@ -874,6 +1124,9 @@ pub async fn run(mut o: Options) -> Result<()> {
             next.map = map;
             match load(&next) {
                 Ok((new_bsp, mut new_world, new_vfs)) => {
+                    if direct_map {
+                        inventory = crate::gameplay::Inventory::default();
+                    }
                     impacts = crate::impacts::Impacts::new(&new_vfs);
                     selection.pending = None;
                     model_report = source_assets::models::append_models(&mut new_world, &new_vfs);
@@ -911,11 +1164,32 @@ pub async fn run(mut o: Options) -> Result<()> {
                     audio.ambient(&vfs, &world).await?;
                     o = next;
                     message = format!("Loaded {}", o.map);
+                    if direct_map {
+                        console.log(message.clone());
+                        console.mode = crate::console::Mode::Gameplay;
+                        fly = false;
+                        yaw = spawn_yaw;
+                        pitch = 0.;
+                        playback_movement = None;
+                        jump_suppressed = true;
+                        grabbed = true;
+                        attack_suppression.consume();
+                        queued_attack = false;
+                        queued_secondary = false;
+                        accumulator = 0.;
+                        set_cursor_grab(true);
+                        show_mouse(false);
+                    }
                 }
-                Err(e) => message = format!("Map transition failed: {e:#}"),
+                Err(e) => {
+                    message = format!("Map transition failed: {e:#}");
+                    if direct_map {
+                        console.log(message.clone());
+                    }
+                }
             }
         }
-        if is_key_pressed(KeyCode::B) {
+        if !console.paused() && !ui_transition && is_key_pressed(KeyCode::B) {
             if let Some(hit) = world.raycast(position, direction, 4096.) {
                 let p = ((hit - direction * 20.) / 32.).round() * 32.;
                 placed.push(Block {
@@ -926,11 +1200,11 @@ pub async fn run(mut o: Options) -> Result<()> {
                 message = "Placed a portable mod block".into();
             }
         }
-        if is_key_pressed(KeyCode::Backspace) {
+        if !console.paused() && !ui_transition && is_key_pressed(KeyCode::Backspace) {
             placed.pop();
         }
         sandbox.tick(
-            dt,
+            simulation_dt,
             &mut ModContext {
                 world: &world,
                 blocks: &mut placed,
@@ -1265,7 +1539,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                 19.,
                 LIGHTGRAY,
             );
-            draw_text("WASD / click: mouse / Esc release / F2 fly / Q,E vertical in fly / Tab entities / B block / F5 reload mod",22.,78.,17.,LIGHTGRAY);
+            draw_text("WASD / click: mouse / Esc pause / tilde console / F2 fly / Q,E vertical in fly / Tab entities / B block",22.,78.,17.,LIGHTGRAY);
             draw_text(
             "E use / Ctrl crouch / Space jump / R reload / 1-6 / wheel: weapon menu / Q last / F3 dev loadout / F4 reset / F2 fly",
             22.,
@@ -1295,10 +1569,13 @@ pub async fn run(mut o: Options) -> Result<()> {
                 WHITE,
             );
         }
-        hud.draw_status(&inventory, &weapons, &selection, scene.time);
-        scene.sounds.extend(hud.drain_sounds());
-        hud.draw_selection(&selection, &inventory, &weapons, scene.time);
-        hud.draw_crosshair(&inventory);
+        if !console.paused() {
+            hud.draw_status(&inventory, &weapons, &selection, scene.time);
+            scene.sounds.extend(hud.drain_sounds());
+            hud.draw_selection(&selection, &inventory, &weapons, scene.time);
+            hud.draw_crosshair(&inventory);
+        }
+        console.draw();
         if is_key_pressed(KeyCode::F12) {
             capture(Path::new("artifacts/manual-capture.png"))?;
             write(
@@ -1311,6 +1588,7 @@ pub async fn run(mut o: Options) -> Result<()> {
         }
         for name in requested_captures {
             capture(&Path::new("artifacts").join(format!("{name}.png")))?;
+            capture_snapshots.push(serde_json::json!({"name":name,"scene_time":scene.time,"playback_time":playback_time,"player":player,"position":position.to_array(),"yaw":yaw,"pitch":pitch,"ui":console.mode,"shots":inventory.shots,"active":inventory.active,"clips":inventory.owned,"fly":fly}));
         }
         if o.frames.is_some_and(|n| frame >= n) || is_key_pressed(KeyCode::F10) || requested_quit {
             if let Some(path) = &o.capture {
@@ -1322,6 +1600,9 @@ pub async fn run(mut o: Options) -> Result<()> {
             report["sky_visibility"] = serde_json::to_value(sky_visibility)?;
             report["sky_2d_visible"] = serde_json::json!(sky_2d_visible);
             report["sky_2d_frames"] = serde_json::json!(sky_2d_frames);
+            report["console"] = serde_json::json!({"mode":console.mode,"sv_cheats":console.cheats,"output":console.output,"playback_time":playback_time});
+            report["capture_snapshots"] = serde_json::json!(capture_snapshots);
+            report["scene_time"] = serde_json::json!(scene.time);
             write(
                 Path::new("artifacts/runtime-report.json"),
                 &serde_json::to_vec_pretty(&report)?,

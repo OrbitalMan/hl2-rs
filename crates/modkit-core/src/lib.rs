@@ -140,72 +140,15 @@ impl World {
         }
         (Vec3::new(0., 0., 128.), 0.)
     }
-    /// Swept axis-aligned hull against convex solid brushes. Eye is 64 units above feet.
-    /// Deliberately simple movement; this is not a port of Source's movement rules.
+    /// Player hull sweep against convex brush planes and the player brush mask.
+    /// This geometric query does not implement material or moving-ground behavior.
     pub fn trace(&self, start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3) -> Trace {
-        let mut result = Trace {
-            fraction: 1.,
-            normal: Vec3::ZERO,
-            start_solid: false,
-        };
-        for brush in &self.brushes {
-            if brush.contents & (1 | 0x10000 | 0x20000) == 0 || brush.planes.is_empty() {
-                continue;
-            }
-            let mut enter = -1f32;
-            let mut leave = 1f32;
-            let mut normal = Vec3::ZERO;
-            let mut outside = false;
-            let mut reject = false;
-            for plane in &brush.planes {
-                let n = plane.normal;
-                let support = Vec3::new(
-                    if n.x >= 0. { mins.x } else { maxs.x },
-                    if n.y >= 0. { mins.y } else { maxs.y },
-                    if n.z >= 0. { mins.z } else { maxs.z },
-                );
-                let distance = plane.distance - n.dot(support);
-                let a = n.dot(start) - distance;
-                let b = n.dot(end) - distance;
-                if a > 0. {
-                    outside = true;
-                }
-                if a > 0. && b >= a {
-                    reject = true;
-                    break;
-                }
-                if a <= 0. && b <= 0. {
-                    continue;
-                }
-                if a > b {
-                    let f = ((a - 0.03125) / (a - b)).max(0.);
-                    if f > enter {
-                        enter = f;
-                        normal = n;
-                    }
-                } else {
-                    leave = leave.min((a + 0.03125) / (a - b));
-                }
-            }
-            if reject {
-                continue;
-            }
-            if !outside {
-                result.start_solid = true;
-                result.fraction = 0.;
-                continue;
-            }
-            if enter >= 0. && enter < leave && enter < result.fraction {
-                result.fraction = enter;
-                result.normal = normal;
-            }
-        }
-        result
+        trace_brushes(&self.brushes, start, end, mins, maxs, 0x1400b)
     }
     pub fn slide(&self, mut position: Vec3, mut delta: Vec3, mins: Vec3, maxs: Vec3) -> Vec3 {
         for _ in 0..4 {
             let hit = self.trace(position, position + delta, mins, maxs);
-            if hit.start_solid {
+            if hit.all_solid {
                 break;
             }
             position += delta * hit.fraction;
@@ -256,6 +199,89 @@ pub struct Trace {
     pub fraction: f32,
     pub normal: Vec3,
     pub start_solid: bool,
+    /// The sweep stays inside a solid throughout, rather than merely starting inside.
+    pub all_solid: bool,
+}
+
+/// Sweep an axis-aligned hull against the actual convex brush planes, including
+/// BSP bevel planes. Preserve the collision epsilon without approximate GJK normals.
+/// Overlap uses half that epsilon so touching a floor is not a penetrating start.
+pub fn trace_brushes(
+    brushes: &[Brush],
+    start: Vec3,
+    end: Vec3,
+    mins: Vec3,
+    maxs: Vec3,
+    contents_mask: u32,
+) -> Trace {
+    let mut result = Trace {
+        fraction: 1.,
+        normal: Vec3::ZERO,
+        start_solid: false,
+        all_solid: false,
+    };
+    for brush in brushes {
+        if brush.contents & contents_mask == 0 || brush.planes.is_empty() {
+            continue;
+        }
+        let mut enter = -1f32;
+        let mut leave = 1f32;
+        let mut normal = Vec3::ZERO;
+        let mut start_inside = true;
+        let mut end_inside = true;
+        let mut reject = false;
+        for plane in &brush.planes {
+            let n = plane.normal;
+            let support = Vec3::new(
+                if n.x >= 0. { mins.x } else { maxs.x },
+                if n.y >= 0. { mins.y } else { maxs.y },
+                if n.z >= 0. { mins.z } else { maxs.z },
+            );
+            let distance = plane.distance - n.dot(support);
+            let a = n.dot(start) - distance;
+            let b = n.dot(end) - distance;
+            start_inside &= a < -0.015625;
+            end_inside &= b < -0.015625;
+            if a > 0. && b >= a {
+                reject = true;
+                break;
+            }
+            if a <= 0. && b <= 0. {
+                // A touching/shallow start can move tangentially or outward;
+                // movement into its boundary still has a time-zero contact.
+                if a >= -0.015625 && b < a && enter < 0. {
+                    enter = 0.;
+                    normal = n;
+                }
+                continue;
+            }
+            if a > b {
+                let f = ((a - 0.03125) / (a - b)).max(0.);
+                if f > enter {
+                    enter = f;
+                    normal = n;
+                }
+            } else {
+                leave = leave.min((a + 0.03125) / (a - b));
+            }
+        }
+        if reject {
+            continue;
+        }
+        if start_inside {
+            result.start_solid = true;
+            if end_inside {
+                result.all_solid = true;
+                result.fraction = 0.;
+            }
+            continue;
+        }
+        if enter >= 0. && enter < leave && enter < result.fraction {
+            result.fraction = enter;
+            result.normal = normal;
+        }
+    }
+    result
 }
 
 /// Hosts supply assets and collision; mods add portable content without depending on Source.

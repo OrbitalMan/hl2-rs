@@ -52,18 +52,46 @@ impl Player {
         self.ticks += 1;
         let mins = Vec3::new(-16., -16., 0.);
         let standing = Vec3::new(16., 16., 72.);
+        let ducked = Vec3::new(16., 16., 36.);
+        // Classify the existing hull before changing it. New players and hosts
+        // which reposition the player cannot rely on the previous ground flag.
+        let old_maxs = if self.crouched { ducked } else { standing };
+        let old_ground = world.trace_hull(self.feet, self.feet - Vec3::Z * 2., mins, old_maxs);
+        let was_grounded =
+            old_ground.fraction < 1. && old_ground.normal.z >= 0.7 && self.velocity.z <= 140.;
         if input.crouch {
-            self.crouched = true;
-        } else if self.crouched
-            && !world
-                .trace_hull(self.feet, self.feet, mins, standing)
-                .start_solid
-        {
-            self.crouched = false;
+            if !self.crouched {
+                self.crouched = true;
+                if !was_grounded {
+                    // FinishDuck tucks the feet while preserving head height.
+                    // Apply once, rather than adding height every held tick.
+                    self.feet += standing - ducked;
+                }
+            }
+        } else if self.crouched {
+            let new_feet = if was_grounded {
+                self.feet
+            } else {
+                self.feet - (standing - ducked)
+            };
+            // CanUnduck traces the standing hull over the entire origin change;
+            // testing only the destination misses obstructions along the sweep.
+            let unduck = world.trace_hull(self.feet, new_feet, mins, standing);
+            if !unduck.start_solid && unduck.fraction == 1. {
+                self.feet = new_feet;
+                self.crouched = false;
+            }
         }
-        let maxs = Vec3::new(16., 16., if self.crouched { 36. } else { 72. });
+        let maxs = if self.crouched { ducked } else { standing };
         let target_eye = if self.crouched { 28. } else { 64. };
-        self.eye_height += (target_eye - self.eye_height).clamp(-dt * 180., dt * 180.);
+        if was_grounded {
+            // Ground transition timers and the special duck-jump eye state
+            // remain separate work; retain the existing ground interpolation.
+            self.eye_height += (target_eye - self.eye_height).clamp(-dt * 180., dt * 180.);
+        } else {
+            // Ordinary airborne duck/unduck completion changes view immediately.
+            self.eye_height = target_eye;
+        }
         let ground = world.trace_hull(self.feet, self.feet - Vec3::Z * 2., mins, maxs);
         self.grounded = ground.fraction < 1. && ground.normal.z >= 0.7 && self.velocity.z <= 140.;
         if self.grounded {
@@ -153,7 +181,8 @@ impl Player {
         }
         let before = self.feet;
         let old_velocity = self.velocity;
-        let (flat, flat_velocity) = slide(world, before, old_velocity, dt, mins, maxs);
+        let (flat, flat_velocity) =
+            slide(world, before, old_velocity, dt, mins, maxs, self.grounded);
         self.feet = flat;
         self.velocity = flat_velocity;
         if self.grounded
@@ -169,6 +198,7 @@ impl Player {
                     dt,
                     mins,
                     maxs,
+                    true,
                 );
                 let down = world.trace_hull(raised, raised - Vec3::Z * 18.03125, mins, maxs);
                 if !down.start_solid && down.normal.z >= 0.7 {
@@ -210,43 +240,94 @@ fn slide(
     dt: f32,
     mins: Vec3,
     maxs: Vec3,
+    grounded: bool,
 ) -> (Vec3, Vec3) {
     let mut remaining = dt;
-    let original = velocity;
+    let primal = velocity;
+    let mut segment_velocity = velocity;
+    let mut all_fraction = 0.;
     let mut planes = Vec::<Vec3>::new();
     for _ in 0..4 {
+        if velocity.length_squared() == 0. {
+            break;
+        }
         let hit = world.trace_hull(position, position + velocity * remaining, mins, maxs);
-        if hit.start_solid {
+        all_fraction += hit.fraction;
+        // A player which starts overlapping may still escape the solid. Source
+        // only stops this sweep immediately when its entire path is solid.
+        if hit.all_solid {
             return (position, Vec3::ZERO);
         }
-        position += velocity * remaining * hit.fraction;
-        if hit.fraction >= 1. {
+        if hit.fraction > 0. {
+            let end = position + velocity * remaining * hit.fraction;
+            if hit.fraction == 1. {
+                let stuck = world.trace_hull(end, end, mins, maxs);
+                if stuck.start_solid || stuck.fraction != 1. {
+                    velocity = Vec3::ZERO;
+                    break;
+                }
+            }
+            position = end;
+            // A completed segment no longer shares the previous contact point.
+            // Keep only the planes at this new point and its incoming velocity.
+            segment_velocity = velocity;
+            planes.clear();
+        }
+        if hit.fraction == 1. {
             break;
         }
         remaining *= 1. - hit.fraction;
         planes.push(hit.normal);
-        let incoming = velocity;
+        if planes.len() == 1 && !grounded {
+            // Default WALK has no bounce. Surface-dependent sv_bounce and slide
+            // redirection are still separate work; ordinary clipping uses one.
+            velocity = clip_velocity(segment_velocity, hit.normal);
+            segment_velocity = velocity;
+            continue;
+        }
         let mut candidate = Vec3::ZERO;
         let mut found = false;
-        for &plane in &planes {
-            let clipped = incoming - plane * incoming.dot(plane);
-            if planes.iter().all(|n| clipped.dot(*n) >= -0.01) {
+        for (i, &plane) in planes.iter().enumerate() {
+            let clipped = clip_velocity(segment_velocity, plane);
+            candidate = clipped;
+            if planes
+                .iter()
+                .enumerate()
+                .all(|(j, normal)| i == j || clipped.dot(*normal) >= 0.)
+            {
                 candidate = clipped;
                 found = true;
                 break;
             }
         }
-        if !found && planes.len() == 2 {
+        if !found {
+            if planes.len() != 2 {
+                velocity = Vec3::ZERO;
+                break;
+            }
             let axis = planes[0].cross(planes[1]).normalize_or_zero();
-            candidate = axis * incoming.dot(axis);
+            candidate = axis * candidate.dot(axis);
         }
         velocity = candidate;
-        if velocity.dot(original) <= 0. {
+        if velocity.dot(primal) <= 0. {
             velocity = Vec3::ZERO;
             break;
         }
     }
+    if all_fraction == 0. {
+        velocity = Vec3::ZERO;
+    }
     (position, velocity)
+}
+fn clip_velocity(incoming: Vec3, normal: Vec3) -> Vec3 {
+    let mut clipped = incoming - normal * incoming.dot(normal);
+    // Retail TryPlayerMove inlines this correction from ClipVelocity. It does
+    // not apply the unrelated STOP_EPSILON macro as component snapping here.
+    let adjust = clipped.dot(normal);
+    if adjust < 0. {
+        clipped -= normal * adjust;
+    }
+    clipped
 }
 #[cfg(test)]
 mod tests {
@@ -269,6 +350,328 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+    fn solid_box(min: Vec3, max: Vec3) -> Brush {
+        Brush {
+            contents: 1,
+            planes: vec![
+                Plane {
+                    normal: Vec3::X,
+                    distance: max.x,
+                },
+                Plane {
+                    normal: -Vec3::X,
+                    distance: -min.x,
+                },
+                Plane {
+                    normal: Vec3::Y,
+                    distance: max.y,
+                },
+                Plane {
+                    normal: -Vec3::Y,
+                    distance: -min.y,
+                },
+                Plane {
+                    normal: Vec3::Z,
+                    distance: max.z,
+                },
+                Plane {
+                    normal: -Vec3::Z,
+                    distance: -min.z,
+                },
+            ],
+        }
+    }
+    #[test]
+    fn slide_leaves_a_finite_wall_before_clipping_the_next_surface() {
+        let diagonal = Vec3::new(1., -1., 0.).normalize();
+        let w = World {
+            brushes: vec![
+                solid_box(Vec3::new(1., -10., -10.), Vec3::new(2., 1., 10.)),
+                Brush {
+                    contents: 1,
+                    planes: vec![Plane {
+                        normal: diagonal,
+                        distance: -0.5 / 2f32.sqrt(),
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        let (position, velocity) = slide(
+            &w,
+            Vec3::ZERO,
+            Vec3::new(4., 2., 1.),
+            1.,
+            Vec3::ZERO,
+            Vec3::ZERO,
+            false,
+        );
+        // After passing the finite wall's end, the diagonal surface redirects
+        // motion toward +X. Retaining the old -X plane falsely forbids that.
+        assert!(position.x > 1.1 && position.y > 1.5, "{position:?}");
+        // The four-bump limit and float32 tangent contacts can leave a small
+        // part of this deliberately long sweep unused, but must retain ascent.
+        assert!(position.z > 0.9, "{position:?}, velocity {velocity:?}");
+        assert!(velocity.abs_diff_eq(Vec3::ONE, 0.0001), "{velocity:?}");
+    }
+    #[test]
+    fn simultaneous_ground_contacts_clip_the_segment_velocity() {
+        let diagonal = Vec3::new(-1., -1., 0.).normalize();
+        let w = World {
+            brushes: vec![
+                Brush {
+                    contents: 1,
+                    planes: vec![Plane {
+                        normal: -Vec3::X,
+                        distance: -0.02,
+                    }],
+                },
+                Brush {
+                    contents: 1,
+                    planes: vec![Plane {
+                        normal: diagonal,
+                        distance: -0.02,
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        // Both walls are within the trace skin. First remove +X, then resolve
+        // their shared contact using the original (2,4,1) segment velocity.
+        // Sequential projection instead incorrectly produces (-2,2,1).
+        let (position, velocity) = slide(
+            &w,
+            Vec3::ZERO,
+            Vec3::new(2., 4., 1.),
+            1.,
+            Vec3::ZERO,
+            Vec3::ZERO,
+            true,
+        );
+        assert!(
+            velocity.abs_diff_eq(Vec3::new(-1., 1., 1.), 0.0001),
+            "{velocity:?}"
+        );
+        assert!(
+            position.abs_diff_eq(Vec3::new(-1., 1., 1.), 0.0001),
+            "{position:?}"
+        );
+    }
+    #[test]
+    fn slide_can_exit_an_initial_overlap_but_stops_if_the_whole_path_is_solid() {
+        let w = World {
+            brushes: vec![solid_box(
+                Vec3::new(0., -10., -10.),
+                Vec3::new(10., 10., 10.),
+            )],
+            ..Default::default()
+        };
+        let start = Vec3::new(5., 0., 0.);
+        let (escaped, velocity) =
+            slide(&w, start, Vec3::X * 15., 1., Vec3::ZERO, Vec3::ZERO, false);
+        assert_eq!(escaped, Vec3::new(20., 0., 0.));
+        assert_eq!(velocity, Vec3::X * 15.);
+        let (trapped, velocity) = slide(&w, start, Vec3::X, 1., Vec3::ZERO, Vec3::ZERO, false);
+        assert_eq!(trapped, start);
+        assert_eq!(velocity, Vec3::ZERO);
+    }
+    #[test]
+    fn airborne_duck_tucks_once_and_preserves_view_and_momentum() {
+        let w = floor();
+        let mut standing = Player::new(Vec3::Z * 64.05);
+        standing.step(
+            Input {
+                jump: true,
+                ..Default::default()
+            },
+            &w,
+            TICK,
+        );
+        assert!(!standing.grounded);
+        let mut ducked = standing.clone();
+        for _ in 0..8 {
+            standing.step(Input::default(), &w, TICK);
+            ducked.step(
+                Input {
+                    crouch: true,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            assert!(!ducked.grounded);
+            assert!(ducked.crouched);
+            assert!((ducked.feet.z - standing.feet.z - 36.).abs() < 0.0001);
+            assert!((ducked.eye().z - standing.eye().z).abs() < 0.0001);
+            assert_eq!(ducked.velocity, standing.velocity);
+            assert_eq!(ducked.eye_height, 28.);
+        }
+    }
+    #[test]
+    fn airborne_unduck_restores_origin_and_preserves_view_and_momentum() {
+        let w = World::default();
+        let mut ducked = Player::new(Vec3::Z * 1064.);
+        ducked.velocity = Vec3::new(120., 20., 100.);
+        ducked.step(
+            Input {
+                crouch: true,
+                ..Default::default()
+            },
+            &w,
+            TICK,
+        );
+        let mut standing = ducked.clone();
+        ducked.step(
+            Input {
+                crouch: true,
+                ..Default::default()
+            },
+            &w,
+            TICK,
+        );
+        standing.step(Input::default(), &w, TICK);
+        assert!(!standing.crouched && !standing.grounded);
+        assert_eq!(standing.eye_height, 64.);
+        assert!((ducked.feet.z - standing.feet.z - 36.).abs() < 0.0001);
+        assert!((ducked.eye().z - standing.eye().z).abs() < 0.0001);
+        assert_eq!(ducked.velocity, standing.velocity);
+    }
+    #[test]
+    fn duck_classifies_current_hull_instead_of_a_stale_ground_flag() {
+        for old_grounded in [false, true] {
+            let w = floor();
+            let mut ground_player = Player::new(Vec3::Z * 64.05);
+            ground_player.grounded = old_grounded;
+            ground_player.step(
+                Input {
+                    crouch: true,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            assert!(ground_player.grounded && ground_player.crouched);
+            assert!(ground_player.feet.z < 0.1);
+
+            let mut air_player = Player::new(Vec3::Z * 1064.);
+            air_player.grounded = old_grounded;
+            air_player.step(
+                Input {
+                    crouch: true,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            assert!(!air_player.grounded && air_player.crouched);
+            assert!((air_player.feet.z - 1035.9325).abs() < 0.0001);
+            assert_eq!(air_player.eye_height, 28.);
+        }
+    }
+    #[test]
+    fn airborne_unduck_requires_a_clear_standing_hull_sweep() {
+        for ceiling in [false, true] {
+            let mut w = floor();
+            if ceiling {
+                w.brushes.push(solid_box(
+                    Vec3::new(-100., -100., 64.),
+                    Vec3::new(100., 100., 128.),
+                ));
+            }
+            let mut p = Player::new(Vec3::Z * 84.);
+            p.crouched = true;
+            p.eye_height = 28.;
+            // The current crouched hull is clear. A standing-hull sweep starts
+            // inside the ceiling, or hits the floor while lowering the origin.
+            let start = w.trace(
+                p.feet,
+                p.feet,
+                Vec3::new(-16., -16., 0.),
+                Vec3::new(16., 16., 36.),
+            );
+            assert!(!start.start_solid);
+            p.step(Input::default(), &w, TICK);
+            assert!(p.crouched);
+            assert_eq!(p.eye_height, 28.);
+            assert!(!p.grounded);
+            assert!(p.feet.z > 19.);
+        }
+    }
+    #[test]
+    fn crouch_jump_clears_a_ledge_above_the_ordinary_jump_apex() {
+        let mut w = floor();
+        w.brushes.push(solid_box(
+            Vec3::new(40., -100., 0.),
+            Vec3::new(200., 100., 40.),
+        ));
+        let mut standing = Player::new(Vec3::Z * 64.05);
+        standing.step(Input::default(), &w, TICK);
+        standing.velocity.x = 180.;
+        standing.step(
+            Input {
+                forward: 1.,
+                jump: true,
+                ..Default::default()
+            },
+            &w,
+            TICK,
+        );
+        let mut ducked = standing.clone();
+        for _ in 0..40 {
+            standing.step(
+                Input {
+                    forward: 1.,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            ducked.step(
+                Input {
+                    forward: 1.,
+                    crouch: true,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+        }
+        assert!(
+            standing.feet.x < 24.01,
+            "ordinary jump crossed: {:?}",
+            standing.feet
+        );
+        assert!(standing.feet.z < 0.1);
+        assert!(
+            ducked.feet.x > 50.,
+            "crouch jump blocked: {:?}",
+            ducked.feet
+        );
+        assert!(ducked.grounded && ducked.feet.z >= 40.);
+    }
+    #[test]
+    fn airborne_duck_next_to_a_wall_retains_vertical_motion() {
+        let mut w = floor();
+        w.brushes.push(solid_box(
+            Vec3::new(32., -100., 0.),
+            Vec3::new(48., 100., 128.),
+        ));
+        let mut p = Player::new(Vec3::new(15.95, 0., 74.));
+        p.velocity = Vec3::new(190., 0., 100.);
+        p.step(
+            Input {
+                forward: 1.,
+                crouch: true,
+                ..Default::default()
+            },
+            &w,
+            TICK,
+        );
+        assert!(p.crouched && !p.grounded);
+        assert!(p.feet.x < 16.);
+        assert!((p.feet.z - 47.4325).abs() < 0.0001);
+        assert!((p.velocity.z - 91.).abs() < 0.0001);
     }
     #[test]
     fn ground_acceleration_friction_and_speed_limit() {

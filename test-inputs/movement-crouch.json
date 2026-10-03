@@ -1,0 +1,18 @@
+[
+  {"time":0.05,"action":"console","command":"sv_cheats 1; setpos -2206 -1669 100; setang 0 90"},
+  {"time":0.1,"action":"move"},
+  {"time":1.0,"action":"capture","name":"movement-bench-ground"},
+  {"time":1.1,"action":"move","jump":true},
+  {"time":1.18,"action":"capture","name":"movement-ordinary-rise"},
+  {"time":1.3,"action":"move"},
+  {"time":1.38,"action":"capture","name":"movement-ordinary-apex"},
+  {"time":2.0,"action":"capture","name":"movement-ordinary-landed"},
+  {"time":2.1,"action":"move","jump":true},
+  {"time":2.18,"action":"move","jump":true,"crouch":true},
+  {"time":2.2,"action":"capture","name":"movement-crouch-rise"},
+  {"time":2.25,"action":"move","crouch":true},
+  {"time":2.38,"action":"capture","name":"movement-crouch-apex"},
+  {"time":2.65,"action":"move"},
+  {"time":3.2,"action":"capture","name":"movement-crouch-landed"},
+  {"time":3.4,"action":"quit"}
+]

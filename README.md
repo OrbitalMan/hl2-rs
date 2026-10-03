@@ -36,7 +36,8 @@ Steam libraries are discovered automatically; `HL2_ROOT` can override discovery.
 
 | Control | Action |
 | --- | --- |
-| WASD / mouse | Move / look; click to capture mouse, Escape to release |
+| WASD / mouse | Move / look; click to capture mouse |
+| Escape / tilde | Cancel weapon selection first; otherwise pause / open developer console |
 | Space / Ctrl | Jump / crouch |
 | Shift / Alt | Sprint / walk slowly |
 | E | Use a door or button within reach |
@@ -56,13 +57,15 @@ Steam libraries are discovered automatically; `HL2_ROOT` can override discovery.
 
 The starting map normally has no player weapon. F3 is a test aid. It does not demonstrate campaign weapon acquisition. Some campaign scripts still block progression.
 
+The pause menu has working Resume Game, Developer Console and Quit controls. The console supports history, editing and command-name completion with Tab. `help` lists the implemented commands. Enter `sv_cheats 1; impulse 101` to get the six implemented weapons, ammunition and suit. Other supported commands include `noclip`, `getpos`, `setpos`, `setang`, `map`, `find`, `echo`, `clear`, `toggleconsole` and `quit`. Unsupported Source commands report an error. Save/load, options, bindings and the full Source command registry are unfinished. Player, weapon, entity and prop simulation pauses while the menu or console is open; ambient audio does not yet pause. The UI uses installed GameUI labels/colors and system fonts, but its layout is not an exact VGUI reconstruction.
+
 ## Implemented so far
 
 - Read-only VPK v1/v2 and loose content mounting, map ZIP content, custom content directories/VPKs, CRC checks, bounded readers.
 - BSP 19/20 and compressed lumps, world geometry, brush submodels, displacement geometry and collision, duplicate entity outputs.
 - VMT patch includes, VTF decoding, primary baked lightmap atlases, opaque/cutout/translucent/additive materials, basic two-texture scrolling and entity tint. Six-face LDR sky backgrounds use installed textures/transforms and separate 2D/3D leaf visibility. Lighting remains approximate.
 - MDL/VVD/VTX meshes, skins, static props and selected entity models. Bone hierarchies, skinning, selected compressed MDL/ANI clips and bounded sequence-event decoding; viewmodel sound events play at their recorded cycles.
-- Fixed 15 ms movement with acceleration, friction, gravity, air movement, jump, crouch, sliding and stepping. Collision uses world/terrain/prop shapes; it is not Source prediction or exact collision equivalence.
+- Fixed 15 ms movement with acceleration, friction, gravity, air movement, jump, airborne crouch/uncrouch, sliding and stepping. World brush planes and convex collider SAT provide stable player hull sweeps; meshes and other shapes retain fallback queries. Collision is not Source prediction or exact collision equivalence.
 - Rapier rigid props and collision, moving door transforms, interaction and prop impulses. Prop shapes are derived from render meshes, with approximate mass/material properties.
 - Timed entity I/O, target lookup, relays, counters, branches, cases/shuffling, timers, player triggers, doors and a subset of scripted sequences. Unsupported inputs are logged.
 - Crowbar, pistol, .357, SMG1, AR2 and shotgun primary attacks, shotgun secondary attack, installed scripts/viewmodels, separate reserves, magazine reloads and shell-by-shell shotgun reload/pump/interruption. Secondary fire consumes two shells and fires twelve pellets; reload interruption retains a delayed shot after release. Crowbar traces use the Source ray/hull/corner sequence with approximate Rapier geometry. NPC models can animate and take damage, but do not implement combat AI.
@@ -121,6 +124,8 @@ Run `.\launch.cmd --input-script test-inputs/shotgun-secondary.json` for a nine-
 
 Run `.\launch.cmd --input-script test-inputs/selection-held.json` for held-button selection, independent button rearming and an ordered release/repress in one input poll. These captures and reports also stay in ignored `artifacts/`.
 
+Run `.\launch.cmd --input-script test-inputs/pause-console.json` to exercise the pause menu, console commands, cheat gates and input focus. `.\launch.cmd --input-script test-inputs/movement-crouch.json` compares ordinary and airborne crouched jumps on the station bench. Scripted movement and rendered-frame snapshots are recorded in the runtime report. These fixtures exit automatically; captures remain local.
+
 Crowbar flesh/world impacts use their distinct script sounds, and symbolic sound playback retains all `rndwave` alternatives instead of discarding all but the first. Surface impact marks use installed concrete/metal/wood/glass textures, are clipped to receiver triangles and follow moving props/doors. Their rendering approximates DecalModulate; NPC blood decals, layered fading and exact Source surface response remain unfinished.
 
 Health kits, health vials and batteries play their own installed pickup sounds when accepted. Full health/armor leaves the item in place, and a battery requires a suit. Suit logon sentences are still missing.
@@ -130,3 +135,5 @@ BSP leaves and compressed PVS identify the miniature 3D sky area. Its scenery us
 Player hull queries exclude NPC-only clip brushes. This corrects oversized invisible blockers around the station benches while retaining their visible-model collision. Prop physics still uses approximate render-derived shapes; native PHY shapes remain separate work.
 
 Grounded crouch now crops movement commands independently of maximum speed, preserving the reviewed jump-boost cap. Air crouching retains full air acceleration. Released jumps can chain without an added ground-friction tick in controlled tests. Exact crouch/suit transitions and original-game movement over campaign geometry still need comparison.
+
+Ordinary airborne crouching now tucks the feet upward by 36 units while preserving head height; holding crouch does not repeat the lift. Air uncrouching lowers the origin only after a clear standing-hull sweep. Sliding follows reviewed retail plane-reset, clipping and overlap-exit rules. Stable world-brush and convex-prop player sweeps correct reproduced zero-time contacts that interrupted wall jumps. Ground crouch timers, special duck-jump eye states, mesh query fidelity, native PHY collision and Havok/VPhysics solver equivalence remain unfinished.
