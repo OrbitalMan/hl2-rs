@@ -59,6 +59,7 @@ pub fn can_be_selected(inv: &Inventory, weapons: &BTreeMap<String, Weapon>, name
         || w.ammo_type.eq_ignore_ascii_case("none")
         || *clip > 0
         || inv.reserve_for(name, weapons) > 0
+        || inv.secondary_for(name, weapons) > 0
 }
 
 impl Selection {
@@ -269,6 +270,32 @@ mod tests {
         selection.cancel();
         selection.wheel(&inv, &defs, 1, 0.);
         assert_eq!(selection.pending.as_deref(), Some("weapon_pistol"));
+    }
+    #[test]
+    fn secondary_reserve_keeps_an_owned_empty_primary_weapon_selectable() {
+        let (mut inv, mut defs) = setup();
+        defs.insert(
+            "weapon_smg1".into(),
+            Weapon {
+                slot: 2,
+                magazine: 45,
+                ammo_type: "SMG1".into(),
+                secondary_ammo_type: "SMG1_Grenade".into(),
+                ..Weapon::default()
+            },
+        );
+        inv.owned.insert("weapon_smg1".into(), 0);
+        assert!(!can_be_selected(&inv, &defs, "weapon_smg1"));
+        inv.reserve_ammo.insert("SMG1_Grenade".into(), 1);
+        assert!(can_be_selected(&inv, &defs, "weapon_smg1"));
+        let mut selection = Selection::new();
+        selection.slot(&inv, &defs, 2, 0.);
+        assert_eq!(
+            selection.confirm(&inv, &defs, 0.1).weapon.as_deref(),
+            Some("weapon_smg1")
+        );
+        inv.owned.remove("weapon_smg1");
+        assert!(!can_be_selected(&inv, &defs, "weapon_smg1"));
     }
     #[test]
     fn timeout_cancel_and_confirmation_do_not_switch_inventory_by_themselves() {

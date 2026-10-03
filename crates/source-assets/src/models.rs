@@ -72,6 +72,7 @@ fn parse_static(data: &[u8], version: u16) -> Result<Vec<ModelInstance>> {
             scale: 1.,
             kind: "static_prop".into(),
             solid: record[30] != 0,
+            solid_mode: Some(record[30]),
             entity: None,
         });
     }
@@ -229,6 +230,10 @@ pub struct ModelReport {
     pub rigs_loaded: usize,
     pub clips_loaded: usize,
     pub animation_warnings: Vec<String>,
+    pub collision_models_loaded: usize,
+    pub collision_pieces_loaded: usize,
+    pub collision_models_missing: usize,
+    pub collision_warnings: Vec<String>,
 }
 pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
     for (entity_id, entity) in world.entities.iter().enumerate() {
@@ -293,12 +298,15 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 solid: !entity.class().starts_with("item_")
                     && !entity.class().starts_with("weapon_")
                     && entity.get("solid").is_none_or(|s| s != "0"),
+                solid_mode: None,
                 entity: Some(entity_id),
             });
         }
     }
     let mut cache: BTreeMap<(String, usize), Option<Vec<Surface>>> = BTreeMap::new();
     let mut report = ModelReport::default();
+    let mut collision_attempted = BTreeSet::new();
+    let mut collision_modes_reported = BTreeSet::new();
     let mut batches: BTreeMap<(String, Option<usize>, bool), Surface> = world
         .surfaces
         .drain(..)
@@ -335,6 +343,38 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             .model_assets
             .entry(instance.asset_key())
             .or_insert_with(|| model.clone());
+        // Only static props with a proved identity-root transform use PHY yet.
+        // Animated doors, dynamic props and ragdolls retain explicit fallback.
+        if instance.solid
+            && instance.kind == "static_prop"
+            && !instance.background
+            && instance.solid_mode != Some(6)
+            && collision_modes_reported.insert((instance.asset_key(), instance.solid_mode))
+        {
+            report.collision_warnings.push(format!(
+                "{}: static-prop solid mode {:?} is unsupported; using render collision fallback",
+                instance.model, instance.solid_mode
+            ));
+        }
+        if instance.solid
+            && instance.kind == "static_prop"
+            && !instance.background
+            && instance.solid_mode == Some(6)
+            && collision_attempted.insert(instance.asset_key())
+        {
+            match read_collision(vfs, &instance.model) {
+                Ok(Some(pieces)) => {
+                    report.collision_models_loaded += 1;
+                    report.collision_pieces_loaded += pieces.len();
+                    world.model_collision.insert(instance.asset_key(), pieces);
+                }
+                Ok(None) => report.collision_models_missing += 1,
+                Err(error) => report.collision_warnings.push(format!(
+                    "{}: {error:#}; using render collision fallback",
+                    instance.model
+                )),
+            }
+        }
         report.instances_loaded += 1;
         if instance.entity.is_some() && !world.rigs.contains_key(&instance.asset_key()) {
             let mut wanted = [
@@ -410,6 +450,15 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
     world.surfaces = batches.into_values().collect();
     report
 }
+pub fn read_collision(vfs: &Vfs, model: &str) -> Result<Option<Vec<modkit_core::ConvexPiece>>> {
+    let stem = model.trim_end_matches(".mdl");
+    let Some(phy) = vfs.read(&format!("{stem}.phy"))? else {
+        return Ok(None);
+    };
+    let mdl = vfs.read(model)?.context("PHY companion MDL missing")?;
+    let checksum = crate::phy::identity_root_checksum(&mdl)?;
+    Ok(Some(crate::phy::read(&phy, checksum)?.pieces))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,5 +482,26 @@ mod tests {
         assert_eq!(props[0].model, "models/test.mdl");
         assert_eq!(props[0].origin.x, 42.);
         assert_eq!(props[0].skin, 2);
+    }
+    #[test]
+    fn static_prop_solid_modes_are_preserved_in_every_supported_version() {
+        for (version, stride) in [(4, 56), (5, 60), (6, 64)] {
+            let mut data = vec![0u8; 140 + 3 * stride];
+            data[0] = 1;
+            data[4..19].copy_from_slice(b"models/test.mdl");
+            data[136] = 3;
+            for (i, mode) in [0, 2, 6].into_iter().enumerate() {
+                data[140 + i * stride + 30] = mode;
+            }
+            let props = parse_static(&data, version).unwrap();
+            assert_eq!(
+                props.iter().map(|p| p.solid_mode).collect::<Vec<_>>(),
+                vec![Some(0), Some(2), Some(6)]
+            );
+            assert_eq!(
+                props.iter().map(|p| p.solid).collect::<Vec<_>>(),
+                vec![false, true, true]
+            );
+        }
     }
 }

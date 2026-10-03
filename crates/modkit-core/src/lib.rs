@@ -80,10 +80,18 @@ pub struct World {
     pub terrain: Vec<Surface>,
     #[serde(default)]
     pub model_assets: std::collections::BTreeMap<String, Vec<Surface>>,
+    /// Collision convexes are separate from visible model triangles.
+    #[serde(default)]
+    pub model_collision: std::collections::BTreeMap<String, Vec<ConvexPiece>>,
     #[serde(default)]
     pub lightmaps: Vec<Lightmap>,
     #[serde(default)]
     pub rigs: std::collections::BTreeMap<String, animation::Rig>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConvexPiece {
+    pub vertices: Vec<Vec3>,
+    pub indices: Vec<[u32; 3]>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BackgroundCamera {
@@ -117,6 +125,10 @@ pub struct ModelInstance {
     pub kind: String,
     #[serde(default)]
     pub solid: bool,
+    /// Original Source static-prop SolidType byte; absent for entity models and
+    /// portable inputs that do not supply this engine-specific collision mode.
+    #[serde(default)]
+    pub solid_mode: Option<u8>,
     #[serde(default)]
     pub entity: Option<usize>,
 }

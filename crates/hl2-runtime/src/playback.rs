@@ -74,6 +74,7 @@ pub enum Action {
         pitch: f32,
     },
     Reload,
+    Use,
     Capture {
         name: String,
     },

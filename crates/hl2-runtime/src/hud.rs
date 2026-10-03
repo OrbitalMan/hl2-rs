@@ -65,6 +65,10 @@ fn alpha(mut color: Color, amount: f32) -> Color {
     color.a *= amount;
     color
 }
+fn uses_secondary_ammo(weapon: &Weapon) -> bool {
+    !weapon.secondary_ammo_type.is_empty()
+        && !weapon.secondary_ammo_type.eq_ignore_ascii_case("none")
+}
 
 #[derive(Clone)]
 struct FontFace {
@@ -365,16 +369,34 @@ impl PanelLayout {
         }
     }
     fn rect(&self, scale: f32) -> Rect {
-        let x = self
-            .x
-            .strip_prefix('r')
-            .and_then(|v| v.parse::<f32>().ok())
-            .map_or_else(
-                || self.x.parse::<f32>().unwrap_or(0.) * scale,
-                |offset| screen_width() - offset * scale,
-            );
+        let x = panel_axis(&self.x, screen_width(), scale).unwrap_or(0.);
         Rect::new(x, self.y * scale, self.width * scale, self.height * scale)
     }
+    fn rect_for(&self, viewport: Vec2) -> Rect {
+        let scale = viewport.y / 480.;
+        Rect::new(
+            panel_axis(&self.x, viewport.x, scale).unwrap_or(0.),
+            self.y * scale,
+            self.width * scale,
+            self.height * scale,
+        )
+    }
+}
+fn panel_axis(value: &str, extent: f32, scale: f32) -> Option<f32> {
+    let (alignment, number) = if let Some(number) = value.strip_prefix('r') {
+        (1, number)
+    } else if let Some(number) = value.strip_prefix('c') {
+        (2, number)
+    } else {
+        (0, value)
+    };
+    let number = number.parse::<f32>().ok()? * scale;
+    let value = match alignment {
+        1 => extent - number,
+        2 => extent * 0.5 + number,
+        _ => number,
+    };
+    value.is_finite().then_some(value)
 }
 
 #[derive(Clone)]
@@ -423,6 +445,8 @@ struct EventRule {
     target: String,
     delay: f64,
     run: bool,
+    panel: bool,
+    property: Option<String>,
 }
 
 fn animation_lines(source: &str) -> Result<Vec<(String, Vec<String>)>> {
@@ -482,17 +506,25 @@ fn event_rules(source: &str) -> Result<Vec<EventRule>> {
         .filter_map(|(event, tokens)| {
             if !matches!(
                 tokens.first().map(String::as_str),
-                Some("StopEvent" | "RunEvent")
+                Some("StopEvent" | "RunEvent" | "StopPanelAnimations" | "StopAnimation")
             ) || tokens.len() < 3
             {
                 return None;
             }
-            let delay = tokens[2].parse::<f64>().ok()?;
+            let property = (tokens[0] == "StopAnimation")
+                .then(|| tokens.get(2).cloned())
+                .flatten();
+            let delay = tokens
+                .get(if property.is_some() { 3 } else { 2 })?
+                .parse::<f64>()
+                .ok()?;
             (delay.is_finite() && delay >= 0.).then(|| EventRule {
                 event,
                 target: tokens[1].clone(),
                 delay,
                 run: tokens[0] == "RunEvent",
+                panel: tokens[0] == "StopPanelAnimations",
+                property,
             })
         })
         .collect())
@@ -510,11 +542,12 @@ fn animation<'a>(
     })
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum NumericPanel {
     Health,
     Suit,
     Ammo,
+    AmmoSecondary,
 }
 impl NumericPanel {
     fn read(name: &str) -> Option<Self> {
@@ -522,11 +555,12 @@ impl NumericPanel {
             "hudhealth" => Some(Self::Health),
             "hudsuit" => Some(Self::Suit),
             "hudammo" => Some(Self::Ammo),
+            "hudammosecondary" => Some(Self::AmmoSecondary),
             _ => None,
         }
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum NumericProperty {
     Alpha,
     Blur,
@@ -534,6 +568,8 @@ enum NumericProperty {
     Foreground,
     TextColor,
     Ammo2Color,
+    Position,
+    Size,
 }
 impl NumericProperty {
     fn read(name: &str) -> Option<Self> {
@@ -544,6 +580,8 @@ impl NumericProperty {
             "fgcolor" => Some(Self::Foreground),
             "textcolor" => Some(Self::TextColor),
             "ammo2color" => Some(Self::Ammo2Color),
+            "position" => Some(Self::Position),
+            "size" => Some(Self::Size),
             _ => None,
         }
     }
@@ -553,8 +591,28 @@ impl NumericProperty {
             Self::Background | Self::Foreground | Self::TextColor | Self::Ammo2Color
         )
     }
-    fn target(self, value: &str, settings: &Entry) -> Option<[f32; 4]> {
-        if self.is_color() {
+    fn geometry(self) -> bool {
+        matches!(self, Self::Position | Self::Size)
+    }
+    fn target(self, value: &str, settings: &Entry, viewport: Vec2) -> Option<[f32; 4]> {
+        if self.geometry() {
+            let parts = value.split_whitespace().collect::<Vec<_>>();
+            if parts.len() != 2 || viewport.x <= 0. || viewport.y <= 0. {
+                return None;
+            }
+            let scale = viewport.y / 480.;
+            let extent = if self == Self::Position {
+                viewport
+            } else {
+                Vec2::ZERO
+            };
+            let x = panel_axis(parts[0], extent.x, scale)?;
+            let y = panel_axis(parts[1], extent.y, scale)?;
+            if self == Self::Size && (x < 0. || y < 0.) {
+                return None;
+            }
+            Some([x, y, 0., 0.])
+        } else if self.is_color() {
             let value =
                 rgba(value).or_else(|| settings.get(value).and_then(Entry::text).and_then(rgba))?;
             Some([
@@ -571,7 +629,7 @@ impl NumericProperty {
 }
 #[derive(Clone, Copy)]
 struct PanelEffects {
-    values: [[f32; 4]; 6],
+    values: [[f32; 4]; 8],
 }
 impl PanelEffects {
     fn new(settings: &Entry) -> Self {
@@ -585,6 +643,8 @@ impl PanelEffects {
                 components(background),
                 components(foreground),
                 components(foreground),
+                [0.; 4],
+                [0.; 4],
                 components(foreground),
             ],
         }
@@ -604,6 +664,23 @@ impl PanelEffects {
         let blur = self.values[NumericProperty::Blur as usize][0].clamp(0., 64.);
         (0..blur.ceil() as usize).map(move |pass| (blur - pass as f32).min(1.))
     }
+    fn set_rect(&mut self, rect: Rect) {
+        self.values[NumericProperty::Position as usize] = [rect.x, rect.y, 0., 0.];
+        self.values[NumericProperty::Size as usize] = [rect.w, rect.h, 0., 0.];
+    }
+    fn rect(self) -> Option<Rect> {
+        let position = self.values[NumericProperty::Position as usize];
+        let size = self.values[NumericProperty::Size as usize];
+        (size[0] > 0. && size[1] > 0.).then(|| {
+            // VGUI applies animated geometry through integer panel coordinates.
+            Rect::new(
+                position[0].trunc(),
+                position[1].trunc(),
+                size[0].trunc(),
+                size[1].trunc(),
+            )
+        })
+    }
 }
 struct PropertyAnimation {
     event: String,
@@ -620,9 +697,11 @@ struct PostedEvent {
     target: String,
     at: f64,
     run: bool,
+    panel: bool,
+    property: Option<String>,
 }
 struct NumericHudEffects {
-    panels: [PanelEffects; 3],
+    panels: [PanelEffects; 4],
     animations: Vec<PropertyAnimation>,
     posted: Vec<PostedEvent>,
     health: i32,
@@ -630,12 +709,20 @@ struct NumericHudEffects {
     active: String,
     ammo: i32,
     reserve: i32,
+    secondary_active: String,
+    secondary_ammo: i32,
     time: f64,
+    viewport: Vec2,
+    initial_rects: Option<[Rect; 4]>,
 }
 impl NumericHudEffects {
     fn new(settings: &Entry) -> Self {
+        let mut panels = [PanelEffects::new(settings); 4];
+        // CHudSecondaryAmmo::Reset starts hidden until a secondary-ammo weapon is observed.
+        panels[NumericPanel::AmmoSecondary as usize].values[NumericProperty::Alpha as usize][0] =
+            0.;
         Self {
-            panels: [PanelEffects::new(settings); 3],
+            panels,
             animations: Vec::new(),
             posted: Vec::new(),
             health: -1,
@@ -643,13 +730,46 @@ impl NumericHudEffects {
             active: String::new(),
             ammo: -1,
             reserve: -1,
+            secondary_active: String::new(),
+            secondary_ammo: -1,
             time: 0.,
+            viewport: Vec2::ZERO,
+            initial_rects: None,
         }
     }
     fn stop(&mut self, event: &str) {
         self.animations
             .retain(|a| !a.event.eq_ignore_ascii_case(event));
         self.posted.retain(|s| !s.event.eq_ignore_ascii_case(event));
+    }
+    fn stop_panel(&mut self, panel: &str) {
+        if let Some(panel) = NumericPanel::read(panel) {
+            self.animations.retain(|a| a.panel != panel);
+        }
+    }
+    fn stop_property(&mut self, panel: &str, property: &str) {
+        if let (Some(panel), Some(property)) =
+            (NumericPanel::read(panel), NumericProperty::read(property))
+        {
+            self.animations
+                .retain(|a| a.panel != panel || a.property != property);
+        }
+    }
+    fn configure_layouts(&mut self, layouts: [&PanelLayout; 4], viewport: Vec2) {
+        if self.viewport == viewport && self.initial_rects.is_some() {
+            return;
+        }
+        self.viewport = viewport;
+        let rects = layouts.map(|layout| layout.rect_for(viewport));
+        self.initial_rects = Some(rects);
+        for (panel, rect) in self.panels.iter_mut().zip(rects) {
+            panel.set_rect(rect);
+        }
+        // A viewport change reapplies proportional resource geometry. Old pixel targets
+        // no longer apply; current weapon sequences will supply freshly scaled targets.
+        self.animations.retain(|a| !a.property.geometry());
+        self.active.clear();
+        self.secondary_active.clear();
     }
     fn start(
         &mut self,
@@ -665,11 +785,25 @@ impl NumericHudEffects {
             .iter()
             .filter(|s| s.event.eq_ignore_ascii_case(event))
         {
+            if let Some(property) = &rule.property {
+                if rule.delay == 0. {
+                    self.stop_property(&rule.target, property);
+                    continue;
+                }
+            }
+            if rule.panel && rule.delay == 0. {
+                // The owned secondary-weapon sequences stop existing panel tracks
+                // before scheduling their replacement color/alpha tracks.
+                self.stop_panel(&rule.target);
+                continue;
+            }
             self.posted.push(PostedEvent {
                 event: event.into(),
                 target: rule.target.clone(),
                 at: time + rule.delay,
                 run: rule.run,
+                panel: rule.panel,
+                property: rule.property.clone(),
             });
         }
         for rule in rules.iter().filter(|r| r.event.eq_ignore_ascii_case(event)) {
@@ -679,7 +813,7 @@ impl NumericHudEffects {
             let Some(property) = NumericProperty::read(&rule.property) else {
                 continue;
             };
-            let Some(target) = property.target(&rule.target, settings) else {
+            let Some(target) = property.target(&rule.target, settings, self.viewport) else {
                 continue;
             };
             self.animations.push(PropertyAnimation {
@@ -706,7 +840,11 @@ impl NumericHudEffects {
         let mut ran = HashSet::new();
         while let Some(index) = self.posted.iter().position(|message| message.at <= time) {
             let message = self.posted.remove(index);
-            if message.run {
+            if let Some(property) = message.property {
+                self.stop_property(&message.target, &property);
+            } else if message.panel {
+                self.stop_panel(&message.target);
+            } else if message.run {
                 if ran.insert(message.target.to_ascii_lowercase()) {
                     // Source starts late events at the current frame, without backlog catch-up.
                     self.start(&message.target, time, rules, events, settings);
@@ -757,7 +895,16 @@ impl NumericHudEffects {
             return;
         }
         if time < self.time {
+            let viewport = self.viewport;
+            let rects = self.initial_rects;
             *self = Self::new(settings);
+            self.viewport = viewport;
+            self.initial_rects = rects;
+            if let Some(rects) = rects {
+                for (panel, rect) in self.panels.iter_mut().zip(rects) {
+                    panel.set_rect(rect);
+                }
+            }
         }
         self.advance(time);
         let health = (inv.health as i32).max(0);
@@ -823,10 +970,54 @@ impl NumericHudEffects {
             }
             if self.active != inv.active {
                 // Retail/SDK SetAmmo's playAnimation argument is unused; WeaponChanged follows.
+                self.start(
+                    if clip < 0 {
+                        "WeaponDoesNotUseClips"
+                    } else {
+                        "WeaponUsesClips"
+                    },
+                    time,
+                    rules,
+                    events,
+                    settings,
+                );
                 self.start("WeaponChanged", time, rules, events, settings);
                 self.active.clone_from(&inv.active);
             }
             let _ = weapon;
+        }
+        if let Some(weapon) = weapons.get(&inv.active) {
+            let uses_secondary = uses_secondary_ammo(weapon);
+            if uses_secondary {
+                let ammo = inv.secondary_for(&inv.active, weapons);
+                if ammo != self.secondary_ammo {
+                    let event = if ammo == 0 {
+                        "AmmoSecondaryEmpty"
+                    } else if ammo < self.secondary_ammo {
+                        "AmmoSecondaryDecreased"
+                    } else {
+                        "AmmoSecondaryIncreased"
+                    };
+                    self.start(event, time, rules, events, settings);
+                    self.secondary_ammo = ammo;
+                }
+            }
+            if self.secondary_active != inv.active {
+                self.start(
+                    if uses_secondary {
+                        "WeaponUsesSecondaryAmmo"
+                    } else {
+                        "WeaponDoesNotUseSecondaryAmmo"
+                    },
+                    time,
+                    rules,
+                    events,
+                    settings,
+                );
+                self.secondary_active.clone_from(&inv.active);
+            }
+        } else {
+            self.secondary_active.clear();
         }
         self.posted_events(time, rules, events, settings);
         self.advance(time);
@@ -1110,6 +1301,7 @@ pub struct WeaponHud {
     numbers: HudFont,
     number_glow: HudFont,
     small_numbers: HudFont,
+    ammo_icon_font: HudFont,
     selection_numbers: HudFont,
     selection_text: HudFont,
     labels: HudFont,
@@ -1119,9 +1311,15 @@ pub struct WeaponHud {
     animation_events: Vec<EventRule>,
     numeric_effects: RefCell<NumericHudEffects>,
     ammo_icons: BTreeMap<String, String>,
+    secondary_ammo_icons: BTreeMap<String, String>,
+    weapon_crosshairs: BTreeMap<String, String>,
+    default_crosshair: Texture2D,
+    default_crosshair_rect: Rect,
+    crosshair_color: Color,
     health_panel: PanelLayout,
     suit_panel: PanelLayout,
     ammo_panel: PanelLayout,
+    secondary_ammo_panel: PanelLayout,
     quick_info: QuickInfoHud,
 }
 
@@ -1173,7 +1371,10 @@ impl WeaponHud {
         let animation_events = event_rules(&animation_source)?;
         let numeric_effects = RefCell::new(NumericHudEffects::new(&settings));
         let mut ammo_icons = BTreeMap::new();
+        let mut secondary_ammo_icons = BTreeMap::new();
+        let mut weapon_crosshairs = BTreeMap::new();
         for class in [
+            "weapon_crowbar",
             "weapon_pistol",
             "weapon_357",
             "weapon_smg1",
@@ -1185,17 +1386,44 @@ impl WeaponHud {
         ] {
             if let Some(bytes) = vfs.read(&format!("scripts/{class}.txt"))? {
                 if let Some(weapon) = keyvalues::parse_resource(&bytes)?.first() {
-                    if let Some(icon) = weapon
-                        .get("TextureData")
-                        .and_then(|e| e.get("ammo"))
-                        .and_then(|e| e.get("character"))
-                        .and_then(Entry::text)
-                    {
-                        ammo_icons.insert(class.into(), icon.into());
+                    if let Some(textures) = weapon.get("TextureData") {
+                        for (key, icons) in [
+                            ("ammo", &mut ammo_icons),
+                            ("ammo2", &mut secondary_ammo_icons),
+                            ("crosshair", &mut weapon_crosshairs),
+                        ] {
+                            if let Some(icon) = textures
+                                .get(key)
+                                .and_then(|e| e.get("character"))
+                                .and_then(Entry::text)
+                            {
+                                icons.insert(class.into(), icon.into());
+                            }
+                        }
                     }
                 }
             }
         }
+        let hud_textures = keyvalues::parse_resource(
+            &vfs.read("scripts/hud_textures.txt")?
+                .context("HUD textures missing")?,
+        )?;
+        let default_icon = hud_textures
+            .first()
+            .and_then(|root| root.get("TextureData"))
+            .and_then(|textures| textures.get("crosshair_default"))
+            .context("Default crosshair resource missing")?;
+        let default_file = default_icon
+            .get("file")
+            .and_then(Entry::text)
+            .context("Default crosshair material missing")?;
+        let mut crosshair_color = color(
+            scheme.get("Colors").unwrap_or(&settings),
+            "Normal",
+            Color::from_rgba(255, 208, 64, 255),
+        );
+        // C_BaseCombatWeapon::DrawCrosshair explicitly makes the normal color opaque.
+        crosshair_color.a = 1.;
         let mut corners = Vec::new();
         for number in 1..=4 {
             corners.push(crate::viewer::texture(
@@ -1230,7 +1458,8 @@ impl WeaponHud {
             crosshairs: HudFont::read(fonts, "Crosshairs", face.clone(), 40.),
             numbers: HudFont::read(fonts, "HudNumbers", face.clone(), 32.),
             number_glow: HudFont::read(fonts, "HudNumbersGlow", face.clone(), 32.),
-            small_numbers: HudFont::read(fonts, "HudNumbersSmall", face, 16.),
+            small_numbers: HudFont::read(fonts, "HudNumbersSmall", face.clone(), 16.),
+            ammo_icon_font: HudFont::read(fonts, "WeaponIconsSmall", face, 16.),
             selection_numbers: HudFont::read(fonts, "HudSelectionNumbers", bold.clone(), 11.),
             selection_text: HudFont::read(fonts, "HudSelectionText", bold.clone(), 10.),
             labels: HudFont::read(fonts, "Default", bold, 12.),
@@ -1241,12 +1470,27 @@ impl WeaponHud {
             ),
             suit_panel: PanelLayout::read(layout.get("HudSuit").context("HudSuit layout missing")?),
             ammo_panel: PanelLayout::read(layout.get("HudAmmo").context("HudAmmo layout missing")?),
+            secondary_ammo_panel: PanelLayout::read(
+                layout
+                    .get("HudAmmoSecondary")
+                    .context("Secondary ammo HUD layout missing")?,
+            ),
             layout: weapon_layout,
             settings,
             animation_rules,
             animation_events,
             numeric_effects,
             ammo_icons,
+            secondary_ammo_icons,
+            weapon_crosshairs,
+            default_crosshair: crate::viewer::texture(vfs, default_file)?,
+            default_crosshair_rect: Rect::new(
+                number(default_icon, "x", 0.),
+                number(default_icon, "y", 48.),
+                number(default_icon, "width", 24.),
+                number(default_icon, "height", 24.),
+            ),
+            crosshair_color,
             quick_info,
         })
     }
@@ -1484,7 +1728,7 @@ impl WeaponHud {
         let background = effects.color(NumericProperty::Background);
         let foreground = effects.color(NumericProperty::Foreground);
         let scale = screen_height() / 480.;
-        let rect = panel.rect(scale);
+        let rect = effects.rect().unwrap_or_else(|| panel.rect(scale));
         self.rounded_box(rect, background);
         gl_use_material(&self.additive);
         self.labels.draw(
@@ -1523,11 +1767,20 @@ impl WeaponHud {
         &self,
         inv: &Inventory,
         weapons: &BTreeMap<String, Weapon>,
-        selection: &Selection,
+        _selection: &Selection,
         time: f64,
     ) {
         self.quick_info.draw(inv, weapons, time, &self.additive);
         let mut effects = self.numeric_effects.borrow_mut();
+        effects.configure_layouts(
+            [
+                &self.health_panel,
+                &self.suit_panel,
+                &self.ammo_panel,
+                &self.secondary_ammo_panel,
+            ],
+            vec2(screen_width(), screen_height()),
+        );
         effects.observe(
             inv,
             weapons,
@@ -1553,86 +1806,95 @@ impl WeaponHud {
             None,
             effects.panels[NumericPanel::Suit as usize],
         );
-        // HIDEHUD_WEAPONSELECTION suppresses the ammunition display while the menu is open.
-        if selection.pending.is_some() {
-            return;
-        }
+        // HIDEHUD_WEAPONSELECTION is a player hide-bit. Opening the bucket selector
+        // does not set it; the active weapon's ammunition remains visible.
         let Some(weapon) = weapons.get(&inv.active) else {
             return;
         };
-        if weapon.ammo_type.is_empty() || weapon.ammo_type.eq_ignore_ascii_case("none") {
-            return;
+        if !weapon.ammo_type.is_empty() && !weapon.ammo_type.eq_ignore_ascii_case("none") {
+            let clip = inv.owned.get(&inv.active).copied().unwrap_or(-1);
+            let reserve = inv.reserve_for(&inv.active, weapons);
+            self.numeric_panel(
+                &self.ammo_panel,
+                "AMMO",
+                if clip < 0 { reserve } else { clip },
+                (clip >= 0).then_some(reserve),
+                effects.panels[NumericPanel::Ammo as usize],
+            );
+            self.ammo_icon(
+                &self.ammo_panel,
+                "AMMO",
+                self.ammo_icons.get(&inv.active),
+                effects.panels[NumericPanel::Ammo as usize],
+            );
         }
-        let clip = inv.owned.get(&inv.active).copied().unwrap_or(-1);
-        let reserve = inv.reserve_for(&inv.active, weapons);
-        let mut panel = self.ammo_panel.clone();
-        // These are the settled size/position animations from the installed HudAnimations.
-        let event = if clip < 0 {
-            "WeaponDoesNotUseClips"
-        } else {
-            "WeaponUsesClips"
-        };
-        if let Some(rule) = animation(&self.animation_rules, event, "HudAmmo", "Position") {
-            let position = rule.target.split_whitespace().collect::<Vec<_>>();
-            if position.len() == 2 {
-                panel.x = position[0].into();
-                panel.y = position[1].parse().unwrap_or(panel.y);
-            }
-        }
-        if let Some(rule) = animation(&self.animation_rules, event, "HudAmmo", "Size") {
-            let size = rule
-                .target
-                .split_whitespace()
-                .filter_map(|n| n.parse::<f32>().ok())
-                .collect::<Vec<_>>();
-            if size.len() == 2 {
-                panel.width = size[0];
-                panel.height = size[1];
-            }
-        }
+        let secondary_effects = effects.panels[NumericPanel::AmmoSecondary as usize];
         self.numeric_panel(
-            &panel,
-            "AMMO",
-            if clip < 0 { reserve } else { clip },
-            (clip >= 0).then_some(reserve),
-            effects.panels[NumericPanel::Ammo as usize],
+            &self.secondary_ammo_panel,
+            "ALT",
+            effects.secondary_ammo,
+            None,
+            secondary_effects,
         );
-        if let Some(icon) = self.ammo_icons.get(&inv.active) {
+        self.ammo_icon(
+            &self.secondary_ammo_panel,
+            "ALT",
+            self.secondary_ammo_icons.get(&inv.active),
+            secondary_effects,
+        );
+    }
+
+    fn ammo_icon(
+        &self,
+        panel: &PanelLayout,
+        label: &str,
+        icon: Option<&String>,
+        effects: PanelEffects,
+    ) {
+        if let Some(icon) = icon.filter(|_| effects.opacity() > 0.) {
             let scale = screen_height() / 480.;
-            let rect = panel.rect(scale);
-            let font_size = self.small_numbers.size();
+            let rect = effects.rect().unwrap_or_else(|| panel.rect(scale));
             let x = rect.x
                 + panel.text.x * scale
-                + (self.labels.width("AMMO") - self.small_numbers.width(icon)) * 0.5;
-            let y = rect.y + panel.text.y * scale - self.labels.size() - font_size * 0.5;
+                + (self.labels.width(label) - self.ammo_icon_font.width(icon)) * 0.5;
+            let y = rect.y + panel.text.y * scale
+                - self.labels.size()
+                - self.ammo_icon_font.size() * 0.5;
             gl_use_material(&self.additive);
-            self.small_numbers.draw(
-                icon,
-                x,
-                y,
-                effects.panels[NumericPanel::Ammo as usize].color(NumericProperty::Foreground),
-            );
+            self.ammo_icon_font
+                .draw(icon, x, y, effects.color(NumericProperty::Foreground));
             gl_use_default_material();
         }
     }
 
     pub fn draw_crosshair(&self, inv: &Inventory) {
-        if inv.active.is_empty() || inv.health <= 0. {
+        if inv.health <= 0. {
             return;
         }
-        // All currently implemented stock weapon scripts bind Crosshairs character Q.
-        let character = "Q";
-        let color = color(
-            &self.settings,
-            "FgColor",
-            Color::from_rgba(255, 220, 0, 100),
-        );
+        let Some(character) = self.weapon_crosshairs.get(&inv.active) else {
+            // CHudCrosshair::ResetCrosshair uses the installed default sprite and opaque white.
+            // Retail texture icons scale at width/1600 + 1; font icons use their scheme instead.
+            let scale = (screen_width() / 1600.).floor() + 1.;
+            let size = self.default_crosshair_rect.size() * scale;
+            draw_texture_ex(
+                &self.default_crosshair,
+                (screen_width() * 0.5).round() - (size.x * 0.5).trunc(),
+                (screen_height() * 0.5).round() - (size.y * 0.5).trunc(),
+                WHITE,
+                DrawTextureParams {
+                    source: Some(self.default_crosshair_rect),
+                    dest_size: Some(size),
+                    ..Default::default()
+                },
+            );
+            return;
+        };
         gl_use_material(&self.additive);
         self.crosshairs.draw(
             character,
             (screen_width() - self.crosshairs.width(character)) * 0.5,
             (screen_height() - self.crosshairs.size()) * 0.5,
-            color,
+            self.crosshair_color,
         );
         gl_use_default_material();
     }
@@ -1656,6 +1918,86 @@ mod tests {
         assert_eq!(Interpolation::Accel.sample(0.5), 0.25);
         assert_eq!(Interpolation::Deaccel.sample(0.25), 0.5);
         assert_eq!(Interpolation::Spline.sample(0.5), 0.5);
+    }
+
+    #[test]
+    fn ammo_panel_slides_through_intermediate_positions_and_reverses_from_its_current_position() {
+        let resource =
+            keyvalues::parse_resource(br#"HudAmmo { xpos r150 ypos 432 wide 152 tall 36 }"#)
+                .unwrap();
+        let layout = PanelLayout::read(&resource[0]);
+        let source = "event WeaponUsesClips\n{\nAnimate HudAmmo Position \"r150 432\" Deaccel 0 0.4\nAnimate HudAmmo Size \"132 36\" Deaccel 0 0.4\n}\nevent WeaponUsesSecondaryAmmo\n{\nStopAnimation HudAmmo Position 0\nStopAnimation HudAmmo Size 0\nAnimate HudAmmo Position \"r222 432\" Deaccel 0 0.5\nAnimate HudAmmo Size \"132 36\" Deaccel 0 0.4\n}";
+        let rules = animations(source).unwrap();
+        let events = event_rules(source).unwrap();
+        let settings = settings();
+        let mut effects = NumericHudEffects::new(&settings);
+        effects.configure_layouts([&layout; 4], vec2(1280., 720.));
+        effects.start("WeaponUsesClips", 0., &rules, &events, &settings);
+        effects.start("WeaponUsesSecondaryAmmo", 0., &rules, &events, &settings);
+        assert!(!effects
+            .animations
+            .iter()
+            .any(|track| track.event == "WeaponUsesClips"));
+        let panel = NumericPanel::Ammo as usize;
+        effects.advance(0.);
+        assert_eq!(
+            effects.panels[panel].rect().unwrap(),
+            Rect::new(1055., 648., 228., 54.)
+        );
+        effects.advance(0.1);
+        assert_eq!(effects.panels[panel].rect().unwrap().w, 213.);
+        effects.advance(0.125);
+        assert_eq!(effects.panels[panel].rect().unwrap().x, 1001.);
+        effects.advance(0.5);
+        assert_eq!(
+            effects.panels[panel].rect().unwrap(),
+            Rect::new(947., 648., 198., 54.)
+        );
+        effects.start("WeaponUsesClips", 0.5, &rules, &events, &settings);
+        effects.advance(0.5);
+        assert_eq!(effects.panels[panel].rect().unwrap().x, 947.);
+        effects.advance(0.6);
+        assert_eq!(effects.panels[panel].rect().unwrap().x, 1001.);
+        // Interrupt the return slide with a secondary weapon: start at1001, without snapping.
+        effects.start("WeaponUsesSecondaryAmmo", 0.6, &rules, &events, &settings);
+        effects.advance(0.6);
+        assert_eq!(effects.panels[panel].rect().unwrap().x, 1001.);
+        effects.advance(0.725);
+        assert_eq!(effects.panels[panel].rect().unwrap().x, 974.);
+        effects.advance(1.1);
+        assert_eq!(effects.panels[panel].rect().unwrap().x, 947.);
+    }
+
+    #[test]
+    fn geometry_targets_use_the_current_viewport_and_reject_invalid_coordinates() {
+        let settings = settings();
+        assert_eq!(
+            NumericProperty::Position.target("r222 432", &settings, vec2(1920., 1080.)),
+            Some([1420.5, 972., 0., 0.])
+        );
+        assert_eq!(
+            NumericProperty::Size.target("132 36", &settings, vec2(1920., 1080.)),
+            Some([297., 81., 0., 0.])
+        );
+        assert!(NumericProperty::Position
+            .target("rNaN 432", &settings, vec2(1280., 720.))
+            .is_none());
+        assert!(NumericProperty::Size
+            .target("-1 36", &settings, vec2(1280., 720.))
+            .is_none());
+        let resource =
+            keyvalues::parse_resource(br#"HudAmmo { xpos r150 ypos 432 wide 132 tall 36 }"#)
+                .unwrap();
+        let layout = PanelLayout::read(&resource[0]);
+        let mut effects = NumericHudEffects::new(&settings);
+        effects.configure_layouts([&layout; 4], vec2(1280., 720.));
+        effects.active = "weapon_smg1".into();
+        effects.configure_layouts([&layout; 4], vec2(1920., 1080.));
+        assert_eq!(
+            effects.panels[NumericPanel::Ammo as usize].rect().unwrap(),
+            Rect::new(1582., 972., 297., 81.)
+        );
+        assert!(effects.active.is_empty());
     }
 
     #[test]
@@ -1760,6 +2102,66 @@ mod tests {
             .animations
             .iter()
             .any(|a| a.event == "WeaponChanged"));
+    }
+
+    #[test]
+    fn secondary_panel_observes_real_inventory_and_switching_cancels_its_fade() {
+        let source = "event WeaponUsesSecondaryAmmo\n{\nStopPanelAnimations HudAmmoSecondary 0\nAnimate HudAmmoSecondary Alpha 255 Linear 0 0.1\n}\nevent WeaponDoesNotUseSecondaryAmmo\n{\nStopPanelAnimations HudAmmoSecondary 0\nAnimate HudAmmoSecondary Alpha 0 Linear 0 0.1\n}\nevent AmmoSecondaryDecreased\n{\nAnimate HudAmmoSecondary Blur 7 Linear 0 0\n}\nevent AmmoSecondaryEmpty\n{\nAnimate HudAmmoSecondary FgColor \"255 0 0 255\" Linear 0 0\n}";
+        let rules = animations(source).unwrap();
+        let events = event_rules(source).unwrap();
+        let settings = settings();
+        let weapons = BTreeMap::from([
+            (
+                "weapon_smg1".into(),
+                Weapon {
+                    ammo_type: "SMG1".into(),
+                    secondary_ammo_type: "SMG1_Grenade".into(),
+                    secondary_ammo_max: 3,
+                    ..Default::default()
+                },
+            ),
+            (
+                "weapon_pistol".into(),
+                Weapon {
+                    ammo_type: "Pistol".into(),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let mut inv = Inventory::default();
+        inv.active = "weapon_smg1".into();
+        inv.give_ammo("SMG1_Grenade", 3, &weapons);
+        let mut effects = NumericHudEffects::new(&settings);
+        effects.observe(&inv, &weapons, 0., &rules, &events, &settings);
+        effects.observe(&inv, &weapons, 0.1, &rules, &events, &settings);
+        let secondary = NumericPanel::AmmoSecondary as usize;
+        assert_eq!(effects.secondary_ammo, 3);
+        assert_eq!(effects.panels[secondary].opacity(), 1.);
+        inv.reserve_ammo.insert("SMG1_Grenade".into(), 2);
+        effects.observe(&inv, &weapons, 0.2, &rules, &events, &settings);
+        assert_eq!(effects.secondary_ammo, 2);
+        assert_eq!(
+            effects.panels[secondary].values[NumericProperty::Blur as usize][0],
+            7.
+        );
+        inv.reserve_ammo.insert("SMG1_Grenade".into(), 0);
+        effects.observe(&inv, &weapons, 0.3, &rules, &events, &settings);
+        assert_eq!(
+            effects.panels[secondary].color(NumericProperty::Foreground),
+            Color::from_rgba(255, 0, 0, 255)
+        );
+        inv.active = "weapon_pistol".into();
+        effects.observe(&inv, &weapons, 0.4, &rules, &events, &settings);
+        effects.observe(&inv, &weapons, 0.45, &rules, &events, &settings);
+        assert!((effects.panels[secondary].opacity() - 0.5).abs() < 0.001);
+        inv.active = "weapon_smg1".into();
+        effects.observe(&inv, &weapons, 0.45, &rules, &events, &settings);
+        effects.observe(&inv, &weapons, 0.55, &rules, &events, &settings);
+        assert_eq!(effects.panels[secondary].opacity(), 1.);
+        assert!(!effects
+            .animations
+            .iter()
+            .any(|a| a.event == "WeaponDoesNotUseSecondaryAmmo"));
     }
 
     #[test]

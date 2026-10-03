@@ -7,13 +7,15 @@ use modkit_core::{Block, ModContext, ModPlugin, World};
 use source_assets::{vpk::Vfs, vtf};
 use std::{collections::HashMap, path::Path};
 
-pub fn config() -> macroquad::conf::Conf {
+pub fn config(o: &Options) -> macroquad::conf::Conf {
     macroquad::conf::Conf {
         miniquad_conf: Conf {
             window_title: "HL2-RS | Experimental Rust runtime".into(),
-            window_width: 1280,
-            window_height: 720,
-            high_dpi: false,
+            window_width: o.width,
+            window_height: o.height,
+            fullscreen: o.borderless,
+            // Explicit pixel-size comparisons should avoid Windows bitmap scaling.
+            high_dpi: o.borderless || o.width != 1280 || o.height != 720,
             sample_count: 1,
             ..Default::default()
         },
@@ -437,6 +439,12 @@ fn apply_console_effects(
 }
 
 pub async fn run(mut o: Options) -> Result<()> {
+    if o.borderless {
+        // The vendored Windows backend uses a desktop-sized popup, without a
+        // display-mode switch. Correct its initial default window position too.
+        macroquad::miniquad::window::set_fullscreen(true);
+        next_frame().await;
+    }
     clear_background(BLACK);
     draw_text("Reading your HL2 map and textures...", 35., 75., 30., WHITE);
     next_frame().await;
@@ -542,6 +550,7 @@ pub async fn run(mut o: Options) -> Result<()> {
         let mut actions = playback.poll(playback_time);
         let mut requested_captures = Vec::new();
         let mut requested_quit = false;
+        let mut requested_use = false;
         attack_suppression.update(
             is_mouse_button_down(MouseButton::Left) || playback.held,
             is_mouse_button_down(MouseButton::Right) || playback.secondary_held,
@@ -881,6 +890,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                 }
                 Action::Reload => inventory.reload(&weapons, &mut scene, &world),
                 Action::Capture { name } => requested_captures.push(name.clone()),
+                Action::Use => requested_use = true,
                 Action::Quit => {
                     requested_quit = true;
                 }
@@ -1091,7 +1101,11 @@ pub async fn run(mut o: Options) -> Result<()> {
         for sound in scene.sounds.drain(..) {
             audio.play(&vfs, &sound, false, 0.4).await?;
         }
-        if !console.paused() && !ui_transition && is_key_pressed(KeyCode::E) && !fly {
+        if !console.paused()
+            && !ui_transition
+            && (is_key_pressed(KeyCode::E) || requested_use)
+            && !fly
+        {
             if let Some((id, _)) = physics.ray(position, direction, 96.) {
                 scene.use_entity(&world, id);
             }
@@ -1588,7 +1602,8 @@ pub async fn run(mut o: Options) -> Result<()> {
         }
         for name in requested_captures {
             capture(&Path::new("artifacts").join(format!("{name}.png")))?;
-            capture_snapshots.push(serde_json::json!({"name":name,"scene_time":scene.time,"playback_time":playback_time,"player":player,"position":position.to_array(),"yaw":yaw,"pitch":pitch,"ui":console.mode,"shots":inventory.shots,"active":inventory.active,"clips":inventory.owned,"fly":fly}));
+            let doors: Vec<_> = world.entities.iter().enumerate().filter(|(_, entity)| entity.class().contains("door")).filter_map(|(id, _)| scene.states.get(id).map(|state| serde_json::json!({"entity":id,"origin":state.origin.to_array(),"rotation":state.rotation.to_array(),"locked":state.locked}))).collect();
+            capture_snapshots.push(serde_json::json!({"name":name,"scene_time":scene.time,"playback_time":playback_time,"player":player,"position":position.to_array(),"yaw":yaw,"pitch":pitch,"ui":console.mode,"shots":inventory.shots,"active":inventory.active,"clips":inventory.owned,"reserve_ammo":inventory.reserve_ammo,"suit":inventory.suit,"fly":fly,"pending":selection.pending,"doors":doors}));
         }
         if o.frames.is_some_and(|n| frame >= n) || is_key_pressed(KeyCode::F10) || requested_quit {
             if let Some(path) = &o.capture {
@@ -1603,6 +1618,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             report["console"] = serde_json::json!({"mode":console.mode,"sv_cheats":console.cheats,"output":console.output,"playback_time":playback_time});
             report["capture_snapshots"] = serde_json::json!(capture_snapshots);
             report["scene_time"] = serde_json::json!(scene.time);
+            report["native_static_collision"] = serde_json::json!({"convex_colliders":physics.native_shape_count,"hull_fallbacks":physics.native_shape_fallbacks});
             write(
                 Path::new("artifacts/runtime-report.json"),
                 &serde_json::to_vec_pretty(&report)?,

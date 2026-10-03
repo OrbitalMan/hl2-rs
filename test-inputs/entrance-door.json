@@ -1,0 +1,13 @@
+[
+  {"time":0.05,"action":"console","command":"sv_cheats 1; setpos -3300 -2030 70; setang 0 0"},
+  {"time":0.1,"action":"move"},
+  {"time":0.5,"action":"move","forward":1},
+  {"time":1.5,"action":"capture","name":"door-closed-blocks-player"},
+  {"time":1.6,"action":"move"},
+  {"time":1.9,"action":"use"},
+  {"time":3.5,"action":"capture","name":"door-used-open"},
+  {"time":3.6,"action":"move","forward":1},
+  {"time":4.6,"action":"capture","name":"door-open-allows-passage"},
+  {"time":4.7,"action":"move"},
+  {"time":5.0,"action":"quit"}
+]

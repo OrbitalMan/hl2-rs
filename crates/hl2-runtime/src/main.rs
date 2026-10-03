@@ -33,12 +33,15 @@ pub struct Options {
     pub time_scale: f32,
     pub smoke: bool,
     pub fly: bool,
+    pub borderless: bool,
+    pub width: i32,
+    pub height: i32,
 }
 fn options() -> Result<Options> {
     let mut a = std::env::args().skip(1);
     let command = a.next().unwrap_or("view".into());
     if command == "--help" || command == "help" {
-        println!("HL2-RS experimental Rust runtime\n\nCommands: view (default), inspect, verify, export\nOptions: --game <HL2 folder> --map <map> --all (verify every map)\n         --capture <PNG> --frames <N> --position <x,y,z> --yaw <degrees> --pitch <degrees>\n         --output <JSON> --mods <sandbox.json> --smoke (scripted movement/mod test)\n         --input-script <JSON> (timed regression inputs) --time-scale <factor> (default 1)\n\nStandalone partial reconstruction using installed assets; campaign and NPC AI are incomplete.\nWASD move; click to capture mouse; Esc cancels selection or opens pause; tilde opens console;\nShift faster; F1 debug HUD; F2 fly/walk; Space jump; Tab entity markers; B place block; F5 reload mod; Ctrl crouch; E use; R reload; 1-6 slots/mousewheel weapon selection; Q previous weapon; F3 developer loadout; F4 reset; F12 screenshot; F10 quit.");
+        println!("HL2-RS experimental Rust runtime\n\nCommands: view (default), inspect, verify, export\nOptions: --game <HL2 folder> --map <map> --all (verify every map)\n         --capture <PNG> --frames <N> --position <x,y,z> --yaw <degrees> --pitch <degrees>\n         --output <JSON> --mods <sandbox.json> --smoke (scripted movement/mod test)\n         --input-script <JSON> (timed regression inputs) --time-scale <factor> (default 1)\n         --width <pixels> --height <pixels> (windowed client size; default 1280x720)\n         --borderless (fill the primary desktop without changing display resolution)\n\nStandalone partial reconstruction using installed assets; campaign and NPC AI are incomplete.\nWASD move; click to capture mouse; Esc cancels selection or opens pause; tilde opens console;\nShift faster; F1 debug HUD; F2 fly/walk; Space jump; Tab entity markers; B place block; F5 reload mod; Ctrl crouch; E use; R reload; 1-6 slots/mousewheel weapon selection; Q previous weapon; F3 developer loadout; F4 reset; F12 screenshot; F10 quit.");
         std::process::exit(0);
     }
     if !["view", "inspect", "verify", "export"].contains(&command.as_str()) {
@@ -60,8 +63,15 @@ fn options() -> Result<Options> {
         time_scale: 1.,
         smoke: false,
         fly: false,
+        borderless: false,
+        width: 1280,
+        height: 720,
     };
     while let Some(key) = a.next() {
+        if key == "--borderless" {
+            o.borderless = true;
+            continue;
+        }
         if key == "--fly" {
             o.fly = true;
             continue;
@@ -82,6 +92,8 @@ fn options() -> Result<Options> {
             "--map" => o.map = value,
             "--capture" => o.capture = Some(value.into()),
             "--frames" => o.frames = Some(value.parse()?),
+            "--width" => o.width = value.parse()?,
+            "--height" => o.height = value.parse()?,
             "--output" => o.output = Some(value.into()),
             "--mods" => o.mods = value.into(),
             "--input-script" => o.input_script = Some(value.into()),
@@ -99,6 +111,9 @@ fn options() -> Result<Options> {
     }
     if !o.yaw.is_finite() || !o.pitch.is_finite() {
         bail!("angles must be finite");
+    }
+    if !(64..=16384).contains(&o.width) || !(64..=16384).contains(&o.height) {
+        bail!("window width and height must each be between 64 and 16384 pixels");
     }
     if !o.time_scale.is_finite() || !(0.01..=10.).contains(&o.time_scale) {
         bail!("time scale must be finite and between 0.01 and 10");
@@ -269,7 +284,7 @@ fn main() {
         }
     };
     if o.command == "view" {
-        macroquad::Window::from_config(viewer::config(), async move {
+        macroquad::Window::from_config(viewer::config(&o), async move {
             if let Err(e) = viewer::run(o).await {
                 eprintln!("Runtime error: {e:#}");
                 std::process::exit(1);

@@ -1,0 +1,23 @@
+[
+  {"time":0.2,"action":"loadout"},
+  {"time":0.3,"action":"slot","slot":1},
+  {"time":0.4,"action":"confirm"},
+  {"time":2.0,"action":"capture","name":"hud-slide-pistol-start"},
+  {"time":2.1,"action":"slot","slot":2},
+  {"time":2.2,"action":"confirm"},
+  {"time":2.2,"action":"capture","name":"hud-slide-smg-start"},
+  {"time":2.325,"action":"capture","name":"hud-slide-smg-quarter"},
+  {"time":2.7,"action":"capture","name":"hud-slide-smg-end"},
+  {"time":3.0,"action":"slot","slot":1},
+  {"time":3.1,"action":"confirm"},
+  {"time":3.2,"action":"capture","name":"hud-slide-pistol-quarter"},
+  {"time":3.25,"action":"slot","slot":2},
+  {"time":3.3,"action":"confirm"},
+  {"time":3.3,"action":"capture","name":"hud-slide-interrupted-start"},
+  {"time":3.425,"action":"capture","name":"hud-slide-interrupted-quarter"},
+  {"time":3.8,"action":"capture","name":"hud-slide-interrupted-end"},
+  {"time":4.0,"action":"slot","slot":1},
+  {"time":4.1,"action":"confirm"},
+  {"time":4.5,"action":"capture","name":"hud-slide-pistol-end"},
+  {"time":4.7,"action":"quit"}
+]

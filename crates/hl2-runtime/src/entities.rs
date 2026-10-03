@@ -56,6 +56,7 @@ pub struct State {
     pub enabled: bool,
     pub killed: bool,
     pub animation: String,
+    pub default_animation: String,
     pub animation_started: f64,
     animation_done: Option<f64>,
     script_actor: Option<usize>,
@@ -194,6 +195,7 @@ impl Scene {
                     })
                     .to_lowercase(),
                 animation_started: 0.,
+                default_animation: e.get("DefaultAnim").unwrap_or("").into(),
                 animation_done: None,
                 script_actor: None,
                 scripted_by: None,
@@ -445,10 +447,12 @@ impl Scene {
                 }
             }
             "sethealth" if class.starts_with("npc_") => self.states[id].value = value,
-            "setanimation" | "setdefaultanimation"
-                if class.starts_with("prop_dynamic") || class.starts_with("npc_") =>
-            {
-                self.animate(world, id, &p.parameter, input == "setanimation");
+            "setdefaultanimation" if class.starts_with("prop_dynamic") => {
+                // CDynamicProp stores the name without restarting or validating the active clip.
+                self.states[id].default_animation = p.parameter.clone();
+            }
+            "setanimation" if class.starts_with("prop_dynamic") || class.starts_with("npc_") => {
+                self.animate(world, id, &p.parameter, true);
             }
             "beginsequence" if class == "scripted_sequence" => self.begin_sequence(world, id),
             "cancelsequence" if class == "scripted_sequence" => self.end_sequence(world, id, true),
@@ -804,6 +808,76 @@ mod tests {
         }
     }
     #[test]
+    fn setting_default_animation_preserves_playback_and_completion() {
+        use modkit_core::{
+            animation::{Clip, Rig},
+            ModelInstance,
+        };
+        let w = World {
+            entities: vec![
+                entity(
+                    "prop_dynamic",
+                    "prop",
+                    &[
+                        ("DefaultAnim", "closed"),
+                        ("OnAnimationDone", "result,Add,1,0,-1"),
+                    ],
+                ),
+                entity("math_counter", "result", &[]),
+            ],
+            model_instances: vec![ModelInstance {
+                background: false,
+                model: "prop.mdl".into(),
+                origin: Vec3::ZERO,
+                angles: Vec3::ZERO,
+                skin: 0,
+                scale: 1.,
+                kind: "prop_dynamic".into(),
+                solid: false,
+                solid_mode: None,
+                entity: Some(0),
+            }],
+            rigs: BTreeMap::from([(
+                "prop.mdl#0".into(),
+                Rig {
+                    clips: BTreeMap::from([(
+                        "opening".into(),
+                        Clip {
+                            events: Vec::new(),
+                            fps: 30.,
+                            looping: false,
+                            frames: vec![vec![]; 31],
+                        },
+                    )]),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&w);
+        scene.send(0, "SetAnimation", "opening");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        let started = scene.states[0].animation_started;
+        let due = scene.states[0].animation_done;
+        scene.tick(&w, Vec3::ZERO, 0.2);
+        // Native accepts a deferred name even when no such sequence is loaded.
+        scene.send(0, "SetDefaultAnimation", "DeferredCase");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert_eq!(scene.states[0].default_animation, "DeferredCase");
+        assert_eq!(scene.states[0].animation, "opening");
+        assert_eq!(scene.states[0].animation_started, started);
+        assert_eq!(scene.states[0].animation_done, due);
+        assert!(scene.diagnostics.unsupported.is_empty());
+        scene.send(0, "SetDefaultAnimation", "");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert!(scene.states[0].default_animation.is_empty());
+        assert_eq!(scene.states[0].animation_done, due);
+        scene.tick(&w, Vec3::ZERO, 0.9);
+        assert_eq!(scene.states[1].value, 1.);
+        scene.tick(&w, Vec3::ZERO, 0.9);
+        assert_eq!(scene.states[1].value, 1.);
+    }
+    #[test]
     fn shuffle_exhausts_cases_and_avoids_repeating_across_batches() {
         let w = World {
             entities: vec![
@@ -868,6 +942,7 @@ mod tests {
                 scale: 1.,
                 kind: "npc_citizen".into(),
                 solid: true,
+                solid_mode: None,
                 entity: Some(1),
             }],
             rigs: BTreeMap::from([(

@@ -19,6 +19,8 @@ pub struct Weapon {
     pub default_clip: i32,
     pub ammo_type: String,
     pub ammo_max: i32,
+    pub secondary_ammo_type: String,
+    pub secondary_ammo_max: i32,
     pub pellets: usize,
     pub damage: f32,
     pub sounds: BTreeMap<String, String>,
@@ -60,6 +62,13 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
             .unwrap_or_default();
         let magazine: i32 = value("clip_size").context("clip size absent")?.parse()?;
         let ammo_type = value("primary_ammo").unwrap_or("None");
+        let secondary_ammo_type = value("secondary_ammo").unwrap_or("None");
+        // AR2AltFire's registered carry cvar has an underscore absent from its ammo name.
+        let secondary_skill_name = if secondary_ammo_type.eq_ignore_ascii_case("AR2AltFire") {
+            "ar2_altfire".into()
+        } else {
+            secondary_ammo_type.to_ascii_lowercase()
+        };
         // Buckshot is the ammunition/damage name; sk_plr_dmg_shotgun does not exist.
         let skill_name = if class == "weapon_crowbar" {
             "crowbar".into()
@@ -93,6 +102,10 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
                     .unwrap_or(magazine),
                 ammo_type: ammo_type.into(),
                 ammo_max: number(&format!("sk_max_{skill_name}"))
+                    .unwrap_or(0.)
+                    .max(0.) as i32,
+                secondary_ammo_type: secondary_ammo_type.into(),
+                secondary_ammo_max: number(&format!("sk_max_{secondary_skill_name}"))
                     .unwrap_or(0.)
                     .max(0.) as i32,
                 pellets: if class == "weapon_shotgun" {
@@ -227,6 +240,12 @@ impl Inventory {
             .map(|w| self.ammo(&w.ammo_type))
             .unwrap_or(0)
     }
+    pub fn secondary_for(&self, class: &str, weapons: &BTreeMap<String, Weapon>) -> i32 {
+        weapons
+            .get(class)
+            .map(|w| self.ammo(&w.secondary_ammo_type))
+            .unwrap_or(0)
+    }
     fn ammo(&self, ammo_type: &str) -> i32 {
         if ammo_type.eq_ignore_ascii_case("Pistol") {
             self.pistol_ammo.max(0)
@@ -252,21 +271,32 @@ impl Inventory {
         amount: i32,
         weapons: &BTreeMap<String, Weapon>,
     ) -> i32 {
-        let Some(w) = weapons
-            .values()
-            .find(|w| w.ammo_type.eq_ignore_ascii_case(ammo_type) && w.ammo_max > 0)
-        else {
+        let Some((canonical, maximum)) = weapons.values().find_map(|w| {
+            if w.ammo_type.eq_ignore_ascii_case(ammo_type) && w.ammo_max > 0 {
+                Some((&w.ammo_type, w.ammo_max))
+            } else if w.secondary_ammo_type.eq_ignore_ascii_case(ammo_type)
+                && w.secondary_ammo_max > 0
+            {
+                Some((&w.secondary_ammo_type, w.secondary_ammo_max))
+            } else {
+                None
+            }
+        }) else {
             return 0;
         };
-        let old = self.ammo(&w.ammo_type);
-        let added = amount.max(0).min((w.ammo_max - old).max(0));
-        self.set_ammo(&w.ammo_type, old + added);
+        let old = self.ammo(canonical);
+        let added = amount.max(0).min((maximum - old).max(0));
+        self.set_ammo(canonical, old + added);
         added
     }
     pub fn refill_ammo(&mut self, weapons: &BTreeMap<String, Weapon>) {
         for w in weapons.values().filter(|w| w.ammo_max > 0) {
             self.set_ammo(&w.ammo_type, w.ammo_max);
         }
+        // Both developer loadouts use this path. Retail impulse101 grants these
+        // fixed quantities through GiveAmmo, which clamps them to skill.cfg carry limits.
+        self.give_ammo("SMG1_Grenade", 3, weapons);
+        self.give_ammo("AR2AltFire", 5, weapons);
     }
     pub fn is_reloading(&self) -> bool {
         self.reload.is_some()
@@ -972,6 +1002,8 @@ fn ammo_pickup(class: &str) -> Option<(&'static str, i32)> {
         "item_ammo_357" => ("357", 6),
         "item_ammo_357_large" => ("357", 20),
         "item_box_buckshot" => ("Buckshot", 20),
+        "item_ammo_smg1_grenade" => ("SMG1_Grenade", 1),
+        "item_ammo_ar2_altfire" => ("AR2AltFire", 1),
         _ => return None,
     })
 }
@@ -1060,6 +1092,17 @@ mod tests {
                     magazine: clip,
                     default_clip: clip,
                     ammo_max,
+                    secondary_ammo_type: match class {
+                        "weapon_smg1" => "SMG1_Grenade",
+                        "weapon_ar2" => "AR2AltFire",
+                        _ => "None",
+                    }
+                    .into(),
+                    secondary_ammo_max: if matches!(class, "weapon_smg1" | "weapon_ar2") {
+                        3
+                    } else {
+                        0
+                    },
                     pellets,
                     ..Default::default()
                 },
@@ -1430,6 +1473,54 @@ mod tests {
         assert!(scene.states[0].killed);
         assert_eq!(inv.reserve_for("weapon_ar2", &defs), 60);
         assert_eq!(inv.reserve_for("weapon_pistol", &defs), 0);
+    }
+
+    #[test]
+    fn secondary_ammo_pickups_clamp_independently_and_full_pickups_remain() {
+        let defs = definitions();
+        let mut inv = Inventory::default();
+        assert_eq!(inv.give_ammo("smg1_grenade", 10, &defs), 3);
+        assert_eq!(inv.secondary_for("weapon_smg1", &defs), 3);
+        assert_eq!(inv.secondary_for("weapon_ar2", &defs), 0);
+        assert_eq!(inv.reserve_for("weapon_smg1", &defs), 0);
+        let mut world = World::default();
+        world.entities.push(modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "item_ammo_smg1_grenade".into()),
+                ("origin".into(), "0 0 24".into()),
+            ],
+        });
+        let mut scene = Scene::new(&world);
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+        assert!(!scene.states[0].killed);
+        inv.set_ammo("SMG1_Grenade", 2);
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+        assert!(scene.states[0].killed);
+        assert_eq!(inv.secondary_for("weapon_smg1", &defs), 3);
+    }
+
+    #[test]
+    fn developer_loadout_grants_native_secondary_quantities_without_fake_attacks() {
+        let mut defs = definitions();
+        // Preserve the native fixed GiveAmmo amounts even if custom carry limits are larger.
+        defs.get_mut("weapon_ar2").unwrap().secondary_ammo_max = 8;
+        defs.get_mut("weapon_smg1").unwrap().secondary_ammo_max = 7;
+        let mut inv = Inventory::default();
+        inv.refill_ammo(&defs);
+        assert_eq!(inv.secondary_for("weapon_smg1", &defs), 3);
+        assert_eq!(inv.secondary_for("weapon_ar2", &defs), 5);
+        let world = World::default();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        for class in ["weapon_smg1", "weapon_ar2"] {
+            inv.give(class, &defs, 0.);
+            let ammo = inv.secondary_for(class, &defs);
+            inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+            assert_eq!(inv.secondary_for(class, &defs), ammo);
+            assert_eq!(inv.shots, 0);
+        }
+        assert_eq!(inv.reserve_for("weapon_smg1", &defs), 225);
+        assert_eq!(inv.reserve_for("weapon_ar2", &defs), 60);
     }
 
     #[test]

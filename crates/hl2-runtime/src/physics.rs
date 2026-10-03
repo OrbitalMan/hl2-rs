@@ -1,5 +1,5 @@
 //! Rapier collision/rigid-body adapter. This is not Valve's proprietary VPhysics solver.
-use glam::{Quat, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use modkit_core::{movement::CollisionWorld, trace_brushes, Brush, Surface, Trace, World};
 use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::*;
@@ -69,12 +69,21 @@ fn brush_shape(brush: &Brush) -> Option<SharedShape> {
             .collect::<Vec<_>>(),
     )
 }
-fn mesh_shape(surfaces: &[Surface], convex: bool) -> Option<SharedShape> {
+fn mesh_shape(
+    surfaces: &[Surface],
+    convex: bool,
+    matrices: Option<&[Mat4]>,
+) -> Option<SharedShape> {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     for s in surfaces {
         let base = vertices.len() as u32;
-        vertices.extend(s.vertices.iter().map(|v| Point::from(vector(v.position))));
+        vertices.extend(s.vertices.iter().map(|v| {
+            let position = matrices.zip(v.skin.as_ref()).map_or(v.position, |(m, w)| {
+                modkit_core::animation::skin(v.position, w, m)
+            });
+            Point::from(vector(position))
+        }));
         indices.extend(
             s.indices
                 .as_chunks::<3>()
@@ -94,6 +103,11 @@ fn mesh_shape(surfaces: &[Surface], convex: bool) -> Option<SharedShape> {
         .ok()
     }
 }
+struct PropShapes {
+    shapes: Vec<SharedShape>,
+    native: bool,
+    native_failed: bool,
+}
 #[derive(Default)]
 pub struct Physics {
     pub bodies: RigidBodySet,
@@ -111,6 +125,8 @@ pub struct Physics {
     player_world_brushes: Vec<Brush>,
     player_convex_cache: Mutex<player_convex::ConvexCache>,
     pub dynamic: BTreeMap<usize, RigidBodyHandle>,
+    pub native_shape_count: usize,
+    pub native_shape_fallbacks: usize,
     pub skipped: usize,
 }
 impl Physics {
@@ -130,7 +146,7 @@ impl Physics {
             }
         }
         for surface in &world.terrain {
-            if let Some(shape) = mesh_shape(std::slice::from_ref(surface), false) {
+            if let Some(shape) = mesh_shape(std::slice::from_ref(surface), false, None) {
                 p.colliders
                     .insert(ColliderBuilder::new(shape).friction(0.8));
             }
@@ -193,42 +209,106 @@ impl Physics {
                 continue;
             };
             let dynamic = instance.kind.starts_with("prop_physics");
-            let key = (instance.asset_key(), dynamic);
-            let shape = shape_cache
-                .entry(key)
-                .or_insert_with(|| mesh_shape(asset, dynamic));
-            let Some(shape) = shape else {
+            // The installed rotating door's VVD bind mesh points along X, but
+            // its idle sequence turns the panel along Y. Use the same initial
+            // skinned pose as rendering before applying the entity's swing.
+            // Keep other model collision policies unchanged.
+            let clip = (instance.kind == "prop_door_rotating").then(|| {
+                instance
+                    .entity
+                    .and_then(|id| world.entities.get(id))
+                    .and_then(|e| e.get("DefaultAnim"))
+                    .unwrap_or("idle")
+                    .to_lowercase()
+            });
+            let native_eligible = instance.kind == "static_prop" && instance.solid_mode == Some(6);
+            let key = (instance.asset_key(), dynamic, clip.clone(), native_eligible);
+            let cached = shape_cache.entry(key).or_insert_with(|| {
+                let pieces = native_eligible
+                    .then(|| world.model_collision.get(&instance.asset_key()))
+                    .flatten();
+                if let Some(pieces) = pieces.filter(|pieces| !pieces.is_empty()) {
+                    // Preserve authored convex decomposition. Merging all
+                    // vertices into one hull fills bench/railing openings.
+                    let shapes = pieces
+                        .iter()
+                        .map(|piece| {
+                            if piece.vertices.len() < 4
+                                || !piece.vertices.iter().all(|point| point.is_finite())
+                            {
+                                return None;
+                            }
+                            SharedShape::convex_hull(
+                                &piece
+                                    .vertices
+                                    .iter()
+                                    .map(|point| Point::from(vector(*point)))
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<Option<Vec<_>>>();
+                    if let Some(shapes) = shapes {
+                        return PropShapes {
+                            shapes,
+                            native: true,
+                            native_failed: false,
+                        };
+                    }
+                }
+                let matrices = clip.as_ref().and_then(|name| {
+                    world
+                        .rigs
+                        .get(&instance.asset_key())
+                        .filter(|rig| rig.clips.contains_key(name))
+                        .map(|rig| rig.matrices(name, 0.))
+                });
+                PropShapes {
+                    shapes: mesh_shape(asset, dynamic, matrices.as_deref())
+                        .into_iter()
+                        .collect(),
+                    native: false,
+                    // An invalid native piece never silently removes part of
+                    // the collider: the complete model uses the mesh fallback.
+                    native_failed: pieces.is_some(),
+                }
+            });
+            if cached.shapes.is_empty() {
                 p.skipped += 1;
                 continue;
-            };
+            }
             // Scaled props need separately scaled meshes; skip their collider rather than use a wrong size.
             if (instance.scale - 1.).abs() > 0.001 {
                 p.skipped += 1;
                 continue;
             }
+            p.native_shape_count += usize::from(cached.native) * cached.shapes.len();
+            p.native_shape_fallbacks += usize::from(cached.native_failed);
             let position = pose(instance.origin, angles(instance.angles));
             let entity = instance.entity;
-            let collider = ColliderBuilder::new(shape.clone())
-                .friction(0.7)
-                .restitution(0.05)
-                .user_data(entity.map_or(0, |i| i as u128 + 1));
-            if dynamic {
-                let body = p.bodies.insert(
+            let body = dynamic.then(|| {
+                p.bodies.insert(
                     RigidBodyBuilder::dynamic()
                         .position(position)
                         .ccd_enabled(true)
                         .linear_damping(0.05)
                         .angular_damping(0.1),
-                );
-                let c = p
-                    .colliders
-                    .insert_with_parent(collider.mass(10.), body, &mut p.bodies);
-                if let Some(id) = entity {
-                    p.dynamic.insert(id, body);
-                    p.entity_colliders.entry(id).or_default().push(c);
-                }
-            } else {
-                let c = p.colliders.insert(collider.position(position));
+                )
+            });
+            if let (Some(id), Some(body)) = (entity, body) {
+                p.dynamic.insert(id, body);
+            }
+            for shape in &cached.shapes {
+                let collider = ColliderBuilder::new(shape.clone())
+                    .friction(0.7)
+                    .restitution(0.05)
+                    .user_data(entity.map_or(0, |i| i as u128 + 1));
+                let c = match body {
+                    Some(body) => {
+                        p.colliders
+                            .insert_with_parent(collider.mass(10.), body, &mut p.bodies)
+                    }
+                    None => p.colliders.insert(collider.position(position)),
+                };
                 if let Some(id) = entity {
                     p.entity_colliders.entry(id).or_default().push(c);
                 }
@@ -496,6 +576,288 @@ impl CollisionWorld for Physics {
 mod tests {
     use super::*;
     use modkit_core::movement::{Input, Player, TICK};
+    fn box_surface(min: Vec3, max: Vec3) -> Surface {
+        let vertices = (0..8)
+            .map(|i| modkit_core::Vertex {
+                position: Vec3::new(
+                    if i & 1 == 0 { min.x } else { max.x },
+                    if i & 2 == 0 { min.y } else { max.y },
+                    if i & 4 == 0 { min.z } else { max.z },
+                ),
+                uv: glam::Vec2::ZERO,
+                light_uv: glam::Vec2::ZERO,
+                color: [255; 4],
+                skin: Some(modkit_core::animation::Weights {
+                    bones: [0; 3],
+                    weights: [1., 0., 0.],
+                }),
+            })
+            .collect();
+        Surface {
+            background: false,
+            material: "synthetic".into(),
+            lightmap: None,
+            vertices,
+            indices: vec![
+                0, 2, 3, 0, 3, 1, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 6, 7, 2, 7, 3, 0, 4, 6, 0,
+                6, 2, 1, 3, 7, 1, 7, 5,
+            ],
+        }
+    }
+    fn door_world() -> World {
+        use modkit_core::animation::{Bone, Clip, Pose, Rig};
+        let instance = modkit_core::ModelInstance {
+            background: false,
+            model: "synthetic_door.mdl".into(),
+            origin: Vec3::ZERO,
+            angles: Vec3::ZERO,
+            skin: 0,
+            scale: 1.,
+            kind: "prop_door_rotating".into(),
+            solid: true,
+            solid_mode: None,
+            entity: Some(0),
+        };
+        let idle = Pose {
+            position: Vec3::new(-1., -1., 0.),
+            rotation: Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+        };
+        let key = instance.asset_key();
+        World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![("classname".into(), "prop_door_rotating".into())],
+            }],
+            model_assets: BTreeMap::from([(
+                key.clone(),
+                vec![box_surface(
+                    Vec3::new(0., -2., -54.),
+                    Vec3::new(48., 0., 54.),
+                )],
+            )]),
+            rigs: BTreeMap::from([(
+                key,
+                Rig {
+                    bones: vec![Bone {
+                        name: "door".into(),
+                        parent: None,
+                        bind: Pose {
+                            position: Vec3::ZERO,
+                            rotation: Quat::IDENTITY,
+                        },
+                        inverse_bind: Mat4::IDENTITY,
+                    }],
+                    clips: BTreeMap::from([(
+                        "idle".into(),
+                        Clip {
+                            events: Vec::new(),
+                            fps: 1.,
+                            looping: true,
+                            frames: vec![vec![idle.clone()], vec![idle]],
+                        },
+                    )]),
+                    warnings: Vec::new(),
+                },
+            )]),
+            model_instances: vec![instance],
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn rotating_door_collision_matches_idle_panel_before_and_after_entity_swing() {
+        let world = door_world();
+        let mut physics = Physics::new(&world);
+        let start = Vec3::new(-40., 24., -54.);
+        let end = Vec3::new(40., 24., -54.);
+        let mins = Vec3::new(-16., -16., 0.);
+        let maxs = Vec3::new(16., 16., 72.);
+        let closed = physics.trace_hull(start, end, mins, maxs);
+        assert!(closed.fraction > 0. && closed.fraction < 0.5);
+        assert!(!closed.start_solid);
+        assert_eq!(
+            physics
+                .impact_ray(start + Vec3::Z * 54., Vec3::X, 80.)
+                .unwrap()
+                .entity,
+            0
+        );
+        // The historical mesh collider blocked the open-side panel instead.
+        let mut raw = world.clone();
+        raw.rigs.clear();
+        let raw = Physics::new(&raw);
+        assert_eq!(raw.trace_hull(start, end, mins, maxs).fraction, 1.);
+        physics.set_entity(
+            0,
+            Vec3::ZERO,
+            Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+            true,
+        );
+        physics.tick(TICK);
+        assert_eq!(physics.trace_hull(start, end, mins, maxs).fraction, 1.);
+        assert!(physics
+            .impact_ray(start + Vec3::Z * 54., Vec3::X, 80.)
+            .is_none());
+        // Returning to closed must move queries back, including weapon rays.
+        physics.set_entity(0, Vec3::ZERO, Quat::IDENTITY, true);
+        physics.tick(TICK);
+        assert!(
+            (physics.trace_hull(start, end, mins, maxs).fraction - closed.fraction).abs() < 0.00001
+        );
+    }
+    #[test]
+    fn rotating_door_pose_cache_does_not_change_other_instances_of_the_same_model() {
+        let mut world = door_world();
+        let mut static_prop = world.model_instances[0].clone();
+        static_prop.kind = "static_prop".into();
+        static_prop.entity = None;
+        static_prop.origin = Vec3::Z * 200.;
+        world.model_instances.push(static_prop);
+        let physics = Physics::new(&world);
+        // A regular prop with this asset keeps the raw model geometry.
+        assert!(physics
+            .impact_ray(Vec3::new(24., -40., 200.), Vec3::Y, 80.)
+            .is_some());
+        assert!(physics
+            .impact_ray(Vec3::new(-40., 24., 200.), Vec3::X, 80.)
+            .is_none());
+        assert_eq!(physics.colliders.len(), 2);
+    }
+    fn native_prop_world() -> World {
+        let instance = modkit_core::ModelInstance {
+            background: false,
+            model: "synthetic_separated_prop.mdl".into(),
+            origin: Vec3::new(100., 200., 20.),
+            angles: Vec3::new(0., 90., 0.),
+            skin: 0,
+            scale: 1.,
+            kind: "static_prop".into(),
+            solid: true,
+            solid_mode: Some(6),
+            entity: None,
+        };
+        let piece = |min, max| {
+            let surface = box_surface(min, max);
+            modkit_core::ConvexPiece {
+                vertices: surface.vertices.iter().map(|v| v.position).collect(),
+                indices: surface.indices.as_chunks::<3>().0.to_vec(),
+            }
+        };
+        let key = instance.asset_key();
+        World {
+            model_assets: BTreeMap::from([(
+                key.clone(),
+                vec![box_surface(
+                    Vec3::new(-20., -20., 0.),
+                    Vec3::new(20., 20., 40.),
+                )],
+            )]),
+            model_collision: BTreeMap::from([(
+                key,
+                vec![
+                    piece(Vec3::new(-20., -20., 0.), Vec3::new(-5., 20., 40.)),
+                    piece(Vec3::new(5., -20., 0.), Vec3::new(20., 20., 40.)),
+                ],
+            )]),
+            model_instances: vec![instance],
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn native_convex_prop_pieces_preserve_rotated_gaps_and_weapon_rays() {
+        let world = native_prop_world();
+        let physics = Physics::new(&world);
+        assert_eq!(physics.colliders.len(), 2);
+        assert_eq!(physics.native_shape_count, 2);
+        assert_eq!(physics.native_shape_fallbacks, 0);
+        assert!(physics
+            .colliders
+            .iter()
+            .all(|(_, c)| player_convex::supported(c)));
+        let origin = world.model_instances[0].origin;
+        let center = origin + Vec3::Z * 10.;
+        let mins = Vec3::new(-1., -1., 0.);
+        let maxs = Vec3::new(1., 1., 2.);
+        // Rotating the local X gap by90degrees makes a world X corridor.
+        let start = center - Vec3::X * 40.;
+        let end = center + Vec3::X * 40.;
+        let through_gap = physics.trace_hull(start, end, mins, maxs);
+        assert_eq!(through_gap.fraction, 1.);
+        assert!(!through_gap.start_solid);
+        assert!(physics.impact_ray(start, Vec3::X, 80.).is_none());
+        let across = physics.trace_hull(center - Vec3::Y * 40., center + Vec3::Y * 40., mins, maxs);
+        assert!(across.fraction > 0. && across.fraction < 0.5);
+        assert!(across.normal.distance(-Vec3::Y) < 0.00001);
+        assert!(physics
+            .impact_ray(start + Vec3::Y * 12., Vec3::X, 80.)
+            .is_some());
+        // Confirm this tests native decomposition rather than the broader
+        // synthetic render mesh, which fills the gap.
+        let mut fallback = world;
+        fallback.model_collision.clear();
+        assert!(
+            Physics::new(&fallback)
+                .trace_hull(start, end, mins, maxs)
+                .fraction
+                < 1.
+        );
+    }
+    #[test]
+    fn invalid_native_piece_falls_back_as_a_whole_and_dynamic_props_keep_prior_policy() {
+        let mut world = native_prop_world();
+        let key = world.model_instances[0].asset_key();
+        world.model_collision.get_mut(&key).unwrap()[1]
+            .vertices
+            .clear();
+        let fallback = Physics::new(&world);
+        assert_eq!(fallback.colliders.len(), 1);
+        assert_eq!(fallback.native_shape_count, 0);
+        assert_eq!(fallback.native_shape_fallbacks, 1);
+        // Dynamic prop fallback remains one body and one convex render hull.
+        world = native_prop_world();
+        world.model_instances[0].kind = "prop_physics".into();
+        let dynamic = Physics::new(&world);
+        assert_eq!(dynamic.colliders.len(), 1);
+        assert_eq!(dynamic.bodies.len(), 1);
+        assert_eq!(dynamic.native_shape_count, 0);
+        assert_eq!(dynamic.native_shape_fallbacks, 0);
+    }
+    #[test]
+    fn static_prop_bbox_and_unknown_modes_do_not_reuse_native_hulls() {
+        for mode in [None, Some(2)] {
+            let mut world = native_prop_world();
+            world.model_instances[0].solid_mode = mode;
+            let physics = Physics::new(&world);
+            assert_eq!(physics.colliders.len(), 1);
+            assert_eq!(physics.native_shape_count, 0);
+            assert_eq!(physics.native_shape_fallbacks, 0);
+            let center = world.model_instances[0].origin + Vec3::Z * 10.;
+            let hit = physics.trace_hull(
+                center - Vec3::X * 40.,
+                center + Vec3::X * 40.,
+                Vec3::new(-1., -1., 0.),
+                Vec3::new(1., 1., 2.),
+            );
+            assert!(
+                hit.fraction < 1.,
+                "mode {mode:?} must use the complete render fallback"
+            );
+            // Mixed instances of one model must not share collision policy
+            // merely because its native model pieces were already cached.
+            world = native_prop_world();
+            let mut other = world.model_instances[0].clone();
+            other.solid_mode = mode;
+            other.origin.z += 200.;
+            world.model_instances.push(other);
+            let mixed = Physics::new(&world);
+            assert_eq!(mixed.colliders.len(), 3);
+            assert_eq!(mixed.native_shape_count, 2);
+            assert!(mixed
+                .impact_ray(center - Vec3::X * 40., Vec3::X, 80.)
+                .is_none());
+            assert!(mixed
+                .impact_ray(center + Vec3::Z * 200. - Vec3::X * 40., Vec3::X, 80.)
+                .is_some());
+        }
+    }
     fn bounds_brush(min: Vec3, max: Vec3) -> Brush {
         Brush {
             contents: 1,
