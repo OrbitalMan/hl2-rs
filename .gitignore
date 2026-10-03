@@ -1,0 +1,15 @@
+/target/
+/artifacts/
+/local.json
+/bin/
+/docs/local-recon.json
+*.bsp
+*.vpk
+*.vtf
+*.vmt
+*.mdl
+*.dll
+*.exe
+*.obj
+*.png
+!/docs/images/hl2-rs-trainstation.png

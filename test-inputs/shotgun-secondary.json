@@ -1,0 +1,21 @@
+[
+  {"time":0.3,"action":"loadout"},
+  {"time":0.5,"action":"slot","slot":3},
+  {"time":0.65,"action":"secondary_down"},
+  {"time":1.6,"action":"capture","name":"shotgun-secondary-confirm-held"},
+  {"time":1.7,"action":"secondary_up"},
+  {"time":1.8,"action":"secondary"},
+  {"time":2.1,"action":"secondary"},
+  {"time":2.2,"action":"capture","name":"shotgun-double-fire"},
+  {"time":3.0,"action":"fire"},
+  {"time":4.1,"action":"fire"},
+  {"time":5.2,"action":"fire"},
+  {"time":6.3,"action":"secondary"},
+  {"time":6.5,"action":"capture","name":"shotgun-secondary-single-fallback"},
+  {"time":7.3,"action":"secondary"},
+  {"time":7.4,"action":"capture","name":"shotgun-secondary-one-shell-reload"},
+  {"time":7.7,"action":"secondary_down"},
+  {"time":7.8,"action":"secondary_up"},
+  {"time":8.2,"action":"capture","name":"shotgun-secondary-interrupted-reload"},
+  {"time":9.0,"action":"quit"}
+]

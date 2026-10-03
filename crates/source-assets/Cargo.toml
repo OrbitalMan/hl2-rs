@@ -1,0 +1,17 @@
+[package]
+name = "source-assets"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+glam.workspace = true
+modkit-core.workspace = true
+crc32fast = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+lzma-rs = "0.3"
+vmdl = "0.2.0"
+
+half = "2"

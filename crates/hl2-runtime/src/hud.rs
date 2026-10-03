@@ -1,0 +1,1935 @@
+//! The PC HL2 HUD layout is read from the owned game's scheme and resource files.
+//! Bucket positioning and visibility follow CHudWeaponSelection, rather than a new UI design.
+use crate::{
+    gameplay::{Inventory, Weapon},
+    selection::{self, Selection, WEAPON_SLOTS},
+};
+use anyhow::{Context, Result};
+use macroquad::prelude::*;
+use source_assets::{
+    keyvalues::{self, Entry},
+    vpk::Vfs,
+};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+};
+
+const VERTEX: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+uniform mat4 Model;
+uniform mat4 Projection;
+varying lowp vec4 color;
+varying highp vec2 uv;
+void main(){gl_Position=Projection*Model*vec4(position,1.0);color=color0/255.0;uv=texcoord;}
+"#;
+const FRAGMENT: &str = r#"#version 100
+precision mediump float;
+uniform sampler2D Texture;
+varying lowp vec4 color;
+varying highp vec2 uv;
+void main(){gl_FragColor=color*texture2D(Texture,uv);}
+"#;
+
+fn find<'a>(entries: &'a [Entry], name: &str) -> Option<&'a Entry> {
+    entries.iter().find(|e| e.key.eq_ignore_ascii_case(name))
+}
+fn number(entry: &Entry, key: &str, fallback: f32) -> f32 {
+    entry
+        .get(key)
+        .and_then(Entry::text)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(fallback)
+}
+fn rgba(value: &str) -> Option<Color> {
+    let components = value
+        .split_whitespace()
+        .map(str::parse::<u8>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .ok()?;
+    (components.len() == 4)
+        .then(|| Color::from_rgba(components[0], components[1], components[2], components[3]))
+}
+fn color(settings: &Entry, name: &str, fallback: Color) -> Color {
+    settings
+        .get(name)
+        .and_then(Entry::text)
+        .and_then(rgba)
+        .unwrap_or(fallback)
+}
+fn alpha(mut color: Color, amount: f32) -> Color {
+    color.a *= amount;
+    color
+}
+
+#[derive(Clone)]
+struct FontFace {
+    font: Rc<fontdue::Font>,
+    glyphs: GlyphCache,
+    cell_height: f32,
+    ascent: f32,
+}
+type GlyphCache = Rc<RefCell<HashMap<(char, u16, u16, u16), Glyph>>>;
+#[derive(Clone)]
+struct Glyph {
+    texture: Option<Texture2D>,
+    x: f32,
+    y: f32,
+    advance: f32,
+}
+impl FontFace {
+    fn load(bytes: &[u8]) -> Result<Self> {
+        let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default())
+            .map_err(anyhow::Error::msg)?;
+        let face = ttf_parser::Face::parse(bytes, 0).context("read HUD font metrics")?;
+        let units = f32::from(face.units_per_em()).max(1.);
+        let (ascent, cell_height) = face.tables().os2.map_or_else(
+            || {
+                let metrics = font.horizontal_line_metrics(1.).unwrap();
+                (metrics.ascent, metrics.ascent - metrics.descent)
+            },
+            |table| {
+                let ascent = f32::from(table.windows_ascender()) / units;
+                let descent = f32::from(table.windows_descender()).abs() / units;
+                (ascent, ascent + descent)
+            },
+        );
+        Ok(Self {
+            font: Rc::new(font),
+            glyphs: Rc::new(RefCell::new(HashMap::new())),
+            cell_height: cell_height.max(0.01),
+            ascent,
+        })
+    }
+    fn width(&self, value: &str, size: f32) -> f32 {
+        // Retail CWin32Font uses a positive CreateFontA height: a character cell,
+        // whereas fontdue's size is pixels per EM. Windows OS/2 metrics supply the
+        // conversion; hhea descent differs significantly in the owned HalfLife2 font.
+        let size = size.round().max(1.) / self.cell_height;
+        value
+            .chars()
+            .map(|c| self.font.metrics(c, size).advance_width)
+            .sum()
+    }
+    fn glyph(&self, c: char, size: u16, blur: u16, scanlines: u16) -> Glyph {
+        let key = (c, size, blur, scanlines);
+        if let Some(glyph) = self.glyphs.borrow().get(&key) {
+            return glyph.clone();
+        }
+        let em_size = f32::from(size) / self.cell_height;
+        let (metrics, coverage) = self.font.rasterize(c, em_size);
+        let margin = usize::from(blur);
+        let width = metrics.width + margin * 2;
+        let height = metrics.height + margin * 2;
+        let ascent = self.ascent * em_size;
+        let texture = if metrics.width == 0 || metrics.height == 0 {
+            None
+        } else {
+            let mut bitmap = vec![0.; width * height];
+            for y in 0..metrics.height {
+                for x in 0..metrics.width {
+                    bitmap[(y + margin) * width + x + margin] =
+                        f32::from(coverage[y * metrics.width + x]) / 255.;
+                }
+            }
+            if blur > 0 {
+                bitmap = gaussian_blur(&bitmap, width, height, margin);
+            }
+            let rgba = bitmap
+                .iter()
+                .enumerate()
+                .flat_map(|(i, coverage)| {
+                    // The configured scanline pitch is retained. Exact GDI scanline and
+                    // blur rasterization are not claimed equivalent to VGUI's native font engine.
+                    let brightness = if scanlines > 1 && (i / width) % usize::from(scanlines) != 0 {
+                        180
+                    } else {
+                        255
+                    };
+                    [
+                        brightness,
+                        brightness,
+                        brightness,
+                        (coverage.clamp(0., 1.) * 255.).round() as u8,
+                    ]
+                })
+                .collect::<Vec<_>>();
+            let texture = Texture2D::from_rgba8(width as u16, height as u16, &rgba);
+            texture.set_filter(FilterMode::Linear);
+            Some(texture)
+        };
+        let glyph = Glyph {
+            texture,
+            x: metrics.xmin as f32 - f32::from(blur),
+            y: ascent - metrics.ymin as f32 - metrics.height as f32 - f32::from(blur),
+            advance: metrics.advance_width,
+        };
+        self.glyphs.borrow_mut().insert(key, glyph.clone());
+        glyph
+    }
+    fn draw(&self, value: &str, mut x: f32, y: f32, size: f32, effects: (u16, u16), color: Color) {
+        let (blur, scanlines) = effects;
+        let size = size.round().clamp(1., 1024.) as u16;
+        for c in value.chars() {
+            let glyph = self.glyph(c, size, blur.min(64), scanlines);
+            if let Some(texture) = &glyph.texture {
+                draw_texture(texture, x + glyph.x, y + glyph.y, color);
+            }
+            x += glyph.advance;
+        }
+    }
+    fn draw_cropped(
+        &self,
+        value: &str,
+        origin: Vec2,
+        size: f32,
+        effects: (u16, u16),
+        color: Color,
+        rows: Vec2,
+    ) {
+        let (blur, scanlines) = effects;
+        let size = size.round().clamp(1., 1024.) as u16;
+        let mut x = origin.x;
+        for c in value.chars() {
+            let glyph = self.glyph(c, size, blur.min(64), scanlines);
+            if let Some(texture) = &glyph.texture {
+                let first = (rows.x - glyph.y).clamp(0., texture.height());
+                let last = (rows.y - glyph.y).clamp(0., texture.height());
+                if last > first {
+                    draw_texture_ex(
+                        texture,
+                        x + glyph.x,
+                        origin.y + glyph.y + first,
+                        color,
+                        DrawTextureParams {
+                            source: Some(Rect::new(0., first, texture.width(), last - first)),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+            x += glyph.advance;
+        }
+    }
+}
+
+fn gaussian_blur(bitmap: &[f32], width: usize, height: usize, radius: usize) -> Vec<f32> {
+    let sigma = (radius as f32 * 0.5).max(0.5);
+    let mut kernel = (-(radius as isize)..=radius as isize)
+        .map(|x| (-(x * x) as f32 / (2. * sigma * sigma)).exp())
+        .collect::<Vec<_>>();
+    let sum: f32 = kernel.iter().sum();
+    for weight in &mut kernel {
+        *weight /= sum;
+    }
+    let mut horizontal = vec![0.; bitmap.len()];
+    let mut result = vec![0.; bitmap.len()];
+    for y in 0..height {
+        for x in 0..width {
+            for (i, weight) in kernel.iter().enumerate() {
+                let sample = x as isize + i as isize - radius as isize;
+                if sample >= 0 && (sample as usize) < width {
+                    horizontal[y * width + x] += bitmap[y * width + sample as usize] * weight;
+                }
+            }
+        }
+    }
+    for y in 0..height {
+        for x in 0..width {
+            for (i, weight) in kernel.iter().enumerate() {
+                let sample = y as isize + i as isize - radius as isize;
+                if sample >= 0 && (sample as usize) < height {
+                    result[y * width + x] += horizontal[sample as usize * width + x] * weight;
+                }
+            }
+        }
+    }
+    result
+}
+
+struct FontRange {
+    minimum: f32,
+    maximum: f32,
+    tall: f32,
+    proportional: bool,
+    blur: f32,
+    scanlines: f32,
+}
+struct HudFont {
+    face: FontFace,
+    ranges: Vec<FontRange>,
+}
+impl HudFont {
+    fn read(fonts: &Entry, name: &str, face: FontFace, fallback: f32) -> Self {
+        let ranges = fonts
+            .get(name)
+            .map(Entry::children)
+            .unwrap_or_default()
+            .iter()
+            .map(|entry| {
+                let resolution = entry.get("yres").and_then(Entry::text).and_then(|s| {
+                    let values = s
+                        .split_whitespace()
+                        .map(str::parse::<f32>)
+                        .collect::<std::result::Result<Vec<_>, _>>()
+                        .ok()?;
+                    (values.len() == 2).then_some((values[0], values[1]))
+                });
+                FontRange {
+                    minimum: resolution.map_or(0., |r| r.0),
+                    maximum: resolution.map_or(f32::MAX, |r| r.1),
+                    tall: number(entry, "tall", fallback),
+                    proportional: resolution.is_none(),
+                    blur: number(entry, "blur", 0.),
+                    scanlines: number(entry, "scanlines", 0.),
+                }
+            })
+            .collect();
+        Self { face, ranges }
+    }
+    fn size(&self) -> f32 {
+        let height = screen_height();
+        let range = self
+            .ranges
+            .iter()
+            .find(|r| height >= r.minimum && height <= r.maximum);
+        range.map_or(12., |r| {
+            r.tall * if r.proportional { height / 480. } else { 1. }
+        })
+    }
+    fn effects(&self) -> (u16, u16) {
+        let height = screen_height();
+        let range = self
+            .ranges
+            .iter()
+            .find(|r| height >= r.minimum && height <= r.maximum);
+        range.map_or((0, 0), |r| {
+            let scale = if r.proportional { height / 480. } else { 1. };
+            (
+                (r.blur * scale).round() as u16,
+                (r.scanlines * scale).round() as u16,
+            )
+        })
+    }
+    fn draw(&self, value: &str, x: f32, y: f32, color: Color) {
+        let (blur, scanlines) = self.effects();
+        self.face
+            .draw(value, x, y, self.size(), (blur, scanlines), color);
+    }
+    fn width(&self, value: &str) -> f32 {
+        self.face.width(value, self.size())
+    }
+    fn draw_cropped(&self, value: &str, origin: Vec2, rows: Vec2, color: Color) {
+        self.face
+            .draw_cropped(value, origin, self.size(), self.effects(), color, rows);
+    }
+}
+
+#[derive(Clone)]
+struct PanelLayout {
+    x: String,
+    y: f32,
+    width: f32,
+    height: f32,
+    text: Vec2,
+    digit: Vec2,
+    secondary: Vec2,
+}
+impl PanelLayout {
+    fn read(entry: &Entry) -> Self {
+        Self {
+            x: entry
+                .get("xpos")
+                .and_then(Entry::text)
+                .unwrap_or("0")
+                .into(),
+            y: number(entry, "ypos", 432.),
+            width: number(entry, "wide", 102.),
+            height: number(entry, "tall", 36.),
+            text: vec2(
+                number(entry, "text_xpos", 8.),
+                number(entry, "text_ypos", 20.),
+            ),
+            digit: vec2(
+                number(entry, "digit_xpos", 50.),
+                number(entry, "digit_ypos", 2.),
+            ),
+            secondary: vec2(
+                number(entry, "digit2_xpos", 98.),
+                number(entry, "digit2_ypos", 16.),
+            ),
+        }
+    }
+    fn rect(&self, scale: f32) -> Rect {
+        let x = self
+            .x
+            .strip_prefix('r')
+            .and_then(|v| v.parse::<f32>().ok())
+            .map_or_else(
+                || self.x.parse::<f32>().unwrap_or(0.) * scale,
+                |offset| screen_width() - offset * scale,
+            );
+        Rect::new(x, self.y * scale, self.width * scale, self.height * scale)
+    }
+}
+
+#[derive(Clone)]
+struct Animate {
+    event: String,
+    panel: String,
+    property: String,
+    target: String,
+    delay: f64,
+    duration: f64,
+    interpolation: Interpolation,
+}
+
+#[derive(Clone, Copy)]
+enum Interpolation {
+    Linear,
+    Accel,
+    Deaccel,
+    Spline,
+}
+impl Interpolation {
+    fn read(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "linear" => Some(Self::Linear),
+            "accel" => Some(Self::Accel),
+            "deaccel" => Some(Self::Deaccel),
+            "spline" => Some(Self::Spline),
+            _ => None,
+        }
+    }
+    fn sample(self, position: f32) -> f32 {
+        let position = position.clamp(0., 1.);
+        // VGUI AnimationController::GetInterpolatedValue, including its square-root Deaccel.
+        match self {
+            Self::Linear => position,
+            Self::Accel => position * position,
+            Self::Deaccel => position.sqrt(),
+            Self::Spline => position * position * (3. - 2. * position),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct EventRule {
+    event: String,
+    target: String,
+    delay: f64,
+    run: bool,
+}
+
+fn animation_lines(source: &str) -> Result<Vec<(String, Vec<String>)>> {
+    let mut event = String::new();
+    let mut event_enabled = true;
+    let mut lines = Vec::new();
+    for line in source.lines() {
+        let mut tokens = keyvalues::tokens(line)?;
+        let enabled = if tokens
+            .last()
+            .is_some_and(|t| t.starts_with('[') && t.ends_with(']'))
+        {
+            keyvalues::resource_condition(&tokens.pop().unwrap())?
+        } else {
+            true
+        };
+        if tokens.first().map(String::as_str) == Some("event") && tokens.len() >= 2 {
+            event = tokens[1].clone();
+            event_enabled = enabled;
+        } else if enabled && event_enabled && !tokens.is_empty() {
+            lines.push((event.clone(), tokens));
+        }
+    }
+    Ok(lines)
+}
+fn animations(source: &str) -> Result<Vec<Animate>> {
+    let mut result = Vec::new();
+    for (event, tokens) in animation_lines(source)? {
+        if tokens.first().map(String::as_str) == Some("Animate") && tokens.len() >= 7 {
+            let Some(interpolation) = Interpolation::read(&tokens[4]) else {
+                // Pulse/Bias/Gain/Flicker take additional parameters and are not this subset.
+                continue;
+            };
+            let (Ok(delay), Ok(duration)) = (tokens[5].parse::<f64>(), tokens[6].parse::<f64>())
+            else {
+                continue;
+            };
+            if !delay.is_finite() || !duration.is_finite() || delay < 0. || duration < 0. {
+                continue;
+            }
+            result.push(Animate {
+                event,
+                panel: tokens[1].clone(),
+                property: tokens[2].clone(),
+                target: tokens[3].clone(),
+                delay,
+                duration,
+                interpolation,
+            });
+        }
+    }
+    Ok(result)
+}
+fn event_rules(source: &str) -> Result<Vec<EventRule>> {
+    Ok(animation_lines(source)?
+        .into_iter()
+        .filter_map(|(event, tokens)| {
+            if !matches!(
+                tokens.first().map(String::as_str),
+                Some("StopEvent" | "RunEvent")
+            ) || tokens.len() < 3
+            {
+                return None;
+            }
+            let delay = tokens[2].parse::<f64>().ok()?;
+            (delay.is_finite() && delay >= 0.).then(|| EventRule {
+                event,
+                target: tokens[1].clone(),
+                delay,
+                run: tokens[0] == "RunEvent",
+            })
+        })
+        .collect())
+}
+fn animation<'a>(
+    rules: &'a [Animate],
+    event: &str,
+    panel: &str,
+    property: &str,
+) -> Option<&'a Animate> {
+    rules.iter().find(|a| {
+        a.event.eq_ignore_ascii_case(event)
+            && a.panel.eq_ignore_ascii_case(panel)
+            && a.property.eq_ignore_ascii_case(property)
+    })
+}
+
+#[derive(Clone, Copy)]
+enum NumericPanel {
+    Health,
+    Suit,
+    Ammo,
+}
+impl NumericPanel {
+    fn read(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "hudhealth" => Some(Self::Health),
+            "hudsuit" => Some(Self::Suit),
+            "hudammo" => Some(Self::Ammo),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy)]
+enum NumericProperty {
+    Alpha,
+    Blur,
+    Background,
+    Foreground,
+    TextColor,
+    Ammo2Color,
+}
+impl NumericProperty {
+    fn read(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "alpha" => Some(Self::Alpha),
+            "blur" => Some(Self::Blur),
+            "bgcolor" => Some(Self::Background),
+            "fgcolor" => Some(Self::Foreground),
+            "textcolor" => Some(Self::TextColor),
+            "ammo2color" => Some(Self::Ammo2Color),
+            _ => None,
+        }
+    }
+    fn is_color(self) -> bool {
+        matches!(
+            self,
+            Self::Background | Self::Foreground | Self::TextColor | Self::Ammo2Color
+        )
+    }
+    fn target(self, value: &str, settings: &Entry) -> Option<[f32; 4]> {
+        if self.is_color() {
+            let value =
+                rgba(value).or_else(|| settings.get(value).and_then(Entry::text).and_then(rgba))?;
+            Some([
+                value.r * 255.,
+                value.g * 255.,
+                value.b * 255.,
+                value.a * 255.,
+            ])
+        } else {
+            let value = value.parse::<f32>().ok()?;
+            value.is_finite().then_some([value, 0., 0., 0.])
+        }
+    }
+}
+#[derive(Clone, Copy)]
+struct PanelEffects {
+    values: [[f32; 4]; 6],
+}
+impl PanelEffects {
+    fn new(settings: &Entry) -> Self {
+        let foreground = color(settings, "FgColor", Color::from_rgba(255, 220, 0, 100));
+        let background = color(settings, "BgColor", Color::from_rgba(0, 0, 0, 76));
+        let components = |c: Color| [c.r * 255., c.g * 255., c.b * 255., c.a * 255.];
+        Self {
+            values: [
+                [255., 0., 0., 0.],
+                [0.; 4],
+                components(background),
+                components(foreground),
+                components(foreground),
+                components(foreground),
+            ],
+        }
+    }
+    fn opacity(self) -> f32 {
+        self.values[NumericProperty::Alpha as usize][0].clamp(0., 255.) / 255.
+    }
+    fn color(self, property: NumericProperty) -> Color {
+        // Native VGUI stores interpolated color channels as bytes.
+        let channels = self.values[property as usize].map(|v| v.clamp(0., 255.) as u8);
+        alpha(
+            Color::from_rgba(channels[0], channels[1], channels[2], channels[3]),
+            self.opacity(),
+        )
+    }
+    fn glow(self) -> impl Iterator<Item = f32> {
+        let blur = self.values[NumericProperty::Blur as usize][0].clamp(0., 64.);
+        (0..blur.ceil() as usize).map(move |pass| (blur - pass as f32).min(1.))
+    }
+}
+struct PropertyAnimation {
+    event: String,
+    panel: NumericPanel,
+    property: NumericProperty,
+    target: [f32; 4],
+    from: Option<[f32; 4]>,
+    start: f64,
+    end: f64,
+    interpolation: Interpolation,
+}
+struct PostedEvent {
+    event: String,
+    target: String,
+    at: f64,
+    run: bool,
+}
+struct NumericHudEffects {
+    panels: [PanelEffects; 3],
+    animations: Vec<PropertyAnimation>,
+    posted: Vec<PostedEvent>,
+    health: i32,
+    armor: i32,
+    active: String,
+    ammo: i32,
+    reserve: i32,
+    time: f64,
+}
+impl NumericHudEffects {
+    fn new(settings: &Entry) -> Self {
+        Self {
+            panels: [PanelEffects::new(settings); 3],
+            animations: Vec::new(),
+            posted: Vec::new(),
+            health: -1,
+            armor: -1,
+            active: String::new(),
+            ammo: -1,
+            reserve: -1,
+            time: 0.,
+        }
+    }
+    fn stop(&mut self, event: &str) {
+        self.animations
+            .retain(|a| !a.event.eq_ignore_ascii_case(event));
+        self.posted.retain(|s| !s.event.eq_ignore_ascii_case(event));
+    }
+    fn start(
+        &mut self,
+        event: &str,
+        time: f64,
+        rules: &[Animate],
+        events: &[EventRule],
+        settings: &Entry,
+    ) {
+        // StartAnimationSequence removes earlier commands from the same sequence.
+        self.stop(event);
+        for rule in events
+            .iter()
+            .filter(|s| s.event.eq_ignore_ascii_case(event))
+        {
+            self.posted.push(PostedEvent {
+                event: event.into(),
+                target: rule.target.clone(),
+                at: time + rule.delay,
+                run: rule.run,
+            });
+        }
+        for rule in rules.iter().filter(|r| r.event.eq_ignore_ascii_case(event)) {
+            let Some(panel) = NumericPanel::read(&rule.panel) else {
+                continue;
+            };
+            let Some(property) = NumericProperty::read(&rule.property) else {
+                continue;
+            };
+            let Some(target) = property.target(&rule.target, settings) else {
+                continue;
+            };
+            self.animations.push(PropertyAnimation {
+                event: event.into(),
+                panel,
+                property,
+                target,
+                from: None,
+                start: time + rule.delay,
+                end: time + rule.delay + rule.duration,
+                interpolation: rule.interpolation,
+            });
+        }
+    }
+    fn posted_events(
+        &mut self,
+        time: f64,
+        rules: &[Animate],
+        events: &[EventRule],
+        settings: &Entry,
+    ) {
+        // AnimationController processes posted messages in insertion order, restarting
+        // its traversal after each dispatch. Each RunEvent target may run once per frame.
+        let mut ran = HashSet::new();
+        while let Some(index) = self.posted.iter().position(|message| message.at <= time) {
+            let message = self.posted.remove(index);
+            if message.run {
+                if ran.insert(message.target.to_ascii_lowercase()) {
+                    // Source starts late events at the current frame, without backlog catch-up.
+                    self.start(&message.target, time, rules, events, settings);
+                }
+            } else {
+                self.stop(&message.target);
+            }
+        }
+    }
+    fn advance(&mut self, time: f64) {
+        let mut index = 0;
+        while index < self.animations.len() {
+            let track = &mut self.animations[index];
+            if time < track.start {
+                index += 1;
+                continue;
+            }
+            let value = &mut self.panels[track.panel as usize].values[track.property as usize];
+            // Delayed commands capture the current property when they first become active.
+            let from = *track.from.get_or_insert(*value);
+            let position = if time >= track.end {
+                1.
+            } else {
+                ((time - track.start) / (track.end - track.start)) as f32
+            };
+            let fraction = track.interpolation.sample(position);
+            *value = std::array::from_fn(|channel| {
+                from[channel] + (track.target[channel] - from[channel]) * fraction
+            });
+            if time >= track.end {
+                self.animations.remove(index);
+            } else {
+                index += 1;
+            }
+        }
+        self.time = time;
+    }
+    fn observe(
+        &mut self,
+        inv: &Inventory,
+        weapons: &BTreeMap<String, Weapon>,
+        time: f64,
+        rules: &[Animate],
+        events: &[EventRule],
+        settings: &Entry,
+    ) {
+        if !time.is_finite() {
+            return;
+        }
+        if time < self.time {
+            *self = Self::new(settings);
+        }
+        self.advance(time);
+        let health = (inv.health as i32).max(0);
+        if health != self.health {
+            if health >= 20 {
+                self.start("HealthIncreasedAbove20", time, rules, events, settings);
+            } else if health > 0 {
+                self.start("HealthIncreasedBelow20", time, rules, events, settings);
+                self.start("HealthLow", time, rules, events, settings);
+            } else if self.health > 0 {
+                self.start("HudPlayerDeath", time, rules, events, settings);
+            }
+            self.health = health;
+        }
+        let armor = inv.armor as i32;
+        if armor != self.armor {
+            if armor == 0 {
+                self.start("SuitPowerZero", time, rules, events, settings);
+            } else if armor < self.armor {
+                self.start("SuitDamageTaken", time, rules, events, settings);
+                if armor < 20 {
+                    self.start("SuitArmorLow", time, rules, events, settings);
+                }
+            } else {
+                let event = if self.armor == -1 || self.armor == 0 || armor >= 20 {
+                    "SuitPowerIncreasedAbove20"
+                } else {
+                    "SuitPowerIncreasedBelow20"
+                };
+                self.start(event, time, rules, events, settings);
+            }
+            self.armor = armor;
+        }
+        if let Some(weapon) = weapons
+            .get(&inv.active)
+            .filter(|w| !w.ammo_type.is_empty() && !w.ammo_type.eq_ignore_ascii_case("none"))
+        {
+            let clip = inv.owned.get(&inv.active).copied().unwrap_or(-1);
+            let reserve = inv.reserve_for(&inv.active, weapons);
+            let ammo = if clip < 0 { reserve } else { clip };
+            let ammo2 = if clip < 0 { 0 } else { reserve };
+            if ammo != self.ammo {
+                let event = if ammo == 0 {
+                    "AmmoEmpty"
+                } else if ammo < self.ammo {
+                    "AmmoDecreased"
+                } else {
+                    "AmmoIncreased"
+                };
+                self.start(event, time, rules, events, settings);
+                self.ammo = ammo;
+            }
+            if ammo2 != self.reserve {
+                let event = if ammo2 == 0 {
+                    "Ammo2Empty"
+                } else if ammo2 < self.reserve {
+                    "Ammo2Decreased"
+                } else {
+                    "Ammo2Increased"
+                };
+                self.start(event, time, rules, events, settings);
+                self.reserve = ammo2;
+            }
+            if self.active != inv.active {
+                // Retail/SDK SetAmmo's playAnimation argument is unused; WeaponChanged follows.
+                self.start("WeaponChanged", time, rules, events, settings);
+                self.active.clone_from(&inv.active);
+            }
+            let _ = weapon;
+        }
+        self.posted_events(time, rules, events, settings);
+        self.advance(time);
+    }
+}
+
+struct QuickInfoFade {
+    at: f64,
+    duration: f64,
+    from: f32,
+    target: f32,
+}
+struct QuickInfoState {
+    health: i32,
+    ammo: i32,
+    event_at: f64,
+    time: f64,
+    alpha: f32,
+    dimmed: bool,
+    fade: Option<QuickInfoFade>,
+    warn_health: bool,
+    warn_ammo: bool,
+    health_warning: f32,
+    ammo_warning: f32,
+    pending_sounds: Vec<String>,
+}
+impl Default for QuickInfoState {
+    fn default() -> Self {
+        Self {
+            health: 100,
+            ammo: 0,
+            event_at: 0.,
+            time: 0.,
+            alpha: 255.,
+            dimmed: false,
+            fade: None,
+            warn_health: false,
+            warn_ammo: false,
+            health_warning: 0.,
+            ammo_warning: 0.,
+            pending_sounds: Vec::new(),
+        }
+    }
+}
+impl QuickInfoState {
+    fn observe(&mut self, health: i32, ammo: i32, maximum: i32, time: f64) -> f32 {
+        if time < self.time {
+            *self = Self::default();
+        }
+        let dt = (time - self.time).max(0.) as f32;
+        self.time = time;
+        if let Some(fade) = &self.fade {
+            let position = ((time - fade.at) / fade.duration).clamp(0., 1.) as f32;
+            self.alpha = fade.from + (fade.target - fade.from) * position;
+        }
+        // Published OnThink runs before Paint updates the activity timestamp.
+        let dimmed = time - self.event_at > 1.;
+        if dimmed != self.dimmed {
+            self.dimmed = dimmed;
+            self.fade = Some(QuickInfoFade {
+                at: time,
+                duration: if dimmed { 2. } else { 0.5 },
+                from: self.alpha,
+                target: if dimmed { 64. } else { 255. },
+            });
+        }
+        if health != self.health {
+            self.health = health;
+            self.event_at = time;
+            let warn = health <= 25;
+            if warn && !self.warn_health {
+                self.health_warning = 255.;
+                self.pending_sounds.push("HUDQuickInfo.LowHealth".into());
+            }
+            self.warn_health = warn;
+        }
+        if ammo != self.ammo {
+            self.ammo = ammo;
+            self.event_at = time;
+            // Retail client float at 0x10370f58 is 0.25, corroborating the SDK threshold.
+            let warn = maximum > 1 && ammo as f32 / maximum as f32 <= 0.25;
+            if warn && !self.warn_ammo {
+                self.ammo_warning = 255.;
+                self.pending_sounds.push("HUDQuickInfo.LowAmmo".into());
+            }
+            self.warn_ammo = warn;
+        }
+        dt
+    }
+    fn drain_sounds(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_sounds)
+    }
+    fn warning_color(
+        warn: bool,
+        remaining: &mut f32,
+        time: f64,
+        dt: f32,
+        normal: Color,
+        caution: Color,
+    ) -> Option<(Color, bool)> {
+        let pulse = ((time as f32 * 8.).sin().abs() * 128.) as i32;
+        let full = *remaining > 0.;
+        if full {
+            if *remaining <= dt * 200. {
+                if pulse < 40 {
+                    *remaining = 0.;
+                    return None;
+                }
+                *remaining += dt * 200.;
+            }
+            *remaining -= dt * 200.;
+        }
+        let mut color = if full || warn { caution } else { normal };
+        // The original Color constructor stores this product in an unsigned byte.
+        color.a = f32::from(if full || warn {
+            (pulse * 255) as u8
+        } else {
+            138
+        }) / 255.;
+        Some((color, full))
+    }
+}
+struct QuickInfoHud {
+    font: HudFont,
+    center: Texture2D,
+    center_rect: Rect,
+    left: String,
+    left_empty: String,
+    right: String,
+    right_empty: String,
+    normal: Color,
+    caution: Color,
+    state: RefCell<QuickInfoState>,
+}
+impl QuickInfoHud {
+    fn load(vfs: &Vfs, fonts: &Entry, colors: &Entry) -> Result<Self> {
+        let face = FontFace::load(
+            &vfs.read("resource/HL2crosshairs.ttf")?
+                .context("QuickInfo font missing")?,
+        )?;
+        let resources = keyvalues::parse_resource(
+            &vfs.read("scripts/hud_textures.txt")?
+                .context("HUD textures missing")?,
+        )?;
+        let textures = resources
+            .first()
+            .and_then(|e| e.get("TextureData"))
+            .context("HUD TextureData missing")?;
+        let character = |name| -> Result<String> {
+            Ok(textures
+                .get(name)
+                .and_then(|e| e.get("character"))
+                .and_then(Entry::text)
+                .context("QuickInfo glyph missing")?
+                .into())
+        };
+        let center = textures
+            .get("crosshair")
+            .context("QuickInfo center missing")?;
+        let file = center
+            .get("file")
+            .and_then(Entry::text)
+            .context("QuickInfo center material missing")?;
+        Ok(Self {
+            font: HudFont::read(fonts, "QuickInfo", face, 28.),
+            center: crate::viewer::texture(vfs, file)?,
+            center_rect: Rect::new(
+                number(center, "x", 0.),
+                number(center, "y", 0.),
+                number(center, "width", 40.),
+                number(center, "height", 40.),
+            ),
+            left: character("crosshair_left_full")?,
+            left_empty: character("crosshair_left_empty")?,
+            right: character("crosshair_right_full")?,
+            right_empty: character("crosshair_right_empty")?,
+            normal: color(colors, "Normal", Color::from_rgba(255, 208, 64, 255)),
+            caution: color(colors, "Caution", Color::from_rgba(255, 48, 0, 255)),
+            state: RefCell::new(QuickInfoState::default()),
+        })
+    }
+    fn progress(&self, full: &str, empty: &str, origin: Vec2, percentage: f32, color: Color) {
+        let height = self.font.size().round();
+        let offset = (height * percentage.clamp(0., 1.)).trunc();
+        self.font
+            .draw_cropped(empty, origin, vec2(0., offset), color);
+        self.font
+            .draw_cropped(full, origin, vec2(offset, height), color);
+    }
+    fn draw(
+        &self,
+        inv: &Inventory,
+        weapons: &BTreeMap<String, Weapon>,
+        time: f64,
+        material: &Material,
+    ) {
+        let Some(weapon) = weapons.get(&inv.active) else {
+            return;
+        };
+        if inv.health <= 0. || !time.is_finite() {
+            return;
+        }
+        let ammo = inv.owned.get(&inv.active).copied().unwrap_or(-1);
+        let mut state = self.state.borrow_mut();
+        let dt = state.observe(inv.health as i32, ammo, weapon.magazine, time);
+        let opacity = state.alpha.clamp(0., 255.) / 255.;
+        let x = (screen_width() * 0.5).trunc();
+        let y = (screen_height() * 0.5).trunc() - self.font.size().round() * 0.5;
+        gl_use_material(material);
+        draw_texture_ex(
+            &self.center,
+            x,
+            y,
+            alpha(
+                Color {
+                    a: 138. / 255.,
+                    ..self.normal
+                },
+                opacity,
+            ),
+            DrawTextureParams {
+                source: Some(self.center_rect),
+                ..Default::default()
+            },
+        );
+        let warn_health = state.warn_health;
+        if let Some((color, full)) = QuickInfoState::warning_color(
+            warn_health,
+            &mut state.health_warning,
+            time,
+            dt,
+            self.normal,
+            self.caution,
+        ) {
+            let origin = vec2(x - self.font.width(&self.left) * 2., y);
+            let color = alpha(color, opacity);
+            if full {
+                self.font.draw(&self.left, origin.x, origin.y, color);
+            } else {
+                self.progress(
+                    &self.left,
+                    &self.left_empty,
+                    origin,
+                    1. - inv.health / 100.,
+                    color,
+                );
+            }
+        }
+        let warn_ammo = state.warn_ammo;
+        if let Some((color, full)) = QuickInfoState::warning_color(
+            warn_ammo,
+            &mut state.ammo_warning,
+            time,
+            dt,
+            self.normal,
+            self.caution,
+        ) {
+            let origin = vec2(x + self.font.width(&self.right), y);
+            let color = alpha(color, opacity);
+            if full {
+                self.font.draw(&self.right, origin.x, origin.y, color);
+            } else {
+                let percentage = if weapon.magazine <= 0 {
+                    0.
+                } else {
+                    1. - ammo as f32 / weapon.magazine as f32
+                };
+                self.progress(&self.right, &self.right_empty, origin, percentage, color);
+            }
+        }
+        gl_use_default_material();
+    }
+}
+
+pub struct WeaponHud {
+    corners: Vec<Texture2D>,
+    additive: Material,
+    icons: HudFont,
+    selected_icons: HudFont,
+    crosshairs: HudFont,
+    numbers: HudFont,
+    number_glow: HudFont,
+    small_numbers: HudFont,
+    selection_numbers: HudFont,
+    selection_text: HudFont,
+    labels: HudFont,
+    layout: Entry,
+    settings: Entry,
+    animation_rules: Vec<Animate>,
+    animation_events: Vec<EventRule>,
+    numeric_effects: RefCell<NumericHudEffects>,
+    ammo_icons: BTreeMap<String, String>,
+    health_panel: PanelLayout,
+    suit_panel: PanelLayout,
+    ammo_panel: PanelLayout,
+    quick_info: QuickInfoHud,
+}
+
+impl WeaponHud {
+    /// Local-player warnings emitted by QuickInfo's false-to-true threshold latches.
+    /// Drain after draw_status and forward these owned sound-script names to the scene.
+    pub fn drain_sounds(&self) -> Vec<String> {
+        self.quick_info.state.borrow_mut().drain_sounds()
+    }
+
+    pub fn load(vfs: &Vfs) -> Result<Self> {
+        let scheme = keyvalues::parse_resource(
+            &vfs.read("resource/ClientScheme.res")?
+                .context("ClientScheme.res missing")?,
+        )?;
+        let scheme = find(&scheme, "Scheme").context("Scheme block missing")?;
+        let fonts = scheme.get("Fonts").context("HUD font scheme missing")?;
+        let settings = scheme
+            .get("BaseSettings")
+            .context("HUD color scheme missing")?
+            .clone();
+        let quick_info = QuickInfoHud::load(vfs, fonts, scheme.get("Colors").unwrap_or(&settings))?;
+        let layout = keyvalues::parse_resource(
+            &vfs.read("scripts/HudLayout.res")?
+                .context("HudLayout.res missing")?,
+        )?;
+        let layout = layout.first().context("HUD layout root missing")?;
+        let weapon_layout = layout
+            .get("HudWeaponSelection")
+            .context("HudWeaponSelection layout missing")?
+            .clone();
+        let face = FontFace::load(
+            &vfs.read("resource/HALFLIFE2.ttf")?
+                .context("HalfLife2 HUD font missing")?,
+        )?;
+        let windows = std::env::var_os("WINDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("C:/Windows"));
+        let bold = std::fs::read(windows.join("Fonts/verdanab.ttf"))
+            .ok()
+            .or(vfs.read("resource/linux_fonts/DejaVuSans-Bold.ttf")?)
+            .context("Verdana or bundled HUD fallback font missing")?;
+        let bold = FontFace::load(&bold)?;
+        let animation_source = keyvalues::decode_text(
+            &vfs.read("scripts/HudAnimations.txt")?
+                .context("HudAnimations.txt missing")?,
+        )?;
+        let animation_rules = animations(&animation_source)?;
+        let animation_events = event_rules(&animation_source)?;
+        let numeric_effects = RefCell::new(NumericHudEffects::new(&settings));
+        let mut ammo_icons = BTreeMap::new();
+        for class in [
+            "weapon_pistol",
+            "weapon_357",
+            "weapon_smg1",
+            "weapon_ar2",
+            "weapon_shotgun",
+            "weapon_crossbow",
+            "weapon_rpg",
+            "weapon_frag",
+        ] {
+            if let Some(bytes) = vfs.read(&format!("scripts/{class}.txt"))? {
+                if let Some(weapon) = keyvalues::parse_resource(&bytes)?.first() {
+                    if let Some(icon) = weapon
+                        .get("TextureData")
+                        .and_then(|e| e.get("ammo"))
+                        .and_then(|e| e.get("character"))
+                        .and_then(Entry::text)
+                    {
+                        ammo_icons.insert(class.into(), icon.into());
+                    }
+                }
+            }
+        }
+        let mut corners = Vec::new();
+        for number in 1..=4 {
+            corners.push(crate::viewer::texture(
+                vfs,
+                &format!("vgui/hud/8x800corner{number}"),
+            )?);
+        }
+        let additive = load_material(
+            ShaderSource::Glsl {
+                vertex: VERTEX,
+                fragment: FRAGMENT,
+            },
+            MaterialParams {
+                pipeline_params: PipelineParams {
+                    color_blend: Some(miniquad::BlendState::new(
+                        miniquad::Equation::Add,
+                        miniquad::BlendFactor::Value(miniquad::BlendValue::SourceAlpha),
+                        miniquad::BlendFactor::One,
+                    )),
+                    depth_write: false,
+                    depth_test: miniquad::Comparison::Always,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )?;
+        Ok(Self {
+            corners,
+            additive,
+            icons: HudFont::read(fonts, "WeaponIcons", face.clone(), 64.),
+            selected_icons: HudFont::read(fonts, "WeaponIconsSelected", face.clone(), 64.),
+            crosshairs: HudFont::read(fonts, "Crosshairs", face.clone(), 40.),
+            numbers: HudFont::read(fonts, "HudNumbers", face.clone(), 32.),
+            number_glow: HudFont::read(fonts, "HudNumbersGlow", face.clone(), 32.),
+            small_numbers: HudFont::read(fonts, "HudNumbersSmall", face, 16.),
+            selection_numbers: HudFont::read(fonts, "HudSelectionNumbers", bold.clone(), 11.),
+            selection_text: HudFont::read(fonts, "HudSelectionText", bold.clone(), 10.),
+            labels: HudFont::read(fonts, "Default", bold, 12.),
+            health_panel: PanelLayout::read(
+                layout
+                    .get("HudHealth")
+                    .context("HudHealth layout missing")?,
+            ),
+            suit_panel: PanelLayout::read(layout.get("HudSuit").context("HudSuit layout missing")?),
+            ammo_panel: PanelLayout::read(layout.get("HudAmmo").context("HudAmmo layout missing")?),
+            layout: weapon_layout,
+            settings,
+            animation_rules,
+            animation_events,
+            numeric_effects,
+            ammo_icons,
+            quick_info,
+        })
+    }
+
+    fn rounded_box(&self, rect: Rect, color: Color) {
+        gl_use_default_material();
+        // Retail Panel::GetCornerTextureSize uses max(scaled 8 / 2, 8).
+        let corner = ((8. * screen_height() / 480.).round() / 2.)
+            .floor()
+            .max(8.)
+            .min(rect.w / 2.)
+            .min(rect.h / 2.);
+        draw_rectangle(rect.x + corner, rect.y, rect.w - corner * 2., corner, color);
+        draw_rectangle(rect.x, rect.y + corner, rect.w, rect.h - corner * 2., color);
+        draw_rectangle(
+            rect.x + corner,
+            rect.y + rect.h - corner,
+            rect.w - corner * 2.,
+            corner,
+            color,
+        );
+        for (index, x, y) in [
+            (0, rect.x, rect.y),
+            (1, rect.x + rect.w - corner, rect.y),
+            (3, rect.x, rect.y + rect.h - corner),
+            (2, rect.x + rect.w - corner, rect.y + rect.h - corner),
+        ] {
+            draw_texture_ex(
+                &self.corners[index],
+                x,
+                y,
+                color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(corner, corner)),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    fn selection_alpha(&self, selection: &Selection, time: f64, property: &str) -> f32 {
+        let open = animation(
+            &self.animation_rules,
+            "OpenWeaponSelectionMenu",
+            "HudWeaponSelection",
+            property,
+        );
+        let target = open
+            .and_then(|a| a.target.parse::<f32>().ok())
+            .unwrap_or(if property == "Alpha" { 128. } else { 255. });
+        let opening = open.map_or(1., |a| {
+            if a.duration > 0. {
+                ((time - selection.opened_at - a.delay) / a.duration).clamp(0., 1.) as f32
+            } else {
+                1.
+            }
+        });
+        let fade = animation(
+            &self.animation_rules,
+            "FadeOutWeaponSelectionMenu",
+            "HudWeaponSelection",
+            property,
+        );
+        let fading = fade.map_or(1., |a| {
+            if a.duration > 0. {
+                (1. - (time - selection.changed_at - selection::SELECTION_TIMEOUT - a.delay)
+                    / a.duration)
+                    .clamp(0., 1.) as f32
+            } else {
+                1.
+            }
+        });
+        target / 255. * opening * fading
+    }
+
+    pub fn draw_selection(
+        &self,
+        selection: &Selection,
+        inv: &Inventory,
+        weapons: &BTreeMap<String, Weapon>,
+        time: f64,
+    ) {
+        let Some(pending) = selection.pending.as_deref() else {
+            return;
+        };
+        let Some(selected_weapon) = weapons.get(pending) else {
+            return;
+        };
+        if !inv.suit || inv.health <= 0. || selection.fast_switch || time > selection.until {
+            return;
+        }
+        let scale = screen_height() / 480.;
+        let small = number(&self.layout, "SmallBoxSize", 32.) * scale;
+        let wide = number(&self.layout, "LargeBoxWide", 112.) * scale;
+        let tall = number(&self.layout, "LargeBoxTall", 84.) * scale;
+        let gap = number(&self.layout, "BoxGap", 8.) * scale;
+        let y0 = number(&self.layout, "ypos", 16.) * scale;
+        let mut x = (screen_width() - (WEAPON_SLOTS - 1) as f32 * (small + gap) - wide) * 0.5;
+        let normal_alpha = self.selection_alpha(selection, time, "Alpha");
+        let selected_alpha = self.selection_alpha(selection, time, "SelectionAlpha");
+        let number_color = color(&self.settings, "SelectionNumberFg", YELLOW);
+        let normal = color(
+            &self.settings,
+            "SelectionBoxBg",
+            Color::from_rgba(0, 0, 0, 80),
+        );
+        let empty = color(&self.settings, "SelectionEmptyBoxBg", normal);
+        let selected = color(&self.settings, "SelectionSelectedBoxBg", normal);
+        let names = selection::ordered(inv, weapons);
+        for slot in 0..WEAPON_SLOTS {
+            let slot_names = names
+                .iter()
+                .copied()
+                .filter(|n| weapons[*n].slot == slot)
+                .collect::<Vec<_>>();
+            if slot == selected_weapon.slot {
+                let last = slot_names
+                    .iter()
+                    .map(|n| weapons[*n].slot_position)
+                    .max()
+                    .unwrap_or(0);
+                let mut y = y0;
+                let mut numbered = false;
+                for position in 0..=last {
+                    let name = slot_names
+                        .iter()
+                        .copied()
+                        .find(|n| weapons[*n].slot_position == position);
+                    if name.is_none() && !selection.show_empty_positions {
+                        continue;
+                    }
+                    let is_selected = name == Some(pending);
+                    let opacity = if is_selected {
+                        selected_alpha
+                    } else {
+                        normal_alpha * selected_alpha
+                    };
+                    let background = if name.is_none() {
+                        empty
+                    } else if is_selected {
+                        selected
+                    } else {
+                        normal
+                    };
+                    self.rounded_box(Rect::new(x, y, wide, tall), alpha(background, opacity));
+                    gl_use_material(&self.additive);
+                    if !numbered {
+                        self.selection_numbers.draw(
+                            &(slot + 1).to_string(),
+                            x + number(&self.layout, "SelectionNumberXPos", 4.) * scale,
+                            y + number(&self.layout, "SelectionNumberYPos", 4.) * scale,
+                            alpha(number_color, opacity),
+                        );
+                    }
+                    if let Some(name) = name {
+                        let weapon = &weapons[name];
+                        let mut icon_color = color(
+                            &self.settings,
+                            "FgColor",
+                            Color::from_rgba(255, 220, 0, 100),
+                        );
+                        if !selection::can_be_selected(inv, weapons, name) {
+                            icon_color.r = 1.;
+                            icon_color.g = 0.;
+                            icon_color.b = 0.;
+                        }
+                        icon_color.a = if is_selected {
+                            selected_alpha
+                        } else {
+                            icon_color.a * opacity
+                        };
+                        let icon_x = x + (wide - self.icons.width(&weapon.icon)) * 0.5;
+                        let icon_y = y + (tall - self.icons.size()) * 0.5;
+                        if is_selected {
+                            self.selected_icons
+                                .draw(&weapon.icon, icon_x, icon_y, icon_color);
+                            let text_color =
+                                alpha(color(&self.settings, "BrightFg", YELLOW), selected_alpha);
+                            for (line, text) in weapon
+                                .name
+                                .split("\\n")
+                                .flat_map(|s| s.split('\n'))
+                                .enumerate()
+                            {
+                                self.selection_text.draw(
+                                    text,
+                                    x + (wide - self.selection_text.width(text)) * 0.5,
+                                    y + number(&self.layout, "TextYPos", 64.) * scale
+                                        + line as f32 * self.selection_text.size() * 1.1,
+                                    text_color,
+                                );
+                            }
+                        }
+                        self.icons.draw(&weapon.icon, icon_x, icon_y, icon_color);
+                    }
+                    numbered = true;
+                    y += tall + gap;
+                }
+                x += wide;
+            } else {
+                self.rounded_box(
+                    Rect::new(x, y0, small, small),
+                    alpha(
+                        if slot_names.is_empty() { empty } else { normal },
+                        normal_alpha,
+                    ),
+                );
+                if !slot_names.is_empty() {
+                    gl_use_material(&self.additive);
+                    self.selection_numbers.draw(
+                        &(slot + 1).to_string(),
+                        x + number(&self.layout, "SelectionNumberXPos", 4.) * scale,
+                        y0 + number(&self.layout, "SelectionNumberYPos", 4.) * scale,
+                        alpha(number_color, normal_alpha),
+                    );
+                }
+                x += small;
+            }
+            x += gap;
+        }
+        gl_use_default_material();
+    }
+
+    fn numeric_panel(
+        &self,
+        panel: &PanelLayout,
+        label: &str,
+        value: i32,
+        secondary: Option<i32>,
+        effects: PanelEffects,
+    ) {
+        if effects.opacity() <= 0. {
+            return;
+        }
+        let background = effects.color(NumericProperty::Background);
+        let foreground = effects.color(NumericProperty::Foreground);
+        let scale = screen_height() / 480.;
+        let rect = panel.rect(scale);
+        self.rounded_box(rect, background);
+        gl_use_material(&self.additive);
+        self.labels.draw(
+            label,
+            rect.x + panel.text.x * scale,
+            rect.y + panel.text.y * scale,
+            foreground,
+        );
+        self.numbers.draw(
+            &value.max(0).to_string(),
+            rect.x + panel.digit.x * scale,
+            rect.y + panel.digit.y * scale,
+            foreground,
+        );
+        // CHudNumericDisplay repeats the glow font; Blur is an overbright pass count.
+        for opacity in effects.glow() {
+            self.number_glow.draw(
+                &value.max(0).to_string(),
+                rect.x + panel.digit.x * scale,
+                rect.y + panel.digit.y * scale,
+                alpha(foreground, opacity),
+            );
+        }
+        if let Some(value) = secondary {
+            self.small_numbers.draw(
+                &value.max(0).to_string(),
+                rect.x + panel.secondary.x * scale,
+                rect.y + panel.secondary.y * scale,
+                foreground,
+            );
+        }
+        gl_use_default_material();
+    }
+
+    pub fn draw_status(
+        &self,
+        inv: &Inventory,
+        weapons: &BTreeMap<String, Weapon>,
+        selection: &Selection,
+        time: f64,
+    ) {
+        self.quick_info.draw(inv, weapons, time, &self.additive);
+        let mut effects = self.numeric_effects.borrow_mut();
+        effects.observe(
+            inv,
+            weapons,
+            time,
+            &self.animation_rules,
+            &self.animation_events,
+            &self.settings,
+        );
+        if !inv.suit || inv.health <= 0. {
+            return;
+        }
+        self.numeric_panel(
+            &self.health_panel,
+            "HEALTH",
+            inv.health as i32,
+            None,
+            effects.panels[NumericPanel::Health as usize],
+        );
+        self.numeric_panel(
+            &self.suit_panel,
+            "SUIT",
+            inv.armor as i32,
+            None,
+            effects.panels[NumericPanel::Suit as usize],
+        );
+        // HIDEHUD_WEAPONSELECTION suppresses the ammunition display while the menu is open.
+        if selection.pending.is_some() {
+            return;
+        }
+        let Some(weapon) = weapons.get(&inv.active) else {
+            return;
+        };
+        if weapon.ammo_type.is_empty() || weapon.ammo_type.eq_ignore_ascii_case("none") {
+            return;
+        }
+        let clip = inv.owned.get(&inv.active).copied().unwrap_or(-1);
+        let reserve = inv.reserve_for(&inv.active, weapons);
+        let mut panel = self.ammo_panel.clone();
+        // These are the settled size/position animations from the installed HudAnimations.
+        let event = if clip < 0 {
+            "WeaponDoesNotUseClips"
+        } else {
+            "WeaponUsesClips"
+        };
+        if let Some(rule) = animation(&self.animation_rules, event, "HudAmmo", "Position") {
+            let position = rule.target.split_whitespace().collect::<Vec<_>>();
+            if position.len() == 2 {
+                panel.x = position[0].into();
+                panel.y = position[1].parse().unwrap_or(panel.y);
+            }
+        }
+        if let Some(rule) = animation(&self.animation_rules, event, "HudAmmo", "Size") {
+            let size = rule
+                .target
+                .split_whitespace()
+                .filter_map(|n| n.parse::<f32>().ok())
+                .collect::<Vec<_>>();
+            if size.len() == 2 {
+                panel.width = size[0];
+                panel.height = size[1];
+            }
+        }
+        self.numeric_panel(
+            &panel,
+            "AMMO",
+            if clip < 0 { reserve } else { clip },
+            (clip >= 0).then_some(reserve),
+            effects.panels[NumericPanel::Ammo as usize],
+        );
+        if let Some(icon) = self.ammo_icons.get(&inv.active) {
+            let scale = screen_height() / 480.;
+            let rect = panel.rect(scale);
+            let font_size = self.small_numbers.size();
+            let x = rect.x
+                + panel.text.x * scale
+                + (self.labels.width("AMMO") - self.small_numbers.width(icon)) * 0.5;
+            let y = rect.y + panel.text.y * scale - self.labels.size() - font_size * 0.5;
+            gl_use_material(&self.additive);
+            self.small_numbers.draw(
+                icon,
+                x,
+                y,
+                effects.panels[NumericPanel::Ammo as usize].color(NumericProperty::Foreground),
+            );
+            gl_use_default_material();
+        }
+    }
+
+    pub fn draw_crosshair(&self, inv: &Inventory) {
+        if inv.active.is_empty() || inv.health <= 0. {
+            return;
+        }
+        // All currently implemented stock weapon scripts bind Crosshairs character Q.
+        let character = "Q";
+        let color = color(
+            &self.settings,
+            "FgColor",
+            Color::from_rgba(255, 220, 0, 100),
+        );
+        gl_use_material(&self.additive);
+        self.crosshairs.draw(
+            character,
+            (screen_width() - self.crosshairs.width(character)) * 0.5,
+            (screen_height() - self.crosshairs.size()) * 0.5,
+            color,
+        );
+        gl_use_default_material();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> Entry {
+        keyvalues::parse_resource(
+            br#"Colors { FgColor "255 220 0 100" BrightFg "255 220 0 255" BgColor "0 0 0 76" }"#,
+        )
+        .unwrap()
+        .remove(0)
+    }
+
+    #[test]
+    fn source_interpolators_keep_square_root_deceleration() {
+        assert_eq!(Interpolation::Linear.sample(0.25), 0.25);
+        assert_eq!(Interpolation::Accel.sample(0.5), 0.25);
+        assert_eq!(Interpolation::Deaccel.sample(0.25), 0.5);
+        assert_eq!(Interpolation::Spline.sample(0.5), 0.5);
+    }
+
+    #[test]
+    fn zero_armor_fades_and_a_pickup_stops_the_fade_immediately() {
+        let source = "event SuitPowerZero\n{\nAnimate HudSuit Alpha 0 Linear 0 .4\n}\nevent SuitPowerIncreasedAbove20\n{\nStopEvent SuitPowerZero 0\nAnimate HudSuit Alpha 255 Linear 0 0\n}";
+        let rules = animations(source).unwrap();
+        let stops = event_rules(source).unwrap();
+        let settings = settings();
+        let mut effects = NumericHudEffects::new(&settings);
+        let mut inv = Inventory::default();
+        effects.observe(&inv, &BTreeMap::new(), 0., &rules, &stops, &settings);
+        effects.observe(&inv, &BTreeMap::new(), 0.2, &rules, &stops, &settings);
+        assert!((effects.panels[NumericPanel::Suit as usize].opacity() - 0.5).abs() < 0.001);
+        effects.observe(&inv, &BTreeMap::new(), 0.4, &rules, &stops, &settings);
+        assert_eq!(effects.panels[NumericPanel::Suit as usize].opacity(), 0.);
+        inv.armor = 15.;
+        effects.observe(&inv, &BTreeMap::new(), 0.5, &rules, &stops, &settings);
+        assert_eq!(effects.panels[NumericPanel::Suit as usize].opacity(), 1.);
+        inv.armor = 0.;
+        effects.observe(&inv, &BTreeMap::new(), 1., &rules, &stops, &settings);
+        inv.armor = 15.;
+        effects.observe(&inv, &BTreeMap::new(), 1.1, &rules, &stops, &settings);
+        effects.observe(&inv, &BTreeMap::new(), 1.4, &rules, &stops, &settings);
+        assert_eq!(effects.panels[NumericPanel::Suit as usize].opacity(), 1.);
+    }
+
+    #[test]
+    fn glow_capture_starts_at_the_delay_and_uses_fractional_additive_passes() {
+        let source = "event HealthIncreasedAbove20\n{\nAnimate HudHealth Blur 3 Linear 0 .1\nAnimate HudHealth Blur 0 Deaccel .1 2\n}";
+        let rules = animations(source).unwrap();
+        let settings = settings();
+        let mut effects = NumericHudEffects::new(&settings);
+        effects.start("HealthIncreasedAbove20", 0., &rules, &[], &settings);
+        effects.advance(0.);
+        effects.advance(0.05);
+        assert_eq!(
+            effects.panels[0].values[NumericProperty::Blur as usize][0],
+            1.5
+        );
+        effects.advance(0.1);
+        effects.advance(0.6);
+        assert_eq!(
+            effects.panels[0].values[NumericProperty::Blur as usize][0],
+            1.5
+        );
+        effects.advance(2.1);
+        assert!(effects.panels[0].glow().next().is_none());
+        effects.panels[0].values[NumericProperty::Blur as usize][0] = 2.25;
+        assert_eq!(
+            effects.panels[0].glow().collect::<Vec<_>>(),
+            vec![1., 1., 0.25]
+        );
+    }
+
+    #[test]
+    fn shooting_cancels_ammo_pickup_animation_without_spurious_weapon_changes() {
+        let source = "event AmmoIncreased\n{\nAnimate HudAmmo Blur 5 Linear 0 0\nAnimate HudAmmo Blur 0 Accel .01 1.5\n}\nevent AmmoDecreased\n{\nStopEvent AmmoIncreased 0\nAnimate HudAmmo Blur 7 Linear 0 0\nAnimate HudAmmo Blur 0 Deaccel .1 1.5\n}\nevent WeaponChanged\n{\nAnimate HudAmmo BgColor \"250 220 0 80\" Linear 0 .1\nAnimate HudAmmo BgColor BgColor Deaccel .1 1\n}";
+        let rules = animations(source).unwrap();
+        let stops = event_rules(source).unwrap();
+        let settings = settings();
+        let weapons = BTreeMap::from([
+            (
+                "weapon_pistol".into(),
+                Weapon {
+                    ammo_type: "Pistol".into(),
+                    magazine: 18,
+                    ..Default::default()
+                },
+            ),
+            (
+                "weapon_crowbar".into(),
+                Weapon {
+                    ammo_type: "None".into(),
+                    magazine: -1,
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let mut inv = Inventory::default();
+        inv.active.push_str("weapon_pistol");
+        inv.owned.insert("weapon_pistol".into(), 18);
+        inv.pistol_ammo = 36;
+        let mut effects = NumericHudEffects::new(&settings);
+        effects.observe(&inv, &weapons, 0., &rules, &stops, &settings);
+        effects.observe(&inv, &weapons, 0.1, &rules, &stops, &settings);
+        inv.owned.insert("weapon_pistol".into(), 17);
+        effects.observe(&inv, &weapons, 0.2, &rules, &stops, &settings);
+        assert_eq!(
+            effects.panels[2].values[NumericProperty::Blur as usize][0],
+            7.
+        );
+        assert!(!effects
+            .animations
+            .iter()
+            .any(|a| a.event == "AmmoIncreased"));
+        effects.advance(3.);
+        inv.active = "weapon_crowbar".into();
+        effects.observe(&inv, &weapons, 3.1, &rules, &stops, &settings);
+        inv.active = "weapon_pistol".into();
+        effects.observe(&inv, &weapons, 3.2, &rules, &stops, &settings);
+        assert!(!effects
+            .animations
+            .iter()
+            .any(|a| a.event == "WeaponChanged"));
+    }
+
+    #[test]
+    fn animation_subset_rejects_nonfinite_timings_and_extra_parameter_interpolators() {
+        let rules = animations("event Invalid\nAnimate HudSuit Alpha 0 Linear NaN .4\nAnimate HudSuit Alpha 0 Linear 0 inf\nAnimate HudSuit Alpha 0 Pulse 3 0 .4\nAnimate HudSuit Alpha 0 Linear 0 .4").unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].duration, 0.4);
+    }
+
+    #[test]
+    fn quickinfo_dims_after_one_second_and_brightens_after_activity() {
+        let mut state = QuickInfoState::default();
+        state.observe(100, 18, 18, 0.);
+        state.observe(100, 18, 18, 1.);
+        assert!(!state.dimmed);
+        state.observe(100, 18, 18, 1.1);
+        state.observe(100, 18, 18, 2.1);
+        assert!((state.alpha - 159.5).abs() < 0.001);
+        state.observe(100, 18, 18, 3.1);
+        assert_eq!(state.alpha, 64.);
+        state.observe(100, 17, 18, 3.2);
+        state.observe(100, 17, 18, 3.3);
+        assert!(!state.dimmed);
+        state.observe(100, 17, 18, 3.8);
+        assert_eq!(state.alpha, 255.);
+    }
+
+    #[test]
+    fn quickinfo_warns_at_twenty_five_health_and_quarter_of_clip() {
+        let mut state = QuickInfoState::default();
+        state.observe(26, 5, 18, 0.);
+        assert!(!state.warn_health && !state.warn_ammo);
+        state.observe(25, 4, 18, 0.1);
+        assert!(state.warn_health && state.warn_ammo);
+        assert_eq!(state.health_warning, 255.);
+        state.observe(100, 1, 1, 0.2);
+        assert!(!state.warn_health && !state.warn_ammo);
+        state.observe(100, -1, -1, 0.3);
+        assert!(!state.warn_ammo);
+    }
+
+    #[test]
+    fn installed_health_pulse_repeats_then_recovery_cancels_the_entire_chain() {
+        let source = "event HealthLow\n{\nAnimate HudHealth Blur 5 Linear 0 .1\nAnimate HudHealth Blur 3 Deaccel .1 .9\nRunEvent HealthPulse 1\n}\nevent HealthPulse\n{\nAnimate HudHealth Blur 5 Linear 0 .1\nAnimate HudHealth Blur 2 Deaccel .1 .8\nRunEvent HealthLoop .8\n}\nevent HealthLoop\n{\nRunEvent HealthPulse 0\n}\nevent HealthIncreasedAbove20\n{\nStopEvent HealthLoop 0\nStopEvent HealthPulse 0\nStopEvent HealthLow 0\nAnimate HudHealth Blur 3 Linear 0 .1\nAnimate HudHealth Blur 0 Deaccel .1 2\n}";
+        let rules = animations(source).unwrap();
+        let events = event_rules(source).unwrap();
+        let settings = settings();
+        let mut effects = NumericHudEffects::new(&settings);
+        let mut inv = Inventory::default();
+        inv.health = 15.;
+        effects.observe(&inv, &BTreeMap::new(), 0., &rules, &events, &settings);
+        assert_eq!(effects.posted.len(), 1);
+        assert_eq!(effects.posted[0].at, 1.);
+        effects.observe(&inv, &BTreeMap::new(), 0.99, &rules, &events, &settings);
+        assert!(!effects.animations.iter().any(|a| a.event == "HealthPulse"));
+        effects.observe(&inv, &BTreeMap::new(), 1., &rules, &events, &settings);
+        assert!(effects
+            .animations
+            .iter()
+            .any(|a| a.event == "HealthPulse" && a.start == 1.));
+        effects.observe(&inv, &BTreeMap::new(), 1.8, &rules, &events, &settings);
+        assert!(effects
+            .animations
+            .iter()
+            .any(|a| a.event == "HealthPulse" && a.start == 1.8));
+        assert_eq!(effects.posted.len(), 1);
+        // A stalled frame starts one new pulse now; Source does not replay missed loops.
+        effects.observe(&inv, &BTreeMap::new(), 100., &rules, &events, &settings);
+        assert!(effects
+            .animations
+            .iter()
+            .any(|a| a.event == "HealthPulse" && a.start == 100.));
+        assert_eq!(effects.posted.len(), 1);
+        assert!(effects.animations.len() <= 4);
+        inv.health = 20.;
+        effects.observe(&inv, &BTreeMap::new(), 100.1, &rules, &events, &settings);
+        assert!(effects.posted.is_empty());
+        assert!(!effects
+            .animations
+            .iter()
+            .any(|a| matches!(a.event.as_str(), "HealthLow" | "HealthPulse" | "HealthLoop")));
+        effects.observe(&inv, &BTreeMap::new(), 200., &rules, &events, &settings);
+        assert!(effects.posted.is_empty() && effects.animations.is_empty());
+    }
+
+    #[test]
+    fn zero_delay_event_cycles_are_bounded_by_sources_per_frame_guard() {
+        let source = "event A\nRunEvent B 0\nevent B\nRunEvent A 0";
+        let rules = animations(source).unwrap();
+        let events = event_rules(source).unwrap();
+        let settings = settings();
+        let mut effects = NumericHudEffects::new(&settings);
+        effects.start("A", 0., &rules, &events, &settings);
+        effects.posted_events(0., &rules, &events, &settings);
+        assert!(effects.posted.is_empty());
+    }
+
+    #[test]
+    fn player_death_stops_a_running_health_pulse() {
+        let source = "event HealthLow\nRunEvent HealthPulse 1\nevent HealthPulse\nRunEvent HealthLoop .8\nevent HealthLoop\nRunEvent HealthPulse 0\nevent HudPlayerDeath\nStopEvent HealthLoop 0\nStopEvent HealthPulse 0";
+        let rules = animations(source).unwrap();
+        let events = event_rules(source).unwrap();
+        let settings = settings();
+        let mut effects = NumericHudEffects::new(&settings);
+        let mut inv = Inventory::default();
+        inv.health = 15.;
+        effects.observe(&inv, &BTreeMap::new(), 0., &rules, &events, &settings);
+        effects.observe(&inv, &BTreeMap::new(), 1., &rules, &events, &settings);
+        assert_eq!(effects.posted[0].target, "HealthLoop");
+        inv.health = 0.;
+        effects.observe(&inv, &BTreeMap::new(), 1.2, &rules, &events, &settings);
+        assert!(effects.posted.is_empty());
+    }
+
+    #[test]
+    fn quickinfo_audio_emits_once_per_warning_latch_and_drain_removes_events() {
+        let mut state = QuickInfoState::default();
+        state.observe(26, 5, 18, 0.);
+        assert!(state.drain_sounds().is_empty());
+        state.observe(25, 4, 18, 0.1);
+        assert_eq!(
+            state.drain_sounds(),
+            ["HUDQuickInfo.LowHealth", "HUDQuickInfo.LowAmmo"]
+        );
+        assert!(state.drain_sounds().is_empty());
+        state.observe(24, 3, 18, 0.2);
+        state.observe(10, 0, 18, 1.2);
+        assert!(state.drain_sounds().is_empty());
+        state.observe(26, 5, 18, 1.3);
+        state.observe(25, 4, 18, 1.4);
+        assert_eq!(
+            state.drain_sounds(),
+            ["HUDQuickInfo.LowHealth", "HUDQuickInfo.LowAmmo"]
+        );
+    }
+
+    #[test]
+    fn changing_weapons_with_the_same_clip_count_does_not_recheck_quickinfo_warning() {
+        let mut state = QuickInfoState::default();
+        state.observe(100, 5, 18, 0.);
+        state.observe(100, 5, 45, 0.1);
+        // Retail compares Clip1 to m_lastAmmo before computing the new maximum's fraction.
+        assert!(!state.warn_ammo && state.drain_sounds().is_empty());
+        state.observe(100, 4, 45, 0.2);
+        assert_eq!(state.drain_sounds(), ["HUDQuickInfo.LowAmmo"]);
+    }
+    #[test]
+    fn desktop_resources_keep_nested_conditionals_and_resolution_font_ranges() {
+        let resource = keyvalues::parse_resource(br#"Scheme { Fonts { Numbers { "1" { name HalfLife2 tall 70 [$DECK] tall 64 } } Text { "1" { tall 8 yres "1 599" } "2" { tall 10 yres "600 767" } } } Hud [$DECK] { wide 200 } Hud [!$DECK] { wide 112 } }"#).unwrap();
+        let scheme = &resource[0];
+        assert_eq!(
+            scheme.get("Hud").unwrap().get("wide").and_then(Entry::text),
+            Some("112")
+        );
+        let fonts = scheme.get("Fonts").unwrap();
+        assert_eq!(
+            fonts.get("Numbers").unwrap().children()[0]
+                .get("tall")
+                .and_then(Entry::text),
+            Some("64")
+        );
+        assert_eq!(fonts.get("Text").unwrap().children().len(), 2);
+    }
+    #[test]
+    fn utf16_localization_and_animation_conditions_are_not_corrupted() {
+        let bytes = [0xff, 0xfe, b'H', 0, b'L', 0, b'2', 0];
+        assert_eq!(keyvalues::decode_text(&bytes).unwrap(), "HL2");
+        let rules = animations("event OpenWeaponSelectionMenu\n{\nAnimate HudWeaponSelection Alpha 128 Linear 0 0.1 [!$DECK]\nAnimate HudWeaponSelection Alpha 192 Linear 0 0.1 [$DECK]\n}\nevent DeckOnly [$DECK]\n{\nAnimate HudWeaponSelection Alpha 192 Linear 0 0.1\n}").unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].target, "128");
+        assert!(keyvalues::parse_resource(b"Scheme { x 1").is_err());
+    }
+}
