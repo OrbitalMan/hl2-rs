@@ -16,6 +16,8 @@ cargo fmt --all --check
 
 Test renderer and input changes using the packaged executable launched by launch.cmd. Reports and captures go in ignored artifacts/. Record the tested map, camera or reproduction steps, installed Steam build, and executable fingerprint from bin/build-info.json. An installed-game comparison is valuable; distinguish observed behavior from SDK references and inference.
 
+GitHub Actions runs formatting, strict workspace Clippy and unit tests on Windows for main pushes and pull requests. Those checks require no installed game files. They do not replace packaged play tests against an owned installation.
+
 ## Code and distribution boundaries
 
 - Put file-format readers in source-assets, shared simulation and mod contracts in modkit-core, and rendering/input/host logic in hl2-runtime.
