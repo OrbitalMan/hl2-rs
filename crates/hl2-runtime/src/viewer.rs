@@ -376,6 +376,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     let mut physics = Physics::new(&world);
     let mut scene = Scene::new(&world);
     let mut materials = crate::rendering::Materials::new(&world)?;
+    let (mut sky_background, mut sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
 
     let mut audio = crate::sounds::Audio::new(&vfs);
     audio.ambient(&vfs, &world).await?;
@@ -414,6 +415,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     let mut animation_events = Vec::new();
     let mut previous_animation: Option<(String, String, f64, f32)> = None;
     let mut debug_hud = false;
+    let mut sky_2d_frames = 0u64;
     let mut sky_3d_frames = 0u64;
     let mut sky_visibility_error: Option<String> = None;
     let input_trace = std::env::var_os("HL2_RS_INPUT_TRACE").is_some();
@@ -901,6 +903,10 @@ pub async fn run(mut o: Options) -> Result<()> {
                     physics = Physics::new(&world);
                     scene = Scene::with_campaign(&world, false);
                     materials = crate::rendering::Materials::new(&world)?;
+                    (sky_background, sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
+                    sky_2d_frames = 0;
+                    sky_3d_frames = 0;
+                    sky_visibility_error = None;
                     audio = crate::sounds::Audio::new(&vfs);
                     audio.ambient(&vfs, &world).await?;
                     o = next;
@@ -951,7 +957,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             }
         }
         clear_background(Color::new(0.32, 0.42, 0.53, 1.));
-        set_camera(&Camera3D {
+        let world_camera = Camera3D {
             position: v3(position),
             target: v3(position + direction),
             up: vec3(0., 0., 1.),
@@ -959,7 +965,8 @@ pub async fn run(mut o: Options) -> Result<()> {
             z_near: 1.,
             z_far: 32000.,
             ..Default::default()
-        });
+        };
+        set_camera(&world_camera);
         let mut animated_vertices = 0usize;
         for (id, meshes, _) in &mut dynamic {
             let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(*id))
@@ -986,21 +993,24 @@ pub async fn run(mut o: Options) -> Result<()> {
         }
         // Opaque geometry first; transparent world and entity surfaces share a back-to-front pass.
         let mut draws = Vec::new();
-        let sky_3d_visible = if world.background_camera.is_some() {
-            match bsp.sky_3d_visible(position) {
-                Ok(visible) => visible,
-                Err(error) => {
-                    if sky_visibility_error.is_none() {
-                        let message = format!("3D sky visibility: {error:#}");
-                        eprintln!("{message}");
-                        sky_visibility_error = Some(message);
-                    }
-                    false
+        let sky_visibility = match bsp.sky_visibility(position) {
+            Ok(visibility) => visibility,
+            Err(error) => {
+                if sky_visibility_error.is_none() {
+                    let message = format!("Sky visibility: {error:#}");
+                    eprintln!("{message}");
+                    sky_visibility_error = Some(message);
                 }
+                source_assets::bsp::SkyVisibility::default()
             }
-        } else {
-            false
         };
+        let sky_2d_visible = sky_visibility.background_visible() && sky_background.is_some();
+        let sky_3d_visible = sky_visibility.sky_3d && world.background_camera.is_some();
+        if let Some(sky) = sky_background.as_mut().filter(|_| sky_2d_visible) {
+            sky.draw(&world_camera, v3(direction));
+            sky_2d_frames += 1;
+            set_camera(&world_camera);
+        }
         if let Some(sky) = world.background_camera.as_ref().filter(|_| sky_3d_visible) {
             sky_3d_frames += 1;
             let origin = position / sky.scale + sky.origin;
@@ -1058,15 +1068,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                 gl.flush();
                 gl.quad_context.clear(None, Some(1.), None);
             }
-            set_camera(&Camera3D {
-                position: v3(position),
-                target: v3(position + direction),
-                up: vec3(0., 0., 1.),
-                fovy: 2. * (75f32.to_radians().mul_add(0.5, 0.).tan() / (4. / 3.)).atan(),
-                z_near: 1.,
-                z_far: 32000.,
-                ..Default::default()
-            });
+            set_camera(&world_camera);
         }
         for batch in &batches {
             if batch.background {
@@ -1314,7 +1316,12 @@ pub async fn run(mut o: Options) -> Result<()> {
             if let Some(path) = &o.capture {
                 capture(path)?;
             }
-            let report = serde_json::json!({"map":o.map,"time_scale":o.time_scale,"frames":frame,"triangles":triangles,"textures_loaded":loaded,"materials":world.surfaces.len(),"models":model_report,"animated_vertices":animated_vertices,"simulation":scene.diagnostics,"inventory":inventory,"colliders":physics.colliders.len(),"rigid_bodies":physics.bodies.len(),"skipped_colliders":physics.skipped,"player":player,"replay":replay,"input_events":input_events,"animation_events":animation_events,"rig_warnings":world.rigs.iter().filter(|(_,r)| !r.warnings.is_empty()).map(|(n,r)|(n.clone(),r.warnings.clone())).collect::<std::collections::BTreeMap<_,_>>(),"impact_decals":impacts.created,"unclippable_impacts":impacts.unclippable,"background_surfaces":batches.iter().filter(|b| b.background).count(),"background_entities":world.background_entities.len(),"sky_3d_visible":sky_3d_visible,"sky_3d_frames":sky_3d_frames,"sky_visibility_error":sky_visibility_error,"audio_variants":audio.variants_played,"audio_played":audio.played,"audio_errors":audio.errors,"lightmap_pages":world.lightmaps.len(),"texture_errors":missing,"position":position.to_array(),"yaw":yaw,"pitch":pitch,"mod":sandbox.name(),"mod_blocks":sandbox.blocks.len()+placed.len(),"smoke_start":smoke_start.map(|p|p.to_array()),"smoke_end":smoke_end.map(|p|p.to_array()),"warnings":world.warnings});
+            let mut report = serde_json::json!({"map":o.map,"time_scale":o.time_scale,"frames":frame,"triangles":triangles,"textures_loaded":loaded,"materials":world.surfaces.len(),"models":model_report,"animated_vertices":animated_vertices,"simulation":scene.diagnostics,"inventory":inventory,"colliders":physics.colliders.len(),"rigid_bodies":physics.bodies.len(),"skipped_colliders":physics.skipped,"player":player,"replay":replay,"input_events":input_events,"animation_events":animation_events,"rig_warnings":world.rigs.iter().filter(|(_,r)| !r.warnings.is_empty()).map(|(n,r)|(n.clone(),r.warnings.clone())).collect::<std::collections::BTreeMap<_,_>>(),"impact_decals":impacts.created,"unclippable_impacts":impacts.unclippable,"background_surfaces":batches.iter().filter(|b| b.background).count(),"background_entities":world.background_entities.len(),"sky_3d_visible":sky_3d_visible,"sky_3d_frames":sky_3d_frames,"sky_visibility_error":sky_visibility_error,"audio_variants":audio.variants_played,"audio_played":audio.played,"audio_errors":audio.errors,"lightmap_pages":world.lightmaps.len(),"texture_errors":missing,"position":position.to_array(),"yaw":yaw,"pitch":pitch,"mod":sandbox.name(),"mod_blocks":sandbox.blocks.len()+placed.len(),"smoke_start":smoke_start.map(|p|p.to_array()),"smoke_end":smoke_end.map(|p|p.to_array()),"warnings":world.warnings});
+            report["sky_2d"] = serde_json::json!(sky_background.as_ref().map(|sky| sky.report()));
+            report["sky_asset_error"] = serde_json::json!(sky_asset_error);
+            report["sky_visibility"] = serde_json::to_value(sky_visibility)?;
+            report["sky_2d_visible"] = serde_json::json!(sky_2d_visible);
+            report["sky_2d_frames"] = serde_json::json!(sky_2d_frames);
             write(
                 Path::new("artifacts/runtime-report.json"),
                 &serde_json::to_vec_pretty(&report)?,

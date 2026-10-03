@@ -3,7 +3,7 @@ use glam::{Quat, Vec3};
 use modkit_core::{movement::CollisionWorld, Brush, Surface, Trace, World};
 use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 #[derive(Clone, Copy, Debug)]
 pub struct RayHit {
     pub entity: usize,
@@ -11,6 +11,9 @@ pub struct RayHit {
     pub normal: Vec3,
 }
 const SCALE: f32 = 1. / 39.37;
+// Retail CGameMovement::PlayerSolidMask(true): NPC-only clip volumes do not
+// block players. Keep their colliders available for other query categories.
+const PLAYER_BRUSH_MASK: u32 = 0x1400b;
 fn enabled_filter() -> QueryFilter<'static> {
     static ENABLED: fn(ColliderHandle, &Collider) -> bool = |_, c| c.is_enabled();
     QueryFilter::default().exclude_sensors().predicate(&ENABLED)
@@ -101,6 +104,7 @@ pub struct Physics {
     multibody: MultibodyJointSet,
     ccd: CCDSolver,
     entity_colliders: BTreeMap<usize, Vec<ColliderHandle>>,
+    world_brush_contents: HashMap<ColliderHandle, u32>,
     pub dynamic: BTreeMap<usize, RigidBodyHandle>,
     pub skipped: usize,
 }
@@ -109,8 +113,10 @@ impl Physics {
         let mut p = Self::default();
         for brush in &world.brushes {
             if let Some(shape) = brush_shape(brush) {
-                p.colliders
+                let collider = p
+                    .colliders
                     .insert(ColliderBuilder::new(shape).friction(0.8));
+                p.world_brush_contents.insert(collider, brush.contents);
             } else {
                 p.skipped += 1;
             }
@@ -346,6 +352,16 @@ impl CollisionWorld for Physics {
         let center = (maxs + mins) * 0.5;
         let delta = end - start;
         let stationary = delta.length_squared() < 0.000001;
+        let player_contents_filter = |handle: ColliderHandle, collider: &Collider| {
+            collider.is_enabled()
+                && self
+                    .world_brush_contents
+                    .get(&handle)
+                    .is_none_or(|contents| contents & PLAYER_BRUSH_MASK != 0)
+        };
+        let filter = QueryFilter::default()
+            .exclude_sensors()
+            .predicate(&player_contents_filter);
         // A standing hull merely touching the floor must not prevent uncrouching.
         // Shrink a stationary overlap probe by half the Source collision epsilon.
         let shape = Cuboid::new(vector(if stationary {
@@ -361,13 +377,7 @@ impl CollisionWorld for Physics {
         if stationary {
             let start_solid = self
                 .query
-                .intersection_with_shape(
-                    &self.bodies,
-                    &self.colliders,
-                    &position,
-                    &shape,
-                    enabled_filter(),
-                )
+                .intersection_with_shape(&self.bodies, &self.colliders, &position, &shape, filter)
                 .is_some();
             return Trace {
                 fraction: if start_solid { 0. } else { 1. },
@@ -388,7 +398,7 @@ impl CollisionWorld for Physics {
             &vector(delta),
             &shape,
             options,
-            enabled_filter(),
+            filter,
         ) {
             let n = hit.normal1;
             Trace {
@@ -409,6 +419,59 @@ impl CollisionWorld for Physics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn clip_box(contents: u32) -> World {
+        let mut world = World::default();
+        world.brushes.push(Brush {
+            contents,
+            planes: [
+                (Vec3::X, 20.),
+                (-Vec3::X, -10.),
+                (Vec3::Y, 8.),
+                (-Vec3::Y, 8.),
+                (Vec3::Z, 100.),
+                (-Vec3::Z, 0.),
+            ]
+            .into_iter()
+            .map(|(normal, distance)| modkit_core::Plane { normal, distance })
+            .collect(),
+        });
+        world
+    }
+    #[test]
+    fn npc_only_clip_does_not_block_player_sweeps_or_overlap_queries() {
+        // The installed station uses DETAIL|MONSTERCLIP boxes around benches.
+        let physics = Physics::new(&clip_box(0x8020000));
+        let mins = Vec3::new(-1., -1., 0.);
+        let maxs = Vec3::new(1., 1., 2.);
+        let sweep =
+            physics.trace_hull(Vec3::new(-5., 0., 40.), Vec3::new(35., 0., 40.), mins, maxs);
+        assert_eq!(sweep.fraction, 1.);
+        assert!(!sweep.start_solid);
+        let inside = Vec3::new(15., 0., 40.);
+        assert!(!physics.trace_hull(inside, inside, mins, maxs).start_solid);
+        // This change is limited to player queries; existing weapon traces and
+        // retained world brush/collider data keep their prior behavior.
+        assert!(physics
+            .impact_ray(Vec3::new(-5., 0., 40.), Vec3::X, 40.)
+            .is_some());
+        assert_eq!(physics.colliders.len(), 1);
+    }
+    #[test]
+    fn player_clip_solid_and_mixed_monster_solid_still_block_players() {
+        let mins = Vec3::new(-1., -1., 0.);
+        let maxs = Vec3::new(1., 1., 2.);
+        for contents in [1, 0x10000, 1 | 0x20000] {
+            let physics = Physics::new(&clip_box(contents));
+            let sweep =
+                physics.trace_hull(Vec3::new(-5., 0., 40.), Vec3::new(35., 0., 40.), mins, maxs);
+            assert!(sweep.fraction < 1., "contents {contents:#x}");
+            let inside = Vec3::new(15., 0., 40.);
+            assert!(
+                physics.trace_hull(inside, inside, mins, maxs).start_solid,
+                "contents {contents:#x}"
+            );
+        }
+    }
     #[test]
     fn melee_box_sweep_reaches_a_nearby_offset_target_but_not_outside_its_width() {
         let mut physics = Physics::default();

@@ -1,16 +1,16 @@
 # Local validation — 2026-10-03
 
-This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is D6E5D5824C721A452236D1F5C1664C0BCE08EDDFC7B8A26266CBFB6E8D71163B, built at 2026-10-03T04:29:04.9089857Z. bin/build-info.json is authoritative after a later rebuild.
+This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is B8B94759463E387362E6935174DE7CE07608E8218AAAB1956F243E2373622F31, built at 2026-10-03T09:26:51.6771832Z. bin/build-info.json is authoritative after a later rebuild.
 
 ## Automated checks
 
 | Check | Result |
 | --- | --- |
-| cargo test --workspace --locked | 109 tests passed: 57 runtime, 18 common simulation/animation, 34 asset-reader tests. |
+| cargo test --workspace --locked | 118 tests passed: 62 runtime, 21 common simulation/animation, 35 asset-reader tests. |
 | cargo clippy --workspace --all-targets --locked -- -D warnings | Passed; two existing compiler warnings remain inside the vendored miniquad dependency. |
 | cargo fmt --all --check and git diff --check | Passed. |
 | Release packaging | scripts/build.ps1 compiled/copied bin/hl2-rs.exe used by launch.cmd and recorded its fingerprint. |
-| Installed maps | 78/79 parsed. Installed d2_coast_02.bsp is zero bytes and is correctly rejected. artifacts/verification-iteration5.json records the result. Parsing does not validate campaign gameplay. |
+| Installed maps | 78/79 parsed. Installed d2_coast_02.bsp is zero bytes and is correctly rejected. artifacts/verification-iteration9.json records the result. Parsing does not validate campaign gameplay. |
 
 Regression tests cover Source resource conditions and localization, font alternatives, numeric HUD interpolation/health pulses/cancellation, QuickInfo thresholds/audio latches, wheel/slot order, reload transfer/interruption, primary cadence/spread, shotgun primary/secondary pellets/pump/deadlines/delayed input, health/battery pickup gates and sounds, bounded MDL sound events and melee ray/hull/facing refinement. The melee geometry remains Rapier-derived, not Source collision equivalence.
 
@@ -91,6 +91,20 @@ NPC navigation/schedules/combat, player damage/death, remaining weapons and othe
 Trainstation still reports unsupported inputs including SetPoliceGoal, SetParentAttachment, act-busy queues, tone-map controls, template NPC spawning and logic_choreographed_scene.Start. These prevent faithful campaign progression even though the map loads, renders and the test weapons function. No FAL or crossover was used. A user-authorized Codex continuation is configured for 09:26 Canary time on 2026-10-03, then every five hours and one minute; availability and account limits still determine whether a scheduled run can execute.
 
 
-## LDR sky loader foundation
+## Earlier LDR sky loader foundation
 
-Eight new synthetic tests verify all six actual LDR material/texture references, transforms, bounded patch includes, missing/malformed assets and static 2D VTF limits. The loader is exported by source-assets but is not integrated into rendering yet. The final D6E5D582 package rebuilt all source and completed a 20-frame launch.cmd smoke run with 671/671 textures and no model/texture errors; unchanged weapon logic was exercised by the preceding BC12E81B package's three iteration8 fixtures. No visible 2D sky support is claimed.
+Eight synthetic tests verify all six actual LDR material/texture references, transforms, bounded patch includes, missing/malformed assets and static 2D VTF limits. The earlier D6E5D582 package contained this loader without rendering integration and completed a 20-frame smoke run. The current iteration integrates it as described below.
+
+## LDR sky and bench iteration
+
+The A598E2C8 sky package completed nine 30-frame camera runs: four cardinal views, up/down, a translated up view, the previous hidden-wall viewpoint and the hall. It loaded all six actual LDR material/texture references with no sky asset, visibility, texture or model errors. Eight sky-visible views recorded 30 background frames each; the hidden-wall view recorded zero 2D and 3D frames. Captures remain in artifacts/iteration9-sky-*. Cloud orientation was visually compared against original-engine captures at matched cardinal viewpoints; the near-vertical views differ slightly in pitch because Rust clamps below 89 degrees. Full native shaders/fog/polygon masking are not reproduced.
+
+The final B8B94759 package repeated the sky preview and all three weapon/HUD fixtures. All 27 private report assertions passed, including confirmation/held-input suppression, reload/secondary behavior, clipped impacts and audio-error checks. Evidence: artifacts/iteration9-{weapons,shotgun,selection}-report.json and corresponding assertions. Prior iteration8 results above remain historical evidence.
+
+An actual packaged drop onto the station bench at x=-2206,y=-1669 previously settled at feet z=64.03125 on its oversized NPC-only blocker. The corrected player filter settles at z=36.59562 on the retained model geometry. The private installed-map sweep independently found z=36.60043, and a bench-gap overlap changed from blocked to clear. Both policies retain the clip brushes/colliders; synthetic tests ensure SOLID, PLAYERCLIP and mixed solid/monster-clip still block players. Evidence: artifacts/iteration9-bench-{before,after}-report.json and private bench-runtime-trace.json. Render-derived model collision remains approximate; native PHY equivalence is unfinished.
+
+Three new movement tests cover crouched jump boost using independent maximum speed, full airborne crouch acceleration, signed backward overspeed and three released chain hops with gravity/landing-friction ordering. These tests use controlled worlds and reviewed retail methods. No complete original-game movement trace over campaign geometry was recorded.
+
+The owned original game confirmed the reported three-shell secondary sequence as 3→1→0, with reserve unchanged: a double shot followed by a one-shell primary fallback. Accepted screenshots and rejected setup trials are documented in the separate original-oracle/three-shell-check.md. All six stock configuration entries still matched afterward, and the original process was closed.
+
+The private Database Method audit and exact-byte catalogue are documented in research.md. Full export accounting passes; native/Rust semantic parity is not inferred from it. No database, pseudocode, decompiler tool or game-derived asset was added to this repository.

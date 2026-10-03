@@ -17,6 +17,19 @@ pub struct Bsp {
     lightmaps: Vec<modkit_core::Lightmap>,
     face_lighting: Vec<Option<crate::lighting::FaceLight>>,
 }
+
+/// Independent sky eligibility bits in the camera's containing BSP leaf.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct SkyVisibility {
+    pub sky_3d: bool,
+    pub sky_2d: bool,
+}
+impl SkyVisibility {
+    /// A 3D sky also needs the distant 2D background behind its miniature geometry.
+    pub fn background_visible(self) -> bool {
+        self.sky_3d || self.sky_2d
+    }
+}
 impl Bsp {
     pub fn parse(data: &[u8]) -> Result<Self> {
         if bytes(data, 0, 4)? != b"VBSP" {
@@ -77,14 +90,21 @@ impl Bsp {
     pub fn lump(&self, id: usize) -> &[u8] {
         &self.lumps[id]
     }
-    /// Whether the camera's containing leaf has 3D sky in its PVS (LEAF_FLAGS_SKY).
-    /// A valid leaf without that bit returns false, including leaves with only 2D sky.
-    /// Missing/malformed visibility tables or a non-finite point return an error.
-    pub fn sky_3d_visible(&self, point: Vec3) -> Result<bool> {
+    /// Query separate LEAF_FLAGS_SKY (3D) and LEAF_FLAGS_SKY2D eligibility.
+    /// Missing/malformed node/leaf tables or a non-finite point return an error.
+    pub fn sky_visibility(&self, point: Vec3) -> Result<SkyVisibility> {
         let leaf = crate::visibility::leaf(&self.lumps, self.lump_versions[10], point)?;
         // dleaf_t / dleaf_version_0_t pack area:9 and flags:7 into the word at +6.
         let flags = u16le(leaf, 6)? >> 9;
-        Ok(flags & 0x01 != 0)
+        Ok(SkyVisibility {
+            sky_3d: flags & 0x01 != 0,
+            sky_2d: flags & 0x04 != 0,
+        })
+    }
+    /// Whether the current leaf permits miniature 3D sky scenery.
+    /// A leaf with only 2D sky must not enable background models.
+    pub fn sky_3d_visible(&self, point: Vec3) -> Result<bool> {
+        Ok(self.sky_visibility(point)?.sky_3d)
     }
     pub fn world(&self, name: &str) -> Result<World> {
         let mut world = self.model_world(name, 0)?;
@@ -528,6 +548,40 @@ mod tests {
             assert!(bsp.sky_3d_visible(Vec3::X).unwrap());
             assert!(bsp.sky_3d_visible(Vec3::ZERO).unwrap());
             assert!(!bsp.sky_3d_visible(-Vec3::X).unwrap());
+            assert_eq!(
+                bsp.sky_visibility(Vec3::X).unwrap(),
+                SkyVisibility {
+                    sky_3d: true,
+                    sky_2d: false
+                }
+            );
+            assert_eq!(
+                bsp.sky_visibility(-Vec3::X).unwrap(),
+                SkyVisibility {
+                    sky_3d: false,
+                    sky_2d: true
+                }
+            );
+        }
+    }
+    #[test]
+    fn sky_visibility_separates_neither_2d_3d_and_both_flags() {
+        for version in [0, 1] {
+            let mut bsp = sky_test_bsp(version);
+            for (flags, sky_3d, sky_2d) in [
+                (0, false, false),
+                (1, true, false),
+                (4, false, true),
+                (5, true, true),
+            ] {
+                // All area bits and unrelated sky-rad bits must not alter eligibility.
+                let packed = 511u16 | ((flags | 2) << 9);
+                bsp.lumps[10][6..8].copy_from_slice(&packed.to_le_bytes());
+                let visibility = bsp.sky_visibility(Vec3::X).unwrap();
+                assert_eq!(visibility, SkyVisibility { sky_3d, sky_2d });
+                assert_eq!(visibility.background_visible(), sky_3d || sky_2d);
+                assert_eq!(bsp.sky_3d_visible(Vec3::X).unwrap(), sky_3d);
+            }
         }
     }
     #[test]
@@ -535,6 +589,8 @@ mod tests {
         let mut bsp = sky_test_bsp(1);
         assert!(bsp.sky_3d_visible(Vec3::splat(f32::NAN)).is_err());
         assert!(bsp.sky_3d_visible(Vec3::splat(f32::INFINITY)).is_err());
+        assert!(bsp.sky_visibility(Vec3::splat(f32::NAN)).is_err());
+        assert!(bsp.sky_visibility(Vec3::splat(f32::INFINITY)).is_err());
         bsp.lumps[5][4..8].copy_from_slice(&0i32.to_le_bytes());
         assert!(bsp.sky_3d_visible(Vec3::X).is_err());
         bsp.lumps[5][4..8].copy_from_slice(&(-1i32).to_le_bytes());

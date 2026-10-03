@@ -7,6 +7,7 @@ mod playback;
 mod rendering;
 mod sandbox;
 mod selection;
+mod sky;
 mod sounds;
 mod viewer;
 use anyhow::{bail, Context, Result};

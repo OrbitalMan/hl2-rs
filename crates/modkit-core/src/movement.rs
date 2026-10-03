@@ -80,8 +80,10 @@ impl Player {
         let forward_move = input.forward / input_length;
         let side_move = input.side / input_length;
         let wish = forward * forward_move + right * side_move;
-        let speed = if self.crouched {
-            190. / 3.
+        let max_speed = if self.crouched {
+            // Settled duck keeps normal maxspeed; the command crop is separate.
+            // Full suit/sprint/walk transition gating remains outside this model.
+            190.
         } else if input.sprint {
             320.
         } else if input.slow {
@@ -89,7 +91,15 @@ impl Player {
         } else {
             190.
         };
-        let wishspeed = wish.length().min(1.) * speed;
+        // HandleDuckingSpeedCrop scales command components only while already
+        // ducked on ground. It does not scale m_flMaxSpeed, and air ducking has
+        // the full command speed for AirAccelerate (including strafe input).
+        let command_speed = if self.crouched && self.grounded {
+            max_speed * (1. / 3.)
+        } else {
+            max_speed
+        };
+        let wishspeed = wish.length().min(1.) * command_speed;
         let wishdir = wish.normalize_or_zero();
         let jumping = input.jump && !self.jump_held && self.grounded;
         self.jump_held = input.jump;
@@ -105,8 +115,8 @@ impl Player {
             } else {
                 0.5
             };
-            let addition = (forward_move.abs() * speed * boost)
-                .min(speed * (1. + boost) - self.velocity.truncate().length());
+            let addition = (forward_move.abs() * command_speed * boost)
+                .min(max_speed * (1. + boost) - self.velocity.truncate().length());
             // Retail permits a negative addition when already above the boost
             // limit. Its sign only flips for a negative forward command.
             self.velocity += forward
@@ -320,6 +330,133 @@ mod tests {
             // Native caps to190*1.5 even with no forward input: the signed
             // addition can be negative and zero input does not erase it.
             assert!((p.velocity.x - 285.).abs() < 0.0001);
+        }
+    }
+    #[test]
+    fn grounded_duck_jump_crops_addition_but_preserves_normal_speed_cap() {
+        let w = floor();
+        for (speed, forward, expected) in [
+            (180., 1., 180. + (190. / 3.) * 0.1),
+            (400., 1., 209.),
+            (-400., 0., -591.),
+        ] {
+            let mut p = Player::new(Vec3::Z * 64.05);
+            p.step(
+                Input {
+                    crouch: true,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            p.velocity.x = speed;
+            p.step(
+                Input {
+                    forward,
+                    jump: true,
+                    crouch: true,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            // Retail uses abs(cropped forwardmove * .1) for the addition but
+            // maxspeed190 *1.1 for its cap. Neutral backward overspeed therefore
+            // retains the signed -191 addition, rather than a crouch-speed cap.
+            assert!(
+                (p.velocity.x - expected).abs() < 0.0001,
+                "{speed} -> {}",
+                p.velocity.x
+            );
+            assert!((p.velocity.z - 151.).abs() < 0.0001);
+            assert!(!p.grounded);
+        }
+    }
+    #[test]
+    fn airborne_duck_matches_standing_air_acceleration_without_ground_crop() {
+        let w = World::default();
+        for (vertical, expected) in [(144.5, 7.125), (144.6, 28.5)] {
+            for crouch in [false, true] {
+                let mut p = Player::new(Vec3::Z * 1064.);
+                p.velocity.z = vertical;
+                p.step(
+                    Input {
+                        crouch,
+                        ..Default::default()
+                    },
+                    &w,
+                    TICK,
+                );
+                p.step(
+                    Input {
+                        side: 1.,
+                        crouch,
+                        ..Default::default()
+                    },
+                    &w,
+                    TICK,
+                );
+                // Air duck has wishspeed190; previous categorization provides
+                // friction.25 or1, giving gains7.125 or28.5 along the strafe axis.
+                assert!((p.velocity.y + expected).abs() < 0.0001);
+                assert!(p.velocity.x.abs() < 0.0001);
+                assert!(!p.grounded);
+            }
+        }
+    }
+    #[test]
+    fn released_jump_can_chain_landings_without_a_ground_friction_tick() {
+        let w = floor();
+        for crouch in [false, true] {
+            let mut p = Player::new(Vec3::Z * 64.05);
+            p.step(
+                Input {
+                    crouch,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            p.velocity.x = 200.;
+            for _ in 0..3 {
+                assert!(p.grounded);
+                let start = p.feet.z;
+                p.step(
+                    Input {
+                        jump: true,
+                        crouch,
+                        ..Default::default()
+                    },
+                    &w,
+                    TICK,
+                );
+                let (displacement, vertical) = if crouch {
+                    (2.3325, 151.)
+                } else {
+                    (2.265, 146.5)
+                };
+                assert!((p.feet.z - start - displacement).abs() < 0.0001);
+                assert!((p.velocity.z - vertical).abs() < 0.0001);
+                assert!((p.velocity.x - 200.).abs() < 0.0001);
+                // Release in air, then jump on the first already-grounded tick.
+                // Landing is categorized after AirMove; no friction runs until
+                // a later grounded tick, and CheckJumpButton precedes friction.
+                for _ in 0..100 {
+                    if p.grounded {
+                        break;
+                    }
+                    p.step(
+                        Input {
+                            crouch,
+                            ..Default::default()
+                        },
+                        &w,
+                        TICK,
+                    );
+                }
+                assert!(p.grounded);
+                assert!((p.velocity.x - 200.).abs() < 0.0001);
+            }
         }
     }
     #[test]
