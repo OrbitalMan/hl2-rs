@@ -1,12 +1,12 @@
 # Local validation — 2026-10-03
 
-This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is BC12E81B9EF3D2C9C1D19E8923800F0B9243842D82FEE15747D42DDC29D1977E, built at 2026-10-03T04:16:22.3856044Z. bin/build-info.json is authoritative after a later rebuild.
+This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is D6E5D5824C721A452236D1F5C1664C0BCE08EDDFC7B8A26266CBFB6E8D71163B, built at 2026-10-03T04:29:04.9089857Z. bin/build-info.json is authoritative after a later rebuild.
 
 ## Automated checks
 
 | Check | Result |
 | --- | --- |
-| cargo test --workspace --locked | 101 tests passed: 57 runtime, 18 common simulation/animation, 26 asset-reader tests. |
+| cargo test --workspace --locked | 109 tests passed: 57 runtime, 18 common simulation/animation, 34 asset-reader tests. |
 | cargo clippy --workspace --all-targets --locked -- -D warnings | Passed; two existing compiler warnings remain inside the vendored miniquad dependency. |
 | cargo fmt --all --check and git diff --check | Passed. |
 | Release packaging | scripts/build.ps1 compiled/copied bin/hl2-rs.exe used by launch.cmd and recorded its fingerprint. |
@@ -20,7 +20,7 @@ The first published GitHub Actions run passed formatting, strict workspace Clipp
 
 ## Packaged weapon/HUD regression
 
-launch.cmd --input-script test-inputs/weapons-hud.json completed 1,369 frames and approximately 41 simulation seconds on the current package. artifacts/iteration8-weapons-report.json and iteration8-weapons-assertions.json are local evidence. Earlier matching checks are recorded under iteration6 and iteration7.
+launch.cmd --input-script test-inputs/weapons-hud.json completed 1,369 frames and approximately 41 simulation seconds on the BC12E81B package. artifacts/iteration8-weapons-report.json and iteration8-weapons-assertions.json are local evidence. Earlier matching checks are recorded under iteration6 and iteration7.
 
 - 64 attacks, 82 traced bullet/melee impacts, 82 receiver-clipped marks and zero unclippable impacts. Three crowbar floor hits played two distinct crowbar impact WAV variants as well as the swing sound.
 - Six installed model sound events: four .357 reload events and AR2 rotate/push events. The AR2's distinct engine reload sound also played. 200 audio requests and no decode/playback errors; one low-ammo warning WAV played as the SMG crossed its warning threshold, and one installed empty-click WAV played before its automatic reload.
@@ -32,7 +32,7 @@ The shipped test input is runtime testing data; no native decompiler scripts or 
 
 ## Packaged shotgun secondary regression
 
-launch.cmd --input-script test-inputs/shotgun-secondary.json completed nine simulation seconds on the current package: 277 rendered frames, six attacks, 52 traced impacts/receiver-clipped marks and 73 audio requests with no audio errors. It played two double-shot WAVs, four single-shot WAVs, four pump sounds and all three installed reload variants. Evidence: artifacts/iteration8-shotgun-report.json and iteration8-shotgun-assertions.json.
+launch.cmd --input-script test-inputs/shotgun-secondary.json completed nine simulation seconds on the BC12E81B package: 277 rendered frames, six attacks, 52 traced impacts/receiver-clipped marks and 73 audio requests with no audio errors. It played two double-shot WAVs, four single-shot WAVs, four pump sounds and all three installed reload variants. Evidence: artifacts/iteration8-shotgun-report.json and iteration8-shotgun-assertions.json.
 
 Held secondary confirmation left six shells and zero attacks until release. Double fire consumed two shells; a second request during cooldown was blocked. With one shell, secondary fire used primary attack. Holding secondary during a one-shell reload left reloading active. At two shells it interrupted reload, and the retained shot fired after release when the insertion deadline elapsed. The last case consumed two shells and twelve pellets. This does not validate Source prediction seeds, recoil or pellet hull traces.
 
@@ -89,3 +89,8 @@ A source-only snapshot of the 112 intended public files passed universal-modder 
 NPC navigation/schedules/combat, player damage/death, remaining weapons and other secondary/projectile attacks, recoil/muzzle effects, VCD choreography/dialogue, HEV sentence scheduling, animation blends/IK/attachments, vehicles, save/load and complete campaign state remain missing. Rapier shapes/mass, movement, door blocking, scripted movement and shaders remain partial. Numeric damage-message dispatch and several HUD panels/gates/animation commands are incomplete. The README lists the current boundaries.
 
 Trainstation still reports unsupported inputs including SetPoliceGoal, SetParentAttachment, act-busy queues, tone-map controls, template NPC spawning and logic_choreographed_scene.Start. These prevent faithful campaign progression even though the map loads, renders and the test weapons function. No FAL or crossover was used. A user-authorized Codex continuation is configured for 09:26 Canary time on 2026-10-03, then every five hours and one minute; availability and account limits still determine whether a scheduled run can execute.
+
+
+## LDR sky loader foundation
+
+Eight new synthetic tests verify all six actual LDR material/texture references, transforms, bounded patch includes, missing/malformed assets and static 2D VTF limits. The loader is exported by source-assets but is not integrated into rendering yet. The final D6E5D582 package rebuilt all source and completed a 20-frame launch.cmd smoke run with 671/671 textures and no model/texture errors; unchanged weapon logic was exercised by the preceding BC12E81B package's three iteration8 fixtures. No visible 2D sky support is claimed.
