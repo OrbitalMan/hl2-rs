@@ -140,6 +140,12 @@ struct Reload {
     phase: ReloadPhase,
 }
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct EmptyFire {
+    latched: bool,
+    next_sound: f64,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Inventory {
@@ -171,6 +177,7 @@ pub struct Inventory {
     next_attack: f64,
     soonest_attack: f64,
     reload: Option<Reload>,
+    empty_fire: BTreeMap<String, EmptyFire>,
     shotgun_need_pump: bool,
     #[serde(skip)]
     holding_attack: bool,
@@ -203,6 +210,7 @@ impl Default for Inventory {
             next_attack: 0.,
             soonest_attack: 0.,
             reload: None,
+            empty_fire: BTreeMap::new(),
             shotgun_need_pump: false,
             holding_attack: false,
             burst: 0,
@@ -325,6 +333,7 @@ impl Inventory {
         } else if !self.holding_attack
             && is_automatic(&self.active)
             && self.next_attack <= scene.time
+            && self.owned.get(&self.active).is_some_and(|clip| *clip > 0)
         {
             // Base ItemPostFrame rebases an overdue timer on a new press; no idle burst.
             self.next_attack = scene.time;
@@ -396,10 +405,34 @@ impl Inventory {
                 }
             }
         }
-        // Singleplayer base weapon/shotgun reload an empty clip after fire animation ends.
-        if !attack
+        // Base ReloadOrSwitchWeapons clears the empty latch and requires a
+        // strictly elapsed attack deadline. Unsupported secondary attacks and
+        // next-best-weapon selection remain separate reconstruction work.
+        if is_automatic(&self.active) {
+            if !primary && !secondary {
+                self.try_automatic_empty_reload(weapons, scene, world);
+            }
+        } else if !attack
             && self.reload.is_none()
             && scene.time >= self.next_attack
+            && self.owned.get(&self.active) == Some(&0)
+            && self.reserve_for(&self.active, weapons) > 0
+        {
+            self.reload(weapons, scene, world);
+        }
+    }
+    fn try_automatic_empty_reload(
+        &mut self,
+        weapons: &BTreeMap<String, Weapon>,
+        scene: &mut Scene,
+        world: &World,
+    ) {
+        self.empty_fire
+            .entry(self.active.clone())
+            .or_default()
+            .latched = false;
+        if self.reload.is_none()
+            && scene.time > self.next_attack
             && self.owned.get(&self.active) == Some(&0)
             && self.reserve_for(&self.active, weapons) > 0
         {
@@ -545,7 +578,21 @@ impl Inventory {
         };
         self.delayed_attack = false;
         if clip == 0 {
-            if self.ammo(&w.ammo_type) > 0 {
+            if is_automatic(&self.active) {
+                // Retail SMG1/AR2 share HandleFireOnEmpty: the first call
+                // clicks and latches; the next tries reload. Neither changes
+                // the primary deadline nor selects a dry-fire animation.
+                let empty = self.empty_fire.entry(self.active.clone()).or_default();
+                if empty.latched {
+                    self.try_automatic_empty_reload(weapons, scene, world);
+                } else {
+                    if scene.time > empty.next_sound {
+                        play_sound(scene, w, "empty", world, "");
+                        empty.next_sound = scene.time + 0.5;
+                    }
+                    empty.latched = true;
+                }
+            } else if self.ammo(&w.ammo_type) > 0 {
                 self.reload(weapons, scene, world);
             } else {
                 self.soonest_attack = scene.time + 0.2;
@@ -1206,6 +1253,140 @@ mod tests {
         inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
         assert_eq!(inv.shots, 5);
         assert_eq!(inv.animation, "fire01");
+    }
+    fn automatic_definitions() -> BTreeMap<String, Weapon> {
+        let mut defs = definitions();
+        for (class, sound) in [
+            ("weapon_smg1", "Weapon_SMG1.Empty"),
+            ("weapon_ar2", "Weapon_AR2.Empty"),
+        ] {
+            defs.get_mut(class)
+                .unwrap()
+                .sounds
+                .insert("empty".into(), sound.into());
+        }
+        defs
+    }
+    #[test]
+    fn automatic_empty_trigger_clicks_before_reloading_while_held() {
+        let defs = automatic_definitions();
+        let world = World::default();
+        for class in ["weapon_smg1", "weapon_ar2"] {
+            let mut scene = Scene::new(&world);
+            let mut physics = Physics::new(&world);
+            let mut inv = Inventory::default();
+            inv.give(class, &defs, 0.);
+            inv.owned.insert(class.into(), 0);
+            inv.give_ammo(&defs[class].ammo_type, 5, &defs);
+            let draw_deadline = inv.next_attack;
+            let draw_animation = inv.animation.clone();
+
+            scene.time = 1.;
+            inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+            inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+            assert!(!inv.is_reloading());
+            assert_eq!(scene.sounds, [defs[class].sounds["empty"].clone()]);
+            assert_eq!(inv.next_attack, draw_deadline);
+            assert_eq!(inv.animation, draw_animation);
+            assert_eq!(inv.animation_at, 0.);
+
+            scene.time = 1.015;
+            inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+            inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+            assert!(inv.is_reloading());
+            let reload_animation = if class == "weapon_ar2" {
+                "ir_reload"
+            } else {
+                "reload"
+            };
+            assert_eq!(inv.animation, reload_animation);
+            let completion = 1.015 + fallback_duration(class, reload_animation);
+            assert_eq!(inv.next_attack, completion);
+            assert_eq!(inv.shots, 0);
+
+            scene.time = completion - 0.001;
+            inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+            assert_eq!(inv.owned[class], 0);
+            assert_eq!(inv.reserve_for(class, &defs), 5);
+            scene.time = completion;
+            inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+            inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+            assert!(!inv.is_reloading());
+            assert_eq!(inv.owned[class], 4);
+            assert_eq!(inv.reserve_for(class, &defs), 0);
+            assert_eq!(inv.shots, 1);
+        }
+    }
+    #[test]
+    fn automatic_empty_sound_throttle_survives_trigger_release() {
+        let defs = automatic_definitions();
+        let world = World::default();
+        for class in ["weapon_smg1", "weapon_ar2"] {
+            let mut scene = Scene::new(&world);
+            let mut physics = Physics::new(&world);
+            let mut inv = Inventory::default();
+            inv.give(class, &defs, 0.);
+            inv.owned.insert(class.into(), 0);
+            let draw_deadline = inv.next_attack;
+            let draw_animation = inv.animation.clone();
+            for (time, clicks) in [(1., 1), (1.1, 1), (1.3, 1), (1.5, 1), (1.5001, 2)] {
+                scene.time = time;
+                inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+                inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+                inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+                assert_eq!(scene.sounds.len(), clicks);
+                assert_eq!(inv.next_attack, draw_deadline);
+                assert_eq!(inv.animation, draw_animation);
+                assert_eq!(inv.shots, 0);
+                assert!(!inv.is_reloading());
+            }
+        }
+    }
+    #[test]
+    fn automatic_idle_reload_requires_deadline_to_have_elapsed() {
+        let defs = definitions();
+        let world = World::default();
+        for class in ["weapon_smg1", "weapon_ar2"] {
+            let mut scene = Scene::new(&world);
+            let mut inv = Inventory::default();
+            inv.give(class, &defs, 0.);
+            inv.owned.insert(class.into(), 0);
+            inv.give_ammo(&defs[class].ammo_type, 5, &defs);
+            scene.time = inv.next_attack;
+            inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+            assert!(!inv.is_reloading());
+            scene.time += 0.015;
+            inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+            assert!(inv.is_reloading());
+            assert_eq!(inv.animation_at, scene.time);
+        }
+    }
+    #[test]
+    fn automatic_empty_sound_is_per_weapon_and_survives_switches() {
+        let defs = automatic_definitions();
+        let world = World::default();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut inv = Inventory::default();
+        inv.give("weapon_smg1", &defs, 0.);
+        inv.owned.insert("weapon_smg1".into(), 0);
+        inv.owned.insert("weapon_ar2".into(), 0);
+        scene.time = 1.;
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+        inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        // Keep draw deadlines out of this sound-state comparison. Ordinary
+        // switching still sets its recorded draw duration.
+        inv.give("weapon_ar2", &defs, 0.);
+        scene.time = 1.1;
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+        inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert_eq!(scene.sounds, ["Weapon_SMG1.Empty", "Weapon_AR2.Empty"]);
+        inv.give("weapon_smg1", &defs, 0.);
+        scene.time = 1.2;
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+        inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert_eq!(scene.sounds.len(), 2);
     }
     #[test]
     fn revolver_cooldown_and_circular_spread_bounds() {

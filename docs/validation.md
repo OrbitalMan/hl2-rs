@@ -1,12 +1,12 @@
 # Local validation — 2026-10-03
 
-This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is AD3ABF2A98E5E137D7CE47E86545CDBE5ED98C98F92CAE8AA64C8C1426B0DF53, built at 2026-10-03T03:53:24.5544640Z. bin/build-info.json is authoritative after a later rebuild.
+This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is BC12E81B9EF3D2C9C1D19E8923800F0B9243842D82FEE15747D42DDC29D1977E, built at 2026-10-03T04:16:22.3856044Z. bin/build-info.json is authoritative after a later rebuild.
 
 ## Automated checks
 
 | Check | Result |
 | --- | --- |
-| cargo test --workspace --locked | 97 tests passed: 53 runtime, 18 common simulation/animation, 26 asset-reader tests. |
+| cargo test --workspace --locked | 101 tests passed: 57 runtime, 18 common simulation/animation, 26 asset-reader tests. |
 | cargo clippy --workspace --all-targets --locked -- -D warnings | Passed; two existing compiler warnings remain inside the vendored miniquad dependency. |
 | cargo fmt --all --check and git diff --check | Passed. |
 | Release packaging | scripts/build.ps1 compiled/copied bin/hl2-rs.exe used by launch.cmd and recorded its fingerprint. |
@@ -14,12 +14,16 @@ This validates a partial Rust reconstruction, not a completed Source translation
 
 Regression tests cover Source resource conditions and localization, font alternatives, numeric HUD interpolation/health pulses/cancellation, QuickInfo thresholds/audio latches, wheel/slot order, reload transfer/interruption, primary cadence/spread, shotgun primary/secondary pellets/pump/deadlines/delayed input, health/battery pickup gates and sounds, bounded MDL sound events and melee ray/hull/facing refinement. The melee geometry remains Rapier-derived, not Source collision equivalence.
 
+The SMG1/AR2 tests additionally cover first-empty-click versus next-attempt reload, unchanged animation/primary deadline, strict elapsed idle-reload deadline and independent half-second sound throttles across release/switches. These use reviewed static native and published SDK evidence; no original-engine dynamic empty-fire oracle was run in this pass. Next-best-weapon ranking and secondary deadlines are still missing.
+
+The first published GitHub Actions run passed formatting, strict workspace Clippy and unit tests on a clean Windows runner: [run 37095841557](https://github.com/kvalls/hl2-rs/actions/runs/37095841557), public commit 002dbde. That run covers the initial 97-test source; later commits receive their own runs. A separate fresh public clone also passed all-target workspace cargo check without private research files.
+
 ## Packaged weapon/HUD regression
 
-launch.cmd --input-script test-inputs/weapons-hud.json completed 1,195 frames and approximately 41 simulation seconds on the current package. artifacts/iteration7-weapons-report.json and iteration7-weapons-assertions.json are local evidence. The preceding package completed the same checks in 1,487 frames, recorded under iteration6.
+launch.cmd --input-script test-inputs/weapons-hud.json completed 1,369 frames and approximately 41 simulation seconds on the current package. artifacts/iteration8-weapons-report.json and iteration8-weapons-assertions.json are local evidence. Earlier matching checks are recorded under iteration6 and iteration7.
 
 - 64 attacks, 82 traced bullet/melee impacts, 82 receiver-clipped marks and zero unclippable impacts. Three crowbar floor hits played two distinct crowbar impact WAV variants as well as the swing sound.
-- Six installed model sound events: four .357 reload events and AR2 rotate/push events. The AR2's distinct engine reload sound also played. 199 audio requests and no decode/playback errors; one low-ammo warning WAV played as the SMG crossed its warning threshold.
+- Six installed model sound events: four .357 reload events and AR2 rotate/push events. The AR2's distinct engine reload sound also played. 200 audio requests and no decode/playback errors; one low-ammo warning WAV played as the SMG crossed its warning threshold, and one installed empty-click WAV played before its automatic reload.
 - All six supported primary weapons were selected, fired and reloaded where applicable. Shotgun shell insertion/interruption/pump and SMG empty-clip automatic reload were exercised. SMG reserve transfer and final clip count appear in the report.
 - Primary and secondary attack actions confirmed the pending weapon without increasing attacks. Holding primary attack for over one second after confirmation caused no firing before release. Cancellation retained the current weapon; expiry cleared the menu without switching.
 - Stock resources determine the five small boxes/expanded column, colors, rounded corners, labels and icon fonts. Numeric armor at zero fades out. QuickInfo brackets are present during selection; the center crosshair is a separate HUD element. F1 development banners remain hidden by default.
@@ -28,13 +32,13 @@ The shipped test input is runtime testing data; no native decompiler scripts or 
 
 ## Packaged shotgun secondary regression
 
-launch.cmd --input-script test-inputs/shotgun-secondary.json completed nine simulation seconds on the current package: 224 rendered frames, six attacks, 52 traced impacts/receiver-clipped marks and 73 audio requests with no audio errors. It played two double-shot WAVs, four single-shot WAVs, four pump sounds and all three installed reload variants. Evidence: artifacts/iteration7-shotgun-report.json and iteration7-shotgun-assertions.json.
+launch.cmd --input-script test-inputs/shotgun-secondary.json completed nine simulation seconds on the current package: 277 rendered frames, six attacks, 52 traced impacts/receiver-clipped marks and 73 audio requests with no audio errors. It played two double-shot WAVs, four single-shot WAVs, four pump sounds and all three installed reload variants. Evidence: artifacts/iteration8-shotgun-report.json and iteration8-shotgun-assertions.json.
 
 Held secondary confirmation left six shells and zero attacks until release. Double fire consumed two shells; a second request during cooldown was blocked. With one shell, secondary fire used primary attack. Holding secondary during a one-shell reload left reloading active. At two shells it interrupted reload, and the retained shot fired after release when the insertion deadline elapsed. The last case consumed two shells and twelve pellets. This does not validate Source prediction seeds, recoil or pellet hull traces.
 
 ## Physical wheel/click checks
 
-The current package also completed test-inputs/selection-held.json: 195 frames, four attacks and 37 audio requests with no audio errors. Slot selection while secondary was already held confirmed pistol and shotgun immediately without shooting. A new primary click fired while the consumed secondary remained held. Secondary release/repress in one poll fired the shotgun double shot; wheel selection while primary was held confirmed crowbar, retained suppression, then a new click after release and draw completion fired. The first fixture attempt clicked before the crowbar draw deadline and was revised rather than counted as successful release verification. Evidence: artifacts/iteration7-selection-report.json and iteration7-selection-assertions.json.
+The current package also completed test-inputs/selection-held.json: 203 frames, four attacks and 37 audio requests with no audio errors. Slot selection while secondary was already held confirmed pistol and shotgun immediately without shooting. A new primary click fired while the consumed secondary remained held. Secondary release/repress in one poll fired the shotgun double shot; wheel selection while primary was held confirmed crowbar, retained suppression, then a new click after release and draw completion fired. The first fixture attempt clicked before the crowbar draw deadline and was revised rather than counted as successful release verification. Evidence: artifacts/iteration8-selection-report.json and iteration8-selection-assertions.json.
 
 The preceding package (B941BF020B6B08192AE10AA3EEDB8F76CA0B8E6750B6CEC56D19739BD65D6C18) was launched with --time-scale 0.1 to keep the native-duration selector open long enough for separate Computer Use actions. This run used actual window input, with no input script. The current package additionally checks held secondary confirmation through the normal handlers in its input fixture.
 
@@ -60,13 +64,13 @@ The background pass already cleared depth before the world pass. Sky visibility 
 
 The preceding 4056 package reproduced bright window/light-shaft patches, hidden entrance columns and cyan barrier effects drawing over opaque map walls. The reviewed backend disabled depth testing whenever a material disabled depth writes. Depth comparison and the write mask now apply independently, and clears temporarily enable writes then restore the current mask.
 
-The current package repeated 60-frame captures at camera (-4494,96,22), yaw zero, and (-4100,-2000,150), yaw zero, on d1_trainstation_02 in flight. Matching before/after images show the hidden effects and columns removed while the visible hall geometry remains. A front-side capture at (-2700,-2000,150), yaw180, still shows the entrance columns. No texture/model load errors were reported. Evidence: artifacts/iteration7-depth-before.png, iteration7-depth-after.png, iteration7-hall-before.png, iteration7-hall-after.png, iteration7-entry-visible.png and the corresponding reports. These views establish correction of the reproduced depth defect, not full Source shader equivalence or exhaustive visibility coverage.
+The AD3ABF2A package repeated 60-frame captures at camera (-4494,96,22), yaw zero, and (-4100,-2000,150), yaw zero, on d1_trainstation_02 in flight. Matching before/after images show the hidden effects and columns removed while the visible hall geometry remains. A front-side capture at (-2700,-2000,150), yaw180, still shows the entrance columns. No texture/model load errors were reported. Evidence: artifacts/iteration7-depth-before.png, iteration7-depth-after.png, iteration7-hall-before.png, iteration7-hall-after.png, iteration7-entry-visible.png and the corresponding reports. The later package changes automatic empty-fire behavior and retains the same rendering code. These views establish correction of the reproduced depth defect, not full Source shader equivalence or exhaustive visibility coverage.
 
 ## Movement checks
 
 Native-method-backed tests cover the first standing/duck jump tick, held-jump release, ledge departure, diagonal command cropping before boost, signed overspeed correction and next-tick air friction across the 140 threshold and ascent/descent transition. See docs/research.md for the exact anchors and arithmetic. These tests use controlled collision worlds; they do not validate full retail movement over installed campaign geometry. Surface properties, moving-ground handling, ground quadrants, suit/sprint gating and crouch transitions remain separate work.
 
-The README showcase was captured with the current package through launch.cmd at the tested hall viewpoint, using a slow simulation and developer pistol loadout. Computer Use activated the exact Rust window, toggled F1 diagnostics, requested F12 capture, then closed the run with F10. An initial screenshot covered by Discord was rejected before game input. docs/images/hl2-rs-trainstation.png is the deliberately selected public preview; other captures/reports and native analysis remain local. It does not establish campaign completion or serve as a redistributable game asset.
+The README showcase was captured with the AD3ABF2A package through launch.cmd at the tested hall viewpoint, using a slow simulation and developer pistol loadout. Computer Use activated the exact Rust window, toggled F1 diagnostics, requested F12 capture, then closed the run with F10. An initial screenshot covered by Discord was rejected before game input. docs/images/hl2-rs-trainstation.png is the deliberately selected public preview; other captures/reports and native analysis remain local. It does not establish campaign completion or serve as a redistributable game asset.
 
 All six stock configuration manifest entries remained unchanged after original-game testing. No installed executable/DLL was patched. Test game processes were closed.
 

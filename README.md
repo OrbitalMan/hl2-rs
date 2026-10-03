@@ -109,6 +109,8 @@ Original project code is MIT licensed. Installed assets and private analysis ret
 
 The PC selector follows the installed resources and reviewed `CHudWeaponSelection` behavior: five small slot boxes and one expanded column, only selected-item text, stock colors/corners, wheel cycling, either mouse button to confirm, Escape to cancel and Q for the previous weapon in walk mode. Empty slots retain their box without a number. It starts its inactivity fade after 0.5 seconds and closes after 1.25 seconds. Confirming consumes attack input. The six implemented primary weapons use separate ammunition and reload state; switching cancels an incomplete reload.
 
+SMG1 and AR2 empty fire now follows the reviewed base-weapon latch: the first empty attempt clicks without changing the animation or attack deadline, and the next attempt tries reload. Empty sounds have separate per-weapon 0.5-second throttles; idle automatic reload waits until the primary deadline has elapsed. Next-best-weapon autoswitch, secondary cooldown rules and custom no-auto-reload flags remain unfinished.
+
 The world camera converts HL2's 75-degree horizontal field of view at 4:3 into vertical field of view; the viewmodel keeps its separate 54-degree reference. Development banners are hidden by default and can be toggled with F1.
 
 `--input-script <JSON>` drives timed regression actions through the normal runtime handlers and records them in the runtime report. Captures use simple filename stems under `artifacts/`. `--time-scale 0.1` slows simulation for manual HUD/input checks; normal play defaults to 1. These test options do not establish full original-game equivalence.
