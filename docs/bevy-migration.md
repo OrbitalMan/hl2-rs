@@ -1,8 +1,8 @@
 # Bevy migration preview
 
-The `bevy-migration` branch adds a Bevy 0.19.1/wgpu host with a custom Source-material map viewer. It reads an owned, installed Half-Life 2 copy through the existing `source-assets` and `modkit-core` crates. Game assets and Valve DLLs are not included in the repository or package.
+The `bevy-migration` branch adds a Bevy 0.19.1/wgpu host with custom Source materials and shared player movement/collision. It reads an owned, installed Half-Life 2 copy through `source-assets`; `modkit-core` provides the player controller and `hl2-simulation` provides shared collision support. Game assets and Valve DLLs are not included in the repository or package.
 
-This Bevy executable is a **static renderer with a fly camera**. It does not yet run player collision/movement, weapons, NPC AI, audio, animated entity state, scripted scenes, entity I/O or campaign progression. Visible geometry does not establish playable-map support or Source shader parity. The existing runtime remains available through `scripts/build.ps1` and `launch.cmd`; its implemented behavior has not yet been migrated into Bevy.
+This Bevy executable defaults to **walking with collision**, using the retained `Player` and `Physics` code at 15 ms per step. Flight is available with `--fly` or F2. Rendering remains static: dynamic props, door poses and animated entities are frozen. Weapons/HUD, NPC AI, audio, scripted scenes, entity I/O and campaign progression have not migrated. Visible geometry and working movement do not establish playable-map support or Source shader parity. The existing runtime remains available through `scripts/build.ps1` and `launch.cmd` for its broader implemented behavior.
 
 ## Build and launch
 
@@ -23,33 +23,50 @@ The runtime discovers the installed game. To select a particular installation or
 .\launch-bevy.cmd --game "C:\Program Files (x86)\Steam\steamapps\common\Half-Life 2" --map d1_trainstation_02
 .\launch-bevy.cmd --borderless
 .\launch-bevy.cmd --width 1920 --height 1080
+.\launch-bevy.cmd --fly
 ```
 
 Camera and bounded capture options pass directly to the runtime:
 
 ```powershell
-.\launch-bevy.cmd --map d1_trainstation_01 --position -3400 -420 32 --yaw 180 --pitch 0 --frames 120 --capture artifacts/bevy-station.png --report artifacts/bevy-station.json
+.\launch-bevy.cmd --map d1_trainstation_01 --fly --position -3400 -420 32 --yaw 180 --pitch 0 --frames 120 --capture artifacts/bevy-station.png --report artifacts/bevy-station.json
 ```
 
-`--position` takes three Source-coordinate numbers. Yaw and pitch are in degrees. Captures and reports are local development artifacts. A static render comparison does not validate simulation, NPC behavior, audio or campaign completeness.
+`--position` takes three Source-coordinate **eye-position** numbers. Yaw and pitch are in degrees. Captures and reports are local development artifacts. A render comparison does not validate NPC behavior, audio or campaign completeness.
 
-Click the window to capture the mouse. WASD flies; Space/Ctrl rises/falls; Shift increases speed. Escape releases the cursor and F10 exits. Fly movement has no collision. `--capture` defaults to 120 frames when `--frames` is omitted. A bounded capture waits for GPU readback, exits, then writes the PNG and report. The report records the selected adapter/backend, camera, submitted geometry, asset failures and capture size. It does not certify shader or gameplay fidelity; inspect the picture and log.
+Click the window to capture the mouse and resume movement. WASD moves; Space jumps, Ctrl crouches, Shift sprints and Alt walks slowly. F2 toggles flight, where Space/Ctrl rises/falls and Shift increases speed; flight has no collision. Escape or loss of focus pauses movement and releases the cursor; a click resumes. F10 exits. A held jump across an interactive pause must be released before it can trigger again.
+
+Without a movement script, `--capture` defaults to 120 frames when `--frames` is omitted. A bounded capture waits for GPU readback, exits, then writes the PNG and report. The report records the selected adapter/backend, camera, submitted geometry, asset failures, player/collision state and capture size. It does not certify shader or gameplay fidelity; inspect the picture and log.
+
+## Tick-based movement fixture
+
+Run the owned station bench fixture through the normal shared player/collision adapter:
+
+```powershell
+.\launch-bevy.cmd --map d1_trainstation_02 --movement-script test-inputs/bevy-movement.json --capture artifacts/bevy-movement.png --report artifacts/bevy-movement.json
+```
+
+The fixture settles onto the bench, compares an ordinary jump with airborne crouching/unducking, pauses/resumes while holding jump, then releases and presses jump again. Its commands use strictly increasing `tick` numbers, starting at 1, on the 15 ms host clock. Optional `eye` coordinates reset the player from an eye position; `yaw` is in degrees. Optional `paused` and `fly` change those modes. Each command replaces all held `forward`, `side`, `jump`, `crouch`, `sprint` and `slow` values; omitted held fields become zero/false. A `label` records player state after that tick's step. Paused host ticks still process commands and labels while skipping player movement, so the script can resume itself.
+
+The report stores labeled samples under `render.simulation.samples`. After the final command, player movement freezes; the executable captures the final frame when requested and exits. Omit `--frames` for this fixture: a frame bound can terminate it early and produces an error if the script has not finished. Scripted movement runs independently of window focus and replaces interactive movement controls. These fixtures exercise the migrated adapter and do not demonstrate campaign progression.
 
 ## Architecture being migrated
 
-Following iw4L's boundaries, Bevy owns the host lifecycle and scheduling, while custom material/render code retains Source-specific interpretation. Asset decoding remains outside GPU code, and the common data/simulation contracts remain independent of Bevy. Future simulation integration should publish presentation data for rendering rather than let draw systems mutate gameplay state. The preview is the first host/rendering milestone; fidelity and behavior still require direct comparisons with the owned original game.
+Following iw4L's boundaries, Bevy owns the host lifecycle and scheduling, while custom material/render code retains Source-specific interpretation. Asset decoding remains outside GPU code. `modkit-core` keeps the Source-coordinate player controller; the engine-independent `hl2-simulation` crate shares the Rapier collision/rigid-body adapter and NPC probes between hosts. Its extraction preserves the retained code's limitations and does not establish Havok/VPhysics equivalence.
+
+The Bevy adapter samples input/look before the fixed loop, advances walking at 15 ms per step and publishes the resulting eye position to the camera afterward. Physics queries use static world/model collider poses; rigid bodies are not advanced while their visible meshes remain frozen. Later entity/gameplay integration should publish presentation data for rendering rather than let draw systems mutate gameplay state. Fidelity and behavior still require direct comparisons with the owned original game.
 
 The viewer currently uploads BSP/displacement triangles, baked LDR lightmaps, baked static props and selected entity meshes. A custom WGSL material handles base-texture UV transforms, tint, cutouts, translucency, additive output and two-sided flags through Bevy's depth-tested render phases. Static texture references share decoded and GPU images; immutable meshes/textures release their CPU copies after upload. Owned content is loaded before the app starts, and diagnostic files are written after it exits.
 
 The decoded base-texture limit is **our loader's 512 MiB allocation budget**, not an engine limit. An early preview exceeded it by decoding material aliases separately and loading unused textures; shared caching and draw selection corrected that. The Bevy adapter currently selects existing VTF mips up to 2048 pixels; the retained viewer selects up to 512. Comparisons must account for this quality difference. These byte counts do not measure total RAM/VRAM or performance. Triangle winding is normalized only in BSP render copies before model appending: the model decoder already reverses VTX winding, and applying one native winding to both previously culled model fronts. Original collision copies remain intact.
 
-This is approximate legacy gamma multiplication, not Source's complete material pipeline. Missing/dynamic render textures use a magenta checker and are named in the report. DX fallback blocks, `$color2`, animated material proxies, normal/specular maps, eyes, shadows, fog, refraction, HDR/exposure and both sky passes remain unsupported. Transparent surfaces inherited from the shared prebatched world can still contain disconnected faces, limiting depth sorting. Animated doors/models use authored initial transforms/bind poses; runtime entity state and collision are not migrated. Neither better performance nor 1:1 fidelity has been demonstrated.
+This is approximate legacy gamma multiplication, not Source's complete material pipeline. Missing/dynamic render textures use a magenta checker and are named in the report. DX fallback blocks, `$color2`, animated material proxies, normal/specular maps, eyes, shadows, fog, refraction, HDR/exposure and both sky passes remain unsupported. Transparent surfaces inherited from the shared prebatched world can still contain disconnected faces, limiting depth sorting. Doors/models render at authored initial transforms/bind poses, and collider poses remain frozen; moving entity state and prop dynamics have not migrated. Neither better performance nor 1:1 fidelity has been demonstrated.
 
 ## Contributor milestones before replacing main
 
 1. Compare the custom renderer with matched original/retained-runtime cameras; restore sky visibility/masking, Source material stages and diagnostics without regressions.
-2. Separate the existing gameplay host from Macroquad-specific types, preserve its behavior/tests, and integrate fixed-step simulation with Bevy resources/components and explicit scheduling.
-3. Migrate player/input, weapons/HUD, collision/props, entity I/O, animation/choreography and audio. Preserve original-game evidence and packaged regressions for each subsystem.
+2. Continue separating the existing gameplay host from Macroquad-specific types, preserving its behavior/tests and the migrated player/collision adapter's fixed-step scheduling.
+3. Migrate weapons/HUD, prop dynamics and moving collision, entity I/O, NPC AI, animation/choreography and audio. Preserve original-game evidence and packaged regressions for each subsystem.
 4. Verify regressions for all retained runtime features and both trainstation levels through ordinary campaign state, document remaining gaps, and only then propose moving the replacement into `main`.
 
 Target Bevy PRs at `bevy-migration`. Shared format/core fixes can target `main` and be brought across separately. The preserved `macroquad-prototype` branch is a reference snapshot, not the active migration target. Do not include game files, private native analysis or databases in a PR.

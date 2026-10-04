@@ -3049,6 +3049,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy",
+ "glam 0.27.0",
+ "hl2-simulation",
  "modkit-core",
  "serde",
  "serde_json",
@@ -3062,6 +3064,7 @@ dependencies = [
  "anyhow",
  "fontdue",
  "glam 0.27.0",
+ "hl2-simulation",
  "hound",
  "macroquad",
  "modkit-core",
@@ -3071,6 +3074,15 @@ dependencies = [
  "source-assets",
  "symphonia",
  "ttf-parser",
+]
+
+[[package]]
+name = "hl2-simulation"
+version = "0.1.0"
+dependencies = [
+ "glam 0.27.0",
+ "modkit-core",
+ "rapier3d",
 ]
 
 [[package]]

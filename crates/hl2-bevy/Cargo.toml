@@ -10,6 +10,8 @@ serde.workspace = true
 serde_json.workspace = true
 modkit-core.workspace = true
 source-assets.workspace = true
+glam.workspace = true
+hl2-simulation = { path = "../hl2-simulation" }
 bevy = { version = "=0.19.1", default-features = false, features = ["3d", "bevy_log"] }
 
 [[bin]]

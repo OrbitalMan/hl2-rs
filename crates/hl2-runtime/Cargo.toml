@@ -11,6 +11,7 @@ serde_json.workspace = true
 glam.workspace = true
 modkit-core.workspace = true
 source-assets.workspace = true
+hl2-simulation.workspace = true
 macroquad = { version = "0.4.16", features = ["audio"] }
 rapier3d = "0.26.1"
 hound = "3.5.1"

@@ -1,5 +1,15 @@
 # Local validation — 2026-10-04
 
+## Bevy player/collision migration
+
+The walking preview package is SHA256 `3167DB5CAA551628CC0CF07CC9588F5425907BCD8834E33FC58A1D32B57C448A`, built 2026-10-04T21:45:47Z. Its packaged shader remains `DF39B6090638EC5238CAE9F93A1F29198D15EDE2B45295348E66E2463A3CF249`. `bin/build-bevy-info.json` is authoritative after rebuilding. The static-only package below is superseded.
+
+The collision adapter, private convex implementation and NPC probes moved unchanged into `hl2-simulation`; both hosts import the same modules. Their 25 tests are preserved. The workspace suite passed 243 tests; a final Bevy rerun passed 11, including an additional input-capture regression (244 unique normal tests across the final source). Strict all-target workspace Clippy passes. The Bevy adapter uses an explicit 15 ms fixed timestep, samples look/input before the fixed loop and publishes the eye position afterward. Capture/resume discards transition-frame pointer motion and suppresses held jump until release.
+
+The packaged station02 movement fixture completed all 280 host ticks and passed 26 report assertions. It settled on the bench at feet Z 36.17742157; ordinary and airborne-crouched jumps retain the same eye height and velocity while crouching raises feet by 36 once. Clear air uncrouching restores the matching trajectory. Paused samples preserve the complete player state and tick count; held jump cannot jump again on landing until released. The final 1280×720 capture was visually inspected. This is a controlled shared-player/collision replay, not an original-engine differential replay or campaign proof. Two named dynamic monitor materials remain unsupported; there are no model-load, texture-budget or capture-write failures.
+
+Evidence stays local: `artifacts/bevy-movement.{json,png}`, `bevy-movement.assertions.json`, `bevy-movement-tests.log`, `bevy-movement-final-bevy-tests.log` and `bevy-movement-final-clippy.log`. Rendering still uses initial entity poses/bind poses. Rigid-body dynamics remain frozen to avoid moving colliders without their visible meshes. Weapons/HUD, interactive pause UI/console, NPC animation/AI, scene/entity I/O, audio and campaign progression have not migrated. See [migration instructions](bevy-migration.md).
+
 ## Bevy migration preview
 
 The separate `bevy-migration` branch packages a static owned-map renderer, not the retained gameplay runtime. Final `bin/hl2-bevy.exe` SHA256 is `CD497A0BE933FEB94083C709A0CFC15E67C4877876C81A4EE9FAC902BA1ADD09`, built 2026-10-04T21:17:54Z. Packaged `source.wgsl` SHA256 is `DF39B6090638EC5238CAE9F93A1F29198D15EDE2B45295348E66E2463A3CF249`; `bin/build-bevy-info.json` is authoritative after rebuilding. See [build instructions and limits](bevy-migration.md).

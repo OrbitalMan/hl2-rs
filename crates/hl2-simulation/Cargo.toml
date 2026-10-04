@@ -1,0 +1,10 @@
+[package]
+name = "hl2-simulation"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+glam.workspace = true
+modkit-core.workspace = true
+rapier3d = "0.26.1"

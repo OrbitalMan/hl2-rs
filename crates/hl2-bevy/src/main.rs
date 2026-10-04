@@ -1,21 +1,18 @@
 //! Isolated Bevy/wgpu migration; gameplay still lives in hl2-runtime.
 mod assets;
+mod movement;
 mod rendering;
 use anyhow::{Context, Result, bail};
 use bevy::{
     app::AppExit,
     asset::AssetPlugin,
     core_pipeline::tonemapping::Tonemapping,
-    input::mouse::AccumulatedMouseMotion,
     prelude::*,
     render::{
         renderer::RenderAdapterInfo,
         view::screenshot::{Screenshot, ScreenshotCaptured},
     },
-    window::{
-        CursorGrabMode, CursorOptions, MonitorSelection, PrimaryWindow, WindowMode,
-        WindowResolution,
-    },
+    window::{MonitorSelection, WindowMode, WindowResolution},
 };
 use serde::Serialize;
 use std::{
@@ -36,6 +33,8 @@ struct Options {
     width: u32,
     height: u32,
     borderless: bool,
+    fly: bool,
+    movement_script: Option<PathBuf>,
 }
 impl Options {
     fn parse() -> Result<Self> {
@@ -53,6 +52,8 @@ impl Options {
             width: 1280,
             height: 720,
             borderless: false,
+            fly: false,
+            movement_script: None,
         };
         while let Some(arg) = args.next() {
             let next = |args: &mut std::iter::Skip<std::env::Args>| -> Result<String> {
@@ -77,9 +78,11 @@ impl Options {
                 "--width" => options.width = next(&mut args)?.parse()?,
                 "--height" => options.height = next(&mut args)?.parse()?,
                 "--borderless" => options.borderless = true,
+                "--fly" => options.fly = true,
+                "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration: static owned-map viewer (no gameplay yet).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\nClick to capture mouse; WASD fly, Space/Ctrl rise/fall, Shift fast. Esc releases mouse; F10 quits."
+                        "HL2-RS Bevy migration: player/collision preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F2 toggles fly. Esc pauses; click resumes. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -106,7 +109,10 @@ impl Options {
             bail!("--capture must be a .png path");
         }
         options.pitch = options.pitch.clamp(-1.55, 1.55);
-        if options.capture.is_some() && options.frames.is_none() {
+        if options.capture.is_some()
+            && options.frames.is_none()
+            && options.movement_script.is_none()
+        {
             options.frames = Some(120);
         }
         options.game = match game {
@@ -140,18 +146,17 @@ struct RunStatus {
     materials: usize,
     skipped_background_surfaces: usize,
     camera_source: [f32; 3],
+    simulation: serde_json::Value,
 }
 #[derive(Clone, Resource, Default)]
 struct Status(Arc<Mutex<RunStatus>>);
 #[derive(Component)]
-struct FlyCamera {
-    yaw: f32,
-    pitch: f32,
-}
+struct FlyCamera;
 #[derive(Resource, Default)]
 struct CaptureControl {
     frames: u64,
     requested: bool,
+    requested_frame: Option<u64>,
     completed_frame: Option<u64>,
 }
 /// Source right-handed Z-up coordinates become Bevy right-handed Y-up.
@@ -196,6 +201,24 @@ fn main() -> Result<()> {
         "decoded_base_bytes": unique_textures.values().sum::<usize>(), "decoded_base_budget": 512 * 1024 * 1024,
     });
     let spawn_sky_visibility = format!("{:?}", loaded.bsp.sky_visibility(loaded.world.spawn().0));
+    let (spawn, spawn_yaw) = loaded.world.spawn();
+    let movement_commands = options
+        .movement_script
+        .as_ref()
+        .map(|p| movement::read_script(p))
+        .transpose()?
+        .unwrap_or_default();
+    let simulation = movement::Simulation::new(
+        &loaded.world,
+        options
+            .position
+            .map(|p| glam::Vec3::from_array(p.to_array()))
+            .unwrap_or(spawn),
+        options.yaw.unwrap_or(spawn_yaw),
+        options.pitch,
+        options.fly,
+        movement_commands,
+    );
     let status = Status::default();
     let packaged_assets = std::env::current_exe()?
         .parent()
@@ -210,6 +233,7 @@ fn main() -> Result<()> {
     app.insert_resource(options.clone())
         .insert_resource(status.clone())
         .insert_resource(PreparedMap(Some(loaded)))
+        .insert_resource(simulation)
         .init_resource::<CaptureControl>()
         .insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.1)))
         .add_plugins(
@@ -220,7 +244,7 @@ fn main() -> Result<()> {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "HL2-RS | Bevy/wgpu migration | static map viewer".into(),
+                        title: "HL2-RS | Bevy/wgpu migration | player and collision preview".into(),
                         resolution: WindowResolution::new(options.width, options.height)
                             .with_scale_factor_override(1.),
                         mode: if options.borderless {
@@ -234,8 +258,8 @@ fn main() -> Result<()> {
                 }),
         )
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
+        .add_plugins(movement::MovementPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, fly_camera)
         .add_systems(Last, monitor);
     let exit = app.run();
     let mut status = status
@@ -261,15 +285,22 @@ fn main() -> Result<()> {
     };
     let capture_exists = options.capture.as_ref().is_none_or(|path| path.is_file());
     let report = serde_json::json!({
-        "runtime": "Bevy 0.19.1 / wgpu migration static renderer", "map": options.map, "bsp_revision": revision,
+        "runtime": "Bevy 0.19.1 / wgpu migration player/collision preview", "map": options.map, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
-        "limitations": ["No gameplay, player collision, AI, scene playback or audio in Bevy yet", "Models use static bind poses; brush entities use authored initial transforms", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
+        "limitations": ["Weapons/HUD, AI, scene playback and audio are not migrated yet", "Models use static bind poses; brush entities use authored initial transforms and dynamic props are frozen", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
     std::fs::write(&options.report, serde_json::to_vec_pretty(&report)?)?;
     println!("Report: {}", options.report.display());
     if !matches!(exit, AppExit::Success) {
         bail!("Bevy runner exited with {exit:?}");
+    }
+    if options.movement_script.is_some()
+        && !status.simulation["script_finished"]
+            .as_bool()
+            .unwrap_or(false)
+    {
+        bail!("movement script did not finish; inspect report/log");
     }
     if options.capture.is_some()
         && (!status.capture_completed || !capture_exists || capture_write_error.is_some())
@@ -315,74 +346,12 @@ fn setup(
             source_to_bevy(source_direction(yaw, options.pitch)),
             Vec3::Y,
         ),
-        FlyCamera {
-            yaw,
-            pitch: options.pitch,
-        },
+        FlyCamera,
     ));
-}
-fn fly_camera(
-    time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    mouse: Res<AccumulatedMouseMotion>,
-    mut windows: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
-    mut cameras: Query<(&mut Transform, &mut FlyCamera)>,
-    mut exit: MessageWriter<AppExit>,
-) {
-    let Ok((window, mut cursor)) = windows.single_mut() else {
-        return;
-    };
-    if keys.just_pressed(KeyCode::F10) {
-        exit.write(AppExit::Success);
-    }
-    if keys.just_pressed(KeyCode::Escape) || !window.focused {
-        cursor.grab_mode = CursorGrabMode::None;
-        cursor.visible = true;
-    } else if buttons.just_pressed(MouseButton::Left) {
-        cursor.grab_mode = CursorGrabMode::Locked;
-        cursor.visible = false;
-    }
-    let Ok((mut transform, mut camera)) = cameras.single_mut() else {
-        return;
-    };
-    if cursor.grab_mode == CursorGrabMode::None {
-        return;
-    }
-    camera.yaw -= mouse.delta.x * 0.002;
-    camera.pitch = (camera.pitch - mouse.delta.y * 0.002).clamp(-1.55, 1.55);
-    let forward = source_to_bevy(source_direction(camera.yaw, camera.pitch));
-    let right = forward.cross(Vec3::Y).normalize_or_zero();
-    let mut motion = Vec3::ZERO;
-    if keys.pressed(KeyCode::KeyW) {
-        motion += forward;
-    }
-    if keys.pressed(KeyCode::KeyS) {
-        motion -= forward;
-    }
-    if keys.pressed(KeyCode::KeyD) {
-        motion += right;
-    }
-    if keys.pressed(KeyCode::KeyA) {
-        motion -= right;
-    }
-    if keys.pressed(KeyCode::Space) {
-        motion += Vec3::Y;
-    }
-    if keys.pressed(KeyCode::ControlLeft) {
-        motion -= Vec3::Y;
-    }
-    let speed = if keys.pressed(KeyCode::ShiftLeft) {
-        900.
-    } else {
-        300.
-    };
-    transform.translation += motion.normalize_or_zero() * speed * time.delta_secs().min(0.05);
-    transform.rotation = Transform::IDENTITY.looking_to(forward, Vec3::Y).rotation;
 }
 fn monitor(
     mut commands: Commands,
-    options: Res<Options>,
+    (options, simulation): (Res<Options>, Res<movement::Simulation>),
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
     adapter: Option<Res<RenderAdapterInfo>>,
@@ -392,6 +361,7 @@ fn monitor(
     control.frames += 1;
     let mut report = status.0.lock().expect("status lock");
     report.frames = control.frames;
+    report.simulation = simulation.report();
     if let Some(adapter) = adapter {
         report.adapter = Some(adapter.name.clone());
         report.backend = Some(format!("{:?}", adapter.backend));
@@ -402,9 +372,11 @@ fn monitor(
     if report.capture_completed && control.completed_frame.is_none() {
         control.completed_frame = Some(control.frames);
     }
-    if let Some(limit) = options.frames {
-        if control.frames >= limit && !control.requested {
+    if options.frames.is_some() || options.movement_script.is_some() {
+        let limit = options.frames.unwrap_or(u64::MAX - 600);
+        if (control.frames >= limit || simulation.finished) && !control.requested {
             control.requested = true;
+            control.requested_frame = Some(control.frames);
             if options.capture.is_some() {
                 commands
                     .spawn(Screenshot::primary_window())
@@ -419,7 +391,10 @@ fn monitor(
         {
             exit.write(AppExit::Success);
         }
-        if control.frames > limit + 600 {
+        if control
+            .requested_frame
+            .is_some_and(|frame| control.frames > frame + 600)
+        {
             exit.write(AppExit::error());
         }
     }
