@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-runtime"]
+members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-runtime", "crates/hl2-bevy"]
+default-members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-runtime"]
 resolver = "2"
 exclude = ["third_party/miniquad"]
 

@@ -1,0 +1,17 @@
+[package]
+name = "hl2-bevy"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+modkit-core.workspace = true
+source-assets.workspace = true
+bevy = { version = "=0.19.1", default-features = false, features = ["3d", "bevy_log"] }
+
+[[bin]]
+name = "hl2-bevy"
+path = "src/main.rs"

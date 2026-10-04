@@ -1,0 +1,605 @@
+//! Read owned Source assets before constructing the Bevy app; no system performs file I/O.
+use anyhow::{Context, Result, bail};
+use modkit_core::World;
+use source_assets::{
+    bsp::Bsp,
+    keyvalues::{self, Entry, Value},
+    models,
+    sky::UvTransform,
+    vpk::{self, Vfs},
+    vtf::{self, Image},
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Arc,
+};
+
+const MAX_TEXTURE_DIMENSION: usize = 2048;
+const MAX_TEXTURE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DECODED_BYTES: usize = 512 * 1024 * 1024;
+const MAX_MATERIALS: usize = 16384;
+
+pub struct LoadedMap {
+    pub world: World,
+    pub bsp: Bsp,
+    pub revision: u32,
+    pub materials: BTreeMap<String, MaterialData>,
+    pub texture_errors: Vec<String>,
+    pub models: serde_json::Value,
+}
+
+#[derive(Debug)]
+pub struct MaterialData {
+    pub base: Option<Arc<Image>>,
+    /// Normalized VTF key shared by both decoded textures and GPU image handles.
+    pub base_path: Option<String>,
+    pub alpha_cutoff: Option<f32>,
+    pub translucent: bool,
+    pub additive: bool,
+    pub two_sided: bool,
+    pub opacity: f32,
+    pub tint: [f32; 3],
+    pub unlit: bool,
+    /// Affine rows applied to the BSP/model base UVs before repeat sampling.
+    pub uv_transform: [[f32; 3]; 2],
+}
+
+impl Default for MaterialData {
+    fn default() -> Self {
+        Self {
+            base: None,
+            base_path: None,
+            alpha_cutoff: None,
+            translucent: false,
+            additive: false,
+            two_sided: false,
+            opacity: 1.,
+            tint: [1.; 3],
+            unlit: false,
+            uv_transform: UvTransform::default().rows(),
+        }
+    }
+}
+
+pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
+    let map = map.trim_end_matches(".bsp");
+    if map.is_empty()
+        || map.len() > 128
+        || !map
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+    {
+        bail!("map must be a bare Source map name");
+    }
+    let mut vfs = Vfs::mount(game).context("mount installed owned content")?;
+    let bytes = vfs
+        .read(&format!("maps/{map}.bsp"))?
+        .with_context(|| format!("owned map {map}.bsp not found"))?;
+    if bytes.len() > 512 * 1024 * 1024 {
+        bail!("owned map exceeds 512 MiB read limit");
+    }
+    let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {map}.bsp"))?;
+    vfs.mount_pak(bsp.lump(40)).context("mount map pak")?;
+    let mut world = bsp.world(map).context("decode Source world")?;
+    world.warnings.extend(vfs.warnings.iter().cloned());
+    normalize_bsp_render_winding(&mut world);
+    let model_report = models::append_models(&mut world, &vfs);
+    let names = rendered_material_names(&world);
+    if names.len() > MAX_MATERIALS {
+        bail!("map exceeds {MAX_MATERIALS} unique material limit");
+    }
+    let mut materials = BTreeMap::new();
+    let mut texture_errors = Vec::new();
+    let mut decoded_bytes = 0usize;
+    let mut texture_cache = BTreeMap::new();
+    for name in names {
+        let material = load_material(
+            &vfs,
+            &name,
+            &mut texture_cache,
+            &mut decoded_bytes,
+            &mut texture_errors,
+        );
+        materials.insert(name, material);
+    }
+    Ok(LoadedMap {
+        revision: bsp.revision,
+        bsp,
+        world,
+        materials,
+        texture_errors,
+        models: serde_json::to_value(model_report)?,
+    })
+}
+
+/// BSP surfedges retain clockwise triangles, but vmdl's Strip::indices already
+/// reverses model triangles to CCW. Normalize BSP render copies before static
+/// props are merged, keeping original collision copies and model data intact.
+fn normalize_bsp_render_winding(world: &mut World) {
+    for surface in world.surfaces.iter_mut().chain(
+        world
+            .brush_models
+            .iter_mut()
+            .flat_map(|model| &mut model.surfaces),
+    ) {
+        for triangle in surface.indices.as_chunks_mut::<3>().0 {
+            triangle.swap(1, 2);
+        }
+    }
+}
+
+/// Initial static visibility only. Runtime I/O and animated render effects are separate.
+pub(crate) fn visible_entity(world: &World, id: usize) -> bool {
+    world.entities.get(id).is_some_and(|entity| {
+        !world.background_entities.contains(&id)
+            && !entity.class().starts_with("trigger_")
+            && !entity.class().starts_with("func_areaportal")
+            && entity.get("rendermode") != Some("10")
+    })
+}
+
+fn rendered_material_names(world: &World) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut append = |surfaces: &[modkit_core::Surface]| {
+        names.extend(
+            surfaces
+                .iter()
+                .filter(|surface| !surface.background && !surface.indices.is_empty())
+                .map(|surface| surface.material.clone()),
+        );
+    };
+    // Includes displacements and already-transformed static props. terrain is a
+    // duplicate collision representation, and unused model_assets are not draws.
+    append(&world.surfaces);
+    for (id, entity) in world.entities.iter().enumerate() {
+        if !visible_entity(world, id) {
+            continue;
+        }
+        if let Some(brush) = entity
+            .get("model")
+            .and_then(|name| name.strip_prefix('*'))
+            .and_then(|id| id.parse::<usize>().ok())
+            .and_then(|id| world.brush_models.iter().find(|model| model.id == id))
+        {
+            append(&brush.surfaces);
+        }
+    }
+    for instance in &world.model_instances {
+        if instance.background || !instance.entity.is_some_and(|id| visible_entity(world, id)) {
+            continue;
+        }
+        if let Some(surfaces) = world.model_assets.get(&instance.asset_key()) {
+            append(surfaces);
+        }
+    }
+    names
+}
+
+struct Definition {
+    shader: String,
+    properties: BTreeMap<String, String>,
+}
+
+fn asset_path(name: &str, extension: &str) -> Result<String> {
+    if name.is_empty() || name.len() > 1024 {
+        bail!("material asset name must contain 1..1024 bytes");
+    }
+    let name = vpk::normalize(name)?;
+    let name = name
+        .trim_start_matches("materials/")
+        .trim_end_matches(extension);
+    Ok(format!("materials/{name}{extension}"))
+}
+
+fn direct_properties(entries: &[Entry]) -> BTreeMap<String, String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .text()
+                .map(|text| (entry.key.to_lowercase(), text.into()))
+        })
+        .collect()
+}
+
+// Reuse the bounded KeyValues decoder, preserving direct material parameters and
+// Patch insert/replace semantics. DX fallback blocks and animated proxies are not evaluated.
+fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
+    if depth > 8 {
+        bail!("VMT include cycle/depth limit");
+    }
+    let path = asset_path(name, ".vmt")?;
+    let data = vfs
+        .read(&path)?
+        .with_context(|| format!("VMT absent: {path}"))?;
+    if data.len() > 1024 * 1024 {
+        bail!("VMT exceeds 1 MiB limit: {path}");
+    }
+    let entries = keyvalues::parse(&keyvalues::decode_text(&data)?)?;
+    if entries.len() != 1 || !matches!(entries[0].value, Value::Block(_)) {
+        bail!("VMT must contain one material block: {path}");
+    }
+    let root = &entries[0];
+    if !root.key.eq_ignore_ascii_case("patch") {
+        return Ok(Definition {
+            shader: root.key.clone(),
+            properties: direct_properties(root.children()),
+        });
+    }
+    let include = root
+        .get("include")
+        .and_then(Entry::text)
+        .context("VMT Patch has no include")?;
+    let mut inherited = definition(vfs, include, depth + 1)?;
+    for operation in ["insert", "replace"] {
+        if let Some(block) = root.get(operation) {
+            if !matches!(block.value, Value::Block(_)) {
+                bail!("VMT Patch {operation} must be a block");
+            }
+            for (key, value) in direct_properties(block.children()) {
+                if inherited.properties.contains_key(&key) == (operation == "replace") {
+                    inherited.properties.insert(key, value);
+                }
+            }
+        }
+    }
+    Ok(inherited)
+}
+
+fn scalar(properties: &BTreeMap<String, String>, key: &str, default: f32) -> Result<f32> {
+    let Some(value) = properties.get(key) else {
+        return Ok(default);
+    };
+    let number: f32 = value
+        .parse()
+        .with_context(|| format!("invalid VMT {key}"))?;
+    if !number.is_finite() {
+        bail!("nonfinite VMT {key}");
+    }
+    Ok(number)
+}
+
+fn metadata(definition: &Definition) -> Result<MaterialData> {
+    let p = &definition.properties;
+    let mut material = MaterialData {
+        translucent: scalar(p, "$translucent", 0.)?.trunc() != 0.,
+        additive: scalar(p, "$additive", 0.)?.trunc() != 0.,
+        two_sided: scalar(p, "$nocull", 0.)?.trunc() != 0.,
+        opacity: scalar(p, "$alpha", 1.)?.clamp(0., 1.),
+        unlit: definition.shader.eq_ignore_ascii_case("unlitgeneric"),
+        ..Default::default()
+    };
+    if scalar(p, "$alphatest", 0.)?.trunc() != 0. {
+        let reference = scalar(p, "$alphatestreference", 0.5)?;
+        material.alpha_cutoff = Some(if reference > 0. { reference } else { 0.5 });
+    }
+    if let Some(color) = p.get("$color") {
+        let bytes = color.trim().starts_with('{');
+        let values = color
+            .trim()
+            .trim_matches(['[', ']', '{', '}'])
+            .split_whitespace()
+            .map(str::parse::<f32>)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("invalid VMT $color")?;
+        if values.len() != 3 || values.iter().any(|v| !v.is_finite()) {
+            bail!("VMT $color must contain three finite channels");
+        }
+        material.tint = std::array::from_fn(|i| values[i] / if bytes { 255. } else { 1. });
+    }
+    if let Some(transform) = p.get("$basetexturetransform") {
+        material.uv_transform = UvTransform::parse(transform)?.rows();
+    }
+    Ok(material)
+}
+
+fn load_material(
+    vfs: &Vfs,
+    name: &str,
+    cache: &mut BTreeMap<String, Arc<Image>>,
+    decoded_bytes: &mut usize,
+    errors: &mut Vec<String>,
+) -> MaterialData {
+    let definition = match definition(vfs, name, 0) {
+        Ok(definition) => definition,
+        Err(error) => {
+            errors.push(format!("{name}: {error:#}"));
+            return MaterialData::default();
+        }
+    };
+    let mut material = match metadata(&definition) {
+        Ok(material) => material,
+        Err(error) => {
+            errors.push(format!("{name}: {error:#}"));
+            MaterialData::default()
+        }
+    };
+    let image = (|| -> Result<(String, Arc<Image>)> {
+        let base = definition
+            .properties
+            .get("$basetexture")
+            .or_else(|| definition.properties.get("$refracttinttexture"))
+            .context("VMT has no supported base texture")?;
+        let path = asset_path(base, ".vtf")?;
+        let image = cached_texture(cache, decoded_bytes, &path, || {
+            vfs.read(&path)?
+                .with_context(|| format!("VTF absent: {path}"))
+        })?;
+        Ok((path, image))
+    })();
+    match image {
+        Ok((path, image)) => {
+            material.base_path = Some(path);
+            material.base = Some(image);
+        }
+        Err(error) => errors.push(format!("{name}: {error:#}")),
+    }
+    material
+}
+
+fn cached_texture(
+    cache: &mut BTreeMap<String, Arc<Image>>,
+    decoded_bytes: &mut usize,
+    path: &str,
+    read: impl FnOnce() -> Result<Vec<u8>>,
+) -> Result<Arc<Image>> {
+    if let Some(image) = cache.get(path) {
+        return Ok(Arc::clone(image));
+    }
+    let data = read()?;
+    if data.len() > MAX_TEXTURE_BYTES {
+        bail!("encoded VTF exceeds 64 MiB limit: {path}");
+    }
+    // The VTF adapter picks an existing mip rather than resampling. Reject
+    // a texture with no mip within our cap before allocating its RGBA pixels.
+    let width = usize::from(u16::from_le_bytes(
+        data.get(16..18)
+            .context("truncated VTF width")?
+            .try_into()?,
+    ));
+    let height = usize::from(u16::from_le_bytes(
+        data.get(18..20)
+            .context("truncated VTF height")?
+            .try_into()?,
+    ));
+    let mips = usize::from(*data.get(56).context("truncated VTF mip count")?);
+    if !(1..=15).contains(&mips) {
+        bail!("invalid VTF mip count: {path}");
+    }
+    if (width.max(height) >> (mips - 1)) > MAX_TEXTURE_DIMENSION {
+        bail!("VTF has no mip within the 2048 dimension limit: {path}");
+    }
+    let image =
+        vtf::decode(&data, MAX_TEXTURE_DIMENSION).with_context(|| format!("decode {path}"))?;
+    let total = decoded_bytes
+        .checked_add(image.rgba.len())
+        .context("decoded VTF byte count overflow")?;
+    if total > MAX_DECODED_BYTES {
+        bail!("map decoded texture budget exceeds 512 MiB");
+    }
+    *decoded_bytes = total;
+    let image = Arc::new(image);
+    cache.insert(path.to_owned(), Arc::clone(&image));
+    Ok(image)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bsp_normalization_faces_up_and_preserves_model_and_collision_copies() {
+        let mut surface = modkit_core::Surface {
+            background: false,
+            material: "synthetic".into(),
+            lightmap: None,
+            vertices: [[0., 0., 0.], [0., 1., 0.], [1., 0., 0.]]
+                .into_iter()
+                .map(|position| modkit_core::Vertex {
+                    position: position.into(),
+                    uv: Default::default(),
+                    color: [255; 4],
+                    light_uv: Default::default(),
+                    skin: None,
+                })
+                .collect(),
+            indices: vec![0, 1, 2],
+        };
+        let collision = surface.clone();
+        surface.indices = vec![0, 2, 1];
+        let model = surface;
+        let mut world = World {
+            surfaces: vec![collision.clone()],
+            terrain: vec![collision.clone()],
+            model_assets: BTreeMap::from([("synthetic-model".into(), vec![model.clone()])]),
+            ..Default::default()
+        };
+        normalize_bsp_render_winding(&mut world);
+        let triangle = &world.surfaces[0];
+        let positions: Vec<_> = triangle
+            .indices
+            .iter()
+            .map(|&i| triangle.vertices[i as usize].position)
+            .collect();
+        assert!(
+            (positions[1] - positions[0])
+                .cross(positions[2] - positions[0])
+                .z
+                > 0.
+        );
+        assert_eq!(world.terrain[0].indices, collision.indices);
+        assert_eq!(
+            world.model_assets["synthetic-model"][0].indices,
+            model.indices
+        );
+    }
+
+    fn tiny_vtf() -> Vec<u8> {
+        let mut bytes = vec![0; 80];
+        bytes[..4].copy_from_slice(b"VTF\0");
+        bytes[4..8].copy_from_slice(&7u32.to_le_bytes());
+        bytes[8..12].copy_from_slice(&2u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&80u32.to_le_bytes());
+        bytes[16..18].copy_from_slice(&1u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&1u16.to_le_bytes());
+        bytes[24..26].copy_from_slice(&1u16.to_le_bytes());
+        bytes[56] = 1;
+        bytes[57..61].copy_from_slice(&u32::MAX.to_le_bytes());
+        bytes[63..65].copy_from_slice(&1u16.to_le_bytes());
+        bytes.extend([2, 4, 8, 16]);
+        bytes
+    }
+
+    #[test]
+    fn texture_aliases_share_pixels_and_still_reuse_when_budget_is_full() {
+        let mut cache = BTreeMap::new();
+        let mut used = MAX_DECODED_BYTES - 4;
+        let first_key = asset_path("Materials\\Shared.VTF", ".vtf").unwrap();
+        let alias_key = asset_path("shared", ".vtf").unwrap();
+        assert_eq!(first_key, alias_key);
+        let first = cached_texture(&mut cache, &mut used, &first_key, || Ok(tiny_vtf())).unwrap();
+        assert_eq!(first.rgba, [2, 4, 8, 16]);
+        assert_eq!(used, MAX_DECODED_BYTES);
+        let alias = cached_texture(&mut cache, &mut used, &alias_key, || {
+            panic!("an alias must not read or decode its existing texture again")
+        })
+        .unwrap();
+        assert!(Arc::ptr_eq(&first, &alias));
+        assert_eq!(used, MAX_DECODED_BYTES);
+        assert!(
+            cached_texture(&mut cache, &mut used, "materials/new.vtf", || {
+                Ok(tiny_vtf())
+            })
+            .is_err()
+        );
+        assert_eq!(used, MAX_DECODED_BYTES);
+        assert_eq!(
+            cache.len(),
+            1,
+            "an over-budget texture must not be retained"
+        );
+    }
+
+    #[test]
+    fn selection_excludes_hidden_sky_unreferenced_and_duplicate_collision_materials() {
+        use modkit_core::{BrushModel, Entity, ModelInstance, Surface, Vertex};
+        let surface = |name: &str, background: bool| Surface {
+            material: name.into(),
+            background,
+            vertices: [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]]
+                .into_iter()
+                .map(|position| Vertex {
+                    position: position.into(),
+                    uv: Default::default(),
+                    light_uv: Default::default(),
+                    color: [255; 4],
+                    skin: None,
+                })
+                .collect(),
+            indices: vec![0, 1, 2],
+            lightmap: None,
+        };
+        let entity = |class: &str, model: &str, hidden: bool| Entity {
+            properties: vec![
+                ("classname".into(), class.into()),
+                ("model".into(), model.into()),
+                ("rendermode".into(), if hidden { "10" } else { "0" }.into()),
+            ],
+        };
+        let instance = |model: &str, entity: Option<usize>, background: bool| ModelInstance {
+            model: model.into(),
+            entity,
+            background,
+            origin: Default::default(),
+            angles: Default::default(),
+            scale: 1.,
+            skin: 0,
+            kind: "prop_dynamic".into(),
+            solid: false,
+            solid_mode: None,
+        };
+        let world = World {
+            surfaces: vec![
+                surface("world", false),
+                surface("static-baked", false),
+                surface("sky", true),
+            ],
+            terrain: vec![surface("collision-only", false)],
+            entities: vec![
+                entity("func_detail", "*1", false),
+                entity("trigger_once", "*2", false),
+                entity("func_areaportal", "*3", false),
+                entity("func_brush", "*4", true),
+                entity("func_brush", "*5", false),
+                entity("prop_dynamic", "visible.mdl", false),
+                entity("prop_dynamic", "hidden.mdl", true),
+                entity("prop_dynamic", "background.mdl", false),
+            ],
+            background_entities: vec![4, 7],
+            brush_models: (1..=6)
+                .map(|id| BrushModel {
+                    id,
+                    surfaces: vec![surface(&format!("brush-{id}"), false)],
+                    ..Default::default()
+                })
+                .collect(),
+            model_instances: vec![
+                instance("visible.mdl", Some(5), false),
+                instance("hidden.mdl", Some(6), false),
+                instance("background.mdl", Some(7), true),
+                instance("static.mdl", None, false),
+            ],
+            model_assets: ["visible", "hidden", "background", "static", "unused"]
+                .into_iter()
+                .map(|name| {
+                    (
+                        format!("{name}.mdl#0"),
+                        vec![surface(&format!("model-{name}"), false)],
+                    )
+                })
+                .collect(),
+            ..Default::default()
+        };
+        assert_eq!(
+            rendered_material_names(&world),
+            BTreeSet::from([
+                "world".into(),
+                "static-baked".into(),
+                "brush-1".into(),
+                "model-visible".into(),
+            ])
+        );
+    }
+
+    #[test]
+    fn synthetic_vmt_keeps_cutout_tint_opacity_and_affine_uv_parameters() {
+        let entries = keyvalues::parse(
+            r#""VertexLitGeneric" {
+            "$alpha" "0.4" "$nocull" "1" "$color" "{128 64 255}"
+            "$basetexturetransform" "center 0 0 scale 2 3 translate 0.1 -0.2"
+            "$translucent" "1" "$alphatest" "1" "$alphatestreference" "0.3"
+        }"#,
+        )
+        .unwrap();
+        let definition = Definition {
+            shader: entries[0].key.clone(),
+            properties: direct_properties(entries[0].children()),
+        };
+        let material = metadata(&definition).unwrap();
+        assert!(material.translucent && material.two_sided);
+        assert_eq!(material.alpha_cutoff, Some(0.3));
+        assert_eq!(material.opacity, 0.4);
+        assert_eq!(material.tint, [128. / 255., 64. / 255., 1.]);
+        assert_eq!(material.uv_transform, [[2., 0., 0.1], [0., 3., -0.2]]);
+    }
+    #[test]
+    fn material_rejects_nonfinite_parameters_and_escaping_asset_paths() {
+        let definition = Definition {
+            shader: "UnlitGeneric".into(),
+            properties: BTreeMap::from([("$alpha".into(), "NaN".into())]),
+        };
+        assert!(metadata(&definition).is_err());
+        assert!(asset_path("../../outside", ".vmt").is_err());
+    }
+}

@@ -1,5 +1,24 @@
 # Local validation — 2026-10-04
 
+## Bevy migration preview
+
+The separate `bevy-migration` branch packages a static owned-map renderer, not the retained gameplay runtime. Final `bin/hl2-bevy.exe` SHA256 is `CD497A0BE933FEB94083C709A0CFC15E67C4877876C81A4EE9FAC902BA1ADD09`, built 2026-10-04T21:17:54Z. Packaged `source.wgsl` SHA256 is `DF39B6090638EC5238CAE9F93A1F29198D15EDE2B45295348E66E2463A3CF249`; `bin/build-bevy-info.json` is authoritative after rebuilding. See [build instructions and limits](bevy-migration.md).
+
+The final source passes all 241 normal workspace tests (eight Bevy, 141 retained runtime, 34 core, 58 asset readers), all nine explicitly invoked owned-install checks, formatting and strict all-target workspace Clippy. Existing vendored miniquad warnings remain. New tests cover coordinate handedness/pitch, BSP-only winding normalization, material properties, visible-material selection and shared texture caching under an allocation budget. Existing gameplay tests validate the retained runtime; they do not establish gameplay in Bevy.
+
+Both final packaged runs used `launch-bevy.cmd`, completed GPU capture at 188 frames, exited successfully and were visually inspected. Installed Steam build 19307283, patch 9912070, NVIDIA RTX 3070/Vulkan:
+
+| Map and capture | Result |
+| --- | --- |
+| `d1_trainstation_01`, borderless 1920×1080, Source camera (-4690, -1186, 32.03125), yaw 165 | 314 shared base textures, 273,979,396 decoded bytes (about 261 MiB). Model clock front restored after correcting the different BSP/model winding. Seven named unsupported texture cases remain: three dynamic monitors and four Vortigaunt eye materials. |
+| `d1_trainstation_02`, 1280×720, Source camera (-4304, -224, 1) | 233 shared base textures, 201,117,696 decoded bytes (about 192 MiB). Stairs, fences, props and walls render; two named dynamic monitor textures remain unsupported. |
+
+Neither final report has texture-budget failures, model-load failures or capture-write failures. The 512 MiB cap is the adapter's decoded-base-texture budget, not a Bevy limit or a total memory measurement. An earlier preview failed that budget by decoding aliases separately and loading unused textures; it is retained as rejected evidence. A subsequent preview exposed wrongly culled model fronts and is also superseded. Bevy currently selects texture mips up to 2048 pixels versus the retained viewer's 512, so these are not equivalent performance comparisons.
+
+Local captures/reports are `artifacts/bevy-station01-1080-winding.*` and `artifacts/bevy-station02-winding.*`. Static bind poses and initial door transforms are visible limitations. No movement/collision, weapons/HUD, NPC animation/AI, scene playback, audio or campaign progression is running in Bevy yet. Sky passes, Source material proxies, eyes, dynamic lighting, PVS/areaportals and accurate HDR/gamma remain missing. These captures do not prove Source rendering parity or improved performance.
+
+## Retained runtime validation
+
 This remains a partial Rust reconstruction. Iteration14's final release package is SHA256 07561D4CC09310D7C8837B95D44201C1F6B1871AEDCC6C016BD676669D74DCAD, built 2026-10-04T11:01:23.1984992Z and tested through launch.cmd. bin/build-info.json is authoritative after a later rebuild. The 1D9193BB preview below used the same behavior before the final test-source/format rebuild.
 
 ## Iteration14: actor speech and collision-checked scene movement

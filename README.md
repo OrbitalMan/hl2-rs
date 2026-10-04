@@ -16,6 +16,8 @@ Development is moving toward a Bevy/wgpu host, following the separation of owned
 
 Bevy work will enter `main` after its rendering and gameplay replacements are verified. Until then, use the current launcher below for the existing runtime and the migration branch's own build/run instructions for its experimental renderer. A Bevy map preview is not a playable campaign. See [CONTRIBUTING](CONTRIBUTING.md) before opening a PR.
 
+On this branch, build with `scripts/build-bevy.ps1` and run `launch-bevy.cmd`. The Bevy executable currently renders static owned-map geometry with a fly camera and custom baked-lightmap material; movement/collision, weapons, NPC animation/AI, scenes and audio have not migrated. See [Bevy migration instructions and milestones](docs/bevy-migration.md). The gameplay/weapon/HUD lists below describe the retained `hl2-runtime` executable launched by `launch.cmd`.
+
 ![HL2-RS Rust runtime rendering the trainstation with pistol, HUD and development diagnostics](docs/images/hl2-rs-trainstation.png)
 
 Capture from the packaged Rust build on `d1_trainstation_02`, with F1 diagnostics and a developer weapon loadout. This is a rendering preview, not evidence of completed campaign gameplay. The screenshot depicts owned HL2 content; distributable game assets are not included.

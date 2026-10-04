@@ -8,6 +8,8 @@ Keep decompiler scripts, native binary indices and research-only asset inspectio
 
 Put Source-format code in source-assets, common data/simulation/mod contracts in modkit-core, and renderer/input/host behavior in hl2-runtime. Do not introduce engine-specific file paths into common mod code.
 
+On bevy-migration, put the experimental Bevy host/render adapter in hl2-bevy. Preserve the existing runtime and shared validation. Package the new executable with scripts/build-bevy.ps1 and test bin/hl2-bevy.exe through launch-bevy.cmd. Keep macroquad-prototype as the preserved reference; merge replacements into main only after they are verified. Read docs/bevy-migration.md before extending this host.
+
 Use Cargo.lock. Run relevant unit tests and Clippy after code changes. Verify parser changes against installed maps when available; the local zero-byte d2_coast_02.bsp is a known rejection, not proof of a parser regression. Run the packaged executable for renderer changes. Record limitations and concrete validation in docs/validation.md.
 
 The three upstream repos are research references under the chat's work/references. There is no integrated iw4L crossover yet. Do not describe placeholders or guessed native function names as verified behavior.
