@@ -2,6 +2,20 @@
 
 A standalone, partial Rust reconstruction of Half-Life 2 that reads maps, models, textures, animations and sounds from an installed copy. It does not load Valve's game or engine DLLs. The full campaign is not playable yet.
 
+## Runtime migration and contributing
+
+Development is moving toward a Bevy/wgpu host, following the separation of owned asset readers, simulation and rendering demonstrated by [iw4L](https://github.com/vladtrc/iw4L). The original Macroquad/OpenGL runtime was built as an early prototype; its rendering and gameplay work remains available.
+
+| Branch | Purpose | Pull requests |
+| --- | --- | --- |
+| `main` | Current working partial runtime. It still uses Macroquad while the replacement is being verified. | Shared Source-format/core fixes and fixes to the current runtime. |
+| [macroquad-prototype](https://github.com/kvalls/hl2-rs/tree/macroquad-prototype) | Preserved snapshot of the original prototype before migration. | Reference branch; discuss continuing prototype-specific work first. |
+| [bevy-migration](https://github.com/kvalls/hl2-rs/tree/bevy-migration) | Bevy/wgpu implementation, starting with an owned trainstation map renderer alongside the existing runtime. | Bevy host, renderer and migration changes. Target this branch rather than `main`. |
+
+`source-assets` and `modkit-core` stay engine-independent. Existing asset decoders, simulation behavior and validation are retained as the host is migrated. Bevy's default PBR materials do not recreate Source shaders or physics; those still require their own implementations and comparisons. No speed or fidelity improvement is assumed solely from changing engines.
+
+Bevy work will enter `main` after its rendering and gameplay replacements are verified. Until then, use the current launcher below for the existing runtime and the migration branch's own build/run instructions for its experimental renderer. A Bevy map preview is not a playable campaign. See [CONTRIBUTING](CONTRIBUTING.md) before opening a PR.
+
 ![HL2-RS Rust runtime rendering the trainstation with pistol, HUD and development diagnostics](docs/images/hl2-rs-trainstation.png)
 
 Capture from the packaged Rust build on `d1_trainstation_02`, with F1 diagnostics and a developer weapon loadout. This is a rendering preview, not evidence of completed campaign gameplay. The screenshot depicts owned HL2 content; distributable game assets are not included.

@@ -26,3 +26,6 @@ GitHub Actions runs formatting, strict workspace Clippy and unit tests on Window
 - Add meaningful regression coverage for simulation/parser changes. A screenshot should illustrate a tested behavior, not stand in for a reproducible check.
 
 See docs/research.md for references and docs/validation.md for tested behavior and limitations. Useful contributions include Source collision and movement fidelity, material rendering, NPC schedules/navigation, choreography, remaining weapons, and campaign state. Open a focused issue or PR with reproduction steps and supporting evidence.
+# Branches during the Bevy migration
+
+Target `bevy-migration` for the new Bevy/wgpu host and renderer. Target `main` for shared `source-assets`/`modkit-core` fixes or fixes to its current Macroquad runtime. `macroquad-prototype` preserves the pre-migration implementation for reference. Describe which branch/runtime you tested; a renderer-only preview does not establish campaign fidelity. Migration changes will move to `main` after verified replacements are available.
