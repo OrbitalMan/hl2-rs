@@ -13,6 +13,19 @@ pub struct RayHit {
     pub position: Vec3,
     pub normal: Vec3,
 }
+#[derive(Clone, Copy)]
+pub enum ProjectileHull {
+    Box(Vec3),
+    Sphere(f32),
+}
+#[derive(Clone, Copy, Debug)]
+pub struct ProjectileHit {
+    pub entity: usize,
+    /// Projectile center at impact; the contact point is not its origin.
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub fraction: f32,
+}
 const SCALE: f32 = 1. / 39.37;
 // Retail CGameMovement::PlayerSolidMask(true): NPC-only clip volumes do not
 // block players. Keep their colliders available for other query categories.
@@ -333,6 +346,11 @@ impl Physics {
             }
         }
     }
+    /// Refresh once after a batch of scripted pose/solid updates and before
+    /// projectile queries; otherwise broad-phase bounds lag a moving door.
+    pub fn refresh_queries(&mut self) {
+        self.query.update(&self.colliders);
+    }
     pub fn tick(&mut self, dt: f32) {
         self.player_convex_cache
             .get_mut()
@@ -403,6 +421,118 @@ impl Physics {
                 );
             }
         }
+    }
+    /// Continuous projectile query against enabled solid geometry. These are
+    /// Rapier shape casts, not VPhysics contacts or complete Source group rules.
+    pub fn projectile_sweep(
+        &self,
+        start: Vec3,
+        end: Vec3,
+        hull: ProjectileHull,
+        excluded: &[usize],
+    ) -> Option<ProjectileHit> {
+        if !start.is_finite() || !end.is_finite() {
+            return None;
+        }
+        let shape = match hull {
+            ProjectileHull::Box(half) if half.is_finite() && half.min_element() > 0. => {
+                SharedShape::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
+            }
+            ProjectileHull::Sphere(radius) if radius.is_finite() && radius > 0. => {
+                SharedShape::ball(radius * SCALE)
+            }
+            _ => return None,
+        };
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            let entity = (collider.user_data as usize).wrapping_sub(1);
+            collider.is_enabled()
+                && !excluded.contains(&entity)
+                && self
+                    .world_brush_contents
+                    .get(&handle)
+                    .is_none_or(|contents| contents & 0x0200_400b != 0)
+        };
+        let (handle, hit) = self.query.cast_shape(
+            &self.bodies,
+            &self.colliders,
+            &pose(start, Quat::IDENTITY),
+            &vector(end - start),
+            shape.as_ref(),
+            ShapeCastOptions {
+                max_time_of_impact: 1.,
+                target_distance: 0.,
+                stop_at_penetration: true,
+                compute_impact_geometry_on_penetration: true,
+            },
+            QueryFilter::default()
+                .exclude_sensors()
+                .predicate(&predicate),
+        )?;
+        Some(ProjectileHit {
+            entity: (self.colliders[handle].user_data as usize).wrapping_sub(1),
+            position: start.lerp(end, hit.time_of_impact),
+            normal: Vec3::new(hit.normal1.x, hit.normal1.y, hit.normal1.z),
+            fraction: hit.time_of_impact,
+        })
+    }
+    /// Solid-mask visibility used by local projectile damage, excluding the
+    /// damage receiver. Player/NPC-only clip brushes do not block this trace.
+    pub fn projectile_ray(&self, start: Vec3, end: Vec3, excluded: &[usize]) -> Option<RayHit> {
+        let delta = end - start;
+        let length = delta.length();
+        if !length.is_finite() || length <= 1e-5 {
+            return None;
+        }
+        let direction = delta / length;
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            let entity = (collider.user_data as usize).wrapping_sub(1);
+            collider.is_enabled()
+                && !excluded.contains(&entity)
+                && self
+                    .world_brush_contents
+                    .get(&handle)
+                    .is_none_or(|contents| contents & 0x0200_400b != 0)
+        };
+        let (handle, hit) = self.query.cast_ray_and_get_normal(
+            &self.bodies,
+            &self.colliders,
+            &Ray::new(
+                Point::from(vector(start)),
+                vector![direction.x, direction.y, direction.z],
+            ),
+            length * SCALE,
+            true,
+            QueryFilter::default()
+                .exclude_sensors()
+                .predicate(&predicate),
+        )?;
+        Some(RayHit {
+            entity: (self.colliders[handle].user_data as usize).wrapping_sub(1),
+            position: start + direction * (hit.time_of_impact / SCALE),
+            normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
+        })
+    }
+    /// Closest collision point on an entity, for radius attenuation. Models
+    /// without a collider are handled explicitly by the caller.
+    pub fn entity_closest_point(&self, id: usize, point: Vec3) -> Option<Vec3> {
+        let point = Point::from(vector(point));
+        self.entity_colliders
+            .get(&id)?
+            .iter()
+            .filter_map(|handle| self.colliders.get(*handle))
+            .filter(|collider| collider.is_enabled())
+            .map(|collider| {
+                collider
+                    .shape()
+                    .project_point(collider.position(), &point, true)
+                    .point
+            })
+            .min_by(|a, b| {
+                (a - point)
+                    .norm_squared()
+                    .total_cmp(&(b - point).norm_squared())
+            })
+            .map(|p| Vec3::new(p.x, p.y, p.z) / SCALE)
     }
     /// Symmetric box sweep for melee's secondary trace. Geometry still uses Rapier shapes.
     pub fn impact_hull(
@@ -720,6 +850,33 @@ mod tests {
             .impact_ray(Vec3::new(-40., 24., 200.), Vec3::X, 80.)
             .is_none());
         assert_eq!(physics.colliders.len(), 2);
+    }
+    #[test]
+    fn projectile_queries_follow_scripted_door_poses_without_advancing_simulation() {
+        let world = door_world();
+        let mut physics = Physics::new(&world);
+        let start = Vec3::new(60., 24., 54.);
+        let end = Vec3::new(140., 24., 54.);
+        assert!(physics
+            .projectile_sweep(start, end, ProjectileHull::Sphere(10.), &[])
+            .is_none());
+        physics.set_entity(0, Vec3::X * 100., Quat::IDENTITY, true);
+        physics.refresh_queries();
+        let hit = physics
+            .projectile_sweep(start, end, ProjectileHull::Sphere(10.), &[])
+            .unwrap();
+        assert_eq!(hit.entity, 0);
+        assert!(hit.position.x > 88. && hit.position.x < 92.);
+        assert!(physics.projectile_ray(start, end, &[]).is_some());
+        assert!(physics.projectile_ray(start, end, &[0]).is_none());
+        let closest = physics.entity_closest_point(0, start).unwrap();
+        assert!((closest.x - 99.).abs() < 0.01);
+        physics.set_entity(0, Vec3::X * 100., Quat::IDENTITY, false);
+        physics.refresh_queries();
+        assert!(physics
+            .projectile_sweep(start, end, ProjectileHull::Box(Vec3::splat(3.)), &[])
+            .is_none());
+        assert!(physics.entity_closest_point(0, start).is_none());
     }
     fn native_prop_world() -> World {
         let instance = modkit_core::ModelInstance {

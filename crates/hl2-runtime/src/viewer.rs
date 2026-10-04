@@ -252,6 +252,8 @@ fn prepare_weapons(
         "fire03",
         "fire04",
         "altfire",
+        "shake",
+        "ir_fire2",
         "reload",
         "reloadempty",
         "reload1",
@@ -314,6 +316,67 @@ fn capture(path: &Path) -> Result<()> {
     }
     get_screen_data().export_png(path.to_str().context("screenshot path is not UTF8")?);
     Ok(())
+}
+fn projectile_meshes(
+    vfs: &Vfs,
+    cache: &mut HashMap<String, Option<Texture2D>>,
+) -> (HashMap<String, Vec<DrawBatch>>, Vec<String>) {
+    let mut models = HashMap::new();
+    let mut errors = Vec::new();
+    {
+        let path = crate::projectiles::GRENADE_MODEL;
+        match source_assets::models::read_model(vfs, path, 0) {
+            Ok(surfaces) => {
+                let local = World {
+                    surfaces,
+                    ..Default::default()
+                };
+                let (batches, _, missing) = meshes(&local, vfs, cache);
+                errors.extend(missing);
+                models.insert(path.into(), batches);
+            }
+            Err(error) => errors.push(format!("{path}: {error:#}")),
+        }
+    }
+    (models, errors)
+}
+
+fn prepare_choreography_animations(world: &mut World, vfs: &Vfs, scene: &Scene) {
+    for (key, wanted) in scene.required_animation_clips(world) {
+        let Some(instance) = world
+            .model_instances
+            .iter()
+            .find(|instance| instance.asset_key() == key)
+        else {
+            continue;
+        };
+        match source_assets::animation::load(vfs, &instance.model, &wanted) {
+            Ok(rig) => {
+                if let Some(current) = world.rigs.get_mut(&key) {
+                    let same_skeleton = current.bones.len() == rig.bones.len()
+                        && current
+                            .bones
+                            .iter()
+                            .zip(&rig.bones)
+                            .all(|(a, b)| a.name == b.name && a.parent == b.parent);
+                    if same_skeleton {
+                        current.clips.extend(rig.clips);
+                        current.warnings.extend(rig.warnings);
+                    } else {
+                        current
+                            .warnings
+                            .push("choreography clip skeleton differs from loaded model".into());
+                    }
+                } else {
+                    world.rigs.insert(key, rig);
+                }
+            }
+            Err(error) => world.warnings.push(format!(
+                "choreography animations {}: {error:#}",
+                instance.model
+            )),
+        }
+    }
 }
 fn apply_selection(
     result: crate::selection::SelectionResult,
@@ -433,6 +496,16 @@ fn apply_console_effects(
                 )),
                 Err(error) => console.log(format!("Map lookup failed: {error:#}")),
             },
+            Effect::Fire {
+                target,
+                input,
+                parameter,
+                delay,
+            } => {
+                if context.scene.send_named(&target, &input, &parameter, delay) {
+                    console.log(format!("Queued {target}.{input} after {delay} seconds."));
+                }
+            }
             Effect::Quit => *context.quit = true,
         }
     }
@@ -462,8 +535,14 @@ pub async fn run(mut o: Options) -> Result<()> {
     let (mut batches, mut loaded, mut missing) = meshes(&world, &vfs, &mut texture_cache);
     let mut dynamic = entity_meshes(&world, &vfs, &mut texture_cache);
     let mut viewmodels = weapon_meshes(&world, &vfs, &weapons, &mut texture_cache);
+    let (mut projectile_models, mut projectile_model_errors) =
+        projectile_meshes(&vfs, &mut texture_cache);
+    let mut projectiles = crate::projectiles::Projectiles::default();
+    let mut projectile_visuals = crate::projectile_rendering::ProjectileVisuals::new(&vfs);
     let mut physics = Physics::new(&world);
     let mut scene = Scene::new(&world);
+    scene.load_choreography(&world, &vfs)?;
+    prepare_choreography_animations(&mut world, &vfs, &scene);
     let mut materials = crate::rendering::Materials::new(&world)?;
     let (mut sky_background, mut sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
 
@@ -999,6 +1078,7 @@ pub async fn run(mut o: Options) -> Result<()> {
         accumulator += simulation_dt;
         while accumulator >= TICK {
             scene.tick(&world, player.feet, TICK);
+            inventory.advance_projectile_fire(&world, &mut scene, &weapons, position, direction);
             let input_allowed = (grabbed || playback_enabled)
                 && (!capturing || playback_enabled)
                 && selection.pending.is_none();
@@ -1007,7 +1087,10 @@ pub async fn run(mut o: Options) -> Result<()> {
                 && (is_mouse_button_down(MouseButton::Left) || queued_attack || playback.held);
             let secondary = input_allowed
                 && attack_suppression.secondary_allowed()
-                && inventory.active == "weapon_shotgun"
+                && matches!(
+                    inventory.active.as_str(),
+                    "weapon_shotgun" | "weapon_smg1" | "weapon_ar2"
+                )
                 && (is_mouse_button_down(MouseButton::Right)
                     || queued_secondary
                     || playback.secondary_held);
@@ -1054,6 +1137,19 @@ pub async fn run(mut o: Options) -> Result<()> {
                     !state.killed && state.visible,
                 );
             }
+            for launch in inventory.projectile_spawns.drain(..) {
+                projectiles.spawn(launch, &mut scene);
+            }
+            physics.refresh_queries();
+            let damage = projectiles.tick(
+                &world,
+                &mut scene,
+                &mut physics,
+                player.feet,
+                player.crouched,
+                TICK,
+            );
+            inventory.apply_projectile_damage(damage, &world, &mut scene, &mut physics);
             physics.tick(TICK);
             if !fly {
                 player.step(input, &physics, TICK);
@@ -1167,8 +1263,14 @@ pub async fn run(mut o: Options) -> Result<()> {
                     (batches, loaded, missing) = meshes(&world, &vfs, &mut texture_cache);
                     dynamic = entity_meshes(&world, &vfs, &mut texture_cache);
                     viewmodels = weapon_meshes(&world, &vfs, &weapons, &mut texture_cache);
+                    (projectile_models, projectile_model_errors) =
+                        projectile_meshes(&vfs, &mut texture_cache);
+                    projectiles = crate::projectiles::Projectiles::default();
+                    projectile_visuals = crate::projectile_rendering::ProjectileVisuals::new(&vfs);
                     physics = Physics::new(&world);
                     scene = Scene::with_campaign(&world, false);
+                    scene.load_choreography(&world, &vfs)?;
+                    prepare_choreography_animations(&mut world, &vfs, &scene);
                     materials = crate::rendering::Materials::new(&world)?;
                     (sky_background, sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
                     sky_2d_frames = 0;
@@ -1269,7 +1371,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             if !rig.clips.contains_key(name) {
                 continue;
             }
-            let matrices = rig.matrices(name, (scene.time - state.animation_started) as f32);
+            let matrices = rig.matrices(name, scene.animation_time(*id));
             for batch in meshes {
                 for (v, (bind, weights)) in batch.mesh.vertices.iter_mut().zip(&batch.skin) {
                     if let Some(weights) = weights {
@@ -1404,6 +1506,29 @@ pub async fn run(mut o: Options) -> Result<()> {
                 draws.push((batch, transform, distance, tint));
             }
         }
+        for projectile in &projectiles.active {
+            if projectile.kind == crate::projectiles::ProjectileKind::CombineBall {
+                continue;
+            }
+            let Some(meshes) = projectile_models.get(projectile.model()) else {
+                continue;
+            };
+            let scale = if projectile.kind == crate::projectiles::ProjectileKind::CombineBall {
+                projectile.physical_radius() / 10.
+            } else {
+                1.
+            };
+            let transform = Mat4::from_scale_rotation_translation(
+                Vec3::splat(scale),
+                crate::physics::angles(projectile.angles),
+                v3(projectile.position),
+            );
+            for batch in meshes {
+                let distance =
+                    (transform.transform_point3(batch.center) - v3(position)).length_squared();
+                draws.push((batch, transform, distance, vec4(1., 1., 1., 1.)));
+            }
+        }
         draws.sort_by(|(a, _, da, _), (b, _, db, _)| {
             (a.kind >= 2).cmp(&(b.kind >= 2)).then_with(|| {
                 if a.kind >= 2 {
@@ -1430,6 +1555,13 @@ pub async fn run(mut o: Options) -> Result<()> {
             }
         }
         impacts.draw(&scene, &physics, &materials);
+        projectile_visuals.draw(
+            &projectiles,
+            v3(direction),
+            scene.time,
+            simulation_dt == 0.,
+            &materials,
+        );
         gl_use_default_material();
         for b in sandbox.blocks.iter().chain(&placed) {
             draw_cube(
@@ -1602,8 +1734,17 @@ pub async fn run(mut o: Options) -> Result<()> {
         }
         for name in requested_captures {
             capture(&Path::new("artifacts").join(format!("{name}.png")))?;
-            let doors: Vec<_> = world.entities.iter().enumerate().filter(|(_, entity)| entity.class().contains("door")).filter_map(|(id, _)| scene.states.get(id).map(|state| serde_json::json!({"entity":id,"origin":state.origin.to_array(),"rotation":state.rotation.to_array(),"locked":state.locked}))).collect();
+            let doors: Vec<_> = world.entities.iter().enumerate().filter(|(_, entity)| entity.class().contains("door")).filter_map(|(id, entity)| scene.states.get(id).map(|state| serde_json::json!({"entity":id,"targetname":entity.get("targetname").unwrap_or(""),"origin":state.origin.to_array(),"rotation":state.rotation.to_array(),"locked":state.locked}))).collect();
             capture_snapshots.push(serde_json::json!({"name":name,"scene_time":scene.time,"playback_time":playback_time,"player":player,"position":position.to_array(),"yaw":yaw,"pitch":pitch,"ui":console.mode,"shots":inventory.shots,"active":inventory.active,"clips":inventory.owned,"reserve_ammo":inventory.reserve_ammo,"suit":inventory.suit,"fly":fly,"pending":selection.pending,"doors":doors}));
+            let snapshot = capture_snapshots.last_mut().unwrap();
+            snapshot["projectiles"] = serde_json::json!(projectiles.active);
+            snapshot["effects"] = serde_json::json!(projectiles.effects);
+            snapshot["projectile_diagnostics"] = serde_json::json!(projectiles.diagnostics);
+            snapshot["health"] = serde_json::json!(inventory.health);
+            snapshot["armor"] = serde_json::json!(inventory.armor);
+            snapshot["ar2_charge_until"] = serde_json::json!(inventory.charge_until());
+            snapshot["choreography"] = serde_json::json!(scene.choreography_states(&world));
+            snapshot["actor_animations"] = serde_json::json!(scene.animation_states(&world));
         }
         if o.frames.is_some_and(|n| frame >= n) || is_key_pressed(KeyCode::F10) || requested_quit {
             if let Some(path) = &o.capture {
@@ -1617,7 +1758,13 @@ pub async fn run(mut o: Options) -> Result<()> {
             report["sky_2d_frames"] = serde_json::json!(sky_2d_frames);
             report["console"] = serde_json::json!({"mode":console.mode,"sv_cheats":console.cheats,"output":console.output,"playback_time":playback_time});
             report["capture_snapshots"] = serde_json::json!(capture_snapshots);
+            report["choreography"] = serde_json::json!(scene.choreography_states(&world));
+            report["actor_animations"] = serde_json::json!(scene.animation_states(&world));
             report["scene_time"] = serde_json::json!(scene.time);
+            report["audio_decoded"] = serde_json::json!(audio.decoded);
+            report["ar2_charge_until"] = serde_json::json!(inventory.charge_until());
+            report["projectiles"] = serde_json::json!({"active":projectiles.active,"effects":projectiles.effects,"diagnostics":projectiles.diagnostics,"model_errors":projectile_model_errors});
+            report["projectile_visuals"] = serde_json::json!({"errors":projectile_visuals.errors,"ball_frames":projectile_visuals.ball_frames,"effect_frames":projectile_visuals.effect_frames});
             report["native_static_collision"] = serde_json::json!({"convex_colliders":physics.native_shape_count,"hull_fallbacks":physics.native_shape_fallbacks});
             write(
                 Path::new("artifacts/runtime-report.json"),

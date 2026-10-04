@@ -1,4 +1,30 @@
-# Local validation — 2026-10-03
+# Local validation — 2026-10-04
+
+This remains a partial Rust reconstruction. The latest release package is SHA256 5CC47D6F36A8F6707DEB6EA26C4F3CE8E5C6CAE4C513FCA2FC2662EB13DD622D, built 2026-10-04T00:49:58.5023416Z and tested through the normal launchers. bin/build-info.json is authoritative after a later rebuild. Historical checks below describe earlier packages.
+
+| Current check | Result |
+| --- | --- |
+| Workspace unit tests | 192 passed: 117 runtime, 30 core and 45 asset-reader tests. |
+| Explicit owned-install checks | Both passed: trainstation MP3 decoding and the authored security03 scene gate. These are ignored in the normal suite. |
+| Formatting and all-target strict Clippy | Passed; the vendored miniquad dependency retains two existing compiler warnings. |
+| Existing packaged weapon/shotgun/selection fixtures | All 27 report assertions passed on the latest package. |
+| Packaged SMG/AR2 projectile fixture | All 20 assertions passed, including partial-clip AR2 charge-time reload/holster veto. |
+| Compiled choreography | All 1,837 installed scenes and 15,114 events parsed privately with zero failures. The first map loaded all 44 referenced scenes in the packaged run. |
+| First-map scene fixture | 33 authored-controller and sequence-sampling checks passed; explicit Resume bypasses missing movement readiness. |
+
+The crosshair fix corrects the screen accessor from width to height and follows the native surface's second UV inset. Actual 1280x720 and 1920x1080 captures each match the original's five single-pixel positions and 22x22 footprint. A1281x721 capture checks integer-center rounding without claiming an original odd-size comparison. Tests cover the owned VTF POINTSAMPLE flag and non-square coordinates. The accepted raster captures use the earlier E0A62CB0 package with identical HUD code. A destination half-pixel experiment enlarged the dots and was rejected. RGB/tone mapping and native font rasterization are not claimed equal.
+
+The current projectile fixture records three contact grenades and two energy balls, three grenade detonations, ball bounces and two expirations. Secondary reserves are consumed independently of magazine rounds. AR2 reserve stays unchanged during windup; attempted reload/switch cannot interrupt it, and expiry does not inflict radial damage. Grenade flight/explosion and ball flight captures were inspected. The run reports zero audio, texture, projectile-model or visual errors and no capacity/collision-budget failures. Rapier contact behavior, guidance, damage relationships/filters, underwater gates, dissolve animation and complete particles remain approximate or missing.
+
+Accepted original-engine controls corroborate SMG held-trigger reserve progression from three to zero with primary ammo unchanged, its magazine-reload interruption, and AR2 delayed reserve consumption plus charge-time reload/holster veto. Native AR2 convars report radius10, mass150 and duration2. Captures/logs show one ball after release and none later; exact native trajectory, damage and expiry timing were not measured. Unfocused startup, forwarded wait commands and surplus ammo pickups contaminated earlier attempts; those captures were rejected. The original process closed and all six freshly hashed stock configuration entries matched. Three automatic stock metadata writes were recorded separately; this is not a claim that the entire installation was unchanged.
+
+The scene fixture uses actual security03 SECTION6.8806338, Trigger3 7.013968, early STOPPOINT9.5939703 and tail11.1273012. It verifies scene-clock pause/resume, the locked door before its real trigger, opening to90degrees, early completion, tail completion and cancellation. A customs officer's installed motionright SEQUENCE verifies scene-owned sampling, pause freezing, resume and baseline restoration. The first NPC camera intersected a wall and was rejected; the fixture was corrected using owned BSP geometry. Gesture layers, actor movement/readiness, facial flexes, lip sync, camera/train intro and full AI remain unfinished. Unsupported behavior is diagnosed; the run has zero audio/model/texture errors.
+
+Installed MP3 playback now decodes the trainstation cue to stereo44.1kHz, 3,997,440 frames (90.6449s) and successfully requests backend playback. The earlier door-music failure is resolved. Whole-file first decode can block; streaming, spatial mixing, soundscapes, DSP and paused audio remain open.
+
+Current local evidence is under ignored artifacts/iteration12-*. Private native comparisons, cache census and validators stay in ../../work/hl2-decompiled and ../../work/publishing. No installed game data, native code or research database is a build dependency.
+
+## Historical validation — 2026-10-03
 
 This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is B8B94759463E387362E6935174DE7CE07608E8218AAAB1956F243E2373622F31, built at 2026-10-03T09:26:51.6771832Z. bin/build-info.json is authoritative after a later rebuild.
 

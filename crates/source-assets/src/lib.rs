@@ -5,6 +5,7 @@ pub mod keyvalues;
 pub mod lighting;
 pub mod models;
 pub mod phy;
+pub mod scenes;
 pub mod sky;
 pub mod visibility;
 pub mod vpk;

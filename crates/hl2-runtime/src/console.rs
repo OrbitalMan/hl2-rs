@@ -39,6 +39,7 @@ const COMMANDS: &[(&str, &str)] = &[
         "map <name>: load an installed map and reset the player inventory",
     ),
     ("clear", "clear: clear console output"),
+    ("ent_fire", "ent_fire <targetname> [input=Use] [parameter] [delay]: queue entity input; names/globs supported (cheat)"),
     ("echo", "echo <text>: print text"),
     ("toggleconsole", "toggleconsole: close or open the console"),
     ("quit", "quit: exit and save the runtime report"),
@@ -57,9 +58,19 @@ pub enum Effect {
     Loadout,
     Noclip(Option<bool>),
     Getpos,
-    Setpos { x: f32, y: f32, z: Option<f32> },
+    Setpos {
+        x: f32,
+        y: f32,
+        z: Option<f32>,
+    },
     Setang(glam::Vec3),
     Map(String),
+    Fire {
+        target: String,
+        input: String,
+        parameter: String,
+        delay: f64,
+    },
     Quit,
 }
 
@@ -578,6 +589,30 @@ impl Console {
                 }
                 return Ok(Some(Effect::Map(map.to_owned())));
             }
+            "ent_fire" => {
+                cheat()?;
+                if args.is_empty() || args.len() > 4 || args[0].is_empty() {
+                    return Err(usage());
+                }
+                let delay = args
+                    .get(3)
+                    .map_or(Ok(0.), |s| s.parse::<f64>())
+                    .map_err(|_| usage())?;
+                if !delay.is_finite() || delay < 0. {
+                    return Err("ent_fire: delay must be finite and nonnegative".into());
+                }
+                let input = args.get(1).map_or("Use", String::as_str);
+                if input.is_empty() {
+                    return Err(usage());
+                }
+                return Ok(Some(Effect::Fire {
+                    target: args[0].clone(),
+                    input: input.into(),
+                    parameter: args.get(2).cloned().unwrap_or_default(),
+                    // Desktop ent_fire parses an integer delay; map I/O keeps fractions.
+                    delay: delay.trunc(),
+                }));
+            }
             "help" | "find" => {
                 if args.len() > 1 || name == "find" && args.is_empty() {
                     return Err(usage());
@@ -1084,6 +1119,38 @@ mod tests {
                 z: None
             }]
         );
+    }
+
+    #[test]
+    fn entity_inputs_preserve_quoted_values_and_enforce_cheat_and_delay_rules() {
+        let mut console = Console::default();
+        assert!(console.submit("ent_fire security03 Start").is_empty());
+        assert_eq!(
+            console.submit("sv_cheats 1; ent_fire security_* Start \"value;kept\" 0.1"),
+            vec![Effect::Fire {
+                target: "security_*".into(),
+                input: "Start".into(),
+                parameter: "value;kept".into(),
+                delay: 0.,
+            }]
+        );
+        assert_eq!(
+            console.submit("ent_fire panel"),
+            vec![Effect::Fire {
+                target: "panel".into(),
+                input: "Use".into(),
+                parameter: String::new(),
+                delay: 0.,
+            }]
+        );
+        for command in [
+            "ent_fire",
+            "ent_fire door Open x NaN",
+            "ent_fire door Open x -1",
+            "ent_fire door Open x inf",
+        ] {
+            assert!(console.submit(command).is_empty());
+        }
     }
     #[test]
     fn console_returns_to_its_previous_pause_state_and_history_restores_draft() {

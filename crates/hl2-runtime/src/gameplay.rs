@@ -1,6 +1,6 @@
 //! Partial HL2 weapon behavior, reconstructed from installed scripts and the singleplayer SDK.
-//! Unsupported projectile and secondary attacks are not represented by hitscan substitutes.
-use crate::{entities::Scene, physics::Physics};
+//! Projectile attacks queue actual moving projectiles, independently of hitscan fire.
+use crate::{entities::Scene, physics::Physics, projectiles::ProjectileSpawn};
 use anyhow::{Context, Result};
 use glam::Vec3;
 use modkit_core::World;
@@ -21,6 +21,10 @@ pub struct Weapon {
     pub ammo_max: i32,
     pub secondary_ammo_type: String,
     pub secondary_ammo_max: i32,
+    pub secondary_damage: f32,
+    pub secondary_radius: f32,
+    pub secondary_mass: f32,
+    pub secondary_lifetime: f32,
     pub pellets: usize,
     pub damage: f32,
     pub sounds: BTreeMap<String, String>,
@@ -41,6 +45,7 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
         t.windows(2)
             .find(|p| p[0].eq_ignore_ascii_case(name))
             .and_then(|p| p[1].parse::<f32>().ok())
+            .filter(|value| value.is_finite())
     };
     let localization = localization(vfs)?;
     let mut weapons = BTreeMap::new();
@@ -108,6 +113,24 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
                 secondary_ammo_max: number(&format!("sk_max_{secondary_skill_name}"))
                     .unwrap_or(0.)
                     .max(0.) as i32,
+                secondary_damage: number(&format!("sk_plr_dmg_{secondary_skill_name}"))
+                    .unwrap_or(0.)
+                    .max(0.),
+                secondary_radius: if class == "weapon_smg1" {
+                    number("sk_smg1_grenade_radius").unwrap_or(0.).max(0.)
+                } else if class == "weapon_ar2" {
+                    number("sk_weapon_ar2_alt_fire_radius")
+                        .unwrap_or(10.)
+                        .clamp(1., 12.)
+                } else {
+                    0.
+                },
+                secondary_mass: number("sk_weapon_ar2_alt_fire_mass")
+                    .unwrap_or(150.)
+                    .max(0.),
+                secondary_lifetime: number("sk_weapon_ar2_alt_fire_duration")
+                    .unwrap_or(2.)
+                    .max(0.),
                 pellets: if class == "weapon_shotgun" {
                     // Published CHalfLife2 cvar default; installed skill.cfg may override.
                     number("sk_plr_num_shotgun_pellets")
@@ -164,6 +187,8 @@ struct EmptyFire {
 pub struct Inventory {
     #[serde(skip)]
     pub impacts: Vec<(crate::physics::RayHit, bool)>,
+    #[serde(skip)]
+    pub projectile_spawns: Vec<ProjectileSpawn>,
     pub previous: String,
     pub health: f32,
     pub armor: f32,
@@ -188,6 +213,10 @@ pub struct Inventory {
     #[serde(skip)]
     attack_input: Option<(bool, bool)>,
     next_attack: f64,
+    next_secondary: BTreeMap<String, f64>,
+    owner_attack_until: f64,
+    #[serde(skip)]
+    ar2_charge_until: Option<f64>,
     soonest_attack: f64,
     reload: Option<Reload>,
     empty_fire: BTreeMap<String, EmptyFire>,
@@ -203,6 +232,7 @@ impl Default for Inventory {
     fn default() -> Self {
         Self {
             impacts: Vec::new(),
+            projectile_spawns: Vec::new(),
             previous: String::new(),
             health: 100.,
             armor: 0.,
@@ -221,6 +251,9 @@ impl Default for Inventory {
             delayed_secondary_attack: false,
             attack_input: None,
             next_attack: 0.,
+            next_secondary: BTreeMap::new(),
+            owner_attack_until: 0.,
+            ar2_charge_until: None,
             soonest_attack: 0.,
             reload: None,
             empty_fire: BTreeMap::new(),
@@ -301,6 +334,12 @@ impl Inventory {
     pub fn is_reloading(&self) -> bool {
         self.reload.is_some()
     }
+    pub fn can_holster(&self) -> bool {
+        self.ar2_charge_until.is_none()
+    }
+    pub fn charge_until(&self) -> Option<f64> {
+        self.ar2_charge_until
+    }
     /// Supply physical/script button requests before tick; delayed latches are separate.
     /// Without this call, tick's attack flag retains its primary-only behavior.
     pub fn set_attack_input(&mut self, primary: bool, secondary: bool) {
@@ -317,6 +356,11 @@ impl Inventory {
         if let Some(w) = weapons.get(class) {
             self.owned.entry(class.into()).or_insert(w.default_clip);
             if self.active == class {
+                return;
+            }
+            // AR2 CanHolster rejects an ordinary switch during its charged shot.
+            // Weapon acquisition still succeeds, but the charge keeps its owner.
+            if !self.can_holster() {
                 return;
             }
             self.previous = self.active.clone();
@@ -337,6 +381,9 @@ impl Inventory {
             };
             self.animate(animation, time);
             self.next_attack = time + fallback_duration(class, animation);
+            self.owner_attack_until = self.next_attack;
+            let secondary = self.next_secondary.entry(class.into()).or_default();
+            *secondary = secondary.max(self.next_attack);
             // Releasing the trigger may shorten pistol firing recovery, never draw recovery.
             self.soonest_attack = self.next_attack;
         }
@@ -438,7 +485,7 @@ impl Inventory {
         // Base ReloadOrSwitchWeapons clears the empty latch and requires a
         // strictly elapsed attack deadline. Unsupported secondary attacks and
         // next-best-weapon selection remain separate reconstruction work.
-        if is_automatic(&self.active) {
+        if is_automatic(&self.active) && self.ar2_charge_until.is_none() {
             if !primary && !secondary {
                 self.try_automatic_empty_reload(weapons, scene, world);
             }
@@ -557,6 +604,7 @@ impl Inventory {
             || self.ammo(&w.ammo_type) <= 0
             || self.owned.get(&self.active).copied().unwrap_or(w.magazine) >= w.magazine
             || self.reload.is_some()
+            || self.ar2_charge_until.is_some()
         {
             return;
         }
@@ -582,6 +630,13 @@ impl Inventory {
             phase,
         });
         self.next_attack = end;
+        // Retail SMG reload restores the secondary/owner timer so that a
+        // grenade can interrupt a magazine reload. AR2 retains the owner gate.
+        self.owner_attack_until = if self.active == "weapon_smg1" {
+            self.next_secondary.get(&self.active).copied().unwrap_or(0.)
+        } else {
+            end
+        };
         self.animate(animation, scene.time);
         self.penalty = 0.;
         if self.active != "weapon_shotgun" {
@@ -597,7 +652,12 @@ impl Inventory {
         eye: Vec3,
         direction: Vec3,
     ) {
-        if self.health <= 0. || self.reload.is_some() || scene.time < self.next_attack {
+        if self.health <= 0.
+            || self.reload.is_some()
+            || self.ar2_charge_until.is_some()
+            || scene.time < self.next_attack
+            || scene.time < self.owner_attack_until
+        {
             return;
         }
         let Some(w) = weapons.get(&self.active) else {
@@ -707,7 +767,7 @@ impl Inventory {
             self.shotgun_need_pump = true;
         }
     }
-    /// Only the reconstructed shotgun secondary attack is supported.
+    /// Secondary launch timing is independent of the primary attack timer.
     pub fn secondary_attack(
         &mut self,
         weapons: &BTreeMap<String, Weapon>,
@@ -717,6 +777,10 @@ impl Inventory {
         eye: Vec3,
         direction: Vec3,
     ) {
+        if matches!(self.active.as_str(), "weapon_smg1" | "weapon_ar2") {
+            self.projectile_secondary(weapons, world, scene, eye, direction);
+            return;
+        }
         if self.active != "weapon_shotgun"
             || self.health <= 0.
             || self.reload.is_some()
@@ -757,6 +821,207 @@ impl Inventory {
         }
         if shells > 2 {
             self.shotgun_need_pump = true;
+        }
+    }
+    fn projectile_secondary(
+        &mut self,
+        weapons: &BTreeMap<String, Weapon>,
+        world: &World,
+        scene: &mut Scene,
+        eye: Vec3,
+        direction: Vec3,
+    ) {
+        if self.health <= 0.
+            || self.ar2_charge_until.is_some()
+            || scene.time < self.owner_attack_until
+            || scene.time < self.next_secondary.get(&self.active).copied().unwrap_or(0.)
+            || self.active == "weapon_ar2" && self.reload.is_some()
+        {
+            return;
+        }
+        let Some(w) = weapons.get(&self.active) else {
+            return;
+        };
+        if !self.owned.contains_key(&self.active) {
+            return;
+        }
+        if self.ammo(&w.secondary_ammo_type) <= 0 {
+            self.next_secondary
+                .insert(self.active.clone(), scene.time + 0.5);
+            self.animate("dryfire", scene.time);
+            play_sound(scene, w, "empty", world, "dryfire");
+            return;
+        }
+        if self.active == "weapon_smg1" {
+            // The retail SMG cancels reload before launching; unfinished rounds
+            // are not transferred. Its reserve grenade is separate from clip1.
+            self.reload = None;
+            self.owner_attack_until = scene.time;
+            self.launch_projectile(w, scene, world, eye, direction);
+        } else {
+            let end = scene.time + 0.5;
+            self.ar2_charge_until = Some(end);
+            self.next_attack = end;
+            self.next_secondary.insert(self.active.clone(), end);
+            self.animate("shake", scene.time);
+            play_sound(scene, w, "special1", world, "shake");
+        }
+    }
+    /// Call each unpaused simulation tick, even if buttons were released or the
+    /// selector is open. Retail ItemPostFrame releases strictly after the timer
+    /// using the player's current shoot position and aim, not their charge pose.
+    pub fn advance_projectile_fire(
+        &mut self,
+        world: &World,
+        scene: &mut Scene,
+        weapons: &BTreeMap<String, Weapon>,
+        eye: Vec3,
+        direction: Vec3,
+    ) {
+        let Some(deadline) = self.ar2_charge_until else {
+            return;
+        };
+        if scene.time <= deadline {
+            return;
+        }
+        self.ar2_charge_until = None;
+        if self.health <= 0. || self.active != "weapon_ar2" {
+            return;
+        }
+        if let Some(w) = weapons.get(&self.active) {
+            self.launch_projectile(w, scene, world, eye, direction);
+        }
+    }
+    fn launch_projectile(
+        &mut self,
+        weapon: &Weapon,
+        scene: &mut Scene,
+        world: &World,
+        eye: Vec3,
+        direction: Vec3,
+    ) {
+        let ball = self.active == "weapon_ar2";
+        let animation = if ball { "ir_fire2" } else { "altfire" };
+        play_sound(scene, weapon, "double_shot", world, "");
+        self.animate(animation, scene.time);
+        self.shots += 1;
+        self.last_shot = scene.time;
+        self.set_ammo(
+            &weapon.secondary_ammo_type,
+            self.ammo(&weapon.secondary_ammo_type) - 1,
+        );
+        self.next_attack = scene.time + 0.5;
+        self.next_secondary
+            .insert(self.active.clone(), scene.time + 1.);
+        self.owner_attack_until = if ball {
+            scene.time + duration(world, weapon, animation)
+        } else {
+            scene.time
+        };
+        let angular_velocity = if ball {
+            Vec3::ZERO
+        } else {
+            Vec3::new(self.random(), self.random(), self.random()) * 400.
+        };
+        self.projectile_spawns.push(ProjectileSpawn {
+            kind: if ball {
+                crate::projectiles::ProjectileKind::CombineBall
+            } else {
+                crate::projectiles::ProjectileKind::SmgGrenade
+            },
+            position: eye,
+            velocity: direction.normalize_or_zero() * 1000.,
+            angular_velocity,
+            at: scene.time,
+            damage: weapon.secondary_damage,
+            radius: weapon.secondary_radius,
+            mass: weapon.secondary_mass,
+            lifetime: weapon.secondary_lifetime,
+        });
+    }
+    pub fn apply_projectile_damage(
+        &mut self,
+        events: Vec<crate::projectiles::Damage>,
+        world: &World,
+        scene: &mut Scene,
+        physics: &mut Physics,
+    ) {
+        use crate::projectiles::DamageTarget;
+        for damage in events {
+            if !damage.amount.is_finite() || damage.amount < 0. {
+                continue;
+            }
+            match damage.target {
+                DamageTarget::Player => {
+                    if self.health <= 0. {
+                        continue;
+                    }
+                    // Default singleplayer armor accounting from CBasePlayer.
+                    // Difficulty scaling, damage HUD, pain/death and knockback
+                    // still need their separate native player implementation.
+                    let mut health_damage = damage.amount;
+                    if self.armor > 0. {
+                        health_damage = damage.amount * 0.2;
+                        let armor_cost = (damage.amount - health_damage).max(1.);
+                        if armor_cost > self.armor {
+                            health_damage = damage.amount - self.armor;
+                            self.armor = 0.;
+                        } else {
+                            self.armor -= armor_cost;
+                        }
+                    }
+                    self.health = (self.health - health_damage).max(0.);
+                }
+                DamageTarget::Entity(id) => {
+                    let Some(entity) = world.entities.get(id) else {
+                        continue;
+                    };
+                    let Some(state) = scene.states.get_mut(id) else {
+                        continue;
+                    };
+                    if state.killed {
+                        continue;
+                    }
+                    let npc = entity.class().starts_with("npc_");
+                    let health = entity
+                        .get("health")
+                        .and_then(|s| s.parse::<f32>().ok())
+                        .filter(|v| *v > 0.);
+                    if !npc
+                        && !matches!(entity.class(), "func_breakable" | "func_physbox")
+                        && !entity.class().starts_with("prop_physics")
+                    {
+                        continue;
+                    }
+                    self.hits += 1;
+                    if damage.dissolve {
+                        // The native dissolver keeps a timed ragdoll and effects.
+                        // Here its lethal result removes the live collider while
+                        // leaving the missing dissolve animation explicit.
+                        state.value = 0.;
+                    } else {
+                        if state.value <= 0. {
+                            state.value = health.unwrap_or(40.);
+                        }
+                        state.value -= damage.amount;
+                    }
+                    let dead = state.value <= 0.;
+                    scene.fire(id, "OnDamaged", usize::MAX);
+                    if dead {
+                        self.kills += 1;
+                        scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
+                        scene.states[id].killed = true;
+                        scene.states[id].visible = false;
+                        physics.set_entity(
+                            id,
+                            scene.states[id].origin,
+                            scene.states[id].rotation,
+                            false,
+                        );
+                    }
+                    let _ = damage.direction; // Full native damage-force transport is separate.
+                }
+            }
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -977,6 +1242,9 @@ fn fallback_duration(class: &str, animation: &str) -> f64 {
         ("weapon_crowbar", "draw") => 28. / 30.,
         ("weapon_shotgun", "draw") => 22. / 30.,
         ("weapon_smg1", "reload") => 1.5,
+        ("weapon_smg1", "altfire") => 16. / 30.,
+        ("weapon_ar2", "ir_fire2") => 21. / 30.,
+        ("weapon_ar2", "shake") => 1.,
         ("weapon_ar2", "ir_reload") => 47. / 30.,
         ("weapon_357", "reload") => 110. / 30.,
         ("weapon_pistol", "reload") => 43. / 30.,
@@ -1500,7 +1768,7 @@ mod tests {
     }
 
     #[test]
-    fn developer_loadout_grants_native_secondary_quantities_without_fake_attacks() {
+    fn developer_loadout_grants_native_secondary_quantities_and_draw_blocks_launch() {
         let mut defs = definitions();
         // Preserve the native fixed GiveAmmo amounts even if custom carry limits are larger.
         defs.get_mut("weapon_ar2").unwrap().secondary_ammo_max = 8;
@@ -1521,6 +1789,225 @@ mod tests {
         }
         assert_eq!(inv.reserve_for("weapon_smg1", &defs), 225);
         assert_eq!(inv.reserve_for("weapon_ar2", &defs), 60);
+    }
+
+    fn projectile_definitions() -> BTreeMap<String, Weapon> {
+        let mut defs = automatic_definitions();
+        let smg = defs.get_mut("weapon_smg1").unwrap();
+        smg.secondary_damage = 100.;
+        smg.secondary_radius = 250.;
+        smg.sounds
+            .insert("double_shot".into(), "Weapon_SMG1.Double".into());
+        let ar2 = defs.get_mut("weapon_ar2").unwrap();
+        ar2.secondary_radius = 10.;
+        ar2.secondary_mass = 150.;
+        ar2.secondary_lifetime = 2.;
+        ar2.sounds
+            .insert("special1".into(), "Weapon_CombineGuard.Special1".into());
+        ar2.sounds
+            .insert("double_shot".into(), "Weapon_IRifle.Single".into());
+        defs
+    }
+    #[test]
+    fn smg_grenade_has_separate_ammo_and_deadlines_without_hitscan_damage() {
+        let defs = projectile_definitions();
+        let world = impact_wall();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut inv = Inventory::default();
+        inv.give("weapon_smg1", &defs, 0.);
+        inv.refill_ammo(&defs);
+        scene.time = 1.;
+        inv.secondary_attack(
+            &defs,
+            &world,
+            &mut scene,
+            &mut physics,
+            Vec3::Z * 64.,
+            Vec3::X,
+        );
+        assert_eq!(inv.owned["weapon_smg1"], 45);
+        assert_eq!(inv.secondary_for("weapon_smg1", &defs), 2);
+        assert_eq!(inv.shots, 1);
+        assert_eq!(inv.bullets, 0);
+        assert!(inv.impacts.is_empty());
+        assert_eq!(inv.animation, "altfire");
+        assert_eq!(scene.sounds, ["Weapon_SMG1.Double"]);
+        assert_eq!(inv.projectile_spawns.len(), 1);
+        assert_eq!(inv.projectile_spawns[0].velocity, Vec3::X * 1000.);
+        for time in [1.015, 1.49, 1.5, 1.999] {
+            scene.time = time;
+            inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        }
+        assert_eq!(inv.projectile_spawns.len(), 1);
+        scene.time = 1.5;
+        inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert_eq!(inv.owned["weapon_smg1"], 44);
+        scene.time = 2.;
+        inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert_eq!(inv.projectile_spawns.len(), 2);
+        assert_eq!(inv.secondary_for("weapon_smg1", &defs), 1);
+    }
+    #[test]
+    fn smg_grenade_cancels_unfinished_magazine_reload_and_keeps_reserves() {
+        let defs = projectile_definitions();
+        let world = World::default();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut inv = Inventory::default();
+        inv.give("weapon_smg1", &defs, 0.);
+        inv.owned.insert("weapon_smg1".into(), 0);
+        inv.give_ammo("SMG1", 45, &defs);
+        inv.give_ammo("SMG1_Grenade", 1, &defs);
+        scene.time = 1.;
+        inv.reload(&defs, &mut scene, &world);
+        assert!(inv.is_reloading());
+        scene.time = 1.1;
+        inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert!(!inv.is_reloading());
+        assert_eq!(inv.owned["weapon_smg1"], 0);
+        assert_eq!(inv.reserve_for("weapon_smg1", &defs), 45);
+        assert_eq!(inv.secondary_for("weapon_smg1", &defs), 0);
+        scene.time = 2.5;
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
+        assert_eq!(inv.owned["weapon_smg1"], 0);
+        assert_eq!(inv.reserve_for("weapon_smg1", &defs), 45);
+    }
+    #[test]
+    fn empty_projectile_secondary_uses_its_own_half_second_deadline() {
+        let defs = projectile_definitions();
+        let world = World::default();
+        for class in ["weapon_smg1", "weapon_ar2"] {
+            let mut scene = Scene::new(&world);
+            let mut physics = Physics::new(&world);
+            let mut inv = Inventory::default();
+            inv.give(class, &defs, 0.);
+            let primary_deadline = inv.next_attack;
+            scene.time = 1.;
+            inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+            scene.time = 1.49;
+            inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+            assert_eq!(scene.sounds.len(), 1);
+            assert_eq!(inv.animation, "dryfire");
+            assert_eq!(inv.next_attack, primary_deadline);
+            assert_eq!(inv.next_secondary[class], 1.5);
+            assert!(inv.projectile_spawns.is_empty());
+            assert!(inv.can_holster());
+        }
+    }
+    #[test]
+    fn ar2_charge_uses_current_aim_after_strict_deadline_and_vetoes_holster_reload() {
+        let defs = projectile_definitions();
+        let world = World::default();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut inv = Inventory::default();
+        inv.give("weapon_ar2", &defs, 0.);
+        inv.refill_ammo(&defs);
+        scene.time = 1.;
+        inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert_eq!(inv.animation, "shake");
+        assert_eq!(inv.charge_until(), Some(1.5));
+        assert_eq!(inv.secondary_for("weapon_ar2", &defs), 3);
+        assert!(!inv.can_holster());
+        inv.give("weapon_pistol", &defs, 1.1);
+        assert!(inv.owned.contains_key("weapon_pistol"));
+        assert_eq!(inv.active, "weapon_ar2");
+        inv.owned.insert("weapon_ar2".into(), 20);
+        inv.reload(&defs, &mut scene, &world);
+        assert!(!inv.is_reloading());
+        scene.time = 1.5;
+        inv.advance_projectile_fire(&world, &mut scene, &defs, Vec3::Y * 10., Vec3::Y);
+        assert!(inv.projectile_spawns.is_empty());
+        scene.time = 1.515;
+        inv.set_attack_input(false, false);
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+        inv.advance_projectile_fire(&world, &mut scene, &defs, Vec3::Y * 10., Vec3::Y);
+        assert!(inv.can_holster());
+        assert_eq!(inv.projectile_spawns.len(), 1);
+        assert_eq!(inv.projectile_spawns[0].position, Vec3::Y * 10.);
+        assert_eq!(inv.projectile_spawns[0].velocity, Vec3::Y * 1000.);
+        assert_eq!(inv.projectile_spawns[0].radius, 10.);
+        assert_eq!(inv.projectile_spawns[0].lifetime, 2.);
+        assert_eq!(inv.projectile_spawns[0].mass, 150.);
+        assert_eq!(inv.secondary_for("weapon_ar2", &defs), 2);
+        assert_eq!(inv.owned["weapon_ar2"], 20);
+        assert_eq!(inv.shots, 1);
+        assert_eq!(inv.bullets, 0);
+        assert_eq!(inv.animation, "ir_fire2");
+        assert_eq!(
+            scene.sounds,
+            ["Weapon_CombineGuard.Special1", "Weapon_IRifle.Single"]
+        );
+        inv.advance_projectile_fire(&world, &mut scene, &defs, Vec3::ZERO, Vec3::X);
+        assert_eq!(inv.projectile_spawns.len(), 1);
+        scene.time = 2.015;
+        inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert_eq!(inv.owned["weapon_ar2"], 20);
+        scene.time = inv.owner_attack_until;
+        inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert!(inv.owned["weapon_ar2"] < 20);
+    }
+    #[test]
+    fn ar2_does_not_cancel_magazine_reload_for_a_secondary_charge() {
+        let defs = projectile_definitions();
+        let world = World::default();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut inv = Inventory::default();
+        inv.give("weapon_ar2", &defs, 0.);
+        inv.refill_ammo(&defs);
+        inv.owned.insert("weapon_ar2".into(), 10);
+        scene.time = 1.;
+        inv.reload(&defs, &mut scene, &world);
+        scene.time = 1.1;
+        inv.secondary_attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
+        assert!(inv.is_reloading());
+        assert_eq!(inv.charge_until(), None);
+        assert_eq!(inv.secondary_for("weapon_ar2", &defs), 3);
+        assert!(inv.projectile_spawns.is_empty());
+    }
+    #[test]
+    fn projectile_damage_applies_blast_armor_and_lethal_outputs_once() {
+        use crate::projectiles::{Damage, DamageTarget};
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("health".into(), "90".into()),
+                ],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut inv = Inventory {
+            armor: 50.,
+            ..Default::default()
+        };
+        inv.apply_projectile_damage(
+            vec![Damage {
+                target: DamageTarget::Player,
+                amount: 100.,
+                dissolve: false,
+                direction: Vec3::X,
+            }],
+            &world,
+            &mut scene,
+            &mut physics,
+        );
+        assert_eq!(inv.armor, 0.);
+        assert_eq!(inv.health, 50.);
+        let dissolve = Damage {
+            target: DamageTarget::Entity(0),
+            amount: 0.,
+            dissolve: true,
+            direction: Vec3::X,
+        };
+        inv.apply_projectile_damage(vec![dissolve, dissolve], &world, &mut scene, &mut physics);
+        assert!(scene.states[0].killed);
+        assert!(!scene.states[0].visible);
+        assert_eq!((inv.hits, inv.kills), (1, 1));
     }
 
     #[test]

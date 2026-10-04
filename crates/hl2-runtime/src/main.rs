@@ -5,6 +5,8 @@ mod hud;
 mod impacts;
 mod physics;
 mod playback;
+mod projectile_rendering;
+mod projectiles;
 mod rendering;
 mod sandbox;
 mod selection;

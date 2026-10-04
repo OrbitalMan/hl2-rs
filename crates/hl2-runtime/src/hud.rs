@@ -1292,6 +1292,43 @@ impl QuickInfoHud {
     }
 }
 
+fn sprite_filter(vtf: &[u8]) -> Result<FilterMode> {
+    let flags = u32::from_le_bytes(
+        vtf.get(20..24)
+            .context("HUD sprite VTF flags missing")?
+            .try_into()?,
+    );
+    Ok(if flags & 1 != 0 {
+        FilterMode::Nearest
+    } else {
+        FilterMode::Linear
+    })
+}
+
+fn default_crosshair_rects(viewport: Vec2, atlas: Rect, texture_size: Vec2) -> (Rect, Rect) {
+    // Retail CHudCrosshair::Paint scales texture icons using ScreenHeight, not ScreenWidth.
+    // Keep that integer threshold separate from proportional VGUI font sizing.
+    let scale = (viewport.y / 1600.).floor() + 1.;
+    let width = (atlas.w * scale + 0.5).trunc();
+    let height = (atlas.h * scale + 0.5).trunc();
+    let destination = Rect::new(
+        (viewport.x * 0.5 + 0.5).trunc() - (width * 0.5).trunc(),
+        (viewport.y * 0.5 + 0.5).trunc() - (height * 0.5).trunc(),
+        width,
+        height,
+    );
+    // CHud insets the sprite UVs, then ISurface remaps them through its texture entry's
+    // own half-texel bounds. Both stages matter for the outer dots of the default sprite.
+    let texture_range = (texture_size - Vec2::ONE) / texture_size;
+    let source = Rect::new(
+        0.5 + (atlas.x + 0.5) * texture_range.x,
+        0.5 + (atlas.y + 0.5) * texture_range.y,
+        (atlas.w - 1.) * texture_range.x,
+        (atlas.h - 1.) * texture_range.y,
+    );
+    (destination, source)
+}
+
 pub struct WeaponHud {
     corners: Vec<Texture2D>,
     additive: Material,
@@ -1315,6 +1352,7 @@ pub struct WeaponHud {
     weapon_crosshairs: BTreeMap<String, String>,
     default_crosshair: Texture2D,
     default_crosshair_rect: Rect,
+    default_crosshair_additive: bool,
     crosshair_color: Color,
     health_panel: PanelLayout,
     suit_panel: PanelLayout,
@@ -1417,6 +1455,22 @@ impl WeaponHud {
             .get("file")
             .and_then(Entry::text)
             .context("Default crosshair material missing")?;
+        let default_crosshair = crate::viewer::texture(vfs, default_file)?;
+        let default_base = vfs
+            .base_texture(default_file)?
+            .context("Default crosshair base texture missing")?;
+        let default_vtf = vfs
+            .read(&format!(
+                "materials/{}.vtf",
+                default_base
+                    .trim_start_matches("materials/")
+                    .trim_end_matches(".vtf")
+            ))?
+            .context("Default crosshair VTF missing")?;
+        default_crosshair.set_filter(sprite_filter(&default_vtf)?);
+        let default_crosshair_additive = vfs
+            .material_value(default_file, "$additive")?
+            .is_some_and(|value| value.parse::<i32>().is_ok_and(|value| value != 0));
         let mut crosshair_color = color(
             scheme.get("Colors").unwrap_or(&settings),
             "Normal",
@@ -1483,13 +1537,14 @@ impl WeaponHud {
             ammo_icons,
             secondary_ammo_icons,
             weapon_crosshairs,
-            default_crosshair: crate::viewer::texture(vfs, default_file)?,
+            default_crosshair,
             default_crosshair_rect: Rect::new(
                 number(default_icon, "x", 0.),
                 number(default_icon, "y", 48.),
                 number(default_icon, "width", 24.),
                 number(default_icon, "height", 24.),
             ),
+            default_crosshair_additive,
             crosshair_color,
             quick_info,
         })
@@ -1873,20 +1928,26 @@ impl WeaponHud {
         }
         let Some(character) = self.weapon_crosshairs.get(&inv.active) else {
             // CHudCrosshair::ResetCrosshair uses the installed default sprite and opaque white.
-            // Retail texture icons scale at width/1600 + 1; font icons use their scheme instead.
-            let scale = (screen_width() / 1600.).floor() + 1.;
-            let size = self.default_crosshair_rect.size() * scale;
+            let (destination, source) = default_crosshair_rects(
+                vec2(screen_width(), screen_height()),
+                self.default_crosshair_rect,
+                self.default_crosshair.size(),
+            );
+            if self.default_crosshair_additive {
+                gl_use_material(&self.additive);
+            }
             draw_texture_ex(
                 &self.default_crosshair,
-                (screen_width() * 0.5).round() - (size.x * 0.5).trunc(),
-                (screen_height() * 0.5).round() - (size.y * 0.5).trunc(),
+                destination.x,
+                destination.y,
                 WHITE,
                 DrawTextureParams {
-                    source: Some(self.default_crosshair_rect),
-                    dest_size: Some(size),
+                    source: Some(source),
+                    dest_size: Some(destination.size()),
                     ..Default::default()
                 },
             );
+            gl_use_default_material();
             return;
         };
         gl_use_material(&self.additive);
@@ -1910,6 +1971,97 @@ mod tests {
         )
         .unwrap()
         .remove(0)
+    }
+
+    #[test]
+    fn default_crosshair_keeps_native_size_at_720p_and_1080p() {
+        let atlas = Rect::new(0., 48., 24., 24.);
+        let texture = vec2(128., 128.);
+        assert_eq!(
+            default_crosshair_rects(vec2(1280., 720.), atlas, texture).0,
+            Rect::new(628., 348., 24., 24.)
+        );
+        assert_eq!(
+            default_crosshair_rects(vec2(1920., 1080.), atlas, texture).0,
+            Rect::new(948., 528., 24., 24.)
+        );
+        // A wider viewport alone does not make a larger default crosshair.
+        assert_eq!(
+            default_crosshair_rects(vec2(7680., 1080.), atlas, texture)
+                .0
+                .size(),
+            vec2(24., 24.)
+        );
+        assert_eq!(
+            default_crosshair_rects(vec2(1280., 1599.), atlas, texture)
+                .0
+                .size(),
+            vec2(24., 24.)
+        );
+        assert_eq!(
+            default_crosshair_rects(vec2(1280., 1600.), atlas, texture)
+                .0
+                .size(),
+            vec2(48., 48.)
+        );
+    }
+
+    #[test]
+    fn default_crosshair_uses_atlas_texel_centers_and_integer_centering() {
+        let (destination, source) = default_crosshair_rects(
+            vec2(1281., 721.),
+            Rect::new(0., 48., 24., 24.),
+            vec2(128., 128.),
+        );
+        assert_eq!(destination, Rect::new(629., 349., 24., 24.));
+        assert_eq!(
+            source,
+            Rect::new(0.99609375, 48.621094, 22.820313, 22.820313)
+        );
+        let (_, non_square_source) = default_crosshair_rects(
+            vec2(1921., 1081.),
+            Rect::new(0., 48., 24., 24.),
+            vec2(256., 128.),
+        );
+        assert_eq!(
+            non_square_source,
+            Rect::new(0.9980469, 48.621094, 22.910156, 22.820313)
+        );
+    }
+
+    #[test]
+    fn default_crosshair_point_samples_match_native_five_dot_offsets() {
+        // A sparse test sprite records the independently measured owned default texels.
+        // The expected output offsets came from accepted retail720/1080screenshots.
+        let texels = [(11, 49), (1, 59), (11, 59), (21, 59), (11, 69)];
+        let expected = [(-1, -12), (-12, -1), (-1, -1), (9, -1), (-1, 9)];
+        for viewport in [vec2(1280., 720.), vec2(1920., 1080.), vec2(1281., 721.)] {
+            let (destination, source) =
+                default_crosshair_rects(viewport, Rect::new(0., 48., 24., 24.), vec2(128., 128.));
+            let mut dots = Vec::new();
+            for y in 0..destination.h as i32 {
+                for x in 0..destination.w as i32 {
+                    let texel = (
+                        (source.x + (x as f32 + 0.5) * source.w / destination.w).floor() as i32,
+                        (source.y + (y as f32 + 0.5) * source.h / destination.h).floor() as i32,
+                    );
+                    if texels.contains(&texel) {
+                        dots.push((x - 12, y - 12));
+                    }
+                }
+            }
+            assert_eq!(dots, expected, "viewport{viewport:?}");
+        }
+    }
+
+    #[test]
+    fn hud_sprite_honors_owned_point_sampling_flag() {
+        let mut header = [0u8; 24];
+        header[20..24].copy_from_slice(&0x2341u32.to_le_bytes());
+        assert_eq!(sprite_filter(&header).unwrap(), FilterMode::Nearest);
+        header[20..24].copy_from_slice(&0x2340u32.to_le_bytes());
+        assert_eq!(sprite_filter(&header).unwrap(), FilterMode::Linear);
+        assert!(sprite_filter(&header[..23]).is_err());
     }
 
     #[test]
