@@ -34,7 +34,7 @@ Double-click `launch.cmd` in this folder. It launches `bin/hl2-rs.exe`, the pack
 .\launch.cmd --width 1920 --height 1080
 ```
 
-Double-click `launch-borderless.cmd` to fill the primary desktop without changing its display resolution, or `launch-1080p.cmd` for a 1920x1080 window. Borderless uses 1920x1080 when that is the desktop resolution. Explicit pixel-size modes enable DPI-aware rendering. Other monitors, DPI settings and native font rasterization remain unverified.
+Double-click `launch-borderless.cmd` to fill the primary desktop without changing its display resolution, or `launch-1080p.cmd` to request a 1920x1080 window. Borderless is verified at 1920x1080 on the tested desktop. Windows shortened the titled 1080p window to 1920x1061 to fit; use borderless for exact 16:9 comparisons. Explicit pixel-size modes enable DPI-aware rendering. Other monitors, DPI settings and native font rasterization remain unverified.
 
 Steam libraries are discovered automatically; `HL2_ROOT` can override discovery. Original assets are read in place. There are no bundled game assets, decompiler tools or native game DLLs in the runtime. No FAL account or credits are needed.
 
