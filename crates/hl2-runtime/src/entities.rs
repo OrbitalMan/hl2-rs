@@ -10,6 +10,24 @@ use source_assets::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+pub enum SceneMoveCommand {
+    Start {
+        key: crate::npc::GoalKey,
+        request: crate::npc::MoveRequest,
+    },
+    CancelScene(usize),
+}
+
+#[derive(Clone)]
+struct MovementAnimation {
+    key: crate::npc::GoalKey,
+    sequence: String,
+    elapsed: f32,
+    previous: String,
+    previous_started: f64,
+    previous_done: Option<f64>,
+}
+
 enum ScenePause {
     Input,
     Section {
@@ -100,6 +118,7 @@ pub struct State {
     pub animation_started: f64,
     animation_done: Option<f64>,
     scene_animation: Option<SceneAnimation>,
+    movement_animation: Option<MovementAnimation>,
     script_actor: Option<usize>,
     pub scripted_by: Option<usize>,
     script_finish: Option<f64>,
@@ -156,6 +175,8 @@ pub struct SceneAnimationState {
     pub scene_owner: Option<usize>,
     pub scripted_by: Option<usize>,
     pub clip_loaded: bool,
+    pub origin: [f32; 3],
+    pub yaw_degrees: f32,
 }
 pub struct Scene {
     pub states: Vec<State>,
@@ -165,9 +186,11 @@ pub struct Scene {
     queue: Vec<Pending>,
     pub diagnostics: Diagnostics,
     pub transition: Option<(String, String)>,
-    pub sounds: Vec<String>,
+    pub sounds: Vec<crate::sounds::SoundRequest>,
     unsupported: BTreeSet<String>,
     choreography: BTreeMap<usize, Choreography>,
+    pub movement_commands: Vec<SceneMoveCommand>,
+    movement_ready: BTreeMap<crate::npc::GoalKey, bool>,
 }
 impl Scene {
     pub fn new(world: &World) -> Self {
@@ -185,6 +208,8 @@ impl Scene {
             sounds: Vec::new(),
             unsupported: BTreeSet::new(),
             choreography: BTreeMap::new(),
+            movement_commands: Vec::new(),
+            movement_ready: BTreeMap::new(),
         };
         for e in &world.entities {
             let base_rotation = physics::angles(
@@ -255,7 +280,7 @@ impl Scene {
                     .get("DefaultAnim")
                     .unwrap_or(if e.class() == "npc_metropolice" {
                         "idle_baton"
-                    } else if e.class() == "npc_citizen" {
+                    } else if matches!(e.class(), "npc_citizen" | "npc_barney") {
                         "idle_subtle"
                     } else {
                         "idle"
@@ -265,6 +290,7 @@ impl Scene {
                 default_animation: e.get("DefaultAnim").unwrap_or("").into(),
                 animation_done: None,
                 scene_animation: None,
+                movement_animation: None,
                 script_actor: None,
                 scripted_by: None,
                 script_finish: None,
@@ -414,6 +440,37 @@ impl Scene {
             })
             .map(|(id, _)| id)
     }
+    pub(crate) fn scene_sound_request(
+        &self,
+        world: &World,
+        scene: usize,
+        actor_name: &str,
+        activator: usize,
+        cue: &str,
+    ) -> Option<crate::sounds::SoundRequest> {
+        let actor = self.scene_actor(world, scene, actor_name, activator)?;
+        Some(self.actor_sound_request(world, actor, cue))
+    }
+    fn actor_sound_request(
+        &self,
+        world: &World,
+        actor: usize,
+        cue: &str,
+    ) -> crate::sounds::SoundRequest {
+        crate::sounds::SoundRequest {
+            name: cue.into(),
+            actor: Some(crate::sounds::SoundActor {
+                name: world.entities[actor].get("targetname").unwrap_or("").into(),
+                model: world
+                    .model_instances
+                    .iter()
+                    .find(|i| i.entity == Some(actor))
+                    .map(|i| i.model.as_str())
+                    .unwrap_or(world.entities[actor].get("model").unwrap_or(""))
+                    .into(),
+            }),
+        }
+    }
     /// Installed animation names required by loaded VCDs, grouped by model/skin.
     /// Gestures are requested for future layer support, but are not substituted for a body sequence.
     pub fn required_animation_clips(&self, world: &World) -> BTreeMap<String, BTreeSet<String>> {
@@ -449,6 +506,9 @@ impl Scene {
     /// Sequence sampling uses the paused choreography clock, not wall/game time.
     pub fn animation_time(&self, id: usize) -> f32 {
         let state = &self.states[id];
+        if let Some(movement) = &state.movement_animation {
+            return movement.elapsed;
+        }
         if let Some(animation) = &state.scene_animation {
             if let Some(scene) = self.choreography.get(&animation.owner) {
                 if let Some(play) = &scene.playback {
@@ -458,6 +518,13 @@ impl Scene {
             }
         }
         (self.time - state.animation_started).max(0.) as f32
+    }
+    pub fn body_sequence_owner(&self, id: usize) -> Option<usize> {
+        self.states
+            .get(id)?
+            .scene_animation
+            .as_ref()
+            .map(|s| s.owner)
     }
     /// Read-only capture metadata; this neither advances nor resolves scene readiness.
     pub fn choreography_states(&self, world: &World) -> Vec<ChoreographyState> {
@@ -513,6 +580,11 @@ impl Scene {
                     scene_owner: state.scene_animation.as_ref().map(|a| a.owner),
                     scripted_by: state.scripted_by,
                     clip_loaded,
+                    origin: state.origin.to_array(),
+                    yaw_degrees: {
+                        let forward = state.rotation * Vec3::X;
+                        forward.y.atan2(forward.x).to_degrees()
+                    },
                 })
             })
             .collect()
@@ -526,7 +598,17 @@ impl Scene {
         }
     }
     fn clear_scene_animations(&mut self, owner: usize) {
+        self.movement_commands
+            .push(SceneMoveCommand::CancelScene(owner));
+        self.movement_ready.retain(|key, _| key.scene != owner);
         for actor in 0..self.states.len() {
+            if self.states[actor]
+                .movement_animation
+                .as_ref()
+                .is_some_and(|m| m.key.scene == owner)
+            {
+                self.restore_movement_animation(actor);
+            }
             if self.states[actor]
                 .scene_animation
                 .as_ref()
@@ -535,6 +617,98 @@ impl Scene {
                 self.restore_scene_animation(actor);
             }
         }
+    }
+    fn restore_movement_animation(&mut self, actor: usize) {
+        let state = &mut self.states[actor];
+        if let Some(previous) = state.movement_animation.take() {
+            // A full-body sequence or scripted owner may have taken over since the last update.
+            if state.animation == previous.sequence
+                && state.scene_animation.is_none()
+                && state.scripted_by.is_none()
+            {
+                state.animation = previous.previous;
+                state.animation_started = previous.previous_started;
+                state.animation_done = previous.previous_done;
+            }
+        }
+    }
+    pub fn apply_movement(
+        &mut self,
+        key: crate::npc::GoalKey,
+        feet: Vec3,
+        yaw_degrees: f32,
+        animation: Option<(&str, f32)>,
+        arrived: bool,
+    ) {
+        let Some(ready) = self.movement_ready.get_mut(&key) else {
+            return;
+        };
+        let state = &self.states[key.actor];
+        if state
+            .movement_animation
+            .as_ref()
+            .is_some_and(|m| m.key != key)
+        {
+            *ready = arrived;
+            return;
+        }
+        if state.killed
+            || state.scripted_by.is_some()
+            || state.scene_animation.is_some()
+            || !feet.is_finite()
+            || !yaw_degrees.is_finite()
+        {
+            *ready = false;
+            self.restore_movement_animation(key.actor);
+            return;
+        }
+        *ready = arrived;
+        self.states[key.actor].origin = feet;
+        self.states[key.actor].rotation = physics::angles(Vec3::new(0., yaw_degrees, 0.));
+        if let Some((sequence, elapsed)) = animation {
+            if self.states[key.actor]
+                .movement_animation
+                .as_ref()
+                .is_none_or(|m| m.key != key || m.sequence != sequence)
+            {
+                self.restore_movement_animation(key.actor);
+                let state = &mut self.states[key.actor];
+                state.movement_animation = Some(MovementAnimation {
+                    key,
+                    sequence: sequence.into(),
+                    elapsed,
+                    previous: state.animation.clone(),
+                    previous_started: state.animation_started,
+                    previous_done: state.animation_done,
+                });
+                state.animation = sequence.into();
+                state.animation_done = None;
+            } else if let Some(m) = &mut self.states[key.actor].movement_animation {
+                m.elapsed = elapsed;
+            }
+        } else {
+            self.restore_movement_animation(key.actor);
+        }
+    }
+    fn section_blocked(&self, id: usize, scene: &ChoreoScene, play: &Playback, at: f64) -> bool {
+        scene.events.iter().enumerate().any(|(event, e)| {
+            if !e.active() || !e.resume_condition() || e.start as f64 > at {
+                return false;
+            }
+            let Some(actor) = e.actor.and_then(|a| play.actors[a]) else {
+                return false;
+            };
+            e.kind != EventType::MoveTo
+                || !self
+                    .movement_ready
+                    .get(&crate::npc::GoalKey {
+                        scene: id,
+                        event,
+                        actor,
+                    })
+                    .copied()
+                    .unwrap_or(false)
+        })
     }
     fn start_choreography(&mut self, world: &World, id: usize, activator: usize) {
         let Some(mut scene) = self.choreography.remove(&id) else {
@@ -579,6 +753,10 @@ impl Scene {
             }
             if let Some(mut play) = scene.playback.take() {
                 let mut canceled = false;
+                let current_blocked = self.section_blocked(id, &scene.data, &play, play.elapsed);
+                if let Some(ScenePause::Section { blocked, .. }) = &mut play.pause {
+                    *blocked = current_blocked;
+                }
                 if let Some(ScenePause::Section { blocked, automated }) = &play.pause {
                     if let Some((resume, due)) = automated {
                         if self.time >= *due {
@@ -633,8 +811,64 @@ impl Scene {
                                     }
                                 }
                                 EventType::Speak => {
-                                    if actor.is_some() && !event.parameters[0].is_empty() {
-                                        self.sounds.push(event.parameters[0].clone());
+                                    if let Some(actor) =
+                                        actor.filter(|_| !event.parameters[0].is_empty())
+                                    {
+                                        if let Some(request) = self.scene_sound_request(
+                                            world,
+                                            id,
+                                            &scene.data.actors[event.actor.unwrap()].name,
+                                            actor,
+                                            &event.parameters[0],
+                                        ) {
+                                            self.sounds.push(request);
+                                        }
+                                    }
+                                }
+                                EventType::MoveTo => {
+                                    if let Some(actor) = actor {
+                                        let key = crate::npc::GoalKey {
+                                            scene: id,
+                                            event: index,
+                                            actor,
+                                        };
+                                        let target = world
+                                            .entities
+                                            .iter()
+                                            .enumerate()
+                                            .find(|(target, e)| {
+                                                !self.states[*target].killed
+                                                    && e.get("targetname").is_some_and(|name| {
+                                                        name.eq_ignore_ascii_case(
+                                                            &event.parameters[0],
+                                                        )
+                                                    })
+                                            })
+                                            .map(|(id, _)| id);
+                                        match (
+                                            target,
+                                            crate::npc::MoveStyle::parse(&event.parameters[1]),
+                                        ) {
+                                            (Some(target), Ok(style)) => {
+                                                self.movement_ready.insert(key, false);
+                                                self.movement_commands.push(
+                                                    SceneMoveCommand::Start {
+                                                        key,
+                                                        request: crate::npc::MoveRequest {
+                                                            target_entity: target,
+                                                            target_feet: self.states[target].origin,
+                                                            style,
+                                                            event_distance: event.distance,
+                                                            force_short: event.flags & 16 != 0,
+                                                        },
+                                                    },
+                                                );
+                                            }
+                                            _ => self.unsupported_input(
+                                                "logic_choreographed_scene",
+                                                "MOVETO:target-or-style",
+                                            ),
+                                        }
                                     }
                                 }
                                 EventType::Sequence => {
@@ -647,6 +881,7 @@ impl Scene {
                                                 "SEQUENCE:scripted-actor-busy",
                                             );
                                         } else {
+                                            self.restore_movement_animation(actor);
                                             self.restore_scene_animation(actor);
                                             let previous = SceneAnimation {
                                                 owner: id,
@@ -668,12 +903,12 @@ impl Scene {
                                     }
                                 }
                                 EventType::Section => {
-                                    let blocked = scene.data.events.iter().any(|e| {
-                                        e.active()
-                                            && e.resume_condition()
-                                            && e.start <= event.start
-                                            && e.actor.is_some_and(|a| play.actors[a].is_some())
-                                    });
+                                    let blocked = self.section_blocked(
+                                        id,
+                                        &scene.data,
+                                        &play,
+                                        event.start as f64,
+                                    );
                                     let tokens: Vec<_> =
                                         event.parameters[0].split_whitespace().collect();
                                     let automated = if tokens.len() == 3
@@ -695,7 +930,29 @@ impl Scene {
                                     } else {
                                         None
                                     };
-                                    if blocked && automated.is_none() {
+                                    let unknown_condition = scene
+                                        .data
+                                        .events
+                                        .iter()
+                                        .enumerate()
+                                        .any(|(event_index, e)| {
+                                            e.active()
+                                                && e.resume_condition()
+                                                && e.start <= event.start
+                                                && e.actor.and_then(|a| play.actors[a]).is_some_and(
+                                                    |actor| {
+                                                        e.kind != EventType::MoveTo
+                                                            || !self.movement_ready.contains_key(
+                                                                &crate::npc::GoalKey {
+                                                                    scene: id,
+                                                                    event: event_index,
+                                                                    actor,
+                                                                },
+                                                            )
+                                                    },
+                                                )
+                                        });
+                                    if blocked && automated.is_none() && unknown_condition {
                                         self.unsupported_input(
                                             "logic_choreographed_scene",
                                             "SECTION:actor-resume-condition",
@@ -1652,6 +1909,100 @@ mod tests {
         assert_eq!(scene.states[2].target, 0.);
         scene.tick(&world, Vec3::ZERO, 0.11);
         assert_eq!(scene.states[2].target, 1.);
+    }
+    #[test]
+    fn movement_arrival_resolves_section_and_cancel_restores_body_animation() {
+        let world = World {
+            entities: vec![
+                entity(
+                    "logic_choreographed_scene",
+                    "scene",
+                    &[("target1", "actor"), ("OnTrigger1", "count,Add,1,0,-1")],
+                ),
+                entity("npc_barney", "actor", &[("DefaultAnim", "idle")]),
+                entity("info_target", "mark", &[("origin", "100 0 0")]),
+                entity("math_counter", "count", &[]),
+            ],
+            ..Default::default()
+        };
+        let mut data = Arc::unwrap_or_clone(choreography(&[
+            (EventType::MoveTo, 0., "mark"),
+            (EventType::Section, 0.1, "noaction"),
+            (EventType::FireTrigger, 0.2, "1"),
+        ]));
+        data.events[0].actor = Some(0);
+        data.events[0].parameters[1] = "run".into();
+        data.events[0].flags |= 1;
+        data.actors.push(source_assets::scenes::Actor {
+            name: "!target1".into(),
+            active: true,
+            channels: Vec::new(),
+        });
+        let mut scene = Scene::new(&world);
+        scene.queue.clear();
+        scene.install_choreography(0, Arc::new(data));
+        scene.send(0, "Start", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        scene.tick(&world, Vec3::ZERO, 0.2);
+        let key = crate::npc::GoalKey {
+            scene: 0,
+            event: 0,
+            actor: 1,
+        };
+        assert!(scene.movement_commands.iter().any(|command| matches!(command, SceneMoveCommand::Start {key: k, request} if *k == key && request.target_entity == 2 && request.target_feet == Vec3::new(100.,0.,0.))));
+        let frozen = scene.choreography[&0].playback.as_ref().unwrap().elapsed;
+        scene.apply_movement(
+            key,
+            Vec3::new(20., 0., 0.),
+            0.,
+            Some(("run_all", 0.3)),
+            false,
+        );
+        scene.tick(&world, Vec3::ZERO, 1.);
+        assert_eq!(
+            scene.choreography[&0].playback.as_ref().unwrap().elapsed,
+            frozen
+        );
+        assert_eq!(scene.states[3].value, 0.);
+        assert_eq!(scene.animation_time(1), 0.3);
+        scene.apply_movement(
+            key,
+            Vec3::new(40., 0., 0.),
+            0.,
+            Some(("run_all", 0.4)),
+            false,
+        );
+        assert_eq!(scene.animation_time(1), 0.4);
+        scene.states[1].scripted_by = Some(99);
+        scene.apply_movement(key, Vec3::new(100., 0., 0.), 0., None, true);
+        assert!(!scene.movement_ready[&key]);
+        assert_eq!(scene.states[1].origin.x, 40.);
+        scene.states[1].scripted_by = None;
+        scene.states[1].animation = "idle".into();
+        scene.apply_movement(key, Vec3::new(100., 0., 0.), 0., None, true);
+        scene.tick(&world, Vec3::ZERO, 0.2);
+        assert_eq!(scene.states[3].value, 1.);
+        scene.tick(&world, Vec3::ZERO, 1.);
+        scene.send(0, "Start", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        scene.apply_movement(
+            key,
+            Vec3::new(20., 0., 0.),
+            0.,
+            Some(("run_all", 0.1)),
+            false,
+        );
+        scene.send(0, "Cancel", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert_eq!(scene.states[1].animation, "idle");
+        assert!(!scene.movement_ready.contains_key(&key));
+        assert!(scene
+            .movement_commands
+            .iter()
+            .any(|c| matches!(c, SceneMoveCommand::CancelScene(0))));
+        scene.apply_movement(key, Vec3::new(100., 0., 0.), 0., None, true);
+        assert_eq!(scene.states[1].origin.x, 20.);
     }
     #[test]
     fn scene_sequence_uses_installed_clip_scene_clock_and_restores_baseline() {

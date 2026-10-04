@@ -8,6 +8,7 @@ pub mod navigation;
 pub mod phy;
 pub mod scenes;
 pub mod sky;
+pub mod sounds;
 pub mod visibility;
 pub mod vpk;
 pub mod vtf;

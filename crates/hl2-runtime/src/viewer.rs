@@ -342,7 +342,14 @@ fn projectile_meshes(
 }
 
 fn prepare_choreography_animations(world: &mut World, vfs: &Vfs, scene: &Scene) {
-    for (key, wanted) in scene.required_animation_clips(world) {
+    prepare_actor_animations(world, vfs, scene.required_animation_clips(world));
+}
+fn prepare_actor_animations(
+    world: &mut World,
+    vfs: &Vfs,
+    clips: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+) {
+    for (key, wanted) in clips {
         let Some(instance) = world
             .model_instances
             .iter()
@@ -378,6 +385,144 @@ fn prepare_choreography_animations(world: &mut World, vfs: &Vfs, scene: &Scene) 
         }
     }
 }
+fn prepare_npcs(world: &mut World, vfs: &Vfs, map: &str, revision: u32) -> crate::npc::Controller {
+    let graph = match vfs.read(&format!("maps/graphs/{map}.ain")) {
+        Ok(Some(data)) => match source_assets::navigation::Graph::parse(&data, revision) {
+            Ok(graph) => Some(graph),
+            Err(error) => {
+                world.warnings.push(format!("NPC graph: {error:#}"));
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(error) => {
+            world.warnings.push(format!("NPC graph: {error:#}"));
+            None
+        }
+    };
+    let restrictions = graph
+        .as_ref()
+        .map(|g| crate::npc::NavRestrictions::from_world(world, g))
+        .unwrap_or_default();
+    let mut controller = crate::npc::Controller::new(graph, restrictions);
+    let mut clips = std::collections::BTreeMap::new();
+    // Barney's normal human hull and ordinary spawn are verified in the owned executable.
+    // Other NPC factories need their own hull/motor evidence before being registered here.
+    for instance in &world.model_instances {
+        let Some(actor) = instance.entity else {
+            continue;
+        };
+        if world.entities[actor].class() != "npc_barney" {
+            continue;
+        }
+        let loaded = (|| -> anyhow::Result<_> {
+            let motion = crate::npc::Locomotion::load(vfs, &instance.model)?;
+            let wanted = motion.required_clips();
+            let ground = crate::npc::normal_human(instance.scale, 18., 1.)
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            controller
+                .register_actor(actor, instance.scale, ground, motion)
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            // Verified ordinary Barney eye offset comes from his MDL, not the player's eye.
+            if instance.scale == 1. {
+                controller
+                    .set_view_offset(
+                        actor,
+                        source_assets::models::read_eye_position(vfs, &instance.model)?,
+                    )
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            }
+            Ok(wanted)
+        })();
+        match loaded {
+            Ok(wanted) => {
+                clips.insert(instance.asset_key(), wanted);
+            }
+            Err(error) => world
+                .warnings
+                .push(format!("NPC {}: {error:#}", instance.model)),
+        }
+    }
+    prepare_actor_animations(world, vfs, clips);
+    controller
+}
+
+fn tick_npcs(
+    controller: &mut crate::npc::Controller,
+    scene: &mut Scene,
+    world: &World,
+    physics: &mut Physics,
+    player: &Player,
+    fly: bool,
+) {
+    let poses: Vec<_> = world
+        .entities
+        .iter()
+        .enumerate()
+        .filter_map(|(entity, e)| {
+            let s = &scene.states[entity];
+            if !e.class().starts_with("npc_") || s.killed || !s.visible {
+                return None;
+            }
+            let forward = s.rotation * glam::Vec3::X;
+            Some(crate::npc::ActorPose {
+                entity,
+                feet: s.origin,
+                yaw_degrees: forward.y.atan2(forward.x).to_degrees(),
+                scripted_by: s.scripted_by.or_else(|| scene.body_sequence_owner(entity)),
+            })
+        })
+        .collect();
+    let mut transients: Vec<_> = poses
+        .iter()
+        .filter_map(|p| {
+            controller
+                .actor_hull(p.entity)
+                .map(|hull| crate::npc_probe::ActorHull {
+                    entity: Some(p.entity),
+                    feet: p.feet,
+                    hull,
+                })
+        })
+        .collect();
+    if !fly {
+        transients.push(crate::npc_probe::ActorHull {
+            entity: None,
+            feet: player.feet,
+            hull: crate::npc_probe::Hull {
+                mins: glam::Vec3::new(-16., -16., 0.),
+                maxs: glam::Vec3::new(16., 16., if player.crouched { 36. } else { 72. }),
+            },
+        });
+    }
+    for command in scene.movement_commands.drain(..) {
+        match command {
+            crate::entities::SceneMoveCommand::CancelScene(owner) => controller.cancel_scene(owner),
+            crate::entities::SceneMoveCommand::Start { key, request } => {
+                if let Some(pose) = poses.iter().find(|p| p.entity == key.actor) {
+                    controller.request(key, request, *pose, physics, &transients);
+                }
+            }
+        }
+    }
+    for update in controller.tick(physics, &poses, &transients, TICK, false) {
+        scene.apply_movement(
+            update.key,
+            update.feet,
+            update.yaw_degrees,
+            update
+                .sequence
+                .as_deref()
+                .map(|s| (s, update.animation_time)),
+            update.state.is_arrived(),
+        );
+    }
+    for pose in poses {
+        let s = &scene.states[pose.entity];
+        physics.set_entity(pose.entity, s.origin, s.rotation, !s.killed && s.visible);
+    }
+    physics.refresh_queries();
+}
 fn apply_selection(
     result: crate::selection::SelectionResult,
     inventory: &mut crate::gameplay::Inventory,
@@ -387,9 +532,12 @@ fn apply_selection(
     if let Some(weapon) = result.weapon {
         inventory.give(&weapon, weapons, scene.time);
     }
-    scene
-        .sounds
-        .extend(result.sounds.into_iter().map(str::to_owned));
+    scene.sounds.extend(
+        result
+            .sounds
+            .into_iter()
+            .map(crate::sounds::SoundRequest::from),
+    );
 }
 fn confirm_held_selection(
     selection: &mut crate::selection::Selection,
@@ -543,6 +691,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     let mut scene = Scene::new(&world);
     scene.load_choreography(&world, &vfs)?;
     prepare_choreography_animations(&mut world, &vfs, &scene);
+    let mut npcs = prepare_npcs(&mut world, &vfs, &o.map, bsp.revision);
     let mut navigation = crate::navigation_report(&vfs, &o.map, bsp.revision);
     let mut materials = crate::rendering::Materials::new(&world)?;
     let (mut sky_background, mut sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
@@ -968,6 +1117,30 @@ pub async fn run(mut o: Options) -> Result<()> {
                     yaw = new_yaw.to_radians();
                     pitch = new_pitch.to_radians().clamp(-1.53, 1.53);
                 }
+                Action::ActorPose {
+                    target,
+                    origin,
+                    yaw,
+                } => {
+                    if let Some(actor) = world
+                        .entities
+                        .iter()
+                        .enumerate()
+                        .find(|(_, e)| {
+                            e.class().starts_with("npc_")
+                                && e.get("targetname") == Some(target.as_str())
+                        })
+                        .map(|(id, _)| id)
+                    {
+                        scene.states[actor].origin = glam::Vec3::from_array(*origin);
+                        scene.states[actor].rotation =
+                            crate::physics::angles(glam::Vec3::new(0., *yaw, 0.));
+                    } else {
+                        world
+                            .warnings
+                            .push(format!("fixture actor pose target missing: {target}"));
+                    }
+                }
                 Action::Reload => inventory.reload(&weapons, &mut scene, &world),
                 Action::Capture { name } => requested_captures.push(name.clone()),
                 Action::Use => requested_use = true,
@@ -1142,6 +1315,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                 projectiles.spawn(launch, &mut scene);
             }
             physics.refresh_queries();
+            tick_npcs(&mut npcs, &mut scene, &world, &mut physics, &player, fly);
             let damage = projectiles.tick(
                 &world,
                 &mut scene,
@@ -1183,7 +1357,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                     if (event.id == 5004 || event.name == "AE_CL_PLAYSOUND")
                         && !event.options.is_empty()
                     {
-                        scene.sounds.push(event.options.clone());
+                        scene.sounds.push(event.options.clone().into());
                         animation_events.push(serde_json::json!({"time":scene.time,"weapon":inventory.active,"clip":inventory.animation,"event":event}));
                     }
                 }
@@ -1196,7 +1370,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             }
         }
         for sound in scene.sounds.drain(..) {
-            audio.play(&vfs, &sound, false, 0.4).await?;
+            audio.play_request(&vfs, &sound, false, 0.4).await?;
         }
         if !console.paused()
             && !ui_transition
@@ -1272,6 +1446,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                     scene = Scene::with_campaign(&world, false);
                     scene.load_choreography(&world, &vfs)?;
                     prepare_choreography_animations(&mut world, &vfs, &scene);
+                    npcs = prepare_npcs(&mut world, &vfs, &next.map, bsp.revision);
                     navigation = crate::navigation_report(&vfs, &next.map, bsp.revision);
                     materials = crate::rendering::Materials::new(&world)?;
                     (sky_background, sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
@@ -1719,7 +1894,11 @@ pub async fn run(mut o: Options) -> Result<()> {
         }
         if !console.paused() {
             hud.draw_status(&inventory, &weapons, &selection, scene.time);
-            scene.sounds.extend(hud.drain_sounds());
+            scene.sounds.extend(
+                hud.drain_sounds()
+                    .into_iter()
+                    .map(crate::sounds::SoundRequest::from),
+            );
             hud.draw_selection(&selection, &inventory, &weapons, scene.time);
             hud.draw_crosshair(&inventory);
         }
@@ -1748,6 +1927,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             snapshot["choreography"] = serde_json::json!(scene.choreography_states(&world));
             snapshot["actor_animations"] = serde_json::json!(scene.animation_states(&world));
             snapshot["navigation"] = serde_json::json!(navigation);
+            snapshot["npc_movement"] = serde_json::json!(npcs.snapshots());
         }
         if o.frames.is_some_and(|n| frame >= n) || is_key_pressed(KeyCode::F10) || requested_quit {
             if let Some(path) = &o.capture {
@@ -1764,6 +1944,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             report["choreography"] = serde_json::json!(scene.choreography_states(&world));
             report["actor_animations"] = serde_json::json!(scene.animation_states(&world));
             report["navigation"] = serde_json::json!(navigation);
+            report["npc_movement"] = serde_json::json!(npcs.snapshots());
             report["scene_time"] = serde_json::json!(scene.time);
             report["audio_decoded"] = serde_json::json!(audio.decoded);
             report["ar2_charge_until"] = serde_json::json!(inventory.charge_until());

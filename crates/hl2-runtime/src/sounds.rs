@@ -2,7 +2,11 @@
 use anyhow::{bail, Context, Result};
 use macroquad::audio::{load_sound_from_bytes, play_sound, stop_sound, PlaySoundParams, Sound};
 use modkit_core::World;
-use source_assets::{keyvalues, vpk::Vfs};
+use source_assets::{
+    keyvalues,
+    sounds::{ActorGender, ActorRegistry, Wave},
+    vpk::Vfs,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, ErrorKind};
 use symphonia::core::{
@@ -304,9 +308,82 @@ fn playback_bytes(path: &str, data: Vec<u8>) -> Result<(Vec<u8>, &'static str)> 
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SoundActor {
+    pub name: String,
+    pub model: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SoundRequest {
+    pub name: String,
+    pub actor: Option<SoundActor>,
+}
+
+impl From<String> for SoundRequest {
+    fn from(name: String) -> Self {
+        Self { name, actor: None }
+    }
+}
+
+impl From<&str> for SoundRequest {
+    fn from(name: &str) -> Self {
+        name.to_owned().into()
+    }
+}
+
+impl AsRef<str> for SoundRequest {
+    fn as_ref(&self) -> &str {
+        &self.name
+    }
+}
+
+impl PartialEq<str> for SoundRequest {
+    fn eq(&self, other: &str) -> bool {
+        self.name == other
+    }
+}
+
+impl PartialEq<&str> for SoundRequest {
+    fn eq(&self, other: &&str) -> bool {
+        self.name == *other
+    }
+}
+
+fn eligible_waves(waves: &[Wave], gender: ActorGender) -> Vec<usize> {
+    let matching = waves
+        .iter()
+        .enumerate()
+        .filter_map(|(index, wave)| (wave.gender == gender).then_some(index))
+        .collect::<Vec<_>>();
+    if matching.is_empty() {
+        // Retail has an explicit random fallback across all registered waves
+        // when this gender has no match. NONE is not implicitly male/female.
+        (0..waves.len()).collect()
+    } else {
+        matching
+    }
+}
+
+fn playback_path(wave: &str) -> String {
+    // PSkipSoundChars skips only Source's defined modifiers. `$` is a literal
+    // template byte, not a modifier; removing it could hide unresolved paths.
+    wave.trim_start_matches(['*', '?', '!', '#', '>', '<', '^', '@', ')', '}'])
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+        .trim_start_matches("sound/")
+        .to_owned()
+}
+
+fn raw_wave(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains(".wav") || lower.contains(".mp3")
+}
+
 pub struct Audio {
-    names: BTreeMap<String, Vec<String>>,
-    choices: HashMap<String, usize>,
+    names: BTreeMap<String, Vec<Wave>>,
+    actors: ActorRegistry,
+    available: HashMap<String, Vec<bool>>,
     rng: u64,
     pub variants_played: BTreeMap<String, usize>,
     pub decoded: BTreeMap<String, AudioSummary>,
@@ -317,6 +394,19 @@ pub struct Audio {
 impl Audio {
     pub fn new(vfs: &Vfs) -> Self {
         let mut names = BTreeMap::new();
+        let mut errors = BTreeMap::new();
+        let actors = match (|| -> Result<ActorRegistry> {
+            let data = vfs
+                .read("scripts/global_actors.txt")?
+                .context("actor registry absent")?;
+            ActorRegistry::parse(&data)
+        })() {
+            Ok(registry) => registry,
+            Err(error) => {
+                errors.insert("scripts/global_actors.txt".into(), format!("{error:#}"));
+                ActorRegistry::default()
+            }
+        };
         let result = (|| -> Result<()> {
             let manifest = vfs
                 .read("scripts/game_sounds_manifest.txt")?
@@ -334,7 +424,7 @@ impl Audio {
                     for child in entry.children() {
                         if child.key.eq_ignore_ascii_case("wave") {
                             if let Some(wave) = child.text() {
-                                waves.push(wave.to_string());
+                                waves.extend(Wave::register(wave)?);
                             }
                         }
                         if child.key.eq_ignore_ascii_case("rndwave") {
@@ -344,12 +434,15 @@ impl Audio {
                                 .filter(|e| e.key.eq_ignore_ascii_case("wave"))
                             {
                                 if let Some(wave) = wave.text() {
-                                    waves.push(wave.to_string());
+                                    waves.extend(Wave::register(wave)?);
                                 }
                             }
                         }
                     }
                     if !waves.is_empty() {
+                        if waves.len() > 4096 {
+                            bail!("sound script has more than 4096 wave alternatives");
+                        }
                         names.insert(entry.key.to_lowercase(), waves);
                     }
                 }
@@ -358,37 +451,97 @@ impl Audio {
         })();
         if let Err(e) = result {
             eprintln!("Sound manifest: {e:#}");
+            errors.insert("scripts/game_sounds_manifest.txt".into(), format!("{e:#}"));
         }
         Self {
             names,
-            choices: HashMap::new(),
+            actors,
+            available: HashMap::new(),
             rng: 0x92ea79123,
             variants_played: BTreeMap::new(),
             decoded: BTreeMap::new(),
             cache: HashMap::new(),
-            errors: BTreeMap::new(),
+            errors,
             played: 0,
         }
     }
-    pub async fn play(&mut self, vfs: &Vfs, name: &str, looped: bool, volume: f32) -> Result<()> {
-        let key = name.to_lowercase();
-        let resolved = if let Some(waves) = self.names.get(&key) {
+    fn actor_gender(&self, request: &SoundRequest) -> Result<ActorGender> {
+        self.actors
+            .gender(request.actor.as_ref().map(|actor| actor.model.as_str()))
+    }
+
+    /// Enumerate every wave that this request can select, without consuming the
+    /// emission shuffle state. Used for owned-asset validation and preloading.
+    pub fn alternatives(&self, request: &SoundRequest) -> Result<Vec<String>> {
+        if raw_wave(&request.name) {
+            // Raw EmitSound does not call GenderExpandString, even with an actor.
+            return Ok(vec![playback_path(&request.name)]);
+        }
+        let key = request.name.to_ascii_lowercase();
+        if let Some(waves) = self.names.get(&key) {
+            let gender = self.actor_gender(request)?;
+            Ok(eligible_waves(waves, gender)
+                .into_iter()
+                .map(|index| playback_path(&waves[index].path))
+                .collect())
+        } else {
+            bail!("sound script absent: {}", request.name);
+        }
+    }
+
+    fn resolve(&mut self, request: &SoundRequest) -> Result<String> {
+        if raw_wave(&request.name) {
+            return Ok(playback_path(&request.name));
+        }
+        let key = request.name.to_ascii_lowercase();
+        if let Some(waves) = self.names.get(&key) {
+            let gender = self.actor_gender(request)?;
+            let mut eligible = eligible_waves(waves, gender);
+            let matching_gender = eligible.iter().any(|&i| waves[i].gender == gender);
+            let available = self
+                .available
+                .entry(key)
+                .or_insert_with(|| vec![true; waves.len()]);
+            if matching_gender {
+                // Native resets only this gender's exhausted bag. If no gender
+                // matches, its all-wave fallback ignores availability flags.
+                if !eligible.iter().any(|&i| available[i]) {
+                    for &index in &eligible {
+                        available[index] = true;
+                    }
+                }
+                eligible.retain(|&index| available[index]);
+            }
             self.rng ^= self.rng << 13;
             self.rng ^= self.rng >> 7;
             self.rng ^= self.rng << 17;
-            let mut choice = self.rng as usize % waves.len();
-            if waves.len() > 1 && self.choices.get(&key) == Some(&choice) {
-                choice = (choice + 1) % waves.len();
-            }
-            self.choices.insert(key, choice);
-            waves[choice].clone()
+            let choice = eligible[self.rng as usize % eligible.len()];
+            available[choice] = false;
+            Ok(playback_path(&waves[choice].path))
         } else {
-            name.to_string()
+            Ok(self.alternatives(request)?.remove(0))
+        }
+    }
+
+    pub async fn play(&mut self, vfs: &Vfs, name: &str, looped: bool, volume: f32) -> Result<()> {
+        self.play_request(vfs, &name.into(), looped, volume).await
+    }
+
+    pub async fn play_request(
+        &mut self,
+        vfs: &Vfs,
+        request: &SoundRequest,
+        looped: bool,
+        volume: f32,
+    ) -> Result<()> {
+        let path = match self.resolve(request) {
+            Ok(path) => path,
+            Err(error) => {
+                self.errors
+                    .insert(request.name.clone(), format!("{error:#}"));
+                return Ok(());
+            }
         };
-        let path = resolved
-            .trim_start_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-            .trim_start_matches("sound/")
-            .replace('\\', "/");
         if self.errors.contains_key(&path) {
             return Ok(());
         }
@@ -473,6 +626,124 @@ impl Audio {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn speech_audio() -> Audio {
+        Audio {
+            names: [
+                (
+                    "mixed".into(),
+                    ["vo/$gender01/a.wav", "vo/shared.wav"]
+                        .into_iter()
+                        .flat_map(|path| Wave::register(path).unwrap())
+                        .collect(),
+                ),
+                (
+                    "gendered".into(),
+                    ["vo/$gender01/a.wav", "vo/$gender01/b.wav"]
+                        .into_iter()
+                        .flat_map(|path| Wave::register(path).unwrap())
+                        .collect(),
+                ),
+                ("plain".into(), Wave::register("vo/shared.wav").unwrap()),
+            ]
+            .into(),
+            actors: ActorRegistry::parse(br#"actors { "actor_a" "female" "actor_b" "male" }"#)
+                .unwrap(),
+            available: HashMap::new(),
+            rng: 0x92ea79123,
+            variants_played: BTreeMap::new(),
+            decoded: BTreeMap::new(),
+            cache: HashMap::new(),
+            errors: BTreeMap::new(),
+            played: 0,
+        }
+    }
+
+    fn speech_request(cue: &str, model: &str) -> SoundRequest {
+        SoundRequest {
+            name: cue.into(),
+            actor: Some(SoundActor {
+                name: "actor diagnostic name".into(),
+                model: model.into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn symbolic_selection_uses_model_registry_and_exact_gender_tags() -> Result<()> {
+        let mut audio = speech_audio();
+        assert_eq!(
+            audio.alternatives(&speech_request("MIXED", r"models\ACTOR_A.mdl"))?,
+            ["vo/female01/a.wav"]
+        );
+        assert_eq!(
+            audio.alternatives(&speech_request("mixed", "models/actor_b.mdl"))?,
+            ["vo/male01/a.wav"]
+        );
+        // Plain NONE waves are selected for an unknown actor when present.
+        assert_eq!(
+            audio.alternatives(&speech_request("mixed", "models/female_guess.mdl"))?,
+            ["vo/shared.wav"]
+        );
+        // With no matching NONE wave, retail considers all registered genders.
+        assert_eq!(
+            audio.alternatives(&"gendered".into())?,
+            [
+                "vo/male01/a.wav",
+                "vo/female01/a.wav",
+                "vo/male01/b.wav",
+                "vo/female01/b.wav"
+            ]
+        );
+        assert_eq!(
+            audio.alternatives(&speech_request("plain", "models/actor_a.mdl"))?,
+            ["vo/shared.wav"]
+        );
+        // Raw EmitSound bypasses the actor/template resolver.
+        assert_eq!(
+            audio.alternatives(&speech_request(
+                "^vo/$gender01/raw.wav",
+                "models/actor_a.mdl"
+            ))?,
+            ["vo/$gender01/raw.wav"]
+        );
+        assert!(audio.alternatives(&"unregistered_symbolic".into()).is_err());
+        audio
+            .names
+            .insert("vo/raw.wav".into(), Wave::register("vo/other.wav")?);
+        assert_eq!(
+            audio.resolve(&speech_request("vo/raw.wav", &"x".repeat(5000)))?,
+            "vo/raw.wav"
+        );
+        assert_eq!(
+            audio.resolve(&speech_request("$gender/raw.wav", "models/actor_a.mdl"))?,
+            "$gender/raw.wav"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn emitting_shuffle_exhausts_and_resets_each_gender_independently() -> Result<()> {
+        let mut audio = speech_audio();
+        let female = speech_request("gendered", "models/actor_a.mdl");
+        let male = speech_request("gendered", "models/actor_b.mdl");
+        let first = audio.resolve(&female)?;
+        let second = audio.resolve(&female)?;
+        assert_ne!(first, second);
+        assert!(first.contains("female01") && second.contains("female01"));
+        let male_first = audio.resolve(&male)?;
+        let male_second = audio.resolve(&male)?;
+        assert_ne!(male_first, male_second);
+        assert!(male_first.contains("male01") && male_second.contains("male01"));
+        assert!(audio.resolve(&female)?.contains("female01"));
+        // NONE's fallback must work even after both gender bags are exhausted.
+        for _ in 0..12 {
+            assert!(audio
+                .alternatives(&"gendered".into())?
+                .contains(&audio.resolve(&"gendered".into())?));
+        }
+        Ok(())
+    }
 
     fn adpcm_wave(channels: u16, block: &[u8], frames: u32) -> Vec<u8> {
         let block_size = block.len() as u16;
@@ -687,5 +958,159 @@ mod tests {
                 .any(|sample| sample.unwrap().unsigned_abs() > 100));
             println!("{path}: Microsoft ADPCM -> PCM16, {expected_frames} frames, mono 22050Hz");
         }
+    }
+
+    #[test]
+    #[ignore = "requires an owned installed English Half-Life 2 copy"]
+    fn installed_first_map_scene_voice_census() -> Result<()> {
+        use source_assets::{
+            bsp::Bsp,
+            scenes::{Cache, EventType},
+        };
+        use std::collections::BTreeSet;
+        let root = source_assets::install::discover()?;
+        let mut vfs = Vfs::mount(&root)?;
+        let bsp = Bsp::parse(
+            &vfs.read("maps/d1_trainstation_01.bsp")?
+                .context("first map absent")?,
+        )?;
+        vfs.mount_pak(bsp.lump(40))?;
+        let world = bsp.world("d1_trainstation_01")?;
+        let controller = crate::entities::Scene::new(&world);
+        let cache = Cache::parse(
+            vfs.read("scenes/scenes.image")?
+                .context("scene cache absent")?,
+        )?;
+        let audio = Audio::new(&vfs);
+        let mut scene_paths = BTreeSet::new();
+        let mut cues = BTreeSet::new();
+        let mut definition_events = BTreeSet::new();
+        let mut registered_paths = BTreeSet::new();
+        let mut eligible_paths = BTreeSet::new();
+        let mut scene_failures = BTreeMap::new();
+        let mut actor_failures = BTreeMap::new();
+        let mut cue_failures = BTreeMap::new();
+        let mut decode_failures = BTreeMap::new();
+        let mut template_requests = Vec::new();
+        let mut references = 0;
+        let mut speech_instances = 0;
+        let mut resolved_actors = 0;
+        let mut registered_alternatives = 0;
+        for (entity_id, entity) in world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, entity)| entity.class() == "logic_choreographed_scene")
+        {
+            let Some(path) = entity.get("SceneFile") else {
+                scene_failures.insert(format!("entity {entity_id}"), "SceneFile absent".to_owned());
+                continue;
+            };
+            references += 1;
+            let path = path.replace('\\', "/").to_ascii_lowercase();
+            scene_paths.insert(path.clone());
+            let scene = match cache.scene(&path) {
+                Ok(Some(scene)) => scene,
+                result => {
+                    scene_failures.insert(path, format!("{result:?}"));
+                    continue;
+                }
+            };
+            for (event_id, event) in scene
+                .events
+                .iter()
+                .enumerate()
+                .filter(|(_, event)| event.active() && event.kind == EventType::Speak)
+            {
+                speech_instances += 1;
+                definition_events.insert((path.clone(), event_id));
+                let cue = &event.parameters[0];
+                let cue_key = cue.to_ascii_lowercase();
+                if cues.insert(cue_key.clone()) {
+                    if let Some(waves) = audio.names.get(&cue_key) {
+                        registered_alternatives += waves.len();
+                        registered_paths.extend(waves.iter().map(|wave| playback_path(&wave.path)));
+                    } else if let Ok(paths) = audio.alternatives(&cue.as_str().into()) {
+                        registered_alternatives += paths.len();
+                        registered_paths.extend(paths);
+                    } else {
+                        cue_failures.insert(cue.clone(), "sound script absent".to_owned());
+                    }
+                }
+                let actor_name = event
+                    .actor
+                    .and_then(|id| scene.actors.get(id))
+                    .map(|actor| actor.name.as_str());
+                let Some(request) = actor_name.and_then(|actor_name| {
+                    controller.scene_sound_request(&world, entity_id, actor_name, usize::MAX, cue)
+                }) else {
+                    actor_failures.insert(
+                        format!("{entity_id}:{path}:{event_id}:{cue}"),
+                        actor_name.unwrap_or("<actor absent>").to_owned(),
+                    );
+                    continue;
+                };
+                resolved_actors += 1;
+                match audio.alternatives(&request) {
+                    Ok(paths) => {
+                        let templates = audio.names.get(&cue_key).is_some_and(|waves| {
+                            waves.iter().any(|wave| wave.gender != ActorGender::None)
+                        });
+                        if templates {
+                            let actor = request.actor.as_ref().context("speech actor absent")?;
+                            template_requests.push(serde_json::json!({"scene_entity":entity_id,"scene":path,"cue":cue,"actor":actor.name,"model":actor.model,"gender":format!("{:?}",audio.actor_gender(&request)?),"eligible_waves":paths}));
+                        }
+                        eligible_paths.extend(paths);
+                    }
+                    Err(error) => {
+                        cue_failures.insert(cue.clone(), format!("{error:#}"));
+                    }
+                }
+            }
+        }
+        let mut codecs = BTreeMap::<String, usize>::new();
+        for path in &registered_paths {
+            let result = (|| -> Result<&'static str> {
+                let data = vfs
+                    .read(&format!("sound/{path}"))?
+                    .context("sound asset absent")?;
+                let (decoded, codec) = playback_bytes(path, data)?;
+                let wav = hound::WavReader::new(Cursor::new(decoded))?;
+                if wav.duration() == 0 {
+                    bail!("decoded voice has no frames");
+                }
+                Ok(codec)
+            })();
+            match result {
+                Ok(codec) => {
+                    *codecs.entry(codec.into()).or_default() += 1;
+                }
+                Err(error) => {
+                    decode_failures.insert(path.clone(), format!("{error:#}"));
+                }
+            }
+        }
+        let report = serde_json::json!({
+            "map":"d1_trainstation_01","actor_registry_entries":audio.actors.len(),
+            "scene_references":references,"unique_scenes":scene_paths.len(),
+            "active_speak_definitions":definition_events.len(),"active_speak_instances":speech_instances,
+            "resolved_actor_instances":resolved_actors,"unique_cues":cues.len(),
+            "registered_wave_alternatives":registered_alternatives,"registered_unique_files":registered_paths.len(),
+            "eligible_unique_files":eligible_paths.len(),"decoded_files":codecs.values().sum::<usize>(),
+            "codecs":codecs,"registry_errors":audio.errors,"scene_failures":scene_failures,
+            "actor_failures":actor_failures,"cue_failures":cue_failures,"decode_failures":decode_failures,
+            "template_requests":template_requests,
+            "scope":"All active SPEAK definitions checked per scene entity through runtime actor lookup; every registered wave alternative decoded, including currently ineligible genders. No backend mixing, navigation or lip-sync verification."
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        if !audio.errors.is_empty()
+            || !scene_failures.is_empty()
+            || !actor_failures.is_empty()
+            || !cue_failures.is_empty()
+            || !decode_failures.is_empty()
+        {
+            bail!("first-map speech census has explicit unresolved entries");
+        }
+        Ok(())
     }
 }

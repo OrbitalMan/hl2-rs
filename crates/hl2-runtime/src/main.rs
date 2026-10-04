@@ -3,6 +3,8 @@ mod entities;
 mod gameplay;
 mod hud;
 mod impacts;
+mod npc;
+mod npc_probe;
 mod physics;
 mod playback;
 mod projectile_rendering;

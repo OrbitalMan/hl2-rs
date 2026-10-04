@@ -1,4 +1,5 @@
 //! Rapier collision/rigid-body adapter. This is not Valve's proprietary VPhysics solver.
+use crate::npc_probe::{ActorHull, Hull, HullTrace, NpcCollisionWorld, Query, CONTENTS_MONSTER};
 use glam::{Mat4, Quat, Vec3};
 use modkit_core::{movement::CollisionWorld, trace_brushes, Brush, Surface, Trace, World};
 use rapier3d::parry::query::ShapeCastOptions;
@@ -135,6 +136,7 @@ pub struct Physics {
     ccd: CCDSolver,
     entity_colliders: BTreeMap<usize, Vec<ColliderHandle>>,
     world_brush_contents: HashMap<ColliderHandle, u32>,
+    npc_collider_contents: HashMap<ColliderHandle, u32>,
     player_world_brushes: Vec<Brush>,
     player_convex_cache: Mutex<player_convex::ConvexCache>,
     pub dynamic: BTreeMap<usize, RigidBodyHandle>,
@@ -154,6 +156,7 @@ impl Physics {
                     .colliders
                     .insert(ColliderBuilder::new(shape).friction(0.8));
                 p.world_brush_contents.insert(collider, brush.contents);
+                p.npc_collider_contents.insert(collider, brush.contents);
             } else {
                 p.skipped += 1;
             }
@@ -207,6 +210,7 @@ impl Physics {
                             .friction(0.8),
                     );
                     p.entity_colliders.entry(id).or_default().push(c);
+                    p.npc_collider_contents.insert(c, b.contents);
                 }
             }
         }
@@ -325,6 +329,14 @@ impl Physics {
                 if let Some(id) = entity {
                     p.entity_colliders.entry(id).or_default().push(c);
                 }
+                p.npc_collider_contents.insert(
+                    c,
+                    if instance.kind.starts_with("npc_") {
+                        CONTENTS_MONSTER
+                    } else {
+                        1
+                    },
+                );
             }
         }
         p.query.update(&p.colliders);
@@ -566,6 +578,217 @@ impl Physics {
             position: origin + direction * distance * hit.time_of_impact,
             normal: Vec3::new(hit.normal1.x, hit.normal1.y, hit.normal1.z),
         })
+    }
+}
+impl NpcCollisionWorld for Physics {
+    fn npc_trace_hull(&self, start: Vec3, end: Vec3, hull: Hull, query: Query<'_>) -> HullTrace {
+        if !start.is_finite()
+            || !end.is_finite()
+            || !hull.valid()
+            || !(start + hull.mins).is_finite()
+            || !(end + hull.maxs).is_finite()
+            || query
+                .transients
+                .iter()
+                .any(|actor| !actor.feet.is_finite() || !actor.hull.valid())
+        {
+            return HullTrace::invalid();
+        }
+        let entity_of = |collider: &Collider| {
+            usize::try_from(collider.user_data)
+                .ok()
+                .and_then(|id| id.checked_sub(1))
+        };
+        let accepts = |handle: ColliderHandle, collider: &Collider| {
+            let entity = entity_of(collider);
+            collider.is_enabled()
+                && !collider.is_sensor()
+                && entity.is_none_or(|id| !query.excluded_entities.contains(&id))
+                // Explicit actor bounds supersede an NPC's render-mesh collider.
+                && !entity.is_some_and(|id| {
+                    self.npc_collider_contents.get(&handle) == Some(&CONTENTS_MONSTER)
+                        && query.transients.iter().any(|a| a.entity == Some(id))
+                })
+                && self
+                    .npc_collider_contents
+                    .get(&handle)
+                    .copied()
+                    .unwrap_or(1)
+                    & query.contents_mask
+                    != 0
+        };
+        let fallback = |handle: ColliderHandle, collider: &Collider| {
+            accepts(handle, collider)
+                && !self.world_brush_contents.contains_key(&handle)
+                && !player_convex::supported(collider)
+        };
+        let filter = QueryFilter::default()
+            .exclude_sensors()
+            .predicate(&fallback);
+        let mut result = HullTrace {
+            trace: trace_brushes(
+                &self.player_world_brushes,
+                start,
+                end,
+                hull.mins,
+                hull.maxs,
+                query.contents_mask,
+            ),
+            ..HullTrace::clear()
+        };
+        let mut merge = |hit: Trace, entity: Option<usize>, transient: bool| {
+            if hit.fraction < result.trace.fraction
+                || (hit.start_solid && !result.trace.start_solid)
+            {
+                result.entity = entity;
+                result.transient = transient;
+                result.trace.normal = hit.normal;
+            }
+            result.trace.fraction = result.trace.fraction.min(hit.fraction);
+            result.trace.start_solid |= hit.start_solid;
+            result.trace.all_solid |= hit.all_solid;
+        };
+        if query.contents_mask & CONTENTS_MONSTER != 0 {
+            for ActorHull {
+                entity,
+                feet,
+                hull: actor_hull,
+            } in query.transients
+            {
+                if entity.is_some_and(|id| query.excluded_entities.contains(&id)) {
+                    continue;
+                }
+                let min = *feet + actor_hull.mins;
+                let max = *feet + actor_hull.maxs;
+                let brush = Brush {
+                    contents: CONTENTS_MONSTER,
+                    planes: [
+                        (Vec3::X, max.x),
+                        (-Vec3::X, -min.x),
+                        (Vec3::Y, max.y),
+                        (-Vec3::Y, -min.y),
+                        (Vec3::Z, max.z),
+                        (-Vec3::Z, -min.z),
+                    ]
+                    .into_iter()
+                    .map(|(normal, distance)| modkit_core::Plane { normal, distance })
+                    .collect(),
+                };
+                merge(
+                    trace_brushes(
+                        std::slice::from_ref(&brush),
+                        start,
+                        end,
+                        hull.mins,
+                        hull.maxs,
+                        query.contents_mask,
+                    ),
+                    *entity,
+                    true,
+                );
+            }
+        }
+        let margin = Vec3::splat(0.03125);
+        let bounds = rapier3d::parry::bounding_volume::Aabb::new(
+            Point::from(vector(start.min(end) + hull.mins - margin)),
+            Point::from(vector(start.max(end) + hull.maxs + margin)),
+        );
+        let mut cache = self
+            .player_convex_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.query
+            .colliders_with_aabb_intersecting_aabb(&bounds, |handle| {
+                let collider = &self.colliders[*handle];
+                if accepts(*handle, collider) && !self.world_brush_contents.contains_key(handle) {
+                    if let Some(brush) = cache.brush(*handle, collider) {
+                        merge(
+                            trace_brushes(
+                                std::slice::from_ref(brush),
+                                start,
+                                end,
+                                hull.mins,
+                                hull.maxs,
+                                1,
+                            ),
+                            entity_of(collider),
+                            false,
+                        );
+                    }
+                }
+                true
+            });
+        drop(cache);
+        let center = (hull.maxs + hull.mins) * 0.5;
+        let half = (hull.maxs - hull.mins) * 0.5;
+        let position = pose(start + center, Quat::IDENTITY);
+        let end_position = pose(end + center, Quat::IDENTITY);
+        let stationary = (end - start).length_squared() < 0.000001;
+        // Stand probes have zero-height contact hulls. Only the Parry fallback
+        // needs a tiny thickness; brush/convex planes keep the exact bounds.
+        let shape = Cuboid::new(vector(half.max(Vec3::splat(0.001))));
+        let overlap_shape = Cuboid::new(vector(
+            (half - Vec3::splat(0.015625)).max(Vec3::splat(0.001)),
+        ));
+        self.query.intersections_with_shape(
+            &self.bodies,
+            &self.colliders,
+            &position,
+            &overlap_shape,
+            filter,
+            |handle| {
+                let collider = &self.colliders[handle];
+                let all_solid = stationary
+                    || (collider.shape().is_convex()
+                        && rapier3d::parry::query::intersection_test(
+                            collider.position(),
+                            collider.shape(),
+                            &end_position,
+                            &overlap_shape,
+                        )
+                        .unwrap_or(false));
+                merge(
+                    Trace {
+                        fraction: if all_solid { 0. } else { 1. },
+                        normal: Vec3::ZERO,
+                        start_solid: true,
+                        all_solid,
+                    },
+                    entity_of(collider),
+                    false,
+                );
+                true
+            },
+        );
+        if !stationary && !result.trace.all_solid {
+            let options = ShapeCastOptions {
+                max_time_of_impact: 1.,
+                target_distance: 0.03125 * SCALE,
+                stop_at_penetration: false,
+                compute_impact_geometry_on_penetration: true,
+            };
+            if let Some((handle, hit)) = self.query.cast_shape(
+                &self.bodies,
+                &self.colliders,
+                &position,
+                &vector(end - start),
+                &shape,
+                options,
+                filter,
+            ) {
+                let fraction = hit.time_of_impact.clamp(0., 1.);
+                if fraction < result.trace.fraction {
+                    result.trace.fraction = fraction;
+                    result.trace.normal = Vec3::new(hit.normal1.x, hit.normal1.y, hit.normal1.z);
+                    result.entity = entity_of(&self.colliders[handle]);
+                    result.transient = false;
+                }
+            }
+        }
+        if result.trace.all_solid {
+            result.trace.fraction = 0.;
+        }
+        result
     }
 }
 impl CollisionWorld for Physics {
@@ -1368,5 +1591,333 @@ mod tests {
         p.set_entity(0, Vec3::ZERO, Quat::IDENTITY, false);
         p.tick(0.015);
         assert!(p.ray(Vec3::new(-100., 0., 0.), Vec3::X, 200.).is_none());
+    }
+    fn npc_config() -> crate::npc_probe::GroundConfig {
+        crate::npc_probe::GroundConfig {
+            hull: Hull {
+                mins: Vec3::new(-13., -13., 0.),
+                maxs: Vec3::new(13., 13., 72.),
+            },
+            step_height: 18.,
+            step_down_multiplier: 1.,
+        }
+    }
+    fn npc_floor_world() -> World {
+        World {
+            brushes: vec![bounds_brush(
+                Vec3::new(-200., -200., -20.),
+                Vec3::new(200., 200., 0.),
+            )],
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn npc_clip_masks_are_distinct_from_player_clip_and_preserve_player_queries() {
+        for (contents, npc_blocked, player_blocked) in [
+            (0x20000, true, false),
+            (0x10000, false, true),
+            (1, true, true),
+        ] {
+            let mut brush = bounds_brush(Vec3::new(25., -100., 0.), Vec3::new(35., 100., 100.));
+            brush.contents = contents;
+            let physics = Physics::new(&World {
+                brushes: vec![brush],
+                ..Default::default()
+            });
+            let hull = npc_config().hull;
+            let npc = physics.npc_trace_hull(Vec3::ZERO, Vec3::X * 60., hull, Query::default());
+            let player = physics.trace_hull(Vec3::ZERO, Vec3::X * 60., hull.mins, hull.maxs);
+            assert_eq!(
+                npc.trace.fraction < 1.,
+                npc_blocked,
+                "contents {contents:x}"
+            );
+            assert_eq!(
+                player.fraction < 1.,
+                player_blocked,
+                "contents {contents:x}"
+            );
+        }
+    }
+    #[test]
+    fn npc_transient_hulls_exclude_self_but_block_on_player_and_other_actors() {
+        use crate::npc_probe::NPC_BRUSH_ONLY_MASK;
+        let physics = Physics::default();
+        let hull = npc_config().hull;
+        let actors = [
+            ActorHull {
+                entity: Some(7),
+                feet: Vec3::ZERO,
+                hull,
+            },
+            ActorHull {
+                entity: Some(8),
+                feet: Vec3::X * 60.,
+                hull,
+            },
+        ];
+        let excluded = [7];
+        let query = Query {
+            excluded_entities: &excluded,
+            transients: &actors,
+            ..Default::default()
+        };
+        let hit = physics.npc_trace_hull(Vec3::ZERO, Vec3::X * 100., hull, query);
+        assert!(!hit.trace.start_solid);
+        assert_eq!(hit.entity, Some(8));
+        assert!(hit.transient && hit.trace.fraction < 1.);
+        assert!(physics
+            .npc_trace_hull(
+                Vec3::ZERO,
+                Vec3::X * 100.,
+                hull,
+                Query {
+                    contents_mask: NPC_BRUSH_ONLY_MASK,
+                    ..query
+                }
+            )
+            .clear_path());
+        let player = [ActorHull {
+            entity: None,
+            feet: Vec3::X * 60.,
+            hull,
+        }];
+        let hit = physics.npc_trace_hull(
+            Vec3::ZERO,
+            Vec3::X * 100.,
+            hull,
+            Query {
+                transients: &player,
+                ..Default::default()
+            },
+        );
+        assert!(hit.transient && hit.entity.is_none() && hit.trace.fraction < 1.);
+        let inside = physics.npc_trace_hull(
+            Vec3::ZERO,
+            Vec3::ZERO,
+            hull,
+            Query {
+                transients: &actors,
+                ..Default::default()
+            },
+        );
+        assert!(inside.trace.start_solid && inside.trace.all_solid);
+        assert_eq!(inside.entity, Some(7));
+    }
+    #[test]
+    fn npc_brush_door_hits_have_entity_and_follow_pose_before_simulation_tick() {
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "func_door".into()),
+                    ("model".into(), "*1".into()),
+                ],
+            }],
+            brush_models: vec![modkit_core::BrushModel {
+                id: 1,
+                brushes: vec![bounds_brush(
+                    Vec3::new(0., -100., 0.),
+                    Vec3::new(4., 100., 100.),
+                )],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut physics = Physics::new(&world);
+        let hull = npc_config().hull;
+        let start = Vec3::new(-40., 0., 0.);
+        let end = Vec3::new(40., 0., 0.);
+        let hit = physics.npc_trace_hull(start, end, hull, Query::default());
+        assert_eq!(hit.entity, Some(0));
+        assert!(hit.trace.fraction < 1. && hit.trace.normal.x < -0.99);
+        let excluded = [0];
+        assert!(physics
+            .npc_trace_hull(
+                start,
+                end,
+                hull,
+                Query {
+                    excluded_entities: &excluded,
+                    ..Default::default()
+                }
+            )
+            .clear_path());
+        physics.set_entity(0, Vec3::X * 200., Quat::IDENTITY, true);
+        physics.refresh_queries();
+        assert!(physics
+            .npc_trace_hull(start, end, hull, Query::default())
+            .clear_path());
+        physics.set_entity(0, Vec3::ZERO, Quat::IDENTITY, true);
+        physics.refresh_queries();
+        assert!(
+            (physics
+                .npc_trace_hull(start, end, hull, Query::default())
+                .trace
+                .fraction
+                - hit.trace.fraction)
+                .abs()
+                < 1e-5
+        );
+    }
+    #[test]
+    fn npc_point_visibility_and_model_door_follow_rotation_and_disabled_state() {
+        let mut physics = Physics::new(&door_world());
+        let start = Vec3::new(-40., 24., 0.);
+        let end = Vec3::new(40., 24., 0.);
+        let point = Hull {
+            mins: Vec3::ZERO,
+            maxs: Vec3::ZERO,
+        };
+        let query = Query {
+            contents_mask: crate::npc_probe::NPC_BRUSH_ONLY_MASK,
+            ..Default::default()
+        };
+        let visible = physics.npc_trace_hull(start, end, point, query);
+        assert!(visible.trace.fraction < 1.);
+        assert_eq!(visible.entity, Some(0));
+        let blocked = physics.npc_trace_hull(start, end, npc_config().hull, query);
+        assert!(blocked.trace.fraction < visible.trace.fraction);
+        physics.set_entity(
+            0,
+            Vec3::ZERO,
+            Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+            true,
+        );
+        physics.refresh_queries();
+        assert!(physics
+            .npc_trace_hull(start, end, point, query)
+            .clear_path());
+        assert!(physics
+            .npc_trace_hull(start, end, npc_config().hull, query)
+            .clear_path());
+        physics.set_entity(0, Vec3::ZERO, Quat::IDENTITY, false);
+        physics.refresh_queries();
+        assert!(physics
+            .npc_trace_hull(start, end, npc_config().hull, query)
+            .clear_path());
+        physics.set_entity(0, Vec3::ZERO, Quat::IDENTITY, true);
+        physics.refresh_queries();
+        assert_eq!(
+            physics.npc_trace_hull(start, end, point, query).entity,
+            Some(0)
+        );
+    }
+    #[test]
+    fn npc_stand_and_ground_move_validate_floor_and_do_not_teleport_to_target_z() {
+        use crate::npc_probe::{fits, ground_move, stand};
+        let physics = Physics::new(&npc_floor_world());
+        let config = npc_config();
+        assert!(stand(&physics, Vec3::ZERO, config, Query::default()));
+        assert!(fits(&physics, Vec3::ZERO, config.hull, Query::default()));
+        let movement = ground_move(
+            &physics,
+            Vec3::ZERO,
+            Vec3::new(80., 0., 200.),
+            config,
+            Query::default(),
+        );
+        assert!(movement.completed, "{movement:?}");
+        assert!((movement.end.x - 80.).abs() < 1e-4);
+        assert!(movement.end.z < 0.2 && movement.end.z >= 0.);
+        let empty = Physics::default();
+        assert!(!stand(&empty, Vec3::ZERO, config, Query::default()));
+        assert!(
+            !ground_move(&empty, Vec3::ZERO, Vec3::X * 40., config, Query::default()).completed
+        );
+    }
+    #[test]
+    fn npc_ground_probe_steps_onto_low_step_and_rejects_tall_step_and_wall() {
+        use crate::npc_probe::ground_move;
+        for (height, expected) in [(12., true), (25., false), (100., false)] {
+            let mut world = npc_floor_world();
+            world.brushes.push(bounds_brush(
+                Vec3::new(20., -100., 0.),
+                Vec3::new(150., 100., height),
+            ));
+            let physics = Physics::new(&world);
+            let movement = ground_move(
+                &physics,
+                Vec3::ZERO,
+                Vec3::X * 80.,
+                npc_config(),
+                Query::default(),
+            );
+            assert_eq!(
+                movement.completed, expected,
+                "height {height}: {movement:?}"
+            );
+            if expected {
+                assert!((movement.end.z - height).abs() < 0.2);
+            } else {
+                assert!(movement.end.x < 7. && movement.end.z < 0.2);
+            }
+        }
+    }
+    #[test]
+    fn npc_ground_probe_blocks_gap_large_drop_and_low_ceiling() {
+        use crate::npc_probe::ground_move;
+        for floor in [None, Some(-30.)] {
+            let mut world = World {
+                brushes: vec![bounds_brush(
+                    Vec3::new(-100., -100., -20.),
+                    Vec3::new(20., 100., 0.),
+                )],
+                ..Default::default()
+            };
+            if let Some(z) = floor {
+                world.brushes.push(bounds_brush(
+                    Vec3::new(20., -100., z - 10.),
+                    Vec3::new(200., 100., z),
+                ));
+            }
+            let movement = ground_move(
+                &Physics::new(&world),
+                Vec3::ZERO,
+                Vec3::X * 80.,
+                npc_config(),
+                Query::default(),
+            );
+            assert!(!movement.completed && movement.end.x < 40., "{movement:?}");
+        }
+        let mut world = npc_floor_world();
+        world.brushes.push(bounds_brush(
+            Vec3::new(20., -100., 0.),
+            Vec3::new(150., 100., 12.),
+        ));
+        world.brushes.push(bounds_brush(
+            Vec3::new(0., -100., 76.),
+            Vec3::new(150., 100., 90.),
+        ));
+        let movement = ground_move(
+            &Physics::new(&world),
+            Vec3::ZERO,
+            Vec3::X * 80.,
+            npc_config(),
+            Query::default(),
+        );
+        assert!(!movement.completed && movement.end.x < 7., "{movement:?}");
+    }
+    #[test]
+    fn npc_ground_probe_rejects_embedded_nan_and_excessive_travel() {
+        use crate::npc_probe::{ground_move, BlockReason};
+        let physics = Physics::new(&npc_floor_world());
+        for (start, end, reason) in [
+            (
+                Vec3::new(0., 0., -10.),
+                Vec3::X * 50.,
+                BlockReason::StartSolid,
+            ),
+            (
+                Vec3::ZERO,
+                Vec3::new(f32::NAN, 0., 0.),
+                BlockReason::InvalidInput,
+            ),
+            (Vec3::ZERO, Vec3::X * 10000., BlockReason::TravelBudget),
+        ] {
+            let movement = ground_move(&physics, start, end, npc_config(), Query::default());
+            assert!(!movement.completed);
+            assert_eq!(movement.reason, Some(reason));
+            assert_eq!(movement.end, start);
+        }
     }
 }

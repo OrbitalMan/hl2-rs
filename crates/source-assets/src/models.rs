@@ -6,6 +6,45 @@ use modkit_core::{parse_vec3, ModelInstance, Surface, Vertex, World};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Studio header eye position used by an ordinary NPC's default view offset.
+/// This is metadata only; activity-specific eye changes are separate behavior.
+pub fn read_eye_position(vfs: &Vfs, model: &str) -> Result<Vec3> {
+    let data = vfs
+        .read(model)?
+        .with_context(|| format!("missing model {model}"))?;
+    eye_position(&data).with_context(|| format!("studio eye position: {model}"))
+}
+fn eye_position(data: &[u8]) -> Result<Vec3> {
+    if data.len() > 64 * 1024 * 1024
+        || bytes(data, 0, 4)? != b"IDST"
+        || !(44..=49).contains(&i32le(data, 4)?)
+        || usize::try_from(i32le(data, 76)?)? != data.len()
+    {
+        bail!("invalid studio header for eye position");
+    }
+    vec3(data, 80)
+}
+
+#[cfg(test)]
+mod eye_position_tests {
+    use super::*;
+    #[test]
+    fn studio_eye_rejects_truncated_mismatched_and_nonfinite_metadata() {
+        let mut data = vec![0u8; 92];
+        data[..4].copy_from_slice(b"IDST");
+        data[4..8].copy_from_slice(&44i32.to_le_bytes());
+        data[76..80].copy_from_slice(&92i32.to_le_bytes());
+        data[88..92].copy_from_slice(&70f32.to_le_bytes());
+        assert_eq!(eye_position(&data).unwrap(), Vec3::new(0., 0., 70.));
+        assert!(eye_position(&data[..91]).is_err());
+        data[88..92].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(eye_position(&data).is_err());
+        data[88..92].copy_from_slice(&70f32.to_le_bytes());
+        data[4..8].copy_from_slice(&43i32.to_le_bytes());
+        assert!(eye_position(&data).is_err());
+    }
+}
+
 /// Authored sequence metadata and every blend's independent movement track.
 /// The central index matches the current skeletal adapter; pose weighting is not evaluated.
 #[derive(Clone, Debug, Serialize)]
@@ -472,6 +511,7 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             continue;
         }
         let default_model = match entity.class() {
+            "npc_barney" => Some("models/barney.mdl"),
             "npc_metropolice" => Some("models/police.mdl"),
             "npc_citizen" => Some("models/humans/group01/male_07.mdl"),
             _ => None,
@@ -880,6 +920,36 @@ mod tests {
     #[test]
     fn source_yaw_rotates_x_toward_y() {
         assert!((rotation(Vec3::new(0., 90., 0.)) * Vec3::X - Vec3::Y).length() < 0.0001);
+    }
+    #[test]
+    #[ignore = "requires an installed owned HL2 copy; normal Barney factory model only"]
+    fn owned_barney_without_model_key_loads_native_default_and_eye() {
+        let game = crate::install::discover().unwrap();
+        let data = std::fs::read(game.join("hl2/maps/d1_trainstation_01.bsp")).unwrap();
+        let bsp = crate::bsp::Bsp::parse(&data).unwrap();
+        let actor = crate::keyvalues::entities(bsp.lump(0))
+            .unwrap()
+            .into_iter()
+            .find(|e| e.get("targetname") == Some("barney"))
+            .unwrap();
+        assert_eq!(actor.class(), "npc_barney");
+        assert_eq!(actor.get("model"), None);
+        let mut world = World {
+            entities: vec![actor],
+            ..Default::default()
+        };
+        let vfs = Vfs::mount(&game).unwrap();
+        let report = append_models(&mut world, &vfs);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert_eq!(world.model_instances.len(), 1);
+        assert_eq!(world.model_instances[0].model, "models/barney.mdl");
+        assert_eq!(
+            read_eye_position(&vfs, "models/barney.mdl").unwrap(),
+            Vec3::new(0., 0., 70.)
+        );
+        assert!(world.rigs["models/barney.mdl#0"]
+            .clips
+            .contains_key("idle_subtle"));
     }
     #[test]
     fn truncated_static_dictionary_is_rejected() {

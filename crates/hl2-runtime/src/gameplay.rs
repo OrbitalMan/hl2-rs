@@ -1175,7 +1175,7 @@ fn play_sound(scene: &mut Scene, weapon: &Weapon, key: &str, world: &World, anim
             })
         });
     if !event_sounds {
-        scene.sounds.push(sound.clone());
+        scene.sounds.push(sound.clone().into());
     }
 }
 fn is_automatic(class: &str) -> bool {
@@ -1596,7 +1596,12 @@ mod tests {
             inv.tick(&world, &mut scene, &defs, Vec3::ZERO, true, 0.015);
             inv.attack(&defs, &world, &mut scene, &mut physics, Vec3::ZERO, Vec3::X);
             assert!(!inv.is_reloading());
-            assert_eq!(scene.sounds, [defs[class].sounds["empty"].clone()]);
+            assert_eq!(
+                scene.sounds,
+                [crate::sounds::SoundRequest::from(
+                    defs[class].sounds["empty"].clone()
+                )]
+            );
             assert_eq!(inv.next_attack, draw_deadline);
             assert_eq!(inv.animation, draw_animation);
             assert_eq!(inv.animation_at, 0.);

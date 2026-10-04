@@ -73,6 +73,12 @@ pub enum Action {
         yaw: f32,
         pitch: f32,
     },
+    /// Controlled initial actor pose for regression fixtures, not campaign navigation.
+    ActorPose {
+        target: String,
+        origin: [f32; 3],
+        yaw: f32,
+    },
     Reload,
     Use,
     Capture {
@@ -126,6 +132,20 @@ impl Playback {
             if let Action::Look { yaw, pitch } = &e.action {
                 if !yaw.is_finite() || !pitch.is_finite() {
                     bail!("playback look angles must be finite");
+                }
+            }
+            if let Action::ActorPose {
+                target,
+                origin,
+                yaw,
+            } = &e.action
+            {
+                if target.is_empty()
+                    || target.len() > 128
+                    || !origin.iter().all(|v| v.is_finite())
+                    || !yaw.is_finite()
+                {
+                    bail!("playback actor pose requires a bounded name and finite pose");
                 }
             }
             if let Action::Capture { name } = &e.action {

@@ -900,7 +900,7 @@ mod tests {
             scene
                 .sounds
                 .iter()
-                .filter(|sound| sound.as_str() == "NPC_CombineBall.WhizFlyby")
+                .filter(|sound| sound.as_ref() == "NPC_CombineBall.WhizFlyby")
                 .count(),
             1
         );

@@ -124,7 +124,7 @@ impl Impacts {
             .unwrap_or("default".into());
         if !melee {
             if let Some(sound) = self.property(&prop, "bulletimpact") {
-                scene.sounds.push(sound);
+                scene.sounds.push(sound.into());
             }
         }
         let family = match self
