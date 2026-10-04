@@ -23,7 +23,7 @@
   {"time":7.7,"action":"reload"},
   {"time":7.8,"action":"slot","slot":1},
   {"time":7.9,"action":"confirm"},
-  {"time":8.0,"action":"capture","name":"secondary-ar2-charge-vetoes-holster"},
+  {"time":7.91,"action":"capture","name":"secondary-ar2-charge-vetoes-holster"},
   {"time":8.14,"action":"capture","name":"secondary-ar2-ball-in-flight"},
   {"time":8.3,"action":"secondary"},
   {"time":8.65,"action":"capture","name":"secondary-ar2-ball-bounced"},
