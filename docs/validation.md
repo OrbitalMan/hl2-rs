@@ -1,16 +1,23 @@
 # Local validation — 2026-10-04
 
-This remains a partial Rust reconstruction. The latest release package is SHA256 5CC47D6F36A8F6707DEB6EA26C4F3CE8E5C6CAE4C513FCA2FC2662EB13DD622D, built 2026-10-04T00:49:58.5023416Z and tested through the normal launchers. bin/build-info.json is authoritative after a later rebuild. Historical checks below describe earlier packages.
+This remains a partial Rust reconstruction. The latest release package is SHA256 4BBA946E8AAEFEC18CE7746BA2C03CDF86A29DF78A4855EF5EFB596384C7B9EB, built 2026-10-04T06:00:28.2205472Z and tested through the normal launchers. bin/build-info.json is authoritative after a later rebuild. Historical checks below describe earlier packages.
 
 | Current check | Result |
 | --- | --- |
-| Workspace unit tests | 192 passed: 117 runtime, 30 core and 45 asset-reader tests. |
-| Explicit owned-install checks | Both passed: trainstation MP3 decoding and the authored security03 scene gate. These are ignored in the normal suite. |
+| Workspace unit tests | 210 passed: 122 runtime, 34 core and 54 asset-reader tests. |
+| Explicit owned-install checks | All six passed: MP3, compressed G-Man speech, security03, G-Man actor events/model and authored walk/run records. These are ignored in the normal suite. |
 | Formatting and all-target strict Clippy | Passed; the vendored miniquad dependency retains two existing compiler warnings. |
-| Existing packaged weapon/shotgun/selection fixtures | All 27 report assertions passed on the latest package. |
+| Existing weapon/shotgun/selection fixtures | All 27 assertions passed on the preceding iteration12 package; their implementation is unchanged in this batch. |
 | Packaged SMG/AR2 projectile fixture | All 20 assertions passed, including partial-clip AR2 charge-time reload/holster veto. |
 | Compiled choreography | All 1,837 installed scenes and 15,114 events parsed privately with zero failures. The first map loaded all 44 referenced scenes in the packaged run. |
 | First-map scene fixture | 33 authored-controller and sequence-sampling checks passed; explicit Resume bypasses missing movement readiness. |
+| Packaged G-Man intro actor fixture | All 12 checks passed: owned model/rig, 17 actor events, two ADPCM voice decodes and navigation reports. Captures use a debug camera, not the original intro view. |
+| PC navigation graph reader | Seven synthetic parser regressions pass. Owned first map: AIN37, revision 5366, 163 nodes/341 links/zero tail. |
+| Authored locomotion data | Six new synthetic reader/sampler regressions pass. Owned forward walk is 80 units/1s; run is 125.87412 units/0.6s. No runtime locomotion or weighted blending yet. |
+
+The latest G-Man fixture renders the previously excluded `cycler_actor` model and resolves all 17 authored actor events through 18 seconds. Both compressed voice files successfully request backend playback with zero audio errors: mono 22.05kHz, 146,740 frames (6.654875s) for riseshine and 461,823 frames (20.944354s) for gman_02. Output is trimmed to each original `fact` count. Synthetic mono/stereo controls compare independent signed sample values and reject malformed blocks, custom coefficient tables and excessive allocations. Complete blocks and an explicit `fact` count are required; other WAV codecs remain unsupported. These checks do not prove native mixing or that facial/gesture animation accompanies speech. The inspected capture is an idle G-Man in the map's offstage area; intro cameras, fades, compositing, flexes and gestures remain unfinished.
+
+The navigation census on the earlier preview package, with identical graph-reader/report code, decoded 72 installed graphs and reported six BSP revision mismatches. It loaded 78/79 maps; the known zero-byte d2_coast_02 remains rejected. Reports treat missing/rejected navigation as optional data diagnostics instead of aborting world display. Graph decoding and movement curves are groundwork for NPC movement; they do not establish a working first level.
 
 The crosshair fix corrects the screen accessor from width to height and follows the native surface's second UV inset. Actual 1280x720 and 1920x1080 captures each match the original's five single-pixel positions and 22x22 footprint. A1281x721 capture checks integer-center rounding without claiming an original odd-size comparison. Tests cover the owned VTF POINTSAMPLE flag and non-square coordinates. The accepted raster captures use the earlier E0A62CB0 package with identical HUD code. A destination half-pixel experiment enlarged the dots and was rejected. RGB/tone mapping and native font rasterization are not claimed equal.
 
@@ -22,7 +29,7 @@ The scene fixture uses actual security03 SECTION6.8806338, Trigger3 7.013968, ea
 
 Installed MP3 playback now decodes the trainstation cue to stereo44.1kHz, 3,997,440 frames (90.6449s) and successfully requests backend playback. The earlier door-music failure is resolved. Whole-file first decode can block; streaming, spatial mixing, soundscapes, DSP and paused audio remain open.
 
-Current local evidence is under ignored artifacts/iteration12-*. Private native comparisons, cache census and validators stay in ../../work/hl2-decompiled and ../../work/publishing. No installed game data, native code or research database is a build dependency.
+Current package evidence is under ignored artifacts/iteration13-*; iteration12-* retains the preceding HUD/native-comparison controls. Private native comparisons, cache census and validators stay in ../../work/hl2-decompiled and ../../work/publishing. No installed game data, native code or research database is a build dependency.
 
 ## Historical validation — 2026-10-03
 

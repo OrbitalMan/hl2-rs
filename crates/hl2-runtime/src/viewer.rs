@@ -543,6 +543,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     let mut scene = Scene::new(&world);
     scene.load_choreography(&world, &vfs)?;
     prepare_choreography_animations(&mut world, &vfs, &scene);
+    let mut navigation = crate::navigation_report(&vfs, &o.map, bsp.revision);
     let mut materials = crate::rendering::Materials::new(&world)?;
     let (mut sky_background, mut sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
 
@@ -1271,6 +1272,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                     scene = Scene::with_campaign(&world, false);
                     scene.load_choreography(&world, &vfs)?;
                     prepare_choreography_animations(&mut world, &vfs, &scene);
+                    navigation = crate::navigation_report(&vfs, &next.map, bsp.revision);
                     materials = crate::rendering::Materials::new(&world)?;
                     (sky_background, sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
                     sky_2d_frames = 0;
@@ -1745,6 +1747,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             snapshot["ar2_charge_until"] = serde_json::json!(inventory.charge_until());
             snapshot["choreography"] = serde_json::json!(scene.choreography_states(&world));
             snapshot["actor_animations"] = serde_json::json!(scene.animation_states(&world));
+            snapshot["navigation"] = serde_json::json!(navigation);
         }
         if o.frames.is_some_and(|n| frame >= n) || is_key_pressed(KeyCode::F10) || requested_quit {
             if let Some(path) = &o.capture {
@@ -1760,6 +1763,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             report["capture_snapshots"] = serde_json::json!(capture_snapshots);
             report["choreography"] = serde_json::json!(scene.choreography_states(&world));
             report["actor_animations"] = serde_json::json!(scene.animation_states(&world));
+            report["navigation"] = serde_json::json!(navigation);
             report["scene_time"] = serde_json::json!(scene.time);
             report["audio_decoded"] = serde_json::json!(audio.decoded);
             report["ar2_charge_until"] = serde_json::json!(inventory.charge_until());

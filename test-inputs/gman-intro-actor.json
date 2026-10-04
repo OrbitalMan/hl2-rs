@@ -1,0 +1,9 @@
+[
+  {"time":0.05,"action":"console","command":"sv_cheats 1; noclip 1; ent_fire scene2_lcs_intro Cancel; setpos -14576 -13975 -1277; setang 0 90"},
+  {"time":0.25,"action":"capture","name":"gman-actor-baseline"},
+  {"time":0.50,"action":"console","command":"ent_fire scene2_lcs_intro Start"},
+  {"time":2.20,"action":"capture","name":"gman-actor-speaking"},
+  {"time":9.00,"action":"capture","name":"gman-actor-intro-events"},
+  {"time":18.50,"action":"capture","name":"gman-actor-final"},
+  {"time":18.70,"action":"quit"}
+]

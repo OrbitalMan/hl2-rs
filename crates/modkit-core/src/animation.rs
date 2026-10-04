@@ -35,6 +35,154 @@ pub struct ClipEvent {
     pub name: String,
     pub options: String,
 }
+/// Authored movement block. Speeds describe distance across the block's cycle fraction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MovementRecord {
+    pub end_frame: i32,
+    pub motion_flags: u32,
+    pub v0: f32,
+    pub v1: f32,
+    pub end_yaw_degrees: f32,
+    pub direction: Vec3,
+    pub cumulative_position: Vec3,
+}
+/// Movement of one animation blend; independent of skeletal pose sampling.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RootMotion {
+    pub fps: f32,
+    pub frame_count: u32,
+    pub records: Vec<MovementRecord>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RootMotionSample {
+    pub position: Vec3,
+    pub yaw_degrees: f32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RootMotionError {
+    InvalidData(&'static str),
+    NoMovement,
+    InvalidCycle,
+    UncoveredCycle,
+    NonFiniteSample,
+}
+impl std::fmt::Display for RootMotionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidData(reason) => write!(f, "invalid root motion: {reason}"),
+            Self::NoMovement => f.write_str("animation has no authored movement records"),
+            Self::InvalidCycle => {
+                f.write_str("root-motion cycle is nonfinite or outside loop range")
+            }
+            Self::UncoveredCycle => {
+                f.write_str("root-motion records do not cover the sampled frame")
+            }
+            Self::NonFiniteSample => f.write_str("root-motion sample overflows finite coordinates"),
+        }
+    }
+}
+impl std::error::Error for RootMotionError {}
+impl RootMotion {
+    pub fn validate(&self) -> Result<(), RootMotionError> {
+        if !self.fps.is_finite() || self.fps <= 0. {
+            return Err(RootMotionError::InvalidData("frame rate"));
+        }
+        if self.frame_count == 0 || self.frame_count > 4096 || self.records.len() > 4096 {
+            return Err(RootMotionError::InvalidData("frame/record budget"));
+        }
+        let mut previous = 0;
+        for record in &self.records {
+            if record.end_frame <= previous || record.end_frame >= self.frame_count as i32 {
+                return Err(RootMotionError::InvalidData("movement frame interval"));
+            }
+            if !record.v0.is_finite()
+                || !record.v1.is_finite()
+                || !record.end_yaw_degrees.is_finite()
+                || !record.direction.is_finite()
+                || !record.cumulative_position.is_finite()
+            {
+                return Err(RootMotionError::InvalidData("nonfinite movement record"));
+            }
+            previous = record.end_frame;
+        }
+        Ok(())
+    }
+    pub fn duration(&self) -> Result<f32, RootMotionError> {
+        self.validate()?;
+        let duration = (self.frame_count - 1) as f32 / self.fps;
+        if !duration.is_finite() {
+            return Err(RootMotionError::NonFiniteSample);
+        }
+        Ok(duration)
+    }
+    /// Cumulative local position/yaw, including complete cycles in either direction.
+    /// The caller applies sequence loop/clamping policy; this method samples animation cycles.
+    pub fn position(&self, cycle: f32) -> Result<RootMotionSample, RootMotionError> {
+        self.validate()?;
+        let Some(last) = self.records.last() else {
+            return Err(RootMotionError::NoMovement);
+        };
+        if !cycle.is_finite() || cycle as f64 <= i32::MIN as f64 || cycle as f64 >= i32::MAX as f64
+        {
+            return Err(RootMotionError::InvalidCycle);
+        }
+        // Keep the endpoint convention: cycle1 samples its final frame; negative exact
+        // integers sample the prior loop's final frame, rather than changing block selection.
+        let loops = if cycle > 1. {
+            cycle as i32
+        } else if cycle < 0. {
+            cycle as i32 - 1
+        } else {
+            0
+        };
+        let frame = (cycle - loops as f32) * (self.frame_count - 1) as f32;
+        let mut previous_frame = 0.;
+        let mut previous_position = Vec3::ZERO;
+        let mut previous_yaw = 0.;
+        for record in &self.records {
+            if frame <= record.end_frame as f32 {
+                let fraction =
+                    (frame - previous_frame) / (record.end_frame as f32 - previous_frame);
+                let distance = (record.v0 + 0.5 * (record.v1 - record.v0) * fraction) * fraction;
+                let sample = RootMotionSample {
+                    position: previous_position
+                        + distance * record.direction
+                        + loops as f32 * last.cumulative_position,
+                    yaw_degrees: previous_yaw * (1. - fraction)
+                        + record.end_yaw_degrees * fraction
+                        + loops as f32 * last.end_yaw_degrees,
+                };
+                return finite_motion(sample);
+            }
+            previous_frame = record.end_frame as f32;
+            previous_position = record.cumulative_position;
+            previous_yaw = record.end_yaw_degrees;
+        }
+        Err(RootMotionError::UncoveredCycle)
+    }
+    /// Interval displacement expressed relative to the starting heading, with unwrapped yaw.
+    pub fn movement(&self, from: f32, to: f32) -> Result<RootMotionSample, RootMotionError> {
+        let start = self.position(from)?;
+        let end = self.position(to)?;
+        let delta = end.position - start.position;
+        let (sin, cos) = (-start.yaw_degrees).to_radians().sin_cos();
+        finite_motion(RootMotionSample {
+            position: Vec3::new(
+                delta.x * cos - delta.y * sin,
+                delta.x * sin + delta.y * cos,
+                delta.z,
+            ),
+            yaw_degrees: end.yaw_degrees - start.yaw_degrees,
+        })
+    }
+}
+fn finite_motion(sample: RootMotionSample) -> Result<RootMotionSample, RootMotionError> {
+    if sample.position.is_finite() && sample.yaw_degrees.is_finite() {
+        Ok(sample)
+    } else {
+        Err(RootMotionError::NonFiniteSample)
+    }
+}
 impl Clip {
     pub fn duration(&self) -> f32 {
         self.frames.len().saturating_sub(1) as f32 / self.fps.max(1.)
@@ -133,6 +281,133 @@ pub fn skin(position: Vec3, weights: &Weights, matrices: &[Mat4]) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn turning_motion() -> RootMotion {
+        RootMotion {
+            fps: 20.,
+            frame_count: 21,
+            records: vec![
+                MovementRecord {
+                    end_frame: 10,
+                    motion_flags: 0xc0,
+                    v0: 4.,
+                    v1: 8.,
+                    end_yaw_degrees: 90.,
+                    direction: Vec3::X,
+                    cumulative_position: Vec3::X * 6.,
+                },
+                MovementRecord {
+                    end_frame: 20,
+                    motion_flags: 0xc0,
+                    v0: 8.,
+                    v1: 12.,
+                    end_yaw_degrees: 180.,
+                    direction: Vec3::Y,
+                    cumulative_position: Vec3::new(6., 10., 0.),
+                },
+            ],
+        }
+    }
+    #[test]
+    fn root_motion_piecewise_acceleration_and_cumulative_blocks() {
+        let motion = turning_motion();
+        assert_eq!(motion.duration(), Ok(1.));
+        assert_eq!(
+            motion.position(0.25).unwrap(),
+            RootMotionSample {
+                position: Vec3::X * 2.5,
+                yaw_degrees: 45.
+            }
+        );
+        assert_eq!(
+            motion.position(0.5).unwrap(),
+            RootMotionSample {
+                position: Vec3::X * 6.,
+                yaw_degrees: 90.
+            }
+        );
+        assert_eq!(
+            motion.position(0.75).unwrap(),
+            RootMotionSample {
+                position: Vec3::new(6., 4.5, 0.),
+                yaw_degrees: 135.
+            }
+        );
+        assert_eq!(
+            motion.position(1.).unwrap(),
+            RootMotionSample {
+                position: Vec3::new(6., 10., 0.),
+                yaw_degrees: 180.
+            }
+        );
+    }
+    #[test]
+    fn root_motion_turning_intervals_rotate_by_negative_initial_yaw() {
+        let motion = turning_motion();
+        let interval = motion.movement(0.5, 0.75).unwrap();
+        assert!((interval.position - Vec3::X * 4.5).length() < 1e-5);
+        assert_eq!(interval.yaw_degrees, 45.);
+        let crossing = motion.movement(0.75, 1.25).unwrap();
+        let expected = Vec3::new(3. / 2f32.sqrt(), -8. / 2f32.sqrt(), 0.);
+        assert!((crossing.position - expected).length() < 1e-5);
+        assert_eq!(crossing.yaw_degrees, 90.);
+    }
+    #[test]
+    fn root_motion_accumulates_complete_positive_and_negative_loops() {
+        let motion = turning_motion();
+        assert_eq!(
+            motion.position(2.).unwrap(),
+            RootMotionSample {
+                position: Vec3::new(12., 20., 0.),
+                yaw_degrees: 360.
+            }
+        );
+        assert_eq!(
+            motion.position(-1.).unwrap(),
+            RootMotionSample {
+                position: Vec3::new(-6., -10., 0.),
+                yaw_degrees: -180.
+            }
+        );
+        assert_eq!(
+            motion.position(-0.25).unwrap(),
+            RootMotionSample {
+                position: Vec3::new(0., -5.5, 0.),
+                yaw_degrees: -45.
+            }
+        );
+        assert_eq!(
+            motion.position(1.25).unwrap(),
+            RootMotionSample {
+                position: Vec3::new(8.5, 10., 0.),
+                yaw_degrees: 225.
+            }
+        );
+    }
+    #[test]
+    fn root_motion_rejects_invalid_records_and_reports_missing_coverage() {
+        let mut motion = turning_motion();
+        for cycle in [f32::NAN, f32::INFINITY, i32::MAX as f32, i32::MIN as f32] {
+            assert_eq!(motion.position(cycle), Err(RootMotionError::InvalidCycle));
+        }
+        assert_eq!(
+            motion.movement(0., f32::NAN),
+            Err(RootMotionError::InvalidCycle)
+        );
+        motion.records[1].end_frame = 10;
+        assert!(motion.validate().is_err());
+        motion.records[1].end_frame = 21;
+        assert!(motion.validate().is_err());
+        motion.records[1].end_frame = 20;
+        motion.records[0].v0 = f32::NAN;
+        assert!(motion.validate().is_err());
+        motion.records[0].v0 = 4.;
+        motion.records.truncate(1);
+        assert_eq!(motion.position(0.75), Err(RootMotionError::UncoveredCycle));
+        motion.records.clear();
+        assert_eq!(motion.movement(0., 1.), Err(RootMotionError::NoMovement));
+        motion.fps = 0.;
+        assert!(motion.duration().is_err());
+    }
     fn event_clip(looping: bool) -> Clip {
         Clip {
             fps: 1.,

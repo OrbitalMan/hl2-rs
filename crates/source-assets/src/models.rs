@@ -1,10 +1,229 @@
 //! Static-prop game lumps, model meshes, and installed sequence adapters.
-use crate::{bytes, i32le, u16le, u32le, vec3, vpk::Vfs};
+use crate::{bytes, f32le, i16le, i32le, u16le, u32le, vec3, vpk::Vfs};
 use anyhow::{bail, Context, Result};
 use glam::{Mat3, Vec2, Vec3};
 use modkit_core::{parse_vec3, ModelInstance, Surface, Vertex, World};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Authored sequence metadata and every blend's independent movement track.
+/// The central index matches the current skeletal adapter; pose weighting is not evaluated.
+#[derive(Clone, Debug, Serialize)]
+pub struct MotionSequence {
+    pub source_model: String,
+    pub sequence_id: usize,
+    pub activity_name: String,
+    pub activity: i32,
+    pub activity_weight: i32,
+    pub flags: u32,
+    pub blend_dimensions: [usize; 2],
+    pub animation_indices: Vec<usize>,
+    pub blends: Vec<modkit_core::animation::RootMotion>,
+    pub central_blend: usize,
+}
+#[derive(Default)]
+struct MotionBudget {
+    bytes: usize,
+    blends: usize,
+    records: usize,
+}
+fn motion_count(data: &[u8], field: usize, limit: usize) -> Result<usize> {
+    let count = usize::try_from(i32le(data, field)?)?;
+    if count > limit {
+        bail!("MDL movement table exceeds limit at {field}");
+    }
+    Ok(count)
+}
+fn motion_relative(data: &[u8], base: usize, field: usize) -> Result<usize> {
+    Ok(usize::try_from(base as i64 + i32le(data, field)? as i64)?)
+}
+fn motion_string(data: &[u8], base: usize, field: usize) -> Result<String> {
+    if i32le(data, field)? == 0 {
+        return Ok(String::new());
+    }
+    let at = motion_relative(data, base, field)?;
+    let tail = data.get(at..).context("MDL movement string outside file")?;
+    let end = tail
+        .iter()
+        .take(4096)
+        .position(|b| *b == 0)
+        .context("unterminated MDL movement string")?;
+    Ok(std::str::from_utf8(&tail[..end])?.into())
+}
+fn animation_motion(
+    data: &[u8],
+    at: usize,
+    budget: &mut MotionBudget,
+) -> Result<modkit_core::animation::RootMotion> {
+    use modkit_core::animation::{MovementRecord, RootMotion};
+    bytes(data, at, 100)?;
+    let count = motion_count(data, at + 20, 4096)?;
+    budget.records = budget
+        .records
+        .checked_add(count)
+        .context("movement count overflow")?;
+    if budget.records > 65536 {
+        bail!("MDL movement record budget exceeded");
+    }
+    let mut records = Vec::with_capacity(count);
+    if count > 0 {
+        let start = motion_relative(data, at, at + 24)?;
+        bytes(data, start, count * 44)?;
+        for i in 0..count {
+            let record = start + i * 44;
+            records.push(MovementRecord {
+                end_frame: i32le(data, record)?,
+                motion_flags: u32le(data, record + 4)?,
+                v0: f32le(data, record + 8)?,
+                v1: f32le(data, record + 12)?,
+                end_yaw_degrees: f32le(data, record + 16)?,
+                direction: vec3(data, record + 20)?,
+                cumulative_position: vec3(data, record + 32)?,
+            });
+        }
+    }
+    let motion = RootMotion {
+        fps: f32le(data, at + 8)?,
+        frame_count: u32::try_from(i32le(data, at + 16)?)?,
+        records,
+    };
+    motion.validate()?;
+    Ok(motion)
+}
+fn model_motion(
+    data: &[u8],
+    path: &str,
+    wanted: &BTreeSet<String>,
+    result: &mut BTreeMap<String, MotionSequence>,
+    budget: &mut MotionBudget,
+) -> Result<Vec<String>> {
+    let version = u32le(data, 4)?;
+    if bytes(data, 0, 4)? != b"IDST" || !(44..=49).contains(&version) {
+        bail!("unsupported root-motion model container version");
+    }
+    let declared_length = usize::try_from(i32le(data, 76)?)?;
+    if !(344..=64 * 1024 * 1024).contains(&declared_length) {
+        bail!("invalid MDL movement file length");
+    }
+    let data = bytes(data, 0, declared_length)?;
+    budget.bytes = budget
+        .bytes
+        .checked_add(data.len())
+        .context("MDL byte count overflow")?;
+    if budget.bytes > 64 * 1024 * 1024 {
+        bail!("included MDL movement byte budget exceeded");
+    }
+    let animation_count = motion_count(data, 180, 4096)?;
+    let animation_base = usize::try_from(i32le(data, 184)?)?;
+    bytes(data, animation_base, animation_count * 100)?;
+    let count = motion_count(data, 188, 4096)?;
+    let base = usize::try_from(i32le(data, 192)?)?;
+    bytes(data, base, count * 212)?;
+    for id in 0..count {
+        let at = base + id * 212;
+        let name = motion_string(data, at, at + 4)?.to_lowercase();
+        if !wanted.contains(&name) || result.contains_key(&name) {
+            continue;
+        }
+        // Owned Barney geometry is v44 and includes v48 animation models. Only the
+        // shared header/label/include traversal applies to other container versions.
+        if version != 48 {
+            bail!("movement decoding requires MDL version 48: {path}:{name}");
+        }
+        let count = motion_count(data, at + 56, 4096)?;
+        let dimensions = [
+            motion_count(data, at + 68, 4096)?,
+            motion_count(data, at + 72, 4096)?,
+        ];
+        if count == 0 || dimensions.contains(&0) || dimensions[0] * dimensions[1] != count {
+            bail!("invalid movement blend grid: {path}:{name}");
+        }
+        budget.blends = budget
+            .blends
+            .checked_add(count)
+            .context("blend count overflow")?;
+        if budget.blends > 4096 {
+            bail!("MDL movement blend budget exceeded");
+        }
+        let table = motion_relative(data, at, at + 60)?;
+        bytes(data, table, count * 2)?;
+        let mut animation_indices = Vec::with_capacity(count);
+        let mut blends = Vec::with_capacity(count);
+        for blend in 0..count {
+            let index = usize::try_from(i16le(data, table + blend * 2)?)?;
+            if index >= animation_count {
+                bail!("movement animation index outside table: {path}:{name}");
+            }
+            animation_indices.push(index);
+            blends.push(
+                animation_motion(data, animation_base + index * 100, budget)
+                    .with_context(|| format!("{path}:{name} blend{blend}"))?,
+            );
+        }
+        result.insert(
+            name,
+            MotionSequence {
+                source_model: path.into(),
+                sequence_id: id,
+                activity_name: motion_string(data, at, at + 8)?,
+                activity: i32le(data, at + 16)?,
+                activity_weight: i32le(data, at + 20)?,
+                flags: u32le(data, at + 12)?,
+                blend_dimensions: dimensions,
+                animation_indices,
+                blends,
+                central_blend: count / 2,
+            },
+        );
+    }
+    let count = motion_count(data, 336, 64)?;
+    let base = usize::try_from(i32le(data, 340)?)?;
+    bytes(data, base, count * 8)?;
+    (0..count)
+        .map(|id| {
+            let at = base + id * 8;
+            Ok(motion_string(data, at, at + 4)?
+                .replace('\\', "/")
+                .to_lowercase())
+        })
+        .collect()
+}
+/// Read installed v48 movement metadata without loading meshes/ANI.
+/// Traversal supports the existing v44-49 model containers; movement decoding remains v48 only.
+/// Missing sequence names are absent; empty tracks explicitly return NoMovement when sampled.
+pub fn read_root_motion(
+    vfs: &Vfs,
+    model: &str,
+    wanted: &BTreeSet<String>,
+) -> Result<BTreeMap<String, MotionSequence>> {
+    let wanted = wanted
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect::<BTreeSet<_>>();
+    if wanted.len() > 64 {
+        bail!("root-motion request exceeds 64 sequences");
+    }
+    let mut result = BTreeMap::new();
+    let mut seen = BTreeSet::new();
+    let mut pending = vec![(model.replace('\\', "/").to_lowercase(), 0)];
+    let mut budget = MotionBudget::default();
+    while let Some((path, depth)) = pending.pop() {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        if depth > 8 || seen.len() > 64 {
+            bail!("included-model root-motion traversal budget exceeded");
+        }
+        let data = vfs
+            .read(&path)?
+            .with_context(|| format!("root-motion model missing: {path}"))?;
+        let includes = model_motion(&data, &path, &wanted, &mut result, &mut budget)
+            .with_context(|| path.clone())?;
+        // Preserve the skeletal reader's model-before-includes, first-match ordering.
+        pending.extend(includes.into_iter().rev().map(|name| (name, depth + 1)));
+    }
+    Ok(result)
+}
 
 pub fn static_props(bsp: &[u8], lump: &[u8]) -> Result<Vec<ModelInstance>> {
     if lump.is_empty() {
@@ -242,7 +461,8 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             && !entity.class().starts_with("item_")
             && !matches!(
                 entity.class(),
-                "prop_physics"
+                "cycler_actor"
+                    | "prop_physics"
                     | "prop_physics_multiplayer"
                     | "prop_dynamic"
                     | "prop_dynamic_override"
@@ -462,6 +682,201 @@ pub fn read_collision(vfs: &Vfs, model: &str) -> Result<Option<Vec<modkit_core::
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn movement_model() -> Vec<u8> {
+        let mut data = vec![0; 1024];
+        data[..4].copy_from_slice(b"IDST");
+        data[4..8].copy_from_slice(&48i32.to_le_bytes());
+        data[76..80].copy_from_slice(&1024i32.to_le_bytes());
+        for (at, value) in [(180, 2i32), (184, 344), (188, 1), (192, 544)] {
+            data[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for (at, fps, frames) in [(344, 20f32, 21i32), (444, 10., 11)] {
+            data[at + 8..at + 12].copy_from_slice(&fps.to_le_bytes());
+            data[at + 16..at + 20].copy_from_slice(&frames.to_le_bytes());
+        }
+        data[364..368].copy_from_slice(&2i32.to_le_bytes());
+        data[368..372].copy_from_slice(&456i32.to_le_bytes());
+        for (at, value) in [
+            (548, 356i32),
+            (552, 372),
+            (556, 1),
+            (560, -1),
+            (564, 7),
+            (600, 2),
+            (604, 212),
+            (612, 2),
+            (616, 1),
+        ] {
+            data[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        data[758..760].copy_from_slice(&1i16.to_le_bytes());
+        data[900..909].copy_from_slice(b"move_all\0");
+        data[916..925].copy_from_slice(b"ACT_WALK\0");
+        for (at, end, v0, v1, yaw, direction, position) in [
+            (
+                800,
+                10i32,
+                4f32,
+                8f32,
+                90f32,
+                [1f32, 0., 0.],
+                [6f32, 0., 0.],
+            ),
+            (844, 20, 8., 12., 180., [0., 1., 0.], [6., 10., 0.]),
+        ] {
+            data[at..at + 4].copy_from_slice(&end.to_le_bytes());
+            data[at + 4..at + 8].copy_from_slice(&0xc0u32.to_le_bytes());
+            for (i, value) in [v0, v1, yaw]
+                .into_iter()
+                .chain(direction)
+                .chain(position)
+                .enumerate()
+            {
+                data[at + 8 + i * 4..at + 12 + i * 4].copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        data
+    }
+    #[test]
+    fn mdl_movement_preserves_activity_blends_and_animation_relative_records() {
+        let mut result = BTreeMap::new();
+        let includes = model_motion(
+            &movement_model(),
+            "synthetic.mdl",
+            &BTreeSet::from(["move_all".into()]),
+            &mut result,
+            &mut MotionBudget::default(),
+        )
+        .unwrap();
+        assert!(includes.is_empty());
+        let sequence = &result["move_all"];
+        assert_eq!(sequence.source_model, "synthetic.mdl");
+        assert_eq!(sequence.activity_name, "ACT_WALK");
+        assert_eq!(sequence.activity, -1);
+        assert_eq!(sequence.activity_weight, 7);
+        assert_eq!(sequence.flags, 1);
+        assert_eq!(sequence.blend_dimensions, [2, 1]);
+        assert_eq!(sequence.animation_indices, [0, 1]);
+        assert_eq!(sequence.central_blend, 1);
+        let track = &sequence.blends[0];
+        assert_eq!(track.records.len(), 2);
+        assert_eq!(track.records[1].end_frame, 20);
+        assert_eq!(track.records[1].motion_flags, 0xc0);
+        assert_eq!((track.records[1].v0, track.records[1].v1), (8., 12.));
+        assert_eq!(track.records[1].end_yaw_degrees, 180.);
+        assert_eq!(track.records[1].direction, Vec3::Y);
+        assert_eq!(track.records[1].cumulative_position, Vec3::new(6., 10., 0.));
+        assert_eq!(
+            track.position(0.75).unwrap().position,
+            Vec3::new(6., 4.5, 0.)
+        );
+        assert_eq!(
+            sequence.blends[1].position(0.),
+            Err(modkit_core::animation::RootMotionError::NoMovement)
+        );
+    }
+    #[test]
+    fn mdl_movement_rejects_truncation_relative_ranges_and_invalid_blends() {
+        let data = movement_model();
+        for end in 0..888 {
+            assert!(
+                animation_motion(&data[..end], 344, &mut MotionBudget::default()).is_err(),
+                "accepted truncated movement at{end}"
+            );
+        }
+        let parse = |data: &[u8]| {
+            model_motion(
+                data,
+                "synthetic.mdl",
+                &BTreeSet::from(["move_all".into()]),
+                &mut BTreeMap::new(),
+                &mut MotionBudget::default(),
+            )
+        };
+        for (field, value) in [
+            (4, 49i32),
+            (368, i32::MAX),
+            (758, -1),
+            (612, 3),
+            (844, 10),
+            (844, 21),
+        ] {
+            let mut bad = data.clone();
+            if field == 758 {
+                bad[field..field + 2].copy_from_slice(&(value as i16).to_le_bytes());
+            } else {
+                bad[field..field + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            assert!(parse(&bad).is_err(), "accepted bad movement field{field}");
+        }
+        let mut bad = data.clone();
+        bad[852..856].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(parse(&bad).is_err());
+    }
+    #[test]
+    #[ignore = "requires an installed owned HL2 copy; central blend metadata, not weighted NPC motion"]
+    fn owned_walk_run_root_motion_comes_from_male_shared_records() {
+        let game = crate::install::discover().unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let sequences = read_root_motion(
+            &vfs,
+            "models/barney.mdl",
+            &BTreeSet::from(["walk_all".into(), "run_all".into()]),
+        )
+        .unwrap();
+        for (name, activity, distance, duration) in [
+            ("walk_all", "ACT_WALK", 80.00001f32, 1f32),
+            ("run_all", "ACT_RUN", 125.87412, 0.6),
+        ] {
+            let sequence = &sequences[name];
+            assert_eq!(sequence.source_model, "models/humans/male_shared.mdl");
+            assert_eq!(sequence.activity_name, activity);
+            assert_eq!(sequence.blend_dimensions, [9, 1]);
+            assert_eq!(sequence.blends.len(), 9);
+            assert_eq!(sequence.central_blend, 4);
+            let track = &sequence.blends[4];
+            let movement = track.movement(0., 1.).unwrap();
+            assert!((movement.position - Vec3::X * distance).length() < 0.001);
+            assert_eq!(movement.yaw_degrees, 0.);
+            assert!((track.duration().unwrap() - duration).abs() < 1e-6);
+            println!(
+                "{name}: distance={} duration={} authored_blends={}",
+                movement.position.x,
+                track.duration().unwrap(),
+                sequence.blends.len()
+            );
+        }
+    }
+    #[test]
+    #[ignore = "requires an installed owned HL2 copy; reads installed Gman mesh only"]
+    fn owned_cycler_actor_uses_installed_model_mesh() {
+        let game = crate::install::discover().unwrap();
+        let data = std::fs::read(game.join("hl2/maps/d1_trainstation_01.bsp")).unwrap();
+        let bsp = crate::bsp::Bsp::parse(&data).unwrap();
+        let entities = crate::keyvalues::entities(bsp.lump(0)).unwrap();
+        let actor = entities
+            .into_iter()
+            .find(|e| e.get("targetname") == Some("gman"))
+            .unwrap();
+        assert_eq!(actor.class(), "cycler_actor");
+        let origin = actor.origin();
+        let mut world = World {
+            entities: vec![actor],
+            ..Default::default()
+        };
+        let vfs = Vfs::mount(&game).unwrap();
+        let report = append_models(&mut world, &vfs);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert_eq!(report.unique_models, 1);
+        assert_eq!(world.model_instances.len(), 1);
+        let instance = &world.model_instances[0];
+        assert_eq!(instance.entity, Some(0));
+        assert_eq!(instance.model, "models/gman_high.mdl");
+        assert_eq!(instance.origin, origin);
+        assert_eq!(instance.kind, "cycler_actor");
+        let surfaces = &world.model_assets[&instance.asset_key()];
+        assert!(surfaces.iter().map(|s| s.vertices.len()).sum::<usize>() > 0);
+    }
     #[test]
     fn source_yaw_rotates_x_toward_y() {
         assert!((rotation(Vec3::new(0., 90., 0.)) * Vec3::X - Vec3::Y).length() < 0.0001);

@@ -143,6 +143,59 @@ pub fn load(o: &Options) -> Result<(Bsp, modkit_core::World, Vfs)> {
     Ok((bsp, world, vfs))
 }
 #[derive(Serialize)]
+pub(crate) struct NavigationReport {
+    path: String,
+    status: &'static str,
+    bsp_revision: u32,
+    graph_version: Option<u32>,
+    graph_revision: Option<u32>,
+    nodes: usize,
+    links: usize,
+    trailing_bytes: usize,
+    node_types: BTreeMap<u8, usize>,
+    error: Option<String>,
+}
+/// Report optional owned navigation data without treating its presence as working NPC AI.
+pub(crate) fn navigation_report(vfs: &Vfs, map: &str, revision: u32) -> NavigationReport {
+    let path = format!("maps/graphs/{}.ain", map.trim_end_matches(".bsp"));
+    let mut report = NavigationReport {
+        path,
+        status: "missing",
+        bsp_revision: revision,
+        graph_version: None,
+        graph_revision: None,
+        nodes: 0,
+        links: 0,
+        trailing_bytes: 0,
+        node_types: BTreeMap::new(),
+        error: None,
+    };
+    let decoded = (|| -> Result<Option<source_assets::navigation::Graph>> {
+        vfs.read(&report.path)?
+            .map(|data| source_assets::navigation::Graph::parse(&data, revision))
+            .transpose()
+    })();
+    match decoded {
+        Ok(Some(graph)) => {
+            report.status = "decoded";
+            report.graph_version = Some(graph.version);
+            report.graph_revision = Some(graph.map_revision);
+            report.nodes = graph.nodes.len();
+            report.links = graph.links.len();
+            report.trailing_bytes = graph.trailing_bytes.len();
+            for node in graph.nodes {
+                *report.node_types.entry(node.node_type).or_default() += 1;
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            report.status = "rejected";
+            report.error = Some(format!("{error:#}"));
+        }
+    }
+    report
+}
+#[derive(Serialize)]
 struct Summary {
     map: String,
     version: u32,
@@ -156,6 +209,7 @@ struct Summary {
     classes: BTreeMap<String, usize>,
     textures_loaded: usize,
     texture_errors: Vec<String>,
+    navigation: NavigationReport,
     warnings: Vec<String>,
 }
 fn summary(o: &Options, textures: bool) -> Result<Summary> {
@@ -196,6 +250,7 @@ fn summary(o: &Options, textures: bool) -> Result<Summary> {
         classes,
         textures_loaded: loaded,
         texture_errors: errors,
+        navigation: navigation_report(&vfs, &o.map, bsp.revision),
         warnings: world.warnings.into_iter().chain(vfs.warnings).collect(),
     })
 }

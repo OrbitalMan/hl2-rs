@@ -44,6 +44,12 @@ fn number(e: &Entity, key: &str, default: f32) -> f32 {
         .filter(|v| v.is_finite())
         .unwrap_or(default)
 }
+fn scene_actor_class(class: &str) -> bool {
+    class.starts_with("npc_")
+        || class.starts_with("prop_dynamic")
+        // Retail cycler_actor is a CFlextalkActor, whose native hierarchy includes CBaseFlex.
+        || class == "cycler_actor"
+}
 #[derive(Clone)]
 struct Output {
     name: String,
@@ -401,8 +407,7 @@ impl Scene {
             .enumerate()
             .find(|(id, entity)| {
                 !self.states[*id].killed
-                    && (entity.class().starts_with("npc_")
-                        || entity.class().starts_with("prop_dynamic"))
+                    && scene_actor_class(entity.class())
                     && entity
                         .get("targetname")
                         .is_some_and(|target| glob(&name.to_lowercase(), &target.to_lowercase()))
@@ -479,16 +484,14 @@ impl Scene {
             })
             .collect()
     }
-    /// Named NPC/dynamic-prop samples, including whether an installed rig supplies the clip.
+    /// Named supported actor samples, including whether an installed rig supplies the clip.
     pub fn animation_states(&self, world: &World) -> Vec<SceneAnimationState> {
         world
             .entities
             .iter()
             .enumerate()
             .filter_map(|(id, entity)| {
-                if !(entity.class().starts_with("npc_")
-                    || entity.class().starts_with("prop_dynamic"))
-                {
+                if !scene_actor_class(entity.class()) {
                     return None;
                 }
                 let targetname = entity.get("targetname").filter(|n| !n.is_empty())?;
@@ -1399,6 +1402,118 @@ mod tests {
         }
         data.extend([0, 0, 0]);
         Arc::new(ChoreoScene::parse(&data, &strings).unwrap())
+    }
+    #[test]
+    fn cycler_actor_named_and_target_aliases_deliver_real_actor_events() {
+        let world = World {
+            entities: vec![
+                entity(
+                    "logic_choreographed_scene",
+                    "scene",
+                    &[("target1", "gman"), ("OnTrigger1", "gate,Add,1,0,-1")],
+                ),
+                // A same-name non-actor must not shadow the flex-capable actor.
+                entity("logic_relay", "gman", &[]),
+                entity("cycler_actor", "gman", &[]),
+                entity("math_counter", "gate", &[]),
+                entity("cycler_actor_extra", "unproved_class", &[]),
+                entity("npc_citizen", "existing_npc", &[]),
+                entity("prop_dynamic", "existing_prop", &[]),
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        assert_eq!(scene.scene_actor(&world, 0, "GmAn", usize::MAX), Some(2));
+        assert_eq!(
+            scene.scene_actor(&world, 0, "!TaRgEt1", usize::MAX),
+            Some(2)
+        );
+        assert_eq!(
+            scene.scene_actor(&world, 0, "unproved_class", usize::MAX),
+            None
+        );
+        assert_eq!(
+            scene.scene_actor(&world, 0, "existing_npc", usize::MAX),
+            Some(5)
+        );
+        assert_eq!(
+            scene.scene_actor(&world, 0, "existing_prop", usize::MAX),
+            Some(6)
+        );
+        let mut data = Arc::unwrap_or_clone(choreography(&[
+            (EventType::Speak, 0., "OriginalTest.ActorLine"),
+            (EventType::FireTrigger, 0.1, "1"),
+            (EventType::StopPoint, 5., "noaction"),
+        ]));
+        for name in ["GmAn", "!TaRgEt1"] {
+            data.actors.push(source_assets::scenes::Actor {
+                name: name.into(),
+                active: true,
+                channels: Vec::new(),
+            });
+        }
+        data.events[0].actor = Some(0);
+        data.events[1].actor = Some(1);
+        scene.install_choreography(0, Arc::new(data));
+        scene.send(0, "Start", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        scene.tick(&world, Vec3::ZERO, 0.2);
+        assert_eq!(scene.sounds, vec!["OriginalTest.ActorLine"]);
+        assert_eq!(scene.states[3].value, 1.);
+        assert_eq!(scene.diagnostics.scene_events_started, 2);
+        assert!(!scene
+            .diagnostics
+            .unsupported
+            .contains_key("logic_choreographed_scene.missing-actor"));
+        assert!(scene
+            .animation_states(&world)
+            .iter()
+            .any(|s| s.entity == 2 && s.targetname == "gman"));
+        scene.states[2].killed = true;
+        assert_eq!(scene.scene_actor(&world, 0, "!target1", usize::MAX), None);
+        assert!(!scene.animation_states(&world).iter().any(|s| s.entity == 2));
+    }
+    #[test]
+    #[ignore = "requires an installed owned HL2 copy; actor I/O, not intro camera/face/AI parity"]
+    fn owned_gman_intro_resolves_cycler_actor_and_starts_authored_speech() {
+        let game = source_assets::install::discover().unwrap();
+        let data = std::fs::read(game.join("hl2/maps/d1_trainstation_01.bsp")).unwrap();
+        let bsp = source_assets::bsp::Bsp::parse(&data).unwrap();
+        let world = bsp.world("d1_trainstation_01").unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let mut scene = Scene::new(&world);
+        scene.queue.clear();
+        scene.load_choreography(&world, &vfs).unwrap();
+        let id = world
+            .entities
+            .iter()
+            .position(|e| e.get("targetname") == Some("scene2_lcs_intro"))
+            .unwrap();
+        let actor = world
+            .entities
+            .iter()
+            .position(|e| e.get("targetname") == Some("gman"))
+            .unwrap();
+        assert_eq!(world.entities[actor].class(), "cycler_actor");
+        assert_eq!(
+            world.entities[actor].get("model"),
+            Some("models/gman_high.mdl")
+        );
+        assert_eq!(
+            scene.scene_actor(&world, id, "!target1", usize::MAX),
+            Some(actor)
+        );
+        scene.send(id, "Start", "");
+        for _ in 0..1201 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+        }
+        assert_eq!(scene.diagnostics.scene_events_started, 17);
+        assert!(!scene
+            .diagnostics
+            .unsupported
+            .contains_key("logic_choreographed_scene.missing-actor"));
+        assert!(scene.sounds.iter().any(|s| s == "Trainride.gman_riseshine"));
+        assert!(scene.sounds.iter().any(|s| s == "Trainride.gman_02"));
     }
     #[test]
     fn scene_stop_point_completes_once_without_cutting_off_tail() {
