@@ -11,3 +11,9 @@ source-assets.workspace = true
 glam.workspace = true
 modkit-core.workspace = true
 rapier3d = "0.26.1"
+
+hound = "3.5.1"
+symphonia = { version = "0.5.5", default-features = false, features = ["mp3", "adpcm", "wav"] }
+
+[dev-dependencies]
+serde_json.workspace = true

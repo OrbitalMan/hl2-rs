@@ -10,3 +10,10 @@ OpenGL depth changes:
 - Temporarily enable depth writes for depth-buffer clears, then restore the current pipeline's mask. This preserves separate sky/world/viewmodel depth clears after translucent draws.
 
 This is an open-source Rust dependency patch, not decompiled game code. Computer Use validation and remaining fidelity gaps are recorded in docs/validation.md.
+
+`quad-alsa-sys/` is our MIT compatibility re-export of `alsa-sys` 0.3.1. The
+published quad-alsa-sys fork and Bevy audio's CPAL dependency both declare
+`links = "alsa"`, which Cargo rejects even for this Windows workspace. The shim
+lets quad-snd retain its crate import while using the same native binding package
+as CPAL. It contains no copied bindings or game code. Windows does not use ALSA;
+Linux playback is unverified and now requires upstream ALSA/pkg-config setup.

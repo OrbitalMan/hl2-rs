@@ -15,8 +15,6 @@ hl2-ui.workspace = true
 hl2-simulation.workspace = true
 macroquad = { version = "0.4.16", features = ["audio"] }
 rapier3d = "0.26.1"
-hound = "3.5.1"
-symphonia = { version = "0.5.5", default-features = false, features = ["mp3", "adpcm", "wav"] }
 fontdue = "0.9.3"
 ttf-parser = "0.25.1"
 

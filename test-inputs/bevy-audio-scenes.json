@@ -1,0 +1,17 @@
+[
+  {"tick":1,"fly":true,"eye":[-3480,-350,-16],"yaw":56,"actions":[
+    {"action":"send","target":"#792","input":"Disable"},
+    {"action":"send","target":"trigger_barney_close_exitdoor","input":"Disable"},
+    {"action":"send","target":"trigger_storage_close_door_1","input":"Disable"},
+    {"action":"send","target":"security_*","input":"Cancel"},
+    {"action":"send","target":"barney_ss_*","input":"CancelSequence"},
+    {"action":"send","target":"ss_Helmet_Reveal","input":"CancelSequence"}
+  ]},
+  {"tick":10,"actions":[{"action":"send","target":"security_03","input":"Start"}],"label":"scene-start"},
+  {"tick":70,"label":"speech-playing"},
+  {"tick":80,"paused":true,"label":"ui-paused"},
+  {"tick":130,"label":"ui-held"},
+  {"tick":140,"paused":false,"label":"ui-resumed"},
+  {"tick":350,"label":"speech-progress"},
+  {"tick":420,"paused":true,"label":"audio-final"}
+]

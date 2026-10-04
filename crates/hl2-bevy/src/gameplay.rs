@@ -80,6 +80,8 @@ pub struct Gameplay {
     secondary_consumed: bool,
     pub unplayed_sounds: u64,
     pub sound_cues: Vec<String>,
+    pub sound_requests: Vec<hl2_simulation::sounds::SoundRequest>,
+    weapon_sounds: hl2_simulation::sounds::WeaponAnimationSounds,
 }
 impl Gameplay {
     #[cfg(test)]
@@ -101,6 +103,8 @@ impl Gameplay {
             secondary_consumed: false,
             unplayed_sounds: 0,
             sound_cues: vec![],
+            sound_requests: vec![],
+            weapon_sounds: Default::default(),
         }
     }
     pub fn load(mut world: World, vfs: &Vfs, revision: u32) -> Result<Self> {
@@ -128,6 +132,8 @@ impl Gameplay {
             secondary_consumed: false,
             unplayed_sounds: 0,
             sound_cues: vec![],
+            sound_requests: vec![],
+            weapon_sounds: Default::default(),
         })
     }
     pub fn consume_attacks(&mut self) {
@@ -324,11 +330,21 @@ impl Gameplay {
         self.inventory
             .apply_projectile_damage(damage, &self.world, &mut self.scene, physics);
         physics.tick(TICK);
-        // Keep missing presentation explicit and bounded until audio/decal adapters land.
+        for event in
+            self.weapon_sounds
+                .events(&self.world, &self.inventory, &self.weapons, self.scene.time)
+        {
+            self.scene.sounds.push(event.options.into());
+        }
+        // Keep missing impact presentation and the inter-schedule sound queue bounded.
         self.inventory.impacts.clear();
         for sound in self.scene.sounds.drain(..) {
-            self.unplayed_sounds += 1;
-            self.sound_cues.push(sound.name);
+            self.sound_cues.push(sound.name.clone());
+            if self.sound_requests.len() < 1024 {
+                self.sound_requests.push(sound);
+            } else {
+                self.unplayed_sounds += 1;
+            }
         }
         let excess = self.sound_cues.len().saturating_sub(64);
         self.sound_cues.drain(..excess);
@@ -346,7 +362,7 @@ impl Gameplay {
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"npc_goals":self.npcs.snapshots(),
             "projectiles":{"active":self.projectiles.active,"diagnostics":self.projectiles.diagnostics},"transition":self.scene.transition,
-            "unplayed_sounds":self.unplayed_sounds,"recent_sound_cues":self.sound_cues})
+            "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }
 

@@ -499,7 +499,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     let mut capture_snapshots = Vec::new();
     let mut playback_movement: Option<MoveInput> = None;
     let mut animation_events = Vec::new();
-    let mut previous_animation: Option<(String, String, f64, f32)> = None;
+    let mut weapon_sounds = hl2_simulation::sounds::WeaponAnimationSounds::default();
     let mut debug_hud = false;
     let mut sky_2d_frames = 0u64;
     let mut sky_3d_frames = 0u64;
@@ -1104,36 +1104,9 @@ pub async fn run(mut o: Options) -> Result<()> {
         for (hit, melee) in inventory.impacts.drain(..) {
             impacts.add(hit, melee, &world, &physics, &mut scene, &vfs);
         }
-        if let Some(weapon) = weapons.get(&inventory.active) {
-            if let Some(clip) = world
-                .rigs
-                .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
-                .and_then(|rig| rig.clips.get(&inventory.animation))
-            {
-                let elapsed = (scene.time - inventory.animation_at).max(0.) as f32;
-                let previous = previous_animation
-                    .as_ref()
-                    .filter(|(weapon, animation, started, _)| {
-                        *weapon == inventory.active
-                            && *animation == inventory.animation
-                            && *started == inventory.animation_at
-                    })
-                    .map_or(-f32::EPSILON, |(_, _, _, elapsed)| *elapsed);
-                for event in clip.events_between(previous, elapsed) {
-                    if (event.id == 5004 || event.name == "AE_CL_PLAYSOUND")
-                        && !event.options.is_empty()
-                    {
-                        scene.sounds.push(event.options.clone().into());
-                        animation_events.push(serde_json::json!({"time":scene.time,"weapon":inventory.active,"clip":inventory.animation,"event":event}));
-                    }
-                }
-                previous_animation = Some((
-                    inventory.active.clone(),
-                    inventory.animation.clone(),
-                    inventory.animation_at,
-                    elapsed,
-                ));
-            }
+        for event in weapon_sounds.events(&world, &inventory, &weapons, scene.time) {
+            scene.sounds.push(event.options.clone().into());
+            animation_events.push(serde_json::json!({"time":scene.time,"weapon":inventory.active,"clip":inventory.animation,"event":event}));
         }
         for sound in scene.sounds.drain(..) {
             audio.play_request(&vfs, &sound, false, 0.4).await?;

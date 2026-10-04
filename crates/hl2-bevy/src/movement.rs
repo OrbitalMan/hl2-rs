@@ -132,6 +132,9 @@ impl Simulation {
     pub fn eye(&self) -> Vec3 {
         Vec3::from_array(self.eye.to_array())
     }
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"player": self.player, "eye": self.eye.to_array(), "fly": self.fly,
             "paused": self.paused, "host_tick": self.host_tick, "script_finished": self.finished,

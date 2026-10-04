@@ -1,5 +1,6 @@
 //! Isolated Bevy/wgpu host reusing engine-independent Source simulation.
 mod assets;
+mod audio;
 mod gameplay;
 mod hud;
 mod movement;
@@ -273,6 +274,13 @@ fn main() -> Result<()> {
                 .before(TransformSystems::Propagate),
         )
         .add_systems(Startup, setup)
+        .add_systems(
+            PostUpdate,
+            audio::queue
+                .after(hud::present)
+                .before(TransformSystems::Propagate),
+        )
+        .add_systems(Last, audio::observe.before(monitor))
         .add_systems(Last, monitor);
     let exit = app.run();
     let mut status = status
@@ -301,7 +309,7 @@ fn main() -> Result<()> {
         "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": options.map, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
-        "limitations": ["Audio, pause menu/console, impact/projectile visuals and campaign transitions are not migrated yet", "HUD uses owned resources and retained animation logic; font rasterization and blend/gamma fidelity remain approximate", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
+        "limitations": ["Pause menu/console, impact/projectile visuals and campaign transitions are not migrated yet", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
     std::fs::write(&options.report, serde_json::to_vec_pretty(&report)?)?;
     println!("Report: {}", options.report.display());
@@ -322,14 +330,18 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
+type StartupAssets<'w> = (
+    ResMut<'w, Assets<Mesh>>,
+    ResMut<'w, Assets<rendering::SourceMaterial>>,
+    ResMut<'w, Assets<Image>>,
+    ResMut<'w, Assets<AudioSource>>,
+);
 fn setup(
     mut commands: Commands,
     mut prepared: ResMut<PreparedMap>,
     options: Res<Options>,
     status: Res<Status>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<rendering::SourceMaterial>>,
-    mut images: ResMut<Assets<Image>>,
+    (mut meshes, mut materials, mut images, mut sounds): StartupAssets,
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
     let (spawn, yaw) = loaded.world.spawn();
@@ -347,6 +359,7 @@ fn setup(
     );
     commands.insert_resource(loaded.gameplay);
     commands.insert_resource(hud::Hud::new(loaded.hud));
+    audio::install(&mut commands, &mut sounds, loaded.audio);
     commands.spawn((
         Camera2d,
         Camera {
@@ -402,14 +415,16 @@ type EntityDrawQuery<'w, 's> = Query<
         &'static Visibility,
     ),
 >;
+type HostResources<'w> = (
+    Res<'w, Options>,
+    Res<'w, movement::Simulation>,
+    Res<'w, gameplay::Gameplay>,
+    Res<'w, hud::Hud>,
+    Res<'w, audio::Audio>,
+);
 fn monitor(
     mut commands: Commands,
-    (options, simulation, game, hud): (
-        Res<Options>,
-        Res<movement::Simulation>,
-        Res<gameplay::Gameplay>,
-        Res<hud::Hud>,
-    ),
+    (options, simulation, game, hud, audio): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
     adapter: Option<Res<RenderAdapterInfo>>,
@@ -444,7 +459,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
         }
     }
-    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report()});
+    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report()});
     if let Some(adapter) = adapter {
         report.adapter = Some(adapter.name.clone());
         report.backend = Some(format!("{:?}", adapter.backend));

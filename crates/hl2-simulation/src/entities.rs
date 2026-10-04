@@ -471,6 +471,32 @@ impl Scene {
             }),
         }
     }
+    /// Precache SPEAK cues from every loaded scene without advancing playback.
+    /// Unresolved dynamic actors retain a context-free request for broad preloading.
+    pub fn required_sound_requests(&self, world: &World) -> Vec<crate::sounds::SoundRequest> {
+        let mut result = Vec::new();
+        for (id, scene) in &self.choreography {
+            for event in &scene.data.events {
+                if !event.active()
+                    || event.kind != EventType::Speak
+                    || event.parameters[0].is_empty()
+                {
+                    continue;
+                }
+                let request = event.actor.and_then(|actor| {
+                    self.scene_sound_request(
+                        world,
+                        *id,
+                        &scene.data.actors[actor].name,
+                        usize::MAX,
+                        &event.parameters[0],
+                    )
+                });
+                result.push(request.unwrap_or_else(|| event.parameters[0].clone().into()));
+            }
+        }
+        result
+    }
     /// Installed animation names required by loaded VCDs, grouped by model/skin.
     /// Gestures are requested for future layer support, but are not substituted for a body sequence.
     pub fn required_animation_clips(&self, world: &World) -> BTreeMap<String, BTreeSet<String>> {

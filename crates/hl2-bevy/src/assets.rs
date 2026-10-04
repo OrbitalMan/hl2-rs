@@ -24,6 +24,7 @@ pub struct LoadedMap {
     pub world: Arc<World>,
     pub gameplay: crate::gameplay::Gameplay,
     pub hud: hl2_ui::hud::WeaponHud,
+    pub audio: crate::audio::PreparedAudio,
     pub bsp: Bsp,
     pub revision: u32,
     pub materials: BTreeMap<String, MaterialData>,
@@ -116,7 +117,9 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
         materials.insert(name, material);
     }
     let hud = hl2_ui::hud::WeaponHud::load(&vfs, hl2_ui::canvas::Canvas::default())?;
+    let audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
     Ok(LoadedMap {
+        audio,
         hud,
         gameplay,
         revision: bsp.revision,
