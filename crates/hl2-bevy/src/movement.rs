@@ -19,6 +19,12 @@ use std::path::Path;
 #[serde(deny_unknown_fields)]
 pub struct Command {
     tick: u64,
+    #[serde(default)]
+    actions: Vec<crate::gameplay::Action>,
+    #[serde(default)]
+    primary: bool,
+    #[serde(default)]
+    secondary: bool,
     label: Option<String>,
     eye: Option<[f32; 3]>,
     yaw: Option<f32>,
@@ -48,7 +54,9 @@ pub fn read_script(path: &Path) -> Result<Vec<Command>> {
     }
     let mut previous = 0;
     for c in &commands {
-        if c.tick <= previous
+        if c.actions.len() > 64
+            || c.actions.iter().any(|a| !a.valid())
+            || c.tick <= previous
             || c.tick > 6000
             || !c.forward.is_finite()
             || !c.side.is_finite()
@@ -71,6 +79,8 @@ struct Sample {
     paused: bool,
     fly: bool,
     player: Player,
+    gameplay: Option<serde_json::Value>,
+    ray_entity: Option<usize>,
 }
 #[derive(Resource)]
 pub struct Simulation {
@@ -127,7 +137,7 @@ impl Simulation {
             "paused": self.paused, "host_tick": self.host_tick, "script_finished": self.finished,
             "samples": self.samples, "colliders": self.physics.colliders.len(),
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
-            "skipped_colliders": self.physics.skipped, "dynamic_props": "frozen until entity presentation is migrated"})
+            "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
     }
     fn change_fly(&mut self, fly: bool) {
         if self.fly != fly {
@@ -135,7 +145,7 @@ impl Simulation {
             self.player = Player::new(self.eye);
         }
     }
-    fn step(&mut self) {
+    fn step(&mut self, mut game: Option<&mut crate::gameplay::Gameplay>) {
         if self.finished {
             return;
         }
@@ -169,10 +179,30 @@ impl Simulation {
                 sprint: c.sprint,
                 slow: c.slow,
             };
+            if let Some(game) = game.as_deref_mut() {
+                game.buttons(c.primary, c.secondary);
+                game.actions.extend(c.actions);
+            }
             label = c.label;
             self.next += 1;
         }
+        if self.paused
+            && let Some(game) = game.as_deref_mut()
+        {
+            game.consume_attacks();
+        }
         if !self.paused && (self.focused || !self.commands.is_empty()) && !self.transition {
+            if let Some(game) = game.as_deref_mut() {
+                let direction =
+                    glam::Vec3::from_array(source_direction(self.yaw, self.pitch).to_array());
+                game.tick(
+                    &mut self.physics,
+                    &self.player,
+                    self.eye,
+                    direction,
+                    self.fly,
+                );
+            }
             if self.fly {
                 let forward =
                     glam::Vec3::from_array(source_direction(self.yaw, self.pitch).to_array());
@@ -184,8 +214,6 @@ impl Simulation {
                     .normalize_or_zero();
                 self.eye += direction * if self.input.sprint { 900. } else { 300. } * TICK;
             } else {
-                // Collider poses stay frozen with the static presentation. Do not
-                // advance rigid bodies without moving their visible meshes too.
                 self.player.step(self.input, &self.physics, TICK);
                 self.eye = self.player.eye();
             }
@@ -197,6 +225,15 @@ impl Simulation {
                 paused: self.paused,
                 fly: self.fly,
                 player: self.player.clone(),
+                gameplay: game.as_deref().map(|g| g.report(&self.physics)),
+                ray_entity: self
+                    .physics
+                    .ray(
+                        self.eye,
+                        glam::Vec3::from_array(source_direction(self.yaw, self.pitch).to_array()),
+                        128.,
+                    )
+                    .map(|(id, _)| id),
             });
         }
         self.finished = !self.commands.is_empty() && self.next == self.commands.len();
@@ -225,9 +262,13 @@ impl Plugin for MovementPlugin {
 fn controls(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mouse: Res<AccumulatedMouseMotion>,
+    (mouse, scroll): (
+        Res<AccumulatedMouseMotion>,
+        Option<Res<bevy::input::mouse::AccumulatedMouseScroll>>,
+    ),
     mut windows: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
     mut sim: ResMut<Simulation>,
+    mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
@@ -241,7 +282,13 @@ fn controls(
     }
     sim.transition = false;
     sim.focused = window.focused;
-    if keys.just_pressed(KeyCode::Escape) || !window.focused {
+    let cancel_selection = keys.just_pressed(KeyCode::Escape)
+        && !sim.paused
+        && game.as_ref().is_some_and(|g| g.selection.pending.is_some());
+    if cancel_selection && let Some(game) = game.as_deref_mut() {
+        game.actions.push(crate::gameplay::Action::Cancel);
+    }
+    if keys.just_pressed(KeyCode::Escape) && !cancel_selection || !window.focused {
         sim.transition = !sim.paused;
         sim.paused = true;
         cursor.grab_mode = CursorGrabMode::None;
@@ -259,9 +306,52 @@ fn controls(
     if !keys.pressed(KeyCode::Space) {
         sim.jump_suppressed = false;
     }
+    if let Some(game) = game.as_deref_mut() {
+        game.buttons(
+            buttons.pressed(MouseButton::Left),
+            buttons.pressed(MouseButton::Right),
+        );
+    }
     sim.input = Input::default();
     if sim.paused || sim.transition || cursor.grab_mode == CursorGrabMode::None {
+        if let Some(game) = game.as_deref_mut() {
+            game.consume_attacks();
+        }
         return;
+    }
+    if let Some(game) = game.as_deref_mut() {
+        use crate::gameplay::Action;
+        for (key, action) in [
+            (KeyCode::F3, Action::Loadout),
+            (KeyCode::KeyE, Action::Use),
+            (KeyCode::KeyR, Action::Reload),
+            (KeyCode::KeyQ, Action::Previous),
+            (KeyCode::KeyG, Action::Impulse),
+        ] {
+            if keys.just_pressed(key) {
+                game.actions.push(action);
+            }
+        }
+        for (slot, key) in [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+            KeyCode::Digit6,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if keys.just_pressed(key) {
+                game.actions.push(Action::Slot { slot });
+            }
+        }
+        if let Some(scroll) = scroll.as_deref().filter(|s| s.delta.y != 0.) {
+            game.actions.push(Action::Wheel {
+                delta: if scroll.delta.y > 0. { -1 } else { 1 },
+            });
+        }
     }
     sim.yaw -= mouse.delta.x * 0.001152;
     sim.pitch = (sim.pitch - mouse.delta.y * 0.001152).clamp(-1.55, 1.55);
@@ -279,8 +369,8 @@ fn controls(
         slow: keys.pressed(KeyCode::AltLeft),
     };
 }
-fn fixed_step(mut sim: ResMut<Simulation>) {
-    sim.step();
+fn fixed_step(mut sim: ResMut<Simulation>, mut game: Option<ResMut<crate::gameplay::Gameplay>>) {
+    sim.step(game.as_deref_mut());
 }
 fn present(sim: Res<Simulation>, mut cameras: Query<&mut Transform, With<FlyCamera>>) {
     if let Ok(mut camera) = cameras.single_mut() {
@@ -355,17 +445,17 @@ mod tests {
             false,
             vec![],
         );
-        sim.step();
+        sim.step(None);
         let before = sim.player.clone();
         sim.paused = true;
         for _ in 0..10 {
-            sim.step();
+            sim.step(None);
         }
         assert_eq!(sim.player.ticks, before.ticks);
         assert_eq!(sim.player.feet, before.feet);
         assert_eq!(sim.player.velocity, before.velocity);
         sim.paused = false;
-        sim.step();
+        sim.step(None);
         assert_eq!(sim.player.ticks, before.ticks + 1);
     }
     #[test]

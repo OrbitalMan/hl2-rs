@@ -21,7 +21,8 @@ const MAX_DECODED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_MATERIALS: usize = 16384;
 
 pub struct LoadedMap {
-    pub world: World,
+    pub world: Arc<World>,
+    pub gameplay: crate::gameplay::Gameplay,
     pub bsp: Bsp,
     pub revision: u32,
     pub materials: BTreeMap<String, MaterialData>,
@@ -85,7 +86,17 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
     world.warnings.extend(vfs.warnings.iter().cloned());
     normalize_bsp_render_winding(&mut world);
     let model_report = models::append_models(&mut world, &vfs);
-    let names = rendered_material_names(&world);
+    let gameplay = crate::gameplay::Gameplay::load(world, &vfs, bsp.revision)?;
+    let world = gameplay.world.clone();
+    let mut names = rendered_material_names(&world);
+    for weapon in gameplay.weapons.values() {
+        if let Some(surfaces) = world
+            .model_assets
+            .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
+        {
+            names.extend(surfaces.iter().map(|s| s.material.clone()));
+        }
+    }
     if names.len() > MAX_MATERIALS {
         bail!("map exceeds {MAX_MATERIALS} unique material limit");
     }
@@ -104,6 +115,7 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
         materials.insert(name, material);
     }
     Ok(LoadedMap {
+        gameplay,
         revision: bsp.revision,
         bsp,
         world,
@@ -135,7 +147,6 @@ pub(crate) fn visible_entity(world: &World, id: usize) -> bool {
         !world.background_entities.contains(&id)
             && !entity.class().starts_with("trigger_")
             && !entity.class().starts_with("func_areaportal")
-            && entity.get("rendermode") != Some("10")
     })
 }
 
@@ -482,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_excludes_hidden_sky_unreferenced_and_duplicate_collision_materials() {
+    fn selection_keeps_toggleable_hidden_entities_but_excludes_sky_and_collision_copies() {
         use modkit_core::{BrushModel, Entity, ModelInstance, Surface, Vertex};
         let surface = |name: &str, background: bool| Surface {
             material: name.into(),
@@ -567,6 +578,8 @@ mod tests {
                 "world".into(),
                 "static-baked".into(),
                 "brush-1".into(),
+                "brush-4".into(),
+                "model-hidden".into(),
                 "model-visible".into(),
             ])
         );

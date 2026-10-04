@@ -3080,9 +3080,12 @@ dependencies = [
 name = "hl2-simulation"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "glam 0.27.0",
  "modkit-core",
  "rapier3d",
+ "serde",
+ "source-assets",
 ]
 
 [[package]]

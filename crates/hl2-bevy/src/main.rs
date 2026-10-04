@@ -1,5 +1,6 @@
-//! Isolated Bevy/wgpu migration; gameplay still lives in hl2-runtime.
+//! Isolated Bevy/wgpu host reusing engine-independent Source simulation.
 mod assets;
+mod gameplay;
 mod movement;
 mod rendering;
 use anyhow::{Context, Result, bail};
@@ -147,6 +148,7 @@ struct RunStatus {
     skipped_background_surfaces: usize,
     camera_source: [f32; 3],
     simulation: serde_json::Value,
+    presentation: serde_json::Value,
 }
 #[derive(Clone, Resource, Default)]
 struct Status(Arc<Mutex<RunStatus>>);
@@ -177,7 +179,7 @@ fn source_direction(yaw: f32, pitch: f32) -> Vec3 {
 fn main() -> Result<()> {
     let options = Options::parse()?;
     println!(
-        "Loading owned {} for Bevy/wgpu static renderer...",
+        "Loading owned {} for Bevy/wgpu migration host...",
         options.map
     );
     let loaded = assets::load(&options.game, &options.map)?;
@@ -244,7 +246,7 @@ fn main() -> Result<()> {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "HL2-RS | Bevy/wgpu migration | player and collision preview".into(),
+                        title: "HL2-RS | Bevy/wgpu migration | gameplay migration preview".into(),
                         resolution: WindowResolution::new(options.width, options.height)
                             .with_scale_factor_override(1.),
                         mode: if options.borderless {
@@ -259,6 +261,11 @@ fn main() -> Result<()> {
         )
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
         .add_plugins(movement::MovementPlugin)
+        .add_systems(
+            PostUpdate,
+            (rendering::present_entities, rendering::present_weapons)
+                .before(TransformSystems::Propagate),
+        )
         .add_systems(Startup, setup)
         .add_systems(Last, monitor);
     let exit = app.run();
@@ -285,10 +292,10 @@ fn main() -> Result<()> {
     };
     let capture_exists = options.capture.as_ref().is_none_or(|path| path.is_file());
     let report = serde_json::json!({
-        "runtime": "Bevy 0.19.1 / wgpu migration player/collision preview", "map": options.map, "bsp_revision": revision,
+        "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": options.map, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
-        "limitations": ["Weapons/HUD, AI, scene playback and audio are not migrated yet", "Models use static bind poses; brush entities use authored initial transforms and dynamic props are frozen", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
+        "limitations": ["HUD, audio, impact/projectile visuals and campaign transitions are not migrated yet", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
     std::fs::write(&options.report, serde_json::to_vec_pretty(&report)?)?;
     println!("Report: {}", options.report.display());
@@ -332,6 +339,25 @@ fn setup(
         &mut images,
         &status,
     );
+    commands.insert_resource(loaded.gameplay);
+    commands.spawn((
+        Camera3d::default(),
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        bevy::camera::visibility::RenderLayers::layer(1),
+        Tonemapping::None,
+        Msaa::Off,
+        Projection::Perspective(PerspectiveProjection {
+            fov: 2. * ((54f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
+            near: 0.1,
+            far: 1000.,
+            ..default()
+        }),
+        Transform::IDENTITY.looking_to(Vec3::X, Vec3::Y),
+    ));
     commands.spawn((
         Camera3d::default(),
         Tonemapping::None,
@@ -349,19 +375,57 @@ fn setup(
         FlyCamera,
     ));
 }
+type EntityDrawQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static rendering::SourceEntity,
+        &'static Transform,
+        &'static Visibility,
+    ),
+>;
 fn monitor(
     mut commands: Commands,
-    (options, simulation): (Res<Options>, Res<movement::Simulation>),
+    (options, simulation, game): (
+        Res<Options>,
+        Res<movement::Simulation>,
+        Res<gameplay::Gameplay>,
+    ),
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
     adapter: Option<Res<RenderAdapterInfo>>,
-    cameras: Query<&Transform, With<FlyCamera>>,
+    (cameras, draws): (Query<&Transform, With<FlyCamera>>, EntityDrawQuery),
     mut exit: MessageWriter<AppExit>,
 ) {
     control.frames += 1;
     let mut report = status.0.lock().expect("status lock");
     report.frames = control.frames;
     report.simulation = simulation.report();
+    report.simulation["gameplay"] = game.report(&simulation.physics);
+    let mut mismatches = 0;
+    let mut owned_meshes = 0;
+    let mut doors = Vec::new();
+    for (owner, transform, visibility) in &draws {
+        owned_meshes += 1;
+        let state = &game.scene.states[owner.0];
+        let (origin, rotation) = simulation
+            .physics
+            .entity_pose(owner.0)
+            .unwrap_or((state.origin, state.rotation));
+        let expected = rendering::entity_transform(origin, rotation);
+        let hidden = !state.visible || state.killed;
+        if transform.translation.distance(expected.translation) > 0.001
+            || transform.rotation.dot(expected.rotation).abs() < 0.99999
+            || (*visibility == Visibility::Hidden) != hidden
+        {
+            mismatches += 1;
+        }
+        if game.world.entities[owner.0].get("targetname") == Some("station_entrance") {
+            doors.push(serde_json::json!({"entity":owner.0,"origin":bevy_to_source(transform.translation).to_array(),
+                "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
+        }
+    }
+    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors});
     if let Some(adapter) = adapter {
         report.adapter = Some(adapter.name.clone());
         report.backend = Some(format!("{:?}", adapter.backend));

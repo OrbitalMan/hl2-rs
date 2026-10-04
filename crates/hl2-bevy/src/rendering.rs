@@ -6,6 +6,7 @@ use crate::{
 };
 use bevy::{
     asset::RenderAssetUsages,
+    camera::primitives::{Aabb, MeshAabb},
     image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
     mesh::{Indices, MeshVertexBufferLayoutRef},
     pbr::{MaterialPipeline, MaterialPipelineKey},
@@ -104,6 +105,7 @@ struct Batch {
     light_uvs: Vec<[f32; 2]>,
     colors: Vec<[f32; 4]>,
     indices: Vec<u32>,
+    skin: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
 }
 impl Batch {
     fn append(&mut self, surface: &Surface, transform: Mat4, material: Option<&MaterialData>) {
@@ -112,6 +114,7 @@ impl Batch {
             .map(|m| m.uv_transform)
             .unwrap_or([[1., 0., 0.], [0., 1., 0.]]);
         for vertex in &surface.vertices {
+            self.skin.push((vertex.position, vertex.skin.clone()));
             self.positions.push(
                 source_to_bevy(
                     transform.transform_point3(Vec3::from_array(vertex.position.to_array())),
@@ -133,7 +136,11 @@ impl Batch {
         let count = self.positions.len();
         let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
-            RenderAssetUsages::RENDER_WORLD,
+            if self.skin.iter().any(|(_, weights)| weights.is_some()) {
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD
+            } else {
+                RenderAssetUsages::RENDER_WORLD
+            },
         );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 1., 0.]; count]);
@@ -144,15 +151,136 @@ impl Batch {
         mesh
     }
 }
-fn source_transform(origin: Vec3, angles: Vec3, scale: f32) -> Mat4 {
-    Mat4::from_scale_rotation_translation(
-        Vec3::splat(scale),
-        Quat::from_rotation_z(angles.y.to_radians())
-            * Quat::from_rotation_y(angles.x.to_radians())
-            * Quat::from_rotation_x(angles.z.to_radians()),
-        origin,
+#[derive(Component)]
+pub struct SourceEntity(pub usize);
+#[derive(Component)]
+pub struct AnimatedMesh {
+    sampled: Option<(String, u32)>,
+    entity: Option<usize>,
+    weapon: Option<String>,
+    key: String,
+    scale: f32,
+    bind: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
+}
+/// Conjugate rotation by the same basis change used for vertex positions.
+pub(crate) fn entity_transform(origin: glam::Vec3, rotation: glam::Quat) -> Transform {
+    let basis = Mat3::from_cols(
+        source_to_bevy(Vec3::X),
+        source_to_bevy(Vec3::Y),
+        source_to_bevy(Vec3::Z),
+    );
+    Transform::from_translation(source_to_bevy(Vec3::from_array(origin.to_array()))).with_rotation(
+        Quat::from_mat3(
+            &(basis * Mat3::from_quat(Quat::from_array(rotation.to_array())) * basis.transpose()),
+        ),
     )
 }
+pub fn present_entities(
+    game: Res<crate::gameplay::Gameplay>,
+    sim: Res<crate::movement::Simulation>,
+    mut entities: Query<(&SourceEntity, &mut Transform, &mut Visibility)>,
+    mut animations: Query<(&mut AnimatedMesh, &Mesh3d, Option<&mut Aabb>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    for (owner, mut transform, mut visibility) in &mut entities {
+        let state = &game.scene.states[owner.0];
+        let (origin, rotation) = sim
+            .physics
+            .entity_pose(owner.0)
+            .unwrap_or((state.origin, state.rotation));
+        *transform = entity_transform(origin, rotation);
+        *visibility = if state.visible && !state.killed {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+    for (mut animation, handle, aabb) in &mut animations {
+        let Some(rig) = game.world.rigs.get(&animation.key) else {
+            continue;
+        };
+        let (clip, time) = if let Some(id) = animation.entity {
+            let state = &game.scene.states[id];
+            if !state.visible || state.killed {
+                continue;
+            }
+            (state.animation.as_str(), game.scene.animation_time(id))
+        } else {
+            if animation.weapon.as_deref() != Some(game.inventory.active.as_str()) {
+                continue;
+            }
+            let elapsed = (game.scene.time - game.inventory.animation_at).max(0.) as f32;
+            if rig
+                .clips
+                .get(&game.inventory.animation)
+                .is_some_and(|c| elapsed < c.duration())
+            {
+                (game.inventory.animation.as_str(), elapsed)
+            } else {
+                (game.inventory.idle_animation(), game.scene.time as f32)
+            }
+        };
+        if !rig.clips.contains_key(clip) {
+            continue;
+        }
+        if animation
+            .sampled
+            .as_ref()
+            .is_some_and(|(name, previous)| name == clip && *previous == time.to_bits())
+        {
+            continue;
+        }
+        let sampled = (clip.to_owned(), time.to_bits());
+        let matrices = rig.matrices(clip, time);
+        if let Some(mut mesh) = meshes.get_mut(&handle.0) {
+            let positions: Vec<_> = animation
+                .bind
+                .iter()
+                .map(|(bind, weights)| {
+                    let p = weights
+                        .as_ref()
+                        .map_or(*bind, |w| modkit_core::animation::skin(*bind, w, &matrices));
+                    source_to_bevy(Vec3::from_array((p * animation.scale).to_array())).to_array()
+                })
+                .collect();
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            if let (Some(mut aabb), Some(bounds)) = (aabb, mesh.compute_aabb()) {
+                *aabb = bounds;
+            }
+            animation.sampled = Some(sampled);
+        }
+    }
+}
+#[derive(Component)]
+pub struct WeaponMesh(String);
+pub fn present_weapons(
+    game: Res<crate::gameplay::Gameplay>,
+    mut draws: Query<(&WeaponMesh, &mut Visibility)>,
+) {
+    for (weapon, mut visibility) in &mut draws {
+        *visibility = if weapon.0 == game.inventory.active {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum Owner {
+    World,
+    Entity(usize),
+    Weapon(String),
+}
+impl Owner {
+    fn entity(&self) -> Option<usize> {
+        if let Self::Entity(id) = self {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+}
+
 pub fn spawn_map(
     loaded: &LoadedMap,
     commands: &mut Commands,
@@ -193,10 +321,10 @@ pub fn spawn_map(
         .iter()
         .map(|lm| images.add(image(lm.width, lm.height, lm.rgba.clone(), false)))
         .collect();
-    let mut batches: BTreeMap<(String, Option<usize>, usize), Batch> = BTreeMap::new();
+    let mut batches: BTreeMap<(Owner, String, Option<usize>, usize), Batch> = BTreeMap::new();
     let mut skipped = 0usize;
     let mut transparent_id = 0usize;
-    let mut append = |surface: &Surface, transform: Mat4| {
+    let mut append = |surface: &Surface, transform: Mat4, owner: Owner| {
         if surface.background {
             skipped += 1;
             return;
@@ -214,13 +342,13 @@ pub fn spawn_map(
             0
         };
         batches
-            .entry((surface.material.clone(), surface.lightmap, draw_id))
+            .entry((owner, surface.material.clone(), surface.lightmap, draw_id))
             .or_default()
             .append(surface, transform, loaded.materials.get(&surface.material));
     };
     // BSP::world includes displacements here; terrain is the collision copy.
     for surface in &world.surfaces {
-        append(surface, Mat4::IDENTITY);
+        append(surface, Mat4::IDENTITY, Owner::World);
     }
     for (id, entity) in world.entities.iter().enumerate() {
         if !visible_entity(world, id) {
@@ -232,13 +360,8 @@ pub fn spawn_map(
             .and_then(|s| s.parse::<usize>().ok())
             .and_then(|id| world.brush_models.iter().find(|model| model.id == id));
         if let Some(brush) = brush {
-            let angles = modkit_core::parse_vec3(entity.get("angles").unwrap_or("0 0 0"))
-                .map(|p| Vec3::from_array(p.to_array()))
-                .unwrap_or_default();
-            let transform =
-                source_transform(Vec3::from_array(entity.origin().to_array()), angles, 1.);
             for surface in &brush.surfaces {
-                append(surface, transform);
+                append(surface, Mat4::IDENTITY, Owner::Entity(id));
             }
         }
     }
@@ -248,20 +371,26 @@ pub fn spawn_map(
             continue;
         }
         if let Some(surfaces) = world.model_assets.get(&instance.asset_key()) {
-            let transform = source_transform(
-                Vec3::from_array(instance.origin.to_array()),
-                Vec3::from_array(instance.angles.to_array()),
-                instance.scale,
-            );
+            let transform = Mat4::from_scale(Vec3::splat(instance.scale));
             for surface in surfaces {
-                append(surface, transform);
+                append(surface, transform, Owner::Entity(instance.entity.unwrap()));
+            }
+        }
+    }
+    for (name, weapon) in &loaded.gameplay.weapons {
+        if let Some(surfaces) = world
+            .model_assets
+            .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
+        {
+            for surface in surfaces {
+                append(surface, Mat4::IDENTITY, Owner::Weapon(name.clone()));
             }
         }
     }
     let mut stats = status.0.lock().expect("status lock");
     stats.skipped_background_surfaces = skipped;
     stats.materials = batches.len();
-    for ((name, lm, _), batch) in batches {
+    for ((owner, name, lm, _), mut batch) in batches {
         let fallback = MaterialData::default();
         let definition = loaded.materials.get(&name).unwrap_or(&fallback);
         let alpha = alpha_mode(definition);
@@ -297,12 +426,69 @@ pub fn spawn_map(
         });
         stats.meshes += 1;
         stats.triangles += batch.indices.len() / 3;
-        commands.spawn((
+        let animation = if batch.skin.iter().any(|(_, w)| w.is_some()) {
+            match &owner {
+                Owner::Entity(id) => world
+                    .model_instances
+                    .iter()
+                    .find(|i| i.entity == Some(*id))
+                    .map(|instance| AnimatedMesh {
+                        sampled: None,
+                        entity: Some(*id),
+                        weapon: None,
+                        key: instance.asset_key(),
+                        scale: instance.scale,
+                        bind: std::mem::take(&mut batch.skin),
+                    }),
+                Owner::Weapon(name) => Some(AnimatedMesh {
+                    sampled: None,
+                    entity: None,
+                    weapon: Some(name.clone()),
+                    key: format!(
+                        "{}#0",
+                        loaded.gameplay.weapons[name].viewmodel.to_lowercase()
+                    ),
+                    scale: 1.,
+                    bind: std::mem::take(&mut batch.skin),
+                }),
+                Owner::World => None,
+            }
+        } else {
+            None
+        };
+        // Keep animated meshes in the main world for retained CPU skinning.
+        let animated = animation.is_some();
+        let mut mesh = batch.mesh();
+        if animated {
+            mesh.asset_usage = RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
+        }
+        let transform = owner.entity().map_or(Transform::IDENTITY, |id| {
+            let state = &loaded.gameplay.scene.states[id];
+            entity_transform(state.origin, state.rotation)
+        });
+        let mut draw = commands.spawn((
             Name::new(name),
-            Mesh3d(meshes.add(batch.mesh())),
+            Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
-            Transform::IDENTITY,
+            transform,
         ));
+        if let Some(id) = owner.entity() {
+            draw.insert(SourceEntity(id));
+            let state = &loaded.gameplay.scene.states[id];
+            if !state.visible || state.killed {
+                draw.insert(Visibility::Hidden);
+            }
+        }
+        if let Owner::Weapon(name) = owner {
+            draw.insert((
+                WeaponMesh(name),
+                bevy::camera::visibility::RenderLayers::layer(1),
+                Visibility::Hidden,
+            ));
+        }
+        if let Some(animation) = animation {
+            draw.insert(animation);
+        }
     }
 }
 fn alpha_mode(material: &MaterialData) -> AlphaMode {
@@ -319,6 +505,142 @@ fn alpha_mode(material: &MaterialData) -> AlphaMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn entity_pose_conversion_preserves_scaled_local_points_at_arbitrary_angles() {
+        let origin = glam::Vec3::new(10., -300., 45.);
+        let rotation = hl2_simulation::physics::angles(glam::Vec3::new(17., 90., -12.));
+        let local = glam::Vec3::new(40., 4., 16.) * 1.3;
+        let converted = entity_transform(origin, rotation)
+            .transform_point(source_to_bevy(Vec3::from_array(local.to_array())));
+        let expected = source_to_bevy(Vec3::from_array((origin + rotation * local).to_array()));
+        assert!(converted.distance(expected) < 0.0001);
+    }
+    #[test]
+    fn animation_system_updates_mesh_bounds_pose_and_scripted_visibility() {
+        use bevy::ecs::system::RunSystemOnce;
+        use modkit_core::animation::{Bone, Clip, Pose, Rig, Weights};
+        let key = "synthetic#0".to_owned();
+        let world = modkit_core::World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "prop_dynamic".into()),
+                    ("DefaultAnim".into(), "move".into()),
+                    ("origin".into(), "100 50 10".into()),
+                    ("angles".into(), "0 90 0".into()),
+                ],
+            }],
+            rigs: BTreeMap::from([(
+                key.clone(),
+                Rig {
+                    bones: vec![Bone {
+                        name: "root".into(),
+                        parent: None,
+                        bind: Pose {
+                            position: glam::Vec3::ZERO,
+                            rotation: glam::Quat::IDENTITY,
+                        },
+                        inverse_bind: glam::Mat4::IDENTITY,
+                    }],
+                    clips: BTreeMap::from([(
+                        "move".into(),
+                        Clip {
+                            fps: 1.,
+                            looping: false,
+                            events: vec![],
+                            frames: vec![
+                                vec![Pose {
+                                    position: glam::Vec3::ZERO,
+                                    rotation: glam::Quat::IDENTITY,
+                                }],
+                                vec![Pose {
+                                    position: glam::Vec3::Z * 8.,
+                                    rotation: glam::Quat::IDENTITY,
+                                }],
+                            ],
+                        },
+                    )]),
+                    warnings: vec![],
+                },
+            )]),
+            ..default()
+        };
+        let mut game = crate::gameplay::Gameplay::synthetic(world);
+        game.scene.time = 0.5;
+        let sim = crate::movement::Simulation::new(
+            &game.world,
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut meshes = Assets::<Mesh>::default();
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[1., 0., 0.]]);
+        let handle = meshes.add(mesh);
+        let mut app = App::new();
+        app.insert_resource(game)
+            .insert_resource(sim)
+            .insert_resource(meshes);
+        let entity = app
+            .world_mut()
+            .spawn((
+                SourceEntity(0),
+                Transform::IDENTITY,
+                Visibility::Inherited,
+                AnimatedMesh {
+                    sampled: None,
+                    entity: Some(0),
+                    weapon: None,
+                    key,
+                    scale: 2.,
+                    bind: vec![(
+                        glam::Vec3::X,
+                        Some(Weights {
+                            bones: [0; 3],
+                            weights: [1., 0., 0.],
+                        }),
+                    )],
+                },
+                Mesh3d(handle.clone()),
+                Aabb::default(),
+            ))
+            .id();
+        app.world_mut().run_system_once(present_entities).unwrap();
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        let mesh = meshes.get(&handle).unwrap();
+        assert_eq!(
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                .unwrap()
+                .as_float3()
+                .unwrap(),
+            &[[2., 8., 0.]]
+        );
+        assert!(
+            Vec3::from(app.world().get::<Aabb>(entity).unwrap().center)
+                .distance(Vec3::new(2., 8., 0.))
+                < 0.0001
+        );
+        let point = app
+            .world()
+            .get::<Transform>(entity)
+            .unwrap()
+            .transform_point(Vec3::new(2., 8., 0.));
+        assert!(point.distance(source_to_bevy(Vec3::new(100., 52., 18.))) < 0.0001);
+        app.world_mut()
+            .resource_mut::<crate::gameplay::Gameplay>()
+            .scene
+            .states[0]
+            .visible = false;
+        app.world_mut().run_system_once(present_entities).unwrap();
+        assert_eq!(
+            *app.world().get::<Visibility>(entity).unwrap(),
+            Visibility::Hidden
+        );
+    }
     #[test]
     fn alpha_test_takes_precedence_over_translucency_and_additive_over_both() {
         let mut material = MaterialData {

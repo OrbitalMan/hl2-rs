@@ -5,6 +5,9 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+anyhow.workspace = true
+serde.workspace = true
+source-assets.workspace = true
 glam.workspace = true
 modkit-core.workspace = true
 rapier3d = "0.26.1"

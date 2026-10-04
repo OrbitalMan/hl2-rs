@@ -3,7 +3,6 @@ mod entities;
 mod gameplay;
 mod hud;
 mod impacts;
-mod npc;
 pub use hl2_simulation::{npc_probe, physics};
 mod playback;
 mod projectile_rendering;

@@ -1,0 +1,175 @@
+[
+  {
+    "tick": 1,
+    "label": "door-ready",
+    "eye": [
+      -3296,
+      -2048,
+      128
+    ],
+    "yaw": 0,
+    "actions": [
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Unlock"
+      },
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Close"
+      }
+    ]
+  },
+  {
+    "tick": 2,
+    "forward": 1
+  },
+  {
+    "tick": 45,
+    "label": "closed-blocks",
+    "forward": 1
+  },
+  {
+    "tick": 46,
+    "forward": 1,
+    "actions": [
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Open"
+      }
+    ]
+  },
+  {
+    "tick": 125,
+    "label": "open-passed",
+    "forward": 1
+  },
+  {
+    "tick": 126,
+    "eye": [
+      -3296,
+      -2048,
+      128
+    ],
+    "actions": [
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Close"
+      }
+    ]
+  },
+  {
+    "tick": 195,
+    "label": "reclosed",
+    "eye": [
+      -3260,
+      -2048,
+      128
+    ]
+  },
+  {
+    "tick": 196,
+    "actions": [
+      {
+        "action": "use"
+      }
+    ]
+  },
+  {
+    "tick": 265,
+    "label": "use-opened"
+  },
+  {
+    "tick": 270,
+    "label": "pistol-pending",
+    "actions": [
+      {
+        "action": "loadout"
+      },
+      {
+        "action": "slot",
+        "slot": 1
+      }
+    ]
+  },
+  {
+    "tick": 271,
+    "actions": [
+      {
+        "action": "confirm"
+      }
+    ]
+  },
+  {
+    "tick": 350,
+    "label": "pistol-ready"
+  },
+  {
+    "tick": 351,
+    "label": "pistol-fired",
+    "primary": true
+  },
+  {
+    "tick": 352
+  },
+  {
+    "tick": 380,
+    "actions": [
+      {
+        "action": "slot",
+        "slot": 2
+      },
+      {
+        "action": "confirm"
+      }
+    ]
+  },
+  {
+    "tick": 459,
+    "label": "smg-ready"
+  },
+  {
+    "tick": 460,
+    "label": "smg-secondary",
+    "secondary": true
+  },
+  {
+    "tick": 461
+  },
+  {
+    "tick": 490,
+    "actions": [
+      {
+        "action": "slot",
+        "slot": 2
+      },
+      {
+        "action": "slot",
+        "slot": 2
+      },
+      {
+        "action": "confirm"
+      }
+    ]
+  },
+  {
+    "tick": 579,
+    "label": "ar2-ready"
+  },
+  {
+    "tick": 580,
+    "label": "ar2-charge",
+    "secondary": true
+  },
+  {
+    "tick": 615,
+    "label": "ar2-launched"
+  },
+  {
+    "tick": 625,
+    "label": "final"
+  }
+]

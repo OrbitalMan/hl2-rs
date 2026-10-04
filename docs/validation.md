@@ -1,5 +1,14 @@
 # Local validation — 2026-10-04
 
+## Bevy entity/gameplay migration (2026-10-04)
+
+The shared simulation now retains entities, weapons, projectiles, selection, NPC locomotion and actor preparation; both hosts use the same implementation. The five moved full modules were compared byte-for-byte after newline normalization, with only scene_sound_request visibility widened to preserve a retained host test. All 249 workspace release tests and nine explicit owned-install tests pass; strict workspace/all-target Clippy passes with the same two vendored warnings. Logs: artifacts/bevy-gameplay-tests.log, bevy-gameplay-owned-tests.log and bevy-gameplay-clippy.log.
+
+Packaged executable SHA256 `604244930786CD48B5C16FDB0F1C82C476FDB3572B7FA5DA60E628AC0DCD7238`, built `2026-10-04T22:47:33.7451967Z`. The shader remains unchanged. The packaged bench fixture passed all 26 existing movement assertions with rigid bodies enabled. The packaged station doorway/weapon fixture passed 17 assertions: closed/open/reclosed walking and ray behavior, E use, selection retaining the active weapon until confirmation, pistol consuming one round, SMG spawning one grenade/consuming one secondary round, and AR2 charging before launching/consuming one round. Final 233 owned entity mesh draws have zero transform/visibility mismatches. Private validators and captures stay outside public source. Closed/open doorway and AR2 viewmodel captures were visually inspected.
+
+This validates host integration, not original-engine parity. Retained AI, choreography and physics limitations persist. HUD/audio, impact/projectile effects and campaign host transitions remain unmigrated; audio cues are explicitly reported as unplayed. Missing clips remain bind poses, dynamic monitors remain unsupported, and sky/Source shaders remain incomplete. No FPS improvement or playable first-level campaign is claimed.
+
+
 ## Bevy player/collision migration
 
 The walking preview package is SHA256 `3167DB5CAA551628CC0CF07CC9588F5425907BCD8834E33FC58A1D32B57C448A`, built 2026-10-04T21:45:47Z. Its packaged shader remains `DF39B6090638EC5238CAE9F93A1F29198D15EDE2B45295348E66E2463A3CF249`. `bin/build-bevy-info.json` is authoritative after rebuilding. The static-only package below is superseded.
