@@ -1,6 +1,7 @@
 //! Isolated Bevy/wgpu host reusing engine-independent Source simulation.
 mod assets;
 mod gameplay;
+mod hud;
 mod movement;
 mod rendering;
 use anyhow::{Context, Result, bail};
@@ -83,7 +84,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration: player/collision preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F2 toggles fly. Esc pauses; click resumes. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then pauses; click resumes. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -260,10 +261,15 @@ fn main() -> Result<()> {
                 }),
         )
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
+        .add_plugins(bevy::sprite_render::Material2dPlugin::<hud::HudMaterial>::default())
         .add_plugins(movement::MovementPlugin)
         .add_systems(
             PostUpdate,
-            (rendering::present_entities, rendering::present_weapons)
+            (
+                rendering::present_entities,
+                rendering::present_weapons,
+                hud::present,
+            )
                 .before(TransformSystems::Propagate),
         )
         .add_systems(Startup, setup)
@@ -295,7 +301,7 @@ fn main() -> Result<()> {
         "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": options.map, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
-        "limitations": ["HUD, audio, impact/projectile visuals and campaign transitions are not migrated yet", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
+        "limitations": ["Audio, pause menu/console, impact/projectile visuals and campaign transitions are not migrated yet", "HUD uses owned resources and retained animation logic; font rasterization and blend/gamma fidelity remain approximate", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
     std::fs::write(&options.report, serde_json::to_vec_pretty(&report)?)?;
     println!("Report: {}", options.report.display());
@@ -340,6 +346,18 @@ fn setup(
         &status,
     );
     commands.insert_resource(loaded.gameplay);
+    commands.insert_resource(hud::Hud::new(loaded.hud));
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 2,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        Tonemapping::None,
+        Msaa::Off,
+        bevy::camera::visibility::RenderLayers::layer(2),
+    ));
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -386,10 +404,11 @@ type EntityDrawQuery<'w, 's> = Query<
 >;
 fn monitor(
     mut commands: Commands,
-    (options, simulation, game): (
+    (options, simulation, game, hud): (
         Res<Options>,
         Res<movement::Simulation>,
         Res<gameplay::Gameplay>,
+        Res<hud::Hud>,
     ),
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
@@ -425,7 +444,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
         }
     }
-    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors});
+    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report()});
     if let Some(adapter) = adapter {
         report.adapter = Some(adapter.name.clone());
         report.backend = Some(format!("{:?}", adapter.backend));

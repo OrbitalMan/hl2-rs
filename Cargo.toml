@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-simulation", "crates/hl2-runtime", "crates/hl2-bevy"]
-default-members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-simulation", "crates/hl2-runtime"]
+members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-simulation", "crates/hl2-ui", "crates/hl2-runtime", "crates/hl2-bevy"]
+default-members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-simulation", "crates/hl2-ui", "crates/hl2-runtime"]
 resolver = "2"
 exclude = ["third_party/miniquad"]
 
@@ -12,6 +12,7 @@ glam = { version = "0.27", features = ["serde"] }
 modkit-core = { path = "crates/modkit-core" }
 source-assets = { path = "crates/source-assets" }
 hl2-simulation = { path = "crates/hl2-simulation" }
+hl2-ui = { path = "crates/hl2-ui" }
 
 [profile.dev]
 opt-level = 1

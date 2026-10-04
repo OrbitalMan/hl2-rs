@@ -23,6 +23,7 @@ const MAX_MATERIALS: usize = 16384;
 pub struct LoadedMap {
     pub world: Arc<World>,
     pub gameplay: crate::gameplay::Gameplay,
+    pub hud: hl2_ui::hud::WeaponHud,
     pub bsp: Bsp,
     pub revision: u32,
     pub materials: BTreeMap<String, MaterialData>,
@@ -114,7 +115,9 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
         );
         materials.insert(name, material);
     }
+    let hud = hl2_ui::hud::WeaponHud::load(&vfs, hl2_ui::canvas::Canvas::default())?;
     Ok(LoadedMap {
+        hud,
         gameplay,
         revision: bsp.revision,
         bsp,

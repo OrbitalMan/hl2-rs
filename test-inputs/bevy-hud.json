@@ -1,0 +1,13 @@
+[
+  {"tick":1,"label":"unarmed","fly":true},
+  {"tick":20,"actions":[{"action":"loadout"}]},
+  {"tick":40,"actions":[{"action":"slot","slot":1},{"action":"confirm"}]},
+  {"tick":140,"actions":[{"action":"slot","slot":2}],"label":"pistol-ammo-with-smg-pending"},
+  {"tick":200,"actions":[{"action":"confirm"}],"label":"smg-panel-start"},
+  {"tick":210,"label":"smg-panel-moving"},
+  {"tick":270,"label":"smg-panel-end"},
+  {"tick":310,"secondary":true,"label":"smg-secondary"},
+  {"tick":311},
+  {"tick":335,"actions":[{"action":"slot","slot":3}],"label":"smg-ammo-with-shotgun-pending"},
+  {"tick":345,"paused":true,"label":"hud-final"}
+]

@@ -876,6 +876,7 @@ dependencies = [
  "bevy_reflect",
  "bevy_render",
  "bevy_shader",
+ "bevy_sprite_render",
  "bevy_transform",
  "bevy_utils",
  "bytemuck",
@@ -3051,6 +3052,7 @@ dependencies = [
  "bevy",
  "glam 0.27.0",
  "hl2-simulation",
+ "hl2-ui",
  "modkit-core",
  "serde",
  "serde_json",
@@ -3065,6 +3067,7 @@ dependencies = [
  "fontdue",
  "glam 0.27.0",
  "hl2-simulation",
+ "hl2-ui",
  "hound",
  "macroquad",
  "modkit-core",
@@ -3086,6 +3089,18 @@ dependencies = [
  "rapier3d",
  "serde",
  "source-assets",
+]
+
+[[package]]
+name = "hl2-ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fontdue",
+ "glam 0.27.0",
+ "hl2-simulation",
+ "source-assets",
+ "ttf-parser",
 ]
 
 [[package]]

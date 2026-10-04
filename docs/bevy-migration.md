@@ -2,7 +2,7 @@
 
 The `bevy-migration` branch adds a Bevy 0.19.1/wgpu host with custom Source materials and shared player movement/collision. It reads an owned, installed Half-Life 2 copy through `source-assets`; `modkit-core` provides the player controller and `hl2-simulation` provides shared collision support. Game assets and Valve DLLs are not included in the repository or package.
 
-This Bevy executable defaults to **walking with collision**, using the retained `Player` and `Physics` code at 15 ms per step. Flight is available with `--fly` or F2. The retained entity I/O, choreography scheduler, conservative Barney locomotion, inventory, six implemented weapons and projectile simulation now run in the Bevy fixed step. Door/prop meshes follow collider poses; available skeletal clips and weapon viewmodels animate. HUD, audio, impact decals, projectile visuals and campaign transitions still need Bevy presentation/host adapters. The underlying incomplete AI and scene behavior is preserved, not upgraded to full Source parity. Visible geometry and working movement do not establish playable-map support or Source shader parity. The existing runtime remains available through `scripts/build.ps1` and `launch.cmd` for its broader implemented behavior.
+This Bevy executable defaults to **walking with collision**, using the retained `Player` and `Physics` code at 15 ms per step. Flight is available with `--fly` or F2. The retained entity I/O, choreography scheduler, conservative Barney locomotion, inventory, six implemented weapons and projectile simulation now run in the Bevy fixed step. Door/prop meshes follow collider poses; available skeletal clips and weapon viewmodels animate. The shared owned-resource HUD now presents health/ammunition, weapon buckets, quick-info and white/yellow crosshairs, including secondary-ammo positioning animations. Audio, pause menu/console, impact decals, projectile visuals and campaign transitions still need Bevy presentation/host adapters. The underlying incomplete AI and scene behavior is preserved, not upgraded to full Source parity. Visible geometry and working movement do not establish playable-map support or Source shader parity. The existing runtime remains available through `scripts/build.ps1` and `launch.cmd` for its broader implemented behavior.
 
 ## Build and launch
 
@@ -66,7 +66,7 @@ This is approximate legacy gamma multiplication, not Source's complete material 
 
 1. Compare the custom renderer with matched original/retained-runtime cameras; restore sky visibility/masking, Source material stages and diagnostics without regressions.
 2. Continue separating the existing gameplay host from Macroquad-specific types, preserving its behavior/tests and the migrated player/collision adapter's fixed-step scheduling.
-3. Finish migrating HUD, audio, projectile/impact effects and campaign host transitions, then expand verified NPC/animation/choreography behavior. Preserve original-game evidence and packaged regressions for each subsystem.
+3. Finish migrating audio, pause menu/console, projectile/impact effects and campaign host transitions, then expand verified NPC/animation/choreography behavior. Preserve original-game evidence and packaged regressions for each subsystem.
 4. Verify regressions for all retained runtime features and both trainstation levels through ordinary campaign state, document remaining gaps, and only then propose moving the replacement into `main`.
 
 Target Bevy PRs at `bevy-migration`. Shared format/core fixes can target `main` and be brought across separately. The preserved `macroquad-prototype` branch is a reference snapshot, not the active migration target. Do not include game files, private native analysis or databases in a PR.
@@ -74,3 +74,15 @@ Target Bevy PRs at `bevy-migration`. Shared format/core fixes can target `main` 
 ## Entity and weapon fixture
 
 `launch-bevy.cmd --map d1_trainstation_02 --movement-script test-inputs/bevy-entities-weapons.json --capture artifacts/bevy-entities-weapons.png --report artifacts/bevy-entities-weapons.json` checks a closed/open/reclosed station doorway, E use, bucket confirmation, pistol primary fire, SMG grenade ammo and delayed AR2 launch. `actions` are one-shot commands; held `primary`/`secondary` replace the previous held state alongside movement. `send` targets named map entities for controlled setup. Deployment delays must elapse before firing. Labels include gameplay state and a 128-unit forward ray; the final report checks entity presentation against collider/scene poses. It does not prove an ordinary campaign playthrough.
+
+## Shared HUD and capture fixture
+
+`hl2-ui` keeps the retained scheme/resource parsing, Windows font-cell metrics, glyph blur/scanlines, numeric animation rules, weapon bucket state and default-sprite remapping. Its explicit CPU canvas records ordered texture/rectangle commands; asset reads occur before the Bevy app starts. Bevy uses a separate layer/camera and custom Material2d for normal/additive draws, retaining CPU glyph ownership and pooling meshes. The retained Macroquad host now consumes the same canvas. This is a host migration, not a redesign of the original interface.
+
+```powershell
+.\launch-bevy.cmd --map d1_trainstation_02 --movement-script test-inputs/bevy-hud.json --capture artifacts/bevy-hud.png --report artifacts/bevy-hud.json
+```
+
+The fixture starts unarmed, equips a pistol, opens selection while retaining pistol ammo, confirms SMG, waits for the secondary panel to move, fires a grenade and ends with shotgun selected in the menu while SMG ammo remains active. It pauses on its last tick for a stable capture. HUD draw count, pooled meshes, owned GPU texture count and viewport are reported under `render.presentation.hud`.
+
+White-crosshair packaged raster measurements match the accepted retail five single-pixel offsets at 1280x720 and borderless 1920x1080. Resource-driven secondary panels were inspected at start/intermediate/end positions. Native GDI rasterization, complete HUD hide gates/commands, exact blend/gamma behavior and performance remain unverified; Bevy blends in its linear output pipeline. A visual pause menu/console is still pending.
