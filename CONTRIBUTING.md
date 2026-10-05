@@ -22,7 +22,7 @@ GitHub Actions runs formatting, strict workspace Clippy and unit tests on Window
 
 ## Code and distribution boundaries
 
-- Put file-format readers in source-assets, shared simulation and mod contracts in modkit-core, retained rendering/input/host logic in hl2-runtime, and the new Bevy adapter in hl2-bevy on bevy-migration.
+- Put file-format readers in `source-assets`, common data/player/mod contracts in `modkit-core`, engine-independent physics/entities/NPCs/weapons/choreography in `hl2-simulation`, portable owned-resource HUD/menu/console logic in `hl2-ui`, retained rendering/input/host logic in `hl2-runtime`, and Bevy presentation/input/host adapters in `hl2-bevy`.
 - Read the owned game installation in place. Keep game files, generated world exports, native binary copies, decompiler output and research tools outside the repository.
 - Ship only project source and properly attributed open-source dependencies. Do not submit ripped assets, leaked source, game executables, credentials or private local paths.
 - Add meaningful regression coverage for simulation/parser changes. A screenshot should illustrate a tested behavior, not stand in for a reproducible check.
@@ -30,4 +30,6 @@ GitHub Actions runs formatting, strict workspace Clippy and unit tests on Window
 See docs/research.md for references and docs/validation.md for tested behavior and limitations. Useful contributions include Source collision and movement fidelity, material rendering, NPC schedules/navigation, choreography, remaining weapons, and campaign state. Open a focused issue or PR with reproduction steps and supporting evidence.
 ## Branches during the Bevy migration
 
-Target `bevy-migration` for the new Bevy/wgpu host and renderer. Target `main` for shared `source-assets`/`modkit-core` fixes or fixes to its current Macroquad runtime. `macroquad-prototype` preserves the pre-migration implementation for reference. Describe which branch/runtime you tested; a renderer-only preview does not establish campaign fidelity. Migration changes will move to `main` after verified replacements are available.
+Target `bevy-migration` for migration work, its Bevy/wgpu host and improvements to the extracted shared crates. Target `main` for maintenance of its current partial runtime; discuss fixes needed on both branches so they can be applied and checked deliberately. `macroquad-prototype` preserves the pre-migration implementation for reference. Describe which branch/runtime you tested. Migration changes will move to `main` after verified replacements are available.
+
+Animation contributions should preserve owned sequence bone weights, automatic child layers, additive/post-delta transforms and Faceposer gesture timing. The inspected station gestures have empty parent tracks and require their child layers; playing only the parent clip does not implement them. Keep decoded metadata and pose composition shared between hosts, and keep installed-file reads out of frame systems. See the retail eye-origin and gesture evidence in [research notes](docs/research.md). Head controls, facial animation, NPC schedules and the ordinary first-level campaign remain open work.

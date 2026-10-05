@@ -8,9 +8,9 @@ Development is moving toward a Bevy/wgpu host, following the separation of owned
 
 | Branch | Purpose | Pull requests |
 | --- | --- | --- |
-| `main` | Current working partial runtime. It still uses Macroquad while the replacement is being verified. | Shared Source-format/core fixes and fixes to the current runtime. |
+| `main` | Current working partial runtime. It still uses Macroquad while the replacement is being verified. | Maintenance of the current runtime; coordinate fixes needed on both branches. |
 | [macroquad-prototype](https://github.com/kvalls/hl2-rs/tree/macroquad-prototype) | Preserved snapshot of the original prototype before migration. | Reference branch; discuss continuing prototype-specific work first. |
-| [bevy-migration](https://github.com/kvalls/hl2-rs/tree/bevy-migration) | Bevy/wgpu host with shared movement, entity/weapon simulation, animated presentation, owned HUD/audio, LDR sky and iris rendering alongside the existing runtime. | Bevy host, renderer and migration changes. Target this branch rather than `main`. |
+| [bevy-migration](https://github.com/kvalls/hl2-rs/tree/bevy-migration) | Bevy/wgpu host with shared movement, entity/weapon simulation, animated presentation, owned HUD/audio, LDR sky and iris rendering alongside the existing runtime. | Bevy host, renderer, migration and extracted shared-crate changes. Target this branch. |
 
 `source-assets` and `modkit-core` stay engine-independent. This branch also extracts shared collision, rigid-body support, NPC probes/controllers, entity I/O/choreography, weapons/projectiles and selection into `hl2-simulation`, reused by both hosts. The engine-independent `hl2-ui` crate retains owned HUD/menu layouts, console parsing, fonts, crosshairs and animation state, with drawing adapters for both hosts. Existing asset decoders, simulation behavior and validation are retained as the host is migrated. Bevy's default PBR materials do not recreate Source shaders or physics; those still require their own implementations and comparisons. No speed or fidelity improvement is assumed solely from changing engines.
 

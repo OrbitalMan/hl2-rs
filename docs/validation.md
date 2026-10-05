@@ -1,12 +1,16 @@
 # Local validation — 2026-10-05
 
+## Retail animation research checkpoint (2026-10-05)
+
+Private read-only evidence identifies the inherited retail actor eye-position entry through RTTI-associated tables, the m_latchedEyeOrigin datamap field and the literal eyes attachment path. The station gesture census resolves 65 nonempty event occurrences and their 311 automatic child-layer references, with 59 empty-parameter events recorded separately. This research changes no runtime behavior and does not count as a gesture playback test. See [research notes](research.md) for anchors, scope and remaining work. The latest code tests, captures and executable fingerprints remain those of the attachment milestone below; the subsequent documentation update requires no rebuild.
+
 ## Animated gaze attachments (2026-10-05)
 
 273 normal workspace tests and 15 owned installed-game tests passed, with strict all-target Clippy, formatting and diff checks. The reader validates attachment tables, names, bone indices, supported flags, finite nonsingular transforms and view offsets. Owned Barney, Kleiner, human, G-Man and metrocop models decode attachment bases that match their loaded skeletons.
 
 The rebuilt Bevy package repeated all 26 authored-attention assertions. Thirteen additional checks verify active animated attachments, finite unit forward vectors, pose-cache coverage and self targeting exactly 100 units along attachment forward. Monitor/player/self/final images were inspected. The new presentation used 30 actor pose samples for 40 eye draws and 29 attached NPC origins in this controlled scene; this is instrumentation of the eye pass, not an FPS comparison. A rebuilt retained-host scene/pause/cancel capture completed and was inspected. It continues sharing scene interests without the Bevy iris adapter.
 
-Bevy package SHA-256 7F058DDC849FA4FBB4C7888D911F0AA57B1DD9C72CA49D049B5D7331D7762B37; retained 9845C39907430C898E0B772D57D6AEC37185A6AAA918DB05BB5041B5B6F151A3. Latest evidence is in ignored artifacts/bevy-attachments*. Published SDK attachment behavior informs this adapter; native PVS/think-time latching and derived actor eye overrides remain unverified. Dynamic monitor textures remain unsupported and explicitly reported as absent procedural _rt_camera content. Head poses, layered gestures, flexes and ordinary first-level campaign completion remain unfinished.
+Bevy package SHA-256 7F058DDC849FA4FBB4C7888D911F0AA57B1DD9C72CA49D049B5D7331D7762B37; retained 9845C39907430C898E0B772D57D6AEC37185A6AAA918DB05BB5041B5B6F151A3. Latest evidence is in ignored artifacts/bevy-attachments*. Published SDK attachment behavior and the subsequent reviewed retail attachment path support this adapter; complete native PVS/think-time latching and derived actor eye overrides remain unverified. Dynamic monitor textures remain unsupported and explicitly reported as absent procedural _rt_camera content. Head poses, layered gestures, flexes and ordinary first-level campaign completion remain unfinished.
 
 
 ## Authored LOOKAT attention (2026-10-05)
