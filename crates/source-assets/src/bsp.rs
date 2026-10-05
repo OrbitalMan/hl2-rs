@@ -90,6 +90,9 @@ impl Bsp {
     pub fn lump(&self, id: usize) -> &[u8] {
         &self.lumps[id]
     }
+    pub fn visibility_index(&self) -> Result<crate::visibility::VisibilityIndex> {
+        crate::visibility::VisibilityIndex::new(&self.lumps, self.lump_versions[10])
+    }
     pub fn bounds_in_pvs(&self, eye: Vec3, mins: Vec3, maxs: Vec3) -> Result<bool> {
         crate::visibility::bounds_in_pvs(&self.lumps, self.lump_versions[10], eye, mins, maxs)
     }

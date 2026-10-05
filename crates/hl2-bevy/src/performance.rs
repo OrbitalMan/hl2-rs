@@ -140,4 +140,68 @@ pub fn install(app: &mut App) {
             ),
         );
     }
+    // Subsets of Prepare are fenced inside their parent, so these intervals
+    // measure only their own stage rather than accumulating previous work.
+    for (name, previous, set, next) in [
+        (
+            "render_resource_setup",
+            None,
+            RenderSystems::PrepareResources,
+            Some(RenderSystems::PrepareResourcesBatchPhases),
+        ),
+        (
+            "render_batch",
+            Some(RenderSystems::PrepareResources),
+            RenderSystems::PrepareResourcesBatchPhases,
+            Some(RenderSystems::PrepareResourcesWritePhaseBuffers),
+        ),
+        (
+            "render_write",
+            Some(RenderSystems::PrepareResourcesBatchPhases),
+            RenderSystems::PrepareResourcesWritePhaseBuffers,
+            Some(RenderSystems::PrepareResourcesCollectPhaseBuffers),
+        ),
+        (
+            "render_collect",
+            Some(RenderSystems::PrepareResourcesWritePhaseBuffers),
+            RenderSystems::PrepareResourcesCollectPhaseBuffers,
+            Some(RenderSystems::PrepareResourcesFlush),
+        ),
+        (
+            "render_flush",
+            Some(RenderSystems::PrepareResourcesCollectPhaseBuffers),
+            RenderSystems::PrepareResourcesFlush,
+            Some(RenderSystems::PrepareBindGroups),
+        ),
+        (
+            "render_bindgroups",
+            Some(RenderSystems::PrepareResourcesFlush),
+            RenderSystems::PrepareBindGroups,
+            None,
+        ),
+    ] {
+        let mut begin = (move |mut timers: ResMut<RenderTimers>| {
+            timers.0.insert(name, Instant::now());
+        })
+        .in_set(RenderSystems::Prepare)
+        .before(set.clone());
+        if let Some(previous) = previous {
+            begin = begin.after(previous);
+        }
+        let mut end = (move |mut timers: ResMut<RenderTimers>, performance: Res<Performance>| {
+            if let Some(start) = timers.0.remove(name) {
+                drop(Scope {
+                    performance: Some(&performance),
+                    name,
+                    start,
+                });
+            }
+        })
+        .in_set(RenderSystems::Prepare)
+        .after(set);
+        if let Some(next) = next {
+            end = end.before(next);
+        }
+        render.add_systems(Render, (begin, end));
+    }
 }

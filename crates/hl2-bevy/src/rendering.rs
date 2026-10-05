@@ -612,6 +612,13 @@ pub fn spawn_map(
         {
             draw.insert(bevy::camera::visibility::RenderLayers::layer(4));
         }
+        if matches!(&owner, Owner::World | Owner::Entity(_))
+            && !owner
+                .entity()
+                .is_some_and(|id| world.background_entities.contains(&id))
+        {
+            draw.insert(crate::visibility::PvsDraw::default());
+        }
         if definition.camera {
             draw.insert(crate::monitors::MonitorMaterial {
                 animation: definition.camera_animation.clone(),

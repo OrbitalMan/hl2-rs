@@ -163,6 +163,6 @@ pub fn poll(
             &mut inverse_binds,
         ),
         &status,
-        options.cpu_skinning,
+        (options.cpu_skinning, options.no_pvs),
     );
 }

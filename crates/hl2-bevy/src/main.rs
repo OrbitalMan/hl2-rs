@@ -13,6 +13,7 @@ mod movement;
 mod performance;
 mod rendering;
 mod sky;
+mod visibility;
 use anyhow::{Context, Result, bail};
 use bevy::{
     app::AppExit,
@@ -45,6 +46,7 @@ struct Options {
     profile: bool,
     uncapped: bool,
     cpu_skinning: bool,
+    no_pvs: bool,
     width: u32,
     height: u32,
     borderless: bool,
@@ -68,6 +70,7 @@ impl Options {
             profile: false,
             uncapped: false,
             cpu_skinning: false,
+            no_pvs: false,
             width: 1280,
             height: 720,
             borderless: false,
@@ -94,6 +97,7 @@ impl Options {
                     ))
                 }
                 "--yaw" => options.yaw = Some(next(&mut args)?.parse::<f32>()?.to_radians()),
+                "--no-pvs" => options.no_pvs = true,
                 "--cpu-skinning" => options.cpu_skinning = true,
                 "--uncapped" => options.uncapped = true,
                 "--profile" => options.profile = true,
@@ -105,7 +109,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -331,6 +335,12 @@ fn main() -> Result<()> {
                 .after(rendering::present_entities)
                 .before(TransformSystems::Propagate),
         )
+        .add_systems(
+            PostUpdate,
+            visibility::present
+                .after(bevy::camera::visibility::VisibilitySystems::CalculateBounds)
+                .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
+        )
         .add_systems(Startup, setup)
         .add_systems(
             PostUpdate,
@@ -363,7 +373,7 @@ fn main() -> Result<()> {
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error,
         "monitor_capture_file_exists":monitor_capture_exists,"monitor_capture_write_error":monitor_capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
-        "limitations": ["Pause/console and landmark/inventory map transitions migrated; complete command coverage, save/global state and native effects remain incomplete", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "LDR sky uses owned faces/leaf visibility; sky polygon masks, PVS/areaportals, material proxies, dynamic lighting and HDR remain unfinished", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
+        "limitations": ["Pause/console and landmark/inventory map transitions migrated; complete command coverage, save/global state and native effects remain incomplete", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "LDR sky uses owned faces/leaf visibility; sky polygon masks, area portals/occluders, material proxies, dynamic lighting and HDR remain unfinished", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
     for key in [
         "map",
@@ -438,7 +448,7 @@ fn setup(
             &mut inverse_binds,
         ),
         &status,
-        options.cpu_skinning,
+        (options.cpu_skinning, options.no_pvs),
     );
     commands.insert_resource(console::Console::new(ui));
     commands.spawn((
@@ -501,7 +511,7 @@ pub(crate) fn install_map(
     commands: &mut Commands,
     (meshes, materials, images, sounds, effect_materials, inverse_binds): MapAssets,
     status: &Status,
-    cpu_skinning: bool,
+    (cpu_skinning, no_pvs): (bool, bool),
 ) -> hl2_ui::console::Console {
     {
         let mut stats = status.0.lock().expect("map stats");
@@ -513,6 +523,10 @@ pub(crate) fn install_map(
         stats.materials = 0;
         stats.skipped_background_surfaces = 0;
     }
+    commands.insert_resource(visibility::SourceVisibility::new(
+        loaded.bsp.visibility_index(),
+        no_pvs,
+    ));
     let camera_target = monitors::install(&loaded, commands, images);
     rendering::spawn_map(
         &loaded,
@@ -551,6 +565,7 @@ type EntityDrawQuery<'w, 's> = Query<
         &'static rendering::SourceEntity,
         &'static Transform,
         &'static Visibility,
+        Option<&'static visibility::PvsDraw>,
     ),
     With<Mesh3d>,
 >;
@@ -580,7 +595,10 @@ fn monitor(
     (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
-    adapter: Option<Res<RenderAdapterInfo>>,
+    (adapter, pvs): (
+        Option<Res<RenderAdapterInfo>>,
+        Res<visibility::SourceVisibility>,
+    ),
     (cameras, draws, map_entities, all_cameras, meshes, images): DiagnosticQueries,
     (mut exit, performance, render_diagnostics): (
         MessageWriter<AppExit>,
@@ -606,7 +624,7 @@ fn monitor(
         let mut mismatches = 0;
         let mut owned_meshes = 0;
         let mut doors = Vec::new();
-        for (owner, transform, visibility) in &draws {
+        for (owner, transform, visibility, pvs) in &draws {
             owned_meshes += 1;
             let state = &game.scene.states[owner.0];
             let (origin, rotation) = simulation
@@ -614,7 +632,7 @@ fn monitor(
                 .entity_pose(owner.0)
                 .unwrap_or((state.origin, state.rotation));
             let expected = rendering::entity_transform(origin, rotation);
-            let hidden = !state.visible || state.killed;
+            let hidden = !state.visible || state.killed || pvs.is_some_and(|pvs| pvs.culled);
             if transform.translation.distance(expected.translation) > 0.001
                 || transform.rotation.dot(expected.rotation).abs() < 0.99999
                 || (*visibility == Visibility::Hidden) != hidden
@@ -626,7 +644,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         if let Some(performance) = performance.as_deref() {
             report.presentation["cpu_stages"] = performance.report();

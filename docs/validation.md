@@ -1,4 +1,14 @@
-# Local validation — 2026-10-05
+# Local validation â€” 2026-10-05
+
+## BSP PVS and packaged culling (2026-10-05)
+
+All288 normal workspace tests and17 owned-install tests pass. Cached/raw queries agree on1,200 bounds across the first three station maps. Synthetic tests cover active player/monitor view union, current moved bounds, coplanar bounds, unchanged-result caching, script-hidden entities and missing-cluster fail-open behavior. Strict workspace all-target Clippy, formatting and diff checks pass; the final cache change repeats the affected visibility/animation tests.
+
+Packaged movement26, weapon/door17 and visibility/monitor/campaign/retained20 assertions pass. Player and off-map monitor view clusters both participate in culling; Breen and Kleiner feeds remain visible and were inspected. Breen's slate and unstaged Kleiner scene remain known limitations. Barney's inspected actor region is pixel-identical to the previous GPU reference, and eye projections agree. The spawn PVS-on/off images are pixel-identical;824 of886 tagged draws are rejected. Two controlled trigger transitions preserve landmarks and pistol17→16 inventory, recreate the PVS resource for station03 and retain six host cameras with no pose/visibility disagreement. This is not an ordinary campaign completion test. The retained projectile replay also completes after shared-parser changes.
+
+Matched-package profiled1080p spawn runs average66.69 FPS with --no-pvs and156.94 FPS with PVS after120 warm-up frames. Rendering preparation falls5.86→1.52ms; graph CPU wall interval falls7.39→3.32ms. Other positions and sustained144 FPS remain unverified; see [performance scope](performance.md). Geometry bounds, player/monitor PVS and frusta are implemented; area portals, occluders, native LODs and spatial batch splitting remain incomplete.
+
+Bevy package SHA256 `D18C13D43B018FA12B28FA96BEEAAD2BB8277CB7F4E09798A0448DD12D994438`; rebuilt retained package `2387434FB15580F4E05E19A7E330F365C624D65109123058E0C0CF6161D32C23`. Evidence stays in ignored artifacts/pvs-* and performance-pvs-*-final.json; private validation helpers/native research stay outside the checkout.
 
 ## GPU skinning and release performance (2026-10-05)
 
@@ -120,7 +130,7 @@ The walking preview package is SHA256 `3167DB5CAA551628CC0CF07CC9588F5425907BCD8
 
 The collision adapter, private convex implementation and NPC probes moved unchanged into `hl2-simulation`; both hosts import the same modules. Their 25 tests are preserved. The workspace suite passed 243 tests; a final Bevy rerun passed 11, including an additional input-capture regression (244 unique normal tests across the final source). Strict all-target workspace Clippy passes. The Bevy adapter uses an explicit 15 ms fixed timestep, samples look/input before the fixed loop and publishes the eye position afterward. Capture/resume discards transition-frame pointer motion and suppresses held jump until release.
 
-The packaged station02 movement fixture completed all 280 host ticks and passed 26 report assertions. It settled on the bench at feet Z 36.17742157; ordinary and airborne-crouched jumps retain the same eye height and velocity while crouching raises feet by 36 once. Clear air uncrouching restores the matching trajectory. Paused samples preserve the complete player state and tick count; held jump cannot jump again on landing until released. The final 1280×720 capture was visually inspected. This is a controlled shared-player/collision replay, not an original-engine differential replay or campaign proof. Two named dynamic monitor materials remain unsupported; there are no model-load, texture-budget or capture-write failures.
+The packaged station02 movement fixture completed all 280 host ticks and passed 26 report assertions. It settled on the bench at feet Z 36.17742157; ordinary and airborne-crouched jumps retain the same eye height and velocity while crouching raises feet by 36 once. Clear air uncrouching restores the matching trajectory. Paused samples preserve the complete player state and tick count; held jump cannot jump again on landing until released. The final 1280Ã—720 capture was visually inspected. This is a controlled shared-player/collision replay, not an original-engine differential replay or campaign proof. Two named dynamic monitor materials remain unsupported; there are no model-load, texture-budget or capture-write failures.
 
 Evidence stays local: `artifacts/bevy-movement.{json,png}`, `bevy-movement.assertions.json`, `bevy-movement-tests.log`, `bevy-movement-final-bevy-tests.log` and `bevy-movement-final-clippy.log`. Rendering still uses initial entity poses/bind poses. Rigid-body dynamics remain frozen to avoid moving colliders without their visible meshes. Weapons/HUD, interactive pause UI/console, NPC animation/AI, scene/entity I/O, audio and campaign progression have not migrated. See [migration instructions](bevy-migration.md).
 
@@ -134,8 +144,8 @@ Both final packaged runs used `launch-bevy.cmd`, completed GPU capture at 188 fr
 
 | Map and capture | Result |
 | --- | --- |
-| `d1_trainstation_01`, borderless 1920×1080, Source camera (-4690, -1186, 32.03125), yaw 165 | 314 shared base textures, 273,979,396 decoded bytes (about 261 MiB). Model clock front restored after correcting the different BSP/model winding. Seven named unsupported texture cases remain: three dynamic monitors and four Vortigaunt eye materials. |
-| `d1_trainstation_02`, 1280×720, Source camera (-4304, -224, 1) | 233 shared base textures, 201,117,696 decoded bytes (about 192 MiB). Stairs, fences, props and walls render; two named dynamic monitor textures remain unsupported. |
+| `d1_trainstation_01`, borderless 1920Ã—1080, Source camera (-4690, -1186, 32.03125), yaw 165 | 314 shared base textures, 273,979,396 decoded bytes (about 261 MiB). Model clock front restored after correcting the different BSP/model winding. Seven named unsupported texture cases remain: three dynamic monitors and four Vortigaunt eye materials. |
+| `d1_trainstation_02`, 1280Ã—720, Source camera (-4304, -224, 1) | 233 shared base textures, 201,117,696 decoded bytes (about 192 MiB). Stairs, fences, props and walls render; two named dynamic monitor textures remain unsupported. |
 
 Neither final report has texture-budget failures, model-load failures or capture-write failures. The 512 MiB cap is the adapter's decoded-base-texture budget, not a Bevy limit or a total memory measurement. An earlier preview failed that budget by decoding aliases separately and loading unused textures; it is retained as rejected evidence. A subsequent preview exposed wrongly culled model fronts and is also superseded. Bevy currently selects texture mips up to 2048 pixels versus the retained viewer's 512, so these are not equivalent performance comparisons.
 
@@ -192,7 +202,7 @@ Installed MP3 playback now decodes the trainstation cue to stereo44.1kHz, 3,997,
 
 Current package evidence is under ignored artifacts/iteration13-*; iteration12-* retains the preceding HUD/native-comparison controls. Private native comparisons, cache census and validators stay in ../../work/hl2-decompiled and ../../work/publishing. No installed game data, native code or research database is a build dependency.
 
-## Historical validation — 2026-10-03
+## Historical validation â€” 2026-10-03
 
 This validates a partial Rust reconstruction, not a completed Source translation or playable campaign. The current packaged executable was tested through launch.cmd. Its SHA256 is B8B94759463E387362E6935174DE7CE07608E8218AAAB1956F243E2373622F31, built at 2026-10-03T09:26:51.6771832Z. bin/build-info.json is authoritative after a later rebuild.
 
@@ -299,7 +309,7 @@ An actual packaged drop onto the station bench at x=-2206,y=-1669 previously set
 
 Three new movement tests cover crouched jump boost using independent maximum speed, full airborne crouch acceleration, signed backward overspeed and three released chain hops with gravity/landing-friction ordering. These tests use controlled worlds and reviewed retail methods. No complete original-game movement trace over campaign geometry was recorded.
 
-The owned original game confirmed the reported three-shell secondary sequence as 3→1→0, with reserve unchanged: a double shot followed by a one-shell primary fallback. Accepted screenshots and rejected setup trials are documented in the separate original-oracle/three-shell-check.md. All six stock configuration entries still matched afterward, and the original process was closed.
+The owned original game confirmed the reported three-shell secondary sequence as 3â†’1â†’0, with reserve unchanged: a double shot followed by a one-shell primary fallback. Accepted screenshots and rejected setup trials are documented in the separate original-oracle/three-shell-check.md. All six stock configuration entries still matched afterward, and the original process was closed.
 
 The private Database Method audit and exact-byte catalogue are documented in research.md. Full export accounting passes; native/Rust semantic parity is not inferred from it. No database, pseudocode, decompiler tool or game-derived asset was added to this repository.
 

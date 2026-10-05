@@ -27,3 +27,21 @@ Source still samples the same engine-independent animation clips. The Bevy adapt
 The first controlled GPU run reached roughly 68 FPS uncapped at 1920x1080, versus roughly 35 with CPU skinning. CPU animation was about 0.25 ms and asset preparation about 0.56 ms, versus 4.77 and 11.60 ms. A subsequent matched-package 900-frame run averages 35.05 FPS with CPU skinning and 66.85 FPS with GPU skinning after 120 warm-up frames. See validation for scope and limitations. This is a substantial improvement, not verification of 144 FPS or Source performance parity.
 
 Two controlled station01 close-ups compare Barney's monitor and player LOOKAT interests on both paths. Eye targets/projections agree exactly in reports, and the actor image region differs by less than 0.006 mean channel values on the 0-255 scale. Dynamic physics props elsewhere can differ between independent runs; whole-image identity is not claimed. This validates the migrated presentation against the previous Rust adapter, not the original engine's complete animation behavior.
+
+## BSP PVS follow-up
+
+Debug compilation was not the cause of this regression: the packaged executable is release-built, and development dependencies already have optimization overrides. Profiling instead showed substantial work preparing and binding geometry outside the current room. BSP PVS rejection now supplements Bevy's frustum culling. It uses a validated cached tree, padded current bounds, cached cluster rows and the union of active player/monitor cameras. It never suspends gameplay simulation or bases animation decisions on the previous frame's visibility.
+
+Matched-package 900-frame uncapped/profiled station02 spawn runs at1920x1080, with120 warm-up frames, give:
+
+| Measurement | PVS disabled | PVS enabled |
+| --- | ---: | ---: |
+| Average FPS | 66.69 | 156.94 |
+| Average frame, ms | 14.995 | 6.372 |
+| Render preparation CPU, ms | 5.857 | 1.518 |
+| Render graph CPU wall interval, ms | 7.392 | 3.318 |
+| Source visibility CPU, ms | 0.009 | 0.032 |
+
+PVS rejects824 of886 tagged draws at this position. An inspected spawn comparison is pixel-identical.798 bounds checks were reusable at the final sample; the initial implementation retraversed every bound and cost about0.96ms per frame. The loaded mesh/material counts stay fixed across900 frames; they are not visible draw counts. Finer render preparation timers identify phase-buffer writes and bind-group preparation as major costs reduced by rejection.
+
+Reproduce with `launch-bevy.cmd --width 1920 --height 1080 --frames 900 --uncapped --profile --report artifacts/pvs-on.json`; add `--no-pvs` for the reference run. Do not compile or run another host concurrently with a benchmark. The camera is stationary but autonomous scene time advances: faster runs cover fewer simulation seconds. These are room-specific measurements with profiling overhead, not a matched native campaign benchmark or proof of sustained144 FPS. Area portals/occluders, Source LODs and spatial partitioning of broad material batches still need work.
