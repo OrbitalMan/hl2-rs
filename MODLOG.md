@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-05 Private database coverage and failed-export recovery
+
+**Changed:** Continued private decompilation with a 126-path hashed PE inventory, discovery audits, three new loader-referenced module exports, eleven supplemental failed-body recoveries and a path/hash/address SQLite evidence ledger. Public changes are evidence documentation only.
+
+**Why:** The 22-module export denominator omitted runtime modules and did not establish function discovery. Preserve original errors and uncertain signatures while improving database retrieval and recording unresolved coverage.
+
+**Tested how:** Fresh baseline catalogue audits before/after; all 22 saved/installed/private hashes; read-only Ghidra instruction/storage/discovery inspection; eleven rollback signature checks; supplemental 301-artifact/body audit; exact VPhysics/Speex retrieval and a scoped gamedb CreateInterface control. See docs/validation.md for commands. Installed files were read-only.
+
+**Result:** Across 25 selected modules: 88,884 identified addresses, 88,873 original bodies plus 11 supplemental recoveries. Original failure rows remain. Baseline 22-module audit finds 1,459,199 executable bytes outside functions and 13,830 unresolved pointer-slot observations. Supplement audit has zero discrepancies; fresh gamedb extension indexes 827 bodies, misses 263 and has 36 range mismatches. Native research remains outside Rust source checkouts.
+
+**Still broken / not tested:** Complete runtime scope, discovery, recovered ABIs and native semantics remain unverified. No Rust behavior, game capture, campaign, performance or multiplayer test in this pass. Failed return-type recovery, initial debug setup, old extension-builder path rejection and rejected newline audit remain recorded privately.
+
+**Next:** Review bounded unlabelled RTTI/vtable/orphan-code candidates and remaining optional loader branches on disposable projects, then extend a new audited database version. NPC gestures remain queued.
+
 ## 2026-10-05 Decompilation priority for the new chat
 
 **Changed:** Updated AGENTS.md, STATUS.md and docs/DESIGN.md with the owner's new decompilation priority, plus a private inventory/failure checkpoint.

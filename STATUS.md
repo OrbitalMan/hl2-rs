@@ -1,8 +1,8 @@
 # STATUS
 
-Handoff: 2026-10-05, Atlantic/Canary. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; documentation-only commits follow it. Read AGENTS.md, this file and docs/DESIGN.md first. Historical MODLOG entries describe their own dates, not current limitations.
+Checkpoint: 2026-10-05, Atlantic/Canary. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; documentation-only commits follow it. Latest private research pass: coverage-pass-20261005-01. Read AGENTS.md, this file and docs/DESIGN.md first. Historical MODLOG entries describe their own dates, not current limitations.
 
-Latest owner instruction: continue toward complete decompilation in a **new chat**. This chat updates the handoff only. Begin with the decompilation coverage plan in docs/DESIGN.md; the NPC gesture implementation remains queued. No new decompiler run, export recovery, catalogue rebuild or runtime change was started after this request.
+Latest owner instruction: continue the documented decompilation work and remember the database method. This fresh chat completed a bounded private inventory/discovery/recovery/export pass and an audited supplemental database. NPC gestures remain queued. Rust runtime code is unchanged.
 
 ## Goal
 
@@ -16,7 +16,7 @@ Faithful Rust reconstruction of Half-Life 2 and relevant Source behavior using a
 - Active checkout: workspace `outputs/hl2-rs-bevy`, branch `bevy-migration`, remote https://github.com/kvalls/hl2-rs. Sibling `outputs/hl2-rs` remains main at b4b1731530a9ca146f9d45532f00ef7f9fc69e7d. Preserve macroquad-prototype at f9995dab2640d15cda8d7d7b10d08af7e691c8ea and unverified wip/scripted-scenes at d0a08c8d36e1b7d3496b6627b5a974337641ca9c.
 - Private evidence/checkpoints: workspace `work/hl2-decompiled`, `work/references`, `work/publishing`, reached as `../../work/...` from the active checkout. These are not public runtime dependencies.
 - Bevy release `bin/hl2-bevy.exe`: SHA256 `78348779124CD24019E41969A6EBC33D61EE2852C96CA4673C02DA9736FA9D9D`, built2026-10-05T16:08:57Z. Retained release `bin/hl2-rs.exe`: `9C198FBC252375BC6331D1BB5FA6BF1FF25E65836A9AFA5B0F46ED48229C610A`, built16:14:21Z. Generated metadata/shader hashes are in bin/build*-info.json; executables are ignored.
-- Source commits/pushes and game testing are authorized. Leave user-launched games alone. An old scheduled continuation belongs to the old chat; do not assume it follows a fresh chat. The latest request is to finish this handoff and await the new chat, not continue implementation here.
+- Source commits/pushes and game testing are authorized. Leave user-launched games alone. An old scheduled continuation belongs to the old chat; do not assume it follows this chat. Current work prioritizes private decompilation over runtime implementation.
 
 ## What works (tested)
 
@@ -44,9 +44,13 @@ Not applicable: this is a rewrite. Rust simulation owns player/gameplay state. T
 
 ## The current problem
 
-The immediate priority is coverage and trustworthy recovery of the original binaries. The finished export batch covers 22 selected runtime modules: 87,793 identified functions attempted, 87,783 successful pseudocode bodies, ten failures and 20,132 warning comments. That does not prove complete function discovery, accurate recovered types or native/Rust equivalence. A read-only scan on 2026-10-05 found 126 installed DLL/EXE files, including tools, middleware and other game variants; their classification/dependency reconciliation has not been completed.
+The immediate priority is trustworthy function discovery and remaining runtime scope. A fresh read-only inventory hashed all 126 installed DLL/EXE paths: 126 distinct hashes, 632 static/delay import edges, and all 22 baseline installed/private copies matching their saved hashes. Categories retain tools, middleware, optional services and 11 other-game variant paths; name-based exclusions and dynamic resolution remain provisional. Database loader anchors established three omissions: unicode.dll, video_services.dll and vaudio_speex.dll. Their separate private corpus adds 1,091 identified functions and 1,090 original exports, with one further overlapping-input failure. Across 25 selected modules there are 88,884 identified addresses and 88,873 original successful bodies; the original 11 failure rows remain preserved.
 
-The separate exact-byte SQLite catalogue preserves all 222 source/index/metadata artifacts, all 87,783 successful bodies and ten explicit failed-export rows. The supplied gamedb parser represents 78,070 successful bodies, omits 9,713 and has 2,810 audited read-range mismatches. It also has cross-module navigation limitations. No implementation was marked complete in that navigator; the existing manually implemented Rust behavior is not a function-by-function parity ledger. Use the exact module/address catalogue and raw exports for research.
+All 11 known failures now also have separately saved supplemental bodies after removing conflicting analysis-inferred input parameters in rolled-back read-only Ghidra sessions. Original signatures were verified afterward. A return-type-only pilot failed and is retained. Successful export under relaxed metadata does not recover a trustworthy ABI or prove semantics; all 11 are **not tested** against native behavior. The 25-module scope and function denominator are not complete-game claims.
+
+The 22-module discovery audit records 19,725,824 initialized executable bytes, 18,266,625 in identified function bodies and 1,459,199 outside them. Of those gaps, 545,133 are uniform INT3 bytes, 340 uniform zero bytes and 913,726 unclassified. There are 13,830 read-only pointer-slot observations targeting executable addresses outside functions and 133,588 computed-call instructions. The recorded direct-call target check found no unowned target, but that does not resolve indirect calls or prove boundaries. No candidates were automatically promoted. Recognized VPhysics vtable labels had zero unowned slots; remaining unlabelled tables/shared tails require evidence-based inspection.
+
+The original exact-byte SQLite catalogue remains unchanged and passes a fresh full audit: 222 artifacts, 87,783 bodies and ten original failure rows. The new path/hash/address supplement preserves 301 artifacts, 1,090 extension bodies, 11 recovery bodies and failed/rejected attempts; its audit has zero discrepancies. The original gamedb navigator's recorded 78,070 bodies/9,713 omissions/2,810 range mismatches were not re-audited here. A separate fresh extension navigator indexes 827 of 1,090 bodies, omits 263 and has 36 range mismatches after declared CRLF-to-LF comparison. Scoped CreateInterface retrieval is a positive control. Naming/type review, Rust implementation and native verification tables stay separate and empty in the supplement; no implementation was marked complete.
 
 Queued runtime work: the host migration is substantially connected, but choreography/model reconstruction is incomplete. Real intro/security gestures cannot be reproduced by the current base-clip-only pose path. Existing absolute delta conversion loses information needed for arbitrary post composition. Full-body blending a parent gesture is incorrect: all65 named sampled parents have zero bone masks and refer to311 child layers. Preserve raw transforms, child dependencies, weights and authored retiming before implementing gesture execution, then address actor readiness/AI and first-level staging.
 
@@ -54,17 +58,18 @@ Private database/native exports and published SDK research corroborate selected 
 
 ## Evidence
 
-- Private coverage.json reports 22 finished module passes and the ten failures; inventory.json records original hashes. gamedb-all-modules/audit.json and native-catalog/README.md describe the parser discrepancies and exact-byte corpus audits. This handoff inspected those existing reports; it did not rerun the corpus audit. Private decompilation-handoff-2026-10-05.json records the read-only file inventory and failure list for the new chat.
+- Private coverage-pass-20261005-01/README.md, summary.json, installed-inventory.json, scope-review.json, rejected-approaches.json and ledger-audit.json record current research and commands. native-evidence-v2-6d6fa488a250ac9a.sqlite3 preserves the new evidence. Baseline catalogue audits before/after pass with zero discrepancies and unchanged database SHA256. Eleven original-signature checks and exact VPhysics/Speex body retrieval comparisons pass. extension-corpus/gamedb-audit.json records the new navigator limits; original gamedb-all-modules/audit.json remains historical evidence.
 - Runtime milestones: df6af1b GPU skinning; b888144 cached PVS;322afaa activity lookup; c2b5220 material sharing;28c0bb3 reticles/optional spatial batching.
 - Local logs: artifacts/crosshair-partition-tests.log, crosshair-partition-owned.log, crosshair-partition-clippy.log; partition-movement-final.assertions.json26 passed; partition-weapons-final.assertions.json17 passed; partition-gameplay-checks.json18 passed; crosshair-partition-image-checks.json9 accepted plus rejected hall. Prior GPU/PVS/attention captures remain in artifacts; docs/validation.md records their scope.
 - Native1080 oracle: private work/hl2-decompiled/original-oracle/crosshair-1080-20261005T153947Z, with installed module hashes, measurements and cleanup. Six installed settings stayed unchanged; test process closed.
-- Last runtime source audit:212 files,0 failures,2 known upstream-path warnings. Reaudit this documentation snapshot before publication.
+- Current public snapshot audit: 214 files, 0 failures, 2 unchanged known path warnings. Rust runtime code and executable hashes are unchanged; this pass validates research and documentation only.
 - Private gesture evidence: work/hl2-decompiled/animation-next-2026-10-05.md, owned census and pinned SDK notes.65 named plus59 empty active gesture occurrences; native handling of empty events is unproven. That research note has older build headers; current revisions/builds are above.
 - Uncapped/profiled1080 station02: CPU skinning35.05→GPU66.85FPS; PVS disabled66.69→enabled156.94; subsequent material package174.72. Separate local comparisons with run variation/profiling overhead, not one isolated cumulative benchmark or campaign guarantee. Spatial gains are small/experimental; see docs/performance.md.
 
 ## What we've already tried
 
-- Whole-module Ghidra export and database indexing: the selected 22-module batch finished with ten explicit failures. An exact-byte catalogue addresses gamedb omissions/range errors for retrieval. Discovery completeness, failed-body recovery and full semantic translation remain unverified; do not report another ordinary index pass as completion.
+- Whole-module exports now cover 25 selected modules; eleven original errors remain queryable alongside successful supplemental recovery bodies. Exact export accounting does not establish discovery completeness, ABI recovery or translation parity.
+- Rejected research approaches: uninitialized debug options failed before recovery evaluation; initializing options fixed the runner. Retyping the VPhysics return alone still failed; unlocking inferred inputs succeeded. The old catalogue builder rejected nested extension binary paths, so a separate path/hash/address ledger was used. An initial newline-sensitive navigator audit falsely flagged 827 mismatches; its rejected report remains saved, and normalized comparison finds 36. Do not reuse rejected results.
 - Debug-overhead explanation: packaged builds were already release; development dependency overrides existed. Profiling identified skinning/uploads and out-of-view preparation instead.
 - GPU skinning/current bounds, cached PVS and material reuse: measured local gains with inspected actor/eye/monitor regressions. Do not disable simulation or animation to fake FPS.
 - Equal reticle sizes: rejected in favor of original measurements; fix native rasterization instead. A retained yellow color filter was too strict because additive background raised green239–250; actual dot positions match.
@@ -76,14 +81,14 @@ Private database/native exports and published SDK research corroborate selected 
 
 ## Ideas not tried yet
 
-1. Follow docs/DESIGN.md's decompilation plan in the new chat: reconcile installed/dependency scope, investigate the ten failures, audit function discovery and preserve versioned exact-byte evidence. Keep native analysis private.
+1. Inspect unlabelled RTTI/vtable pointer groups and orphan instruction ranges on disposable projects; promote only bounded evidence-backed candidates and export them into a new path/hash/address database version. Reconcile remaining optional video/audio/renderer loaders and review recovered x87 inputs/callees. Keep native research private.
 2. Use recovered animation/choreography evidence for bounded raw delta/post/mask/layer readers, shared composition and authored gesture execution, then compare a real first-level scene against original captures/audio/timings. Reuse shared crates and separate reader, scheduler, actor readiness and rendering defects.
 3. Resume renderer area/occluder/LOD work with current-view/monitor correctness checks and matched profiles after the requested research priority. Keep spatial splitting opt-in until broader evidence supports a default change.
 
 ## Files that matter
 
 - AGENTS.md: authorization/boundaries/order. MODLOG.md: historical tested changes. docs/DESIGN.md: architecture/next bounded plan.
-- Private work/hl2-decompiled/README.md, inventory.json, coverage.json and scripts/decompile-installed.ps1, DecompileAllHL2.java, coverage.py: current export workflow. Its launcher overwrites private copies before checking finished modules; do not rerun it blindly against changed installed binaries. native-catalog/README.md and scripts/native_catalog.py: exact-byte retrieval/audit. gamedb-all-modules/README.md and audit.json: measured navigator limits. decompilation-handoff-2026-10-05.json: current read-only preflight and failure list.
+- Private work/hl2-decompiled/coverage-pass-20261005-01/README.md: newest commands, supplement and checkpoint. Original inventory.json/coverage.json, native-catalog and gamedb-all-modules remain preserved. scripts/decompile-installed.ps1 overwrites private copies before skipping finished modules; do not run blindly. scripts/coverage_ledger.py preserves path/hash/address identities and original bytes. Original decompilation-handoff-2026-10-05.json is historical preflight.
 - crates/source-assets/src/animation.rs and crates/modkit-core/src/animation.rs: decoding/pose math; raw delta/post/layer work starts here.
 - crates/hl2-simulation/src/actors.rs, entities.rs, attention.rs, npc.rs: preparation, scene scheduling/interests and incomplete locomotion/AI.
 - crates/hl2-simulation/src/physics.rs, player_convex.rs and crates/modkit-core/src/movement.rs: shared collision/player behavior.

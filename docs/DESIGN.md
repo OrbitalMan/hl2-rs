@@ -8,9 +8,17 @@ Owned VPK/loose/map content -> source-assets bounded decoders -> modkit-core con
 
 AGENTS.md records fixed-step order and renderer invariants. Bevy uses custom materials/lightmaps, separate sky/world/viewmodel/HUD cameras, GPU skinning/current bounds and player/monitor PVS/frustum rejection. Identical material/lightmap pairs share handles. Spatial splitting remains off by default. Replacing Rapier is a separate behavior migration.
 
-## Next bounded plan: decompilation coverage in the fresh chat
+## Active bounded plan: private decompilation coverage
 
-The owner requested continued progress toward complete decompilation, then explicitly moved that work to a new chat. This handoff records the plan only. No new Ghidra run, recovery attempt, export or database rebuild was started here.
+The fresh chat is now authorized to continue the decompilation work. This pass changes private research and public evidence documentation; runtime gesture work remains queued. Preserve the original 22-module project, exports and exact-byte catalogue.
+
+Bound this pass to: (a) a new path/hash-keyed inventory with PE imports, exports, duplicate groups and explicit scope decisions; (b) read-only inspection of all ten failed exports, with separately recorded baseline and evidence-based recovery attempts on disposable program state; (c) discovery accounting for the existing corpus, including executable bytes outside function bodies, entry/export targets and unresolved call/data-pointer candidates. Keep generated scripts, logs and bodies under private work/hl2-decompiled. Never silently mutate the baseline database or count plausible pointer targets as confirmed functions.
+
+Validation: reconcile all installed paths and baseline binary hashes; audit saved report identities/counts and original corpus hashes; record raw instructions, calling conventions, input storage and recovery outcomes for each failure. Audit gaps as uncertain code/data/padding rather than claiming a complete denominator. Check public documentation, source whitelist and publication audit. Runtime code is unchanged, so gameplay rebuilds are not required for this pass.
+
+Completed coverage-pass-20261005-01:126 installed paths/hashes and 632 import edges; all 22 baseline hashes match. Three loader-referenced modules add 1,091 identified addresses/1,090 original bodies. Eleven original failures have separate relaxed-input recovery bodies with verified transaction rollback, giving 88,884 identified addresses with some pseudocode across 25 selected modules. The baseline catalogue is unchanged; a path/hash/address supplement audits 301 artifacts and preserves all rejected attempts. Its gamedb navigator misses 263 bodies and has 36 range mismatches. Full discovery/ABI/semantics remain unverified.
+
+Next bounded pass: review a small set of unlabelled RTTI/vtable pointer groups and executable orphan ranges using a disposable project. Require slot/reference and instruction-flow evidence before creating a candidate function, compare inferred boundaries with raw flow, and keep rejected/shared-tail cases. Extend a new database version rather than rewriting this pass. Reconcile remaining optional renderer/video/audio loader branches. The current 22-module audit's1,459,199 gap bytes and 13,830 pointer-slot observations are uncertain evidence, not a count of missing functions. Review the recovered x87 callees/types before treating those bodies as behavior specifications.
 
 1. Reconcile a hashed installed-binary inventory with the existing 22-module corpus. A read-only scan found 126 DLL/EXE files across the installation, including tools, middleware and other game variants. Classify baseline HL2 runtime, optional renderer/audio/input modules, tools, third-party dependencies, duplicate bytes and other game variants; record evidence and exclusions. File count alone does not identify the required runtime set. Preserve current private binary copies, exports and catalogues; do not overwrite them or key expanded inventories by basename alone.
 2. Investigate the ten recorded overlapping-input-varnode export failures using raw instructions, function boundaries, calling conventions and Ghidra diagnostics. Save each genuinely different recovery attempt separately, with binary hash, address, settings, result and original error. Do not erase failures, invent bodies or equate a successful retry with verified semantics.
@@ -29,6 +37,6 @@ After each bounded pass, record exact coverage, remaining failures/uncertainties
 
 Validate each step. After two failed attempts at one approach, document it and choose a different evidence-based approach. Full AI, staging, save state, arsenal and shaders remain separate tasks.
 
-## This handoff's validation
+## Publication validation
 
-Documentation only: preserve history/invariants and the source-only whitelist, update the decompilation priority and private checkpoint, check links and audit the public snapshot, then commit/push to bevy-migration. Do not rebuild/replay unchanged runtime code. The owner will continue in a fresh chat.
+Public changes for this pass are documentation only: preserve history/invariants and the source-only whitelist, update evidence and the private checkpoint, check links and audit the public snapshot, then commit/push to bevy-migration. Do not rebuild/replay unchanged runtime code.

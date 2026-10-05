@@ -1,5 +1,23 @@
 # Local validation â€” 2026-10-05
 
+## Private decompilation database pass (2026-10-05)
+
+This pass validates private research integrity, not gameplay. It hashes 126 installed DLL/EXE paths and records 632 static/delay import edges; all 22 baseline private and installed hashes match. Read-only Ghidra discovery counts equal the original 87,793 identified functions. The three separate loader-referenced module exports contain 1,091 identified functions/1,090 successes/one failure. Eleven baseline/extension failures have supplemental bodies after unlocking inferred input metadata, with eleven original-signature rollback proofs. Recovered ABIs and native semantics are **not tested**.
+
+From private `work/hl2-decompiled`, the executed catalogue commands were:
+
+```powershell
+C:\Python310\python.exe scripts/native_catalog.py audit --db native-catalog/hl2-native-v1-f37c8da5d5e019b1.sqlite3
+C:\Python310\python.exe scripts/audit_extension_gamedb.py
+C:\Python310\python.exe scripts/coverage_ledger.py build
+C:\Python310\python.exe scripts/coverage_ledger.py audit --db coverage-pass-20261005-01/native-evidence-v2-6d6fa488a250ac9a.sqlite3
+C:\Python310\python.exe scripts/coverage_ledger.py query --db coverage-pass-20261005-01/native-evidence-v2-6d6fa488a250ac9a.sqlite3 --module bin/vphysics.dll --address 0x100977ad
+```
+
+Recorded results: original catalogue passes before/after with unchanged SHA256 and zero discrepancies. Supplement audit passes 301 exact artifacts, 1,124 evidence rows, 1,090 extension bodies and 11 recovery bodies; naming/types, Rust implementation and native verification tables have zero rows. Exact recovered VPhysics/Speex retrieval files match their saved bodies; scoped gamedb CreateInterface read matches its whole normalized export. The fresh navigator indexes 827 bodies, misses 263 and has 36 range mismatches. Its original 22-module omissions/range report was not re-audited. Build/audit scripts create exclusive versioned outputs; use the existing reports for this completed pass rather than overwriting them.
+
+Discovery is incomplete: 1,459,199 initialized executable bytes lie outside identified baseline function bodies; 13,830 unresolved pointer-slot observations and 133,588 computed calls remain. Uniform bytes and shared tails cannot be counted as missing functions. No candidates were promoted. Rejected debug setup, return-type-only recovery, basename-path catalogue build and raw-newline range audit remain in private logs/reports. Runtime code, packaged executables and build metadata are unchanged; gameplay/build/Clippy/performance were not rerun for public documentation edits.
+
 ## Native crosshairs, launchers and optional spatial batches (2026-10-05)
 
 All294 normal workspace tests and19 owned-install checks pass, with strict workspace all-target Clippy and formatting. New tests cover monochrome bitmap row padding/bounds, native pistol/SMG offsets at720p/1080p and an odd viewport, exact partition triangle payloads/winding/spanning bounds, malformed indices/attributes and chunk-budget fallback.
