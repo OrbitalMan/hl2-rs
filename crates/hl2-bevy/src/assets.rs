@@ -26,6 +26,7 @@ pub struct LoadedMap {
     pub hud: hl2_ui::hud::WeaponHud,
     pub audio: crate::audio::PreparedAudio,
     pub sky: Option<source_assets::sky::Skybox>,
+    pub effects: crate::effects::PreparedEffects,
     pub eyes: BTreeMap<(String, String), source_assets::eyes::Eyeball>,
     pub bsp: Bsp,
     pub revision: u32,
@@ -98,7 +99,9 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
     let model_report = models::append_models(&mut world, &vfs);
     let gameplay = crate::gameplay::Gameplay::load(world, &vfs, bsp.revision)?;
     let world = gameplay.world.clone();
+    let effects = crate::effects::PreparedEffects::load(&vfs);
     let mut names = rendered_material_names(&world);
+    names.extend(effects.grenade.iter().map(|s| s.material.clone()));
     for weapon in gameplay.weapons.values() {
         if let Some(surfaces) = world
             .model_assets
@@ -150,6 +153,7 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
         }
     };
     Ok(LoadedMap {
+        effects,
         eyes,
         sky,
         audio,

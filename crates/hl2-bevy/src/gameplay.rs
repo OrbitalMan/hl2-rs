@@ -71,6 +71,7 @@ pub struct Gameplay {
     pub selection: Selection,
     pub npcs: Controller,
     pub projectiles: Projectiles,
+    pub impacts: hl2_simulation::impacts::Impacts,
     pub primary: bool,
     pub secondary: bool,
     pub actions: Vec<Action>,
@@ -94,6 +95,7 @@ impl Gameplay {
             selection: Selection::new(),
             npcs: Controller::new(None, Default::default()),
             projectiles: Projectiles::default(),
+            impacts: Default::default(),
             primary: false,
             secondary: false,
             actions: vec![],
@@ -115,7 +117,9 @@ impl Gameplay {
         let npcs = actors::prepare_npcs(&mut world, vfs, &map, revision);
         let weapons = hl2_simulation::gameplay::definitions(vfs)?;
         actors::prepare_weapons(&mut world, vfs, &weapons)?;
+        let impacts = hl2_simulation::impacts::Impacts::new(vfs, &world);
         Ok(Self {
+            impacts,
             world: Arc::new(world),
             scene,
             inventory: Inventory::default(),
@@ -336,8 +340,10 @@ impl Gameplay {
         {
             self.scene.sounds.push(event.options.into());
         }
-        // Keep missing impact presentation and the inter-schedule sound queue bounded.
-        self.inventory.impacts.clear();
+        for (hit, melee) in self.inventory.impacts.drain(..) {
+            self.impacts
+                .add(hit, melee, &self.world, physics, &mut self.scene);
+        }
         for sound in self.scene.sounds.drain(..) {
             self.sound_cues.push(sound.name.clone());
             if self.sound_requests.len() < 1024 {
@@ -361,7 +367,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"pending":self.selection.pending,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"npc_goals":self.npcs.snapshots(),
-            "projectiles":{"active":self.projectiles.active,"diagnostics":self.projectiles.diagnostics},"transition":self.scene.transition,
+            "projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

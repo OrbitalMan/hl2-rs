@@ -440,7 +440,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     let weapons = crate::gameplay::definitions(&vfs)?;
     let mut selection = crate::selection::Selection::new();
     let hud = crate::hud::WeaponHud::load(&vfs)?;
-    let mut impacts = crate::impacts::Impacts::new(&vfs);
+    let mut impacts = crate::impacts::Impacts::new(&vfs, &world);
     let mut attack_suppression = AttackSuppression::default();
     let mut inventory = crate::gameplay::Inventory::default();
     prepare_weapons(&mut world, &vfs, &weapons)?;
@@ -1151,7 +1151,6 @@ pub async fn run(mut o: Options) -> Result<()> {
                     if direct_map {
                         inventory = crate::gameplay::Inventory::default();
                     }
-                    impacts = crate::impacts::Impacts::new(&new_vfs);
                     selection.pending = None;
                     model_report = source_assets::models::append_models(&mut new_world, &new_vfs);
                     prepare_weapons(&mut new_world, &new_vfs, &weapons)?;
@@ -1186,6 +1185,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                     scene.load_choreography(&world, &vfs)?;
                     prepare_choreography_animations(&mut world, &vfs, &scene);
                     npcs = prepare_npcs(&mut world, &vfs, &next.map, bsp.revision);
+                    impacts = crate::impacts::Impacts::new(&vfs, &world);
                     navigation = crate::navigation_report(&vfs, &next.map, bsp.revision);
                     materials = crate::rendering::Materials::new(&world)?;
                     (sky_background, sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);

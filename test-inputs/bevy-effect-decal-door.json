@@ -1,0 +1,65 @@
+[
+  {
+    "tick": 1,
+    "fly": true,
+    "eye": [
+      -3260,
+      -2024,
+      128
+    ],
+    "yaw": 0,
+    "actions": [
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Close"
+      },
+      {
+        "action": "loadout"
+      },
+      {
+        "action": "slot",
+        "slot": 1
+      },
+      {
+        "action": "confirm"
+      }
+    ]
+  },
+  {
+    "tick": 79,
+    "label": "pistol-ready"
+  },
+  {
+    "tick": 80,
+    "primary": true,
+    "label": "pistol-impact"
+  },
+  {
+    "tick": 81,
+    "paused": true,
+    "label": "decal-frozen"
+  },
+  {
+    "tick": 90,
+    "paused": false,
+    "actions": [
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Unlock"
+      },
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "OpenAwayFrom",
+        "parameter": "!player"
+      }
+    ]
+  },
+  {
+    "tick": 170,
+    "label": "decal-door-open",
+    "paused": true
+  }
+]

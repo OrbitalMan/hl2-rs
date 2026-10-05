@@ -55,6 +55,12 @@ impl PreparedAudio {
                 .into_iter()
                 .map(|r| r.name),
         );
+        cues.extend(
+            game.impacts
+                .required_sound_requests()
+                .into_iter()
+                .map(|r| r.name),
+        );
         for weapon in game.weapons.values() {
             cues.extend(weapon.sounds.values().cloned());
         }

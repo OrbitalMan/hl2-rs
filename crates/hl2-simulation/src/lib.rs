@@ -13,3 +13,6 @@ pub mod npc;
 pub mod projectiles;
 pub mod selection;
 pub mod sounds;
+
+pub mod impacts;
+pub mod projectile_visuals;

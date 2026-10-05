@@ -1,5 +1,13 @@
 # Local validation — 2026-10-05
 
+## Bevy projectile and impact presentation (2026-10-05)
+
+All 260 normal workspace release tests and thirteen owned-install ignored tests pass, with strict all-target workspace Clippy, formatting and diff checks passing. The ignored checks require HL2_ROOT for the HUD fixture; the initial unset-variable run was corrected and the complete suite rerun. Added coverage includes bounded receiver projection, 256-mark retention, preload-only impact dispatch and a real trainstation door collision hit against its posed render mesh. No original-engine particle/studio-decal equivalence is claimed.
+
+Five packaged effect fixtures pass 40 assertions: real observed grenade/decal draws, pose agreement, paused simulation, secondary-ammo consumption, delayed ball launch, contact explosion, bullet-mark raster changes and marked-door opening. Captures were inspected. Their functional package was `8FAB2598F1C4E9C0CAF1A8F1F512169F5FA2BDE9FED8B094905765F0203BB2B1`; the final report-wording-only rebuild is `E01AF842D27665F861A8892A981A3B3C78F5238D9F1E865B544182BEC2DA0DE0`, built `2026-10-05T03:45:24.7691506Z`, and passes the combined 17-assertion door/weapon fixture. The effects shader hash is `1A2755078D438BC13A90C558D873F75102343FCA3283B6C4BCEEFD15C665673C`. The retained host was rebuilt to `A858A78F2D4D11E6DFD82CA10976873489EC2C00F2AF293E4CEA841135565E42` and its bounded smoke capture inspected. Local evidence is under artifacts/bevy-effect-final-*, bevy-effects-final-* and bevy-effects-retained-*.
+
+Five unused sand/shot base textures are absent in the tested owned installation and remain named preload errors. Sprite/model loads and emitted playback requests succeed in the fixtures. Marks follow current entity/rigid transforms, but later skeletal deformation is unfinished. Native particles, dynamic lights, sparks/rings and exact gamma/shader behavior remain incomplete. The door projection repair fixes a retained-host gap as well: raw bind vertices and an approximately one-unit collision/render separation prevented marks on this leaf.
+
 ## Deferred door opener inputs (2026-10-05)
 
 The shared OpenAwayFrom input now resolves a named entity, player, caller or activator at delivery time and chooses the prop-door swing using its current origin. Missing names retain the default forward swing. Locks and explicit opendir override the target; repeated Open/OpenAwayFrom inputs do not retarget an already opening/open prop door. The published props.cpp handler corroborates this contract; native linkage/blocker handling remains incomplete.

@@ -30,34 +30,9 @@ varying highp vec2 light_uv;
 void main(){vec4 base=texture2D(Texture,uv)*texture2D(Texture2,uv+Scroll);base.a=mix(1.0,base.a,TextureAlpha);base*=color*Tint;if(base.a<Cutoff)discard;gl_FragColor=vec4(base.rgb*texture2D(Lightmap,light_uv).rgb*Modulate,base.a);}
 "#;
 pub fn kind(vfs: &Vfs, name: &str) -> usize {
-    if vfs
-        .material_value(name, "$additive")
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("1")
-    {
-        3
-    } else if vfs
-        .material_value(name, "$translucent")
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("1")
-    {
-        2
-    } else if vfs
-        .material_value(name, "$alphatest")
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("1")
-    {
-        1
-    } else {
-        0
-    }
+    hl2_simulation::projectile_visuals::material_kind(vfs, name)
 }
+
 pub struct Materials {
     variants: Vec<Material>,
     white: usize,

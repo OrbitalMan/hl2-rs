@@ -427,38 +427,15 @@ pub fn spawn_map(
     for ((owner, name, lm, _), mut batch) in batches {
         let fallback = MaterialData::default();
         let definition = loaded.materials.get(&name).unwrap_or(&fallback);
-        let alpha = alpha_mode(definition);
-        let material = materials.add(SourceMaterial {
-            tint: Vec4::new(
-                definition.tint[0],
-                definition.tint[1],
-                definition.tint[2],
-                definition.opacity,
-            ),
-            parameters: Vec4::new(
-                definition
-                    .alpha_cutoff
-                    .unwrap_or(if matches!(alpha, AlphaMode::Opaque) {
-                        0.
-                    } else {
-                        0.001
-                    }),
-                f32::from(matches!(alpha, AlphaMode::Opaque)),
-                f32::from(matches!(alpha, AlphaMode::Add)),
-                f32::from(irises.contains_key(&name)),
-            ),
-            iris: irises.get(&name).unwrap_or(&white).clone(),
-            base: bases.get(&name).unwrap_or(&missing).clone(),
-            lightmap: if definition.unlit {
-                white.clone()
-            } else {
-                lm.and_then(|index| lightmaps.get(index))
-                    .unwrap_or(&white)
-                    .clone()
-            },
-            alpha,
-            two_sided: definition.two_sided,
-        });
+        let material = materials.add(make_material(
+            definition,
+            bases.get(&name).unwrap_or(&missing).clone(),
+            lm.and_then(|index| lightmaps.get(index))
+                .unwrap_or(&white)
+                .clone(),
+            irises.get(&name).cloned(),
+            &white,
+        ));
         stats.meshes += 1;
         stats.triangles += batch.indices.len() / 3;
         let animation = if batch.skin.iter().any(|(_, w)| w.is_some()) {
@@ -542,6 +519,50 @@ pub fn spawn_map(
         }
     }
 }
+pub(crate) fn mesh_from_surface(surface: &Surface, definition: &MaterialData) -> Mesh {
+    let mut batch = Batch::default();
+    batch.append(surface, Mat4::IDENTITY, Some(definition));
+    batch.mesh()
+}
+pub(crate) fn make_material(
+    definition: &MaterialData,
+    base: Handle<Image>,
+    lightmap: Handle<Image>,
+    iris: Option<Handle<Image>>,
+    white: &Handle<Image>,
+) -> SourceMaterial {
+    let alpha = alpha_mode(definition);
+    SourceMaterial {
+        tint: Vec4::new(
+            definition.tint[0],
+            definition.tint[1],
+            definition.tint[2],
+            definition.opacity,
+        ),
+        parameters: Vec4::new(
+            definition
+                .alpha_cutoff
+                .unwrap_or(if matches!(alpha, AlphaMode::Opaque) {
+                    0.
+                } else {
+                    0.001
+                }),
+            f32::from(matches!(alpha, AlphaMode::Opaque)),
+            f32::from(matches!(alpha, AlphaMode::Add)),
+            f32::from(iris.is_some()),
+        ),
+        iris: iris.unwrap_or_else(|| white.clone()),
+        base,
+        lightmap: if definition.unlit {
+            white.clone()
+        } else {
+            lightmap
+        },
+        alpha,
+        two_sided: definition.two_sided,
+    }
+}
+
 fn alpha_mode(material: &MaterialData) -> AlphaMode {
     if material.additive {
         AlphaMode::Add
