@@ -25,18 +25,21 @@ use std::collections::BTreeMap;
 #[bind_group_data(MaterialKey)]
 pub struct SourceMaterial {
     #[uniform(0)]
-    tint: Vec4,
+    pub(crate) tint: Vec4,
     // x = alpha cutoff, y = ignore base alpha, z = additive output.
     #[uniform(3)]
-    parameters: Vec4,
+    pub(crate) parameters: Vec4,
     #[texture(1)]
     #[sampler(2)]
-    base: Handle<Image>,
+    pub(crate) base: Handle<Image>,
     #[texture(4)]
     #[sampler(5)]
-    lightmap: Handle<Image>,
-    alpha: AlphaMode,
-    two_sided: bool,
+    pub(crate) lightmap: Handle<Image>,
+    #[texture(6)]
+    #[sampler(7)]
+    pub(crate) iris: Handle<Image>,
+    pub(crate) alpha: AlphaMode,
+    pub(crate) two_sided: bool,
 }
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct MaterialKey {
@@ -71,7 +74,7 @@ impl Material for SourceMaterial {
         Ok(())
     }
 }
-fn image(width: u16, height: u16, rgba: Vec<u8>, repeat: bool) -> Image {
+pub(crate) fn image(width: u16, height: u16, rgba: Vec<u8>, repeat: bool) -> Image {
     let mut image = Image::new(
         Extent3d {
             width: width.into(),
@@ -153,6 +156,12 @@ impl Batch {
 }
 #[derive(Component)]
 pub struct SourceEntity(pub usize);
+#[derive(Component)]
+pub struct EyeMesh {
+    pub key: String,
+    pub eye: source_assets::eyes::Eyeball,
+    pub scale: f32,
+}
 #[derive(Component)]
 pub struct AnimatedMesh {
     sampled: Option<(String, u32)>,
@@ -268,6 +277,7 @@ pub fn present_weapons(
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Owner {
     World,
+    SkyWorld,
     Entity(usize),
     Weapon(String),
 }
@@ -316,19 +326,43 @@ pub fn spawn_map(
             (name.clone(), handle)
         })
         .collect();
+    let irises: BTreeMap<_, _> = loaded
+        .materials
+        .iter()
+        .filter_map(|(name, m)| {
+            m.iris
+                .as_ref()
+                .zip(m.iris_path.as_ref())
+                .map(|(image, path)| {
+                    let handle = texture_handles
+                        .entry(path.clone())
+                        .or_insert_with(|| {
+                            images.add(self::image(
+                                image.width,
+                                image.height,
+                                image.rgba.clone(),
+                                false,
+                            ))
+                        })
+                        .clone();
+                    (name.clone(), handle)
+                })
+        })
+        .collect();
     let lightmaps: Vec<_> = world
         .lightmaps
         .iter()
         .map(|lm| images.add(image(lm.width, lm.height, lm.rgba.clone(), false)))
         .collect();
     let mut batches: BTreeMap<(Owner, String, Option<usize>, usize), Batch> = BTreeMap::new();
-    let mut skipped = 0usize;
+    let skipped = 0usize;
     let mut transparent_id = 0usize;
     let mut append = |surface: &Surface, transform: Mat4, owner: Owner| {
-        if surface.background {
-            skipped += 1;
-            return;
-        }
+        let owner = if surface.background && owner == Owner::World {
+            Owner::SkyWorld
+        } else {
+            owner
+        };
         if surface.indices.is_empty() {
             return;
         }
@@ -367,7 +401,7 @@ pub fn spawn_map(
     }
     for instance in &world.model_instances {
         // append_models already baked entity=None static props into surfaces.
-        if instance.background || instance.entity.is_none_or(|id| !visible_entity(world, id)) {
+        if instance.entity.is_none_or(|id| !visible_entity(world, id)) {
             continue;
         }
         if let Some(surfaces) = world.model_assets.get(&instance.asset_key()) {
@@ -411,8 +445,9 @@ pub fn spawn_map(
                     }),
                 f32::from(matches!(alpha, AlphaMode::Opaque)),
                 f32::from(matches!(alpha, AlphaMode::Add)),
-                0.,
+                f32::from(irises.contains_key(&name)),
             ),
+            iris: irises.get(&name).unwrap_or(&white).clone(),
             base: bases.get(&name).unwrap_or(&missing).clone(),
             lightmap: if definition.unlit {
                 white.clone()
@@ -451,13 +486,13 @@ pub fn spawn_map(
                     scale: 1.,
                     bind: std::mem::take(&mut batch.skin),
                 }),
-                Owner::World => None,
+                Owner::World | Owner::SkyWorld => None,
             }
         } else {
             None
         };
         // Keep animated meshes in the main world for retained CPU skinning.
-        let animated = animation.is_some();
+        let animated = animation.is_some() || irises.contains_key(&name);
         let mut mesh = batch.mesh();
         if animated {
             mesh.asset_usage = RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
@@ -467,13 +502,29 @@ pub fn spawn_map(
             entity_transform(state.origin, state.rotation)
         });
         let mut draw = commands.spawn((
-            Name::new(name),
+            Name::new(name.clone()),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
             transform,
         ));
+        if matches!(owner, Owner::SkyWorld)
+            || owner
+                .entity()
+                .is_some_and(|id| world.background_entities.contains(&id))
+        {
+            draw.insert(bevy::camera::visibility::RenderLayers::layer(4));
+        }
         if let Some(id) = owner.entity() {
             draw.insert(SourceEntity(id));
+            if let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(id))
+                && let Some(eye) = loaded.eyes.get(&(instance.asset_key(), name.clone()))
+            {
+                draw.insert(EyeMesh {
+                    key: instance.asset_key(),
+                    eye: eye.clone(),
+                    scale: instance.scale,
+                });
+            }
             let state = &loaded.gameplay.scene.states[id];
             if !state.visible || state.killed {
                 draw.insert(Visibility::Hidden);

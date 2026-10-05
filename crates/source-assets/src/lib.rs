@@ -62,3 +62,5 @@ pub(crate) fn records(d: &[u8], size: usize) -> Result<impl Iterator<Item = &[u8
     }
     Ok(d.chunks_exact(size))
 }
+
+pub mod eyes;

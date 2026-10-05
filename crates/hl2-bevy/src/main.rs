@@ -1,10 +1,12 @@
 //! Isolated Bevy/wgpu host reusing engine-independent Source simulation.
 mod assets;
 mod audio;
+mod eyes;
 mod gameplay;
 mod hud;
 mod movement;
 mod rendering;
+mod sky;
 use anyhow::{Context, Result, bail};
 use bevy::{
     app::AppExit,
@@ -203,6 +205,7 @@ fn main() -> Result<()> {
     let texture_summary = serde_json::json!({
         "source_materials": loaded.materials.len(), "unique_base_textures": unique_textures.len(),
         "decoded_base_bytes": unique_textures.values().sum::<usize>(), "decoded_base_budget": 512 * 1024 * 1024,
+        "owned_eye_dx8_fallbacks":loaded.materials.iter().filter(|(_,m)|m.eye_fallback).map(|(name,_)|name).collect::<Vec<_>>(),
     });
     let spawn_sky_visibility = format!("{:?}", loaded.bsp.sky_visibility(loaded.world.spawn().0));
     let (spawn, spawn_yaw) = loaded.world.spawn();
@@ -269,8 +272,15 @@ fn main() -> Result<()> {
             (
                 rendering::present_entities,
                 rendering::present_weapons,
+                sky::present,
                 hud::present,
             )
+                .before(TransformSystems::Propagate),
+        )
+        .add_systems(
+            PostUpdate,
+            eyes::present
+                .after(rendering::present_entities)
                 .before(TransformSystems::Propagate),
         )
         .add_systems(Startup, setup)
@@ -309,7 +319,7 @@ fn main() -> Result<()> {
         "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": options.map, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
-        "limitations": ["Pause menu/console, impact/projectile visuals and campaign transitions are not migrated yet", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "No Source sky rendering, PVS/areaportals, material proxies, dynamic lighting or HDR", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
+        "limitations": ["Pause menu/console, impact/projectile visuals and campaign transitions are not migrated yet", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "LDR sky uses owned faces/leaf visibility; sky polygon masks, PVS/areaportals, material proxies, dynamic lighting and HDR remain unfinished", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
     std::fs::write(&options.report, serde_json::to_vec_pretty(&report)?)?;
     println!("Report: {}", options.report.display());
@@ -357,6 +367,19 @@ fn setup(
         &mut images,
         &status,
     );
+    commands.insert_resource(eyes::Eyes::new(&loaded));
+    sky::install(
+        &loaded,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+    );
+    commands.insert_resource(sky::Sky::new(
+        loaded.bsp,
+        loaded.world.background_camera.clone(),
+        loaded.sky.as_ref(),
+    ));
     commands.insert_resource(loaded.gameplay);
     commands.insert_resource(hud::Hud::new(loaded.hud));
     audio::install(&mut commands, &mut sounds, loaded.audio);
@@ -421,10 +444,12 @@ type HostResources<'w> = (
     Res<'w, gameplay::Gameplay>,
     Res<'w, hud::Hud>,
     Res<'w, audio::Audio>,
+    Res<'w, sky::Sky>,
+    Res<'w, eyes::Eyes>,
 );
 fn monitor(
     mut commands: Commands,
-    (options, simulation, game, hud, audio): HostResources,
+    (options, simulation, game, hud, audio, sky, eyes): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
     adapter: Option<Res<RenderAdapterInfo>>,
@@ -459,7 +484,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
         }
     }
-    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report()});
+    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"eyes":eyes.report()});
     if let Some(adapter) = adapter {
         report.adapter = Some(adapter.name.clone());
         report.backend = Some(format!("{:?}", adapter.backend));

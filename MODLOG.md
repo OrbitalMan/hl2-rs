@@ -130,3 +130,7 @@ Symbolic speech carries the resolved actor model through the installed gender re
 ### Bevy audio adapter
 
 Shared owned sound-script selection, actor gender, WAV/MS ADPCM/MP3 decoding and viewmodel event cursor now serve both hosts. Bevy preloads references outside systems and plays ambient/scene/weapon/HUD requests through monitored audio sinks, including host pause/resume. Packaged door/weapon and controlled scene fixtures, full tests and strict Clippy passed. Source spatial audio/DSP, soundscapes and lipsync remain unfinished; this does not complete the campaign.
+
+### Bevy sky, iris projection and prop door swing
+
+Restored owned LDR cube/miniature sky passes before the playable world, with current-leaf visibility and depth occlusion. Eyes now use authored studio metadata and separate iris textures; gaze uses a bounded visible player/NPC approximation. EyeRefract uses its owned Eyes_dx8 fallback, with refraction/flex/glints still missing. Prop door use carries the opener position to linked leaves and respects explicit swing direction, fixing the opposite inward/outward entrance behavior. Native door blockers and full gaze/choreography logic remain unfinished.

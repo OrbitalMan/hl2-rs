@@ -24,27 +24,12 @@ const INDICES: [u16; 6] = [0, 1, 2, 0, 2, 3];
 const DRAW_ORDER: [usize; 6] = [0, 2, 1, 3, 4, 5];
 
 fn face_vector(face: usize, s: f32, t: f32) -> Vec3 {
-    // Material order rt,bk,lf,ft,up,dn differs from VTF cubemap-file order.
-    match face {
-        0 => vec3(1., -s, t),
-        1 => vec3(s, 1., t),
-        2 => vec3(-1., s, t),
-        3 => vec3(-s, -1., t),
-        4 => vec3(-t, -s, 1.),
-        5 => vec3(t, -s, -1.),
-        _ => unreachable!("sky requires exactly six faces"),
-    }
+    let v = source_assets::sky::face_vector(face, s, t);
+    vec3(v.x, v.y, v.z)
 }
 fn face_uv(s: f32, t: f32, transform: UvTransform) -> Vec2 {
-    // Source first insets to a fixed 512-texel edge, then applies the VMT transform.
-    // GPU sampling clamps the transformed coordinates, including half-height sides.
-    let edge = 1. / 512.;
-    let uv = glam::Vec2::new(
-        ((s + 1.) * 0.5).clamp(edge, 1. - edge),
-        1. - ((t + 1.) * 0.5).clamp(edge, 1. - edge),
-    );
-    let uv = transform.apply(uv);
-    vec2(uv.x, uv.y)
+    let v = source_assets::sky::face_uv(s, t, transform);
+    vec2(v.x, v.y)
 }
 fn vertices(face: usize, transform: UvTransform, far: f32) -> Vec<Vertex> {
     // At the cube corners distance is just below z_far, matching owned-retail d.

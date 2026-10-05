@@ -105,6 +105,7 @@ struct Pending {
     parameter: String,
     caller: usize,
     activator: usize,
+    opener: Option<Vec3>,
 }
 #[derive(Clone)]
 pub struct State {
@@ -242,8 +243,17 @@ impl Scene {
             )
             .max(0.01);
             let rotating = matches!(e.class(), "func_door_rotating" | "prop_door_rotating");
-            let angle =
-                number(e, "distance", 90.).to_radians() * if flags & 2 != 0 { -1. } else { 1. };
+            let angle = if e.class() == "prop_door_rotating" {
+                let distance = number(e, "distance", 90.).abs();
+                (if distance == 0. { 90. } else { distance }).to_radians()
+                    * if number(e, "opendir", 0.) as i32 == 2 {
+                        1.
+                    } else {
+                        -1.
+                    }
+            } else {
+                number(e, "distance", 90.).to_radians() * if flags & 2 != 0 { -1. } else { 1. }
+            };
             let axis = if flags & 64 != 0 {
                 Vec3::X
             } else if flags & 128 != 0 {
@@ -1070,6 +1080,7 @@ impl Scene {
                 parameter: output.parameter.clone(),
                 caller: id,
                 activator,
+                opener: None,
             });
         }
     }
@@ -1102,6 +1113,7 @@ impl Scene {
             parameter: parameter.into(),
             caller: id,
             activator: usize::MAX,
+            opener: None,
         });
     }
     /// Console input uses the normal deferred I/O queue and target-name matching.
@@ -1123,22 +1135,51 @@ impl Scene {
             parameter: parameter.into(),
             caller: usize::MAX,
             activator: usize::MAX,
+            opener: None,
         });
         true
     }
     pub fn use_entity(&mut self, world: &World, id: usize) {
-        if world.entities.get(id).is_some_and(|e| {
-            matches!(
-                e.class(),
-                "func_door" | "func_door_rotating" | "prop_door_rotating"
-            )
-        }) {
+        self.use_with_opener(world, id, None);
+    }
+    pub fn use_entity_at(&mut self, world: &World, id: usize, player_origin: Vec3) {
+        self.use_with_opener(world, id, Some(player_origin));
+    }
+    fn use_with_opener(&mut self, world: &World, id: usize, opener: Option<Vec3>) {
+        let Some(entity) = world.entities.get(id) else {
+            return;
+        };
+        if entity.class() == "prop_door_rotating" {
+            let opening = self.states[id].target == 0.;
+            if opening && self.states[id].locked {
+                self.send(id, "Open", "");
+                return;
+            }
+            if !opening && number(entity, "spawnflags", 0.) as u32 & 8192 == 0 {
+                return;
+            }
+            let group = entity
+                .get("slavename")
+                .filter(|s| !s.is_empty())
+                .or_else(|| entity.get("targetname").filter(|s| !s.is_empty()));
+            let ids: Vec<_> = world
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(other, e)| {
+                    *other == id
+                        || e.class() == "prop_door_rotating"
+                            && group.is_some_and(|name| e.get("targetname") == Some(name))
+                })
+                .map(|(i, _)| i)
+                .collect();
+            for door in ids {
+                self.send(door, if opening { "Open" } else { "Close" }, "");
+                self.queue.last_mut().expect("queued door use").opener = opener;
+            }
+        } else if matches!(entity.class(), "func_door" | "func_door_rotating") {
             self.send(id, "Toggle", "");
-        } else if world
-            .entities
-            .get(id)
-            .is_some_and(|e| e.class() == "func_button")
-        {
+        } else if entity.class() == "func_button" {
             self.fire(id, "OnPressed", usize::MAX);
         }
     }
@@ -1212,6 +1253,20 @@ impl Scene {
                 } else {
                     1. - self.states[id].target
                 };
+                if class == "prop_door_rotating"
+                    && target > 0.
+                    && self.states[id].fraction.abs() < 0.00001
+                {
+                    let state = &mut self.states[id];
+                    let back = match number(e, "opendir", 0.) as i32 {
+                        1 => false,
+                        2 => true,
+                        _ => p.opener.is_some_and(|origin| {
+                            (state.rotation * Vec3::X).dot(origin - state.origin) > 0.
+                        }),
+                    };
+                    state.angle = state.angle.abs() * if back { 1. } else { -1. };
+                }
                 self.states[id].target = target;
                 self.states[id].return_at = None;
                 self.fire(
@@ -1404,6 +1459,7 @@ impl Scene {
                 parameter: String::new(),
                 caller: id,
                 activator: usize::MAX,
+                opener: None,
             });
             return;
         }
@@ -2446,12 +2502,89 @@ mod tests {
         for _ in 0..70 {
             s.tick(&w, Vec3::ZERO, 0.015);
         }
-        assert!((s.states[0].rotation * Vec3::X - Vec3::Y).length() < 0.001);
+        assert!((s.states[0].rotation * Vec3::X + Vec3::Y).length() < 0.001);
         assert_eq!(s.diagnostics.door_completions, 1);
     }
     #[test]
     fn escaped_output_parameters_can_contain_commas() {
         let o = output("OnTrigger", "x\x1bSetValue\x1ba,b\x1b0\x1b-1").unwrap();
         assert_eq!(o.parameter, "a,b");
+    }
+    #[test]
+    fn paired_prop_doors_use_opener_side_and_return_to_authored_closed_pose() {
+        let w = World {
+            entities: vec![
+                entity(
+                    "prop_door_rotating",
+                    "pair",
+                    &[
+                        ("origin", "0 -47 0"),
+                        ("angles", "0 0 0"),
+                        ("spawnflags", "8192"),
+                        ("speed", "90"),
+                    ],
+                ),
+                entity(
+                    "prop_door_rotating",
+                    "pair",
+                    &[
+                        ("origin", "0 47 0"),
+                        ("angles", "0 180 0"),
+                        ("spawnflags", "8192"),
+                        ("speed", "90"),
+                    ],
+                ),
+            ],
+            ..Default::default()
+        };
+        let mut s = Scene::new(&w);
+        for side in [-1., 1.] {
+            s.use_entity_at(&w, 0, Vec3::X * side * 64.);
+            for _ in 0..70 {
+                s.tick(&w, Vec3::ZERO, 0.015);
+            }
+            for state in &s.states {
+                let panel = state.origin + state.rotation * Vec3::Y * 47.;
+                assert!(
+                    panel.x * side < -46.,
+                    "both panels must swing away from opener"
+                );
+            }
+            s.use_entity_at(&w, 1, Vec3::X * side * 64.);
+            for _ in 0..70 {
+                s.tick(&w, Vec3::ZERO, 0.015);
+            }
+            for state in &s.states {
+                assert_eq!(state.fraction, 0.);
+                assert!(state.rotation.dot(state.base_rotation).abs() > 0.99999);
+            }
+        }
+        assert_eq!(s.diagnostics.door_completions, 8);
+    }
+    #[test]
+    fn explicit_prop_door_direction_and_lock_override_opener_side() {
+        for (direction, sign) in [(1, -1.), (2, 1.)] {
+            let w = World {
+                entities: vec![entity(
+                    "prop_door_rotating",
+                    "door",
+                    &[
+                        ("opendir", if direction == 1 { "1" } else { "2" }),
+                        ("locked", "1"),
+                    ],
+                )],
+                ..Default::default()
+            };
+            let mut s = Scene::new(&w);
+            s.use_entity_at(&w, 0, Vec3::X * 64.);
+            s.tick(&w, Vec3::ZERO, 0.015);
+            assert_eq!(s.states[0].target, 0.);
+            s.send(0, "Unlock", "");
+            s.tick(&w, Vec3::ZERO, 0.015);
+            s.use_entity_at(&w, 0, Vec3::X * 64.);
+            s.tick(&w, Vec3::ZERO, 0.015);
+            assert_eq!(s.states[0].target, 1.);
+            assert_eq!(s.states[0].angle.signum(), sign);
+        }
     }
 }

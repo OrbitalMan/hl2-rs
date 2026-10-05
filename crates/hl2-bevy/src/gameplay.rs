@@ -210,7 +210,7 @@ impl Gameplay {
                 }
                 Action::Use => {
                     if let Some((id, _)) = physics.ray(eye, direction, 96.) {
-                        self.scene.use_entity(&self.world, id);
+                        self.scene.use_entity_at(&self.world, id, player.feet);
                     }
                     continue;
                 }

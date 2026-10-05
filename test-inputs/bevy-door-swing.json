@@ -1,0 +1,71 @@
+[
+  {
+    "tick": 1,
+    "eye": [
+      -3270,
+      -2048,
+      128
+    ],
+    "yaw": 0,
+    "fly": true,
+    "actions": [
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Unlock"
+      },
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Close"
+      }
+    ]
+  },
+  {
+    "tick": 80,
+    "actions": [
+      {
+        "action": "use"
+      }
+    ]
+  },
+  {
+    "tick": 160,
+    "label": "inside-open",
+    "paused": true
+  },
+  {
+    "tick": 170,
+    "paused": false,
+    "actions": [
+      {
+        "action": "send",
+        "target": "station_entrance",
+        "input": "Close"
+      }
+    ]
+  },
+  {
+    "tick": 240,
+    "label": "closed"
+  },
+  {
+    "tick": 250,
+    "eye": [
+      -3125,
+      -2048,
+      128
+    ],
+    "yaw": 180,
+    "actions": [
+      {
+        "action": "use"
+      }
+    ]
+  },
+  {
+    "tick": 330,
+    "label": "outside-open",
+    "paused": true
+  }
+]

@@ -1117,7 +1117,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             && !fly
         {
             if let Some((id, _)) = physics.ray(position, direction, 96.) {
-                scene.use_entity(&world, id);
+                scene.use_entity_at(&world, id, player.feet);
             }
         }
         if !console.paused()

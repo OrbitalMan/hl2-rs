@@ -7,6 +7,27 @@ use modkit_core::Entity;
 /// Source sky material order, distinct from VTF cubemap face order.
 pub const SUFFIXES: [&str; 6] = ["rt", "bk", "lf", "ft", "up", "dn"];
 
+/// Direction and planar texture mapping used by the owned retail sky cube.
+pub fn face_vector(face: usize, s: f32, t: f32) -> glam::Vec3 {
+    use glam::Vec3;
+    match face {
+        0 => Vec3::new(1., -s, t),
+        1 => Vec3::new(s, 1., t),
+        2 => Vec3::new(-1., s, t),
+        3 => Vec3::new(-s, -1., t),
+        4 => Vec3::new(-t, -s, 1.),
+        5 => Vec3::new(t, -s, -1.),
+        _ => panic!("sky requires exactly six faces"),
+    }
+}
+pub fn face_uv(s: f32, t: f32, transform: UvTransform) -> Vec2 {
+    let edge = 1. / 512.;
+    transform.apply(Vec2::new(
+        ((s + 1.) * 0.5).clamp(edge, 1. - edge),
+        1. - ((t + 1.) * 0.5).clamp(edge, 1. - edge),
+    ))
+}
+
 #[derive(Debug)]
 pub struct Skybox {
     pub name: String,

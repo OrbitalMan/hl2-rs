@@ -25,6 +25,8 @@ pub struct LoadedMap {
     pub gameplay: crate::gameplay::Gameplay,
     pub hud: hl2_ui::hud::WeaponHud,
     pub audio: crate::audio::PreparedAudio,
+    pub sky: Option<source_assets::sky::Skybox>,
+    pub eyes: BTreeMap<(String, String), source_assets::eyes::Eyeball>,
     pub bsp: Bsp,
     pub revision: u32,
     pub materials: BTreeMap<String, MaterialData>,
@@ -37,6 +39,9 @@ pub struct MaterialData {
     pub base: Option<Arc<Image>>,
     /// Normalized VTF key shared by both decoded textures and GPU image handles.
     pub base_path: Option<String>,
+    pub iris: Option<Arc<Image>>,
+    pub iris_path: Option<String>,
+    pub eye_fallback: bool,
     pub alpha_cutoff: Option<f32>,
     pub translucent: bool,
     pub additive: bool,
@@ -53,6 +58,9 @@ impl Default for MaterialData {
         Self {
             base: None,
             base_path: None,
+            iris: None,
+            iris_path: None,
+            eye_fallback: false,
             alpha_cutoff: None,
             translucent: false,
             additive: false,
@@ -116,9 +124,34 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
         );
         materials.insert(name, material);
     }
+    let mut eyes = BTreeMap::new();
+    for (key, surfaces) in &world.model_assets {
+        let model = key.split('#').next().unwrap_or(key);
+        match source_assets::eyes::load(&vfs, model) {
+            Ok(records) => {
+                for eye in records {
+                    if let Some(surface) = surfaces.get(eye.surface) {
+                        eyes.insert((key.clone(), surface.material.clone()), eye);
+                    } else {
+                        texture_errors.push(format!("{model}: eyeball mesh missing"));
+                    }
+                }
+            }
+            Err(e) => texture_errors.push(format!("{model}: eyeball metadata: {e:#}")),
+        }
+    }
     let hud = hl2_ui::hud::WeaponHud::load(&vfs, hl2_ui::canvas::Canvas::default())?;
     let audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
+    let sky = match source_assets::sky::load(&vfs, &world.entities, 512) {
+        Ok(sky) => sky,
+        Err(e) => {
+            texture_errors.push(format!("2D sky assets: {e:#}"));
+            None
+        }
+    };
     Ok(LoadedMap {
+        eyes,
+        sky,
         audio,
         hud,
         gameplay,
@@ -150,9 +183,7 @@ fn normalize_bsp_render_winding(world: &mut World) {
 /// Initial static visibility only. Runtime I/O and animated render effects are separate.
 pub(crate) fn visible_entity(world: &World, id: usize) -> bool {
     world.entities.get(id).is_some_and(|entity| {
-        !world.background_entities.contains(&id)
-            && !entity.class().starts_with("trigger_")
-            && !entity.class().starts_with("func_areaportal")
+        !entity.class().starts_with("trigger_") && !entity.class().starts_with("func_areaportal")
     })
 }
 
@@ -162,7 +193,7 @@ fn rendered_material_names(world: &World) -> BTreeSet<String> {
         names.extend(
             surfaces
                 .iter()
-                .filter(|surface| !surface.background && !surface.indices.is_empty())
+                .filter(|surface| !surface.indices.is_empty())
                 .map(|surface| surface.material.clone()),
         );
     };
@@ -183,7 +214,7 @@ fn rendered_material_names(world: &World) -> BTreeSet<String> {
         }
     }
     for instance in &world.model_instances {
-        if instance.background || !instance.entity.is_some_and(|id| visible_entity(world, id)) {
+        if !instance.entity.is_some_and(|id| visible_entity(world, id)) {
             continue;
         }
         if let Some(surfaces) = world.model_assets.get(&instance.asset_key()) {
@@ -221,7 +252,7 @@ fn direct_properties(entries: &[Entry]) -> BTreeMap<String, String> {
 }
 
 // Reuse the bounded KeyValues decoder, preserving direct material parameters and
-// Patch insert/replace semantics. DX fallback blocks and animated proxies are not evaluated.
+// Patch insert/replace semantics. Only the authored Eyes_dx8 fallback for EyeRefract is selected; other DX blocks/proxies remain unsupported.
 fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
     if depth > 8 {
         bail!("VMT include cycle/depth limit");
@@ -238,6 +269,16 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
         bail!("VMT must contain one material block: {path}");
     }
     let root = &entries[0];
+    if root.key.eq_ignore_ascii_case("eyerefract")
+        && let Some(fallback) = root.get("Eyes_dx8")
+    {
+        let mut properties = direct_properties(root.children());
+        properties.extend(direct_properties(fallback.children()));
+        return Ok(Definition {
+            shader: "eyes_dx8".into(),
+            properties,
+        });
+    }
     if !root.key.eq_ignore_ascii_case("patch") {
         return Ok(Definition {
             shader: root.key.clone(),
@@ -285,6 +326,7 @@ fn metadata(definition: &Definition) -> Result<MaterialData> {
         two_sided: scalar(p, "$nocull", 0.)?.trunc() != 0.,
         opacity: scalar(p, "$alpha", 1.)?.clamp(0., 1.),
         unlit: definition.shader.eq_ignore_ascii_case("unlitgeneric"),
+        eye_fallback: definition.shader.eq_ignore_ascii_case("eyes_dx8"),
         ..Default::default()
     };
     if scalar(p, "$alphatest", 0.)?.trunc() != 0. {
@@ -351,6 +393,28 @@ fn load_material(
             material.base = Some(image);
         }
         Err(error) => errors.push(format!("{name}: {error:#}")),
+    }
+    if definition.shader.eq_ignore_ascii_case("eyes") || material.eye_fallback {
+        let iris = (|| -> Result<(String, Arc<Image>)> {
+            let path = asset_path(
+                definition
+                    .properties
+                    .get("$iris")
+                    .context("Eyes VMT missing $iris")?,
+                ".vtf",
+            )?;
+            let image = cached_texture(cache, decoded_bytes, &path, || {
+                vfs.read(&path)?.context("owned iris VTF absent")
+            })?;
+            Ok((path, image))
+        })();
+        match iris {
+            Ok((path, image)) => {
+                material.iris_path = Some(path);
+                material.iris = Some(image);
+            }
+            Err(e) => errors.push(format!("{name}: iris: {e:#}")),
+        }
     }
     material
 }
@@ -583,6 +647,9 @@ mod tests {
             BTreeSet::from([
                 "world".into(),
                 "static-baked".into(),
+                "sky".into(),
+                "brush-5".into(),
+                "model-background".into(),
                 "brush-1".into(),
                 "brush-4".into(),
                 "model-hidden".into(),
