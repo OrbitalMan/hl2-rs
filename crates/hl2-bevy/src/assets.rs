@@ -28,6 +28,7 @@ pub struct LoadedMap {
     pub audio: crate::audio::PreparedAudio,
     pub sky: Option<source_assets::sky::Skybox>,
     pub effects: crate::effects::PreparedEffects,
+    pub gaze: BTreeMap<String, source_assets::eyes::Gaze>,
     pub eyes: BTreeMap<(String, String), source_assets::eyes::Eyeball>,
     pub bsp: Bsp,
     pub revision: u32,
@@ -155,8 +156,21 @@ pub fn load_with_canvas(
         materials.insert(name, material);
     }
     let mut eyes = BTreeMap::new();
+    let mut gaze = BTreeMap::new();
     for (key, surfaces) in &world.model_assets {
         let model = key.split('#').next().unwrap_or(key);
+        if world.model_instances.iter().any(|i| {
+            i.asset_key() == *key
+                && i.entity
+                    .is_some_and(|id| world.entities[id].class().starts_with("npc_"))
+        }) {
+            match source_assets::eyes::load_gaze(&vfs, model) {
+                Ok(metadata) => {
+                    gaze.insert(key.clone(), metadata);
+                }
+                Err(e) => texture_errors.push(format!("{model}: gaze attachment metadata: {e:#}")),
+            }
+        }
         match source_assets::eyes::load(&vfs, model) {
             Ok(records) => {
                 for eye in records {
@@ -184,6 +198,7 @@ pub fn load_with_canvas(
         console,
         effects,
         eyes,
+        gaze,
         sky,
         audio,
         hud,

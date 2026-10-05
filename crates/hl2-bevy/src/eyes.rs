@@ -7,9 +7,17 @@ use crate::{
 };
 use bevy::{mesh::VertexAttributeValues, prelude::*};
 use std::collections::BTreeMap;
+struct Actor {
+    key: String,
+    gaze: source_assets::eyes::Gaze,
+    scale: f32,
+}
 #[derive(Resource, Default)]
 pub struct Eyes {
-    actors: BTreeMap<usize, (String, source_assets::eyes::Eyeball, f32)>,
+    actors: BTreeMap<usize, Actor>,
+    pose_samples: usize,
+    attachment_actors: usize,
+    origins: Vec<serde_json::Value>,
     draws: usize,
     tracking_player: usize,
     tracking_npc: usize,
@@ -25,21 +33,22 @@ impl Eyes {
             if !loaded.world.entities[id].class().starts_with("npc_") {
                 continue;
             }
-            if let Some((_, eye)) = loaded
-                .eyes
-                .iter()
-                .find(|((key, _), _)| key == &i.asset_key())
-            {
-                result
-                    .actors
-                    .insert(id, (i.asset_key(), eye.clone(), i.scale));
+            if let Some(gaze) = loaded.gaze.get(&i.asset_key()) {
+                result.actors.insert(
+                    id,
+                    Actor {
+                        key: i.asset_key(),
+                        gaze: gaze.clone(),
+                        scale: i.scale,
+                    },
+                );
             }
         }
         result
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"draws":self.draws,"tracking_player":self.tracking_player,"tracking_npc":self.tracking_npc,"tracking_entity":self.tracking_entity,"tracking_scene":self.tracking_scene,"projections":self.projections,
-            "policy":"newest valid authored LOOKAT interest, shared per actor; nearest-visible fallback outside scripted interests; random/synthetic/native head/facial/PVS behavior remains unfinished",
+        serde_json::json!({"draws":self.draws,"pose_samples":self.pose_samples,"attachment_actors":self.attachment_actors,"origins":self.origins,"tracking_player":self.tracking_player,"tracking_npc":self.tracking_npc,"tracking_entity":self.tracking_entity,"tracking_scene":self.tracking_scene,"projections":self.projections,
+            "policy":"newest valid authored LOOKAT interest, shared per actor; nearest-visible fallback outside scripted interests; animated owned eyes attachments supply actor origin/forward; native random/head/facial/PVS latch behavior remains unfinished",
             "shader":"owned Eyes iris alpha over sclera with retail planar basis; glints, eyelid flexes and Source model lighting remain unfinished"})
     }
 }
@@ -48,11 +57,10 @@ fn bone_pose(
     key: &str,
     id: usize,
     bone: usize,
+    poses: &BTreeMap<usize, Vec<glam::Mat4>>,
 ) -> Option<glam::Mat4> {
     let rig = game.world.rigs.get(key)?;
-    let state = &game.scene.states[id];
-    let matrices = rig.matrices(&state.animation, game.scene.animation_time(id));
-    Some(*matrices.get(bone)? * rig.bones.get(bone)?.inverse_bind.inverse())
+    Some(*poses.get(&id)?.get(bone)? * rig.bones.get(bone)?.inverse_bind.inverse())
 }
 pub fn present(
     mut eyes: ResMut<Eyes>,
@@ -63,22 +71,72 @@ pub fn present(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let Ok(camera) = camera.single() else { return };
+    // Evaluate each visible actor once per presentation; target and iris consumers
+    // share these skin transforms rather than sampling the full rig for every eye.
+    let mut pose_keys: BTreeMap<usize, &str> = eyes
+        .actors
+        .iter()
+        .map(|(&id, a)| (id, a.key.as_str()))
+        .collect();
+    for (owner, eye, _) in &draws {
+        pose_keys.entry(owner.0).or_insert(&eye.key);
+    }
+    let poses: BTreeMap<_, _> = pose_keys
+        .into_iter()
+        .filter_map(|(id, key)| {
+            let state = &game.scene.states[id];
+            if state.killed || !state.visible {
+                return None;
+            }
+            let rig = game.world.rigs.get(key)?;
+            Some((
+                id,
+                rig.matrices(&state.animation, game.scene.animation_time(id)),
+            ))
+        })
+        .collect();
     let mut candidates = vec![(
         None,
         glam::Vec3::from_array(bevy_to_source(camera.translation).to_array()),
+        glam::Vec3::ZERO,
     )];
-    for (&id, (key, eye, scale)) in &eyes.actors {
+    let mut origins = Vec::new();
+    let mut attachment_actors = 0;
+    for (&id, actor) in &eyes.actors {
         let state = &game.scene.states[id];
-        if state.visible
-            && !state.killed
-            && let Some(bone) = bone_pose(&game, key, id, eye.bone)
-        {
-            candidates.push((
-                Some(id),
-                state.origin + state.rotation * (bone.transform_point3(eye.origin) * *scale),
-            ));
+        if !state.visible || state.killed {
+            continue;
         }
+        let attached = actor.gaze.attachment.as_ref().and_then(|attachment| {
+            bone_pose(&game, &actor.key, id, attachment.bone, &poses)
+                .map(|bone| (bone * attachment.local, attachment.world_align))
+        });
+        let (origin, forward) = if let Some((attachment, world_align)) = attached {
+            attachment_actors += 1;
+            (
+                state.origin
+                    + state.rotation
+                        * (attachment.transform_point3(glam::Vec3::ZERO) * actor.scale),
+                if world_align {
+                    glam::Vec3::X
+                } else {
+                    state.rotation * attachment.transform_vector3(glam::Vec3::X).normalize()
+                },
+            )
+        } else {
+            // Base NPC eye offset is already in world axes; PVS-dependent latching
+            // and derived retail eye-position overrides are not modeled here.
+            (
+                state.origin + actor.gaze.view_offset * actor.scale,
+                state.rotation * glam::Vec3::X,
+            )
+        };
+        candidates.push((Some(id), origin, forward));
+        origins.push(serde_json::json!({"entity":id,"origin":origin.to_array(),"forward":forward.to_array(),"attachment":attached.is_some()}));
     }
+    eyes.pose_samples = poses.len();
+    eyes.attachment_actors = attachment_actors;
+    eyes.origins = origins;
     eyes.projections.clear();
     eyes.draws = 0;
     eyes.tracking_player = 0;
@@ -97,7 +155,7 @@ pub fn present(
         if !state.visible || state.killed {
             continue;
         }
-        let Some(bone) = bone_pose(&game, &mesh_eye.key, owner.0, mesh_eye.eye.bone) else {
+        let Some(bone) = bone_pose(&game, &mesh_eye.key, owner.0, mesh_eye.eye.bone, &poses) else {
             continue;
         };
         let origin = bone.transform_point3(mesh_eye.eye.origin);
@@ -106,18 +164,18 @@ pub fn present(
         // SetViewtarget is per actor; both eyes consume the same world target.
         let selected = actor_targets.entry(owner.0).or_insert_with(|| {
             use hl2_simulation::attention::Target;
-            let actor_eye = candidates
-                .iter()
-                .find(|(id, _)| *id == Some(owner.0))
-                .map_or(world_origin, |(_, p)| *p);
-            let forward = state.rotation * head_forward;
+            let actor_eye = candidates.iter().find(|(id, _, _)| *id == Some(owner.0));
+            let (actor_eye, forward) = actor_eye.map_or(
+                (world_origin, state.rotation * head_forward),
+                |(_, p, f)| (*p, *f),
+            );
             let position = |target| match target {
                 Target::Player => Some(candidates[0].1),
                 Target::Entity(id) => game.scene.states.get(id).filter(|s| !s.killed).map(|s| {
                     candidates
                         .iter()
-                        .find(|(candidate, _)| *candidate == Some(id))
-                        .map_or(s.origin, |(_, p)| *p)
+                        .find(|(candidate, _, _)| *candidate == Some(id))
+                        .map_or(s.origin, |(_, p, _)| *p)
                 }),
             };
             if let Some((interest, point)) = game
@@ -137,7 +195,7 @@ pub fn present(
             }
             candidates
                 .iter()
-                .filter_map(|&(id, p)| {
+                .filter_map(|&(id, p, _)| {
                     if id == Some(owner.0) {
                         return None;
                     }

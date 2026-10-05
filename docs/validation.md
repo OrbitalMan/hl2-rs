@@ -1,5 +1,14 @@
 # Local validation — 2026-10-05
 
+## Animated gaze attachments (2026-10-05)
+
+273 normal workspace tests and 15 owned installed-game tests passed, with strict all-target Clippy, formatting and diff checks. The reader validates attachment tables, names, bone indices, supported flags, finite nonsingular transforms and view offsets. Owned Barney, Kleiner, human, G-Man and metrocop models decode attachment bases that match their loaded skeletons.
+
+The rebuilt Bevy package repeated all 26 authored-attention assertions. Thirteen additional checks verify active animated attachments, finite unit forward vectors, pose-cache coverage and self targeting exactly 100 units along attachment forward. Monitor/player/self/final images were inspected. The new presentation used 30 actor pose samples for 40 eye draws and 29 attached NPC origins in this controlled scene; this is instrumentation of the eye pass, not an FPS comparison. A rebuilt retained-host scene/pause/cancel capture completed and was inspected. It continues sharing scene interests without the Bevy iris adapter.
+
+Bevy package SHA-256 7F058DDC849FA4FBB4C7888D911F0AA57B1DD9C72CA49D049B5D7331D7762B37; retained 9845C39907430C898E0B772D57D6AEC37185A6AAA918DB05BB5041B5B6F151A3. Latest evidence is in ignored artifacts/bevy-attachments*. Published SDK attachment behavior informs this adapter; native PVS/think-time latching and derived actor eye overrides remain unverified. Dynamic monitor textures remain unsupported and explicitly reported as absent procedural _rt_camera content. Head poses, layered gestures, flexes and ordinary first-level campaign completion remain unfinished.
+
+
 ## Authored LOOKAT attention (2026-10-05)
 
 272 normal release workspace tests and 14 installed-game ignored tests passed, with strict all-target Clippy and formatting. The added owned security02 test checks named marks, monitor/player overlap, authored intensity, held scene time with continued interest refresh, cancellation tail expiry and target deletion. Synthetic tests check start-time binding, target aliases, missing-target diagnostics, non-NPC no-op, queue priority and zero-time ramp boundaries.

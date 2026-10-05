@@ -15,6 +15,84 @@ pub struct Eyeball {
     pub z_offset: f32,
     pub iris_scale: f32,
 }
+/// Server actor attention uses the animated "eyes" attachment when available.
+#[derive(Clone, Debug)]
+pub struct Attachment {
+    pub bone: usize,
+    pub local: glam::Mat4,
+    pub world_align: bool,
+}
+#[derive(Clone, Debug)]
+pub struct Gaze {
+    pub view_offset: Vec3,
+    pub attachment: Option<Attachment>,
+}
+pub fn load_gaze(vfs: &Vfs, model: &str) -> Result<Gaze> {
+    decode_gaze(&vfs.read(model)?.context("gaze MDL absent")?)
+}
+fn decode_gaze(data: &[u8]) -> Result<Gaze> {
+    validate_header(data)?;
+    let view_offset = vec3(data, 80)?;
+    let bones = count(data, 156, 256)?;
+    let attachments = count(data, 240, 4096)?;
+    let base = usize::try_from(i32le(data, 244)?)?;
+    bytes(data, base, attachments * 92)?;
+    let mut result = Gaze {
+        view_offset,
+        attachment: None,
+    };
+    for id in 0..attachments {
+        let at = base + id * 92;
+        let start = relative(data, at, at)?;
+        let tail = data.get(start..).context("attachment name outside MDL")?;
+        let end = tail
+            .iter()
+            .take(1025)
+            .position(|b| *b == 0)
+            .context("attachment name unterminated or exceeds 1024 bytes")?;
+        let name = std::str::from_utf8(&tail[..end])?;
+        if !name.eq_ignore_ascii_case("eyes") {
+            continue;
+        }
+        let bone = usize::try_from(i32le(data, at + 8)?)?;
+        if bone >= bones {
+            bail!("eyes attachment bone outside skeleton");
+        }
+        let flags = crate::u32le(data, at + 4)?;
+        if flags & !0x10000 != 0 {
+            bail!("unsupported eyes attachment flags {flags:#x}");
+        }
+        let mut matrix = [0.; 16];
+        matrix[15] = 1.;
+        for row in 0..3 {
+            for col in 0..4 {
+                matrix[col * 4 + row] = f32le(data, at + 12 + (row * 4 + col) * 4)?;
+            }
+        }
+        let local = glam::Mat4::from_cols_array(&matrix);
+        let determinant = local.determinant();
+        if !determinant.is_finite() || determinant.abs() < 1e-8 {
+            bail!("singular eyes attachment transform");
+        }
+        result.attachment = Some(Attachment {
+            bone,
+            local,
+            world_align: flags & 0x10000 != 0,
+        });
+        break;
+    }
+    Ok(result)
+}
+fn validate_header(data: &[u8]) -> Result<()> {
+    if data.len() > 64 * 1024 * 1024
+        || bytes(data, 0, 4)? != b"IDST"
+        || !(44..=49).contains(&i32le(data, 4)?)
+        || usize::try_from(i32le(data, 76)?)? != data.len()
+    {
+        bail!("invalid studio eye header");
+    }
+    Ok(())
+}
 /// Retail StudioRender planar iris basis, at default eyeball-size adjustment.
 /// `bone` is the current bone-to-model transform, before entity scale/rotation.
 pub fn projection(eye: &Eyeball, bone: glam::Mat4, target: Option<Vec3>) -> [glam::Vec4; 2] {
@@ -49,13 +127,7 @@ fn relative(data: &[u8], base: usize, at: usize) -> Result<usize> {
     Ok(usize::try_from(base as i64 + i32le(data, at)? as i64)?)
 }
 fn decode(data: &[u8]) -> Result<Vec<Eyeball>> {
-    if data.len() > 64 * 1024 * 1024
-        || bytes(data, 0, 4)? != b"IDST"
-        || !(44..=49).contains(&i32le(data, 4)?)
-        || usize::try_from(i32le(data, 76)?)? != data.len()
-    {
-        bail!("invalid studio eyeball header");
-    }
+    validate_header(data)?;
     let bones = count(data, 156, 4096)?;
     let bodies = count(data, 232, 256)?;
     let start = usize::try_from(i32le(data, 236)?)?;
@@ -140,6 +212,90 @@ mod tests {
             d[at..at + 4].copy_from_slice(&v.to_le_bytes());
         }
         d
+    }
+    fn gaze_fixture() -> Vec<u8> {
+        let mut d = vec![0u8; 500];
+        d[..4].copy_from_slice(b"IDST");
+        for (at, value) in [
+            (4, 48i32),
+            (76, 500),
+            (156, 1),
+            (240, 1),
+            (244, 300),
+            (300, 100),
+        ] {
+            d[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        d[400..405].copy_from_slice(b"eyes\0");
+        for (at, value) in [
+            (88, 70f32),
+            (312, 1.),
+            (332, 1.),
+            (352, 1.),
+            (324, 4.),
+            (340, 5.),
+            (356, 6.),
+        ] {
+            d[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        d
+    }
+    #[test]
+    fn attachment_basis_fallback_and_malformed_records_are_distinguished() {
+        let d = gaze_fixture();
+        let gaze = decode_gaze(&d).unwrap();
+        assert_eq!(gaze.view_offset, Vec3::new(0., 0., 70.));
+        let a = gaze.attachment.unwrap();
+        assert_eq!(a.bone, 0);
+        assert_eq!(a.local.transform_point3(Vec3::ZERO), Vec3::new(4., 5., 6.));
+        assert!(!a.world_align);
+        for (at, n) in [
+            (244, 490u32),
+            (308, 1),
+            (300, 1000),
+            (316, 0x7fc00000),
+            (304, 1),
+            (312, 0),
+        ] {
+            let mut bad = d.clone();
+            bad[at..at + 4].copy_from_slice(&n.to_le_bytes());
+            assert!(decode_gaze(&bad).is_err(), "offset {at}");
+        }
+        let mut overflow = d.clone();
+        for at in [312, 332] {
+            overflow[at..at + 4].copy_from_slice(&f32::MAX.to_le_bytes());
+        }
+        assert!(decode_gaze(&overflow).is_err());
+        let mut missing = d.clone();
+        missing[400..405].copy_from_slice(b"hand\0");
+        assert!(decode_gaze(&missing).unwrap().attachment.is_none());
+        missing[240..244].copy_from_slice(&0i32.to_le_bytes());
+        assert!(decode_gaze(&missing).unwrap().attachment.is_none());
+    }
+    #[test]
+    #[ignore = "requires owned installed HL2 actor MDLs"]
+    fn owned_actor_gaze_attachments_match_bone_skeletons() {
+        let vfs = Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        for model in [
+            "models/barney.mdl",
+            "models/kleiner.mdl",
+            "models/humans/group01/male_07.mdl",
+            "models/gman_high.mdl",
+            "models/police.mdl",
+        ] {
+            let gaze = load_gaze(&vfs, model).unwrap();
+            let attachment = gaze.attachment.expect(model);
+            let rig = crate::animation::load(&vfs, model, &["idle_subtle".into()].into()).unwrap();
+            assert!(attachment.bone < rig.bones.len(), "{model}");
+            let matrix = rig.matrices("idle_subtle", 0.)[attachment.bone]
+                * rig.bones[attachment.bone].inverse_bind.inverse()
+                * attachment.local;
+            assert!(matrix.is_finite());
+            assert!(
+                (matrix.transform_vector3(Vec3::X).length() - 1.).abs() < 1e-3,
+                "{model}"
+            );
+        }
     }
     #[test]
     fn valid_eye_and_malformed_tables_are_distinguished() {
