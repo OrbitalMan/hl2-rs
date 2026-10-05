@@ -1,4 +1,62 @@
-# HL2 reconstruction journal
+# MODLOG
+
+Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
+
+## 2026-10-05 Fresh-chat documentation handoff
+
+**Changed:** Reworked AGENTS.md, added STATUS.md and docs/DESIGN.md, updated this log and changed .gitignore to a source-only whitelist.
+
+**Why:** Preserve verified state, existing authorization and failed approaches without rereading the entire chat.
+
+**Tested how:** Reviewed the three templates against repository instructions, Git revisions, build metadata, recorded logs and the private checkpoint. Checked links, whitelist coverage/exclusions and the staged public snapshot.
+
+**Result:** Handoff identifies active branches, both release packages, tested capabilities, unresolved fidelity work and the next bounded gesture plan. Historical entries remain available.
+
+**Still broken / not tested:** Runtime code is unchanged; gameplay/build checks belong to28c0bb3 and are not rerun claims for this documentation edit. Full campaign/1:1 parity remains unfinished.
+
+**Next:** Start a fresh chat in the Bevy checkout; read AGENTS.md, STATUS.md and docs/DESIGN.md before continuing.
+
+## 2026-10-05 Native crosshairs and optional spatial batches —28c0bb3
+
+**Changed:** Shared owned Windows glyph rasterization/placement, Bevy1080p/borderless launchers, optional spatial batches/render-candidate diagnostics and targeted retained build tooling.
+
+**Why:** Correct blur/fractional reticles and investigate broad world batches without changing physics or forcing equal native sizes.
+
+**Tested how:** Ran original HL2 at1080p,294 unit tests/19 owned checks, strict Clippy/fmt, packaged captures/replays and source audit.
+
+**Result:** Seven Bevy captures and retained1080 captures match dot offsets: white22x22, pistol/SMG21x17. Movement26, weapons17, monitor/campaign18 and accepted images9 pass. Plaza/spawn partition images are identical; audit212 files/0 failures.
+
+**Still broken / not tested:** Splitting stays opt-in; hall camera was rejected, frozen benchmark script was incomplete and25 known station03 material errors remain. Other fonts/colors/platforms and full campaign parity are not established.
+
+**Next:** Preserve verified reticles and reconstruct authored NPC gestures.
+
+## 2026-10-05 Shared materials and model activity —c2b5220 /322afaa
+
+**Changed:** Shared authored material/lightmap handles and avoided unchanged GPU uploads; added owned label/activity/weight resolution and corrected unsupported Kleiner idle.
+
+**Why:** Reduce preparation overhead and use model-authored animations instead of assumed labels.
+
+**Tested how:** Unit/owned checks, controlled Kleiner capture, movement/weapon replays, matched actor/eye/monitor comparisons and local1080 profiles.
+
+**Result:** Station02 material handles921→743. Kleiner resolves idle_subtle; valid metrocop idle_baton stays. Material package measured174.72FPS at the tested spawn, with limited scope.
+
+**Still broken / not tested:** Native RNG/modifiers/full virtual IDs, gestures/facial animation and natural staging remain unfinished. Global eye reports differ after the intervening idle fix.
+
+**Next:** Preserve raw delta/post transforms, masks and child dependencies before gestures.
+
+## 2026-10-05 GPU skinning and cached BSP PVS —df6af1b /b888144
+
+**Changed:** GPU skinning/current bounds/shared iris poses; conservative PVS across active player/monitor views with script visibility/fail-open behavior.
+
+**Why:** Profiling found CPU skinning/uploads and preparation of out-of-view geometry.
+
+**Tested how:** Synthetic/owned bounds/visibility checks, packaged actor/eye/monitor/campaign/gameplay fixtures and900-frame1080 profiles.
+
+**Result:** Selected actor/eye comparisons preserve tested scope. CPU→GPU35.05→66.85FPS and PVS-off→on66.69→156.94 are separate local comparisons; simulation remains enabled.
+
+**Still broken / not tested:** Area portals/occluders/LODs, complete animation and whole-campaign/native144FPS parity remain unverified.
+
+**Next:** Preserve current bounds/view-union ordering and expand fidelity with the same regressions.
 
 ## 2026-10-05 - animated attention attachments
 

@@ -1,19 +1,60 @@
-# Project context
+# AGENTS.md
 
-Read README.md and docs/research.md before extending the runtime. This project is an experimental partial Rust reconstruction, not a completed campaign rewrite.
+## Project
 
-Keep the installed game read-only. Work on private DLL copies for binary analysis. Keep decompiler output and original assets outside the source tree; generated exports and screenshots belong in ignored artifacts/. Do not call FAL; the user has no credits and wants to reuse installed assets.
+HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavior, using content from an owned installation. It is not a passthrough mod and does not load Valve game/engine DLLs. Complete campaign and 1:1 fidelity have not been achieved.
 
-Keep decompiler scripts, native binary indices and research-only asset inspection helpers outside this repository too, in ../../work/hl2-decompiled. The runtime is Rust code reading owned assets in place; its scripts/ folder contains build tooling only. Package with scripts/build.ps1 and test bin/hl2-rs.exe through launch.cmd, rather than leaving the shipped binary stale after testing target/debug.
+## Hard rules, never break these
 
-Put Source-format code in source-assets, common data/player/mod contracts in modkit-core, shared physics, entities/choreography, weapons/projectiles, selection and NPC orchestration in hl2-simulation, portable owned-resource HUD/pause/console logic in hl2-ui, and retained renderer/input/host behavior in hl2-runtime. Keep hl2-simulation independent of Macroquad and Bevy. Do not introduce engine-specific file paths into common mod code.
+1. Keep game assets, native binaries, decompiled code, databases and research tools outside public source checkouts. Read installed content in place; binary analysis uses private copies. Generated screenshots/reports belong in ignored artifacts/.
+2. Keep .gitignore as a source-only whitelist. Add narrow exceptions for reviewed source, documentation, fixtures or explicitly licensed project resources. Never force-add extracted game content or generated executables.
+3. Commit/push only authorized work and stage only the task's files. The owner already authorized reviewed source commits/pushes to kvalls/hl2-rs, including milestones and checkpoints near 98% of the five-hour quota. Do not repeatedly ask. Never merge unverified replacements into main.
+4. Keep the installed game read-only. Approved private working directories are workspace work/hl2-decompiled, work/references and work/publishing. Other unrelated files remain outside scope unless named by the owner.
+5. Do not put credentials, tokens or passwords in project files, logs or commits.
+6. No FAL, replacement assets, crossovers or unsolicited Discord messages. This phase reconstructs HL2. There is no single-player/offline-only project restriction; multiplayer/netcode fidelity is not implemented or tested.
 
-On bevy-migration, put the experimental Bevy host/render adapter in hl2-bevy. Preserve the existing runtime and shared validation. Package the new executable with scripts/build-bevy.ps1 and test bin/hl2-bevy.exe through launch-bevy.cmd. Keep macroquad-prototype as the preserved reference; merge replacements into main only after they are verified. Read docs/bevy-migration.md before extending this host.
+## How to work
 
-The Bevy host now defaults to walking with the retained Player controller and shared Physics queries at 15 ms. Sample input before the fixed loop and publish camera state afterward, preserving held-jump/crouch semantics and Source feet/eye coordinates. --fly/F2 enables flight; Escape/focus loss opens the pause menu and releases the cursor; Resume returns to gameplay. Tilde toggles the console. --movement-script uses tick-based commands and labeled state samples; test-inputs/bevy-movement.json is the owned bench fixture. Its final command freezes movement before an optional end capture. The shared Gameplay resource advances scene -> weapons -> entity collider poses/query refresh -> NPC/projectiles -> physics -> player. PostUpdate publishes owned local-mesh transforms/visibility before Bevy transform propagation and samples skeletal/viewmodel animation with updated bounds. Keep this order. F3/slots/wheel/fire/reload/E/G are bridged; Owned HUD logic now draws through a shared CPU canvas and Bevy Material2d overlay; keep file reads in setup and drawing free of GPU globals. Audio uses preloaded owned waves and shared script/animation-event selection; pause/resume existing sinks with the host. Projectile sprites, grenade models and impact marks are shared CPU state with Bevy presentation. Pause UI/console use explicit portable input and canvas commands. Campaign loads decode owned maps on a worker while fixed host ticks freeze, then replace MapOwned draw/audio entities and resources only after success; preserve this failure-safe ordering. Landmark position/inventory and weapon deadline rebasing are shared. Saved global/entity state and complete player transfer remain unfinished. test-inputs/bevy-entities-weapons.json covers doors/use/weapon timing. Do not call this a complete playable campaign.
+- Read STATUS.md, README.md, docs/DESIGN.md, docs/research.md and docs/bevy-migration.md first. Machine-local detail is in workspace work/publishing/continuation.md; its newest checkpoint supersedes history.
+- For substantial changes, record a bounded design/validation plan in docs/DESIGN.md before coding. Keep steps independently reviewable and reversible.
+- Use instrumentation and visual evidence together. The owner explicitly authorizes testing, screenshots and computer use. Record positions, timings, state transitions and image comparisons. Test packaged executables. Do not close user-launched games or send input to unrelated apps.
+- Reuse shared implementations: source-assets reads formats; modkit-core owns contracts/player/pose math; hl2-simulation owns shared gameplay/physics; hl2-ui owns portable HUD/menu/console; hl2-bevy and hl2-runtime are adapters. No asset reads/font rasterization in frame systems.
+- Continue the approved Bevy migration on bevy-migration. Ask before materially different large refactors outside that scope. Preserve macroquad-prototype and unverified wip/scripted-scenes; main remains the retained host until replacement validation.
+- Preserve 15 ms order: sample input first; scene -> weapons -> entity collider poses/query refresh -> NPC/projectiles -> rigid physics -> player. Publish presentation before transform propagation and current animation bounds before visibility. Preserve held input, pause and selection semantics.
+- Bevy uses scripts/build-bevy.ps1 and launch-bevy.cmd; retained uses scripts/build.ps1 and launch.cmd. Shared changes require checking both hosts. Keep generated executable/shader metadata current after runtime changes.
+- Use Cargo.lock. Run relevant tests, strict Clippy and formatting; verify parsers against owned files and rendering through packaged captures. Give exact test commands and expected results. Documentation-only edits require document/whitelist checks, not gameplay rebuilds.
+- Research database/native exports are evidence, not automatic parity. Distinguish inferred names/signatures, SDK behavior and verified retail behavior. Seeded developer actors do not establish ordinary campaign completion.
+- Explain changes plainly: actual behavior, verification, limitations and next bounded step.
 
-Use Cargo.lock. Run relevant unit tests and Clippy after code changes. Verify parser changes against installed maps when available; the local zero-byte d2_coast_02.bsp is a known rejection, not proof of a parser regression. Run the packaged executable for renderer changes. Record limitations and concrete validation in docs/validation.md.
+## Honesty
 
-The three upstream repos are research references under the chat's work/references. There is no integrated iw4L crossover yet. Do not describe placeholders or guessed native function names as verified behavior.
+- Write **not tested** when applicable. Distinguish unit tests, owned-file checks, controlled replays, native comparisons and ordinary playthroughs.
+- After two unsuccessful real attempts, stop repeating that approach and record evidence in STATUS.md. Choose a materially different evidence-based approach; continue independent work rather than retrying random variations.
+- Record failures/rejected captures alongside successes. Never claim complete decompilation, 1:1 fidelity or FPS guarantees without verification.
 
-Bevy sky cameras render owned six-face LDR background on layer 3/order -2 and miniature scenery on layer 4/order -1, before world/layer 0. Requery separate BSP 2D/3D leaf flags each frame and retain independent world depth/color clearing. Eye meshes read bounded MDL eyeball records and owned iris textures; authored VCD LOOKAT refreshes shared explicit timed interests with compiled event/scene ramps, and both eyes consume a single actor target. Use the owned animated eyes attachment for actor origin/forward, with explicit view-offset fallback. Cache skin poses once per actor in eye presentation and preserve cycler eye meshes. The remaining nearest-visible fallback is not native random/tactical attention. Preserve scene-pause refresh, UI clock freeze, and cancellation tail expiry. Head/facial/PVS and exact retail scheduling remain unverified. EyeRefract uses only its explicit owned Eyes_dx8 fallback and reports that choice. Keep iris projection aligned with the animated bone, before entity transform/scale. Shared door use carries player origin and opens linked leaves away from it unless opendir fixes the direction; blocked-door reversal, native linkage ownership and arbitrary spawn positions remain incomplete.
+## Keep these files updated
+
+- MODLOG.md: newest first; Changed / Why / Tested how / Result / Still broken or not tested / Next.
+- STATUS.md: verified revision/builds, current problems, evidence, rejected approaches, reproduction commands and next work.
+- docs/DESIGN.md: architecture and substantial plans. README.md: tested capabilities/limitations. docs/validation.md and docs/performance.md: detailed evidence.
+- Private work/publishing/continuation.md: precise local checkpoint before quota exhaustion or handoff. When the owner requests a fresh chat, finish the handoff and await further instructions here instead of continuing implementation in this chat.
+
+## Environment
+
+- Windows 11 Pro 64-bit, observed version 10.0.26200; other platforms **not tested**.
+- Owned Steam Half-Life 2 app220, tested build19307283/patch9912070; other versions **not tested**. Default installation: C:/Program Files (x86)/Steam/steamapps/common/Half-Life 2; discover another library or use HL2_ROOT.
+- Rust1.99.0 stable MSVC, Visual Studio C++ tools/Windows SDK. Bevy0.19.1/wgpu and direct Rapier0.26.1. Switching to Avian was not requested; comparative physics performance is not tested.
+- Loader: none. Game owning the player: not applicable; Rust simulation owns state and the installation supplies content.
+- Agent: Codex Desktop. Previous implementation run used GPT-6.1 Extra High/Normal Speed; select new-chat settings explicitly.
+- Active checkout: workspace outputs/hl2-rs-bevy on bevy-migration; sibling outputs/hl2-rs remains main.
+
+## Runtime invariants to preserve
+
+- Walking uses shared Player/Physics; F2/--fly enables flight. Escape cancels selection before pause; tilde opens console. Consume transition input and pause simulation/audio. Map workers freeze fixed/script clocks; replace map-owned resources only after success. Missing maps preserve the world; saved/global state transfer is unfinished.
+- HUD uses owned resources and an ordered CPU canvas for both hosts. GDI font rasterization is setup-only.
+- Sky background layer3/order-2, miniature sky layer4/order-1, world layer0: independent depth/color clears and BSP 2D/3D eligibility. Current animation bounds and all active player/monitor views drive visibility; missing data fails open, script-hidden/killed entities remain hidden. Spatial splitting is opt-in.
+- Eyes use owned MDL records, animated eyes attachment origin/forward and iris projection before entity transform/scale. Preserve authored LOOKAT ramps, cancellation tails, pause refresh, cycler meshes and one target for both eyes. EyeRefract uses explicit Eyes_dx8 fallback; native head/facial/random/tactical attention is unfinished.
+- Door use carries opener origin, opens linked leaves away and honors explicit direction. Blocked reversal/arbitrary spawn/native linkage remain incomplete.
+- Keep the known zero-byte d2_coast_02.bsp rejection and station03's known materials distinct from new regressions. Research references are not integrated iw4L crossovers.
+
+Template basis: [AGENTS starter](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/AGENTS-starter.md), adapted to existing owner authorization and this rewrite.
