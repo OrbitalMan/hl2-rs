@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-05 Callback discovery, ABI and switch evidence; quota handoff
+
+**Changed:** Continued private research through pass14. The exact-byte index now combines13 source datasets,133,473 observed addresses with some pseudocode and133,556 export variants across42 selected modules. Saved entries and10,752 temporary discovery entries remain separate. Public changes document research; runtime code is unchanged.
+
+**Why:** Export success, listing ownership and decompiler switch recovery do not establish complete discovery or trustworthy ABIs. Preserve failures, variants and module/hash/address identity before using native evidence in Rust.
+
+**Tested how:** Exact database/source-row/hash audits, original project bytes, callback/disassembly rollback, private PE data/relocations,16 x87 context/recovery checks,44 existing-function switch/owner controls, ambiguity/overwrite refusal and C-only gamedb range audits. Detailed commands are in docs/validation.md.
+
+**Result:** All research audits pass. Callback discovery adds8,992 bodies and bounded disassembly62. All2,462 disassembly addresses restore original entry/listing absence. All2,333 data records match PE bytes. Original project/catalogues remain unchanged; type/implementation/native-verification flags remain empty.
+
+**Still broken or not tested:** Full decompilation, scope/ABI/names, native gameplay and campaign parity. The two-double-width pilot fails;45/46 orphan dispatch controls remain unmatched. Navigator omissions/range errors and rejected mixed/incomplete indexes remain recorded. Runtime tests were not rerun for documentation-only changes.
+
+**Next:** Raw branch/table-bound/shared-tail evidence for unresolved dispatchers, x87 helper storage and runtime scope. Preserve the final private checkpoint near the owner's requested quota margin; gestures remain queued.
+
 ## 2026-10-05 Continued discovery and optional-module databases
 
 **Changed:** Resumed authorized private research after the owner corrected an early stop. A private baseline clone adds 9,850 candidate exports. Seventeen optional modules expand saved coverage to 42 modules/122,721 entries with some pseudocode. Separate raw-flow/disassembly passes produce 34 and 11 temporary bodies. Public changes document evidence only.

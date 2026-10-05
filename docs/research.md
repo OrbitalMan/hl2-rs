@@ -1,5 +1,15 @@
 # Sources and native research
 
+## Latest private checkpoint: pass14
+
+The exact-byte retrieval index audits13 immutable source datasets:126inventory identities,42modules with exports,133,473distinct observed addresses with some pseudocode,133,556export variants,51,823candidate/control rows,268,939recorded calls and94,824string records. Saved122,721entries and10,752temporary discovery entries remain separate. Sixteen original errors/recoveries and39failed variants are preserved. Reviewed names/types, Rust implementation and native verification tables remain empty. All native code, binaries, tools and databases stay outside this repository.
+
+Callback discovery adds8,992bodies and bounded disassembly62; rollback checks pass for all2,462disassembly targets. All2,333data units match private PE bytes, including2,074relocation words. Forty-four words reach unowned executable destinations behind indirect jumps. Ten known-function switch controls and34nearby-entry controls add variants on existing entries; one server control records76decompiler instruction addresses outside its listing body. Only one of46orphan dispatcher/seed cases matches a recovered switch relationship. Listing gaps, decompiler coverage and function identity are separate measures.
+
+Sixteen x87 contexts form15matching normalized instruction shapes and one distinct FileSystem_Stdio/SSE case. The VPhysics double-width input pilot fails; original metadata and earlier recovery bytes remain intact. No corrected ABI was adopted. The callback C-only gamedb navigator indexes8,945/8,992bodies, with47omissions/48range mismatches; the62-body navigator has none. Mixed-file indexing produced929false rows and an incomplete-copy index was rejected. Exact path/hash/address/source/variant retrieval is authoritative and rejects ambiguous or existing outputs.
+
+Full decompilation, runtime scope and native behavior remain unverified. Next trace raw branches, table bounds/words and shared tails for unresolved dispatchers, then review x87 helper storage and loader/middleware/tool/variant scope. Gestures remain queued. The private pass14 README and newest publishing/continuation.md contain precise commands/hashes. Frozen ledger scripts must be changed in a new version/class.
+
 The requested references are [universal-modder](https://github.com/rehan-remade/universal-modder), [iw4L](https://github.com/vladtrc/iw4L), and [2010-rust-rewrite-mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup). Their local checkouts informed the discovery/backups workflow, owned-asset loading, shared world representation and simulation/renderer boundaries. No crossover runtime was integrated.
 
 | Reference | Checked-out commit |

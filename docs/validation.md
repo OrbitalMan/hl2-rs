@@ -2,6 +2,20 @@
 
 ## Continued private discovery and optional scope (2026-10-05)
 
+The final continuation through pass14 supersedes these earlier counts. Its audits check13source datasets and every normalized row:133,556export variants,133,473observed addresses,51,823candidate/control rows,268,939recorded calls and94,824strings. All source database hashes match; original project50files/633,910,865bytes are unchanged. Module/dataset identity and real/synthetic exact retrieval/refusal controls pass. Thirty-nine failed variants are retained; no type/implementation/native-verification flags were adopted.
+
+Pass07 audits36,509artifacts/8,992bodies and8,992independent rollbacks. Pass08 audits436artifacts/62bodies and rollback for all2,462targets. Pass10 checks16x87 contexts/recovery bytes/original metadata; the two-double-width pilot fails. Pass11 checks2,333data units/2,074relocation words. Pass12/13 export10/34existing-function controls with unchanged metadata;45/46orphan dispatcher/seed cases remain unmatched. Navigator omissions/range errors and rejected mixed/incomplete indexes are preserved. These checks do not establish a complete native denominator, ABI or gameplay parity.
+
+Recorded command from the active checkout:
+
+```powershell
+C:/Python310/python.exe ../../work/hl2-decompiled/scripts/extended_native_index.py audit --root ../../work/hl2-decompiled/coverage-pass-20261005-14 --db ../../work/hl2-decompiled/coverage-pass-20261005-14/native-index-v5-23cee333e05b5f7c.sqlite3
+```
+
+Result: passed,13datasets,126identities,42modules with exports,133,473observed addresses and zero adopted completion flags. Reports are fresh-write only; repeat with `reaudit_native_index.py` using the same root/database and `--out` pointing to a fresh private directory. Final repeat reports are under pass14/reaudit-final-20261005.
+
+Public checks passed: `git diff --check`, private publishing/validate_decompilation_handoff.py and audit_public_snapshot.py against this checkout. Six documentation files changed; all 214 tracked whitelist files, local links, ignored native/generated examples and unchanged package hashes passed their checks. The publication snapshot had zero failures and two existing absolute-path warnings. The 2026-10-06 commit cleanup repeats these checks with validate_decompilation_handoff_20261006.py and a fresh publication snapshot. Runtime tests, Clippy/builds, owned parsers, gameplay/captures and native comparisons were **not rerun** for documentation-only changes. Earlier runtime results retain their original revision/scope.
+
 The original project/catalogue remains unchanged. On a private clone, 9,850 additional candidate entries export with zero failures; before/after executable-gap and pointer accounting is recorded. The discovery ledger audits 20,842 artifacts, 30,275 candidate attempt records, 47,512 table slots, 9,850 bodies, 13,266 recorded calls and 7,001 strings with zero discrepancies. The discovery navigator indexes all 9,850 bodies but has one range mismatch. Exact VPhysics/client retrieval and a scoped navigator control pass. An initially chosen client control lacked defined instructions and was correctly absent; later bounded disassembly provides its separately catalogued body.
 
 Raw-prototype-flow and bounded-disassembly passes audit 34 and 11 temporary exports respectively. Independent read-only checks verify rollback for all 34 entries and restoration of function/instruction absence for all 15 disassembly targets. Ambiguous entry/shared-tail cases remain unresolved.
