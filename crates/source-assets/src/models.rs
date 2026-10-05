@@ -638,6 +638,7 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         report.instances_loaded += 1;
         if instance.entity.is_some() && !world.rigs.contains_key(&instance.asset_key()) {
             let mut wanted = [
+                "ACT_IDLE",
                 "idle_subtle",
                 "idle_baton",
                 "walk_all",

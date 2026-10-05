@@ -24,6 +24,8 @@ The Bevy branch now renders live `_rt_Camera` feeds from owned map cameras, incl
 
 Capture from the packaged Rust build on `d1_trainstation_02`, with F1 diagnostics and a developer weapon loadout. This is a rendering preview, not evidence of completed campaign gameplay. The screenshot depicts owned HL2 content; distributable game assets are not included.
 
+Model-authored activity lookup now repairs unsupported implicit NPC idle labels, including Kleiner, while preserving explicit defaults and existing loaded poses. Native AI scheduling, gestures, facial animation and first-level staging remain incomplete.
+
 ## Build a fresh checkout
 
 You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust stable with the MSVC toolchain, and Visual Studio C++ build tools with a Windows SDK. The renderer uses OpenGL; GPU and RAM minimums have not been measured. Other operating systems are unverified.

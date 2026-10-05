@@ -215,13 +215,91 @@ impl Clip {
         result
     }
 }
+/// Model-authored activity assignment. Ordering preserves the include traversal.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Sequence {
+    pub name: String,
+    pub activity: String,
+    pub weight: i32,
+    #[serde(default)]
+    pub order: u32,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Rig {
     pub bones: Vec<Bone>,
     pub clips: BTreeMap<String, Clip>,
+    #[serde(default)]
+    pub sequences: Vec<Sequence>,
     pub warnings: Vec<String>,
 }
 impl Rig {
+    /// Merge preloaded cohorts without changing model traversal order or label ownership.
+    pub fn merge_sequence_metadata(&mut self, sequences: impl IntoIterator<Item = Sequence>) {
+        for sequence in sequences {
+            if let Some(existing) = self.sequences.iter_mut().find(|s| s.name == sequence.name) {
+                if sequence.order < existing.order {
+                    *existing = sequence;
+                }
+            } else {
+                self.sequences.push(sequence);
+            }
+        }
+        self.sequences.sort_by_key(|s| s.order);
+    }
+    /// Label first, then model-authored activity. The caller supplies a bounded
+    /// integer in 0..total_weight; native RNG/prediction stream parity is separate.
+    /// Pass no current sequence for native LookupSequence semantics; activity selection
+    /// can retain an appropriate negative-weight current sequence without drawing RNG.
+    pub fn lookup_sequence(
+        &self,
+        name: &str,
+        current: Option<&str>,
+        mut draw: impl FnMut(u32) -> u32,
+    ) -> Option<&str> {
+        if let Some(sequence) = self
+            .sequences
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name))
+        {
+            return Some(&sequence.name);
+        }
+        if let Some((label, _)) = self.clips.get_key_value(&name.to_lowercase()) {
+            return Some(label);
+        }
+        if let Some(sequence) = self.sequences.iter().find(|s| {
+            s.weight < 0
+                && s.activity.eq_ignore_ascii_case(name)
+                && current.is_some_and(|c| c.eq_ignore_ascii_case(&s.name))
+        }) {
+            return Some(&sequence.name);
+        }
+        let choices: Vec<_> = self
+            .sequences
+            .iter()
+            .filter(|s| !s.activity.is_empty() && s.activity.eq_ignore_ascii_case(name))
+            .collect();
+        let total = choices
+            .iter()
+            .try_fold(0u32, |total, s| total.checked_add(s.weight.unsigned_abs()))?;
+        // The native all-zero-weight table has no valid random interval. Reject it.
+        if total == 0 || total > i32::MAX as u32 {
+            return None;
+        }
+        let mut ticket = draw(total);
+        if ticket >= total {
+            return None;
+        }
+        for sequence in choices {
+            // Native tuple construction gives a zero-weight entry one slot, while
+            // its total interval is still the sum of absolute authored weights.
+            let slots = sequence.weight.unsigned_abs().max(1);
+            if ticket < slots {
+                return Some(&sequence.name);
+            }
+            ticket -= slots;
+        }
+        None
+    }
     pub fn matrices(&self, name: &str, time: f32) -> Vec<Mat4> {
         let clip = self.clips.get(&name.to_lowercase());
         let sample = clip.map(|c| {
@@ -281,6 +359,95 @@ pub fn skin(position: Vec3, weights: &Weights, matrices: &[Mat4]) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sequence_lookup_preserves_labels_weight_intervals_and_negative_current() {
+        let mut rig = Rig {
+            sequences: vec![
+                Sequence {
+                    name: "idle_a".into(),
+                    activity: "ACT_IDLE".into(),
+                    weight: 2,
+                    order: 0,
+                },
+                Sequence {
+                    name: "idle_b".into(),
+                    activity: "ACT_IDLE".into(),
+                    weight: -1,
+                    order: 1,
+                },
+                Sequence {
+                    name: "act_idle".into(),
+                    activity: "ACT_OTHER".into(),
+                    weight: 1,
+                    order: 2,
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            rig.lookup_sequence("ACT_IDLE", None, |_| panic!("labels use no random draw")),
+            Some("act_idle")
+        );
+        rig.sequences.pop();
+        for (ticket, expected) in [(0, "idle_a"), (1, "idle_a"), (2, "idle_b")] {
+            assert_eq!(
+                rig.lookup_sequence("aCt_IdLe", None, |total| {
+                    assert_eq!(total, 3);
+                    ticket
+                }),
+                Some(expected)
+            );
+        }
+        assert_eq!(
+            rig.lookup_sequence("ACT_IDLE", Some("IDLE_B"), |_| panic!(
+                "negative current is retained"
+            )),
+            Some("idle_b")
+        );
+        assert_eq!(
+            rig.lookup_sequence("ACT_IDLE", Some("idle_a"), |_| 2),
+            Some("idle_b")
+        );
+        assert!(rig
+            .lookup_sequence("ACT_MISSING", None, |_| panic!())
+            .is_none());
+        assert!(rig.lookup_sequence("ACT_IDLE", None, |_| 3).is_none());
+        rig.sequences[0].weight = 0;
+        rig.sequences[1].weight = 0;
+        assert!(rig
+            .lookup_sequence("ACT_IDLE", None, |_| panic!("zero total is rejected"))
+            .is_none());
+        rig.sequences[1].weight = 2;
+        assert_eq!(rig.lookup_sequence("ACT_IDLE", None, |_| 0), Some("idle_a"));
+        assert_eq!(rig.lookup_sequence("ACT_IDLE", None, |_| 1), Some("idle_b"));
+        rig.sequences[0].weight = i32::MIN;
+        assert!(rig
+            .lookup_sequence("ACT_IDLE", None, |_| panic!("overflow rejected"))
+            .is_none());
+        let first = Sequence {
+            name: "first".into(),
+            activity: "ACT_NEW".into(),
+            weight: 1,
+            order: 3,
+        };
+        let last = Sequence {
+            name: "last".into(),
+            activity: "ACT_NEW".into(),
+            weight: 1,
+            order: 8,
+        };
+        rig.merge_sequence_metadata([last.clone()]);
+        rig.merge_sequence_metadata([last, first]);
+        assert_eq!(
+            rig.sequences
+                .iter()
+                .filter(|s| s.activity == "ACT_NEW")
+                .count(),
+            2
+        );
+        assert_eq!(rig.lookup_sequence("ACT_NEW", None, |_| 0), Some("first"));
+        assert_eq!(rig.lookup_sequence("ACT_NEW", None, |_| 1), Some("last"));
+    }
     fn turning_motion() -> RootMotion {
         RootMotion {
             fps: 20.,

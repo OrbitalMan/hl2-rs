@@ -256,14 +256,18 @@ fn clip(
     })
 }
 pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
+    let wanted = wanted
+        .iter()
+        .map(|s| s.to_lowercase())
+        .collect::<BTreeSet<_>>();
     let data = vfs.read(path)?.context("MDL missing for animation")?;
     let base = bones(&data)?;
     let mut rig = Rig {
         bones: base.iter().map(|b| b.bone.clone()).collect(),
         ..Default::default()
     };
-    let mut seen = BTreeSet::new();
-    load_sequences(vfs, path, &data, wanted, &mut rig, &mut seen, 0)?;
+    let mut state = LoadState::default();
+    load_sequences(vfs, path, &data, &wanted, &mut rig, &mut state, 0)?;
     Ok(rig)
 }
 fn sequence_events(
@@ -306,17 +310,47 @@ fn sequence_events(
     }
     Ok((events, discarded))
 }
+fn sequence_metadata(data: &[u8], at: usize) -> Result<modkit_core::animation::Sequence> {
+    bytes(data, at, 212)?;
+    let activity = if i32le(data, at + 8)? == 0 {
+        String::new()
+    } else {
+        string(data, relative(data, at, at + 8)?)?
+    };
+    Ok(modkit_core::animation::Sequence {
+        name: string(data, relative(data, at, at + 4)?)?.to_lowercase(),
+        activity,
+        weight: i32le(data, at + 20)?,
+        order: 0,
+    })
+}
+#[derive(Default)]
+struct LoadState {
+    seen: BTreeSet<String>,
+    ordinal: u32,
+    bytes: usize,
+}
 fn load_sequences(
     vfs: &Vfs,
     path: &str,
     data: &[u8],
     wanted: &BTreeSet<String>,
     rig: &mut Rig,
-    seen: &mut BTreeSet<String>,
+    state: &mut LoadState,
     depth: usize,
 ) -> Result<()> {
-    if depth > 8 || !seen.insert(path.to_lowercase()) {
+    if depth > 8 {
+        bail!("included animation model depth budget exceeded");
+    }
+    if !state.seen.insert(path.to_lowercase()) {
         return Ok(());
+    }
+    state.bytes = state
+        .bytes
+        .checked_add(data.len())
+        .context("animation byte budget overflow")?;
+    if state.seen.len() > 64 || state.bytes > 64 * 1024 * 1024 {
+        bail!("included animation model budget exceeded");
     }
     let source_bones = bones(data)?;
     let name = string(data, offset(data, 348)?)?.replace('\\', "/");
@@ -330,17 +364,38 @@ fn load_sequences(
         bail!("sequence table too large");
     }
     let base = offset(data, 192)?;
+    let ordinal = state.ordinal;
+    state.ordinal = state
+        .ordinal
+        .checked_add(sequences as u32)
+        .context("sequence order overflow")?;
     for id in 0..sequences {
         let at = base + id * 212;
         bytes(data, at, 212)?;
-        let name = string(data, relative(data, at, at + 4)?)?.to_lowercase();
-        if !wanted.contains(&name) || rig.clips.contains_key(&name) {
+        let mut metadata = sequence_metadata(data, at)?;
+        metadata.order = ordinal + id as u32;
+        let name = metadata.name.clone();
+        if !wanted.contains(&name)
+            && (metadata.activity.is_empty() || !wanted.contains(&metadata.activity.to_lowercase()))
+        {
+            continue;
+        }
+        if rig.sequences.iter().any(|s| s.name == name) {
+            continue;
+        }
+        if rig.sequences.len() >= 4096 {
+            bail!("requested sequence metadata budget exceeded");
+        }
+        rig.sequences.push(metadata);
+        if rig.clips.contains_key(&name) {
             continue;
         }
         if rig.clips.len() >= 64 {
-            rig.warnings
-                .push("sequence load budget of 64 reached".into());
-            break;
+            let warning = "sequence load budget of 64 reached".to_string();
+            if !rig.warnings.contains(&warning) {
+                rig.warnings.push(warning);
+            }
+            continue;
         }
         // Select the central sample for blend grids; pose-parameter blends are not evaluated yet.
         let blends = offset(data, at + 56)?.max(1);
@@ -399,7 +454,7 @@ fn load_sequences(
             .replace('\\', "/")
             .to_lowercase();
         if let Some(bytes) = vfs.read(&include)? {
-            if let Err(e) = load_sequences(vfs, &include, &bytes, wanted, rig, seen, depth + 1) {
+            if let Err(e) = load_sequences(vfs, &include, &bytes, wanted, rig, state, depth + 1) {
                 rig.warnings.push(format!("{include}: {e:#}"));
             }
         } else {
@@ -412,6 +467,55 @@ fn load_sequences(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn relative_activity_metadata_preserves_signed_weights_and_bounds() {
+        let mut data = vec![0; 300];
+        let at = 32;
+        data[at + 4..at + 8].copy_from_slice(&212i32.to_le_bytes());
+        data[at + 8..at + 12].copy_from_slice(&220i32.to_le_bytes());
+        data[at + 20..at + 24].copy_from_slice(&(-3i32).to_le_bytes());
+        data[244..250].copy_from_slice(b"IdleA\0");
+        data[252..261].copy_from_slice(b"ACT_IDLE\0");
+        let seq = sequence_metadata(&data, at).unwrap();
+        assert_eq!(seq.name, "idlea");
+        assert_eq!(seq.activity, "ACT_IDLE");
+        assert_eq!(seq.weight, -3);
+        assert!(sequence_metadata(&data[..260], at).is_err());
+        data[at + 8..at + 12].fill(0);
+        assert!(sequence_metadata(&data, at).unwrap().activity.is_empty());
+        data[at + 8..at + 12].copy_from_slice(&i32::MAX.to_le_bytes());
+        assert!(sequence_metadata(&data, at).is_err());
+    }
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn owned_idle_activities_load_model_sequences_with_finite_poses() {
+        let vfs = Vfs::mount(std::path::Path::new(
+            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
+        ))
+        .unwrap();
+        for (model, expected) in [
+            ("models/kleiner.mdl", vec![("idle_subtle", 1)]),
+            (
+                "models/police.mdl",
+                vec![("batonidle1", 2), ("batonidle2", 1)],
+            ),
+        ] {
+            let rig = load(&vfs, model, &BTreeSet::from(["ACT_IDLE".into()])).unwrap();
+            assert!(rig.warnings.is_empty(), "{model}: {:?}", rig.warnings);
+            assert_eq!(
+                rig.sequences
+                    .iter()
+                    .map(|s| (s.name.as_str(), s.weight))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for seq in &rig.sequences {
+                assert!(rig.clips.contains_key(&seq.name));
+                assert!(rig.matrices(&seq.name, 0.37).iter().all(|m| m.is_finite()));
+            }
+            assert!(rig.lookup_sequence("ACT_IDLE", None, |_| 0).is_some());
+        }
+    }
     fn event_data() -> Vec<u8> {
         let mut data = vec![0; 400];
         // The sequence begins at 32; its event table is relative to that sequence.

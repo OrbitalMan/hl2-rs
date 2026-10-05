@@ -805,6 +805,7 @@ mod tests {
                         },
                     )]),
                     warnings: vec![],
+                    sequences: vec![],
                 },
             )]),
             ..default()

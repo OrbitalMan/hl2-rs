@@ -34,6 +34,7 @@ pub fn prepare_actor_animations(
                             .all(|(a, b)| a.name == b.name && a.parent == b.parent);
                     if same_skeleton {
                         current.clips.extend(rig.clips);
+                        current.merge_sequence_metadata(rig.sequences);
                         current.warnings.extend(rig.warnings);
                     } else {
                         current

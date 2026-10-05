@@ -1,0 +1,6 @@
+[
+  {"tick":1,"fly":true,"eye":[-740,2210,-535],"yaw":90,"label":"implicit-idle"},
+  {"tick":20,"actions":[{"action":"send","target":"kleiner","input":"SetAnimation","parameter":"ACT_IDLE"}],"label":"activity-input"},
+  {"tick":21,"label":"resolved-activity"},
+  {"tick":80,"paused":true,"label":"frozen-idle"}
+]

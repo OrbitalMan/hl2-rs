@@ -175,6 +175,7 @@ mod tests {
                 },
             )]),
             warnings: vec![],
+            sequences: vec![],
         };
         let scale = 2.5;
         let actor = crate::rendering::entity_transform(

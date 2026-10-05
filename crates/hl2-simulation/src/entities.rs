@@ -350,6 +350,27 @@ impl Scene {
             s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
             scene.states.push(s);
         }
+        // Preserve explicit/default labels and existing loaded poses. Unsupported
+        // implicit NPC labels may resolve through the model-authored idle activity.
+        for id in 0..world.entities.len() {
+            let entity = &world.entities[id];
+            if !entity.class().starts_with("npc_") || entity.get("DefaultAnim").is_some() {
+                continue;
+            }
+            let rig = world
+                .model_instances
+                .iter()
+                .find(|i| i.entity == Some(id))
+                .and_then(|i| world.rigs.get(&i.asset_key()));
+            if rig.is_some_and(|r| {
+                !r.clips.contains_key(&scene.states[id].animation)
+                    && r.sequences
+                        .iter()
+                        .any(|s| s.activity.eq_ignore_ascii_case("ACT_IDLE"))
+            }) {
+                scene.animate(world, id, "ACT_IDLE", false);
+            }
+        }
         for id in 0..world.entities.len() {
             if world.entities[id].class() == "logic_auto" {
                 scene.fire(id, "OnMapSpawn", usize::MAX);
@@ -1568,15 +1589,20 @@ impl Scene {
             .iter()
             .find(|i| i.entity == Some(id))
             .map(|i| i.asset_key());
-        let clip = key
-            .as_ref()
-            .and_then(|key| world.rigs.get(key))
-            .and_then(|r| r.clips.get(&name.to_lowercase()));
-        let Some(clip) = clip else {
+        let rig = key.as_ref().and_then(|key| world.rigs.get(key));
+        let random = &mut self.random;
+        let resolved = rig.and_then(|r| {
+            r.lookup_sequence(name, None, |upper| {
+                *random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                (*random >> 32) as u32 % upper
+            })
+        });
+        let clip = rig.zip(resolved).and_then(|(r, label)| r.clips.get(label));
+        let Some((clip, resolved)) = clip.zip(resolved) else {
             self.unsupported_input(world.entities[id].class(), &format!("animation:{name}"));
             return false;
         };
-        self.states[id].animation = name.to_lowercase();
+        self.states[id].animation = resolved.to_owned();
         self.states[id].scene_animation = None;
         self.states[id].animation_started = self.time;
         self.states[id].animation_done =
@@ -1648,7 +1674,7 @@ impl Scene {
             .iter()
             .find(|i| i.entity == Some(actor))
             .and_then(|i| world.rigs.get(&i.asset_key()))
-            .and_then(|r| r.clips.get(&play.to_lowercase()))
+            .and_then(|r| r.clips.get(&self.states[actor].animation))
             .map(|c| c.duration())
             .unwrap_or(0.);
         self.states[actor].scripted_by = Some(id);
@@ -1666,10 +1692,27 @@ impl Scene {
                 .get("m_iszPostIdle")
                 .filter(|s| !s.is_empty())
                 .or(world.entities[actor].get("DefaultAnim"))
-                .unwrap_or(if world.entities[actor].class() == "npc_metropolice" {
-                    "idle_baton"
-                } else {
-                    "idle_subtle"
+                .unwrap_or_else(|| {
+                    let preferred = if world.entities[actor].class() == "npc_metropolice" {
+                        "idle_baton"
+                    } else {
+                        "idle_subtle"
+                    };
+                    let rig = world
+                        .model_instances
+                        .iter()
+                        .find(|i| i.entity == Some(actor))
+                        .and_then(|i| world.rigs.get(&i.asset_key()));
+                    if rig.is_some_and(|r| {
+                        !r.clips.contains_key(preferred)
+                            && r.sequences
+                                .iter()
+                                .any(|s| s.activity.eq_ignore_ascii_case("ACT_IDLE"))
+                    }) {
+                        "ACT_IDLE"
+                    } else {
+                        preferred
+                    }
                 });
             let animated = self.animate(world, actor, name, false);
             self.fire(
@@ -1692,7 +1735,7 @@ impl Scene {
                         .iter()
                         .find(|i| i.entity == Some(actor))
                         .and_then(|i| world.rigs.get(&i.asset_key()))
-                        .and_then(|r| r.clips.get(&name.to_lowercase()))
+                        .and_then(|r| r.clips.get(&self.states[actor].animation))
                         .map_or(0., |c| c.duration())
                 } else {
                     0.
@@ -2833,6 +2876,81 @@ mod tests {
             s.tick(&w, Vec3::ZERO, 0.6);
             assert_eq!(s.states[2].value, 2.);
         }
+    }
+    #[test]
+    fn implicit_idle_and_scripted_activity_use_real_clip_and_deadlines() {
+        use modkit_core::{
+            animation::{Clip, Rig, Sequence},
+            ModelInstance,
+        };
+        let mut world = World {
+            entities: vec![
+                entity(
+                    "scripted_sequence",
+                    "script",
+                    &[
+                        ("m_iszEntity", "actor"),
+                        ("m_iszPlay", "ACT_IDLE"),
+                        ("m_iszPostIdle", "ACT_IDLE"),
+                    ],
+                ),
+                entity("npc_kleiner", "actor", &[]),
+            ],
+            model_instances: vec![ModelInstance {
+                model: "actor.mdl".into(),
+                origin: Vec3::ZERO,
+                angles: Vec3::ZERO,
+                skin: 0,
+                scale: 1.,
+                kind: "npc_kleiner".into(),
+                background: false,
+                solid: false,
+                solid_mode: None,
+                entity: Some(1),
+            }],
+            rigs: BTreeMap::from([(
+                "actor.mdl#0".into(),
+                Rig {
+                    clips: BTreeMap::from([(
+                        "model_idle".into(),
+                        Clip {
+                            events: vec![],
+                            fps: 2.,
+                            looping: true,
+                            frames: vec![vec![]; 5],
+                        },
+                    )]),
+                    sequences: vec![Sequence {
+                        name: "model_idle".into(),
+                        activity: "ACT_IDLE".into(),
+                        weight: 1,
+                        order: 0,
+                    }],
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        assert_eq!(scene.states[1].animation, "model_idle");
+        scene.send(0, "BeginSequence", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert_eq!(scene.states[1].animation, "model_idle");
+        let finish = scene.states[0].script_finish.unwrap();
+        assert!((finish - scene.time - 2.).abs() < 0.0001);
+        scene.tick(&world, Vec3::ZERO, 2.1);
+        assert_eq!(scene.states[1].animation, "model_idle");
+        assert!(scene.states[1].scripted_by.is_none());
+        let post = scene.states[0].post_idle_done.unwrap().0;
+        assert!((post - scene.time - 2.).abs() < 0.0001);
+        world.entities[1]
+            .properties
+            .push(("DefaultAnim".into(), "authored_missing".into()));
+        let mut scene = Scene::new(&world);
+        assert_eq!(scene.states[1].animation, "authored_missing");
+        // Explicit missing label does not silently fall back to an activity.
+        assert!(!scene.animate(&world, 1, "authored_missing", false));
+        assert_eq!(scene.states[1].animation, "authored_missing");
     }
     #[test]
     fn duplicate_outputs_delays_and_fire_limits() {

@@ -1,5 +1,15 @@
 # Local validation â€” 2026-10-05
 
+## Model activity lookup and NPC idle (2026-10-05)
+
+All291 normal tests and18 owned-content checks pass, with strict workspace all-target Clippy, formatting and diff checks. New tests validate sequence-relative activity names and signed weights, label priority, weighted ticket intervals, negative-current retention for explicit activity selection, cohort merge order, invalid random intervals and actual scripted/post-idle deadlines. Owned Kleiner/Police activity candidates decode to finite poses and expected model-authored names/weights.
+
+The packaged station01 lab-room capture shows Kleiner playing idle_subtle instead of an unloaded idle/bind pose. Seven checks verify implicit selection, ACT_IDLE input resolution/restart, clock advancement, capture completion, textures and pose agreement. The14 existing station02 idle_baton metrocop reports remain loaded; that is a valid label and was not replaced. Packaged movement26 and weapon/door17 assertions still pass. The rebuilt retained host reports Kleiner's selected clip. Its lab-room captures show occluding geometry even after correcting a feet/eye coordinate mistake, so they are rejected as actor-image evidence. The accepted actor capture is from Bevy.
+
+The profiled1080p station02 spawn averages154.96 FPS over780 frames after120 warm-up frames, preserving the PVS improvement. This remains a room-specific measurement. Bevy SHA256 `BF4D9D568EAC552375CEF3653263760D8DA7953F48699092B85172C8535A9B98`; retained `6E379B5184F1D1F41A2D091F4C3D9BC33D7CDEC2C37FDCB8E45A19F794BD820C`. Evidence is in ignored artifacts/activity-* and performance-activity.json.
+
+This adds label/activity resolution and repairs unsupported implicit idle labels while preserving explicit defaults and existing loaded poses. Native RNG/prediction streams, activity modifiers/AI translation, idle reselection, complete virtual sequence IDs, blends, gesture layers, facial animation and campaign staging remain unfinished. No ordinary first-level completion or complete NPC AI is claimed.
+
 ## BSP PVS and packaged culling (2026-10-05)
 
 All288 normal workspace tests and17 owned-install tests pass. Cached/raw queries agree on1,200 bounds across the first three station maps. Synthetic tests cover active player/monitor view union, current moved bounds, coplanar bounds, unchanged-result caching, script-hidden entities and missing-cluster fail-open behavior. Strict workspace all-target Clippy, formatting and diff checks pass; the final cache change repeats the affected visibility/animation tests.

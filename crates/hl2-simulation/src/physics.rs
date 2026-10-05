@@ -1042,6 +1042,7 @@ mod tests {
                         },
                     )]),
                     warnings: Vec::new(),
+                    sequences: Vec::new(),
                 },
             )]),
             model_instances: vec![instance],
