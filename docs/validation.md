@@ -1,5 +1,16 @@
 # Local validation — 2026-10-05
 
+## Authored LOOKAT attention (2026-10-05)
+
+272 normal release workspace tests and 14 installed-game ignored tests passed, with strict all-target Clippy and formatting. The added owned security02 test checks named marks, monitor/player overlap, authored intensity, held scene time with continued interest refresh, cancellation tail expiry and target deletion. Synthetic tests check start-time binding, target aliases, missing-target diagnostics, non-NPC no-op, queue priority and zero-time ramp boundaries.
+
+The packaged Bevy security02 fixture passed 26 assertions across monitor/player/self/end captures: both eye meshes consume the same authored world target, iris bases change, scene pause refreshes interests, UI pause freezes both clocks, overlapping events retain queue order independently of importance, and cancellation expires the tail. Captures were visually inspected. Barney's pose is explicitly seeded and unrelated entry triggers disabled before room entry; no ordinary campaign or native differential behavior is inferred. The retained packaged fixture verifies shared queue execution/pause/expiry, while its iris presentation remains unchanged. The combined packaged weapon regression passed 17 assertions.
+
+Private pinned-SDK C++ curve reference comparison passed all 2,974 sampled points from 28 owned LOOKAT events; maximum absolute error was 0.000000476. This validates compiled default-curve math against the SDK, not the installed retail AI implementation. The retail catalogue supplies view-target network registration anchors only. Head poses, gestures, facial/eyelid flexes, lipsync, previous-target retention, random/tactical/synthetic interests, PVS gating and exact actor scheduling remain unfinished.
+
+Bevy package SHA-256 627A5C0B7ACE97175771FD5D9655536A8C4DC6CD71589A92B6157F81AFB86014; retained package C4441464244EDBE0D170704E1D14A3A24DB33CDBC6F649B824D406643D018DC9. Evidence remains in ignored artifacts/bevy-attention*, with reference sources/harness/data kept outside public checkouts.
+
+
 ## Bevy shared pause/console and campaign host (2026-10-05)
 
 All 267 normal workspace release tests and thirteen owned-install ignored tests pass, with strict all-target workspace Clippy, formatting and diff checks passing. Portable extraction preserves the parser/history command bodies; added regressions cover Unicode editing/completion, menu selection, input-transition consumption, setpos/getpos semantics, landmark placement, weapon deadline rebasing and input-only changelevel behavior. The first synthetic trigger test lacked collision brush planes; its fixture was corrected before the final passing run.

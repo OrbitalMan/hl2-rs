@@ -1,0 +1,57 @@
+[
+  {
+    "time": 0.05,
+    "action": "console",
+    "command": "sv_cheats 1; ent_fire #792 Disable; ent_fire trigger_barney_close_exitdoor Disable; ent_fire trigger_storage_close_door_1 Disable; ent_fire security_* Cancel; ent_fire barney_ss_* CancelSequence; ent_fire ss_Helmet_Reveal CancelSequence"
+  },
+  {
+    "time": 0.2,
+    "action": "actor_pose",
+    "target": "barney",
+    "origin": [
+      -3336,
+      -340,
+      -32
+    ],
+    "yaw": 90
+  },
+  {
+    "time": 0.3,
+    "action": "console",
+    "command": "noclip 1; setpos -3376 -252 -30; setang 0 -65; ent_fire security_* Cancel"
+  },
+  {
+    "time": 0.5,
+    "action": "console",
+    "command": "ent_fire security_02 Start"
+  },
+  {
+    "time": 1.4,
+    "action": "capture",
+    "name": "attention-retained-monitor"
+  },
+  {
+    "time": 1.5,
+    "action": "console",
+    "command": "ent_fire security_02 Pause"
+  },
+  {
+    "time": 2.4,
+    "action": "capture",
+    "name": "attention-retained-scene-held"
+  },
+  {
+    "time": 2.5,
+    "action": "console",
+    "command": "ent_fire security_02 Cancel"
+  },
+  {
+    "time": 2.8,
+    "action": "capture",
+    "name": "attention-retained-expired"
+  },
+  {
+    "time": 3.0,
+    "action": "quit"
+  }
+]

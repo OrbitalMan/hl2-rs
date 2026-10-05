@@ -1,4 +1,4 @@
-//! Owned iris projection with a bounded visible-interest fallback for gaze.
+//! Owned iris projection with authored scene interests and a visible-interest fallback.
 use crate::{
     FlyCamera,
     assets::LoadedMap,
@@ -13,6 +13,8 @@ pub struct Eyes {
     draws: usize,
     tracking_player: usize,
     tracking_npc: usize,
+    tracking_entity: usize,
+    tracking_scene: usize,
     projections: Vec<serde_json::Value>,
 }
 impl Eyes {
@@ -36,8 +38,8 @@ impl Eyes {
         result
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"draws":self.draws,"tracking_player":self.tracking_player,"tracking_npc":self.tracking_npc,"projections":self.projections,
-            "policy":"nearest visible player/NPC within 1024 units and 75-degree eye cone; interest queues and VCD LOOKAT/head/facial blending remain unfinished",
+        serde_json::json!({"draws":self.draws,"tracking_player":self.tracking_player,"tracking_npc":self.tracking_npc,"tracking_entity":self.tracking_entity,"tracking_scene":self.tracking_scene,"projections":self.projections,
+            "policy":"newest valid authored LOOKAT interest, shared per actor; nearest-visible fallback outside scripted interests; random/synthetic/native head/facial/PVS behavior remains unfinished",
             "shader":"owned Eyes iris alpha over sclera with retail planar basis; glints, eyelid flexes and Source model lighting remain unfinished"})
     }
 }
@@ -81,6 +83,15 @@ pub fn present(
     eyes.draws = 0;
     eyes.tracking_player = 0;
     eyes.tracking_npc = 0;
+    eyes.tracking_entity = 0;
+    eyes.tracking_scene = 0;
+    #[derive(Clone)]
+    struct Selected {
+        point: glam::Vec3,
+        label: String,
+        interest: Option<hl2_simulation::attention::Interest>,
+    }
+    let mut actor_targets = BTreeMap::<usize, Option<Selected>>::new();
     for (owner, mesh_eye, handle) in &draws {
         let state = &game.scene.states[owner.0];
         if !state.visible || state.killed {
@@ -92,41 +103,90 @@ pub fn present(
         let origin = bone.transform_point3(mesh_eye.eye.origin);
         let head_forward = -bone.transform_vector3(mesh_eye.eye.forward).normalize();
         let world_origin = state.origin + state.rotation * (origin * mesh_eye.scale);
-        let target = candidates
-            .iter()
-            .filter_map(|&(id, p)| {
-                if id == Some(owner.0) {
-                    return None;
-                }
-                let local = state.rotation.inverse() * (p - state.origin) / mesh_eye.scale;
-                let distance = p.distance(world_origin);
-                if !(1. ..=1024.).contains(&distance)
-                    || (local - origin).normalize().dot(head_forward) <= 0.259
-                {
-                    return None;
-                }
-                let excluded = [owner.0, id.unwrap_or(usize::MAX)];
-                if sim
-                    .physics
-                    .projectile_ray(world_origin, p, &excluded)
-                    .is_some()
-                {
-                    return None;
-                }
-                Some((id, local, distance))
-            })
-            .min_by(|a, b| a.2.total_cmp(&b.2));
-        let projection =
-            source_assets::eyes::projection(&mesh_eye.eye, bone, target.map(|(_, p, _)| p));
-        if let Some((id, _, _)) = target {
-            if id.is_some() {
-                eyes.tracking_npc += 1;
-            } else {
+        // SetViewtarget is per actor; both eyes consume the same world target.
+        let selected = actor_targets.entry(owner.0).or_insert_with(|| {
+            use hl2_simulation::attention::Target;
+            let actor_eye = candidates
+                .iter()
+                .find(|(id, _)| *id == Some(owner.0))
+                .map_or(world_origin, |(_, p)| *p);
+            let forward = state.rotation * head_forward;
+            let position = |target| match target {
+                Target::Player => Some(candidates[0].1),
+                Target::Entity(id) => game.scene.states.get(id).filter(|s| !s.killed).map(|s| {
+                    candidates
+                        .iter()
+                        .find(|(candidate, _)| *candidate == Some(id))
+                        .map_or(s.origin, |(_, p)| *p)
+                }),
+            };
+            if let Some((interest, point)) = game
+                .scene
+                .look_targets
+                .eye_target(owner.0, actor_eye, forward, position)
+            {
+                let label = match interest.target {
+                    Target::Player => "player".into(),
+                    Target::Entity(id) => format!("#{id}"),
+                };
+                return Some(Selected {
+                    point,
+                    label,
+                    interest: Some(interest.clone()),
+                });
+            }
+            candidates
+                .iter()
+                .filter_map(|&(id, p)| {
+                    if id == Some(owner.0) {
+                        return None;
+                    }
+                    let distance = p.distance(actor_eye);
+                    if !(1. ..=1024.).contains(&distance)
+                        || (p - actor_eye).normalize().dot(forward) <= 0.259
+                    {
+                        return None;
+                    }
+                    let excluded = [owner.0, id.unwrap_or(usize::MAX)];
+                    if sim
+                        .physics
+                        .projectile_ray(actor_eye, p, &excluded)
+                        .is_some()
+                    {
+                        return None;
+                    }
+                    Some((id, p, distance))
+                })
+                .min_by(|a, b| a.2.total_cmp(&b.2))
+                .map(|(id, point, _)| Selected {
+                    point,
+                    label: id.map_or("player".into(), |i| format!("#{i}")),
+                    interest: None,
+                })
+        });
+        let local_target = selected
+            .as_ref()
+            .map(|s| state.rotation.inverse() * (s.point - state.origin) / mesh_eye.scale);
+        let projection = source_assets::eyes::projection(&mesh_eye.eye, bone, local_target);
+        if let Some(selected) = selected {
+            if selected.interest.is_some() {
+                eyes.tracking_scene += 1;
+            }
+            if selected.label == "player" {
                 eyes.tracking_player += 1;
+            } else {
+                eyes.tracking_entity += 1;
+                let id = selected
+                    .label
+                    .strip_prefix('#')
+                    .and_then(|s| s.parse::<usize>().ok());
+                if id.is_some_and(|id| game.world.entities[id].class().starts_with("npc_")) {
+                    eyes.tracking_npc += 1;
+                }
             }
         }
         eyes.projections.push(serde_json::json!({"entity":owner.0,"surface":mesh_eye.eye.surface,"rows":projection.iter().map(|r|r.to_array()).collect::<Vec<_>>(),
-            "target":target.map(|(id,_,_)|id.map_or("player".to_string(),|i|format!("#{i}")))}));
+            "target":selected.as_ref().map(|s|&s.label),"world_target":selected.as_ref().map(|s|s.point.to_array()),"scripted_interest":selected.as_ref().and_then(|s|s.interest.as_ref())}));
         if let Some(mut mesh) = meshes.get_mut(&handle.0) {
             let Some(VertexAttributeValues::Float32x3(positions)) =
                 mesh.attribute(Mesh::ATTRIBUTE_POSITION)

@@ -888,20 +888,12 @@ pub async fn run(mut o: Options) -> Result<()> {
                     origin,
                     yaw,
                 } => {
-                    if let Some(actor) = world
-                        .entities
-                        .iter()
-                        .enumerate()
-                        .find(|(_, e)| {
-                            e.class().starts_with("npc_")
-                                && e.get("targetname") == Some(target.as_str())
-                        })
-                        .map(|(id, _)| id)
-                    {
-                        scene.states[actor].origin = glam::Vec3::from_array(*origin);
-                        scene.states[actor].rotation =
-                            crate::physics::angles(glam::Vec3::new(0., *yaw, 0.));
-                    } else {
+                    if !scene.fixture_actor_pose(
+                        &world,
+                        target,
+                        glam::Vec3::from_array(*origin),
+                        *yaw,
+                    ) {
                         world
                             .warnings
                             .push(format!("fixture actor pose target missing: {target}"));
@@ -1655,6 +1647,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             snapshot["armor"] = serde_json::json!(inventory.armor);
             snapshot["ar2_charge_until"] = serde_json::json!(inventory.charge_until());
             snapshot["choreography"] = serde_json::json!(scene.choreography_states(&world));
+            snapshot["look_targets"] = serde_json::json!(scene.look_targets.report());
             snapshot["actor_animations"] = serde_json::json!(scene.animation_states(&world));
             snapshot["navigation"] = serde_json::json!(navigation);
             snapshot["npc_movement"] = serde_json::json!(npcs.snapshots());
@@ -1672,6 +1665,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             report["console"] = serde_json::json!({"mode":console.mode,"sv_cheats":console.cheats,"output":console.output,"playback_time":playback_time});
             report["capture_snapshots"] = serde_json::json!(capture_snapshots);
             report["choreography"] = serde_json::json!(scene.choreography_states(&world));
+            report["look_targets"] = serde_json::json!(scene.look_targets.report());
             report["actor_animations"] = serde_json::json!(scene.animation_states(&world));
             report["navigation"] = serde_json::json!(navigation);
             report["npc_movement"] = serde_json::json!(npcs.snapshots());

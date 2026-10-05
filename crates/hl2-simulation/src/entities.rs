@@ -42,6 +42,7 @@ struct Playback {
     completed_early: bool,
     pause: Option<ScenePause>,
     actors: Vec<Option<usize>>,
+    look_targets: BTreeMap<usize, crate::attention::Target>,
 }
 struct Choreography {
     data: Arc<ChoreoScene>,
@@ -192,6 +193,7 @@ pub struct Scene {
     choreography: BTreeMap<usize, Choreography>,
     pub movement_commands: Vec<SceneMoveCommand>,
     movement_ready: BTreeMap<crate::npc::GoalKey, bool>,
+    pub look_targets: crate::attention::LookTargets,
 }
 impl Scene {
     pub fn new(world: &World) -> Self {
@@ -211,6 +213,7 @@ impl Scene {
             choreography: BTreeMap::new(),
             movement_commands: Vec::new(),
             movement_ready: BTreeMap::new(),
+            look_targets: Default::default(),
         };
         for e in &world.entities {
             let base_rotation = physics::angles(
@@ -449,6 +452,64 @@ impl Scene {
                         .is_some_and(|target| glob(&name.to_lowercase(), &target.to_lowercase()))
             })
             .map(|(id, _)| id)
+    }
+    /// Developer fixture setup only; does not reproduce campaign actor placement.
+    pub fn fixture_actor_pose(
+        &mut self,
+        world: &World,
+        target: &str,
+        origin: Vec3,
+        yaw: f32,
+    ) -> bool {
+        let Some(id) = world
+            .entities
+            .iter()
+            .enumerate()
+            .find(|(id, e)| {
+                e.class().starts_with("npc_")
+                    && !self.states[*id].killed
+                    && e.get("targetname")
+                        .is_some_and(|n| n.eq_ignore_ascii_case(target))
+            })
+            .map(|(id, _)| id)
+        else {
+            return false;
+        };
+        self.states[id].origin = origin;
+        self.states[id].rotation = physics::angles(Vec3::new(0., yaw, 0.));
+        true
+    }
+    fn scene_look_target(
+        &self,
+        world: &World,
+        scene: usize,
+        actor: usize,
+        name: &str,
+    ) -> Option<crate::attention::Target> {
+        use crate::attention::Target;
+        if name.eq_ignore_ascii_case("!self") {
+            return Some(Target::Entity(actor));
+        }
+        let name = name
+            .strip_prefix('!')
+            .and_then(|s| s.to_lowercase().strip_prefix("target").map(str::to_owned))
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|slot| (1..=8).contains(slot))
+            .and_then(|slot| world.entities[scene].get(&format!("target{slot}")))
+            .unwrap_or(name);
+        if name.eq_ignore_ascii_case("!player") || name.eq_ignore_ascii_case("player") {
+            return Some(Target::Player);
+        }
+        world
+            .entities
+            .iter()
+            .enumerate()
+            .find(|(id, e)| {
+                !self.states[*id].killed
+                    && e.get("targetname")
+                        .is_some_and(|n| glob(&name.to_lowercase(), &n.to_lowercase()))
+            })
+            .map(|(id, _)| Target::Entity(id))
     }
     pub fn scene_sound_request(
         &self,
@@ -764,6 +825,7 @@ impl Scene {
                 completed_early: false,
                 pause: None,
                 actors,
+                look_targets: BTreeMap::new(),
             });
             self.fire(id, "OnStart", id);
         }
@@ -858,6 +920,26 @@ impl Scene {
                                             &event.parameters[0],
                                         ) {
                                             self.sounds.push(request);
+                                        }
+                                    }
+                                }
+                                EventType::LookAt => {
+                                    // CBaseFlex LOOKAT refreshes NPC interests; non-NPC flex actors are a no-op.
+                                    if let Some(actor) = actor
+                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                    {
+                                        if let Some(target) = self.scene_look_target(
+                                            world,
+                                            id,
+                                            actor,
+                                            &event.parameters[0],
+                                        ) {
+                                            play.look_targets.insert(index, target);
+                                        } else {
+                                            self.unsupported_input(
+                                                "logic_choreographed_scene",
+                                                "LOOKAT:missing-target",
+                                            );
                                         }
                                     }
                                 }
@@ -1024,6 +1106,35 @@ impl Scene {
                         if play.pause.is_none() {
                             play.elapsed = end;
                         }
+                    }
+                    // Preserve start-dispatch order for overlapping events. Pause freezes scene
+                    // elapsed time while the global actor interest lifetime continues to refresh.
+                    for &index in scene.order.iter().take(play.next) {
+                        let event = &scene.data.events[index];
+                        if event.kind != EventType::LookAt
+                            || !event.active()
+                            || play.elapsed < event.start as f64
+                            || play.elapsed > event.end.unwrap_or(event.start) as f64
+                        {
+                            continue;
+                        }
+                        let Some(target) = play.look_targets.get(&index).copied() else {
+                            continue;
+                        };
+                        let Some(actor) = event.actor.and_then(|a| play.actors[a]) else {
+                            continue;
+                        };
+                        if self.states[actor].killed
+                            || matches!(target, crate::attention::Target::Entity(t) if self.states[t].killed)
+                        {
+                            continue;
+                        }
+                        let importance = crate::attention::scene_importance(
+                            event.intensity(&scene.data, play.elapsed as f32),
+                            play.elapsed as f32 - event.start,
+                        );
+                        self.look_targets
+                            .refresh(actor, target, importance, self.time, id, index);
                     }
                     if play.pause.is_none()
                         && play.next == scene.order.len()
@@ -1580,6 +1691,9 @@ impl Scene {
     }
     pub fn tick(&mut self, world: &World, player_feet: Vec3, dt: f32) {
         self.time += dt as f64;
+        self.look_targets.cleanup(self.time, |id| {
+            self.states.get(id).is_some_and(|s| !s.killed)
+        });
         self.tick_choreography(world, dt);
         for id in 0..world.entities.len() {
             let e = &world.entities[id];
@@ -1774,6 +1888,53 @@ mod tests {
         }
         data.extend([0, 0, 0]);
         Arc::new(ChoreoScene::parse(&data, &strings).unwrap())
+    }
+    #[test]
+    fn lookat_binds_target_alias_once_and_reports_missing_target_without_cycler_interest() {
+        use crate::attention::Target;
+        let mut world = World {
+            entities: vec![
+                entity("logic_choreographed_scene", "scene", &[("target1", "MARK")]),
+                entity("npc_citizen", "actor", &[]),
+                entity("cycler_actor", "cycler", &[]),
+                entity("info_target", "mark", &[]),
+            ],
+            ..Default::default()
+        };
+        let mut data = Arc::unwrap_or_clone(choreography(&[
+            (EventType::LookAt, 0., "!TaRgEt1"),
+            (EventType::LookAt, 0., "!player"),
+            (EventType::LookAt, 0.1, "absent"),
+        ]));
+        for name in ["actor", "cycler"] {
+            data.actors.push(source_assets::scenes::Actor {
+                name: name.into(),
+                active: true,
+                channels: Vec::new(),
+            });
+        }
+        for (id, e) in data.events.iter_mut().enumerate() {
+            e.actor = Some(if id == 1 { 1 } else { 0 });
+            e.end = Some(1.);
+        }
+        let mut scene = Scene::new(&world);
+        scene.install_choreography(0, Arc::new(data));
+        scene.send(0, "Start", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        scene.tick(&world, Vec3::ZERO, 0.05);
+        assert_eq!(scene.look_targets.report()[&1][0].target, Target::Entity(3));
+        assert!(!scene.look_targets.report().contains_key(&2));
+        // Renaming a surviving entity does not re-resolve an already-started event.
+        world.entities[3].properties = vec![
+            ("classname".into(), "info_target".into()),
+            ("targetname".into(), "renamed".into()),
+        ];
+        scene.tick(&world, Vec3::ZERO, 0.1);
+        assert_eq!(scene.look_targets.report()[&1][0].target, Target::Entity(3));
+        assert_eq!(
+            scene.diagnostics.unsupported["logic_choreographed_scene.LOOKAT:missing-target"],
+            1
+        );
     }
     #[test]
     fn cycler_actor_named_and_target_aliases_deliver_real_actor_events() {
@@ -2312,6 +2473,88 @@ mod tests {
             .events
             .iter()
             .any(|e| e.kind == EventType::StopPoint && (e.start - 9.59397).abs() < 1e-6));
+    }
+    #[test]
+    #[ignore = "requires owned HL2 scene cache; isolated LOOKAT execution, not native AI parity"]
+    fn owned_security02_refreshes_overlapping_look_targets_and_pause_cancel_lifetime() {
+        use crate::attention::Target;
+        let game = source_assets::install::discover().unwrap();
+        let data = std::fs::read(game.join("hl2/maps/d1_trainstation_01.bsp")).unwrap();
+        let world = source_assets::bsp::Bsp::parse(&data)
+            .unwrap()
+            .world("d1_trainstation_01")
+            .unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let mut scene = Scene::new(&world);
+        scene.queue.clear();
+        scene.load_choreography(&world, &vfs).unwrap();
+        let entity = |name: &str| {
+            world
+                .entities
+                .iter()
+                .position(|e| {
+                    e.get("targetname")
+                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                })
+                .unwrap()
+        };
+        let id = entity("security_02");
+        let barney = entity("Barney");
+        let monitor = entity("mark_secmonitor_look_1");
+        scene.send(id, "Start", "");
+        for _ in 0..50 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+        }
+        let first = scene.look_targets.report()[&barney].last().unwrap();
+        assert_eq!(first.target, Target::Entity(monitor));
+        assert_eq!(first.scene, id);
+        let elapsed = scene.choreography[&id].playback.as_ref().unwrap().elapsed;
+        let e = &scene.choreography[&id].data.events[first.event];
+        assert!(
+            (first.importance
+                - crate::attention::scene_importance(
+                    e.intensity(&scene.choreography[&id].data, elapsed as f32),
+                    elapsed as f32 - e.start
+                ))
+            .abs()
+                < 1e-6
+        );
+        scene.send(id, "Pause", "");
+        // Entity input delivery follows choreography in the retained fixed tick.
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        let paused_elapsed = scene.choreography[&id].playback.as_ref().unwrap().elapsed;
+        assert!((paused_elapsed - elapsed - 0.015).abs() < 1e-6);
+        for _ in 0..30 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+        }
+        assert_eq!(
+            scene.choreography[&id].playback.as_ref().unwrap().elapsed,
+            paused_elapsed
+        );
+        assert!(scene.look_targets.report()[&barney].last().unwrap().end > scene.time);
+        scene.send(id, "Resume", "");
+        for _ in 0..365 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+        }
+        let targets = &scene.look_targets.report()[&barney];
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].target, Target::Entity(monitor));
+        assert_eq!(targets[1].target, Target::Player);
+        // Explicit cancellation stops refreshing but retains the last 0.1 sec interest.
+        scene.send(id, "Cancel", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(!scene.look_targets.report()[&barney].is_empty());
+        for _ in 0..7 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+        }
+        assert!(!scene.look_targets.report().contains_key(&barney));
+        scene.send(id, "Start", "");
+        for _ in 0..50 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+        }
+        scene.states[monitor].killed = true;
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(!scene.look_targets.report().contains_key(&barney));
     }
     #[test]
     fn no_touch_changelevel_still_accepts_explicit_input() {

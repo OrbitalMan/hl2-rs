@@ -1,0 +1,166 @@
+[
+  {
+    "tick": 1,
+    "fly": true,
+    "eye": [
+      -4022,
+      -510,
+      38
+    ],
+    "yaw": -65,
+    "actions": [
+      {
+        "action": "send",
+        "target": "#792",
+        "input": "Disable"
+      },
+      {
+        "action": "send",
+        "target": "trigger_barney_close_exitdoor",
+        "input": "Disable"
+      },
+      {
+        "action": "send",
+        "target": "trigger_storage_close_door_1",
+        "input": "Disable"
+      },
+      {
+        "action": "send",
+        "target": "security_*",
+        "input": "Cancel"
+      },
+      {
+        "action": "send",
+        "target": "barney_ss_*",
+        "input": "CancelSequence"
+      },
+      {
+        "action": "send",
+        "target": "ss_Helmet_Reveal",
+        "input": "CancelSequence"
+      },
+      {
+        "action": "actor_pose",
+        "target": "barney",
+        "origin": [
+          -3336,
+          -340,
+          -32
+        ],
+        "yaw": 90
+      }
+    ]
+  },
+  {
+    "tick": 2,
+    "eye": [
+      -3376,
+      -252,
+      34
+    ],
+    "yaw": -65
+  },
+  {
+    "tick": 3,
+    "actions": [
+      {
+        "action": "send",
+        "target": "security_*",
+        "input": "Cancel"
+      }
+    ]
+  },
+  {
+    "tick": 10,
+    "actions": [
+      {
+        "action": "send",
+        "target": "security_02",
+        "input": "Start"
+      }
+    ],
+    "label": "lookat-start"
+  },
+  {
+    "tick": 65,
+    "label": "monitor-interest"
+  },
+  {
+    "tick": 75,
+    "actions": [
+      {
+        "action": "send",
+        "target": "security_02",
+        "input": "Pause"
+      }
+    ]
+  },
+  {
+    "tick": 80,
+    "label": "scene-paused"
+  },
+  {
+    "tick": 100,
+    "label": "scene-held"
+  },
+  {
+    "tick": 101,
+    "actions": [
+      {
+        "action": "send",
+        "target": "security_02",
+        "input": "Resume"
+      }
+    ]
+  },
+  {
+    "tick": 445,
+    "label": "player-monitor-overlap"
+  },
+  {
+    "tick": 465,
+    "label": "player-after-monitor"
+  },
+  {
+    "tick": 480,
+    "paused": true,
+    "label": "ui-paused"
+  },
+  {
+    "tick": 520,
+    "label": "ui-held"
+  },
+  {
+    "tick": 521,
+    "paused": false,
+    "label": "ui-resumed"
+  },
+  {
+    "tick": 1447,
+    "label": "self-interest"
+  },
+  {
+    "tick": 1450,
+    "actions": [
+      {
+        "action": "send",
+        "target": "security_02",
+        "input": "Cancel"
+      }
+    ],
+    "label": "cancel-request"
+  },
+  {
+    "tick": 1451,
+    "label": "cancel-retains-tail"
+  },
+  {
+    "tick": 1460,
+    "label": "cancel-expired"
+  },
+  {
+    "tick": 1470,
+    "paused": true,
+    "label": "attention-final"
+  }
+]

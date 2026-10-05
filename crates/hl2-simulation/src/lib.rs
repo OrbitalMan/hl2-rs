@@ -17,3 +17,5 @@ pub mod sounds;
 pub mod campaign;
 pub mod impacts;
 pub mod projectile_visuals;
+
+pub mod attention;

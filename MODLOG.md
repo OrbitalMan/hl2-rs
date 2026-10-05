@@ -1,5 +1,10 @@
 # HL2 reconstruction journal
 
+## 2026-10-05 - authored scene attention
+
+Shared simulation now executes compiled LOOKAT events with normalized-time scene/event ramps, timed deduplicated interests, target aliases, pause refresh and cancellation expiry. Bevy projects both eyes toward one selected actor target; monitor/player/self behavior is capture-verified in a deliberately seeded security02 fixture. Retained simulation/reporting consumes the same queue. Head/facial controls and native random/tactical attention remain unfinished; this is not campaign or retail AI parity.
+
+
 ## 2026-10-05: shared pause/console and Bevy campaign host
 
 Moved the retained console parser/history/cheat gates and resource-driven pause layout into hl2-ui. Both hosts now provide explicit input and consume the same canvas. Bevy opens Resume/Console/Quit, supports the existing command subset and preserves selection/capture/held-input ordering. Console rendering clips output to its panel and handles Unicode character boundaries.

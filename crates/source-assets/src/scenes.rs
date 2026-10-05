@@ -119,6 +119,68 @@ impl Event {
     pub fn resume_condition(&self) -> bool {
         self.flags & 1 != 0
     }
+    /// Compiled BVCD ramps restore the default normalized-X Catmull-Rom curve.
+    /// Text VCD edge/curve overrides are not represented by this binary format.
+    pub fn intensity(&self, scene: &ChoreoScene, time: f32) -> f32 {
+        self.end.map_or(0., |end| {
+            compiled_ramp(&self.ramp, end - self.start, time - self.start)
+                * compiled_ramp(&scene.ramp, scene.stop_time(), time)
+        })
+    }
+}
+/// Evaluate a compiled scene/event ramp with implicit zero-valued boundary samples.
+/// Neighbor time intervals are normalized before Catmull-Rom; output is clamped.
+pub fn compiled_ramp(samples: &[Sample], duration: f32, time: f32) -> f32 {
+    if !time.is_finite() || !duration.is_finite() {
+        return 0.;
+    }
+    if samples.is_empty() {
+        return 1.;
+    }
+    // A real sample at t=0 supersedes the implicit zero boundary. The native
+    // span search starts from a real sample; avoid a zero-width virtual segment.
+    if samples[0].time == time {
+        return samples[0].value.clamp(0., 1.);
+    }
+    let right = samples.partition_point(|s| s.time < time);
+    let bounded = |index: isize| {
+        if index < 0 {
+            (0., 0.)
+        } else {
+            samples
+                .get(index as usize)
+                .map_or((duration, 0.), |s| (s.time, s.value))
+        }
+    };
+    let (start_t, start) = bounded(right as isize - 1);
+    let (end_t, end) = bounded(right as isize);
+    let (mut pre_t, mut pre) = bounded(right as isize - 2);
+    let (mut next_t, mut next) = bounded(right as isize + 1);
+    if right < 2 {
+        pre_t = start_t;
+    }
+    if right + 1 >= samples.len() {
+        next_t = end_t;
+    }
+    let dt = end_t - start_t;
+    if dt != 0. {
+        if pre_t != start_t {
+            pre = start + (pre - start) * dt / (start_t - pre_t);
+        }
+        if next_t != end_t {
+            next = end + (next - end) * dt / (next_t - end_t);
+        }
+    }
+    let t = if dt > 0. {
+        ((time - start_t) / dt).clamp(0., 1.)
+    } else {
+        0.
+    };
+    let y = start
+        + 0.5 * (end - pre) * t
+        + 0.5 * (2. * pre - 5. * start + 4. * end - next) * t * t
+        + 0.5 * (-pre + 3. * start - 3. * end + next) * t * t * t;
+    y.clamp(0., 1.)
 }
 #[derive(Clone, Debug)]
 pub struct Channel {
@@ -655,6 +717,77 @@ mod tests {
         b.extend(0u32.to_le_bytes());
         b.extend(blob);
         b
+    }
+    #[test]
+    fn compiled_ramps_normalize_irregular_times_and_zero_edges() {
+        let samples = [(0., 0.2), (0.25, 0.4), (1.25, 0.6), (2., 0.8)]
+            .into_iter()
+            .map(|(time, value)| Sample { time, value })
+            .collect::<Vec<_>>();
+        // Cubic interpolation at one quarter of the interval is 0.490625; linear is 0.45.
+        assert!((compiled_ramp(&samples, 2., 0.5) - 0.490625).abs() < 1e-6);
+        let edges = [
+            Sample {
+                time: 0.25,
+                value: 1.,
+            },
+            Sample {
+                time: 0.75,
+                value: 1.,
+            },
+        ];
+        assert_eq!(compiled_ramp(&edges, 1., 0.), 0.);
+        assert_eq!(compiled_ramp(&edges, 1., 1.), 0.);
+        assert!((compiled_ramp(&edges, 1., 0.0625) - 0.203125).abs() < 1e-6);
+        assert_eq!(compiled_ramp(&edges, 1., 0.5), 1.);
+        assert_eq!(compiled_ramp(&[], 1., 0.5), 1.);
+        assert_eq!(
+            compiled_ramp(
+                &[
+                    Sample {
+                        time: 0.,
+                        value: 1.
+                    },
+                    Sample {
+                        time: 1.,
+                        value: 1.
+                    }
+                ],
+                1.,
+                0.
+            ),
+            1.
+        );
+    }
+    #[test]
+    fn event_intensity_multiplies_scene_ramp_and_requires_an_end() {
+        let mut scene = ChoreoScene::parse(&binary(), &["s".into()]).unwrap();
+        scene.ramp = vec![
+            Sample {
+                time: 0.,
+                value: 0.5,
+            },
+            Sample {
+                time: 2.,
+                value: 0.5,
+            },
+        ];
+        scene.events[0].start = 0.;
+        scene.events[0].end = Some(2.);
+        scene.events[0].ramp = vec![
+            Sample {
+                time: 0.,
+                value: 0.8,
+            },
+            Sample {
+                time: 2.,
+                value: 0.8,
+            },
+        ];
+        // Each constant segment overshoots to 1.125 times its control value at its midpoint.
+        assert!((scene.events[0].intensity(&scene, 1.) - 0.50625).abs() < 1e-6);
+        scene.events[0].end = None;
+        assert_eq!(scene.events[0].intensity(&scene, 1.), 0.);
     }
     #[test]
     fn all_event_types_and_inactive_channel_are_preserved() {

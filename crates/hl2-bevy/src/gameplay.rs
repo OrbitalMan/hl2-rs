@@ -35,6 +35,12 @@ pub enum Action {
     Reload,
     Use,
     Impulse,
+    /// Seed an isolated test actor; never called by ordinary campaign play.
+    ActorPose {
+        target: String,
+        origin: [f32; 3],
+        yaw: f32,
+    },
     Send {
         target: String,
         input: String,
@@ -45,6 +51,16 @@ pub enum Action {
 impl Action {
     pub fn valid(&self) -> bool {
         match self {
+            Self::ActorPose {
+                target,
+                origin,
+                yaw,
+            } => {
+                !target.is_empty()
+                    && target.len() <= 128
+                    && origin.iter().all(|v| v.is_finite())
+                    && yaw.is_finite()
+            }
             Self::Slot { slot } => *slot < 6,
             Self::Wheel { delta } => (-100..=100).contains(delta),
             Self::Send {
@@ -229,6 +245,26 @@ impl Gameplay {
                     }
                     continue;
                 }
+                Action::ActorPose {
+                    target,
+                    origin,
+                    yaw,
+                } => {
+                    if !self.scene.fixture_actor_pose(
+                        &self.world,
+                        &target,
+                        Vec3::from_array(origin),
+                        yaw,
+                    ) {
+                        *self
+                            .scene
+                            .diagnostics
+                            .unsupported
+                            .entry(format!("fixture actor pose target missing: {target}"))
+                            .or_default() += 1;
+                    }
+                    continue;
+                }
                 Action::Send {
                     target,
                     input,
@@ -371,7 +407,7 @@ impl Gameplay {
             }).collect();
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"pending":self.selection.pending,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
-            "animations":self.scene.animation_states(&self.world),"npc_goals":self.npcs.snapshots(),
+            "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"npc_goals":self.npcs.snapshots(),
             "projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
