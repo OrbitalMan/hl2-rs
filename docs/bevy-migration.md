@@ -157,3 +157,6 @@ Static bounds checks are reused only while both bounds and view-cluster signatur
 ## Model-authored activity lookup
 
 Both hosts share label-first animation lookup with model activity fallback and weighted candidates. This fixes Kleiner's unsupported implicit idle while retaining existing metrocop/citizen poses and explicit authored defaults. Requested candidates are preloaded; frame systems perform no model reads. Scripted actions and post-idle durations use the resolved clip. Run `launch-bevy.cmd --map d1_trainstation_01 --movement-script test-inputs/bevy-activity-idle.json --capture artifacts/idle.png --report artifacts/idle.json` for a controlled view into the owned off-map lab room and an ACT_IDLE input. It does not validate ordinary security-scene staging, full AI or native gesture layers.
+
+
+The renderer shares map material handles by authored name/lightmap pair and only uploads changed global proxy values. Skeleton transforms and eye UVs retain per-owner state. Future per-entity material proxies need copy-on-write or distinct handles; do not add owner-dependent uniforms to the current cache key silently. Loaded material statistics count unique handles, while mesh statistics still count draw objects. Packaged feed/actor/movement/weapon comparisons are recorded in validation.md.

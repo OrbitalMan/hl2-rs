@@ -502,20 +502,27 @@ pub fn spawn_map(
     }
     let mut stats = status.0.lock().expect("status lock");
     stats.skipped_background_surfaces = skipped;
-    stats.materials = batches.len();
+    let mut material_handles = BTreeMap::new();
     let mut skeletons = BTreeMap::<Owner, crate::gpu_skinning::Skeleton>::new();
     for ((owner, name, lm, _), mut batch) in batches {
         let fallback = MaterialData::default();
         let definition = loaded.materials.get(&name).unwrap_or(&fallback);
-        let material = materials.add(make_material(
-            definition,
-            bases.get(&name).unwrap_or(&missing).clone(),
-            lm.and_then(|index| lightmaps.get(index))
-                .unwrap_or(&white)
-                .clone(),
-            irises.get(&name).or_else(|| overlays.get(&name)).cloned(),
-            &white,
-        ));
+        // Uniforms and proxy clocks belong to this material/lightmap pair, not its owner.
+        // Eye projection remains per-mesh UV data, so sharing this handle cannot share gaze.
+        let material = material_handles
+            .entry((name.clone(), lm))
+            .or_insert_with(|| {
+                materials.add(make_material(
+                    definition,
+                    bases.get(&name).unwrap_or(&missing).clone(),
+                    lm.and_then(|index| lightmaps.get(index))
+                        .unwrap_or(&white)
+                        .clone(),
+                    irises.get(&name).or_else(|| overlays.get(&name)).cloned(),
+                    &white,
+                ))
+            })
+            .clone();
         stats.meshes += 1;
         stats.triangles += batch.indices.len() / 3;
         let mut animation = if batch.skin.iter().any(|(_, w)| w.is_some()) {
@@ -666,6 +673,7 @@ pub fn spawn_map(
         }
     }
     stats.skin_joints = skeletons.values().map(|s| s.joints.len()).sum();
+    stats.materials = material_handles.len();
 }
 pub(crate) fn mesh_from_surface(surface: &Surface, definition: &MaterialData) -> Mesh {
     let mut batch = Batch::default();

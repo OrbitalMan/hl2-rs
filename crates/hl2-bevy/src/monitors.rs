@@ -170,19 +170,32 @@ pub fn present_materials(
     )>,
     mut materials: ResMut<Assets<crate::rendering::SourceMaterial>>,
 ) {
+    // Shared materials use one authored proxy and scene clock on every draw.
+    let mut updated = std::collections::HashSet::new();
     for (definition, handle) in &draws {
+        if !updated.insert(handle.0.id()) {
+            continue;
+        }
         let (color, uv) = definition
             .animation
             .sample(definition.color, game.scene.time as f32);
-        if let Some(mut material) = materials.get_mut(&handle.0) {
-            material.tint.x = color[0] * definition.color2[0];
-            material.tint.y = color[1] * definition.color2[1];
-            material.tint.z = color[2] * definition.color2[2];
-            material.secondary_uv = Mat3::from_cols(
-                Vec3::new(uv[0][0], uv[1][0], 0.),
-                Vec3::new(uv[0][1], uv[1][1], 0.),
-                Vec3::new(uv[0][2], uv[1][2], 1.),
-            );
+        let tint = Vec3::new(
+            color[0] * definition.color2[0],
+            color[1] * definition.color2[1],
+            color[2] * definition.color2[2],
+        );
+        let secondary_uv = Mat3::from_cols(
+            Vec3::new(uv[0][0], uv[1][0], 0.),
+            Vec3::new(uv[0][1], uv[1][1], 0.),
+            Vec3::new(uv[0][2], uv[1][2], 1.),
+        );
+        if materials
+            .get(&handle.0)
+            .is_some_and(|m| m.tint.truncate() != tint || m.secondary_uv != secondary_uv)
+            && let Some(mut material) = materials.get_mut(&handle.0)
+        {
+            material.tint = tint.extend(material.tint.w);
+            material.secondary_uv = secondary_uv;
         }
     }
 }
