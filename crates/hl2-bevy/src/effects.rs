@@ -305,6 +305,7 @@ pub fn present(
             let mesh = meshes.add(quad_mesh(&quad));
             let entity = commands
                 .spawn((
+                    crate::campaign::MapOwned,
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material.clone()),
                     Transform::IDENTITY,
@@ -378,6 +379,7 @@ pub fn present(
             let material = effects.materials[&mark.material].clone();
             let entity = commands
                 .spawn((
+                    crate::campaign::MapOwned,
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material),
                     transform,
@@ -434,6 +436,7 @@ pub fn present(
                 .map(|(mesh, material)| {
                     commands
                         .spawn((
+                            crate::campaign::MapOwned,
                             Mesh3d(mesh.clone()),
                             MeshMaterial3d(material.clone()),
                             transform,

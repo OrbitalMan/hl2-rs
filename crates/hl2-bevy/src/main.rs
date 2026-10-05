@@ -1,6 +1,8 @@
 //! Isolated Bevy/wgpu host reusing engine-independent Source simulation.
 mod assets;
 mod audio;
+mod campaign;
+mod console;
 mod effects;
 mod eyes;
 mod gameplay;
@@ -88,7 +90,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then pauses; click resumes. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -154,6 +156,7 @@ struct RunStatus {
     camera_source: [f32; 3],
     simulation: serde_json::Value,
     presentation: serde_json::Value,
+    map_metadata: serde_json::Value,
 }
 #[derive(Clone, Resource, Default)]
 struct Status(Arc<Mutex<RunStatus>>);
@@ -242,6 +245,7 @@ fn main() -> Result<()> {
         .insert_resource(status.clone())
         .insert_resource(PreparedMap(Some(loaded)))
         .insert_resource(simulation)
+        .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
         .insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.1)))
         .add_plugins(
@@ -269,6 +273,12 @@ fn main() -> Result<()> {
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
         .add_plugins(bevy::sprite_render::Material2dPlugin::<hud::HudMaterial>::default())
         .add_plugins(movement::MovementPlugin)
+        .add_systems(
+            RunFixedMainLoop,
+            campaign::poll
+                .in_set(bevy::app::RunFixedMainLoopSystems::AfterFixedMainLoop)
+                .before(movement::present),
+        )
         .add_systems(
             PostUpdate,
             (
@@ -319,12 +329,25 @@ fn main() -> Result<()> {
         None
     };
     let capture_exists = options.capture.as_ref().is_none_or(|path| path.is_file());
-    let report = serde_json::json!({
+    let mut report = serde_json::json!({
         "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": options.map, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
-        "limitations": ["Pause menu/console and campaign transitions are not migrated yet; migrated effects retain incomplete native particles and studio decals", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "LDR sky uses owned faces/leaf visibility; sky polygon masks, PVS/areaportals, material proxies, dynamic lighting and HDR remain unfinished", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
+        "limitations": ["Pause/console and landmark/inventory map transitions migrated; complete command coverage, save/global state and native effects remain incomplete", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "LDR sky uses owned faces/leaf visibility; sky polygon masks, PVS/areaportals, material proxies, dynamic lighting and HDR remain unfinished", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
+    for key in [
+        "map",
+        "bsp_revision",
+        "models",
+        "textures",
+        "texture_errors",
+        "asset_warnings",
+        "spawn_sky_visibility",
+    ] {
+        if let Some(value) = status.map_metadata.get(key) {
+            report[key] = value.clone();
+        }
+    }
     std::fs::write(&options.report, serde_json::to_vec_pretty(&report)?)?;
     println!("Report: {}", options.report.display());
     if !matches!(exit, AppExit::Success) {
@@ -359,44 +382,25 @@ fn setup(
     (mut meshes, mut materials, mut images, mut sounds, mut effect_materials): StartupAssets,
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
+    commands.insert_resource(campaign::Campaign::new(&loaded));
     let (spawn, yaw) = loaded.world.spawn();
     let position = options
         .position
         .unwrap_or_else(|| Vec3::from_array(spawn.to_array()));
     let yaw = options.yaw.unwrap_or(yaw);
-    rendering::spawn_map(
-        &loaded,
+    let ui = install_map(
+        loaded,
         &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut images,
+        (
+            &mut meshes,
+            &mut materials,
+            &mut images,
+            &mut sounds,
+            &mut effect_materials,
+        ),
         &status,
     );
-    effects::install(
-        &loaded,
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut effect_materials,
-        &mut images,
-    );
-    commands.insert_resource(eyes::Eyes::new(&loaded));
-    sky::install(
-        &loaded,
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut images,
-    );
-    commands.insert_resource(sky::Sky::new(
-        loaded.bsp,
-        loaded.world.background_camera.clone(),
-        loaded.sky.as_ref(),
-    ));
-    effects::adopt(loaded.effects.sprites, &mut commands);
-    commands.insert_resource(loaded.gameplay);
-    commands.insert_resource(hud::Hud::new(loaded.hud));
-    audio::install(&mut commands, &mut sounds, loaded.audio);
+    commands.insert_resource(console::Console::new(ui));
     commands.spawn((
         Camera2d,
         Camera {
@@ -443,6 +447,48 @@ fn setup(
         FlyCamera,
     ));
 }
+pub(crate) type MapAssets<'a> = (
+    &'a mut Assets<Mesh>,
+    &'a mut Assets<rendering::SourceMaterial>,
+    &'a mut Assets<Image>,
+    &'a mut Assets<AudioSource>,
+    &'a mut Assets<effects::EffectMaterial>,
+);
+pub(crate) fn install_map(
+    loaded: assets::LoadedMap,
+    commands: &mut Commands,
+    (meshes, materials, images, sounds, effect_materials): MapAssets,
+    status: &Status,
+) -> hl2_ui::console::Console {
+    {
+        let mut stats = status.0.lock().expect("map stats");
+        stats.meshes = 0;
+        stats.triangles = 0;
+        stats.materials = 0;
+        stats.skipped_background_surfaces = 0;
+    }
+    rendering::spawn_map(&loaded, commands, meshes, materials, images, status);
+    effects::install(
+        &loaded,
+        commands,
+        meshes,
+        materials,
+        effect_materials,
+        images,
+    );
+    commands.insert_resource(eyes::Eyes::new(&loaded));
+    sky::install(&loaded, commands, meshes, materials, images);
+    commands.insert_resource(sky::Sky::new(
+        loaded.bsp,
+        loaded.world.background_camera.clone(),
+        loaded.sky.as_ref(),
+    ));
+    effects::adopt(loaded.effects.sprites, commands);
+    commands.insert_resource(loaded.gameplay);
+    commands.insert_resource(hud::Hud::new(loaded.hud));
+    audio::install(commands, sounds, loaded.audio);
+    loaded.console
+}
 type EntityDrawQuery<'w, 's> = Query<
     'w,
     's,
@@ -461,19 +507,30 @@ type HostResources<'w> = (
     Res<'w, sky::Sky>,
     Res<'w, eyes::Eyes>,
     Res<'w, effects::Effects>,
+    Res<'w, console::Console>,
+    Res<'w, campaign::Campaign>,
+);
+type DiagnosticQueries<'w, 's> = (
+    Query<'w, 's, &'static Transform, With<FlyCamera>>,
+    EntityDrawQuery<'w, 's>,
+    Query<'w, 's, Entity, With<campaign::MapOwned>>,
+    Query<'w, 's, Entity, With<Camera>>,
+    Res<'w, Assets<Mesh>>,
+    Res<'w, Assets<Image>>,
 );
 fn monitor(
     mut commands: Commands,
-    (options, simulation, game, hud, audio, sky, eyes, effects): HostResources,
+    (options, simulation, game, hud, audio, sky, eyes, effects, console, campaign): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
     adapter: Option<Res<RenderAdapterInfo>>,
-    (cameras, draws): (Query<&Transform, With<FlyCamera>>, EntityDrawQuery),
+    (cameras, draws, map_entities, all_cameras, meshes, images): DiagnosticQueries,
     mut exit: MessageWriter<AppExit>,
 ) {
     control.frames += 1;
     let mut report = status.0.lock().expect("status lock");
     report.frames = control.frames;
+    report.map_metadata = campaign.metadata.clone();
     report.simulation = simulation.report();
     report.simulation["gameplay"] = game.report(&simulation.physics);
     let mut mismatches = 0;
@@ -499,7 +556,8 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
         }
     }
-    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"eyes":eyes.report(),"effects":effects.report()});
+    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),
+        "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
     if let Some(adapter) = adapter {
         report.adapter = Some(adapter.name.clone());
         report.backend = Some(format!("{:?}", adapter.backend));
@@ -512,7 +570,10 @@ fn monitor(
     }
     if options.frames.is_some() || options.movement_script.is_some() {
         let limit = options.frames.unwrap_or(u64::MAX - 600);
-        if (control.frames >= limit || simulation.finished) && !control.requested {
+        if (control.frames >= limit || simulation.finished)
+            && !simulation.loading()
+            && !control.requested
+        {
             control.requested = true;
             control.requested_frame = Some(control.frames);
             if options.capture.is_some() {

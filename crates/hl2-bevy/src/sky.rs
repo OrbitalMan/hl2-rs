@@ -86,6 +86,7 @@ pub fn install(
                 false,
             ));
             commands.spawn((
+                crate::campaign::MapOwned,
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(materials.add(rendering::SourceMaterial {
                     tint: Vec4::ONE,
@@ -103,6 +104,7 @@ pub fn install(
     }
     for (is_2d, layer, order) in [(true, 3, -2), (false, 4, -1)] {
         commands.spawn((
+            crate::campaign::MapOwned,
             Camera3d::default(),
             Camera {
                 order,

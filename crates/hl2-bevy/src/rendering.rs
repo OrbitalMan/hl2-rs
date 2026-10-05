@@ -479,6 +479,7 @@ pub fn spawn_map(
             entity_transform(state.origin, state.rotation)
         });
         let mut draw = commands.spawn((
+            crate::campaign::MapOwned,
             Name::new(name.clone()),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
@@ -660,6 +661,7 @@ mod tests {
         let entity = app
             .world_mut()
             .spawn((
+                crate::campaign::MapOwned,
                 SourceEntity(0),
                 Transform::IDENTITY,
                 Visibility::Inherited,

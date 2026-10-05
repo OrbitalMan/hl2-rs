@@ -1,0 +1,204 @@
+[
+  {
+    "tick": 1,
+    "eye": [
+      -3260,
+      -2024,
+      128
+    ],
+    "yaw": 0,
+    "ui": [
+      {
+        "action": "toggle_console"
+      },
+      {
+        "action": "command",
+        "command": "impulse 101"
+      }
+    ],
+    "label": "cheat-denied"
+  },
+  {
+    "tick": 5,
+    "ui": [
+      {
+        "action": "command",
+        "command": "sv_cheats 1; impulse 101; noclip 1; getpos; echo \"value;kept\""
+      }
+    ],
+    "label": "cheat-granted"
+  },
+  {
+    "tick": 10,
+    "ui": [
+      {
+        "action": "command",
+        "command": "setpos -3260 -2024 64; setang 0 0; ent_fire station_entrance Close"
+      }
+    ],
+    "label": "setpos-paused"
+  },
+  {
+    "tick": 11,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "text": "é🦀"
+        }
+      }
+    ],
+    "label": "unicode-input"
+  },
+  {
+    "tick": 12,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "left",
+            "backspace"
+          ]
+        }
+      }
+    ],
+    "label": "unicode-edit"
+  },
+  {
+    "tick": 15,
+    "ui": [
+      {
+        "action": "toggle_console"
+      }
+    ],
+    "label": "resume-transition"
+  },
+  {
+    "tick": 16
+  },
+  {
+    "tick": 20,
+    "actions": [
+      {
+        "action": "slot",
+        "slot": 1
+      },
+      {
+        "action": "confirm"
+      }
+    ]
+  },
+  {
+    "tick": 110,
+    "actions": [
+      {
+        "action": "slot",
+        "slot": 2
+      }
+    ],
+    "label": "selection-open"
+  },
+  {
+    "tick": 111,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "selection-canceled"
+  },
+  {
+    "tick": 115,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "pause-open"
+  },
+  {
+    "tick": 118,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "pointer": [
+            0,
+            0
+          ],
+          "click": true
+        }
+      }
+    ],
+    "label": "outside-click"
+  },
+  {
+    "tick": 120,
+    "ui": [
+      {
+        "action": "toggle_console"
+      }
+    ],
+    "label": "console-from-pause"
+  },
+  {
+    "tick": 121,
+    "ui": [
+      {
+        "action": "command",
+        "command": "getpos; help; unsupported_command"
+      }
+    ],
+    "label": "console-paused"
+  },
+  {
+    "tick": 125,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "return-to-pause"
+  },
+  {
+    "tick": 130,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "enter"
+          ]
+        }
+      }
+    ],
+    "primary": true,
+    "label": "menu-resume"
+  },
+  {
+    "tick": 131,
+    "primary": true,
+    "label": "held-attack-consumed"
+  },
+  {
+    "tick": 135
+  },
+  {
+    "tick": 136,
+    "primary": true,
+    "label": "released-attack-fires"
+  },
+  {
+    "tick": 137
+  },
+  {
+    "tick": 140,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "final-menu"
+  }
+]

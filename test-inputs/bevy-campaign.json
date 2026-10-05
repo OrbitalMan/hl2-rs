@@ -1,0 +1,83 @@
+[
+  {
+    "tick": 1,
+    "fly": true,
+    "eye": [
+      -3400,
+      -420,
+      32
+    ],
+    "yaw": 0,
+    "actions": [
+      {
+        "action": "loadout"
+      },
+      {
+        "action": "slot",
+        "slot": 1
+      },
+      {
+        "action": "confirm"
+      }
+    ],
+    "label": "station01-inventory"
+  },
+  {
+    "tick": 2
+  },
+  {
+    "tick": 90,
+    "primary": true,
+    "label": "pre-transition-fire"
+  },
+  {
+    "tick": 91
+  },
+  {
+    "tick": 100,
+    "eye": [
+      -3104,
+      -152,
+      64
+    ],
+    "label": "station01-exit-trigger",
+    "fly": false
+  },
+  {
+    "tick": 101,
+    "label": "station02-arrival"
+  },
+  {
+    "tick": 120,
+    "primary": true,
+    "label": "station02-fire-after-reset"
+  },
+  {
+    "tick": 121
+  },
+  {
+    "tick": 150,
+    "eye": [
+      -5328,
+      -4486,
+      64
+    ],
+    "label": "station02-exit-trigger",
+    "fly": false
+  },
+  {
+    "tick": 151,
+    "label": "station03-arrival"
+  },
+  {
+    "tick": 160,
+    "paused": true,
+    "label": "station03-final",
+    "eye": [
+      -5176,
+      -4440,
+      81
+    ],
+    "yaw": 270
+  }
+]

@@ -23,6 +23,7 @@ const MAX_MATERIALS: usize = 16384;
 pub struct LoadedMap {
     pub world: Arc<World>,
     pub gameplay: crate::gameplay::Gameplay,
+    pub console: hl2_ui::console::Console,
     pub hud: hl2_ui::hud::WeaponHud,
     pub audio: crate::audio::PreparedAudio,
     pub sky: Option<source_assets::sky::Skybox>,
@@ -33,6 +34,23 @@ pub struct LoadedMap {
     pub materials: BTreeMap<String, MaterialData>,
     pub texture_errors: Vec<String>,
     pub models: serde_json::Value,
+}
+
+pub fn map_metadata(loaded: &LoadedMap) -> serde_json::Value {
+    let unique: BTreeMap<_, _> = loaded
+        .materials
+        .values()
+        .filter_map(|m| {
+            m.base_path
+                .as_ref()
+                .zip(m.base.as_ref())
+                .map(|(k, i)| (k.clone(), i.rgba.len()))
+        })
+        .collect();
+    serde_json::json!({"map":loaded.world.name,"bsp_revision":loaded.revision,"models":loaded.models,"texture_errors":loaded.texture_errors,"asset_warnings":loaded.world.warnings,
+        "spawn_sky_visibility":format!("{:?}",loaded.bsp.sky_visibility(loaded.world.spawn().0)),
+        "textures":{"source_materials":loaded.materials.len(),"unique_base_textures":unique.len(),"decoded_base_bytes":unique.values().sum::<usize>(),"decoded_base_budget":512*1024*1024,
+            "owned_eye_dx8_fallbacks":loaded.materials.iter().filter(|(_,m)|m.eye_fallback).map(|(n,_)|n).collect::<Vec<_>>()}})
 }
 
 #[derive(Debug)]
@@ -75,6 +93,14 @@ impl Default for MaterialData {
 }
 
 pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
+    load_with_canvas(game, map, hl2_ui::canvas::Canvas::default(), true)
+}
+pub fn load_with_canvas(
+    game: &Path,
+    map: &str,
+    canvas: hl2_ui::canvas::Canvas,
+    new_game: bool,
+) -> Result<LoadedMap> {
     let map = map.trim_end_matches(".bsp");
     if map.is_empty()
         || map.len() > 128
@@ -97,7 +123,8 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
     world.warnings.extend(vfs.warnings.iter().cloned());
     normalize_bsp_render_winding(&mut world);
     let model_report = models::append_models(&mut world, &vfs);
-    let gameplay = crate::gameplay::Gameplay::load(world, &vfs, bsp.revision)?;
+    let gameplay =
+        crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
     let effects = crate::effects::PreparedEffects::load(&vfs);
     let mut names = rendered_material_names(&world);
@@ -143,7 +170,8 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
             Err(e) => texture_errors.push(format!("{model}: eyeball metadata: {e:#}")),
         }
     }
-    let hud = hl2_ui::hud::WeaponHud::load(&vfs, hl2_ui::canvas::Canvas::default())?;
+    let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
+    let console = hl2_ui::console::Console::load(&vfs, hud.canvas.clone());
     let audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
     let sky = match source_assets::sky::load(&vfs, &world.entities, 512) {
         Ok(sky) => sky,
@@ -153,6 +181,7 @@ pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
         }
     };
     Ok(LoadedMap {
+        console,
         effects,
         eyes,
         sky,

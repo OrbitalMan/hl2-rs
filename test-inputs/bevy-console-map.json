@@ -1,0 +1,70 @@
+[
+  {
+    "tick": 1,
+    "fly": true,
+    "eye": [
+      -3260,
+      -2024,
+      128
+    ],
+    "actions": [
+      {
+        "action": "loadout"
+      }
+    ],
+    "ui": [
+      {
+        "action": "toggle_console"
+      },
+      {
+        "action": "command",
+        "command": "sv_cheats 1; echo history-survives; map d1_trainstation_01"
+      }
+    ],
+    "label": "direct-map-request"
+  },
+  {
+    "tick": 2,
+    "label": "direct-map-arrival"
+  },
+  {
+    "tick": 10,
+    "ui": [
+      {
+        "action": "toggle_console"
+      },
+      {
+        "action": "command",
+        "command": "map hl2_rs_missing_test_map"
+      }
+    ],
+    "label": "missing-map-request"
+  },
+  {
+    "tick": 11,
+    "label": "missing-map-recovered"
+  },
+  {
+    "tick": 15,
+    "ui": [
+      {
+        "action": "command",
+        "command": "map d1_trainstation_02"
+      }
+    ],
+    "label": "second-direct-map"
+  },
+  {
+    "tick": 16,
+    "label": "second-direct-arrival"
+  },
+  {
+    "tick": 20,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "final-menu"
+  }
+]

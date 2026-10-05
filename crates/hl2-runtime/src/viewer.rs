@@ -1136,13 +1136,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             .map(|map| (map, String::new()))
             .or_else(|| scene.transition.take())
         {
-            let old_landmark = world
-                .entities
-                .iter()
-                .find(|e| {
-                    e.class() == "info_landmark" && e.get("targetname") == Some(landmark.as_str())
-                })
-                .map(|e| e.origin());
+            let previous_time = scene.time;
             let previous = position;
             let mut next = o.clone();
             next.map = map;
@@ -1154,18 +1148,15 @@ pub async fn run(mut o: Options) -> Result<()> {
                     selection.pending = None;
                     model_report = source_assets::models::append_models(&mut new_world, &new_vfs);
                     prepare_weapons(&mut new_world, &new_vfs, &weapons)?;
-                    let new_landmark = new_world
-                        .entities
-                        .iter()
-                        .find(|e| {
-                            e.class() == "info_landmark"
-                                && e.get("targetname") == Some(landmark.as_str())
-                        })
-                        .map(|e| e.origin());
                     (spawn, spawn_yaw) = new_world.spawn();
-                    position = old_landmark
-                        .zip(new_landmark)
-                        .map_or(spawn, |(a, b)| previous - a + b);
+                    position = if direct_map {
+                        spawn
+                    } else {
+                        hl2_simulation::campaign::arrival(&world, &new_world, previous, &landmark)
+                    };
+                    if !direct_map {
+                        inventory.rebase_clock(previous_time, 0.);
+                    }
                     player = Player::new(position);
                     audio.stop();
                     world = new_world;

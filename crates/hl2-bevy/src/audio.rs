@@ -198,6 +198,7 @@ impl Audio {
             PlaybackSettings::DESPAWN
         };
         commands.spawn((
+            crate::campaign::MapOwned,
             SoundPlayer {
                 path: path.clone(),
                 queued_frame: self.frame,

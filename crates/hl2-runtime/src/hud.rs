@@ -32,8 +32,7 @@ void main(){gl_FragColor=color*texture2D(Texture,uv);}
 
 pub struct WeaponHud {
     hud: hl2_ui::hud::WeaponHud,
-    textures: RefCell<HashMap<usize, (CpuTexture, Texture2D)>>,
-    additive: Material,
+    painter: CanvasPainter,
 }
 impl Deref for WeaponHud {
     type Target = hl2_ui::hud::WeaponHud;
@@ -45,6 +44,52 @@ impl WeaponHud {
     pub fn load(vfs: &Vfs) -> Result<Self> {
         let canvas = Canvas::default();
         let hud = hl2_ui::hud::WeaponHud::load(vfs, canvas)?;
+        Ok(Self {
+            hud,
+            painter: CanvasPainter::new()?,
+        })
+    }
+    fn viewport(&self) {
+        self.hud.canvas.resize(screen_width(), screen_height());
+    }
+    fn paint(&self) {
+        self.painter.paint(&self.hud.canvas);
+    }
+    pub fn draw_status(
+        &self,
+        inv: &Inventory,
+        weapons: &BTreeMap<String, Weapon>,
+        selection: &Selection,
+        time: f64,
+    ) {
+        self.viewport();
+        self.hud.draw_status(inv, weapons, selection, time);
+        self.paint();
+    }
+    pub fn draw_selection(
+        &self,
+        selection: &Selection,
+        inv: &Inventory,
+        weapons: &BTreeMap<String, Weapon>,
+        time: f64,
+    ) {
+        self.viewport();
+        self.hud.draw_selection(selection, inv, weapons, time);
+        self.paint();
+    }
+    pub fn draw_crosshair(&self, inv: &Inventory) {
+        self.viewport();
+        self.hud.draw_crosshair(inv);
+        self.paint();
+    }
+}
+
+pub(crate) struct CanvasPainter {
+    textures: RefCell<HashMap<usize, (CpuTexture, Texture2D)>>,
+    additive: Material,
+}
+impl CanvasPainter {
+    pub(crate) fn new() -> Result<Self> {
         let additive = load_material(
             ShaderSource::Glsl {
                 vertex: VERTEX,
@@ -65,17 +110,13 @@ impl WeaponHud {
             },
         )?;
         Ok(Self {
-            hud,
             textures: RefCell::new(HashMap::new()),
             additive,
         })
     }
-    fn viewport(&self) {
-        self.hud.canvas.resize(screen_width(), screen_height());
-    }
-    fn paint(&self) {
+    pub(crate) fn paint(&self, canvas: &Canvas) {
         let mut textures = self.textures.borrow_mut();
-        for quad in self.hud.canvas.drain() {
+        for quad in canvas.drain() {
             if quad.additive {
                 gl_use_material(&self.additive);
             } else {
@@ -112,32 +153,5 @@ impl WeaponHud {
             }
         }
         gl_use_default_material();
-    }
-    pub fn draw_status(
-        &self,
-        inv: &Inventory,
-        weapons: &BTreeMap<String, Weapon>,
-        selection: &Selection,
-        time: f64,
-    ) {
-        self.viewport();
-        self.hud.draw_status(inv, weapons, selection, time);
-        self.paint();
-    }
-    pub fn draw_selection(
-        &self,
-        selection: &Selection,
-        inv: &Inventory,
-        weapons: &BTreeMap<String, Weapon>,
-        time: f64,
-    ) {
-        self.viewport();
-        self.hud.draw_selection(selection, inv, weapons, time);
-        self.paint();
-    }
-    pub fn draw_crosshair(&self, inv: &Inventory) {
-        self.viewport();
-        self.hud.draw_crosshair(inv);
-        self.paint();
     }
 }

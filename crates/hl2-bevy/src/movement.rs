@@ -22,6 +22,8 @@ pub struct Command {
     #[serde(default)]
     actions: Vec<crate::gameplay::Action>,
     #[serde(default)]
+    ui: Vec<crate::console::Action>,
+    #[serde(default)]
     primary: bool,
     #[serde(default)]
     secondary: bool,
@@ -54,7 +56,9 @@ pub fn read_script(path: &Path) -> Result<Vec<Command>> {
     }
     let mut previous = 0;
     for c in &commands {
-        if c.actions.len() > 64
+        if c.ui.len() > 64
+            || c.ui.iter().any(|a| !a.valid())
+            || c.actions.len() > 64
             || c.actions.iter().any(|a| !a.valid())
             || c.tick <= previous
             || c.tick > 6000
@@ -81,6 +85,7 @@ struct Sample {
     player: Player,
     gameplay: Option<serde_json::Value>,
     ray_entity: Option<usize>,
+    console: Option<serde_json::Value>,
 }
 #[derive(Resource)]
 pub struct Simulation {
@@ -92,6 +97,7 @@ pub struct Simulation {
     input: Input,
     fly: bool,
     paused: bool,
+    loading: bool,
     focused: bool,
     jump_suppressed: bool,
     transition: bool,
@@ -119,6 +125,7 @@ impl Simulation {
             input: Input::default(),
             fly,
             paused: false,
+            loading: false,
             focused: true,
             jump_suppressed: false,
             transition: false,
@@ -133,11 +140,33 @@ impl Simulation {
         Vec3::from_array(self.eye.to_array())
     }
     pub fn paused(&self) -> bool {
-        self.paused
+        self.paused || self.loading
+    }
+    pub fn loading(&self) -> bool {
+        self.loading
+    }
+    pub fn loading_failed(&mut self) {
+        self.loading = false;
+        self.transition = true;
+    }
+    pub fn change_map(&mut self, world: &World, eye: glam::Vec3, direct: bool) {
+        self.physics = Physics::new(world);
+        self.eye = eye;
+        self.player = Player::new(eye);
+        if direct {
+            self.fly = false;
+            self.yaw = world.spawn().1;
+            self.pitch = 0.;
+            self.paused = false;
+        }
+        self.loading = false;
+        self.transition = true;
+        self.input = Input::default();
+        self.jump_suppressed = true;
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"player": self.player, "eye": self.eye.to_array(), "fly": self.fly,
-            "paused": self.paused, "host_tick": self.host_tick, "script_finished": self.finished,
+            "paused": self.paused(), "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
             "samples": self.samples, "colliders": self.physics.colliders.len(),
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
@@ -148,9 +177,84 @@ impl Simulation {
             self.player = Player::new(self.eye);
         }
     }
-    fn step(&mut self, mut game: Option<&mut crate::gameplay::Gameplay>) {
-        if self.finished {
+    pub fn console_effects(
+        &mut self,
+        ui: &mut crate::console::Console,
+        game: &mut crate::gameplay::Gameplay,
+        effects: Vec<hl2_ui::console::Effect>,
+    ) {
+        use hl2_ui::console::Effect;
+        for effect in effects {
+            match effect {
+                Effect::Loadout => {
+                    for name in game.weapons.keys() {
+                        game.inventory.give(name, &game.weapons, game.scene.time);
+                    }
+                    game.inventory.refill_ammo(&game.weapons);
+                    game.inventory.suit = true;
+                    game.inventory
+                        .give("weapon_crowbar", &game.weapons, game.scene.time);
+                    ui.source.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
+                }
+                Effect::Noclip(value) => {
+                    self.fly = value.unwrap_or(!self.fly);
+                    self.player = Player::new(self.eye);
+                    ui.source.log(format!("noclip {}", u8::from(self.fly)));
+                }
+                Effect::Getpos => ui.source.log(format!(
+                    "setpos {:.6} {:.6} {:.6}; setang {:.6} {:.6} 0",
+                    self.eye.x,
+                    self.eye.y,
+                    self.eye.z,
+                    -self.pitch.to_degrees(),
+                    self.yaw.to_degrees()
+                )),
+                Effect::Setpos { x, y, z } => {
+                    self.player.feet = glam::Vec3::new(x, y, z.unwrap_or(self.player.feet.z));
+                    self.eye = self.player.eye();
+                    ui.source.log(format!(
+                        "Player origin: {} {} {}",
+                        self.player.feet.x, self.player.feet.y, self.player.feet.z
+                    ));
+                }
+                Effect::Setang(a) => {
+                    self.pitch = -a.x.to_radians().clamp(-1.53, 1.53);
+                    self.yaw = a.y.to_radians();
+                    ui.source.log(format!(
+                        "View angles: {} {} 0",
+                        -self.pitch.to_degrees(),
+                        self.yaw.to_degrees()
+                    ));
+                }
+                Effect::Map(map) => {
+                    ui.map_request = Some(map);
+                    self.loading = true;
+                }
+                Effect::Fire {
+                    target,
+                    input,
+                    parameter,
+                    delay,
+                } => {
+                    if game.scene.send_named(&target, &input, &parameter, delay) {
+                        ui.source
+                            .log(format!("Queued {target}.{input} after {delay} seconds."));
+                    }
+                }
+                Effect::Quit => ui.quit_requested = true,
+            }
+        }
+    }
+    fn step(
+        &mut self,
+        mut game: Option<&mut crate::gameplay::Gameplay>,
+        mut ui: Option<&mut crate::console::Console>,
+    ) {
+        if self.finished || self.loading {
             return;
+        }
+        if !self.commands.is_empty() {
+            self.transition = false;
         }
         self.host_tick += 1;
         let mut label = None;
@@ -186,15 +290,31 @@ impl Simulation {
                 game.buttons(c.primary, c.secondary);
                 game.actions.extend(c.actions);
             }
+            if let (Some(ui), Some(game)) = (ui.as_deref_mut(), game.as_deref_mut()) {
+                let before = ui.source.mode;
+                for action in &c.ui {
+                    self.ui_action(ui, game, action);
+                }
+                if ui.source.mode != before {
+                    self.paused = ui.source.paused();
+                    self.transition = true;
+                    self.jump_suppressed |= c.jump;
+                    game.consume_attacks();
+                }
+            }
+            if !c.jump {
+                self.jump_suppressed = false;
+            }
+            self.input.jump &= !self.jump_suppressed;
             label = c.label;
             self.next += 1;
         }
-        if self.paused
+        if (self.paused() || self.transition)
             && let Some(game) = game.as_deref_mut()
         {
             game.consume_attacks();
         }
-        if !self.paused && (self.focused || !self.commands.is_empty()) && !self.transition {
+        if !self.paused() && (self.focused || !self.commands.is_empty()) && !self.transition {
             if let Some(game) = game.as_deref_mut() {
                 let direction =
                     glam::Vec3::from_array(source_direction(self.yaw, self.pitch).to_array());
@@ -221,6 +341,9 @@ impl Simulation {
                 self.eye = self.player.eye();
             }
         }
+        if game.as_ref().is_some_and(|g| g.scene.transition.is_some()) {
+            self.loading = true;
+        }
         if let Some(label) = label {
             self.samples.push(Sample {
                 label,
@@ -229,6 +352,7 @@ impl Simulation {
                 fly: self.fly,
                 player: self.player.clone(),
                 gameplay: game.as_deref().map(|g| g.report(&self.physics)),
+                console: ui.as_deref().map(|u| u.report()),
                 ray_entity: self
                     .physics
                     .ray(
@@ -262,17 +386,20 @@ impl Plugin for MovementPlugin {
         );
     }
 }
+type InputDevices<'w, 's> = (
+    Res<'w, ButtonInput<KeyCode>>,
+    Res<'w, ButtonInput<MouseButton>>,
+    Res<'w, AccumulatedMouseMotion>,
+    Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>,
+    MessageReader<'w, 's, bevy::input::keyboard::KeyboardInput>,
+);
 fn controls(
-    keys: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    (mouse, scroll): (
-        Res<AccumulatedMouseMotion>,
-        Option<Res<bevy::input::mouse::AccumulatedMouseScroll>>,
-    ),
+    (keys, buttons, mouse, scroll, mut characters): InputDevices,
     mut windows: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
     mut sim: ResMut<Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
+    mut ui: Option<ResMut<crate::console::Console>>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
         exit.write(AppExit::Success);
@@ -280,6 +407,12 @@ fn controls(
     let Ok((window, mut cursor)) = windows.single_mut() else {
         return;
     };
+    let text: String = characters
+        .read()
+        .filter(|e| e.state == bevy::input::ButtonState::Pressed)
+        .filter_map(|e| e.text.as_ref())
+        .map(|s| s.as_str())
+        .collect();
     if !sim.commands.is_empty() {
         return;
     }
@@ -291,7 +424,54 @@ fn controls(
     if cancel_selection && let Some(game) = game.as_deref_mut() {
         game.actions.push(crate::gameplay::Action::Cancel);
     }
-    if keys.just_pressed(KeyCode::Escape) && !cancel_selection || !window.focused {
+    if let Some(ui) = ui.as_deref_mut() {
+        let before = ui.source.mode;
+        ui.source.canvas.resize(window.width(), window.height());
+        if keys.just_pressed(KeyCode::Escape) && !cancel_selection {
+            ui.source.escape();
+        }
+        if keys.just_pressed(KeyCode::Backquote) {
+            ui.source.toggle();
+        }
+        if !window.focused && !ui.source.paused() {
+            ui.source.mode = hl2_ui::console::Mode::Pause;
+        }
+        if ui.source.mode == before
+            && let Some(game) = game.as_deref_mut()
+        {
+            let effects = ui.source.input(&hl2_ui::console::Input {
+                text,
+                keys: crate::console::keys(&keys),
+                pointer: window
+                    .cursor_position()
+                    .map(|v| glam::Vec2::from_array(v.to_array())),
+                click: buttons.just_pressed(MouseButton::Left),
+            });
+            sim.console_effects(ui, game, effects);
+        }
+        sim.transition = ui.source.mode != before;
+        sim.paused = ui.source.paused();
+        if sim.transition || sim.paused {
+            cursor.grab_mode = if sim.paused {
+                CursorGrabMode::None
+            } else {
+                CursorGrabMode::Locked
+            };
+            cursor.visible = sim.paused;
+            sim.jump_suppressed |= keys.pressed(KeyCode::Space);
+        } else if !sim.paused
+            && buttons.just_pressed(MouseButton::Left)
+            && cursor.grab_mode == CursorGrabMode::None
+        {
+            sim.transition = true;
+            cursor.grab_mode = CursorGrabMode::Locked;
+            cursor.visible = false;
+            sim.jump_suppressed |= keys.pressed(KeyCode::Space);
+        }
+        if ui.quit_requested {
+            exit.write(AppExit::Success);
+        }
+    } else if keys.just_pressed(KeyCode::Escape) && !cancel_selection || !window.focused {
         sim.transition = !sim.paused;
         sim.paused = true;
         cursor.grab_mode = CursorGrabMode::None;
@@ -316,7 +496,7 @@ fn controls(
         );
     }
     sim.input = Input::default();
-    if sim.paused || sim.transition || cursor.grab_mode == CursorGrabMode::None {
+    if sim.paused() || sim.transition || cursor.grab_mode == CursorGrabMode::None {
         if let Some(game) = game.as_deref_mut() {
             game.consume_attacks();
         }
@@ -372,10 +552,18 @@ fn controls(
         slow: keys.pressed(KeyCode::AltLeft),
     };
 }
-fn fixed_step(mut sim: ResMut<Simulation>, mut game: Option<ResMut<crate::gameplay::Gameplay>>) {
-    sim.step(game.as_deref_mut());
+fn fixed_step(
+    mut sim: ResMut<Simulation>,
+    mut game: Option<ResMut<crate::gameplay::Gameplay>>,
+    mut ui: Option<ResMut<crate::console::Console>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    sim.step(game.as_deref_mut(), ui.as_deref_mut());
+    if ui.is_some_and(|u| u.quit_requested) {
+        exit.write(AppExit::Success);
+    }
 }
-fn present(sim: Res<Simulation>, mut cameras: Query<&mut Transform, With<FlyCamera>>) {
+pub(crate) fn present(sim: Res<Simulation>, mut cameras: Query<&mut Transform, With<FlyCamera>>) {
     if let Ok(mut camera) = cameras.single_mut() {
         *camera = Transform::from_translation(source_to_bevy(sim.eye())).looking_to(
             source_to_bevy(source_direction(sim.yaw, sim.pitch)),
@@ -403,7 +591,8 @@ mod tests {
         .insert_resource(AccumulatedMouseMotion {
             delta: Vec2::new(100., 100.),
         })
-        .add_message::<AppExit>();
+        .add_message::<AppExit>()
+        .add_message::<bevy::input::keyboard::KeyboardInput>();
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -439,6 +628,135 @@ mod tests {
         assert!(app.world().resource::<Simulation>().input.jump);
     }
     #[test]
+    fn ui_open_close_and_resume_consume_pointer_attack_and_held_jump() {
+        use bevy::ecs::system::RunSystemOnce;
+        use hl2_ui::console::Mode;
+        let mut app = App::new();
+        app.insert_resource(Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        ))
+        .insert_resource(crate::gameplay::Gameplay::synthetic(World::default()))
+        .insert_resource(crate::console::Console::new(Default::default()))
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .insert_resource(AccumulatedMouseMotion {
+            delta: Vec2::splat(100.),
+        })
+        .add_message::<AppExit>()
+        .add_message::<bevy::input::keyboard::KeyboardInput>();
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            CursorOptions::default(),
+            PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Backquote);
+        app.world_mut().run_system_once(controls).unwrap();
+        assert_eq!(
+            app.world()
+                .resource::<crate::console::Console>()
+                .source
+                .mode,
+            Mode::Console
+        );
+        assert!(app.world().resource::<Simulation>().paused);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut().run_system_once(controls).unwrap();
+        let sim = app.world().resource::<Simulation>();
+        assert!(!sim.paused && sim.transition && sim.jump_suppressed && !sim.input.jump);
+        assert_eq!((sim.yaw, sim.pitch), (0., 0.));
+        assert!(!app.world().resource::<crate::gameplay::Gameplay>().primary);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<crate::console::Console>()
+            .source
+            .mode = Mode::Pause;
+        app.world_mut().run_system_once(controls).unwrap();
+        assert!(app.world().resource::<Simulation>().paused);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut().run_system_once(controls).unwrap();
+        assert!(
+            app.world().resource::<Simulation>().paused,
+            "click outside Resume cannot close the menu"
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.world_mut().run_system_once(controls).unwrap();
+        assert!(app.world().resource::<Simulation>().transition);
+        assert!(!app.world().resource::<Simulation>().paused);
+    }
+    #[test]
+    fn console_setpos_preserves_velocity_and_getpos_uses_eye() {
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::console::Console::new(Default::default());
+        sim.player.velocity = glam::Vec3::new(1., 2., 3.);
+        sim.ui_action(
+            &mut ui,
+            &mut game,
+            &crate::console::Action::Command {
+                command:
+                    "sv_cheats 1; setpos 10 20 30; setang 15 90; getpos; ent_fire missing Open"
+                        .into(),
+            },
+        );
+        assert_eq!(sim.player.feet, glam::Vec3::new(10., 20., 30.));
+        assert_eq!(sim.player.velocity, glam::Vec3::new(1., 2., 3.));
+        assert_eq!(sim.eye, glam::Vec3::new(10., 20., 94.));
+        let position = ui
+            .source
+            .output
+            .iter()
+            .find(|s| s.starts_with("setpos 10.000000 20.000000 94.000000; setang "))
+            .expect("camera origin log");
+        let angles: Vec<_> = position
+            .split("setang ")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert!((angles[0].parse::<f32>().unwrap() - 15.).abs() < 1e-4);
+        assert!((angles[1].parse::<f32>().unwrap() - 90.).abs() < 1e-4);
+    }
+    #[test]
     fn pause_does_not_advance_player_and_resume_retains_fixed_tick() {
         let mut sim = Simulation::new(
             &World::default(),
@@ -448,17 +766,17 @@ mod tests {
             false,
             vec![],
         );
-        sim.step(None);
+        sim.step(None, None);
         let before = sim.player.clone();
         sim.paused = true;
         for _ in 0..10 {
-            sim.step(None);
+            sim.step(None, None);
         }
         assert_eq!(sim.player.ticks, before.ticks);
         assert_eq!(sim.player.feet, before.feet);
         assert_eq!(sim.player.velocity, before.velocity);
         sim.paused = false;
-        sim.step(None);
+        sim.step(None, None);
         assert_eq!(sim.player.ticks, before.ticks + 1);
     }
     #[test]

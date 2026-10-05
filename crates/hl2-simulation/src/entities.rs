@@ -1662,7 +1662,13 @@ impl Scene {
                         self.states[id].enabled = false;
                     }
                 }
-                if inside && e.class() == "trigger_changelevel" && !self.states[id].touching {
+                // SF_CHANGELEVEL_NOTOUCH (0x2) leaves the ChangeLevel input available,
+                // but must not change maps when the player overlaps the brush.
+                if inside
+                    && e.class() == "trigger_changelevel"
+                    && number(e, "spawnflags", 0.) as u32 & 2 == 0
+                    && !self.states[id].touching
+                {
                     self.send(id, "ChangeLevel", "");
                 }
                 self.states[id].touching = inside;
@@ -2306,6 +2312,54 @@ mod tests {
             .events
             .iter()
             .any(|e| e.kind == EventType::StopPoint && (e.start - 9.59397).abs() < 1e-6));
+    }
+    #[test]
+    fn no_touch_changelevel_still_accepts_explicit_input() {
+        let world = World {
+            entities: vec![entity(
+                "trigger_changelevel",
+                "exit",
+                &[
+                    ("spawnflags", "2"),
+                    ("model", "*1"),
+                    ("map", "next"),
+                    ("landmark", "arrival"),
+                ],
+            )],
+            brush_models: vec![modkit_core::BrushModel {
+                id: 1,
+                brushes: vec![modkit_core::Brush {
+                    planes: [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z]
+                        .into_iter()
+                        .map(|normal| modkit_core::Plane {
+                            normal,
+                            distance: 8.,
+                        })
+                        .collect(),
+                    contents: 1,
+                }],
+                mins: Vec3::splat(-8.),
+                maxs: Vec3::splat(8.),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(scene.transition.is_none());
+        scene.send(0, "ChangeLevel", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert_eq!(scene.transition, Some(("next".into(), "arrival".into())));
+        let mut touch_world = world.clone();
+        touch_world.entities[0]
+            .properties
+            .retain(|(key, _)| key != "spawnflags");
+        let mut touch_scene = Scene::new(&touch_world);
+        touch_scene.tick(&touch_world, Vec3::ZERO, 0.015);
+        assert_eq!(
+            touch_scene.transition,
+            Some(("next".into(), "arrival".into()))
+        );
     }
     #[test]
     fn setting_default_animation_preserves_playback_and_completion() {

@@ -53,14 +53,14 @@ fn uses_secondary_ammo(weapon: &Weapon) -> bool {
 }
 
 #[derive(Clone)]
-struct FontFace {
+pub(crate) struct FontFace {
     canvas: Canvas,
     font: Arc<fontdue::Font>,
     glyphs: GlyphCache,
     cell_height: f32,
     ascent: f32,
 }
-type GlyphCache = Arc<MutexCell<HashMap<(char, u16, u16, u16), Glyph>>>;
+type GlyphCache = Arc<MutexCell<HashMap<(char, u32, u16, u16), Glyph>>>;
 #[derive(Clone)]
 struct Glyph {
     texture: Option<Texture2D>,
@@ -69,7 +69,7 @@ struct Glyph {
     advance: f32,
 }
 impl FontFace {
-    fn load(bytes: &[u8], canvas: Canvas) -> Result<Self> {
+    pub(crate) fn load(bytes: &[u8], canvas: Canvas) -> Result<Self> {
         let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default())
             .map_err(anyhow::Error::msg)?;
         let face = ttf_parser::Face::parse(bytes, 0).context("read HUD font metrics")?;
@@ -104,11 +104,13 @@ impl FontFace {
             .sum()
     }
     fn glyph(&self, c: char, size: u16, blur: u16, scanlines: u16) -> Glyph {
-        let key = (c, size, blur, scanlines);
+        self.raster(c, f32::from(size) / self.cell_height, blur, scanlines)
+    }
+    fn raster(&self, c: char, em_size: f32, blur: u16, scanlines: u16) -> Glyph {
+        let key = (c, em_size.to_bits(), blur, scanlines);
         if let Some(glyph) = self.glyphs.borrow().get(&key) {
             return glyph.clone();
         }
-        let em_size = f32::from(size) / self.cell_height;
         let (metrics, coverage) = self.font.rasterize(c, em_size);
         let margin = usize::from(blur);
         let width = metrics.width + margin * 2;
@@ -168,6 +170,41 @@ impl FontFace {
                 draw_texture(&self.canvas, texture, x + glyph.x, y + glyph.y, color);
             }
             x += glyph.advance;
+        }
+    }
+    pub(crate) fn face(&self) -> Arc<fontdue::Font> {
+        self.font.clone()
+    }
+    pub(crate) fn width_em(&self, value: &str, em: f32) -> f32 {
+        value
+            .chars()
+            .map(|c| self.font.metrics(c, em).advance_width)
+            .sum()
+    }
+    pub(crate) fn draw_baseline(
+        &self,
+        value: &str,
+        mut origin: Vec2,
+        em: f32,
+        scale: f32,
+        color: Color,
+    ) {
+        for c in value.chars() {
+            let glyph = self.raster(c, em, 0, 0);
+            if let Some(texture) = &glyph.texture {
+                draw_texture_ex(
+                    &self.canvas,
+                    texture,
+                    origin.x + glyph.x * scale,
+                    origin.y + (glyph.y - self.ascent * em) * scale,
+                    color,
+                    DrawTextureParams {
+                        dest_size: Some(texture.size() * scale),
+                        ..Default::default()
+                    },
+                );
+            }
+            origin.x += glyph.advance * scale;
         }
     }
     fn draw_cropped(

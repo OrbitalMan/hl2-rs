@@ -267,6 +267,33 @@ impl Default for Inventory {
     }
 }
 impl Inventory {
+    /// Retain remaining weapon deadlines when the destination map resets scene time.
+    /// Transient hit/spawn queues and held input belong to the old world.
+    pub fn rebase_clock(&mut self, old: f64, new: f64) {
+        let delta = new - old;
+        self.animation_at += delta;
+        self.next_attack += delta;
+        self.owner_attack_until += delta;
+        self.soonest_attack += delta;
+        self.last_shot += delta;
+        for time in self.next_secondary.values_mut() {
+            *time += delta;
+        }
+        for empty in self.empty_fire.values_mut() {
+            empty.next_sound += delta;
+        }
+        if let Some(time) = &mut self.ar2_charge_until {
+            *time += delta;
+        }
+        if let Some(reload) = &mut self.reload {
+            reload.at += delta;
+        }
+        self.impacts.clear();
+        self.projectile_spawns.clear();
+        self.attack_input = None;
+        self.holding_attack = false;
+    }
+
     pub fn reserve_for(&self, class: &str, weapons: &BTreeMap<String, Weapon>) -> i32 {
         weapons
             .get(class)
@@ -1278,6 +1305,46 @@ fn ammo_pickup(class: &str) -> Option<(&'static str, i32)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn map_clock_transfer_preserves_remaining_cooldown_reload_and_charge() {
+        use super::*;
+        let mut inv = Inventory {
+            health: 42.,
+            suit: true,
+            next_attack: 101.5,
+            owner_attack_until: 102.,
+            soonest_attack: 100.25,
+            last_shot: 99.,
+            animation_at: 98.,
+            ar2_charge_until: Some(100.5),
+            reload: Some(Reload {
+                weapon: "weapon_smg1".into(),
+                at: 103.,
+                phase: ReloadPhase::Magazine,
+            }),
+            ..Default::default()
+        };
+        inv.next_secondary.insert("weapon_smg1".into(), 104.);
+        inv.empty_fire.insert(
+            "weapon_smg1".into(),
+            EmptyFire {
+                latched: true,
+                next_sound: 100.4,
+            },
+        );
+        inv.rebase_clock(100., 0.);
+        assert_eq!(
+            (inv.next_attack, inv.owner_attack_until, inv.soonest_attack),
+            (1.5, 2., 0.25)
+        );
+        assert_eq!((inv.last_shot, inv.animation_at), (-1., -2.));
+        assert_eq!(inv.ar2_charge_until, Some(0.5));
+        assert_eq!(inv.reload.as_ref().unwrap().at, 3.);
+        assert_eq!(inv.next_secondary["weapon_smg1"], 4.);
+        assert!((inv.empty_fire["weapon_smg1"].next_sound - 0.4).abs() < 1e-9);
+        assert!(inv.suit && inv.health == 42.);
+    }
+
     use super::*;
     fn melee_target(origin: Vec3) -> (Physics, Scene) {
         use rapier3d::prelude::*;

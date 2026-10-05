@@ -183,6 +183,7 @@ pub fn present(
     mut commands: Commands,
     mut hud: ResMut<Hud>,
     mut game: ResMut<crate::gameplay::Gameplay>,
+    (ui, clock): (Res<crate::console::Console>, Res<Time<Real>>),
     windows: Query<&Window, With<PrimaryWindow>>,
     (mut images, mut materials, mut meshes): HudAssets,
     mut draws: DrawQuery,
@@ -205,7 +206,10 @@ pub fn present(
         &game.weapons,
         game.scene.time,
     );
-    hud.source.draw_crosshair(&game.inventory);
+    if !ui.source.paused() {
+        hud.source.draw_crosshair(&game.inventory);
+    }
+    ui.source.draw(clock.elapsed_secs_f64());
     game.scene
         .sounds
         .extend(hud.source.drain_sounds().into_iter().map(Into::into));
@@ -234,6 +238,7 @@ pub fn present(
             let mesh = meshes.add(mesh);
             let entity = commands
                 .spawn((
+                    crate::campaign::MapOwned,
                     HudDraw,
                     Mesh2d(mesh.clone()),
                     MeshMaterial2d(material),

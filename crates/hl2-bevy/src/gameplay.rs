@@ -109,8 +109,13 @@ impl Gameplay {
             weapon_sounds: Default::default(),
         }
     }
-    pub fn load(mut world: World, vfs: &Vfs, revision: u32) -> Result<Self> {
-        let mut scene = Scene::new(&world);
+    pub fn load_with_campaign(
+        mut world: World,
+        vfs: &Vfs,
+        revision: u32,
+        new_game: bool,
+    ) -> Result<Self> {
+        let mut scene = Scene::with_campaign(&world, new_game);
         scene.load_choreography(&world, vfs)?;
         actors::prepare_choreography_animations(&mut world, vfs, &scene);
         let map = world.name.clone();

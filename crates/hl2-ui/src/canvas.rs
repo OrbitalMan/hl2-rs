@@ -23,6 +23,9 @@ pub struct Color {
     pub a: f32,
 }
 impl Color {
+    pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
     pub const fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self {
             r: r as f32 / 255.,
@@ -47,6 +50,12 @@ pub struct Rect {
 impl Rect {
     pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self { x, y, w, h }
+    }
+    pub fn contains(self, point: Vec2) -> bool {
+        point.x >= self.x
+            && point.y >= self.y
+            && point.x <= self.x + self.w
+            && point.y <= self.y + self.h
     }
     pub fn size(self) -> Vec2 {
         vec2(self.w, self.h)

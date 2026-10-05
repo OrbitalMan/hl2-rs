@@ -14,5 +14,6 @@ pub mod projectiles;
 pub mod selection;
 pub mod sounds;
 
+pub mod campaign;
 pub mod impacts;
 pub mod projectile_visuals;

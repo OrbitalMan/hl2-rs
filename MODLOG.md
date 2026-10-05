@@ -1,5 +1,14 @@
 # HL2 reconstruction journal
 
+## 2026-10-05: shared pause/console and Bevy campaign host
+
+Moved the retained console parser/history/cheat gates and resource-driven pause layout into hl2-ui. Both hosts now provide explicit input and consume the same canvas. Bevy opens Resume/Console/Quit, supports the existing command subset and preserves selection/capture/held-input ordering. Console rendering clips output to its panel and handles Unicode character boundaries.
+
+Added asynchronous owned-map decoding with simulation/script clocks frozen while loading. Successful transitions replace map-owned draws/audio and carry landmark-relative eye position/inventory with rebased weapon deadlines; direct map starts fresh. Missing maps preserve the current level. Testing exposed repeated same-map loads from input-only changelevel brushes; shared touch handling now honors their 0x2 flag while retaining explicit ChangeLevel input. Full saved entity/global/player state and ordinary campaign completion remain unfinished.
+
+267 normal tests, thirteen owned-install tests and strict Clippy pass. Packaged console/campaign captures pass 45 checks, including 720p/borderless1080p UI, actual paused audio sinks, two real station exit transitions, failure recovery and camera cleanup. Retained-host and weapon/movement regressions are recorded in validation.md. No game files or native research are published.
+
+
 ## 2026-10-05: shared effects presented in Bevy
 
 Extracted retained projectile billboard/RNG/blur and impact selection/clipping into hl2-simulation, leaving rendering adapters in each host. Bevy now presents owned SMG grenades, energy balls, impact/explosion sprites and bullet marks with depth testing. Decals retain destination-color blending and doubled modulation, and follow moving receiver transforms. Testing found a retained door-mark failure: projection used raw MDL vertices instead of the animated idle pose and rejected the one-unit collision/visual gap. Both hosts now project onto the current posed mesh with a bounded same-receiver correction. Native studio deformation and complete particles remain unfinished.
