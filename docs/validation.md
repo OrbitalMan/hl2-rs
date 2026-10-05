@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Deferred door opener inputs (2026-10-05)
+
+The shared OpenAwayFrom input now resolves a named entity, player, caller or activator at delivery time and chooses the prop-door swing using its current origin. Missing names retain the default forward swing. Locks and explicit opendir override the target; repeated Open/OpenAwayFrom inputs do not retarget an already opening/open prop door. The published props.cpp handler corroborates this contract; native linkage/blocker handling remains incomplete.
+
+All 258 normal workspace release tests and strict all-target Clippy pass. The prior eleven owned-reader checks remain valid: no asset reader changed in this increment. The packaged 330-tick test-inputs/bevy-door-inputs.json fixture passes eleven assertions for both opener sides, both leaves, closed collision, input support, capture completion and pose agreement. Its screenshot was inspected. Final Bevy package SHA256 `0CB871816976CDDC867AD2D2C8CF26E14C93270BE14AF275E6D53657C39E47AF`, built `2026-10-05T00:33:28.3574059Z`; shader hashes are unchanged. The retained package was rebuilt to `EA9182C7EFE35EED59574166ED8239AD4F31E7695F7BF51619BB596ACB811AF5`. Evidence stays local in artifacts/bevy-door-input*.
+
 ## Bevy sky, eyes and paired-door milestone (2026-10-05)
 
 All 256 normal workspace release tests and eleven explicit owned-install ignored tests pass, including bounded MDL eyeball parsing/projection and real Barney, citizen, G-Man and Vortigaunt metadata. Strict all-target workspace Clippy passes with the same two vendored warnings; formatting and diff checks pass. Logs are local under artifacts/bevy-sky-eyes-doors-{final-tests,owned-tests,clippy}.log.

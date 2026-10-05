@@ -1183,7 +1183,7 @@ impl Scene {
             self.fire(id, "OnPressed", usize::MAX);
         }
     }
-    fn deliver(&mut self, world: &World, id: usize, p: &Pending) {
+    fn deliver(&mut self, world: &World, id: usize, p: &Pending, player_feet: Vec3) {
         if id >= self.states.len() {
             self.unsupported_input("player", &p.input);
             return;
@@ -1241,12 +1241,20 @@ impl Scene {
             "turnoff" => self.states[id].visible = false,
             "lock" => self.states[id].locked = true,
             "unlock" => self.states[id].locked = false,
-            "open" | "close" | "toggle" if door => {
+            "open" | "close" | "toggle" | "openawayfrom"
+                if door && (input != "openawayfrom" || class == "prop_door_rotating") =>
+            {
                 if self.states[id].locked && input != "close" {
                     self.fire(id, "OnLockedUse", p.activator);
                     return;
                 }
-                let target = if input == "open" {
+                if class == "prop_door_rotating"
+                    && matches!(input.as_str(), "open" | "openawayfrom")
+                    && self.states[id].target > 0.
+                {
+                    return;
+                }
+                let target = if input == "open" || input == "openawayfrom" {
                     1.
                 } else if input == "close" {
                     0.
@@ -1257,11 +1265,30 @@ impl Scene {
                     && target > 0.
                     && self.states[id].fraction.abs() < 0.00001
                 {
+                    // Resolve the named opener when the deferred input is delivered,
+                    // using its current origin and the original caller/activator.
+                    let opener = if input == "openawayfrom" {
+                        let name = p.parameter.to_lowercase();
+                        if name == "!player" || name == "!activator" && p.activator == usize::MAX {
+                            Some(player_feet)
+                        } else {
+                            let mut lookup = p.clone();
+                            lookup.target = p.parameter.clone();
+                            self.targets(world, &lookup).into_iter().find_map(|other| {
+                                self.states
+                                    .get(other)
+                                    .filter(|s| !s.killed)
+                                    .map(|s| s.origin)
+                            })
+                        }
+                    } else {
+                        p.opener
+                    };
                     let state = &mut self.states[id];
                     let back = match number(e, "opendir", 0.) as i32 {
                         1 => false,
                         2 => true,
-                        _ => p.opener.is_some_and(|origin| {
+                        _ => opener.is_some_and(|origin| {
                             (state.rotation * Vec3::X).dot(origin - state.origin) > 0.
                         }),
                     };
@@ -1663,7 +1690,7 @@ impl Scene {
                 self.targets(world, &p)
             };
             for id in targets {
-                self.deliver(world, id, &p);
+                self.deliver(world, id, &p, player_feet);
             }
         }
         self.diagnostics.budget_exhaustions += 1;
@@ -2586,5 +2613,79 @@ mod tests {
             assert_eq!(s.states[0].target, 1.);
             assert_eq!(s.states[0].angle.signum(), sign);
         }
+    }
+    #[test]
+    fn open_away_input_resolves_current_named_player_and_caller_origins() {
+        let w = World {
+            entities: vec![
+                entity("prop_door_rotating", "door", &[("wait", "-1")]),
+                entity("info_target", "actor", &[("origin", "-64 0 0")]),
+                entity(
+                    "logic_relay",
+                    "relay",
+                    &[
+                        ("origin", "64 0 0"),
+                        ("OnTrigger", "door,OpenAwayFrom,!caller,0,-1"),
+                    ],
+                ),
+            ],
+            ..Default::default()
+        };
+        for (name, expected) in [
+            ("actor", 1.),
+            ("!player", 1.),
+            ("!activator", 1.),
+            ("missing", -1.),
+        ] {
+            let mut s = Scene::new(&w);
+            // The input uses the current state, not the map's initial actor origin.
+            s.states[1].origin = Vec3::X * 64.;
+            s.send(0, "OpenAwayFrom", name);
+            s.tick(&w, Vec3::X * 64., 0.015);
+            assert_eq!(s.states[0].target, 1.);
+            assert_eq!(s.states[0].angle.signum(), expected, "{name}");
+            assert_eq!(
+                s.diagnostics
+                    .unsupported
+                    .get("prop_door_rotating.openawayfrom"),
+                None
+            );
+        }
+        let mut s = Scene::new(&w);
+        s.send(0, "OpenAwayFrom", "!player");
+        s.send(0, "OpenAwayFrom", "missing");
+        s.tick(&w, Vec3::X * 64., 0.015);
+        assert_eq!(
+            s.states[0].angle.signum(),
+            1.,
+            "second open input must not retarget the opening door"
+        );
+        let mut s = Scene::new(&w);
+        s.send(2, "Trigger", "");
+        s.tick(&w, -Vec3::X * 64., 0.015);
+        assert_eq!(s.states[0].angle.signum(), 1., "caller relay, not player");
+    }
+    #[test]
+    fn open_away_input_obeys_lock_fixed_direction_and_keeps_opening_swing() {
+        let w = World {
+            entities: vec![entity(
+                "prop_door_rotating",
+                "door",
+                &[("locked", "1"), ("opendir", "1"), ("wait", "-1")],
+            )],
+            ..Default::default()
+        };
+        let mut s = Scene::new(&w);
+        s.send(0, "OpenAwayFrom", "!player");
+        s.tick(&w, Vec3::X * 64., 0.015);
+        assert_eq!(s.states[0].target, 0.);
+        s.send(0, "Unlock", "");
+        s.send(0, "OpenAwayFrom", "!player");
+        s.tick(&w, Vec3::X * 64., 0.015);
+        assert_eq!(s.states[0].target, 1.);
+        assert_eq!(s.states[0].angle.signum(), -1.);
+        s.send(0, "OpenAwayFrom", "!player");
+        s.tick(&w, -Vec3::X * 64., 0.015);
+        assert_eq!(s.states[0].angle.signum(), -1.);
     }
 }
