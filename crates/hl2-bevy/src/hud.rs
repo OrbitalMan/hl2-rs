@@ -83,9 +83,15 @@ struct GpuTexture {
 struct FrameTiming {
     frames: std::collections::VecDeque<f64>,
     frame_ms: f64,
+    frames_seen: u64,
+    warmup_end: Option<f64>,
 }
 impl FrameTiming {
     fn observe(&mut self, now: f64) {
+        self.frames_seen += 1;
+        if self.frames_seen == 120 {
+            self.warmup_end = Some(now);
+        }
         if let Some(last) = self.frames.back() {
             self.frame_ms = (now - last).max(0.) * 1000.;
         }
@@ -93,6 +99,14 @@ impl FrameTiming {
         while self.frames.len() > 600 || self.frames.front().is_some_and(|t| now - t > 1.) {
             self.frames.pop_front();
         }
+    }
+    fn benchmark(&self) -> serde_json::Value {
+        let frames = self.frames_seen.saturating_sub(120);
+        let elapsed = self
+            .warmup_end
+            .zip(self.frames.back())
+            .map_or(0., |(start, end)| end - start);
+        serde_json::json!({"warmup_frames":120,"measured_frames":frames,"elapsed_seconds":elapsed,"mean_fps":if elapsed>0. {frames as f64/elapsed} else {0.},"mean_frame_ms":if frames>0 {elapsed*1000./frames as f64} else {0.}})
     }
     fn fps(&self) -> f64 {
         let span = self
@@ -119,7 +133,7 @@ pub struct Hud {
 }
 impl Hud {
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"lines":self.debug_lines}})
+        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines}})
     }
     pub fn new(source: hl2_ui::hud::WeaponHud) -> Self {
         Self {

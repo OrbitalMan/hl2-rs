@@ -67,7 +67,12 @@ pub fn present(
     game: Res<crate::gameplay::Gameplay>,
     sim: Res<crate::movement::Simulation>,
     camera: Query<&Transform, With<FlyCamera>>,
-    draws: Query<(&SourceEntity, &EyeMesh, &Mesh3d)>,
+    draws: Query<(
+        &SourceEntity,
+        &EyeMesh,
+        &Mesh3d,
+        Option<&bevy::mesh::skinning::SkinnedMesh>,
+    )>,
     mut meshes: ResMut<Assets<Mesh>>,
     performance: Option<Res<crate::performance::Performance>>,
 ) {
@@ -80,7 +85,7 @@ pub fn present(
         .iter()
         .map(|(&id, a)| (id, a.key.as_str()))
         .collect();
-    for (owner, eye, _) in &draws {
+    for (owner, eye, _, _) in &draws {
         pose_keys.entry(owner.0).or_insert(&eye.key);
     }
     let poses: BTreeMap<_, _> = pose_keys
@@ -152,7 +157,7 @@ pub fn present(
         interest: Option<hl2_simulation::attention::Interest>,
     }
     let mut actor_targets = BTreeMap::<usize, Option<Selected>>::new();
-    for (owner, mesh_eye, handle) in &draws {
+    for (owner, mesh_eye, handle, skinned) in &draws {
         let state = &game.scene.states[owner.0];
         if !state.visible || state.killed {
             continue;
@@ -247,7 +252,7 @@ pub fn present(
         }
         eyes.projections.push(serde_json::json!({"entity":owner.0,"surface":mesh_eye.eye.surface,"rows":projection.iter().map(|r|r.to_array()).collect::<Vec<_>>(),
             "target":selected.as_ref().map(|s|&s.label),"world_target":selected.as_ref().map(|s|s.point.to_array()),"scripted_interest":selected.as_ref().and_then(|s|s.interest.as_ref())}));
-        if let Some(mut mesh) = meshes.get_mut(&handle.0) {
+        if let Some(mesh) = meshes.get(&handle.0) {
             let Some(VertexAttributeValues::Float32x3(positions)) =
                 mesh.attribute(Mesh::ATTRIBUTE_POSITION)
             else {
@@ -255,10 +260,16 @@ pub fn present(
             };
             let uvs = positions
                 .iter()
-                .map(|p| {
+                .enumerate()
+                .map(|(vertex, p)| {
                     let point =
                         glam::Vec3::from_array(bevy_to_source(Vec3::from_array(*p)).to_array())
                             / mesh_eye.scale;
+                    let point = if skinned.is_some() {
+                        crate::gpu_skinning::skin_vertex(mesh, vertex, point, &poses[&owner.0])
+                    } else {
+                        point
+                    };
                     [
                         projection[0].dot(point.extend(1.)),
                         projection[1].dot(point.extend(1.)),
@@ -266,6 +277,7 @@ pub fn present(
                 })
                 .collect::<Vec<_>>();
             if !matches!(mesh.attribute(Mesh::ATTRIBUTE_UV_1),Some(VertexAttributeValues::Float32x2(old)) if *old == uvs)
+                && let Some(mut mesh) = meshes.get_mut(&handle.0)
             {
                 mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uvs);
             }

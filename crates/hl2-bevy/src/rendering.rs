@@ -176,6 +176,7 @@ fn sample_key(clip: &modkit_core::animation::Clip, time: f32) -> u32 {
 #[derive(Component)]
 pub struct AnimatedMesh {
     sampled: Option<(String, u32)>,
+    gpu: Option<crate::gpu_skinning::Skeleton>,
     entity: Option<usize>,
     weapon: Option<String>,
     key: String,
@@ -198,7 +199,11 @@ pub(crate) fn entity_transform(origin: glam::Vec3, rotation: glam::Quat) -> Tran
 pub fn present_entities(
     game: Res<crate::gameplay::Gameplay>,
     sim: Res<crate::movement::Simulation>,
-    mut entities: Query<(&SourceEntity, &mut Transform, &mut Visibility)>,
+    mut entities: Query<
+        (&SourceEntity, &mut Transform, &mut Visibility),
+        Without<crate::gpu_skinning::Joint>,
+    >,
+    mut joints: Query<&mut Transform, (With<crate::gpu_skinning::Joint>, Without<SourceEntity>)>,
     mut animations: Query<(&mut AnimatedMesh, &Mesh3d, Option<&mut Aabb>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     performance: Option<Res<crate::performance::Performance>>,
@@ -210,13 +215,20 @@ pub fn present_entities(
             .physics
             .entity_pose(owner.0)
             .unwrap_or((state.origin, state.rotation));
-        *transform = entity_transform(origin, rotation);
-        *visibility = if state.visible && !state.killed {
+        let pose = entity_transform(origin, rotation);
+        if *transform != pose {
+            *transform = pose;
+        }
+        let visible = if state.visible && !state.killed {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
+        if *visibility != visible {
+            *visibility = visible;
+        }
     }
+    let mut updated_joints = std::collections::BTreeSet::new();
     let mut poses: BTreeMap<(String, String, u32), Vec<glam::Mat4>> = BTreeMap::new();
     for (mut animation, handle, aabb) in &mut animations {
         let Some(rig) = game.world.rigs.get(&animation.key) else {
@@ -258,6 +270,25 @@ pub fn present_entities(
         let matrices = poses
             .entry((animation.key.clone(), clip.to_owned(), key))
             .or_insert_with(|| rig.matrices(clip, time));
+        if let Some(skeleton) = &animation.gpu {
+            if updated_joints.insert(skeleton.joints[0]) {
+                for ((joint, matrix), bone) in
+                    skeleton.joints.iter().zip(matrices.iter()).zip(&rig.bones)
+                {
+                    if let Ok(mut transform) = joints.get_mut(*joint) {
+                        let pose = Transform::from_matrix(crate::gpu_skinning::convert(
+                            *matrix * bone.inverse_bind.inverse(),
+                            animation.scale,
+                        ));
+                        if *transform != pose {
+                            *transform = pose;
+                        }
+                    }
+                }
+            }
+            animation.sampled = Some(sampled);
+            continue;
+        }
         if let Some(mut mesh) = meshes.get_mut(&handle.0) {
             let positions: Vec<_> = animation
                 .bind
@@ -311,11 +342,14 @@ impl Owner {
 pub fn spawn_map(
     loaded: &LoadedMap,
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
+    (meshes, inverse_binds): (
+        &mut Assets<Mesh>,
+        &mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
+    ),
     materials: &mut Assets<SourceMaterial>,
     images: &mut Assets<Image>,
     status: &Status,
-    camera_target: &Handle<Image>,
+    (camera_target, cpu_skinning): (&Handle<Image>, bool),
 ) {
     let world = &loaded.world;
     let white = images.add(image(1, 1, vec![255; 4], false));
@@ -469,6 +503,7 @@ pub fn spawn_map(
     let mut stats = status.0.lock().expect("status lock");
     stats.skipped_background_surfaces = skipped;
     stats.materials = batches.len();
+    let mut skeletons = BTreeMap::<Owner, crate::gpu_skinning::Skeleton>::new();
     for ((owner, name, lm, _), mut batch) in batches {
         let fallback = MaterialData::default();
         let definition = loaded.materials.get(&name).unwrap_or(&fallback);
@@ -483,7 +518,7 @@ pub fn spawn_map(
         ));
         stats.meshes += 1;
         stats.triangles += batch.indices.len() / 3;
-        let animation = if batch.skin.iter().any(|(_, w)| w.is_some()) {
+        let mut animation = if batch.skin.iter().any(|(_, w)| w.is_some()) {
             match &owner {
                 Owner::Entity(id) => world
                     .model_instances
@@ -491,6 +526,7 @@ pub fn spawn_map(
                     .find(|i| i.entity == Some(*id))
                     .map(|instance| AnimatedMesh {
                         sampled: None,
+                        gpu: None,
                         entity: Some(*id),
                         weapon: None,
                         key: instance.asset_key(),
@@ -499,6 +535,7 @@ pub fn spawn_map(
                     }),
                 Owner::Weapon(name) => Some(AnimatedMesh {
                     sampled: None,
+                    gpu: None,
                     entity: None,
                     weapon: Some(name.clone()),
                     key: format!(
@@ -513,9 +550,47 @@ pub fn spawn_map(
         } else {
             None
         };
-        // Keep animated meshes in the main world for retained CPU skinning.
+        if !cpu_skinning
+            && let Some(animation) = &mut animation
+            && let Some(rig) = world
+                .rigs
+                .get(&animation.key)
+                .filter(|rig| !rig.bones.is_empty() && rig.bones.len() < 256)
+        {
+            let skeleton = skeletons.entry(owner.clone()).or_insert_with(|| {
+                let mut root = commands.spawn((
+                    crate::campaign::MapOwned,
+                    Transform::IDENTITY,
+                    Visibility::Inherited,
+                ));
+                match &owner {
+                    Owner::Entity(id) => {
+                        root.insert(SourceEntity(*id));
+                    }
+                    Owner::Weapon(name) => {
+                        root.insert(WeaponMesh(name.clone()));
+                    }
+                    _ => unreachable!("only owned model meshes animate"),
+                }
+                let root = root.id();
+                crate::gpu_skinning::Skeleton::spawn(
+                    commands,
+                    inverse_binds,
+                    rig,
+                    animation.scale,
+                    root,
+                )
+            });
+            animation.gpu = Some(skeleton.clone());
+        }
+        // CPU assets retain bounds and eye projection data; GPU skinning keeps their positions immutable.
         let animated = animation.is_some() || irises.contains_key(&name);
         let mut mesh = batch.mesh();
+        if let Some(animation) = &animation
+            && let Some(skeleton) = &animation.gpu
+        {
+            skeleton.attributes(&mut mesh, &animation.bind);
+        }
         if animated {
             mesh.asset_usage = RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
         }
@@ -570,9 +645,20 @@ pub fn spawn_map(
             ));
         }
         if let Some(animation) = animation {
+            if let Some(skeleton) = &animation.gpu {
+                stats.gpu_skinned_meshes += 1;
+                draw.insert((
+                    skeleton.component(),
+                    bevy::camera::visibility::DynamicSkinnedMeshBounds,
+                ));
+            }
+            if animation.gpu.is_none() {
+                stats.cpu_skinned_meshes += 1;
+            }
             draw.insert(animation);
         }
     }
+    stats.skin_joints = skeletons.values().map(|s| s.joints.len()).sum();
 }
 pub(crate) fn mesh_from_surface(surface: &Surface, definition: &MaterialData) -> Mesh {
     let mut batch = Batch::default();
@@ -746,6 +832,7 @@ mod tests {
                 Visibility::Inherited,
                 AnimatedMesh {
                     sampled: None,
+                    gpu: None,
                     entity: Some(0),
                     weapon: None,
                     key,

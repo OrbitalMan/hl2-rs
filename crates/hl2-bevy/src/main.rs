@@ -6,6 +6,7 @@ mod console;
 mod effects;
 mod eyes;
 mod gameplay;
+mod gpu_skinning;
 mod hud;
 mod monitors;
 mod movement;
@@ -43,6 +44,7 @@ struct Options {
     pitch: f32,
     profile: bool,
     uncapped: bool,
+    cpu_skinning: bool,
     width: u32,
     height: u32,
     borderless: bool,
@@ -65,6 +67,7 @@ impl Options {
             pitch: 0.,
             profile: false,
             uncapped: false,
+            cpu_skinning: false,
             width: 1280,
             height: 720,
             borderless: false,
@@ -91,6 +94,7 @@ impl Options {
                     ))
                 }
                 "--yaw" => options.yaw = Some(next(&mut args)?.parse::<f32>()?.to_radians()),
+                "--cpu-skinning" => options.cpu_skinning = true,
                 "--uncapped" => options.uncapped = true,
                 "--profile" => options.profile = true,
                 "--pitch" => options.pitch = next(&mut args)?.parse::<f32>()?.to_radians(),
@@ -101,7 +105,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -171,6 +175,9 @@ struct RunStatus {
     adapter: Option<String>,
     backend: Option<String>,
     meshes: usize,
+    gpu_skinned_meshes: usize,
+    cpu_skinned_meshes: usize,
+    skin_joints: usize,
     triangles: usize,
     materials: usize,
     skipped_background_surfaces: usize,
@@ -335,7 +342,7 @@ fn main() -> Result<()> {
         .add_systems(Last, audio::observe.before(monitor))
         .add_systems(Last, monitor);
     if options.profile {
-        app.init_resource::<performance::Performance>();
+        performance::install(&mut app);
     }
     let exit = app.run();
     let mut status = status
@@ -403,13 +410,14 @@ type StartupAssets<'w> = (
     ResMut<'w, Assets<Image>>,
     ResMut<'w, Assets<AudioSource>>,
     ResMut<'w, Assets<effects::EffectMaterial>>,
+    ResMut<'w, Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
 );
 fn setup(
     mut commands: Commands,
     mut prepared: ResMut<PreparedMap>,
     options: Res<Options>,
     status: Res<Status>,
-    (mut meshes, mut materials, mut images, mut sounds, mut effect_materials): StartupAssets,
+    (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
     commands.insert_resource(campaign::Campaign::new(&loaded));
@@ -427,8 +435,10 @@ fn setup(
             &mut images,
             &mut sounds,
             &mut effect_materials,
+            &mut inverse_binds,
         ),
         &status,
+        options.cpu_skinning,
     );
     commands.insert_resource(console::Console::new(ui));
     commands.spawn((
@@ -484,16 +494,21 @@ pub(crate) type MapAssets<'a> = (
     &'a mut Assets<Image>,
     &'a mut Assets<AudioSource>,
     &'a mut Assets<effects::EffectMaterial>,
+    &'a mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
 );
 pub(crate) fn install_map(
     loaded: assets::LoadedMap,
     commands: &mut Commands,
-    (meshes, materials, images, sounds, effect_materials): MapAssets,
+    (meshes, materials, images, sounds, effect_materials, inverse_binds): MapAssets,
     status: &Status,
+    cpu_skinning: bool,
 ) -> hl2_ui::console::Console {
     {
         let mut stats = status.0.lock().expect("map stats");
         stats.meshes = 0;
+        stats.gpu_skinned_meshes = 0;
+        stats.cpu_skinned_meshes = 0;
+        stats.skin_joints = 0;
         stats.triangles = 0;
         stats.materials = 0;
         stats.skipped_background_surfaces = 0;
@@ -502,11 +517,11 @@ pub(crate) fn install_map(
     rendering::spawn_map(
         &loaded,
         commands,
-        meshes,
+        (meshes, inverse_binds),
         materials,
         images,
         status,
-        &camera_target,
+        (&camera_target, cpu_skinning),
     );
     effects::install(
         &loaded,
@@ -537,6 +552,7 @@ type EntityDrawQuery<'w, 's> = Query<
         &'static Transform,
         &'static Visibility,
     ),
+    With<Mesh3d>,
 >;
 type HostResources<'w> = (
     Res<'w, Options>,
@@ -566,9 +582,10 @@ fn monitor(
     status: Res<Status>,
     adapter: Option<Res<RenderAdapterInfo>>,
     (cameras, draws, map_entities, all_cameras, meshes, images): DiagnosticQueries,
-    (mut exit, performance): (
+    (mut exit, performance, render_diagnostics): (
         MessageWriter<AppExit>,
         Option<Res<performance::Performance>>,
+        Option<Res<bevy::diagnostic::DiagnosticsStore>>,
     ),
 ) {
     let _timing = performance::scope(performance.as_deref(), "diagnostics");
@@ -613,6 +630,9 @@ fn monitor(
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         if let Some(performance) = performance.as_deref() {
             report.presentation["cpu_stages"] = performance.report();
+            if let Some(diagnostics) = render_diagnostics.as_deref() {
+                report.presentation["render_diagnostics"] = performance::render_report(diagnostics);
+            }
         }
         if let Some(adapter) = adapter {
             report.adapter = Some(adapter.name.clone());

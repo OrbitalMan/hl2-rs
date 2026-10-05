@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## GPU skinning and release performance (2026-10-05)
+
+All 287 normal workspace tests pass, including normalized influence/basis parity and production joint/bounds checks through translated, rotated and scaled poses. The joint bounds enclose the CPU-skinned vertices without mutating bind positions, and linked joint entities are removed with their root. Strict Bevy all-target Clippy, formatting and diff checks pass. Shared parsers/simulation are unchanged from the 16 passing owned-install checks at the preceding milestone.
+
+Packaged station01 close-ups compare CPU and GPU paths for Barney's monitor and player LOOKAT targets. Both eye projections/targets agree exactly in reports; the inspected actor region differs by less than 0.006 mean RGB channel values on the 0-255 scale. Dynamic props outside that region differ between runs, so whole-image identity is not claimed. Station01 uses 436 GPU-skinned surfaces, no CPU fallback surfaces and 2,769 joints; station02 uses 186 surfaces and 2,077 joints. The packaged door/weapon fixture passes all 17 existing assertions with no rendered/simulated pose disagreement.
+
+Matched-package uncapped 1920x1080 station02 runs use 900 frames, a 120-frame warm-up and `--profile`. Over the remaining 780 frames, CPU skinning averages 35.05 FPS (28.53 ms), while GPU skinning averages 66.85 FPS (14.96 ms). Mean animation cost falls from 4.65 to 0.26 ms and asset preparation from 11.63 to 0.59 ms. These are RTX 3070/Vulkan local measurements with unchanged texture quality. Render preparation and graph/presentation still cost about 5.8 and 7.4 ms; 144 FPS and matched native performance remain unverified. Profiling adds diagnostic queries/timing fences. See [performance](performance.md).
+
+Bevy package SHA256 `C9AFFB5B3058BF139C35F8A1EA6D948FBE6939E2BB6CC5C6A54311853BE0B0DD`. The retained executable is unchanged at `0A6AC5F3C4966ACD9C10AA239056C16399E69EACC49909C3CB79183CC4C9F987`. Private evidence is in ignored artifacts/skin-* and performance-skin-*-final.json. An initial attention capture was run on station02, where the station01 actor IDs do not apply; it was rejected as actor evidence and replaced with the correctly mapped close-ups above. Complete Source animation layers, visibility/areaportal/occluder behavior and campaign fidelity remain unfinished.
+
 ## Live monitor feeds and CPU performance work (2026-10-05)
 
 All **285 normal workspace tests and 16 owned-install tests** pass, with strict all-target Clippy, formatting and diff checks. Incremental collision queries match 400 independent sweeps against full rebuilds across moves, rotations and enable changes. Packaged movement (26 assertions) and weapon/door (17 assertions) regressions pass. A further 22 checks verify live monitor captures, camera selection/state, zero missing textures, pose agreement, two landmark/inventory transitions and the retained projectile replay. Captures were inspected locally.

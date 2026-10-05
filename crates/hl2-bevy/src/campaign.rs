@@ -49,7 +49,7 @@ type Host<'w> = (
 pub fn poll(
     mut commands: Commands,
     (options, mut campaign, mut ui, mut game, mut sim): Host,
-    (mut meshes, mut materials, mut images, mut sounds, mut effect_materials): StartupAssets,
+    (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
     old_draws: Query<Entity, With<MapOwned>>,
     mut windows: Query<&mut CursorOptions, With<PrimaryWindow>>,
     status: Res<Status>,
@@ -160,7 +160,9 @@ pub fn poll(
             &mut images,
             &mut sounds,
             &mut effect_materials,
+            &mut inverse_binds,
         ),
         &status,
+        options.cpu_skinning,
     );
 }
