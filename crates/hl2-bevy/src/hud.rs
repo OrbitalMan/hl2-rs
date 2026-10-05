@@ -79,6 +79,34 @@ struct GpuTexture {
     normal: Handle<HudMaterial>,
     additive: Handle<HudMaterial>,
 }
+#[derive(Default)]
+struct FrameTiming {
+    frames: std::collections::VecDeque<f64>,
+    frame_ms: f64,
+}
+impl FrameTiming {
+    fn observe(&mut self, now: f64) {
+        if let Some(last) = self.frames.back() {
+            self.frame_ms = (now - last).max(0.) * 1000.;
+        }
+        self.frames.push_back(now);
+        while self.frames.len() > 600 || self.frames.front().is_some_and(|t| now - t > 1.) {
+            self.frames.pop_front();
+        }
+    }
+    fn fps(&self) -> f64 {
+        let span = self
+            .frames
+            .back()
+            .zip(self.frames.front())
+            .map_or(0., |(end, start)| end - start);
+        if span > 0. {
+            self.frames.len().saturating_sub(1) as f64 / span
+        } else {
+            0.
+        }
+    }
+}
 #[derive(Resource)]
 pub struct Hud {
     pub source: hl2_ui::hud::WeaponHud,
@@ -86,10 +114,12 @@ pub struct Hud {
     white: Option<(Handle<HudMaterial>, Handle<HudMaterial>)>,
     pool: Vec<(Entity, Handle<Mesh>)>,
     pub quads: usize,
+    timing: FrameTiming,
+    debug_lines: Vec<String>,
 }
 impl Hud {
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()]})
+        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"lines":self.debug_lines}})
     }
     pub fn new(source: hl2_ui::hud::WeaponHud) -> Self {
         Self {
@@ -98,6 +128,8 @@ impl Hud {
             white: None,
             pool: vec![],
             quads: 0,
+            timing: FrameTiming::default(),
+            debug_lines: vec![],
         }
     }
     fn material(
@@ -183,7 +215,12 @@ pub fn present(
     mut commands: Commands,
     mut hud: ResMut<Hud>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    (ui, clock): (Res<crate::console::Console>, Res<Time<Real>>),
+    (ui, clock, sim, status): (
+        Res<crate::console::Console>,
+        Res<Time<Real>>,
+        Res<crate::movement::Simulation>,
+        Res<crate::Status>,
+    ),
     windows: Query<&Window, With<PrimaryWindow>>,
     (mut images, mut materials, mut meshes): HudAssets,
     mut draws: DrawQuery,
@@ -208,6 +245,23 @@ pub fn present(
     );
     if !ui.source.paused() {
         hud.source.draw_crosshair(&game.inventory);
+    }
+    hud.timing.observe(clock.elapsed_secs_f64());
+    hud.debug_lines.clear();
+    if sim.dev_overlay {
+        let stats = status.0.lock().expect("developer statistics");
+        let eye = sim.eye();
+        let textures = stats.map_metadata["textures"]["unique_base_textures"]
+            .as_u64()
+            .unwrap_or(0);
+        hud.debug_lines = vec![
+            format!("HL2-RS  /  Rust runtime  /  {}", game.world.name),
+            format!("{} triangles  |  {} textures  |  {} entities  |  {}  |  {:.0} fps", stats.triangles, textures, game.world.entities.len(), if sim.flying() { "FLY" } else { "WALK" }, hud.timing.fps()),
+            "WASD / click: mouse / Esc pause / tilde console / F2 fly / Space,Ctrl vertical in fly / G prop impulse".into(),
+            "E use / Ctrl crouch / Space jump / R reload / 1-6 / wheel: weapon menu / Q last / F3 dev loadout / F1 overlay".into(),
+            format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
+        ];
+        ui.source.draw_debug(&hud.debug_lines);
     }
     ui.source.draw(clock.elapsed_secs_f64());
     game.scene

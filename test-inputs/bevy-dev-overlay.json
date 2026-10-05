@@ -1,0 +1,16 @@
+[
+  {
+    "tick": 1,
+    "dev_overlay": true,
+    "label": "developer-on"
+  },
+  {
+    "tick": 30,
+    "paused": true,
+    "label": "developer-paused"
+  },
+  {
+    "tick": 60,
+    "label": "developer-frozen"
+  }
+]

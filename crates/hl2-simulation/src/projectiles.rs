@@ -74,6 +74,8 @@ pub enum EffectKind {
 }
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Effect {
+    pub id: u64,
+    pub magnitude: f32,
     pub kind: EffectKind,
     pub position: Vec3,
     pub normal: Vec3,
@@ -83,8 +85,9 @@ pub struct Effect {
 impl Effect {
     pub fn duration(&self) -> f64 {
         match self.kind {
-            EffectKind::BallImpact => 0.5,
-            _ => 0.5,
+            EffectKind::BallImpact => 4.,
+            EffectKind::GrenadeExplosion => 3.,
+            EffectKind::BallExplosion => 8.,
         }
     }
 }
@@ -122,8 +125,14 @@ pub struct Projectiles {
     pub effects: Vec<Effect>,
     pub diagnostics: Diagnostics,
     next_id: u64,
+    next_effect_id: u64,
 }
 impl Projectiles {
+    fn effect(&mut self, mut effect: Effect) {
+        self.next_effect_id += 1;
+        effect.id = self.next_effect_id;
+        self.effects.push(effect);
+    }
     pub fn spawn(&mut self, launch: ProjectileSpawn, scene: &mut Scene) {
         if self.active.len() >= 128 {
             self.diagnostics.capacity_rejections += 1;
@@ -302,7 +311,9 @@ impl Projectiles {
                         // Movable props/characters return after OnHitEntity;
                         // world and non-damageable push brushes dispatch effects.
                         if !entity.is_some_and(ball_hittable_entity) {
-                            self.effects.push(Effect {
+                            self.effect(Effect {
+                                id: 0,
+                                magnitude: 0.,
                                 kind: EffectKind::BallImpact,
                                 position: projectile.position,
                                 normal,
@@ -349,7 +360,9 @@ impl Projectiles {
         } else {
             self.diagnostics.ball_collision_removals += 1;
         }
-        self.effects.push(Effect {
+        self.effect(Effect {
+            id: 0,
+            magnitude: 0.,
             kind: EffectKind::BallExplosion,
             position: projectile.position,
             normal: Vec3::Z,
@@ -372,7 +385,9 @@ impl Projectiles {
         damage: &mut Vec<Damage>,
     ) {
         self.diagnostics.grenade_detonations += 1;
-        self.effects.push(Effect {
+        self.effect(Effect {
+            id: 0,
+            magnitude: projectile.damage,
             kind: EffectKind::GrenadeExplosion,
             position: projectile.position,
             normal,

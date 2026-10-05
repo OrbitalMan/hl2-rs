@@ -98,6 +98,7 @@ pub struct Console {
     title: String,
     menu_layout: MenuLayout,
     mono: Option<FontFace>,
+    developer_font: Option<FontFace>,
     menu_labels: [String; 3],
     style: Style,
 }
@@ -360,6 +361,7 @@ impl Default for Console {
             title: "HL2-RS".into(),
             menu_layout: MenuLayout::default(),
             mono: None,
+            developer_font: None,
             menu_labels: [
                 "RESUME GAME".into(),
                 "DEVELOPER CONSOLE".into(),
@@ -385,6 +387,11 @@ impl Console {
         };
         let mut console = Self {
             canvas: canvas.clone(),
+            developer_font: FontFace::load(
+                include_bytes!("../assets/fonts/ProggyClean.ttf"),
+                canvas.clone(),
+            )
+            .ok(),
             font: font("tahoma.ttf"),
             menu_font: font("verdanab.ttf"),
             mono: font("lucon.ttf").or_else(|| {
@@ -837,6 +844,52 @@ impl Console {
         }
         Vec::new()
     }
+    /// Four compact header rows and a footer, preserving the retained host's developer layout.
+    /// Font data is bundled under its own MIT license, independent of installed game content.
+    pub fn draw_debug(&self, lines: &[String]) {
+        self.canvas.rectangle(
+            0.,
+            0.,
+            self.canvas.width(),
+            105.,
+            Color::new(0.025, 0.045, 0.07, 0.88),
+        );
+        let rows = [
+            (vec2(22., 30.), 27., WHITE),
+            (vec2(22., 55.), 19., Color::new(0.784, 0.784, 0.784, 1.)),
+            (vec2(22., 78.), 17., Color::new(0.784, 0.784, 0.784, 1.)),
+            (vec2(22., 98.), 16., Color::from_rgba(240, 180, 90, 255)),
+        ];
+        let draw = |line: &str, origin: Vec2, size: f32, color| {
+            if let Some(font) = &self.developer_font {
+                font.draw_baseline(line, origin, size, 1., color);
+            } else {
+                text(
+                    &self.canvas,
+                    line,
+                    origin,
+                    size,
+                    1.,
+                    self.mono.as_ref().or(self.font.as_ref()),
+                    color,
+                );
+            }
+        };
+        for (line, (origin, size, color)) in lines.iter().take(4).zip(rows) {
+            draw(line, origin, size, color);
+        }
+        if let Some(footer) = lines.get(4) {
+            self.canvas.rectangle(
+                0.,
+                self.canvas.height() - 38.,
+                self.canvas.width(),
+                38.,
+                Color::new(0.025, 0.045, 0.07, 0.85),
+            );
+            draw(footer, vec2(20., self.canvas.height() - 13.), 18., WHITE);
+        }
+    }
+
     pub fn draw(&self, time: f64) {
         if self.mode == Mode::Gameplay {
             return;

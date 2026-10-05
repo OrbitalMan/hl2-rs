@@ -1,6 +1,10 @@
-//! Engine-independent retained projectile sprite geometry. Particle clouds,
-//! lights, sparks and rings remain approximate or unimplemented.
-use crate::projectiles::{EffectKind, ProjectileKind, Projectiles};
+//! Shared projectile sprite geometry and owned-material explosion emitters.
+//! Native ambient lighting, pixel visibility and beam tessellation remain partial.
+use crate::{
+    explosion_particles::Particles,
+    physics::Physics,
+    projectiles::{EffectKind, ProjectileKind, Projectiles},
+};
 use anyhow::{Context, Result};
 use glam::Vec3;
 use source_assets::{vpk::Vfs, vtf};
@@ -23,6 +27,7 @@ pub struct Quad {
     pub material: String,
     pub positions: [Vec3; 4],
     pub color: [u8; 4],
+    pub uv: [[f32; 2]; 4],
 }
 pub struct ProjectileVisuals {
     pub sprites: HashMap<String, Sprite>,
@@ -32,6 +37,8 @@ pub struct ProjectileVisuals {
     pub errors: BTreeMap<String, String>,
     pub ball_frames: u64,
     pub effect_frames: u64,
+    pub particles: Particles,
+    pub missing_particle_draws: u64,
 }
 pub fn load_sprite(vfs: &Vfs, material: &str) -> Result<Sprite> {
     let base = vfs
@@ -43,7 +50,11 @@ pub fn load_sprite(vfs: &Vfs, material: &str) -> Result<Sprite> {
     let image = vtf::decode(&data, 512)?;
     Ok(Sprite {
         image: std::sync::Arc::new(image),
-        kind: material_kind(vfs, material),
+        kind: if material == "sprites/lgtning" {
+            3
+        } else {
+            material_kind(vfs, material)
+        },
     })
 }
 /// Preserves the retained host's exact legacy flag precedence.
@@ -77,7 +88,7 @@ pub fn material_kind(vfs: &Vfs, name: &str) -> usize {
     }
 }
 
-fn basis(direction: Vec3) -> (Vec3, Vec3) {
+pub(crate) fn basis(direction: Vec3) -> (Vec3, Vec3) {
     let direction = direction.normalize_or_zero();
     let mut right = direction.cross(Vec3::Z).normalize_or_zero();
     if right.length_squared() == 0. {
@@ -102,11 +113,17 @@ impl ProjectileVisuals {
             errors: BTreeMap::new(),
             ball_frames: 0,
             effect_frames: 0,
+            particles: Particles::default(),
+            missing_particle_draws: 0,
         }
     }
     pub fn new(vfs: &Vfs) -> Self {
         let mut result = Self::empty();
-        for name in SPRITES {
+        for name in SPRITES
+            .iter()
+            .chain(crate::explosion_particles::MATERIALS)
+            .collect::<std::collections::BTreeSet<_>>()
+        {
             match load_sprite(vfs, name) {
                 Ok(sprite) => {
                     result.sprites.insert((*name).into(), sprite);
@@ -154,10 +171,19 @@ impl ProjectileVisuals {
             material: material.into(),
             positions,
             color: [shade, shade, shade, 255],
+            uv: crate::explosion_particles::UV,
         });
     }
 
-    pub fn frame(&mut self, projectiles: &Projectiles, direction: Vec3, time: f64, paused: bool) {
+    pub fn frame(
+        &mut self,
+        projectiles: &Projectiles,
+        eye: Vec3,
+        direction: Vec3,
+        time: f64,
+        paused: bool,
+        physics: &Physics,
+    ) {
         self.quads.clear();
         let axes = basis(direction);
         self.previous
@@ -236,28 +262,17 @@ impl ProjectileVisuals {
                         (1. - age / 0.5).max(0.),
                     );
                 }
-                EffectKind::GrenadeExplosion => {
-                    // Bounded owned fire sprites, pending Source particle-cloud simulation.
-                    self.quad(
-                        "effects/fire_cloud1",
-                        position,
-                        axes,
-                        32. + age * 64.,
-                        0.,
-                        (1. - age / 0.5).max(0.),
-                    );
-                    self.quad(
-                        "effects/fire_cloud2",
-                        position,
-                        axes,
-                        24. + age * 48.,
-                        1.,
-                        (1. - age / 0.5).max(0.),
-                    );
-                }
-                EffectKind::BallExplosion => (), // Native sparks/beam rings need their own particle path.
+                EffectKind::GrenadeExplosion | EffectKind::BallExplosion => (),
             }
             self.effect_frames += 1;
+        }
+        self.particles.sync(&projectiles.effects, time, physics);
+        for quad in self.particles.draw(eye, direction, time, physics) {
+            if self.sprites.contains_key(&quad.material) {
+                self.quads.push(quad);
+            } else {
+                self.missing_particle_draws += 1;
+            }
         }
     }
 }

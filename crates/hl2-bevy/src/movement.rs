@@ -31,6 +31,7 @@ pub struct Command {
     eye: Option<[f32; 3]>,
     yaw: Option<f32>,
     paused: Option<bool>,
+    dev_overlay: Option<bool>,
     fly: Option<bool>,
     #[serde(default)]
     forward: f32,
@@ -106,6 +107,7 @@ pub struct Simulation {
     host_tick: u64,
     samples: Vec<Sample>,
     pub finished: bool,
+    pub dev_overlay: bool,
 }
 impl Simulation {
     pub fn new(
@@ -134,10 +136,14 @@ impl Simulation {
             host_tick: 0,
             samples: vec![],
             finished: false,
+            dev_overlay: false,
         }
     }
     pub fn eye(&self) -> Vec3 {
         Vec3::from_array(self.eye.to_array())
+    }
+    pub fn flying(&self) -> bool {
+        self.fly
     }
     pub fn paused(&self) -> bool {
         self.paused || self.loading
@@ -166,7 +172,7 @@ impl Simulation {
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"player": self.player, "eye": self.eye.to_array(), "fly": self.fly,
-            "paused": self.paused(), "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
+            "paused": self.paused(), "dev_overlay":self.dev_overlay, "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
             "samples": self.samples, "colliders": self.physics.colliders.len(),
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
@@ -273,6 +279,9 @@ impl Simulation {
             }
             if let Some(fly) = c.fly {
                 self.change_fly(fly);
+            }
+            if let Some(enabled) = c.dev_overlay {
+                self.dev_overlay = enabled;
             }
             if let Some(paused) = c.paused {
                 self.paused = paused;
@@ -413,6 +422,9 @@ fn controls(
         .filter_map(|e| e.text.as_ref())
         .map(|s| s.as_str())
         .collect();
+    if keys.just_pressed(KeyCode::F1) && window.focused {
+        sim.dev_overlay = !sim.dev_overlay;
+    }
     if !sim.commands.is_empty() {
         return;
     }

@@ -150,8 +150,9 @@ impl Effects {
         serde_json::json!({"sprite_draws":self.draws,"pooled_quads":self.quads.len(),
             "grenade_draws":self.grenade_draws,"decal_draws":self.mark_draws,"pose_mismatches":self.pose_mismatches, "observed_decals":self.observed_decals,"observed_grenades":self.observed_grenades,
             "ball_frames":self.source.ball_frames,"effect_frames":self.source.effect_frames,
+            "particle_emitters":self.source.particles.diagnostics,"missing_particle_draws":self.source.missing_particle_draws,
             "sprite_errors":self.source.errors,"model_errors":self.model_errors,
-            "limitations":"retained sprite/triangle-decal approximations; native particles/lights/sparks/rings, animated receivers and exact model shading remain unfinished"})
+            "limitations":"owned smoke/fire/ember/debris/electric emitters and shock rings; native RNG, ambient cubes, soft depth blending, beam tessellation, particle-manager scheduling, animated receivers and exact shading remain unfinished"})
     }
 }
 pub fn install(
@@ -279,7 +280,7 @@ fn quad_mesh(quad: &hl2_simulation::projectile_visuals::Quad) -> Mesh {
             .iter()
             .map(|p| crate::source_to_bevy(Vec3::from_array(p.to_array())).to_array())
             .collect(),
-        vec![[0., 1.], [0., 0.], [1., 0.], [1., 1.]],
+        quad.uv.to_vec(),
         vec![quad.color.map(|c| f32::from(c) / 255.); 4],
         vec![0, 1, 2, 0, 2, 3],
         true,
@@ -294,9 +295,14 @@ pub fn present(
     mut draws: Query<(&mut Transform, &mut Visibility)>,
 ) {
     let direction = glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
-    effects
-        .source
-        .frame(&game.projectiles, direction, game.scene.time, sim.paused());
+    effects.source.frame(
+        &game.projectiles,
+        glam::Vec3::from_array(sim.eye().to_array()),
+        direction,
+        game.scene.time,
+        sim.paused(),
+        &sim.physics,
+    );
     effects.draws = effects.source.quads.len();
     for i in 0..effects.source.quads.len() {
         let quad = effects.source.quads[i].clone();

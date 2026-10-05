@@ -34,23 +34,28 @@ impl ProjectileVisuals {
             .collect();
         Self { source, textures }
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         projectiles: &Projectiles,
+        eye: Vec3,
         direction: Vec3,
         time: f64,
         paused: bool,
         materials: &Materials,
+        physics: &crate::physics::Physics,
     ) {
         self.source.frame(
             projectiles,
+            glam::Vec3::from_array(eye.to_array()),
             glam::Vec3::from_array(direction.to_array()),
             time,
             paused,
+            physics,
         );
         for quad in &self.source.quads {
             let sprite = &self.source.sprites[&quad.material];
-            let uv = [vec2(0., 1.), vec2(0., 0.), vec2(1., 0.), vec2(1., 1.)];
+            let uv = quad.uv.map(Vec2::from_array);
             let vertices = quad
                 .positions
                 .iter()

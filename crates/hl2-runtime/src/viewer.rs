@@ -1456,10 +1456,12 @@ pub async fn run(mut o: Options) -> Result<()> {
         impacts.draw(&scene, &physics, &materials);
         projectile_visuals.draw(
             &projectiles,
+            v3(position),
             v3(direction),
             scene.time,
             simulation_dt == 0.,
             &materials,
+            &physics,
         );
         gl_use_default_material();
         for b in sandbox.blocks.iter().chain(&placed) {
@@ -1673,7 +1675,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             report["audio_decoded"] = serde_json::json!(audio.decoded);
             report["ar2_charge_until"] = serde_json::json!(inventory.charge_until());
             report["projectiles"] = serde_json::json!({"active":projectiles.active,"effects":projectiles.effects,"diagnostics":projectiles.diagnostics,"model_errors":projectile_model_errors});
-            report["projectile_visuals"] = serde_json::json!({"errors":projectile_visuals.errors,"ball_frames":projectile_visuals.ball_frames,"effect_frames":projectile_visuals.effect_frames});
+            report["projectile_visuals"] = serde_json::json!({"errors":projectile_visuals.errors,"ball_frames":projectile_visuals.ball_frames,"effect_frames":projectile_visuals.effect_frames,"particle_emitters":projectile_visuals.particles.diagnostics,"missing_particle_draws":projectile_visuals.missing_particle_draws});
             report["native_static_collision"] = serde_json::json!({"convex_colliders":physics.native_shape_count,"hull_fallbacks":physics.native_shape_fallbacks});
             write(
                 Path::new("artifacts/runtime-report.json"),

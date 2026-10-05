@@ -90,7 +90,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
