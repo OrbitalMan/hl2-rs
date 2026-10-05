@@ -194,6 +194,7 @@ pub struct Scene {
     pub movement_commands: Vec<SceneMoveCommand>,
     movement_ready: BTreeMap<crate::npc::GoalKey, bool>,
     pub look_targets: crate::attention::LookTargets,
+    pub monitors: crate::monitors::Cameras,
 }
 impl Scene {
     pub fn new(world: &World) -> Self {
@@ -214,6 +215,7 @@ impl Scene {
             movement_commands: Vec::new(),
             movement_ready: BTreeMap::new(),
             look_targets: Default::default(),
+            monitors: crate::monitors::Cameras::new(world),
         };
         for e in &world.entities {
             let base_rotation = physics::angles(
@@ -286,7 +288,8 @@ impl Scene {
             let mut s = State {
                 origin: e.origin(),
                 rotation: base_rotation,
-                visible: e.get("rendermode") != Some("10"),
+                visible: e.get("rendermode") != Some("10")
+                    && (!matches!(e.class(), "func_brush" | "func_monitor") || enabled),
                 enabled,
                 killed: false,
                 animation: e
@@ -1311,6 +1314,12 @@ impl Scene {
             class,
             "func_door" | "func_door_rotating" | "prop_door_rotating" | "func_movelinear"
         );
+        if self
+            .monitors
+            .input(world, &self.states, id, &input, &p.parameter, self.time)
+        {
+            return;
+        }
         match input.as_str() {
             "start" if class == "logic_choreographed_scene" => {
                 self.start_choreography(world, id, p.activator)
@@ -1343,11 +1352,24 @@ impl Scene {
             }
             "enable" => {
                 self.states[id].enabled = true;
+                if matches!(class, "func_brush" | "func_monitor") {
+                    self.states[id].visible = true;
+                }
                 self.states[id].timer_at =
                     self.time + number(e, "RefireTime", 1.).max(0.015) as f64;
             }
-            "disable" => self.states[id].enabled = false,
-            "toggle" if !door => self.states[id].enabled = !self.states[id].enabled,
+            "disable" => {
+                self.states[id].enabled = false;
+                if matches!(class, "func_brush" | "func_monitor") {
+                    self.states[id].visible = false;
+                }
+            }
+            "toggle" if !door => {
+                self.states[id].enabled = !self.states[id].enabled;
+                if matches!(class, "func_brush" | "func_monitor") {
+                    self.states[id].visible = self.states[id].enabled;
+                }
+            }
             "turnon" => self.states[id].visible = true,
             "turnoff" => self.states[id].visible = false,
             "lock" => self.states[id].locked = true,
@@ -1610,6 +1632,14 @@ impl Scene {
             return;
         }
         let play = script.get("m_iszPlay").unwrap_or("");
+        if play.is_empty() {
+            // Retail StartSequence completes a null action immediately, allowing the authored post idle.
+            self.states[actor].scripted_by = Some(id);
+            self.states[id].script_actor = Some(actor);
+            self.fire(id, "OnBeginSequence", actor);
+            self.end_sequence(world, id, false);
+            return;
+        }
         if !self.animate(world, actor, play, false) {
             return;
         }
@@ -1691,6 +1721,7 @@ impl Scene {
     }
     pub fn tick(&mut self, world: &World, player_feet: Vec3, dt: f32) {
         self.time += dt as f64;
+        self.monitors.tick(&self.states, self.time);
         self.look_targets.cleanup(self.time, |id| {
             self.states.get(id).is_some_and(|s| !s.killed)
         });
@@ -2714,7 +2745,7 @@ mod tests {
             animation::{Clip, Rig},
             ModelInstance,
         };
-        let w = World {
+        let mut w = World {
             entities: vec![
                 entity(
                     "scripted_sequence",
@@ -2779,6 +2810,29 @@ mod tests {
         assert_eq!(s.states[2].value, 1.);
         s.tick(&w, Vec3::ZERO, 0.6);
         assert_eq!(s.states[2].value, 2.);
+        // Both an omitted action and an explicitly empty one must enter post idle immediately.
+        for omitted in [false, true] {
+            w.entities[0].properties.retain(|(k, _)| k != "m_iszPlay");
+            if !omitted {
+                w.entities[0]
+                    .properties
+                    .push(("m_iszPlay".into(), String::new()));
+            }
+            let mut s = Scene::new(&w);
+            s.send(0, "BeginSequence", "");
+            s.tick(&w, Vec3::ZERO, 0.015);
+            assert_eq!(s.states[1].animation, "post");
+            assert_eq!(s.states[2].value, 1.);
+            assert!(!s
+                .diagnostics
+                .unsupported
+                .keys()
+                .any(|k| k.contains("animation:")));
+            s.tick(&w, Vec3::ZERO, 1.5);
+            assert_eq!(s.states[2].value, 1.);
+            s.tick(&w, Vec3::ZERO, 0.6);
+            assert_eq!(s.states[2].value, 2.);
+        }
     }
     #[test]
     fn duplicate_outputs_delays_and_fire_limits() {

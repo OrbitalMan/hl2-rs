@@ -90,6 +90,9 @@ impl Bsp {
     pub fn lump(&self, id: usize) -> &[u8] {
         &self.lumps[id]
     }
+    pub fn bounds_in_pvs(&self, eye: Vec3, mins: Vec3, maxs: Vec3) -> Result<bool> {
+        crate::visibility::bounds_in_pvs(&self.lumps, self.lump_versions[10], eye, mins, maxs)
+    }
     /// Query separate LEAF_FLAGS_SKY (3D) and LEAF_FLAGS_SKY2D eligibility.
     /// Missing/malformed node/leaf tables or a non-finite point return an error.
     pub fn sky_visibility(&self, point: Vec3) -> Result<SkyVisibility> {

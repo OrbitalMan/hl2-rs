@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## Live monitor feeds and CPU performance work (2026-10-05)
+
+All **285 normal workspace tests and 16 owned-install tests** pass, with strict all-target Clippy, formatting and diff checks. Incremental collision queries match 400 independent sweeps against full rebuilds across moves, rotations and enable changes. Packaged movement (26 assertions) and weapon/door (17 assertions) regressions pass. A further 22 checks verify live monitor captures, camera selection/state, zero missing textures, pose agreement, two landmark/inventory transitions and the retained projectile replay. Captures were inspected locally.
+
+Bevy now renders the owned Breen and Kleiner camera rooms into a shared 256x256 target, with authored scanline overlays and a supported subset of material proxies. The Breen capture still has the map's Combine slate over the portrait, and the Kleiner scene is not staged correctly. These controlled feeds do not prove the normal broadcast or security scene works. Camera sky/fog, area connectivity, client camera ordering, recursive feedback and remaining TV noise proxies are incomplete. The retained host shares camera/entity state but has no live render-target adapter.
+
+The performance regression remains material. Default-VSync 1080p measured about 30 FPS both before and after CPU improvements. Mean fixed simulation fell from 4.02 to 2.61 ms per tick; diagnostics fell from 1.39 to 0.022 ms per frame. A subsequent constant-pose upload fix plus no-VSync measured about 35 FPS; this is not an isolated comparison for that fix. GPU/render-thread cost and 144 FPS are unverified. See [measurements and reproduction](performance.md).
+
+Final Bevy package SHA256 `443618608F260D49BF504FA457CD318104EF8F4833B56DBA137B329CA7CC8E16`; retained package `0A6AC5F3C4966ACD9C10AA239056C16399E69EACC49909C3CB79183CC4C9F987`. Evidence is in ignored artifacts/bevy-monitors*, retained-monitors-physics and performance*. Native decompiler evidence, databases, reference tools and captures remain outside the public source snapshot.
+
 ## Owned explosion emitters and developer overlay (2026-10-05)
 
 The shared emitter adds distinct grenade smoke/fire/embers/debris, electric bounce/expiry sparks and two expanding AR2 shock rings. Five emitter tests cover emission/lifetime ranges, ring diameter/continuous geometry, pause-safe dispatch, delayed catch-up and bounded/reset state. All **278 normal tests and16 owned-install tests** pass, with strict all-target Clippy and formatting checks. Owned tests decode the nine particle materials with their intended blend modes.

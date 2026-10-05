@@ -69,7 +69,9 @@ pub fn present(
     camera: Query<&Transform, With<FlyCamera>>,
     draws: Query<(&SourceEntity, &EyeMesh, &Mesh3d)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    performance: Option<Res<crate::performance::Performance>>,
 ) {
+    let _timing = crate::performance::scope(performance.as_deref(), "eyes");
     let Ok(camera) = camera.single() else { return };
     // Evaluate each visible actor once per presentation; target and iris consumers
     // share these skin transforms rather than sampling the full rig for every eye.

@@ -20,3 +20,5 @@ pub mod impacts;
 pub mod projectile_visuals;
 
 pub mod attention;
+
+pub mod monitors;

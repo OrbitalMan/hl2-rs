@@ -192,7 +192,7 @@ pub fn tick_npcs(
         let s = &scene.states[pose.entity];
         physics.set_entity(pose.entity, s.origin, s.rotation, !s.killed && s.visible);
     }
-    physics.refresh_queries();
+    physics.refresh_entity_queries();
 }
 
 pub fn prepare_weapons(

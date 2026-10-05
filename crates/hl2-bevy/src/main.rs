@@ -7,7 +7,9 @@ mod effects;
 mod eyes;
 mod gameplay;
 mod hud;
+mod monitors;
 mod movement;
+mod performance;
 mod rendering;
 mod sky;
 use anyhow::{Context, Result, bail};
@@ -34,10 +36,13 @@ struct Options {
     map: String,
     frames: Option<u64>,
     capture: Option<PathBuf>,
+    monitor_capture: Option<PathBuf>,
     report: PathBuf,
     position: Option<Vec3>,
     yaw: Option<f32>,
     pitch: f32,
+    profile: bool,
+    uncapped: bool,
     width: u32,
     height: u32,
     borderless: bool,
@@ -53,10 +58,13 @@ impl Options {
             map: "d1_trainstation_02".into(),
             frames: None,
             capture: None,
+            monitor_capture: None,
             report: "artifacts/bevy-report.json".into(),
             position: None,
             yaw: None,
             pitch: 0.,
+            profile: false,
+            uncapped: false,
             width: 1280,
             height: 720,
             borderless: false,
@@ -73,6 +81,7 @@ impl Options {
                 "--map" => options.map = next(&mut args)?,
                 "--frames" => options.frames = Some(next(&mut args)?.parse()?),
                 "--capture" => options.capture = Some(next(&mut args)?.into()),
+                "--capture-monitor" => options.monitor_capture = Some(next(&mut args)?.into()),
                 "--report" => options.report = next(&mut args)?.into(),
                 "--position" => {
                     options.position = Some(Vec3::new(
@@ -82,6 +91,8 @@ impl Options {
                     ))
                 }
                 "--yaw" => options.yaw = Some(next(&mut args)?.parse::<f32>()?.to_radians()),
+                "--uncapped" => options.uncapped = true,
+                "--profile" => options.profile = true,
                 "--pitch" => options.pitch = next(&mut args)?.parse::<f32>()?.to_radians(),
                 "--width" => options.width = next(&mut args)?.parse()?,
                 "--height" => options.height = next(&mut args)?.parse()?,
@@ -90,7 +101,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --report JSON\n--fly --movement-script JSON\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -109,15 +120,18 @@ impl Options {
         {
             bail!("camera coordinates and angles must be finite");
         }
-        if options
-            .capture
-            .as_ref()
-            .is_some_and(|p| p.extension().is_none_or(|e| !e.eq_ignore_ascii_case("png")))
+        for path in [&options.capture, &options.monitor_capture]
+            .into_iter()
+            .flatten()
         {
-            bail!("--capture must be a .png path");
+            if path
+                .extension()
+                .is_none_or(|e| !e.eq_ignore_ascii_case("png"))
+            {
+                bail!("capture must be a .png path");
+            }
         }
-        options.pitch = options.pitch.clamp(-1.55, 1.55);
-        if options.capture.is_some()
+        if (options.capture.is_some() || options.monitor_capture.is_some())
             && options.frames.is_none()
             && options.movement_script.is_none()
         {
@@ -127,9 +141,13 @@ impl Options {
             Some(path) => source_assets::install::validate(path)?,
             None => source_assets::install::discover()?,
         };
-        for path in [Some(&options.report), options.capture.as_ref()]
-            .into_iter()
-            .flatten()
+        for path in [
+            Some(&options.report),
+            options.capture.as_ref(),
+            options.monitor_capture.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
         {
             if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
                 std::fs::create_dir_all(parent)?;
@@ -144,6 +162,9 @@ struct PreparedMap(Option<assets::LoadedMap>);
 struct RunStatus {
     #[serde(skip)]
     captured_image: Option<Image>,
+    #[serde(skip)]
+    monitor_image: Option<Image>,
+    monitor_capture_completed: bool,
     frames: u64,
     capture_completed: bool,
     capture_size: Option<[u32; 2]>,
@@ -256,6 +277,11 @@ fn main() -> Result<()> {
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
+                        present_mode: if options.uncapped {
+                            bevy::window::PresentMode::AutoNoVsync
+                        } else {
+                            bevy::window::PresentMode::AutoVsync
+                        },
                         title: "HL2-RS | Bevy/wgpu migration | gameplay migration preview".into(),
                         resolution: WindowResolution::new(options.width, options.height)
                             .with_scale_factor_override(1.),
@@ -286,6 +312,8 @@ fn main() -> Result<()> {
                 rendering::present_weapons,
                 effects::present,
                 sky::present,
+                monitors::present,
+                monitors::present_materials,
                 hud::present,
             )
                 .before(TransformSystems::Propagate),
@@ -306,6 +334,9 @@ fn main() -> Result<()> {
         .add_systems(Last, effects::observe.before(monitor))
         .add_systems(Last, audio::observe.before(monitor))
         .add_systems(Last, monitor);
+    if options.profile {
+        app.init_resource::<performance::Performance>();
+    }
     let exit = app.run();
     let mut status = status
         .0
@@ -313,26 +344,18 @@ fn main() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("render status lock poisoned"))?;
     // Readback is retained in memory during the app. PNG/report writes happen
     // only after the host exits, so renderer systems perform no blocking I/O.
-    let capture_write_error = if let Some(path) = &options.capture {
-        match status.captured_image.take() {
-            Some(image) => match image.try_into_dynamic() {
-                Ok(image) => image
-                    .to_rgb8()
-                    .save(path)
-                    .err()
-                    .map(|error| error.to_string()),
-                Err(error) => Some(format!("screenshot conversion: {error}")),
-            },
-            None => Some("screenshot readback did not finish".into()),
-        }
-    } else {
-        None
-    };
+    let capture_write_error = save_capture(status.captured_image.take(), options.capture.as_ref());
+    let monitor_capture_write_error = save_capture(
+        status.monitor_image.take(),
+        options.monitor_capture.as_ref(),
+    );
+    let monitor_capture_exists = options.monitor_capture.as_ref().is_none_or(|p| p.is_file());
     let capture_exists = options.capture.as_ref().is_none_or(|path| path.is_file());
     let mut report = serde_json::json!({
         "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": options.map, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
-        "capture_file_exists": capture_exists, "capture_write_error": capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
+        "capture_file_exists": capture_exists, "capture_write_error": capture_write_error,
+        "monitor_capture_file_exists":monitor_capture_exists,"monitor_capture_write_error":monitor_capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
         "limitations": ["Pause/console and landmark/inventory map transitions migrated; complete command coverage, save/global state and native effects remain incomplete", "Audio uses shared script selection/decoding and Bevy sinks; mixing is 2D without Source DSP, spatialization or soundscapes", "Retained incomplete scene/AI/weapon behavior; missing animation clips remain bind poses", "LDR sky uses owned faces/leaf visibility; sky polygon masks, PVS/areaportals, material proxies, dynamic lighting and HDR remain unfinished", "Base textures and baked lightmaps use approximate legacy gamma multiplication; not full Source shader fidelity"]
     });
     for key in [
@@ -364,6 +387,13 @@ fn main() -> Result<()> {
         && (!status.capture_completed || !capture_exists || capture_write_error.is_some())
     {
         bail!("requested screenshot did not complete; inspect report/log");
+    }
+    if options.monitor_capture.is_some()
+        && (!status.monitor_capture_completed
+            || !monitor_capture_exists
+            || monitor_capture_write_error.is_some())
+    {
+        bail!("requested monitor screenshot did not complete; inspect report/log");
     }
     Ok(())
 }
@@ -445,6 +475,7 @@ fn setup(
             Vec3::Y,
         ),
         FlyCamera,
+        bevy::camera::visibility::RenderLayers::layer(0).with(5),
     ));
 }
 pub(crate) type MapAssets<'a> = (
@@ -467,7 +498,16 @@ pub(crate) fn install_map(
         stats.materials = 0;
         stats.skipped_background_surfaces = 0;
     }
-    rendering::spawn_map(&loaded, commands, meshes, materials, images, status);
+    let camera_target = monitors::install(&loaded, commands, images);
+    rendering::spawn_map(
+        &loaded,
+        commands,
+        meshes,
+        materials,
+        images,
+        status,
+        &camera_target,
+    );
     effects::install(
         &loaded,
         commands,
@@ -505,6 +545,7 @@ type HostResources<'w> = (
     Res<'w, hud::Hud>,
     Res<'w, audio::Audio>,
     Res<'w, sky::Sky>,
+    Res<'w, monitors::Monitors>,
     Res<'w, eyes::Eyes>,
     Res<'w, effects::Effects>,
     Res<'w, console::Console>,
@@ -520,52 +561,74 @@ type DiagnosticQueries<'w, 's> = (
 );
 fn monitor(
     mut commands: Commands,
-    (options, simulation, game, hud, audio, sky, eyes, effects, console, campaign): HostResources,
+    (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
     adapter: Option<Res<RenderAdapterInfo>>,
     (cameras, draws, map_entities, all_cameras, meshes, images): DiagnosticQueries,
-    mut exit: MessageWriter<AppExit>,
+    (mut exit, performance): (
+        MessageWriter<AppExit>,
+        Option<Res<performance::Performance>>,
+    ),
 ) {
+    let _timing = performance::scope(performance.as_deref(), "diagnostics");
     control.frames += 1;
     let mut report = status.0.lock().expect("status lock");
     report.frames = control.frames;
-    report.map_metadata = campaign.metadata.clone();
-    report.simulation = simulation.report();
-    report.simulation["gameplay"] = game.report(&simulation.physics);
-    let mut mismatches = 0;
-    let mut owned_meshes = 0;
-    let mut doors = Vec::new();
-    for (owner, transform, visibility) in &draws {
-        owned_meshes += 1;
-        let state = &game.scene.states[owner.0];
-        let (origin, rotation) = simulation
-            .physics
-            .entity_pose(owner.0)
-            .unwrap_or((state.origin, state.rotation));
-        let expected = rendering::entity_transform(origin, rotation);
-        let hidden = !state.visible || state.killed;
-        if transform.translation.distance(expected.translation) > 0.001
-            || transform.rotation.dot(expected.rotation).abs() < 0.99999
-            || (*visibility == Visibility::Hidden) != hidden
-        {
-            mismatches += 1;
-        }
-        if game.world.entities[owner.0].get("targetname") == Some("station_entrance") {
-            doors.push(serde_json::json!({"entity":owner.0,"origin":bevy_to_source(transform.translation).to_array(),
+    // Full diagnostic serialization is sampled for play; captures and exits always get a fresh snapshot.
+    let snapshot = control.frames == 1
+        || control.frames.is_multiple_of(60)
+        || control.requested
+        || simulation.finished
+        || options.frames.is_some_and(|limit| control.frames >= limit)
+        || console.quit_requested;
+    if snapshot {
+        report.map_metadata = campaign.metadata.clone();
+        report.simulation = simulation.report();
+        report.simulation["gameplay"] = game.report(&simulation.physics);
+        let mut mismatches = 0;
+        let mut owned_meshes = 0;
+        let mut doors = Vec::new();
+        for (owner, transform, visibility) in &draws {
+            owned_meshes += 1;
+            let state = &game.scene.states[owner.0];
+            let (origin, rotation) = simulation
+                .physics
+                .entity_pose(owner.0)
+                .unwrap_or((state.origin, state.rotation));
+            let expected = rendering::entity_transform(origin, rotation);
+            let hidden = !state.visible || state.killed;
+            if transform.translation.distance(expected.translation) > 0.001
+                || transform.rotation.dot(expected.rotation).abs() < 0.99999
+                || (*visibility == Visibility::Hidden) != hidden
+            {
+                mismatches += 1;
+            }
+            if game.world.entities[owner.0].get("targetname") == Some("station_entrance") {
+                doors.push(serde_json::json!({"entity":owner.0,"origin":bevy_to_source(transform.translation).to_array(),
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
+            }
+        }
+        report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),
+        "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
+        if let Some(performance) = performance.as_deref() {
+            report.presentation["cpu_stages"] = performance.report();
+        }
+        if let Some(adapter) = adapter {
+            report.adapter = Some(adapter.name.clone());
+            report.backend = Some(format!("{:?}", adapter.backend));
+        }
+        if let Ok(camera) = cameras.single() {
+            report.camera_source = bevy_to_source(camera.translation).to_array();
+            report.simulation["camera_forward"] =
+                serde_json::json!(bevy_to_source(*camera.forward()).to_array());
         }
     }
-    report.presentation = serde_json::json!({"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),
-        "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
-    if let Some(adapter) = adapter {
-        report.adapter = Some(adapter.name.clone());
-        report.backend = Some(format!("{:?}", adapter.backend));
-    }
-    if let Ok(camera) = cameras.single() {
-        report.camera_source = bevy_to_source(camera.translation).to_array();
-    }
-    if report.capture_completed && control.completed_frame.is_none() {
+    if control.requested
+        && (options.capture.is_none() || report.capture_completed)
+        && (options.monitor_capture.is_none() || report.monitor_capture_completed)
+        && control.completed_frame.is_none()
+    {
         control.completed_frame = Some(control.frames);
     }
     if options.frames.is_some() || options.movement_script.is_some() {
@@ -580,7 +643,13 @@ fn monitor(
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(capture_complete);
-            } else {
+            }
+            if options.monitor_capture.is_some() {
+                commands
+                    .spawn(Screenshot::image(monitors.target.clone()))
+                    .observe(monitor_capture_complete);
+            }
+            if options.capture.is_none() && options.monitor_capture.is_none() {
                 exit.write(AppExit::Success);
             }
         }
@@ -604,6 +673,26 @@ fn capture_complete(event: On<ScreenshotCaptured>, status: Res<Status>) {
     report.capture_size = Some([event.image.width(), event.image.height()]);
     report.captured_image = Some(event.image.clone());
 }
+fn monitor_capture_complete(event: On<ScreenshotCaptured>, status: Res<Status>) {
+    let mut report = status.0.lock().expect("monitor capture");
+    report.monitor_capture_completed = true;
+    report.monitor_image = Some(event.image.clone());
+}
+fn save_capture(image: Option<Image>, path: Option<&PathBuf>) -> Option<String> {
+    let path = path?;
+    match image {
+        Some(image) => match image.try_into_dynamic() {
+            Ok(image) => image
+                .to_rgb8()
+                .save(path)
+                .err()
+                .map(|error| error.to_string()),
+            Err(error) => Some(format!("screenshot conversion: {error}")),
+        },
+        None => Some("screenshot readback did not finish".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

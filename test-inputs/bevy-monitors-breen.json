@@ -1,0 +1,22 @@
+[
+  {
+    "tick": 1,
+    "fly": true,
+    "eye": [
+      -3550,
+      -2536,
+      469
+    ],
+    "yaw": 180,
+    "label": "breen-camera-active"
+  },
+  {
+    "tick": 450,
+    "paused": true,
+    "label": "breen-camera-frozen"
+  },
+  {
+    "tick": 480,
+    "label": "breen-capture"
+  }
+]

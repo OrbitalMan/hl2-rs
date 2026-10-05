@@ -33,6 +33,14 @@ impl Sky {
             "width":f.image.width,"height":f.image.height,"uv_transform":f.transform.rows()})).collect::<Vec<_>>()
         })), visible: SkyVisibility::default(), frames_2d:0, frames_3d:0, error:None }
     }
+    pub fn bounds_in_pvs(
+        &self,
+        eye: glam::Vec3,
+        mins: glam::Vec3,
+        maxs: glam::Vec3,
+    ) -> anyhow::Result<bool> {
+        self.bsp.bounds_in_pvs(eye, mins, maxs)
+    }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"ldr":self.faces,"leaf_visibility":self.visible,"frames_2d":self.frames_2d,
             "frames_3d":self.frames_3d,"visibility_error":self.error,
@@ -94,6 +102,7 @@ pub fn install(
                     base,
                     lightmap: white.clone(),
                     iris: white.clone(),
+                    secondary_uv: Mat3::IDENTITY,
                     alpha: AlphaMode::Opaque,
                     two_sided: true,
                 })),

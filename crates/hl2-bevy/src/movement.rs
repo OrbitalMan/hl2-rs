@@ -411,6 +411,9 @@ fn controls(
     mut ui: Option<ResMut<crate::console::Console>>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
+        if let Some(ui) = ui.as_deref_mut() {
+            ui.quit_requested = true;
+        }
         exit.write(AppExit::Success);
     }
     let Ok((window, mut cursor)) = windows.single_mut() else {
@@ -569,7 +572,9 @@ fn fixed_step(
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut ui: Option<ResMut<crate::console::Console>>,
     mut exit: MessageWriter<AppExit>,
+    performance: Option<Res<crate::performance::Performance>>,
 ) {
+    let _timing = crate::performance::scope(performance.as_deref(), "fixed_simulation");
     sim.step(game.as_deref_mut(), ui.as_deref_mut());
     if ui.is_some_and(|u| u.quit_requested) {
         exit.write(AppExit::Success);

@@ -4,6 +4,7 @@ pub mod install;
 pub mod keyvalues;
 pub mod lighting;
 pub mod models;
+pub mod monitor_material;
 pub mod navigation;
 pub mod phy;
 pub mod scenes;

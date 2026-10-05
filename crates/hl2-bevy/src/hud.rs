@@ -211,20 +211,23 @@ type HudAssets<'w> = (
     ResMut<'w, Assets<HudMaterial>>,
     ResMut<'w, Assets<Mesh>>,
 );
+type HudResources<'w> = (
+    Res<'w, crate::console::Console>,
+    Res<'w, Time<Real>>,
+    Res<'w, crate::movement::Simulation>,
+    Res<'w, crate::Status>,
+    Option<Res<'w, crate::performance::Performance>>,
+);
 pub fn present(
     mut commands: Commands,
     mut hud: ResMut<Hud>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    (ui, clock, sim, status): (
-        Res<crate::console::Console>,
-        Res<Time<Real>>,
-        Res<crate::movement::Simulation>,
-        Res<crate::Status>,
-    ),
+    (ui, clock, sim, status, performance): HudResources,
     windows: Query<&Window, With<PrimaryWindow>>,
     (mut images, mut materials, mut meshes): HudAssets,
     mut draws: DrawQuery,
 ) {
+    let _timing = crate::performance::scope(performance.as_deref(), "hud");
     let Ok(window) = windows.single() else {
         return;
     };

@@ -127,6 +127,7 @@ pub struct Physics {
     pub bodies: RigidBodySet,
     pub colliders: ColliderSet,
     query: QueryPipeline,
+    changed_entity_colliders: Vec<ColliderHandle>,
     pipeline: PhysicsPipeline,
     islands: IslandManager,
     broad: BroadPhaseMultiSap,
@@ -344,24 +345,55 @@ impl Physics {
     }
     pub fn set_entity(&mut self, id: usize, origin: Vec3, rotation: Quat, enabled: bool) {
         let dynamic = self.dynamic.get(&id);
-        if let Some(body) = dynamic.and_then(|h| self.bodies.get_mut(*h)) {
-            body.set_enabled(enabled);
+        if dynamic
+            .and_then(|h| self.bodies.get(*h))
+            .is_some_and(|body| body.is_enabled() != enabled)
+        {
+            self.bodies
+                .get_mut(*dynamic.unwrap())
+                .unwrap()
+                .set_enabled(enabled);
         }
+        let target = dynamic.is_none().then(|| pose(origin, rotation));
         if let Some(colliders) = self.entity_colliders.get(&id) {
             for h in colliders {
-                if let Some(c) = self.colliders.get_mut(*h) {
-                    if dynamic.is_none() {
-                        c.set_position(pose(origin, rotation));
-                    }
+                let Some(c) = self.colliders.get(*h) else {
+                    continue;
+                };
+                let move_pose = target.as_ref().is_some_and(|target| c.position() != target);
+                let change_enabled = c.is_enabled() != enabled;
+                if !move_pose && !change_enabled {
+                    continue;
+                }
+                let c = self.colliders.get_mut(*h).unwrap();
+                if move_pose {
+                    c.set_position(*target.as_ref().unwrap());
+                }
+                if change_enabled {
                     c.set_enabled(enabled);
                 }
+                self.changed_entity_colliders.push(*h);
             }
+        }
+    }
+    /// Refresh just entity poses changed through set_entity; physics.step updates dynamic bodies.
+    /// Direct external collider edits still require the full refresh_queries entry point.
+    pub fn refresh_entity_queries(&mut self) {
+        if !self.changed_entity_colliders.is_empty() {
+            self.query.update_incremental(
+                &self.colliders,
+                &self.changed_entity_colliders,
+                &[],
+                true,
+            );
+            self.changed_entity_colliders.clear();
         }
     }
     /// Refresh once after a batch of scripted pose/solid updates and before
     /// projectile queries; otherwise broad-phase bounds lag a moving door.
     pub fn refresh_queries(&mut self) {
         self.query.update(&self.colliders);
+        self.changed_entity_colliders.clear();
     }
     pub fn tick(&mut self, dt: f32) {
         self.player_convex_cache
@@ -386,6 +418,7 @@ impl Physics {
             &(),
             &(),
         );
+        self.changed_entity_colliders.clear();
     }
     pub fn entity_pose(&self, id: usize) -> Option<(Vec3, Quat)> {
         let b = self.bodies.get(*self.dynamic.get(&id)?)?;
@@ -1073,6 +1106,34 @@ mod tests {
             .impact_ray(Vec3::new(-40., 24., 200.), Vec3::X, 80.)
             .is_none());
         assert_eq!(physics.colliders.len(), 2);
+    }
+    #[test]
+    fn incremental_entity_queries_match_full_rebuild_across_moves_rotations_and_visibility() {
+        let mut incremental = Physics::new(&door_world());
+        let mut rebuilt = Physics::new(&door_world());
+        for i in 0..80 {
+            let origin = Vec3::new((i % 5) as f32 * 30., (i % 3) as f32 * -20., 0.);
+            let rotation = angles(Vec3::new(0., (i % 4) as f32 * 45., 0.));
+            let enabled = i % 7 != 0;
+            incremental.set_entity(0, origin, rotation, enabled);
+            // Repeating an identical entity pose must preserve the result without marking it again.
+            incremental.set_entity(0, origin, rotation, enabled);
+            rebuilt.set_entity(0, origin, rotation, enabled);
+            incremental.refresh_entity_queries();
+            rebuilt.refresh_queries();
+            for y in [-80., -20., 24., 60., 100.] {
+                let start = Vec3::new(-100., y, 54.);
+                let end = Vec3::new(250., y, 54.);
+                let a = incremental.projectile_sweep(start, end, ProjectileHull::Sphere(3.), &[]);
+                let b = rebuilt.projectile_sweep(start, end, ProjectileHull::Sphere(3.), &[]);
+                assert_eq!(a.is_some(), b.is_some(), "pose {i}, ray {y}");
+                if let (Some(a), Some(b)) = (a, b) {
+                    assert_eq!(a.entity, b.entity);
+                    assert!((a.fraction - b.fraction).abs() < 1e-6);
+                    assert!(a.normal.distance(b.normal) < 1e-5);
+                }
+            }
+        }
     }
     #[test]
     fn projectile_queries_follow_scripted_door_poses_without_advancing_simulation() {

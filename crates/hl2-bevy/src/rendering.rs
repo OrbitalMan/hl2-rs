@@ -38,6 +38,8 @@ pub struct SourceMaterial {
     #[texture(6)]
     #[sampler(7)]
     pub(crate) iris: Handle<Image>,
+    #[uniform(8)]
+    pub(crate) secondary_uv: Mat3,
     pub(crate) alpha: AlphaMode,
     pub(crate) two_sided: bool,
 }
@@ -162,6 +164,15 @@ pub struct EyeMesh {
     pub eye: source_assets::eyes::Eyeball,
     pub scale: f32,
 }
+fn sample_key(clip: &modkit_core::animation::Clip, time: f32) -> u32 {
+    if clip.frames.len() <= 1 {
+        0
+    } else if !clip.looping && time * clip.fps >= (clip.frames.len() - 1) as f32 {
+        u32::MAX
+    } else {
+        time.to_bits()
+    }
+}
 #[derive(Component)]
 pub struct AnimatedMesh {
     sampled: Option<(String, u32)>,
@@ -190,7 +201,9 @@ pub fn present_entities(
     mut entities: Query<(&SourceEntity, &mut Transform, &mut Visibility)>,
     mut animations: Query<(&mut AnimatedMesh, &Mesh3d, Option<&mut Aabb>)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    performance: Option<Res<crate::performance::Performance>>,
 ) {
+    let _timing = crate::performance::scope(performance.as_deref(), "animation");
     for (owner, mut transform, mut visibility) in &mut entities {
         let state = &game.scene.states[owner.0];
         let (origin, rotation) = sim
@@ -204,6 +217,7 @@ pub fn present_entities(
             Visibility::Hidden
         };
     }
+    let mut poses: BTreeMap<(String, String, u32), Vec<glam::Mat4>> = BTreeMap::new();
     for (mut animation, handle, aabb) in &mut animations {
         let Some(rig) = game.world.rigs.get(&animation.key) else {
             continue;
@@ -229,18 +243,21 @@ pub fn present_entities(
                 (game.inventory.idle_animation(), game.scene.time as f32)
             }
         };
-        if !rig.clips.contains_key(clip) {
+        let Some(definition) = rig.clips.get(clip) else {
             continue;
-        }
+        };
+        let key = sample_key(definition, time);
         if animation
             .sampled
             .as_ref()
-            .is_some_and(|(name, previous)| name == clip && *previous == time.to_bits())
+            .is_some_and(|(name, previous)| name == clip && *previous == key)
         {
             continue;
         }
-        let sampled = (clip.to_owned(), time.to_bits());
-        let matrices = rig.matrices(clip, time);
+        let sampled = (clip.to_owned(), key);
+        let matrices = poses
+            .entry((animation.key.clone(), clip.to_owned(), key))
+            .or_insert_with(|| rig.matrices(clip, time));
         if let Some(mut mesh) = meshes.get_mut(&handle.0) {
             let positions: Vec<_> = animation
                 .bind
@@ -248,7 +265,7 @@ pub fn present_entities(
                 .map(|(bind, weights)| {
                     let p = weights
                         .as_ref()
-                        .map_or(*bind, |w| modkit_core::animation::skin(*bind, w, &matrices));
+                        .map_or(*bind, |w| modkit_core::animation::skin(*bind, w, matrices));
                     source_to_bevy(Vec3::from_array((p * animation.scale).to_array())).to_array()
                 })
                 .collect();
@@ -298,6 +315,7 @@ pub fn spawn_map(
     materials: &mut Assets<SourceMaterial>,
     images: &mut Assets<Image>,
     status: &Status,
+    camera_target: &Handle<Image>,
 ) {
     let world = &loaded.world;
     let white = images.add(image(1, 1, vec![255; 4], false));
@@ -314,14 +332,18 @@ pub fn spawn_map(
         .materials
         .iter()
         .map(|(name, material)| {
-            let handle = match (&material.base, &material.base_path) {
-                (Some(base), Some(path)) => texture_handles
-                    .entry(path.clone())
-                    .or_insert_with(|| {
-                        images.add(image(base.width, base.height, base.rgba.clone(), true))
-                    })
-                    .clone(),
-                _ => missing.clone(),
+            let handle = if material.camera {
+                camera_target.clone()
+            } else {
+                match (&material.base, &material.base_path) {
+                    (Some(base), Some(path)) => texture_handles
+                        .entry(path.clone())
+                        .or_insert_with(|| {
+                            images.add(image(base.width, base.height, base.rgba.clone(), true))
+                        })
+                        .clone(),
+                    _ => missing.clone(),
+                }
             };
             (name.clone(), handle)
         })
@@ -342,6 +364,29 @@ pub fn spawn_map(
                                 image.height,
                                 image.rgba.clone(),
                                 false,
+                            ))
+                        })
+                        .clone();
+                    (name.clone(), handle)
+                })
+        })
+        .collect();
+    let overlays: BTreeMap<_, _> = loaded
+        .materials
+        .iter()
+        .filter_map(|(name, m)| {
+            m.camera_overlay
+                .as_ref()
+                .zip(m.camera_overlay_path.as_ref())
+                .map(|(overlay, path)| {
+                    let handle = texture_handles
+                        .entry(path.clone())
+                        .or_insert_with(|| {
+                            images.add(image(
+                                overlay.width,
+                                overlay.height,
+                                overlay.rgba.clone(),
+                                true,
                             ))
                         })
                         .clone();
@@ -433,7 +478,7 @@ pub fn spawn_map(
             lm.and_then(|index| lightmaps.get(index))
                 .unwrap_or(&white)
                 .clone(),
-            irises.get(&name).cloned(),
+            irises.get(&name).or_else(|| overlays.get(&name)).cloned(),
             &white,
         ));
         stats.meshes += 1;
@@ -491,6 +536,15 @@ pub fn spawn_map(
                 .is_some_and(|id| world.background_entities.contains(&id))
         {
             draw.insert(bevy::camera::visibility::RenderLayers::layer(4));
+        }
+        if definition.camera {
+            draw.insert(crate::monitors::MonitorMaterial {
+                animation: definition.camera_animation.clone(),
+                color: definition.tint,
+                color2: definition.camera_color2,
+            });
+            // Avoid sampling a render attachment while drawing into that same attachment.
+            draw.insert(bevy::camera::visibility::RenderLayers::layer(5));
         }
         if let Some(id) = owner.entity() {
             draw.insert(SourceEntity(id));
@@ -550,9 +604,18 @@ pub(crate) fn make_material(
                 }),
             f32::from(matches!(alpha, AlphaMode::Opaque)),
             f32::from(matches!(alpha, AlphaMode::Add)),
-            f32::from(iris.is_some()),
+            if definition.camera {
+                if definition.camera_vertex_color {
+                    -2.
+                } else {
+                    -1.
+                }
+            } else {
+                f32::from(iris.is_some())
+            },
         ),
         iris: iris.unwrap_or_else(|| white.clone()),
+        secondary_uv: Mat3::IDENTITY,
         base,
         lightmap: if definition.unlit {
             white.clone()
@@ -578,6 +641,22 @@ fn alpha_mode(material: &MaterialData) -> AlphaMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn animation_keys_keep_live_samples_and_stop_reuploading_constant_poses() {
+        use modkit_core::animation::Clip;
+        let mut clip = Clip {
+            fps: 30.,
+            looping: false,
+            frames: vec![vec![]; 31],
+            events: vec![],
+        };
+        assert_ne!(sample_key(&clip, 0.2), sample_key(&clip, 0.3));
+        assert_eq!(sample_key(&clip, 1.), sample_key(&clip, 50.));
+        clip.looping = true;
+        assert_ne!(sample_key(&clip, 1.), sample_key(&clip, 50.));
+        clip.frames.truncate(1);
+        assert_eq!(sample_key(&clip, 0.), sample_key(&clip, 50.));
+    }
     #[test]
     fn entity_pose_conversion_preserves_scaled_local_points_at_arbitrary_angles() {
         let origin = glam::Vec3::new(10., -300., 45.);

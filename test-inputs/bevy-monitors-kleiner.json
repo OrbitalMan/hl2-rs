@@ -1,0 +1,34 @@
+[
+  {
+    "tick": 1,
+    "fly": true,
+    "eye": [
+      -3360,
+      -291,
+      52
+    ],
+    "yaw": 0,
+    "actions": [
+      {
+        "action": "send",
+        "target": "barney_security_monitor_1",
+        "input": "Enable"
+      },
+      {
+        "action": "send",
+        "target": "kleiner_security_camera_1",
+        "input": "SetOnAndTurnOthersOff"
+      }
+    ],
+    "label": "kleiner-camera-inputs"
+  },
+  {
+    "tick": 90,
+    "paused": true,
+    "label": "kleiner-camera-frozen"
+  },
+  {
+    "tick": 120,
+    "label": "kleiner-capture"
+  }
+]

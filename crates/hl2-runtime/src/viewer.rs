@@ -1072,7 +1072,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             for launch in inventory.projectile_spawns.drain(..) {
                 projectiles.spawn(launch, &mut scene);
             }
-            physics.refresh_queries();
+            physics.refresh_entity_queries();
             tick_npcs(&mut npcs, &mut scene, &world, &mut physics, &player, fly);
             let damage = projectiles.tick(
                 &world,

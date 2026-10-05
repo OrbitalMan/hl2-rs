@@ -69,6 +69,12 @@ pub struct MaterialData {
     pub opacity: f32,
     pub tint: [f32; 3],
     pub unlit: bool,
+    pub camera: bool,
+    pub camera_overlay: Option<Arc<Image>>,
+    pub camera_overlay_path: Option<String>,
+    pub camera_vertex_color: bool,
+    pub camera_animation: source_assets::monitor_material::Animation,
+    pub camera_color2: [f32; 3],
     /// Affine rows applied to the BSP/model base UVs before repeat sampling.
     pub uv_transform: [[f32; 3]; 2],
 }
@@ -88,6 +94,12 @@ impl Default for MaterialData {
             opacity: 1.,
             tint: [1.; 3],
             unlit: false,
+            camera: false,
+            camera_overlay: None,
+            camera_overlay_path: None,
+            camera_vertex_color: false,
+            camera_animation: Default::default(),
+            camera_color2: [1.; 3],
             uv_transform: UvTransform::default().rows(),
         }
     }
@@ -275,6 +287,7 @@ fn rendered_material_names(world: &World) -> BTreeSet<String> {
 struct Definition {
     shader: String,
     properties: BTreeMap<String, String>,
+    proxies: Vec<Entry>,
 }
 
 fn asset_path(name: &str, extension: &str) -> Result<String> {
@@ -324,6 +337,7 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
         properties.extend(direct_properties(fallback.children()));
         return Ok(Definition {
             shader: "eyes_dx8".into(),
+            proxies: Vec::new(),
             properties,
         });
     }
@@ -331,6 +345,9 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
         return Ok(Definition {
             shader: root.key.clone(),
             properties: direct_properties(root.children()),
+            proxies: root
+                .get("Proxies")
+                .map_or(vec![], |p| p.children().to_vec()),
         });
     }
     let include = root
@@ -422,6 +439,50 @@ fn load_material(
             MaterialData::default()
         }
     };
+    if definition
+        .properties
+        .get("$basetexture")
+        .is_some_and(|base| base.eq_ignore_ascii_case("_rt_camera"))
+    {
+        material.camera = true;
+        material.unlit = true;
+        material.base_path = Some("_rt_camera".into());
+        material.camera_vertex_color =
+            scalar(&definition.properties, "$vertexcolor", 0.).unwrap_or(0.) != 0.;
+        material.camera_animation =
+            source_assets::monitor_material::Animation::parse(&definition.proxies);
+        if let Some(color) = definition.properties.get("$color2") {
+            let color = color
+                .trim()
+                .trim_matches(['[', ']'])
+                .split_whitespace()
+                .map(str::parse::<f32>)
+                .collect::<std::result::Result<Vec<_>, _>>();
+            match color {
+                Ok(color) if color.len() == 3 && color.iter().all(|v| v.is_finite()) => {
+                    material.camera_color2.copy_from_slice(&color)
+                }
+                _ => errors.push(format!("{name}: invalid monitor $color2")),
+            }
+        }
+        if let Some(second) = definition.properties.get("$texture2") {
+            let texture = (|| -> Result<_> {
+                let path = asset_path(second, ".vtf")?;
+                let image = cached_texture(cache, decoded_bytes, &path, || {
+                    vfs.read(&path)?.context("owned monitor overlay absent")
+                })?;
+                Ok((path, image))
+            })();
+            match texture {
+                Ok((path, image)) => {
+                    material.camera_overlay_path = Some(path);
+                    material.camera_overlay = Some(image);
+                }
+                Err(e) => errors.push(format!("{name}: monitor overlay: {e:#}")),
+            }
+        }
+        return material;
+    }
     let image = (|| -> Result<(String, Arc<Image>)> {
         let base = definition
             .properties
@@ -719,6 +780,7 @@ mod tests {
         let definition = Definition {
             shader: entries[0].key.clone(),
             properties: direct_properties(entries[0].children()),
+            proxies: Vec::new(),
         };
         let material = metadata(&definition).unwrap();
         assert!(material.translucent && material.two_sided);
@@ -732,6 +794,7 @@ mod tests {
         let definition = Definition {
             shader: "UnlitGeneric".into(),
             properties: BTreeMap::from([("$alpha".into(), "NaN".into())]),
+            proxies: Vec::new(),
         };
         assert!(metadata(&definition).is_err());
         assert!(asset_path("../../outside", ".vmt").is_err());
