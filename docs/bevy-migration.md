@@ -17,6 +17,8 @@ From the checkout root:
 
 `-DebugBuild` selects a debug build. Cargo uses the checked-in lockfile and builds only `hl2-bevy`. Packaging writes `bin/hl2-bevy.exe`, copies the viewer's shader assets into `bin/bevy-assets`, and records their hashes in `bin/build-bevy-info.json`. Keep the executable and shader folder together. The launcher requires the packaged executable; rebuilding is necessary after changing source or shaders.
 
+Double-click `launch-bevy-1080p.cmd` for a 1920x1080 window or `launch-bevy-borderless.cmd` for borderless at the primary desktop resolution. Both forward additional arguments to `launch-bevy.cmd`. `launch-1080p.cmd` and `launch-borderless.cmd` still select the retained runtime.
+
 The runtime discovers the installed game. To select a particular installation or display size:
 
 ```powershell
@@ -160,3 +162,13 @@ Both hosts share label-first animation lookup with model activity fallback and w
 
 
 The renderer shares map material handles by authored name/lightmap pair and only uploads changed global proxy values. Skeleton transforms and eye UVs retain per-owner state. Future per-entity material proxies need copy-on-write or distinct handles; do not add owner-dependent uniforms to the current cache key silently. Loaded material statistics count unique handles, while mesh statistics still count draw objects. Packaged feed/actor/movement/weapon comparisons are recorded in validation.md.
+
+## Physics adapter
+
+Both hosts use the same direct Rapier 0.26.1 integration in `hl2-simulation`; Bevy holds its physics state as a resource. The custom Source-style hull controller, owned PHY convex pieces and synchronized door poses are reused. Avian is a separate ECS-oriented physics library, not a required part of Bevy. Replacing the solver or queries is a separate behavior migration and requires matched movement/prop/door regressions. No Rapier-versus-Avian benchmark or exact Havok equivalence has been established.
+
+## Monochrome crosshairs
+
+On Windows, owned non-antialiased, non-proportional weapon crosshair glyphs are rasterized during HUD setup with a process-private in-memory GDI font registration. Copied monochrome bitmaps use nearest sampling and integer positions; all GDI handles are released before gameplay. No installed font or game setting is changed, and no font assets are distributed. Other font modes and non-Windows platforms retain the existing renderer and are unverified against native pixels.
+
+`--world-partition` enables experimental setup-time splitting of opaque/cutout world batches for finer culling. It is off by default; see [measurements and limits](performance.md). Reports distinguish loaded mesh/material counts from union-of-view render candidates. `scripts/build.ps1` now builds only the retained executable, while `scripts/build-bevy.ps1` builds the Bevy executable, avoiding redundant workspace-wide engine builds.

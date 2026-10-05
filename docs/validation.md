@@ -1,5 +1,15 @@
 # Local validation â€” 2026-10-05
 
+## Native crosshairs, launchers and optional spatial batches (2026-10-05)
+
+All294 normal workspace tests and19 owned-install checks pass, with strict workspace all-target Clippy and formatting. New tests cover monochrome bitmap row padding/bounds, native pistol/SMG offsets at720p/1080p and an odd viewport, exact partition triangle payloads/winding/spanning bounds, malformed indices/attributes and chunk-budget fallback.
+
+The actual owned original game was run at1920x1080 using its installed engine/client/server modules. Native white has five single-pixel dots over22x22 pixels; pistol and SMG have five over21x17. All seven packaged Bevy white/pistol/SMG captures at720p,1080p and borderless match those offsets. Both new Bevy launchers produce1920x1080 captures on this desktop. Windows crosshair setup uses the owned font through a private in-memory GDI registration, releases handles before gameplay and draws nearest-sampled monochrome bitmaps at integer positions. Other HUD fonts, glow, colors/tone mapping, non-Windows platforms and untested native reticles remain outside this pixel claim. The native test process closed and six installed settings remained byte-identical.
+
+Spatial splitting is opt-in. Packaged movement26 and weapon/door17 assertions pass; another18 checks preserve selected Breen/Kleiner feeds, both active view clusters, camera cleanup, two authored landmark/inventory transfers and pose agreement. Station03's25 unsupported-material errors exactly match the prior campaign fixture; they are not newly missing textures from splitting. Plaza on/off images are pixel-identical. An initial hall camera inside a pillar is rejected as visibility evidence. Broadcast staging, complete choreography/AI and ordinary campaign completion remain unfinished.
+
+Bevy release SHA256 `78348779124CD24019E41969A6EBC33D61EE2852C96CA4673C02DA9736FA9D9D`. Captures/reports stay in ignored artifacts/crosshair-*-final and partition-*-final; original-game captures/module hashes and research helpers remain outside the checkout. No owned font or game files are distributed. See [performance scope](performance.md).
+
 ## Model activity lookup and NPC idle (2026-10-05)
 
 All291 normal tests and18 owned-content checks pass, with strict workspace all-target Clippy, formatting and diff checks. New tests validate sequence-relative activity names and signed weights, label priority, weighted ticket intervals, negative-current retention for explicit activity selection, cohort merge order, invalid random intervals and actual scripted/post-idle deadlines. Owned Kleiner/Police activity candidates decode to finite poses and expected model-authored names/weights.

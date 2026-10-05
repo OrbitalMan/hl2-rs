@@ -7,7 +7,7 @@ try {
     $cargoBinary = if ($cargoCommand) { $cargoCommand.Source } else { Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe' }
     if (!(Test-Path -LiteralPath $cargoBinary)) { throw 'Install Rust using rustup first.' }
     $profileName = if ($DebugBuild) { 'debug' } else { 'release' }
-    $cargoArguments = @('build', '--locked', '--workspace')
+    $cargoArguments = @('build', '--locked', '-p', 'hl2-runtime', '--bin', 'hl2-rs')
     if (!$DebugBuild) { $cargoArguments += '--release' }
     & $cargoBinary @cargoArguments
     if ($LASTEXITCODE -ne 0) { throw 'Cargo build failed.' }

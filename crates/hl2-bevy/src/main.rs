@@ -47,6 +47,7 @@ struct Options {
     uncapped: bool,
     cpu_skinning: bool,
     no_pvs: bool,
+    world_partition: bool,
     width: u32,
     height: u32,
     borderless: bool,
@@ -71,6 +72,7 @@ impl Options {
             uncapped: false,
             cpu_skinning: false,
             no_pvs: false,
+            world_partition: false,
             width: 1280,
             height: 720,
             borderless: false,
@@ -98,6 +100,7 @@ impl Options {
                 }
                 "--yaw" => options.yaw = Some(next(&mut args)?.parse::<f32>()?.to_radians()),
                 "--no-pvs" => options.no_pvs = true,
+                "--world-partition" => options.world_partition = true,
                 "--cpu-skinning" => options.cpu_skinning = true,
                 "--uncapped" => options.uncapped = true,
                 "--profile" => options.profile = true,
@@ -109,7 +112,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -182,6 +185,8 @@ struct RunStatus {
     gpu_skinned_meshes: usize,
     cpu_skinned_meshes: usize,
     skin_joints: usize,
+    world_partition: bool,
+    partitioned_world_batches: usize,
     triangles: usize,
     materials: usize,
     skipped_background_surfaces: usize,
@@ -448,7 +453,11 @@ fn setup(
             &mut inverse_binds,
         ),
         &status,
-        (options.cpu_skinning, options.no_pvs),
+        (
+            options.cpu_skinning,
+            options.no_pvs,
+            options.world_partition,
+        ),
     );
     commands.insert_resource(console::Console::new(ui));
     commands.spawn((
@@ -511,11 +520,12 @@ pub(crate) fn install_map(
     commands: &mut Commands,
     (meshes, materials, images, sounds, effect_materials, inverse_binds): MapAssets,
     status: &Status,
-    (cpu_skinning, no_pvs): (bool, bool),
+    (cpu_skinning, no_pvs, world_partition): (bool, bool, bool),
 ) -> hl2_ui::console::Console {
     {
         let mut stats = status.0.lock().expect("map stats");
         stats.meshes = 0;
+        stats.partitioned_world_batches = 0;
         stats.gpu_skinned_meshes = 0;
         stats.cpu_skinned_meshes = 0;
         stats.skin_joints = 0;
@@ -535,7 +545,7 @@ pub(crate) fn install_map(
         materials,
         images,
         status,
-        (&camera_target, cpu_skinning),
+        (&camera_target, cpu_skinning, world_partition),
     );
     effects::install(
         &loaded,
@@ -589,6 +599,7 @@ type DiagnosticQueries<'w, 's> = (
     Query<'w, 's, Entity, With<Camera>>,
     Res<'w, Assets<Mesh>>,
     Res<'w, Assets<Image>>,
+    Query<'w, 's, (&'static ViewVisibility, &'static rendering::DrawTriangles)>,
 );
 fn monitor(
     mut commands: Commands,
@@ -599,7 +610,7 @@ fn monitor(
         Option<Res<RenderAdapterInfo>>,
         Res<visibility::SourceVisibility>,
     ),
-    (cameras, draws, map_entities, all_cameras, meshes, images): DiagnosticQueries,
+    (cameras, draws, map_entities, all_cameras, meshes, images, geometry): DiagnosticQueries,
     (mut exit, performance, render_diagnostics): (
         MessageWriter<AppExit>,
         Option<Res<performance::Performance>>,
@@ -646,6 +657,21 @@ fn monitor(
         }
         report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
+        let mut visible_meshes = 0;
+        let mut visible_triangles = 0;
+        let mut total_triangles = 0;
+        for (visible, triangles) in &geometry {
+            total_triangles += triangles.0;
+            if visible.get() {
+                visible_meshes += 1;
+                visible_triangles += triangles.0;
+            }
+        }
+        report.presentation["render_candidates"] = serde_json::json!({
+            "tagged_meshes":geometry.iter().count(),"tagged_triangles":total_triangles,
+            "visible_any_view_meshes":visible_meshes,"visible_any_view_triangles":visible_triangles,
+            "scope":"world/entity candidates after PVS/frustum/layer checks; excludes sky and viewmodels; union of all views, not GPU draw-call counts"
+        });
         if let Some(performance) = performance.as_deref() {
             report.presentation["cpu_stages"] = performance.report();
             if let Some(diagnostics) = render_diagnostics.as_deref() {

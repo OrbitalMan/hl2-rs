@@ -113,6 +113,61 @@ struct Batch {
     skin: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
 }
 impl Batch {
+    /// Group whole triangles, never cut them at cell boundaries. Actual mesh
+    /// bounds (including spanning triangles) remain the culling bounds.
+    fn spatial_chunks(self) -> Vec<Self> {
+        const CELL: f64 = 1024.;
+        const MAX_CHUNKS: usize = 64;
+        if !self.indices.len().is_multiple_of(3)
+            || self.positions.iter().flatten().any(|v| !v.is_finite())
+            || self.uvs.len() != self.positions.len()
+            || self.light_uvs.len() != self.positions.len()
+            || self.colors.len() != self.positions.len()
+            || self.skin.len() != self.positions.len()
+        {
+            return vec![self];
+        }
+        let mut groups = BTreeMap::<[i32; 3], Vec<u32>>::new();
+        for triangle in self.indices.as_chunks::<3>().0 {
+            let [Some(a), Some(b), Some(c)] = triangle.map(|i| self.positions.get(i as usize))
+            else {
+                return vec![self];
+            };
+            let vertices = [a, b, c];
+            let cell = std::array::from_fn(|axis| {
+                ((vertices.iter().map(|p| f64::from(p[axis])).sum::<f64>() / 3.) / CELL).floor()
+                    as i32
+            });
+            groups.entry(cell).or_default().extend_from_slice(triangle);
+            if groups.len() > MAX_CHUNKS {
+                return vec![self];
+            }
+        }
+        if groups.len() <= 1 {
+            return vec![self];
+        }
+        groups
+            .into_values()
+            .map(|indices| {
+                let mut batch = Self::default();
+                let mut remap = std::collections::HashMap::new();
+                for index in indices {
+                    let new = *remap.entry(index).or_insert_with(|| {
+                        let new = batch.positions.len() as u32;
+                        let index = index as usize;
+                        batch.positions.push(self.positions[index]);
+                        batch.uvs.push(self.uvs[index]);
+                        batch.light_uvs.push(self.light_uvs[index]);
+                        batch.colors.push(self.colors[index]);
+                        batch.skin.push(self.skin[index].clone());
+                        new
+                    });
+                    batch.indices.push(new);
+                }
+                batch
+            })
+            .collect()
+    }
     fn append(&mut self, surface: &Surface, transform: Mat4, material: Option<&MaterialData>) {
         let offset = self.positions.len() as u32;
         let rows = material
@@ -158,6 +213,8 @@ impl Batch {
 }
 #[derive(Component)]
 pub struct SourceEntity(pub usize);
+#[derive(Component)]
+pub struct DrawTriangles(pub usize);
 #[derive(Component)]
 pub struct EyeMesh {
     pub key: String,
@@ -349,7 +406,7 @@ pub fn spawn_map(
     materials: &mut Assets<SourceMaterial>,
     images: &mut Assets<Image>,
     status: &Status,
-    (camera_target, cpu_skinning): (&Handle<Image>, bool),
+    (camera_target, cpu_skinning, world_partition): (&Handle<Image>, bool, bool),
 ) {
     let world = &loaded.world;
     let white = images.add(image(1, 1, vec![255; 4], false));
@@ -502,6 +559,26 @@ pub fn spawn_map(
     }
     let mut stats = status.0.lock().expect("status lock");
     stats.skipped_background_surfaces = skipped;
+    stats.world_partition = world_partition;
+    let batches = batches
+        .into_iter()
+        .flat_map(|(key, batch)| {
+            let partition = world_partition
+                && key.0 == Owner::World
+                && loaded.materials.get(&key.1).is_none_or(|m| {
+                    matches!(alpha_mode(m), AlphaMode::Opaque | AlphaMode::Mask(_))
+                });
+            let chunks = if partition {
+                batch.spatial_chunks()
+            } else {
+                vec![batch]
+            };
+            if chunks.len() > 1 {
+                stats.partitioned_world_batches += 1;
+            }
+            chunks.into_iter().map(move |batch| (key.clone(), batch))
+        })
+        .collect::<Vec<_>>();
     let mut material_handles = BTreeMap::new();
     let mut skeletons = BTreeMap::<Owner, crate::gpu_skinning::Skeleton>::new();
     for ((owner, name, lm, _), mut batch) in batches {
@@ -524,7 +601,8 @@ pub fn spawn_map(
             })
             .clone();
         stats.meshes += 1;
-        stats.triangles += batch.indices.len() / 3;
+        let triangles = batch.indices.len() / 3;
+        stats.triangles += triangles;
         let mut animation = if batch.skin.iter().any(|(_, w)| w.is_some()) {
             match &owner {
                 Owner::Entity(id) => world
@@ -624,7 +702,10 @@ pub fn spawn_map(
                 .entity()
                 .is_some_and(|id| world.background_entities.contains(&id))
         {
-            draw.insert(crate::visibility::PvsDraw::default());
+            draw.insert((
+                crate::visibility::PvsDraw::default(),
+                DrawTriangles(triangles),
+            ));
         }
         if definition.camera {
             draw.insert(crate::monitors::MonitorMaterial {
@@ -742,6 +823,100 @@ fn alpha_mode(material: &MaterialData) -> AlphaMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn partition_fixture() -> Batch {
+        let positions = vec![
+            [-2048., 0., 0.],
+            [-2030., 1., 0.],
+            [-2035., 0., 2.],
+            [2050., 0., 0.],
+            [2060., 1., 0.],
+            [2055., 0., 2.],
+        ];
+        Batch {
+            uvs: (0..6).map(|i| [i as f32 * 0.1, -i as f32]).collect(),
+            light_uvs: (0..6).map(|i| [0.3, i as f32 * 0.2]).collect(),
+            colors: (0..6).map(|i| [i as f32, 0.25, 0.5, 1.]).collect(),
+            skin: positions
+                .iter()
+                .map(|p| (glam::Vec3::from_array(*p), None))
+                .collect(),
+            positions,
+            // Reversed winding, shared vertices and a degenerate triangle must survive.
+            indices: vec![0, 1, 2, 3, 5, 4, 0, 3, 4, 1, 2, 2],
+        }
+    }
+    fn triangle_payload(batch: &Batch) -> Vec<Vec<u32>> {
+        batch
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|triangle| {
+                triangle
+                    .iter()
+                    .flat_map(|&i| {
+                        let i = i as usize;
+                        batch.positions[i]
+                            .into_iter()
+                            .chain(batch.uvs[i])
+                            .chain(batch.light_uvs[i])
+                            .chain(batch.colors[i])
+                            .map(f32::to_bits)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+    #[test]
+    fn spatial_partition_preserves_triangle_attributes_and_spanning_bounds() {
+        let mut expected = triangle_payload(&partition_fixture());
+        let chunks = partition_fixture().spatial_chunks();
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks.iter().map(|b| b.indices.len()).sum::<usize>(), 12);
+        let mut actual: Vec<_> = chunks.iter().flat_map(triangle_payload).collect();
+        expected.sort();
+        actual.sort();
+        assert_eq!(actual, expected);
+        // Bounds come from whole triangles; the central group spans over four cells.
+        assert!(
+            chunks
+                .into_iter()
+                .any(|b| b.mesh().compute_aabb().unwrap().half_extents.x > 2000.)
+        );
+    }
+    #[test]
+    fn spatial_partition_keeps_original_for_invalid_data_or_excessive_chunks() {
+        let mut invalid = partition_fixture();
+        invalid.indices[0] = u32::MAX;
+        assert_eq!(invalid.spatial_chunks().len(), 1);
+        let mut invalid = partition_fixture();
+        invalid.uvs.pop();
+        assert_eq!(invalid.spatial_chunks().len(), 1);
+        let mut invalid = partition_fixture();
+        invalid.indices.push(99);
+        let unchanged = invalid.spatial_chunks();
+        assert_eq!(unchanged.len(), 1);
+        assert_eq!(unchanged[0].indices.last(), Some(&99));
+        let mut invalid = partition_fixture();
+        invalid.positions[0][0] = f32::NAN;
+        assert_eq!(invalid.spatial_chunks().len(), 1);
+        let mut broad = Batch::default();
+        for cell in 0..65 {
+            for vertex in 0..3 {
+                broad
+                    .positions
+                    .push([cell as f32 * 2048., vertex as f32, 0.]);
+                broad.uvs.push([0.; 2]);
+                broad.light_uvs.push([0.; 2]);
+                broad.colors.push([1.; 4]);
+                broad.skin.push((glam::Vec3::ZERO, None));
+                broad.indices.push(broad.indices.len() as u32);
+            }
+        }
+        let unchanged = broad.spatial_chunks();
+        assert_eq!(unchanged.len(), 1);
+        assert_eq!(unchanged[0].indices.len(), 195);
+    }
     #[test]
     fn animation_keys_keep_live_samples_and_stop_reuploading_constant_poses() {
         use modkit_core::animation::Clip;

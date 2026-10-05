@@ -284,10 +284,18 @@ struct FontRange {
     proportional: bool,
     blur: f32,
     scanlines: f32,
+    #[cfg(windows)]
+    antialias: bool,
 }
 struct HudFont {
     face: FontFace,
     ranges: Vec<FontRange>,
+}
+#[cfg(windows)]
+impl FontRange {
+    fn monochrome_crosshair(&self) -> bool {
+        !self.antialias && !self.proportional && self.blur == 0. && self.scanlines == 0.
+    }
 }
 impl HudFont {
     fn read(fonts: &Entry, name: &str, face: FontFace, fallback: f32) -> Self {
@@ -312,6 +320,8 @@ impl HudFont {
                     proportional: resolution.is_none(),
                     blur: number(entry, "blur", 0.),
                     scanlines: number(entry, "scanlines", 0.),
+                    #[cfg(windows)]
+                    antialias: number(entry, "antialias", 1.) != 0.,
                 }
             })
             .collect();
@@ -1355,6 +1365,8 @@ pub struct WeaponHud {
     icons: HudFont,
     selected_icons: HudFont,
     crosshairs: HudFont,
+    #[cfg(windows)]
+    native_crosshairs: BTreeMap<(char, u16), crate::native_font::Glyph>,
     numbers: HudFont,
     number_glow: HudFont,
     small_numbers: HudFont,
@@ -1414,11 +1426,10 @@ impl WeaponHud {
             .get("HudWeaponSelection")
             .context("HudWeaponSelection layout missing")?
             .clone();
-        let face = FontFace::load(
-            &vfs.read("resource/HALFLIFE2.ttf")?
-                .context("HalfLife2 HUD font missing")?,
-            canvas.clone(),
-        )?;
+        let icon_font = vfs
+            .read("resource/HALFLIFE2.ttf")?
+            .context("HalfLife2 HUD font missing")?;
+        let face = FontFace::load(&icon_font, canvas.clone())?;
         let windows = std::env::var_os("WINDIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("C:/Windows"));
@@ -1436,7 +1447,7 @@ impl WeaponHud {
         let numeric_effects = MutexCell::new(NumericHudEffects::new(&settings));
         let mut ammo_icons = BTreeMap::new();
         let mut secondary_ammo_icons = BTreeMap::new();
-        let mut weapon_crosshairs = BTreeMap::new();
+        let mut weapon_crosshairs = BTreeMap::<String, String>::new();
         for class in [
             "weapon_crowbar",
             "weapon_pistol",
@@ -1504,6 +1515,23 @@ impl WeaponHud {
         );
         // C_BaseCombatWeapon::DrawCrosshair explicitly makes the normal color opaque.
         crosshair_color.a = 1.;
+        let crosshairs = HudFont::read(fonts, "Crosshairs", face.clone(), 40.);
+        #[cfg(windows)]
+        let native_crosshairs = {
+            let requests = crosshairs
+                .ranges
+                .iter()
+                .filter(|range| range.monochrome_crosshair())
+                .flat_map(|range| {
+                    weapon_crosshairs.values().flat_map(move |characters| {
+                        characters.chars().map(move |character| {
+                            (character, range.tall.round().clamp(1., 1024.) as u16)
+                        })
+                    })
+                })
+                .collect();
+            crate::native_font::load(&icon_font, &requests)?
+        };
         let mut corners = Vec::new();
         for number in 1..=4 {
             corners.push(texture(vfs, &format!("vgui/hud/8x800corner{number}"))?);
@@ -1513,7 +1541,9 @@ impl WeaponHud {
             canvas,
             icons: HudFont::read(fonts, "WeaponIcons", face.clone(), 64.),
             selected_icons: HudFont::read(fonts, "WeaponIconsSelected", face.clone(), 64.),
-            crosshairs: HudFont::read(fonts, "Crosshairs", face.clone(), 40.),
+            crosshairs,
+            #[cfg(windows)]
+            native_crosshairs,
             numbers: HudFont::read(fonts, "HudNumbers", face.clone(), 32.),
             number_glow: HudFont::read(fonts, "HudNumbersGlow", face.clone(), 32.),
             small_numbers: HudFont::read(fonts, "HudNumbersSmall", face.clone(), 16.),
@@ -1962,6 +1992,39 @@ impl WeaponHud {
             return;
         };
         self.canvas.additive(true);
+        #[cfg(windows)]
+        if let Some(glyph) = character
+            .chars()
+            .next()
+            .filter(|_| character.chars().count() == 1)
+            .and_then(|c| {
+                let range = self.crosshairs.ranges.iter().find(|range| {
+                    self.canvas.height() >= range.minimum && self.canvas.height() <= range.maximum
+                })?;
+                range.monochrome_crosshair().then_some(())?;
+                self.native_crosshairs.get(&(c, range.tall.round() as u16))
+            })
+        {
+            if let Some(texture) = &glyph.texture {
+                // Integer icon dimensions and GDI's actual cell height, not the requested
+                // height or fractional fontdue EM metrics. No rasterization occurs here.
+                let center = vec2(
+                    (self.canvas.width() * 0.5 + 0.5).trunc(),
+                    (self.canvas.height() * 0.5 + 0.5).trunc(),
+                );
+                let origin = center - vec2((glyph.advance / 2) as f32, (glyph.height / 2) as f32)
+                    + glyph.origin;
+                draw_texture(
+                    &self.canvas,
+                    texture,
+                    origin.x,
+                    origin.y,
+                    self.crosshair_color,
+                );
+            }
+            self.canvas.additive(false);
+            return;
+        }
         self.crosshairs.draw(
             character,
             (self.canvas.width() - self.crosshairs.width(character)) * 0.5,
@@ -1975,6 +2038,47 @@ impl WeaponHud {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires an owned HL2 installation in HL2_ROOT"]
+    fn owned_monochrome_crosshair_matches_native_pistol_and_smg_pixels() {
+        let root = std::env::var_os("HL2_ROOT").expect("set HL2_ROOT to the owned installation");
+        let vfs = Vfs::mount(std::path::Path::new(&root)).unwrap();
+        let canvas = Canvas::default();
+        let hud = WeaponHud::load(&vfs, canvas.clone()).unwrap();
+        let mut inventory = Inventory::default();
+        for weapon in ["weapon_pistol", "weapon_smg1"] {
+            inventory.active = weapon.into();
+            for viewport in [vec2(1280., 720.), vec2(1920., 1080.), vec2(1281., 721.)] {
+                canvas.resize(viewport.x, viewport.y);
+                hud.draw_crosshair(&inventory);
+                let quads = canvas.drain();
+                assert_eq!(quads.len(), 1);
+                let quad = &quads[0];
+                assert_eq!(quad.color.a, 1.);
+                let texture = quad.texture.as_ref().unwrap();
+                assert_eq!(texture.filter(), FilterMode::Nearest);
+                let center = vec2(
+                    (viewport.x * 0.5 + 0.5).trunc(),
+                    (viewport.y * 0.5 + 0.5).trunc(),
+                );
+                let mut dots = Vec::new();
+                for (i, pixel) in texture.0.rgba.as_chunks::<4>().0.iter().enumerate() {
+                    assert!(pixel[3] == 0 || pixel[3] == 255);
+                    if pixel[3] != 0 {
+                        let x = i % usize::from(texture.0.width);
+                        let y = i / usize::from(texture.0.width);
+                        dots.push((
+                            (quad.destination.x + x as f32 - center.x) as i32,
+                            (quad.destination.y + y as f32 - center.y) as i32,
+                        ));
+                    }
+                }
+                assert_eq!(dots, [(-1, -8), (-11, 0), (-1, 0), (9, 0), (-1, 8)]);
+            }
+        }
+    }
 
     #[test]
     #[ignore = "requires an owned HL2 installation in HL2_ROOT"]

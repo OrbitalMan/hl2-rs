@@ -2,3 +2,5 @@
 pub mod canvas;
 pub mod console;
 pub mod hud;
+#[cfg(windows)]
+mod native_font;
