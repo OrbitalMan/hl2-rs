@@ -1,5 +1,26 @@
 # Local validation â€” 2026-10-05
 
+## Continued private discovery and optional scope (2026-10-05)
+
+The original project/catalogue remains unchanged. On a private clone, 9,850 additional candidate entries export with zero failures; before/after executable-gap and pointer accounting is recorded. The discovery ledger audits 20,842 artifacts, 30,275 candidate attempt records, 47,512 table slots, 9,850 bodies, 13,266 recorded calls and 7,001 strings with zero discrepancies. The discovery navigator indexes all 9,850 bodies but has one range mismatch. Exact VPhysics/client retrieval and a scoped navigator control pass. An initially chosen client control lacked defined instructions and was correctly absent; later bounded disassembly provides its separately catalogued body.
+
+Raw-prototype-flow and bounded-disassembly passes audit 34 and 11 temporary exports respectively. Independent read-only checks verify rollback for all 34 entries and restoration of function/instruction absence for all 15 disassembly targets. Ambiguous entry/shared-tail cases remain unresolved.
+
+The 17 optional modules contain 23,987 saved entries: 23,982 original bodies, five original errors and five separate recovery bodies. All five original signatures remain unchanged; final saved entry sets equal the export snapshots. Their ledger audits 393 artifacts, 23,992 export/attempt rows, 51,968 recorded calls and 17,222 strings with zero discrepancies. Its navigator omits 2,544 original bodies and has 779 range mismatches. Exact Vulkan failure/recovery and Bink factory retrieval pass. The initial missing project-directory failure and Vulkan exception-handler analyzer error remain in private logs. Recovered ABIs, exception coverage and actual optional-loader activation are **not tested** against original-game behavior.
+
+From private `work/hl2-decompiled`, executed integrity/retrieval commands include:
+
+```powershell
+C:\Python310\python.exe scripts/discovery_ledger.py audit --db coverage-pass-20261005-02/native-discovery-v3-208cb39c195a81df.sqlite3
+C:\Python310\python.exe scripts/discovery_ledger.py query --db coverage-pass-20261005-02/native-discovery-v3-208cb39c195a81df.sqlite3 --module bin/vphysics.dll --address 0x10001000
+C:\Python310\python.exe scripts/optional_evidence_ledger.py audit --root coverage-pass-20261005-03 --db coverage-pass-20261005-03/native-evidence-v4-bc332d20089c50b1.sqlite3
+C:\Python310\python.exe scripts/optional_evidence_ledger.py query --db coverage-pass-20261005-03/native-evidence-v4-bc332d20089c50b1.sqlite3 --module bin/shaderapivk.dll --address 0x1006ae3d
+C:\Python310\python.exe scripts/module_evidence_ledger.py audit --root coverage-pass-20261005-04 --db coverage-pass-20261005-04/native-evidence-v4-1d7e205973063ce0.sqlite3
+C:\Python310\python.exe scripts/module_evidence_ledger.py audit --root coverage-pass-20261005-05 --db coverage-pass-20261005-05/native-evidence-v4-552c8d9f7686b145.sqlite3
+```
+
+Expected and recorded results: audit status passed/zero discrepancies; exact path/hash/address queries preserve original failures and identify successful body SHA256s. Naming/types, Rust implementation and native verification tables remain empty. Native tools, databases, binaries and recovered C stay outside public source checkouts. Runtime source/packages are unchanged; gameplay rebuild/tests/Clippy/performance are **not tested** again for these documentation edits.
+
 ## Private decompilation database pass (2026-10-05)
 
 This pass validates private research integrity, not gameplay. It hashes 126 installed DLL/EXE paths and records 632 static/delay import edges; all 22 baseline private and installed hashes match. Read-only Ghidra discovery counts equal the original 87,793 identified functions. The three separate loader-referenced module exports contain 1,091 identified functions/1,090 successes/one failure. Eleven baseline/extension failures have supplemental bodies after unlocking inferred input metadata, with eleven original-signature rollback proofs. Recovered ABIs and native semantics are **not tested**.

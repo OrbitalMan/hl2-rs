@@ -32,7 +32,7 @@ You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust 
 
 The tested installation is Steam app 220, build `19307283`, patch `9912070`. Other game builds are unverified. Rust `1.99.0` was used for the recorded Windows checks. Cargo resolves the library versions in `Cargo.lock`; no external mod, loader or Source engine runtime is needed.
 
-Private research now covers 25 selected native modules and 88,884 identified addresses with original or supplemental pseudocode. The database method preserves exact bytes and distinguishes exports, failed attempts, naming/types, Rust implementation and native verification. Complete discovery, recovered ABIs and behavior parity remain unverified; these counts do not mean the game has been reconstructed. All native binaries, code, tools and databases remain outside this repository. See [research evidence](docs/research.md).
+Private research now includes 42 selected native modules and 122,721 entries in their saved analysis/export snapshots, with original or supplemental pseudocode. Further temporary discovery candidates are recorded separately. The database method preserves exact bytes, original failures and independent export/name/type/implementation/native-verification states. Complete runtime scope, discovery, recovered ABIs and behavior parity remain unverified; these counts do not mean the game has been reconstructed. All native binaries, code, tools and databases remain outside this repository. See [research evidence](docs/research.md).
 
 ```powershell
 git clone https://github.com/kvalls/hl2-rs.git

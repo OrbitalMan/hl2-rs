@@ -1,8 +1,8 @@
 # STATUS
 
-Checkpoint: 2026-10-05, Atlantic/Canary. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; documentation-only commits follow it. Latest private research pass: coverage-pass-20261005-01. Read AGENTS.md, this file and docs/DESIGN.md first. Historical MODLOG entries describe their own dates, not current limitations.
+Checkpoint: 2026-10-05, Atlantic/Canary. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; documentation-only commits follow it. Private research continues through coverage-pass-20261005-06; earlier passes remain frozen. Read AGENTS.md, this file and docs/DESIGN.md first. Historical MODLOG entries describe their own dates, not current limitations.
 
-Latest owner instruction: continue the documented decompilation work and remember the database method. This fresh chat completed a bounded private inventory/discovery/recovery/export pass and an audited supplemental database. NPC gestures remain queued. Rust runtime code is unchanged.
+Latest owner instruction: continue the documented decompilation work and remember the database method. The owner corrected an early stop after the first checkpoint; bounded passes are validation boundaries, not permission to end authorized research. Work has resumed with private discovery, raw-flow inspection and optional-module exports. NPC gestures remain queued. Rust runtime code is unchanged.
 
 ## Goal
 
@@ -44,6 +44,12 @@ Not applicable: this is a rewrite. Rust simulation owns player/gameplay state. T
 
 ## The current problem
 
+Current saved analysis snapshots cover 42 selected modules and 122,721 entries with some pseudocode, including 9,850 newly identified entries on a private baseline clone and 23,987 entries in 17 added optional modules. All 16 original export errors remain preserved with separate successful relaxed-input recovery bodies. The original project/catalogue is unchanged. Read-only raw-flow/disassembly passes additionally export 34 and 11 temporary entries with independently checked rollback. These are separate candidate evidence, not a proven full-game function denominator. Native names, ABI/semantic fidelity, actual optional-loader activation, middleware/tool/variant scope and indirect/shared-tail coverage remain unfinished and **not tested** against original gameplay.
+
+Discovery on the 22-module clone leaves 1,172,660 executable bytes outside functions and 1,488 unowned pointer-slot observations, down from the original 1,459,199 bytes/13,830 slots. The 17 optional modules add 385,203 gap bytes/3,390 observations; their saved entry counts exactly match export snapshots. A Vulkan shader exception-handler analyzer error remains recorded despite successful exports. Database audits preserve 20,842 discovery artifacts/9,850 bodies, 393 optional artifacts/23,987 bodies plus five original error rows, and the 34/11 temporary body ledgers; all have zero discrepancies. The discovery navigator indexes all 9,850 bodies with one range mismatch; the optional navigator misses 2,544 bodies and has 779 mismatches. Use exact path/hash/address retrieval as authority.
+
+The following paragraphs retain the initial coverage-pass-20261005-01 baseline, before this continuation:
+
 The immediate priority is trustworthy function discovery and remaining runtime scope. A fresh read-only inventory hashed all 126 installed DLL/EXE paths: 126 distinct hashes, 632 static/delay import edges, and all 22 baseline installed/private copies matching their saved hashes. Categories retain tools, middleware, optional services and 11 other-game variant paths; name-based exclusions and dynamic resolution remain provisional. Database loader anchors established three omissions: unicode.dll, video_services.dll and vaudio_speex.dll. Their separate private corpus adds 1,091 identified functions and 1,090 original exports, with one further overlapping-input failure. Across 25 selected modules there are 88,884 identified addresses and 88,873 original successful bodies; the original 11 failure rows remain preserved.
 
 All 11 known failures now also have separately saved supplemental bodies after removing conflicting analysis-inferred input parameters in rolled-back read-only Ghidra sessions. Original signatures were verified afterward. A return-type-only pilot failed and is retained. Successful export under relaxed metadata does not recover a trustworthy ABI or prove semantics; all 11 are **not tested** against native behavior. The 25-module scope and function denominator are not complete-game claims.
@@ -68,7 +74,9 @@ Private database/native exports and published SDK research corroborate selected 
 
 ## What we've already tried
 
-- Whole-module exports now cover 25 selected modules; eleven original errors remain queryable alongside successful supplemental recovery bodies. Exact export accounting does not establish discovery completeness, ABI recovery or translation parity.
+- Continuation discovery on a private clone identifies and exports 9,850 additional candidate entries, with no export failures. Boundaries require relocated pointer slots, defined instructions, coherent bounded flow and independent entry evidence. Original scope/semantics remain unverified. Raw RTTI validation initially rejected writable type descriptors; the rejected report is retained and initialized readable records are now checked against pinned Ghidra layouts.
+- Two passes using analysis-adjusted instruction flow still rejected direct JMP entries as terminals. Stop repeating that approach: a separate read-only raw-prototype-flow pass exports 34 more entries with transaction rollback. The rejected/interior/shared-tail cases remain recorded. Initial optional-module launch failed because its private project directory was missing; that setup failure and corrected launch are retained. All native tools/data remain outside this checkout.
+- Whole-module exports now cover 42 selected modules; sixteen original errors remain queryable alongside successful supplemental recovery bodies. Exact export accounting does not establish discovery completeness, ABI recovery or translation parity.
 - Rejected research approaches: uninitialized debug options failed before recovery evaluation; initializing options fixed the runner. Retyping the VPhysics return alone still failed; unlocking inferred inputs succeeded. The old catalogue builder rejected nested extension binary paths, so a separate path/hash/address ledger was used. An initial newline-sensitive navigator audit falsely flagged 827 mismatches; its rejected report remains saved, and normalized comparison finds 36. Do not reuse rejected results.
 - Debug-overhead explanation: packaged builds were already release; development dependency overrides existed. Profiling identified skinning/uploads and out-of-view preparation instead.
 - GPU skinning/current bounds, cached PVS and material reuse: measured local gains with inspected actor/eye/monitor regressions. Do not disable simulation or animation to fake FPS.
@@ -81,14 +89,14 @@ Private database/native exports and published SDK research corroborate selected 
 
 ## Ideas not tried yet
 
-1. Inspect unlabelled RTTI/vtable pointer groups and orphan instruction ranges on disposable projects; promote only bounded evidence-backed candidates and export them into a new path/hash/address database version. Reconcile remaining optional video/audio/renderer loaders and review recovered x87 inputs/callees. Keep native research private.
+1. Continue indirect-call/shared-tail/orphan-code discovery, including the optional pointer-target pass and the earlier three-module extension audit. Reconcile middleware/tool/variant exclusions and loader branches, then review recovered x87 inputs/callees. Keep native research private, versioned and keyed by path/hash/address; checkpoints do not end the authorized research.
 2. Use recovered animation/choreography evidence for bounded raw delta/post/mask/layer readers, shared composition and authored gesture execution, then compare a real first-level scene against original captures/audio/timings. Reuse shared crates and separate reader, scheduler, actor readiness and rendering defects.
 3. Resume renderer area/occluder/LOD work with current-view/monitor correctness checks and matched profiles after the requested research priority. Keep spatial splitting opt-in until broader evidence supports a default change.
 
 ## Files that matter
 
 - AGENTS.md: authorization/boundaries/order. MODLOG.md: historical tested changes. docs/DESIGN.md: architecture/next bounded plan.
-- Private work/hl2-decompiled/coverage-pass-20261005-01/README.md: newest commands, supplement and checkpoint. Original inventory.json/coverage.json, native-catalog and gamedb-all-modules remain preserved. scripts/decompile-installed.ps1 overwrites private copies before skipping finished modules; do not run blindly. scripts/coverage_ledger.py preserves path/hash/address identities and original bytes. Original decompilation-handoff-2026-10-05.json is historical preflight.
+- Private work/hl2-decompiled/coverage-pass-20261005-02 through 06: discovery/optional/raw-flow/disassembly ledgers and commands. Pass01 remains frozen, as do original inventory/coverage, native-catalog and gamedb-all-modules. scripts/decompile-installed.ps1 overwrites private copies before skipping finished modules; do not run blindly. Versioned ledger tools preserve full path/hash/address identities and original bytes. Original decompilation-handoff-2026-10-05.json is historical preflight.
 - crates/source-assets/src/animation.rs and crates/modkit-core/src/animation.rs: decoding/pose math; raw delta/post/layer work starts here.
 - crates/hl2-simulation/src/actors.rs, entities.rs, attention.rs, npc.rs: preparation, scene scheduling/interests and incomplete locomotion/AI.
 - crates/hl2-simulation/src/physics.rs, player_convex.rs and crates/modkit-core/src/movement.rs: shared collision/player behavior.

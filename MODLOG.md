@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-05 Continued discovery and optional-module databases
+
+**Changed:** Resumed authorized private research after the owner corrected an early stop. A private baseline clone adds 9,850 candidate exports. Seventeen optional modules expand saved coverage to 42 modules/122,721 entries with some pseudocode. Separate raw-flow/disassembly passes produce 34 and 11 temporary bodies. Public changes document evidence only.
+
+**Why:** Whole-module export counts omitted callable entries and optional scope. Checkpoints are validation boundaries; preserve baseline provenance while continuing discovery, rather than treating a checkpoint as task completion.
+
+**Tested how:** Original project/catalogue hashes; relocated pointer/RTTI records and bounded instruction flow; exact SQLite artifact/body audits; saved optional entry sets; five new failure recoveries/signature checks; independent rollback of temporary function/listing state; exact body retrieval and scoped gamedb control. Commands/counts are in docs/validation.md. Installed content stayed read-only.
+
+**Result:** Discovery ledger:20,842 artifacts/9,850 bodies/zero discrepancies. Optional ledger:393 artifacts/23,987 successful body rows plus five preserved original errors/zero discrepancies. All16 known original failures have separate recovery bodies. Temporary 34/11 body ledgers and rollback checks pass. Discovery navigator has one range mismatch; optional navigator omits2,544 bodies and has779 mismatches, so exact path/hash/address retrieval remains authoritative.
+
+**Still broken / not tested:** Complete discovery/runtime scope, original names/ABIs, exception coverage, optional activation, middleware/tool/variant exclusions and native behavior remain unresolved. Two analysis-adjusted flow attempts, initial writable-RTTI rejection, missing project-directory launch and Vulkan exception-handler analyzer error remain recorded. No Rust change, rebuild, gameplay capture, performance or multiplayer test.
+
+**Next:** Continue optional orphan-target discovery and relocated callback/instruction-operand references across all42 snapshots, retaining versioned databases and rollback proofs. Gestures remain queued behind the documented research priority.
+
 ## 2026-10-05 Private database coverage and failed-export recovery
 
 **Changed:** Continued private decompilation with a 126-path hashed PE inventory, discovery audits, three new loader-referenced module exports, eleven supplemental failed-body recoveries and a path/hash/address SQLite evidence ledger. Public changes are evidence documentation only.
