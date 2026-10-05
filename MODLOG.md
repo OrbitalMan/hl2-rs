@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-05 Decompilation priority for the new chat
+
+**Changed:** Updated AGENTS.md, STATUS.md and docs/DESIGN.md with the owner's new decompilation priority, plus a private inventory/failure checkpoint.
+
+**Why:** Continue toward complete original-game coverage in a fresh chat while retaining the verified Rust build and precise limits of the database method.
+
+**Tested how:** Read the existing 22-module coverage, export scripts, catalogue and gamedb audit documentation; enumerated installed DLL/EXE files read-only. Checked document consistency, Git diff and the public snapshot.
+
+**Result:** Handoff records 87,783 successful exports/ten failures, exact-byte catalogue coverage, gamedb omissions/read-range errors and 126 installed DLL/EXE paths awaiting scope/dependency classification. The plan separates inventory, failure recovery, discovery, type/behavior recovery and verified Rust translation.
+
+**Still broken / not tested:** No new Ghidra run, recovery/export, database rebuild or runtime modification occurred. Existing audit reports were inspected, not rerun. Complete decompilation, function discovery and semantic parity remain unverified; the failed exports and parser discrepancies remain open.
+
+**Next:** The owner starts a fresh chat in outputs/hl2-rs-bevy. Read AGENTS.md, STATUS.md, docs/DESIGN.md and the newest private checkpoint, then execute the bounded decompilation plan before queued NPC gesture work.
+
 ## 2026-10-05 Fresh-chat documentation handoff
 
 **Changed:** Reworked AGENTS.md, added STATUS.md and docs/DESIGN.md, updated this log and changed .gitignore to a source-only whitelist.

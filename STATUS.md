@@ -1,6 +1,8 @@
 # STATUS
 
-Handoff: 2026-10-05, Atlantic/Canary. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; the documentation commit follows it. Read AGENTS.md, this file and docs/DESIGN.md first. Historical MODLOG entries describe their own dates, not current limitations.
+Handoff: 2026-10-05, Atlantic/Canary. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; documentation-only commits follow it. Read AGENTS.md, this file and docs/DESIGN.md first. Historical MODLOG entries describe their own dates, not current limitations.
+
+Latest owner instruction: continue toward complete decompilation in a **new chat**. This chat updates the handoff only. Begin with the decompilation coverage plan in docs/DESIGN.md; the NPC gesture implementation remains queued. No new decompiler run, export recovery, catalogue rebuild or runtime change was started after this request.
 
 ## Goal
 
@@ -42,12 +44,17 @@ Not applicable: this is a rewrite. Rust simulation owns player/gameplay state. T
 
 ## The current problem
 
-The host migration is substantially connected, but choreography/model reconstruction is incomplete. Real intro/security gestures cannot be reproduced by the current base-clip-only pose path. Existing absolute delta conversion loses information needed for arbitrary post composition. Full-body blending a parent gesture is incorrect: all65 named sampled parents have zero bone masks and refer to311 child layers. Preserve raw transforms, child dependencies, weights and authored retiming before implementing gesture execution, then address actor readiness/AI and first-level staging.
+The immediate priority is coverage and trustworthy recovery of the original binaries. The finished export batch covers 22 selected runtime modules: 87,793 identified functions attempted, 87,783 successful pseudocode bodies, ten failures and 20,132 warning comments. That does not prove complete function discovery, accurate recovered types or native/Rust equivalence. A read-only scan on 2026-10-05 found 126 installed DLL/EXE files, including tools, middleware and other game variants; their classification/dependency reconciliation has not been completed.
+
+The separate exact-byte SQLite catalogue preserves all 222 source/index/metadata artifacts, all 87,783 successful bodies and ten explicit failed-export rows. The supplied gamedb parser represents 78,070 successful bodies, omits 9,713 and has 2,810 audited read-range mismatches. It also has cross-module navigation limitations. No implementation was marked complete in that navigator; the existing manually implemented Rust behavior is not a function-by-function parity ledger. Use the exact module/address catalogue and raw exports for research.
+
+Queued runtime work: the host migration is substantially connected, but choreography/model reconstruction is incomplete. Real intro/security gestures cannot be reproduced by the current base-clip-only pose path. Existing absolute delta conversion loses information needed for arbitrary post composition. Full-body blending a parent gesture is incorrect: all65 named sampled parents have zero bone masks and refer to311 child layers. Preserve raw transforms, child dependencies, weights and authored retiming before implementing gesture execution, then address actor readiness/AI and first-level staging.
 
 Private database/native exports and published SDK research corroborate selected behavior. The entire game has **not** been decompiled and translated; indexing functions is not a completed rewrite. Keep byte/hash provenance, mark inferred signatures and keep native code/databases outside public Rust sources.
 
 ## Evidence
 
+- Private coverage.json reports 22 finished module passes and the ten failures; inventory.json records original hashes. gamedb-all-modules/audit.json and native-catalog/README.md describe the parser discrepancies and exact-byte corpus audits. This handoff inspected those existing reports; it did not rerun the corpus audit. Private decompilation-handoff-2026-10-05.json records the read-only file inventory and failure list for the new chat.
 - Runtime milestones: df6af1b GPU skinning; b888144 cached PVS;322afaa activity lookup; c2b5220 material sharing;28c0bb3 reticles/optional spatial batching.
 - Local logs: artifacts/crosshair-partition-tests.log, crosshair-partition-owned.log, crosshair-partition-clippy.log; partition-movement-final.assertions.json26 passed; partition-weapons-final.assertions.json17 passed; partition-gameplay-checks.json18 passed; crosshair-partition-image-checks.json9 accepted plus rejected hall. Prior GPU/PVS/attention captures remain in artifacts; docs/validation.md records their scope.
 - Native1080 oracle: private work/hl2-decompiled/original-oracle/crosshair-1080-20261005T153947Z, with installed module hashes, measurements and cleanup. Six installed settings stayed unchanged; test process closed.
@@ -57,6 +64,7 @@ Private database/native exports and published SDK research corroborate selected 
 
 ## What we've already tried
 
+- Whole-module Ghidra export and database indexing: the selected 22-module batch finished with ten explicit failures. An exact-byte catalogue addresses gamedb omissions/range errors for retrieval. Discovery completeness, failed-body recovery and full semantic translation remain unverified; do not report another ordinary index pass as completion.
 - Debug-overhead explanation: packaged builds were already release; development dependency overrides existed. Profiling identified skinning/uploads and out-of-view preparation instead.
 - GPU skinning/current bounds, cached PVS and material reuse: measured local gains with inspected actor/eye/monitor regressions. Do not disable simulation or animation to fake FPS.
 - Equal reticle sizes: rejected in favor of original measurements; fix native rasterization instead. A retained yellow color filter was too strict because additive background raised green239–250; actual dot positions match.
@@ -68,13 +76,14 @@ Private database/native exports and published SDK research corroborate selected 
 
 ## Ideas not tried yet
 
-1. Follow docs/DESIGN.md: bounded raw delta/post/mask/layer readers, shared composition, authored gesture execution, then real-scene comparison. Reuse shared crates and private native evidence.
-2. Compare a real first-level scene against original captures/audio/timings, separating reader, scheduler, actor readiness and rendering defects.
-3. Add area/occluder/LOD work only with current-view/monitor correctness checks and matched profiles. Keep spatial splitting opt-in until broader evidence supports a default change.
+1. Follow docs/DESIGN.md's decompilation plan in the new chat: reconcile installed/dependency scope, investigate the ten failures, audit function discovery and preserve versioned exact-byte evidence. Keep native analysis private.
+2. Use recovered animation/choreography evidence for bounded raw delta/post/mask/layer readers, shared composition and authored gesture execution, then compare a real first-level scene against original captures/audio/timings. Reuse shared crates and separate reader, scheduler, actor readiness and rendering defects.
+3. Resume renderer area/occluder/LOD work with current-view/monitor correctness checks and matched profiles after the requested research priority. Keep spatial splitting opt-in until broader evidence supports a default change.
 
 ## Files that matter
 
 - AGENTS.md: authorization/boundaries/order. MODLOG.md: historical tested changes. docs/DESIGN.md: architecture/next bounded plan.
+- Private work/hl2-decompiled/README.md, inventory.json, coverage.json and scripts/decompile-installed.ps1, DecompileAllHL2.java, coverage.py: current export workflow. Its launcher overwrites private copies before checking finished modules; do not rerun it blindly against changed installed binaries. native-catalog/README.md and scripts/native_catalog.py: exact-byte retrieval/audit. gamedb-all-modules/README.md and audit.json: measured navigator limits. decompilation-handoff-2026-10-05.json: current read-only preflight and failure list.
 - crates/source-assets/src/animation.rs and crates/modkit-core/src/animation.rs: decoding/pose math; raw delta/post/layer work starts here.
 - crates/hl2-simulation/src/actors.rs, entities.rs, attention.rs, npc.rs: preparation, scene scheduling/interests and incomplete locomotion/AI.
 - crates/hl2-simulation/src/physics.rs, player_convex.rs and crates/modkit-core/src/movement.rs: shared collision/player behavior.
