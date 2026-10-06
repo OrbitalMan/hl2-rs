@@ -2302,6 +2302,36 @@ impl Scene {
         self.states[id].script_finish = Some(self.time + duration.max(0.015) as f64);
         self.fire(id, "OnBeginSequence", actor);
     }
+    /// SCRIPT_EVENT_FIREEVENT (1003) animation events crossed this tick by the actor's
+    /// scripted clip fire the script's OnScriptEventNN output (options = NN).
+    fn script_events(&mut self, world: &World, id: usize) {
+        let Some(actor) = self.states[id].script_actor else {
+            return;
+        };
+        let state = &self.states[actor];
+        let Some(clip) = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(actor))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|r| r.clips.get(&state.animation))
+        else {
+            return;
+        };
+        let duration = clip.duration().max(0.015);
+        let now = ((self.time - state.animation_started) as f32 / duration).min(1.);
+        let before = now - self.tick_dt / duration;
+        let fired: Vec<String> = clip
+            .events
+            .iter()
+            .filter(|e| e.id == 1003 && e.cycle > before && e.cycle <= now)
+            .filter_map(|e| e.options.trim().parse::<u32>().ok())
+            .map(|n| format!("OnScriptEvent{n:02}"))
+            .collect();
+        for output in fired {
+            self.fire(id, &output, actor);
+        }
+    }
     fn end_sequence(&mut self, world: &World, id: usize, cancel: bool) {
         let actor = self.states[id].script_actor.take();
         self.states[id].script_finish = None;
@@ -2416,6 +2446,9 @@ impl Scene {
                     self.states[id].post_idle_done = None;
                     self.fire(id, "OnPostIdleEndSequence", actor);
                 }
+            }
+            if e.class() == "scripted_sequence" {
+                self.script_events(world, id);
             }
             if self.states[id]
                 .script_finish
