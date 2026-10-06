@@ -11,6 +11,8 @@ use std::{
 pub struct Audio {
     library: hl2_simulation::sounds::Library,
     cache: HashMap<String, Sound>,
+    /// Master volume scale (`--volume`), applied to every request.
+    pub master: f32,
 }
 impl Deref for Audio {
     type Target = hl2_simulation::sounds::Library;
@@ -28,6 +30,7 @@ impl Audio {
         Self {
             library: hl2_simulation::sounds::Library::new(vfs),
             cache: HashMap::new(),
+            master: 1.,
         }
     }
     pub async fn play(&mut self, vfs: &Vfs, name: &str, looped: bool, volume: f32) -> Result<()> {
@@ -82,7 +85,7 @@ impl Audio {
             &self.cache[&path],
             PlaySoundParams {
                 looped,
-                volume: volume.clamp(0., 1.),
+                volume: (volume * self.master).clamp(0., 1.),
             },
         );
         *self.variants_played.entry(path).or_default() += 1;

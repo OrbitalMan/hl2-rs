@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Retained-host facial flexes and volume option
+
+**Changed:** The retained host now applies the shared `FaceModel` flex path: per-vertex studio flex keys in its draw batches, NPC face models loaded at setup, and scene controller values plus rest-gaze FACS eyelids added to bind positions before CPU skinning. It also accepts `--volume 0..1` as a master scale for all sounds, so unattended tests run at 1%.
+
+**Why:** Shared changes must work in both hosts. Quiet testing had no option on the retained host.
+
+**Tested how:** Strict workspace Clippy/fmt, hl2-runtime tests. Packaged retained G-Man intro close-ups (artifacts/retained-flex/gman-closeup.png, launched without activation at volume 0.01): faces deform sanely and the expression changes over time.
+
+**Result:** Retained actors show scene facial expressions.
+
+**Still broken or not tested:** The retained host has no eye-target presentation (eyelids use the rest gaze) and no iris shader. In a retained security_02 smoke run Barney did not spawn from his template (helmetBack stayed at its map position), a retained-specific gap not investigated. The retained input script needs an explicit `quit` before it writes its report.
+
+**Next:** Lip sync from phoneme data.
+
 ## 2026-10-06 Entity parenting and Barney's helmet props
 
 **Changed:** The simulation now supports movement parenting. Map-spawn `parentname` keeps the spawn offset, and the `SetParent`, `SetParentAttachment`, `SetParentAttachmentMaintainOffset` and `ClearParent` inputs work. Each tick, children follow the parent's pose or animated attachment, using the same composed pose both hosts render. `prop_dynamic` StartDisabled hides the prop. Gear attached to an animated attachment has no collider, so a helmet no longer blocks its wearer. The security fixtures now include the campaign state by security_02: faceplates off (ss_Helmet_Reveal runs in security_01) and logic_disable_cameras triggered.

@@ -40,6 +40,8 @@ struct DrawBatch {
     secondary: Option<Texture2D>,
     scroll: Vec2,
     skin: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
+    /// Studio (bodypart, mesh, mesh-local vertex) per vertex, for facial flexes.
+    flex: Vec<Option<[u16; 3]>>,
 }
 pub(crate) fn texture(vfs: &Vfs, name: &str) -> Result<Texture2D> {
     let base = vfs
@@ -74,6 +76,7 @@ fn make_batch(
     kind: usize,
     secondary: Option<Texture2D>,
     scroll: Vec2,
+    flex: Vec<Option<[u16; 3]>>,
 ) -> DrawBatch {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
@@ -91,6 +94,7 @@ fn make_batch(
         secondary,
         scroll,
         skin,
+        flex,
     }
 }
 fn meshes(
@@ -145,6 +149,7 @@ fn meshes(
         };
         let mut remap = HashMap::new();
         let mut skin = Vec::new();
+        let mut flex = Vec::new();
         for tri in s.indices.as_chunks::<3>().0 {
             if mesh.indices.len() + 3 > 30000 || mesh.vertices.len() + 3 > 15000 {
                 batches.push(make_batch(
@@ -154,6 +159,7 @@ fn meshes(
                     kind,
                     secondary.clone(),
                     scroll,
+                    std::mem::take(&mut flex),
                 ));
                 mesh = Mesh {
                     vertices: Vec::new(),
@@ -168,6 +174,13 @@ fn meshes(
                 let index = *remap.entry(id).or_insert_with(|| {
                     let p = &s.vertices[id as usize];
                     skin.push((p.position, p.skin.clone()));
+                    flex.push(s.flex_source.as_ref().and_then(|f| {
+                        Some([
+                            u16::try_from(f.bodypart).ok()?,
+                            u16::try_from(f.mesh).ok()?,
+                            *f.vertex_ids.get(id as usize)?,
+                        ])
+                    }));
                     mesh.vertices.push(Vertex {
                         position: v3(p.position),
                         uv: vec2(p.uv.x, p.uv.y),
@@ -191,6 +204,7 @@ fn meshes(
                 kind,
                 secondary.clone(),
                 scroll,
+                flex,
             ));
         }
         for batch in &mut batches[batch_start..] {
@@ -448,6 +462,30 @@ pub async fn run(mut o: Options) -> Result<()> {
     let mut texture_cache = HashMap::new();
     let (mut batches, mut loaded, mut missing) = meshes(&world, &vfs, &mut texture_cache);
     let mut dynamic = entity_meshes(&world, &vfs, &mut texture_cache);
+    // Facial flexes and eyeballs for NPC models, loaded once (no frame IO).
+    let mut faces = HashMap::new();
+    for instance in &world.model_instances {
+        let key = instance.asset_key();
+        if faces.contains_key(&key)
+            || !instance
+                .entity
+                .is_some_and(|id| world.entities[id].class().starts_with("npc_"))
+        {
+            continue;
+        }
+        let model = key.split('#').next().unwrap_or(&key).to_owned();
+        let face = vfs
+            .read(&model)
+            .ok()
+            .flatten()
+            .and_then(|data| source_assets::flexes::read_flexes(&data).ok())
+            .filter(|flex| !flex.meshes.is_empty())
+            .map(|flex| source_assets::flexes::FaceModel {
+                flex,
+                eyes: source_assets::eyes::load(&vfs, &model).unwrap_or_default(),
+            });
+        faces.insert(key, face);
+    }
     let mut viewmodels = weapon_meshes(&world, &vfs, &weapons, &mut texture_cache);
     let (mut projectile_models, mut projectile_model_errors) =
         projectile_meshes(&vfs, &mut texture_cache);
@@ -463,6 +501,7 @@ pub async fn run(mut o: Options) -> Result<()> {
     let (mut sky_background, mut sky_asset_error) = crate::sky::prepare(&vfs, &world.entities);
 
     let mut audio = crate::sounds::Audio::new(&vfs);
+    audio.master = o.volume;
     audio.ambient(&vfs, &world).await?;
     println!(
         "Collision: {} colliders, {} rigid bodies, {} skipped",
@@ -1171,6 +1210,7 @@ pub async fn run(mut o: Options) -> Result<()> {
                     sky_3d_frames = 0;
                     sky_visibility_error = None;
                     audio = crate::sounds::Audio::new(&vfs);
+                    audio.master = o.volume;
                     audio.ambient(&vfs, &world).await?;
                     o = next;
                     message = format!("Loaded {}", o.map);
@@ -1266,10 +1306,36 @@ pub async fn run(mut o: Options) -> Result<()> {
                 continue;
             }
             let matrices = scene.actor_matrices(rig, *id);
+            // Shared flex path: scene controllers plus rest-gaze FACS eyelids (this host
+            // has no eye-target presentation) deform bind positions before skinning.
+            let deltas = faces
+                .get(&instance.asset_key())
+                .and_then(Option::as_ref)
+                .map(|face| {
+                    let empty = std::collections::BTreeMap::new();
+                    let values = scene.flex_controllers.get(id).unwrap_or(&empty);
+                    face.flex
+                        .vertex_deltas(&face.descriptor_weights(values, |_| None))
+                })
+                .unwrap_or_default();
             for batch in meshes {
-                for (v, (bind, weights)) in batch.mesh.vertices.iter_mut().zip(&batch.skin) {
+                for (i, (v, (bind, weights))) in
+                    batch.mesh.vertices.iter_mut().zip(&batch.skin).enumerate()
+                {
                     if let Some(weights) = weights {
-                        v.position = v3(modkit_core::animation::skin(*bind, weights, &matrices));
+                        let delta = batch
+                            .flex
+                            .get(i)
+                            .copied()
+                            .flatten()
+                            .and_then(|key| deltas.get(&key))
+                            .copied()
+                            .unwrap_or_default();
+                        v.position = v3(modkit_core::animation::skin(
+                            *bind + delta,
+                            weights,
+                            &matrices,
+                        ));
                         animated_vertices += 1;
                     }
                 }
