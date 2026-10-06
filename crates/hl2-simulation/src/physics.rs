@@ -1035,6 +1035,7 @@ mod tests {
                     clips: BTreeMap::from([(
                         "idle".into(),
                         Clip {
+                            layer: Default::default(),
                             events: Vec::new(),
                             fps: 1.,
                             looping: true,

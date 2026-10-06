@@ -921,6 +921,7 @@ mod tests {
     fn animation_keys_keep_live_samples_and_stop_reuploading_constant_poses() {
         use modkit_core::animation::Clip;
         let mut clip = Clip {
+            layer: Default::default(),
             fps: 30.,
             looping: false,
             frames: vec![vec![]; 31],
@@ -972,6 +973,7 @@ mod tests {
                     clips: BTreeMap::from([(
                         "move".into(),
                         Clip {
+                            layer: Default::default(),
                             fps: 1.,
                             looping: false,
                             events: vec![],

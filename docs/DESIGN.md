@@ -12,8 +12,8 @@ AGENTS.md records fixed-step order and renderer invariants. Bevy uses custom mat
 
 Owner decision 2026-10-06: resume the Rust rewrite now. Whole-corpus coverage passes stop after pass14; the private index (133,473 addresses with pseudocode, about 94% of baseline executable bytes inside identified functions, zero reviewed names/types) is sufficient for targeted retrieval. For each step below, first identify the responsible retail functions (for example server.dll/client.dll animation-layer, sequence and choreography code) through strings, RTTI, callers and pinned SDK correspondence; retrieve exact bodies by installed path/hash/address; record reviewed findings privately with SDK-versus-retail distinctions. Only then implement in shared crates. Native code stays private; Rust contains original implementation.
 
-1. Preserve raw delta/post transforms, bone masks, autolayers and model-tag dependencies in bounded readers. Preserve base clips and account explicitly for child budgets.
-2. Implement shared layered pose composition with independent synthetic references and owned-data comparisons. Verify retail/native evidence separately from SDK behavior.
+1. Done 2026-10-06 (except model faceposer tags): raw delta/post transforms, bone masks and autolayers are preserved; children load as dependencies. Next: faceposer tags and an explicit child budget.
+2. Done 2026-10-06: shared composition with synthetic and owned tests; retail AccumulatePose/AddSequenceLayers/SlerpBones statically compared. Native runtime pose comparison is not done.
 3. Execute choreography gestures with authored timing/tag retiming, ramps, priorities and pause/cancel semantics. Both renderers consume the same composed poses.
 4. Compare a real intro/security scene against original captures/audio/timings, then extend head/facial/lip controls and actor scheduling. Seeded developer actors are not campaign proof.
 

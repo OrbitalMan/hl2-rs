@@ -2,7 +2,7 @@
 use crate::{bytes, f32le, i16le, i32le, u16le, u32le, vec3, vpk::Vfs};
 use anyhow::{bail, Context, Result};
 use glam::{Mat4, Quat, Vec3};
-use modkit_core::animation::{Bone, Clip, Pose, Rig};
+use modkit_core::animation::{sequence_flags, AutoLayer, Bone, Clip, ClipLayer, Pose, Rig};
 use std::collections::BTreeSet;
 fn offset(data: &[u8], field: usize) -> Result<usize> {
     Ok(usize::try_from(i32le(data, field)?)?)
@@ -116,10 +116,28 @@ fn quaternion(data: &[u8], at: usize, wide: bool) -> Result<Quat> {
 fn euler(v: Vec3) -> Quat {
     Quat::from_rotation_z(v.z) * Quat::from_rotation_y(v.y) * Quat::from_rotation_x(v.x)
 }
-fn frame(data: &[u8], mut at: usize, bones: &[SourceBone], frame: usize) -> Result<Vec<Pose>> {
+/// Pose of a bone without animation data: identity offsets for delta animations.
+fn default_pose(bone: &Bone, delta: bool) -> Pose {
+    if delta {
+        Pose {
+            position: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+        }
+    } else {
+        bone.bind.clone()
+    }
+}
+/// Values follow SDK CalcBoneQuaternion/CalcBonePosition: delta records stay raw offsets.
+fn frame(
+    data: &[u8],
+    mut at: usize,
+    bones: &[SourceBone],
+    frame: usize,
+    delta_animation: bool,
+) -> Result<Vec<Pose>> {
     let mut poses = bones
         .iter()
-        .map(|b| b.bone.bind.clone())
+        .map(|b| default_pose(&b.bone, delta_animation))
         .collect::<Vec<_>>();
     for _ in 0..256 {
         let header = bytes(data, at, 4)?;
@@ -170,14 +188,7 @@ fn frame(data: &[u8], mut at: usize, bones: &[SourceBone], frame: usize) -> Resu
         } else {
             bone.bone.bind.position
         };
-        poses[id] = if delta {
-            Pose {
-                position: bone.bone.bind.position + position,
-                rotation: bone.bone.bind.rotation * rotation,
-            }
-        } else {
-            Pose { position, rotation }
-        };
+        poses[id] = Pose { position, rotation };
         let next = i16le(data, at + 2)?;
         if next == 0 {
             return Ok(poses);
@@ -208,10 +219,21 @@ fn clip(
         bail!("animation exceeds frame limit");
     }
     let fps = f32le(mdl, at + 8)?.clamp(1., 240.);
+    let animation_flags = u32le(mdl, at + 12)?;
+    let delta_animation = animation_flags & sequence_flags::DELTA != 0;
     let section_frames = offset(mdl, at + 84)?;
     let section_base = relative(mdl, at, at + 80)?;
     let mut frames = Vec::with_capacity(count);
-    for f in 0..count {
+    if animation_flags & sequence_flags::ALLZEROS != 0 {
+        // No authored data: every frame is the base (or identity delta) pose.
+        let pose = bones
+            .iter()
+            .map(|b| default_pose(&b.bone, delta_animation))
+            .collect::<Vec<_>>();
+        frames.resize(count, pose);
+    }
+    let authored = if frames.is_empty() { count } else { 0 };
+    for f in 0..authored {
         let (mut block, mut index) = (i32le(mdl, at + 52)?, i32le(mdl, at + 56)?);
         let mut local_frame = f;
         if section_frames > 0 {
@@ -245,7 +267,7 @@ fn clip(
             )?;
             (data, usize::try_from(index)?)
         };
-        frames.push(frame(data, start, bones, local_frame)?);
+        frames.push(frame(data, start, bones, local_frame, delta_animation)?);
     }
     let _ = vfs;
     Ok(Clip {
@@ -253,6 +275,7 @@ fn clip(
         fps,
         looping,
         frames,
+        layer: ClipLayer::default(),
     })
 }
 pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
@@ -324,6 +347,88 @@ fn sequence_metadata(data: &[u8], at: usize) -> Result<modkit_core::animation::S
         order: 0,
     })
 }
+fn sequence_label(data: &[u8], sequences: usize, base: usize, id: usize) -> Result<String> {
+    if id >= sequences {
+        bail!("autolayer sequence outside table");
+    }
+    let at = base + id * 212;
+    Ok(string(data, relative(data, at, at + 4)?)?.to_lowercase())
+}
+/// Raw autolayer; `child` is relative to the sequence's own model file (iRelativeSeq).
+struct RawAutoLayer {
+    child: usize,
+    pose: i16,
+    flags: u32,
+    ramp: [f32; 4],
+}
+fn autolayer_records(data: &[u8], at: usize) -> Result<Vec<RawAutoLayer>> {
+    let count = offset(data, at + 148)?;
+    if count > 64 {
+        bail!("autolayer count exceeds limit");
+    }
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let base = relative(data, at, at + 152)?;
+    bytes(data, base, count * 24)?;
+    (0..count)
+        .map(|i| {
+            let at = base + i * 24;
+            Ok(RawAutoLayer {
+                child: usize::try_from(i16le(data, at)?).context("negative autolayer sequence")?,
+                pose: i16le(data, at + 2)?,
+                flags: u32le(data, at + 4)?,
+                ramp: [
+                    f32le(data, at + 8)?,
+                    f32le(data, at + 12)?,
+                    f32le(data, at + 16)?,
+                    f32le(data, at + 20)?,
+                ],
+            })
+        })
+        .collect()
+}
+/// Sequence flags, fades, per-bone weights (remapped to rig bones) and named autolayers.
+fn sequence_layer(
+    data: &[u8],
+    at: usize,
+    source_bones: &[SourceBone],
+    remap: &[Option<usize>],
+    sequences: usize,
+    base: usize,
+) -> Result<ClipLayer> {
+    let weights = relative(data, at, at + 156)?;
+    bytes(data, weights, source_bones.len() * 4)?;
+    let bone_weights = remap
+        .iter()
+        .map(|id| match id {
+            Some(id) => f32le(data, weights + id * 4),
+            None => Ok(0.),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let autolayers = autolayer_records(data, at)?
+        .into_iter()
+        .map(|raw| {
+            let [start, peak, tail, end] = raw.ramp;
+            Ok(AutoLayer {
+                sequence: sequence_label(data, sequences, base, raw.child)?,
+                pose: raw.pose,
+                flags: raw.flags,
+                start,
+                peak,
+                tail,
+                end,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(ClipLayer {
+        flags: u32le(data, at + 12)?,
+        bone_weights,
+        autolayers,
+        fade_in: f32le(data, at + 104)?,
+        fade_out: f32le(data, at + 108)?,
+    })
+}
 #[derive(Default)]
 struct LoadState {
     seen: BTreeSet<String>,
@@ -369,17 +474,42 @@ fn load_sequences(
         .ordinal
         .checked_add(sequences as u32)
         .context("sequence order overflow")?;
+    bytes(data, base, sequences * 212)?;
+    let mut selected = BTreeSet::new();
     for id in 0..sequences {
+        let metadata = sequence_metadata(data, base + id * 212)?;
+        if wanted.contains(&metadata.name)
+            || (!metadata.activity.is_empty() && wanted.contains(&metadata.activity.to_lowercase()))
+        {
+            selected.insert(id);
+        }
+    }
+    // Autolayer children are dependencies of their parents; the parent alone has no pose.
+    let mut pending = selected.iter().copied().collect::<Vec<_>>();
+    while let Some(id) = pending.pop() {
+        for RawAutoLayer { child, .. } in autolayer_records(data, base + id * 212)? {
+            if child >= sequences {
+                bail!("autolayer sequence outside table");
+            }
+            if selected.insert(child) {
+                pending.push(child);
+            }
+        }
+    }
+    let remap = rig
+        .bones
+        .iter()
+        .map(|b| {
+            source_bones
+                .iter()
+                .position(|s| s.bone.name.eq_ignore_ascii_case(&b.name))
+        })
+        .collect::<Vec<_>>();
+    for id in selected {
         let at = base + id * 212;
-        bytes(data, at, 212)?;
         let mut metadata = sequence_metadata(data, at)?;
         metadata.order = ordinal + id as u32;
         let name = metadata.name.clone();
-        if !wanted.contains(&name)
-            && (metadata.activity.is_empty() || !wanted.contains(&metadata.activity.to_lowercase()))
-        {
-            continue;
-        }
         if rig.sequences.iter().any(|s| s.name == name) {
             continue;
         }
@@ -408,7 +538,11 @@ fn load_sequences(
             &source_bones,
             animation,
             u32le(data, at + 12)? & 1 != 0,
-        ) {
+        )
+        .and_then(|clip| {
+            sequence_layer(data, at, &source_bones, &remap, sequences, base)
+                .map(|layer| Clip { layer, ..clip })
+        }) {
             Ok(mut clip) => {
                 let (events, discarded) = sequence_events(data, at)?;
                 clip.events = events;
@@ -417,15 +551,7 @@ fn load_sequences(
                         "{path}:{name}: discarded {discarded} invalid event cycles"
                     ));
                 }
-                let remap = rig
-                    .bones
-                    .iter()
-                    .map(|b| {
-                        source_bones
-                            .iter()
-                            .position(|s| s.bone.name.eq_ignore_ascii_case(&b.name))
-                    })
-                    .collect::<Vec<_>>();
+                let delta = clip.layer.flags & sequence_flags::DELTA != 0;
                 for frame in &mut clip.frames {
                     *frame = rig
                         .bones
@@ -434,7 +560,7 @@ fn load_sequences(
                         .map(|(b, id)| {
                             id.and_then(|id| frame.get(id))
                                 .cloned()
-                                .unwrap_or_else(|| b.bind.clone())
+                                .unwrap_or_else(|| default_pose(b, delta))
                         })
                         .collect();
                 }
@@ -553,6 +679,134 @@ mod tests {
         assert_eq!(rle(&bytes, 0, 3).unwrap(), 2.);
         assert_eq!(rle(&bytes, 0, 5).unwrap(), -3.);
         assert!(rle(&[0, 0], 0, 0).is_err());
+    }
+    fn layer_data() -> Vec<u8> {
+        // Two sequences at 0 and 212; sequence 0 has one autolayer and two bone weights.
+        let mut data = vec![0; 600];
+        for (seq, label) in [(0usize, 440usize), (212, 450)] {
+            data[seq + 4..seq + 8].copy_from_slice(&((label - seq) as i32).to_le_bytes());
+        }
+        data[440..446].copy_from_slice(b"Parent");
+        data[450..455].copy_from_slice(b"Child");
+        data[12..16].copy_from_slice(&0x14u32.to_le_bytes());
+        data[104..108].copy_from_slice(&0.2f32.to_le_bytes());
+        data[108..112].copy_from_slice(&0.4f32.to_le_bytes());
+        data[148..152].copy_from_slice(&1i32.to_le_bytes());
+        data[152..156].copy_from_slice(&480i32.to_le_bytes());
+        data[156..160].copy_from_slice(&520i32.to_le_bytes());
+        data[480..482].copy_from_slice(&1i16.to_le_bytes());
+        data[482..484].copy_from_slice(&(-1i16).to_le_bytes());
+        data[484..488].copy_from_slice(&0x40u32.to_le_bytes());
+        for (i, v) in [0.1f32, 0.3, 0.7, 0.9].iter().enumerate() {
+            data[488 + i * 4..492 + i * 4].copy_from_slice(&v.to_le_bytes());
+        }
+        data[520..524].copy_from_slice(&0.5f32.to_le_bytes());
+        data[524..528].copy_from_slice(&1f32.to_le_bytes());
+        data
+    }
+    fn source_bone(name: &str) -> SourceBone {
+        SourceBone {
+            bone: Bone {
+                name: name.into(),
+                parent: None,
+                bind: Pose {
+                    position: Vec3::ZERO,
+                    rotation: Quat::IDENTITY,
+                },
+                inverse_bind: Mat4::IDENTITY,
+            },
+            euler: Vec3::ZERO,
+            position_scale: Vec3::ONE,
+            rotation_scale: Vec3::ONE,
+        }
+    }
+    #[test]
+    fn sequence_layer_reads_flags_remapped_weights_and_named_autolayers() {
+        let data = layer_data();
+        let bones = [source_bone("a"), source_bone("b")];
+        // Rig order b, missing, a: weights follow names; unmapped bones get zero.
+        let remap = [Some(1), None, Some(0)];
+        let layer = sequence_layer(&data, 0, &bones, &remap, 2, 0).unwrap();
+        assert_eq!(layer.flags, sequence_flags::DELTA | sequence_flags::POST);
+        assert_eq!(layer.bone_weights, [1., 0., 0.5]);
+        assert_eq!(layer.fade_in, 0.2);
+        assert_eq!(layer.fade_out, 0.4);
+        assert_eq!(layer.autolayers.len(), 1);
+        let auto = &layer.autolayers[0];
+        assert_eq!(auto.sequence, "child");
+        assert_eq!((auto.pose, auto.flags), (-1, 0x40));
+        assert_eq!(
+            [auto.start, auto.peak, auto.tail, auto.end],
+            [0.1, 0.3, 0.7, 0.9]
+        );
+        // Out-of-table child, negative child, nonfinite ramp and weight are rejected.
+        assert!(sequence_layer(&data, 0, &bones, &remap, 1, 0).is_err());
+        let mut bad = data.clone();
+        bad[480..482].copy_from_slice(&(-2i16).to_le_bytes());
+        assert!(autolayer_records(&bad, 0).is_err());
+        let mut bad = data.clone();
+        bad[492..496].copy_from_slice(&f32::INFINITY.to_le_bytes());
+        assert!(autolayer_records(&bad, 0).is_err());
+        for field in [524, 108] {
+            let mut bad = data.clone();
+            bad[field..field + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+            assert!(sequence_layer(&bad, 0, &bones, &remap, 2, 0).is_err());
+        }
+    }
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn owned_barney_gesture_loads_masked_parent_and_delta_children() {
+        let vfs = Vfs::mount(std::path::Path::new(
+            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
+        ))
+        .unwrap();
+        let rig = load(
+            &vfs,
+            "models/barney.mdl",
+            &BTreeSet::from(["g_pointRight".into()]),
+        )
+        .unwrap();
+        let parent = &rig.clips["g_pointright"];
+        assert_eq!(parent.layer.autolayers.len(), 6);
+        assert!(parent.layer.bone_weights.iter().all(|w| *w == 0.));
+        assert_eq!(parent.layer.bone_weights.len(), rig.bones.len());
+        let mut delta_children = 0;
+        for auto in &parent.layer.autolayers {
+            let child = rig.clips.get(&auto.sequence).unwrap_or_else(|| {
+                panic!("child {} not loaded: {:?}", auto.sequence, rig.warnings)
+            });
+            delta_children += usize::from(child.layer.flags & sequence_flags::DELTA != 0);
+            assert!(child
+                .frames
+                .iter()
+                .flatten()
+                .all(|p| p.position.is_finite() && p.rotation.is_finite()));
+        }
+        assert!(delta_children > 0);
+        let bind = rig.bind_pose();
+        let mut changed = 0;
+        for cycle in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let mut pose = rig.bind_pose();
+            rig.accumulate_pose(&mut pose, "g_pointRight", cycle, 1.)
+                .unwrap();
+            assert!(rig.local_matrices(&pose).iter().all(|m| m.is_finite()));
+            changed += pose
+                .iter()
+                .zip(&bind)
+                .filter(|(a, b)| a.rotation.dot(b.rotation).abs() < 0.9999)
+                .count();
+        }
+        assert!(changed > 0, "gesture layers left every bone at bind");
+        let names = std::iter::once("g_pointright".to_string())
+            .chain(parent.layer.autolayers.iter().map(|a| a.sequence.clone()))
+            .collect::<Vec<_>>();
+        assert!(
+            !rig.warnings
+                .iter()
+                .any(|w| names.iter().any(|n| w.contains(n.as_str()))),
+            "{:?}",
+            rig.warnings
+        );
     }
     #[test]
     fn compressed_identity_quaternion() {

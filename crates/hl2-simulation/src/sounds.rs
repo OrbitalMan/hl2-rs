@@ -684,6 +684,7 @@ mod tests {
                 clips: [(
                     "draw".into(),
                     Clip {
+                        layer: Default::default(),
                         fps: 1.,
                         looping: false,
                         frames: vec![vec![], vec![]],

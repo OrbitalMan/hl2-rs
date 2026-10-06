@@ -2387,6 +2387,7 @@ mod tests {
                     clips: BTreeMap::from([(
                         "performance".into(),
                         Clip {
+                            layer: Default::default(),
                             fps: 30.,
                             looping: false,
                             frames: vec![vec![]; 31],
@@ -2714,6 +2715,7 @@ mod tests {
                     clips: BTreeMap::from([(
                         "opening".into(),
                         Clip {
+                            layer: Default::default(),
                             events: Vec::new(),
                             fps: 30.,
                             looping: false,
@@ -2823,6 +2825,7 @@ mod tests {
                         (
                             "play".into(),
                             Clip {
+                                layer: Default::default(),
                                 events: Vec::new(),
                                 fps: 30.,
                                 looping: false,
@@ -2832,6 +2835,7 @@ mod tests {
                         (
                             "post".into(),
                             Clip {
+                                layer: Default::default(),
                                 events: Vec::new(),
                                 fps: 30.,
                                 looping: false,
@@ -2914,6 +2918,7 @@ mod tests {
                     clips: BTreeMap::from([(
                         "model_idle".into(),
                         Clip {
+                            layer: Default::default(),
                             events: vec![],
                             fps: 2.,
                             looping: true,

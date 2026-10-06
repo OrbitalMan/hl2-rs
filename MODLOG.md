@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Shared Source animation layer composition
+
+**Changed:** modkit-core composes Source sequences: delta/post layers, per-bone weights and autolayer ramps through `Rig::accumulate_pose`. source-assets keeps raw delta frames, sequence flags, bone weights, fades and named autolayers, and loads autolayer children with their parents.
+
+**Why:** Real NPC gestures are masked parents whose children are delta layers. The old absolute delta conversion and base-clip-only path could not reproduce them.
+
+**Tested how:** 302 normal and 20 owned tests, strict Clippy/fmt; synthetic composition tests; owned Barney g_pointRight load/compose check; retail client.dll AccumulatePose/AddSequenceLayers/SlerpBones static comparison; five packaged fixtures pixel-identical to 28c0bb3 captures, plus movement 26, weapons 17 and attention 26 assertions and a retained smoke capture.
+
+**Result:** Composition matches the SDK and the reviewed retail code paths. Existing scenes are unchanged.
+
+**Still broken or not tested:** Scene gestures are not executed yet. IK, local-context, world-space and pose-parameter layers, fixed-alignment slerp, 3-way blends and native runtime pose comparisons are missing.
+
+**Next:** Scene gesture layers: faceposer tag retiming, intensity and end fades, then compose them in both hosts.
+
 ## 2026-10-06 Priority change: resume Rust rewrite, on-demand decompilation
 
 **Changed:** Owner decision: pause whole-corpus decompilation coverage after pass14 and resume the Rust rewrite with authored NPC gestures. AGENTS.md, STATUS.md and docs/DESIGN.md now make decompilation feature-driven: retrieve and review the relevant retail functions from the private index before implementing each step. A drafted pass15 dispatcher-trace plan was dropped before any run.

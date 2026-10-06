@@ -162,6 +162,7 @@ mod tests {
             clips: std::collections::BTreeMap::from([(
                 "move".into(),
                 Clip {
+                    layer: Default::default(),
                     events: vec![],
                     fps: 1.,
                     looping: false,

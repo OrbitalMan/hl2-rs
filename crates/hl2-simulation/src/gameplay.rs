@@ -2266,6 +2266,7 @@ mod tests {
             rig.clips.insert(
                 name.into(),
                 modkit_core::animation::Clip {
+                    layer: Default::default(),
                     fps: 25.,
                     looping: false,
                     frames: vec![Vec::new(); frame_count],
@@ -2400,6 +2401,7 @@ mod tests {
         rig.clips.insert(
             "ir_reload".into(),
             modkit_core::animation::Clip {
+                layer: Default::default(),
                 fps: 30.,
                 looping: false,
                 frames: Vec::new(),

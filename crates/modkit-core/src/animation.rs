@@ -1,5 +1,5 @@
 //! Engine-neutral skeletons, sampled clips and linear-blend skinning.
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,7 +25,180 @@ pub struct Clip {
     pub events: Vec<ClipEvent>,
     pub fps: f32,
     pub looping: bool,
+    /// Local poses as Source CalcPoseSingle returns them. Delta sequences keep raw
+    /// offsets/rotations, not poses converted against the bind pose.
     pub frames: Vec<Vec<Pose>>,
+    #[serde(default)]
+    pub layer: ClipLayer,
+}
+/// Studio sequence flags used by pose composition (studio.h).
+pub mod sequence_flags {
+    pub const LOOPING: u32 = 0x0001;
+    pub const DELTA: u32 = 0x0004;
+    pub const POST: u32 = 0x0010;
+    pub const ALLZEROS: u32 = 0x0020;
+    pub const LOCAL: u32 = 0x0200;
+    pub const WORLD: u32 = 0x4000;
+}
+/// Studio autolayer flags (studio.h STUDIO_AL_*).
+pub mod autolayer_flags {
+    pub const POST: u32 = 0x0010;
+    pub const SPLINE: u32 = 0x0040;
+    pub const XFADE: u32 = 0x0080;
+    pub const NOBLEND: u32 = 0x0200;
+    pub const LOCAL: u32 = 0x1000;
+    pub const POSE: u32 = 0x4000;
+}
+/// Sequence-level composition data preserved from the MDL sequence descriptor.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClipLayer {
+    pub flags: u32,
+    /// Per rig bone; empty means every bone has weight one. Unmapped bones are zero.
+    pub bone_weights: Vec<f32>,
+    pub autolayers: Vec<AutoLayer>,
+    pub fade_in: f32,
+    pub fade_out: f32,
+}
+/// Child sequence accumulated after its parent, ramped by the parent cycle.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AutoLayer {
+    pub sequence: String,
+    pub pose: i16,
+    pub flags: u32,
+    pub start: f32,
+    pub peak: f32,
+    pub tail: f32,
+    pub end: f32,
+}
+impl AutoLayer {
+    /// SDK AddSequenceLayers child (cycle, weight) for a parent cycle; `None` skips it.
+    pub fn sample(&self, cycle: f32, weight: f32) -> Result<Option<(f32, f32)>, PoseError> {
+        if self.flags & autolayer_flags::POSE != 0 {
+            return Err(PoseError::Unsupported("pose-parameter autolayer"));
+        }
+        if self.start == self.end {
+            return Ok(Some((cycle, weight)));
+        }
+        if cycle < self.start || cycle >= self.end {
+            return Ok(None);
+        }
+        let mut s = 1.;
+        if cycle < self.peak && self.start != self.peak {
+            s = (cycle - self.start) / (self.peak - self.start);
+        } else if cycle > self.tail && self.end != self.tail {
+            s = (self.end - cycle) / (self.end - self.tail);
+        }
+        if self.flags & autolayer_flags::SPLINE != 0 {
+            s = simple_spline(s);
+        }
+        let weight = if self.flags & autolayer_flags::XFADE != 0 && cycle > self.tail {
+            (s * weight) / (1. - weight + s * weight)
+        } else if self.flags & autolayer_flags::NOBLEND != 0 {
+            s
+        } else {
+            weight * s
+        };
+        Ok(Some((
+            (cycle - self.start) / (self.end - self.start),
+            weight,
+        )))
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum PoseError {
+    MissingSequence(String),
+    Depth,
+    BoneCount,
+    Unsupported(&'static str),
+}
+impl std::fmt::Display for PoseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingSequence(name) => write!(f, "pose layer sequence not loaded: {name}"),
+            Self::Depth => f.write_str("pose layer recursion budget exceeded"),
+            Self::BoneCount => f.write_str("pose layer bone count differs from rig"),
+            Self::Unsupported(what) => write!(f, "unsupported pose composition: {what}"),
+        }
+    }
+}
+impl std::error::Error for PoseError {}
+pub fn simple_spline(s: f32) -> f32 {
+    let s2 = s * s;
+    3. * s2 - 2. * s2 * s
+}
+/// mathlib QuaternionAlign: choose the sign of `q` nearest `p`.
+pub fn quaternion_align(p: Quat, q: Quat) -> Quat {
+    let a = (Vec4::from(p) - Vec4::from(q)).length_squared();
+    let b = (Vec4::from(p) + Vec4::from(q)).length_squared();
+    if a > b {
+        -q
+    } else {
+        q
+    }
+}
+/// mathlib QuaternionMult: aligned Hamilton product `p * q`.
+pub fn quaternion_mult(p: Quat, q: Quat) -> Quat {
+    p * quaternion_align(p, q)
+}
+/// mathlib QuaternionScale: scale the rotation angle by `t`, keeping the sign of w.
+pub fn quaternion_scale(p: Quat, t: f32) -> Quat {
+    let sinom = Vec3::new(p.x, p.y, p.z).length().min(1.);
+    let sinsom = (sinom.asin() * t).sin();
+    let scale = sinsom / (sinom + f32::EPSILON);
+    let w = (1. - sinsom * sinsom).max(0.).sqrt();
+    Quat::from_xyzw(
+        p.x * scale,
+        p.y * scale,
+        p.z * scale,
+        if p.w < 0. { -w } else { w },
+    )
+}
+/// bone_setup QuaternionSM: `(s * p) * q`, normalized.
+pub fn quaternion_sm(s: f32, p: Quat, q: Quat) -> Quat {
+    quaternion_mult(quaternion_scale(p, s), q).normalize()
+}
+/// bone_setup QuaternionMA: `p * (s * q)`, normalized.
+pub fn quaternion_ma(p: Quat, s: f32, q: Quat) -> Quat {
+    quaternion_mult(p, quaternion_scale(q, s)).normalize()
+}
+/// SDK SlerpBones for local-space sequences: weighted slerp, or additive delta/post.
+pub fn slerp_bones(
+    base: &mut [Pose],
+    layer: &[Pose],
+    info: &ClipLayer,
+    weight: f32,
+) -> Result<(), PoseError> {
+    if weight <= 0. {
+        return Ok(());
+    }
+    if info.flags & sequence_flags::WORLD != 0 {
+        return Err(PoseError::Unsupported("world-space sequence"));
+    }
+    if base.len() != layer.len()
+        || (!info.bone_weights.is_empty() && info.bone_weights.len() != base.len())
+    {
+        return Err(PoseError::BoneCount);
+    }
+    let s = weight.min(1.);
+    for (i, (q1, q2)) in base.iter_mut().zip(layer).enumerate() {
+        let s2 = s * info.bone_weights.get(i).copied().unwrap_or(1.);
+        if s2 <= 0. {
+            continue;
+        }
+        if info.flags & sequence_flags::DELTA != 0 {
+            q1.rotation = if info.flags & sequence_flags::POST != 0 {
+                quaternion_ma(q1.rotation, s2, q2.rotation)
+            } else {
+                quaternion_sm(s2, q2.rotation, q1.rotation)
+            };
+            q1.position += q2.position * s2;
+        } else {
+            let s1 = 1. - s2;
+            q1.rotation = q2.rotation.slerp(q1.rotation, s1);
+            q1.position = q1.position * s1 + q2.position * s2;
+        }
+    }
+    Ok(())
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClipEvent {
@@ -187,6 +360,26 @@ impl Clip {
     pub fn duration(&self) -> f32 {
         self.frames.len().saturating_sub(1) as f32 / self.fps.max(1.)
     }
+    /// Interpolated local poses at a normalized cycle; looping clips wrap, others clamp.
+    pub fn sample(&self, cycle: f32) -> Option<Vec<Pose>> {
+        let last = self.frames.len().checked_sub(1)?;
+        if !cycle.is_finite() {
+            return None;
+        }
+        let cycle = if self.looping {
+            cycle - cycle.floor()
+        } else {
+            cycle.clamp(0., 1.)
+        };
+        let frame = cycle * last as f32;
+        let a = (frame.floor() as usize).min(last);
+        let b = (a + 1).min(last);
+        Some(interpolate(
+            &self.frames[a],
+            &self.frames[b],
+            frame - a as f32,
+        ))
+    }
     /// Event intervals are open on the left, closed on the right, so frame updates never replay them.
     pub fn events_between(&self, previous: f32, current: f32) -> Vec<&ClipEvent> {
         if current < previous || !previous.is_finite() || !current.is_finite() {
@@ -300,31 +493,89 @@ impl Rig {
         }
         None
     }
+    pub fn bind_pose(&self) -> Vec<Pose> {
+        self.bones.iter().map(|b| b.bind.clone()).collect()
+    }
+    /// SDK AccumulatePose subset: sample the sequence, SlerpBones it onto `pose`, then
+    /// add non-local autolayers. IK, local-context and world-space layers are not applied.
+    pub fn accumulate_pose(
+        &self,
+        pose: &mut [Pose],
+        sequence: &str,
+        cycle: f32,
+        weight: f32,
+    ) -> Result<(), PoseError> {
+        self.accumulate(pose, sequence, cycle, weight.clamp(0., 1.), 0)
+    }
+    fn accumulate(
+        &self,
+        pose: &mut [Pose],
+        sequence: &str,
+        cycle: f32,
+        weight: f32,
+        depth: usize,
+    ) -> Result<(), PoseError> {
+        if depth > 8 {
+            return Err(PoseError::Depth);
+        }
+        let clip = self
+            .clips
+            .get(&sequence.to_lowercase())
+            .ok_or_else(|| PoseError::MissingSequence(sequence.into()))?;
+        if clip.layer.flags & sequence_flags::LOCAL != 0 {
+            return Err(PoseError::Unsupported("local-context sequence"));
+        }
+        if let Some(layer) = clip.sample(cycle) {
+            slerp_bones(pose, &layer, &clip.layer, weight)?;
+        }
+        for auto in &clip.layer.autolayers {
+            // AddSequenceLayers skips local layers; those belong to AddLocalLayers.
+            if auto.flags & autolayer_flags::LOCAL != 0 {
+                continue;
+            }
+            if let Some((child_cycle, child_weight)) = auto.sample(cycle, weight)? {
+                self.accumulate(
+                    pose,
+                    &auto.sequence,
+                    child_cycle,
+                    child_weight.clamp(0., 1.),
+                    depth + 1,
+                )?;
+            }
+        }
+        Ok(())
+    }
+    /// Base-clip playback at seconds. Delta sequences are composed onto the bind pose.
     pub fn matrices(&self, name: &str, time: f32) -> Vec<Mat4> {
-        let clip = self.clips.get(&name.to_lowercase());
-        let sample = clip.map(|c| {
-            let frames = c.frames.len().saturating_sub(1).max(1) as f32;
-            let frame = if c.looping {
-                (time.max(0.) * c.fps) % frames
-            } else {
-                (time.max(0.) * c.fps).min(frames)
-            };
-            let a = (frame.floor() as usize).min(c.frames.len() - 1);
-            let b = (a + 1).min(c.frames.len() - 1);
-            (c, a, b, frame.fract())
-        });
+        let Some(clip) = self.clips.get(&name.to_lowercase()) else {
+            return self.local_matrices(&self.bind_pose());
+        };
+        let Some(last) = clip.frames.len().checked_sub(1) else {
+            return self.local_matrices(&self.bind_pose());
+        };
+        let frames = last.max(1) as f32;
+        let frame = if clip.looping {
+            (time.max(0.) * clip.fps) % frames
+        } else {
+            (time.max(0.) * clip.fps).min(frames)
+        };
+        let a = (frame.floor() as usize).min(last);
+        let b = (a + 1).min(last);
+        let sampled = interpolate(&clip.frames[a], &clip.frames[b], frame.fract());
+        if clip.layer.flags & sequence_flags::DELTA == 0 {
+            return self.local_matrices(&sampled);
+        }
+        let mut pose = self.bind_pose();
+        if slerp_bones(&mut pose, &sampled, &clip.layer, 1.).is_err() {
+            pose = self.bind_pose();
+        }
+        self.local_matrices(&pose)
+    }
+    /// Skinning matrices for already composed local poses; missing bones use bind.
+    pub fn local_matrices(&self, poses: &[Pose]) -> Vec<Mat4> {
         let mut world = Vec::<Mat4>::with_capacity(self.bones.len());
         for (id, bone) in self.bones.iter().enumerate() {
-            let pose = sample
-                .map(|(c, a, b, t)| {
-                    let p = &c.frames[a][id];
-                    let q = &c.frames[b][id];
-                    Pose {
-                        position: p.position.lerp(q.position, t),
-                        rotation: p.rotation.slerp(q.rotation, t),
-                    }
-                })
-                .unwrap_or_else(|| bone.bind.clone());
+            let pose = poses.get(id).unwrap_or(&bone.bind);
             let local = Mat4::from_rotation_translation(pose.rotation, pose.position);
             world.push(
                 bone.parent
@@ -338,6 +589,15 @@ impl Rig {
             .map(|(m, b)| *m * b.inverse_bind)
             .collect()
     }
+}
+fn interpolate(a: &[Pose], b: &[Pose], t: f32) -> Vec<Pose> {
+    a.iter()
+        .zip(b)
+        .map(|(p, q)| Pose {
+            position: p.position.lerp(q.position, t),
+            rotation: p.rotation.slerp(q.rotation, t),
+        })
+        .collect()
 }
 pub fn skin(position: Vec3, weights: &Weights, matrices: &[Mat4]) -> Vec3 {
     let mut output = Vec3::ZERO;
@@ -577,6 +837,7 @@ mod tests {
     }
     fn event_clip(looping: bool) -> Clip {
         Clip {
+            layer: Default::default(),
             fps: 1.,
             looping,
             frames: vec![vec![], vec![]],
@@ -638,6 +899,7 @@ mod tests {
         rig.clips.insert(
             "move".into(),
             Clip {
+                layer: Default::default(),
                 events: Vec::new(),
                 fps: 1.,
                 looping: false,
@@ -662,5 +924,218 @@ mod tests {
             &rig.matrices("move", 0.5),
         );
         assert!((p - Vec3::new(1., 1., 0.)).length() < 0.0001);
+    }
+    fn close(a: Quat, b: Quat) -> bool {
+        a.dot(b).abs() > 0.99999
+    }
+    fn pose(position: Vec3, rotation: Quat) -> Pose {
+        Pose { position, rotation }
+    }
+    #[test]
+    fn quaternion_scale_follows_angle_and_keeps_w_sign() {
+        let q = Quat::from_rotation_z(1.2);
+        assert!(close(quaternion_scale(q, 1.), q));
+        assert!(close(quaternion_scale(q, 0.), Quat::IDENTITY));
+        assert!(close(quaternion_scale(q, 0.5), Quat::from_rotation_z(0.6)));
+        assert!(quaternion_scale(-q, 0.5).w < 0.);
+        // Alignment picks the nearer sign before the Hamilton product.
+        let p = Quat::from_rotation_x(0.3);
+        assert!(close(quaternion_mult(p, -q), p * q));
+    }
+    #[test]
+    fn delta_layers_premultiply_and_post_layers_postmultiply() {
+        let base = Quat::from_rotation_x(0.5);
+        let delta = Quat::from_rotation_z(0.7);
+        let mut info = ClipLayer {
+            flags: sequence_flags::DELTA,
+            ..Default::default()
+        };
+        let layer = [pose(Vec3::X * 2., delta)];
+        let mut pre = [pose(Vec3::Y, base)];
+        slerp_bones(&mut pre, &layer, &info, 1.).unwrap();
+        assert!(close(pre[0].rotation, delta * base));
+        assert_eq!(pre[0].position, Vec3::new(2., 1., 0.));
+        info.flags |= sequence_flags::POST;
+        let mut post = [pose(Vec3::Y, base)];
+        slerp_bones(&mut post, &layer, &info, 0.5).unwrap();
+        assert!(close(post[0].rotation, base * Quat::from_rotation_z(0.35)));
+        assert_eq!(post[0].position, Vec3::new(1., 1., 0.));
+        assert!(!close(pre[0].rotation, base * delta));
+    }
+    #[test]
+    fn bone_weights_mask_and_scale_ordinary_blends() {
+        let info = ClipLayer {
+            bone_weights: vec![0., 0.5],
+            ..Default::default()
+        };
+        let mut base = [
+            pose(Vec3::ZERO, Quat::IDENTITY),
+            pose(Vec3::ZERO, Quat::IDENTITY),
+        ];
+        let layer = [
+            pose(Vec3::X * 4., Quat::from_rotation_y(1.)),
+            pose(Vec3::X * 4., Quat::from_rotation_y(1.)),
+        ];
+        slerp_bones(&mut base, &layer, &info, 0.5).unwrap();
+        assert_eq!(base[0].position, Vec3::ZERO);
+        assert!(close(base[0].rotation, Quat::IDENTITY));
+        assert!((base[1].position - Vec3::X).length() < 1e-6);
+        assert!(close(base[1].rotation, Quat::from_rotation_y(0.25)));
+        assert_eq!(
+            slerp_bones(&mut base, &layer[..1], &info, 1.),
+            Err(PoseError::BoneCount)
+        );
+        let world = ClipLayer {
+            flags: sequence_flags::WORLD,
+            ..Default::default()
+        };
+        assert!(slerp_bones(&mut base, &layer, &world, 1.).is_err());
+    }
+    fn ramp(flags: u32) -> AutoLayer {
+        AutoLayer {
+            sequence: "child".into(),
+            pose: -1,
+            flags,
+            start: 0.2,
+            peak: 0.4,
+            tail: 0.6,
+            end: 1.,
+        }
+    }
+    #[test]
+    fn autolayer_ramps_match_sdk_cases() {
+        let linear = ramp(0);
+        assert_eq!(linear.sample(0.1, 1.), Ok(None));
+        assert_eq!(linear.sample(1., 1.), Ok(None));
+        let (cycle, weight) = linear.sample(0.3, 0.8).unwrap().unwrap();
+        assert!((cycle - 0.125).abs() < 1e-6 && (weight - 0.4).abs() < 1e-6);
+        assert_eq!(linear.sample(0.5, 0.8).unwrap().unwrap().1, 0.8);
+        let (_, tail) = linear.sample(0.8, 1.).unwrap().unwrap();
+        assert!((tail - 0.5).abs() < 1e-6);
+        let spline = ramp(autolayer_flags::SPLINE)
+            .sample(0.25, 1.)
+            .unwrap()
+            .unwrap();
+        assert!((spline.1 - simple_spline(0.25)).abs() < 1e-6);
+        let noblend = ramp(autolayer_flags::NOBLEND)
+            .sample(0.3, 0.2)
+            .unwrap()
+            .unwrap();
+        assert!((noblend.1 - 0.5).abs() < 1e-6);
+        let xfade = ramp(autolayer_flags::XFADE)
+            .sample(0.8, 0.5)
+            .unwrap()
+            .unwrap();
+        assert!((xfade.1 - 0.25 / 0.75).abs() < 1e-6);
+        let mut constant = ramp(0);
+        constant.end = constant.start;
+        assert_eq!(constant.sample(0.9, 0.7), Ok(Some((0.9, 0.7))));
+        assert!(ramp(autolayer_flags::POSE).sample(0.5, 1.).is_err());
+    }
+    fn layered_rig() -> Rig {
+        let bone = Bone {
+            name: "root".into(),
+            parent: None,
+            bind: pose(Vec3::ZERO, Quat::from_rotation_x(0.2)),
+            inverse_bind: Mat4::IDENTITY,
+        };
+        let parent = Clip {
+            events: vec![],
+            fps: 10.,
+            looping: false,
+            frames: vec![vec![pose(Vec3::ZERO, Quat::IDENTITY)]; 11],
+            layer: ClipLayer {
+                flags: sequence_flags::DELTA | sequence_flags::ALLZEROS,
+                bone_weights: vec![0.],
+                autolayers: vec![
+                    ramp(0),
+                    AutoLayer {
+                        flags: autolayer_flags::LOCAL,
+                        ..ramp(0)
+                    },
+                ],
+                ..Default::default()
+            },
+        };
+        let child = Clip {
+            events: vec![],
+            fps: 10.,
+            looping: false,
+            frames: vec![
+                vec![pose(Vec3::ZERO, Quat::IDENTITY)],
+                vec![pose(Vec3::Z * 8., Quat::from_rotation_z(0.8))],
+            ],
+            layer: ClipLayer {
+                flags: sequence_flags::DELTA,
+                ..Default::default()
+            },
+        };
+        Rig {
+            bones: vec![bone],
+            clips: BTreeMap::from([("parent".into(), parent), ("child".into(), child)]),
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn accumulate_pose_adds_ramped_children_after_masked_parent() {
+        let rig = layered_rig();
+        let bind = rig.bind_pose();
+        // Parent cycle 0.3: child weight 0.5, child cycle 0.125.
+        let mut composed = rig.bind_pose();
+        rig.accumulate_pose(&mut composed, "parent", 0.3, 1.)
+            .unwrap();
+        let child = rig.clips["child"].sample(0.125).unwrap();
+        let mut expected = rig.bind_pose();
+        slerp_bones(&mut expected, &child, &rig.clips["child"].layer, 0.5).unwrap();
+        assert!(close(composed[0].rotation, expected[0].rotation));
+        assert!((composed[0].position - Vec3::Z * 0.5).length() < 1e-5);
+        assert!(!close(composed[0].rotation, bind[0].rotation));
+        // Outside the ramp the zero-weight parent leaves the base unchanged.
+        let mut outside = rig.bind_pose();
+        rig.accumulate_pose(&mut outside, "parent", 0.1, 1.)
+            .unwrap();
+        assert!(close(outside[0].rotation, bind[0].rotation));
+        assert_eq!(
+            rig.accumulate_pose(&mut outside, "missing", 0.5, 1.),
+            Err(PoseError::MissingSequence("missing".into()))
+        );
+    }
+    #[test]
+    fn accumulate_pose_rejects_cycles_local_context_and_missing_children() {
+        let mut rig = layered_rig();
+        let mut pose = rig.bind_pose();
+        rig.clips.get_mut("child").unwrap().layer.autolayers = vec![AutoLayer {
+            sequence: "child".into(),
+            start: 0.,
+            end: 0.,
+            ..ramp(0)
+        }];
+        assert_eq!(
+            rig.accumulate_pose(&mut pose, "child", 0.5, 1.),
+            Err(PoseError::Depth)
+        );
+        rig.clips.get_mut("child").unwrap().layer.flags |= sequence_flags::LOCAL;
+        assert!(matches!(
+            rig.accumulate_pose(&mut pose, "child", 0.5, 1.),
+            Err(PoseError::Unsupported(_))
+        ));
+        rig.clips.remove("child");
+        assert_eq!(
+            rig.accumulate_pose(&mut pose, "parent", 0.5, 1.),
+            Err(PoseError::MissingSequence("child".into()))
+        );
+    }
+    #[test]
+    fn standalone_delta_playback_composes_onto_bind() {
+        let rig = layered_rig();
+        let bind = rig.bones[0].bind.rotation;
+        let matrix = rig.matrices("child", 0.1);
+        let (_, rotation, translation) = matrix[0].to_scale_rotation_translation();
+        assert!(close(rotation, Quat::from_rotation_z(0.8) * bind));
+        assert!((translation - Vec3::Z * 8.).length() < 1e-4);
+        assert_eq!(
+            rig.matrices("missing", 0.),
+            rig.local_matrices(&rig.bind_pose())
+        );
     }
 }
