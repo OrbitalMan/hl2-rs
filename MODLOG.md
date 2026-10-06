@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Trigger toucher filters
+
+**Changed:** trigger_once/trigger_multiple honor client/NPC/everything toucher flags, and NPCs can activate NPC triggers. Security fixtures enable trigger_cop_close_door_1 as the campaign does earlier.
+
+**Why:** NPC-only triggers fired for the player, and NPCs could not trigger anything, which blocks Barney's door sequence.
+
+**Tested how:** 308 normal tests, strict Clippy/fmt; packaged movement assertions and movement/campaign pixel comparisons.
+
+**Result:** No regression in the checked fixtures. Barney still stops at barney_door_2.
+
+**Still broken or not tested:** Why the cop-door trigger does not let Barney through; no NPC-touch unit test; the full regression batch was not rerun.
+
+**Next:** Instrument trigger_cop_close_door_1 bounds and door lock timing against Barney's feet, then rerun the native comparison.
+
 ## 2026-10-06 Native scene oracle, point_template spawning, prop flags and NPC doors
 
 **Changed:** Private native oracle for the security scene. point_template children wait for ForceSpawn. prop_physics motion-disabled/start-asleep flags are honored. NPC routes pass through doors and open them on contact. Barney fixtures force-spawn him like the campaign trigger.

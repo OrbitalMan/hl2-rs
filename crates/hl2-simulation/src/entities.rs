@@ -1966,21 +1966,39 @@ impl Scene {
                 self.fire(id, "OnTimer", usize::MAX);
             }
             if e.class().starts_with("trigger_") && self.states[id].enabled {
-                let inside = self.player_inside(world, id, player_feet);
+                // CBaseTrigger PassesTriggerFilters: clients (1), NPCs (2), everything (0x40).
+                // Other trigger classes keep the earlier player-only touch.
+                let gated = matches!(e.class(), "trigger_once" | "trigger_multiple");
+                let flags = number(e, "spawnflags", 1.) as u32;
+                let clients = !gated || flags & (1 | 0x40) != 0;
+                let npcs = gated && flags & (2 | 0x40) != 0;
+                let player = clients && self.player_inside(world, id, player_feet);
+                let npc = if npcs && !player {
+                    (0..self.states.len()).find(|&n| {
+                        world.entities[n].class().starts_with("npc_")
+                            && !self.states[n].killed
+                            && self.states[n].visible
+                            && self.player_inside(world, id, self.states[n].origin)
+                    })
+                } else {
+                    None
+                };
+                let inside = player || npc.is_some();
+                let activator = npc.unwrap_or(usize::MAX);
                 if inside && !self.states[id].touching {
                     self.diagnostics.trigger_entries += 1;
-                    self.fire(id, "OnStartTouch", usize::MAX);
-                    self.fire(id, "OnStartTouchAll", usize::MAX);
+                    self.fire(id, "OnStartTouch", activator);
+                    self.fire(id, "OnStartTouchAll", activator);
                 }
                 if !inside && self.states[id].touching {
-                    self.fire(id, "OnEndTouch", usize::MAX);
-                    self.fire(id, "OnEndTouchAll", usize::MAX);
+                    self.fire(id, "OnEndTouch", activator);
+                    self.fire(id, "OnEndTouchAll", activator);
                 }
                 if inside
-                    && matches!(e.class(), "trigger_once" | "trigger_multiple")
+                    && gated
                     && self.time - self.states[id].last_trigger >= number(e, "wait", 0.2) as f64
                 {
-                    self.fire(id, "OnTrigger", usize::MAX);
+                    self.fire(id, "OnTrigger", activator);
                     self.states[id].last_trigger = self.time;
                     if e.class() == "trigger_once" {
                         self.states[id].enabled = false;
