@@ -43,6 +43,9 @@ struct Playback {
     pause: Option<ScenePause>,
     actors: Vec<Option<usize>>,
     look_targets: BTreeMap<usize, crate::attention::Target>,
+    /// FACE event targets and (initial yaw, actor was moving) latched on first process.
+    face_targets: BTreeMap<usize, crate::attention::Target>,
+    face_initial: BTreeMap<usize, (f32, bool)>,
 }
 struct Choreography {
     data: Arc<ChoreoScene>,
@@ -199,6 +202,8 @@ pub struct Scene {
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
     templates: BTreeMap<usize, Vec<(usize, bool, bool)>>,
+    /// Player feet from the latest tick; FACE targets of `!player` turn toward it.
+    player_feet: Vec3,
 }
 impl Scene {
     pub fn new(world: &World) -> Self {
@@ -222,6 +227,7 @@ impl Scene {
             gestures: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
             templates: BTreeMap::new(),
+            player_feet: Vec3::ZERO,
         };
         for e in &world.entities {
             let base_rotation = physics::angles(
@@ -906,6 +912,8 @@ impl Scene {
                 pause: None,
                 actors,
                 look_targets: BTreeMap::new(),
+                face_targets: BTreeMap::new(),
+                face_initial: BTreeMap::new(),
             });
             self.fire(id, "OnStart", id);
         }
@@ -951,6 +959,56 @@ impl Scene {
                 priority: event.channel.unwrap_or(0),
                 moving: self.states[actor].movement_animation.is_some(),
             });
+        }
+    }
+    /// ProcessFacingSceneEvent for a standing NPC: ideal yaw blends from the yaw latched at
+    /// the first process toward the target by event intensity, and the motor turns at most
+    /// MaxYawSpeed (45 per 0.1 s) toward it. Facing while moving (AddFacingTarget) is not
+    /// implemented; a moving actor only re-latches its initial yaw.
+    fn process_faces(&mut self, _id: usize, scene: &Choreography, play: &mut Playback, dt: f32) {
+        for &index in scene.order.iter().take(play.next) {
+            let event = &scene.data.events[index];
+            if event.kind != EventType::Face
+                || !event.active()
+                || play.elapsed < event.start as f64
+                || play.elapsed > event.end.unwrap_or(event.start) as f64
+            {
+                continue;
+            }
+            let (Some(target), Some(actor)) = (
+                play.face_targets.get(&index).copied(),
+                event.actor.and_then(|a| play.actors[a]),
+            ) else {
+                continue;
+            };
+            if self.states[actor].killed {
+                continue;
+            }
+            let target_position = match target {
+                crate::attention::Target::Player => self.player_feet,
+                crate::attention::Target::Entity(t) if t == actor => continue,
+                crate::attention::Target::Entity(t) => self.states[t].origin,
+            };
+            let forward = self.states[actor].rotation * Vec3::X;
+            let current = forward.y.atan2(forward.x).to_degrees();
+            let moving = self.states[actor].movement_animation.is_some();
+            let latched = play.face_initial.entry(index).or_insert((current, moving));
+            if latched.1 != moving {
+                *latched = (current, moving);
+            }
+            if moving {
+                continue;
+            }
+            let delta = target_position - self.states[actor].origin;
+            if delta.truncate().length_squared() < 1e-6 {
+                continue;
+            }
+            let goal = delta.y.atan2(delta.x).to_degrees();
+            let initial = latched.0;
+            let intensity = event.intensity(&scene.data, play.elapsed as f32);
+            let ideal = initial + angle_diff(goal, initial) * intensity;
+            let yaw = clamp_yaw(450. * dt.min(0.2), current, ideal);
+            self.states[actor].rotation = physics::angles(Vec3::new(0., yaw, 0.));
         }
     }
     fn cancel_choreography(&mut self, id: usize) {
@@ -1047,6 +1105,26 @@ impl Scene {
                                 }
                                 EventType::Gesture => {
                                     // Layers start and update in process_gestures each tick.
+                                }
+                                EventType::Face => {
+                                    // StartFacingSceneEvent needs a target; NPCs turn in process_faces.
+                                    if let Some(actor) = actor
+                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                    {
+                                        if let Some(target) = self.scene_look_target(
+                                            world,
+                                            id,
+                                            actor,
+                                            &event.parameters[0],
+                                        ) {
+                                            play.face_targets.insert(index, target);
+                                        } else {
+                                            self.unsupported_input(
+                                                "logic_choreographed_scene",
+                                                "FACE:missing-target",
+                                            );
+                                        }
+                                    }
                                 }
                                 EventType::LookAt => {
                                     // CBaseFlex LOOKAT refreshes NPC interests; non-NPC flex actors are a no-op.
@@ -1263,6 +1341,7 @@ impl Scene {
                     }
                     if play.pause.is_none() {
                         self.process_gestures(id, &scene, &play);
+                        self.process_faces(id, &scene, &mut play, dt);
                     }
                     if play.pause.is_none()
                         && play.next == scene.order.len()
@@ -1897,6 +1976,7 @@ impl Scene {
     }
     pub fn tick(&mut self, world: &World, player_feet: Vec3, dt: f32) {
         self.time += dt as f64;
+        self.player_feet = player_feet;
         self.monitors.tick(&self.states, self.time);
         self.look_targets.cleanup(self.time, |id| {
             self.states.get(id).is_some_and(|s| !s.killed)
@@ -2065,6 +2145,21 @@ impl Scene {
         })
     }
 }
+/// UTIL_AngleDiff: signed shortest difference `a - b` in degrees.
+fn angle_diff(a: f32, b: f32) -> f32 {
+    let mut d = (a - b) % 360.;
+    if d > 180. {
+        d -= 360.;
+    } else if d < -180. {
+        d += 360.;
+    }
+    d
+}
+/// AI_ClampYaw: move `current` toward `target` by at most `speed` degrees.
+fn clamp_yaw(speed: f32, current: f32, target: f32) -> f32 {
+    let step = angle_diff(target, current).clamp(-speed, speed);
+    (current + step).rem_euclid(360.)
+}
 fn glob(pattern: &str, value: &str) -> bool {
     if let Some((first, last)) = pattern.split_once('*') {
         value.starts_with(first) && value.ends_with(last)
@@ -2116,6 +2211,48 @@ mod tests {
         }
         data.extend([0, 0, 0]);
         Arc::new(ChoreoScene::parse(&data, &strings).unwrap())
+    }
+    #[test]
+    fn face_turns_standing_npc_toward_target_at_max_yaw_speed() {
+        let world = World {
+            entities: vec![
+                entity("logic_choreographed_scene", "scene", &[]),
+                entity("npc_citizen", "actor", &[]),
+                entity("info_target", "mark", &[("origin", "0 100 0")]),
+            ],
+            ..Default::default()
+        };
+        let mut data = Arc::unwrap_or_clone(choreography(&[(EventType::Face, 0., "mark")]));
+        data.actors.push(source_assets::scenes::Actor {
+            name: "actor".into(),
+            active: true,
+            channels: Vec::new(),
+        });
+        data.events[0].actor = Some(0);
+        data.events[0].end = Some(2.);
+        let mut scene = Scene::new(&world);
+        scene.install_choreography(0, Arc::new(data));
+        let yaw = |scene: &Scene| {
+            let f = scene.states[1].rotation * Vec3::X;
+            f.y.atan2(f.x).to_degrees()
+        };
+        assert!(yaw(&scene).abs() < 1e-3);
+        scene.send(0, "Start", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        scene.tick(&world, Vec3::ZERO, 0.1);
+        // 450 degrees per second: 45 degrees in this 0.1 sec step toward the 90 degree goal.
+        let partial = yaw(&scene);
+        assert!(partial > 40. && partial < 90., "{partial}");
+        for _ in 0..5 {
+            scene.tick(&world, Vec3::ZERO, 0.1);
+        }
+        assert!((yaw(&scene) - 90.).abs() < 1e-3, "{}", yaw(&scene));
+        assert!(!scene
+            .diagnostics
+            .unsupported
+            .contains_key("logic_choreographed_scene.actor-event:Face"));
+        assert_eq!(angle_diff(10., 350.), 20.);
+        assert_eq!(clamp_yaw(5., 358., 10.), 3.);
     }
     #[test]
     fn lookat_binds_target_alias_once_and_reports_missing_target_without_cycler_interest() {

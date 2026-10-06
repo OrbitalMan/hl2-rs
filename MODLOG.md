@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Scene FACE events, arrival distance, Combine camera model
+
+**Changed:** FACE events turn standing NPCs toward targets at SDK yaw speed. MOVETO walks until within the event arrival distance (2D). The npc_combine_camera model is set. Unattended-test options: Bevy `--volume`/`--no-focus`, and a quiet, unfocused native oracle.
+
+**Why:** In the native comparison, Barney faced the wrong way, stopped 9 units short of his mark, and the wall camera was missing.
+
+**Tested how:** 310 normal tests, strict Clippy/fmt; FACE unit test; packaged security fixtures; movement and attention verifiers.
+
+**Result:** Barney stands on his mark and faces the monitor; the camera renders.
+
+**Still broken or not tested:** Attention 24/26: without head pose control Barney cannot look at the player while his body faces the monitor. Facing while moving, camera open/close activities and facial flexes are not implemented.
+
+**Next:** Pose-parameter sequence blending and CAI_BaseActor head control (head_yaw/head_pitch) driven by attention targets.
+
 ## 2026-10-06 NPC door lookahead: Barney reaches his desk
 
 **Changed:** NPC routes remember door segments and request the door ahead of contact (within 96 units).

@@ -17,6 +17,8 @@ Owner decision 2026-10-06: resume the Rust rewrite now. Whole-corpus coverage pa
 3. Done 2026-10-06: scene gestures run with tag retiming, intensity, posture suppression and end/cancel fades; both hosts use Scene::actor_matrices. Remaining: native cross-scene priority and empty-name behavior.
 4. In progress: the private native oracle captures security_02 at measured scene times. Bevy Barney now spawns from his point_template and opens unlocked doors, but stops at barney_door_2. Next, NPC touch for triggers with spawnflag 2 (they unlock that door), then the side-by-side pose comparison; then head/facial/lip controls and actor scheduling. Seeded developer actors are not campaign proof.
 
+5. Next bounded step: pose-parameter blending and head control. (a) source-assets keeps every blend animation of a sequence with its pose-parameter indices, ranges and group sizes, plus the model pose-parameter table. (b) modkit-core samples blend grids like SDK CalcPoseSingle/Studio_LocalPoseParameter (1D/2D, loop wrap, all-zero skips), and AccumulatePose skips sequences whose selected animations are all zeros. (c) hl2-simulation drives head_yaw/head_pitch (and related) pose parameters from attention targets using retail CAI_BaseActor behavior reviewed on demand; then AL_POSE autolayers. Validate with synthetic blend tests, owned Barney head sequences and the attention fixtures (target 26/26), then native captures.
+
 Validate each step. After two failed attempts at one approach, document it and choose a different evidence-based approach. Full AI, staging, save state, arsenal and shaders remain separate tasks.
 
 ## Paused: private decompilation coverage (passes01-14 record)

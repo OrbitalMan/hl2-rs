@@ -514,6 +514,8 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             "npc_barney" => Some("models/barney.mdl"),
             "npc_metropolice" => Some("models/police.mdl"),
             "npc_citizen" => Some("models/humans/group01/male_07.mdl"),
+            // CNPCCombineCamera::Spawn sets this model (string beside the class name in retail server.dll).
+            "npc_combine_camera" => Some("models/combine_camera/combine_camera.mdl"),
             _ => None,
         };
         let script_model = if entity.class().starts_with("weapon_") {

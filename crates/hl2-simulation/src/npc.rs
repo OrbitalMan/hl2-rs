@@ -638,7 +638,10 @@ fn advance<W: NpcCollisionWorld>(
             reason: "actor cannot stand".to_owned(),
         });
     }
-    if goal.feet.distance(goal.request.target_feet) <= goal.tolerance {
+    // SDK: the hull tolerance only decides whether to move; once moving, the navigator walks
+    // until within SetArrivalDistance(event distance), measured horizontally.
+    let arrival = goal.request.event_distance.max(0.1);
+    if (goal.feet - goal.request.target_feet).truncate().length() <= arrival {
         goal.state = GoalState::Arrived;
         return Ok(());
     }
@@ -716,13 +719,18 @@ fn advance<W: NpcCollisionWorld>(
             goal.animation_time += consumed * (actual / amount).clamp(0., 1.);
         }
         if !movement.completed {
+            // Blocked right beside the goal still counts as reaching it within tolerance.
+            if goal.feet.distance(goal.request.target_feet) <= goal.tolerance {
+                goal.state = GoalState::Arrived;
+                return Ok(());
+            }
             return Err(GoalBlockReason::Collision {
                 blocker: movement.blocker,
                 reason: format!("{:?}", movement.reason),
             });
         }
         remaining = (remaining - consumed).max(0.);
-        if goal.feet.distance(goal.request.target_feet) <= goal.tolerance {
+        if (goal.feet - goal.request.target_feet).truncate().length() <= arrival {
             goal.state = GoalState::Arrived;
             return Ok(());
         }
