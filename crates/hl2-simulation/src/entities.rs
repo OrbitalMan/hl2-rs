@@ -198,6 +198,8 @@ pub struct Scene {
     movement_ready: BTreeMap<crate::npc::GoalKey, bool>,
     pub look_targets: crate::attention::LookTargets,
     pub gestures: crate::gestures::GestureLayers,
+    /// CAI_BaseActor head control per actor, driven by look interests.
+    pub heads: BTreeMap<usize, crate::attention::Head>,
     pub monitors: crate::monitors::Cameras,
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
@@ -225,6 +227,7 @@ impl Scene {
             movement_ready: BTreeMap::new(),
             look_targets: Default::default(),
             gestures: Default::default(),
+            heads: BTreeMap::new(),
             monitors: crate::monitors::Cameras::new(world),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
@@ -681,9 +684,81 @@ impl Scene {
     /// Skinning matrices for an actor: current base clip plus scene gesture layers.
     /// Both hosts use this so presentation, eyes and impacts see one pose.
     pub fn actor_matrices(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<glam::Mat4> {
+        let params = self.actor_pose_values(rig, id);
         self.gestures
-            .compose(rig, id, &self.states[id].animation, self.animation_time(id))
+            .compose(
+                rig,
+                id,
+                &self.states[id].animation,
+                self.animation_time(id),
+                &params,
+            )
             .0
+    }
+    /// Normalized pose parameters: model defaults plus head control (head_pitch/yaw/roll).
+    pub fn actor_pose_values(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<f32> {
+        let mut params = rig.default_pose_values();
+        if let Some(head) = self.heads.get(&id) {
+            for (name, value) in [
+                ("head_pitch", head.goal.x),
+                ("head_yaw", head.goal.y),
+                ("head_roll", head.goal.z),
+            ] {
+                if let Some(i) = rig.pose_parameter(name) {
+                    params[i] = rig.pose_parameters[i].normalize(value);
+                }
+            }
+        }
+        params
+    }
+    /// Changes whenever an actor's composed pose inputs change; zero for plain base clips.
+    pub fn pose_signature(&self, id: usize) -> u64 {
+        let mut hash = self.gestures.signature(id);
+        if let Some(head) = self.heads.get(&id) {
+            for v in head.goal.to_array() {
+                hash = (hash ^ v.to_bits() as u64)
+                    .wrapping_mul(0x100000001b3)
+                    .rotate_left(9);
+            }
+        }
+        hash
+    }
+    /// MaintainLookTargets: blend this tick's interests into each NPC's head control.
+    fn update_heads(&mut self, world: &World, dt: f32) {
+        let mut actors: BTreeSet<usize> = self.look_targets.report().keys().copied().collect();
+        actors.extend(self.heads.keys().copied());
+        for actor in actors {
+            let state = &self.states[actor];
+            if state.killed || !world.entities[actor].class().starts_with("npc_") {
+                self.heads.remove(&actor);
+                continue;
+            }
+            let eye = state.origin + Vec3::Z * 64.;
+            let forward = state.rotation * Vec3::X;
+            let body_yaw = forward.y.atan2(forward.x).to_degrees();
+            let targets = self
+                .look_targets
+                .report()
+                .get(&actor)
+                .into_iter()
+                .flatten()
+                .filter_map(|interest| {
+                    let position = match interest.target {
+                        crate::attention::Target::Player => self.player_feet + Vec3::Z * 64.,
+                        crate::attention::Target::Entity(t) if t == actor => {
+                            return Some((forward, interest.importance));
+                        }
+                        crate::attention::Target::Entity(t) => self.states.get(t)?.origin,
+                    };
+                    Some((position - eye, interest.importance))
+                })
+                .collect::<Vec<_>>();
+            let head = self.heads.entry(actor).or_default();
+            head.update(&targets, body_yaw, dt);
+            if targets.is_empty() && head.influence == 0. && head.goal.length() < 0.01 {
+                self.heads.remove(&actor);
+            }
+        }
     }
     /// Sequence sampling uses the paused choreography clock, not wall/game time.
     pub fn animation_time(&self, id: usize) -> f32 {
@@ -1985,6 +2060,7 @@ impl Scene {
         self.gestures
             .advance(dt, |id| states.get(id).is_some_and(|s| !s.killed));
         self.tick_choreography(world, dt);
+        self.update_heads(world, dt);
         for id in 0..world.entities.len() {
             let e = &world.entities[id];
             if self.states[id].killed {
@@ -2984,7 +3060,10 @@ mod tests {
             }
             if layers.iter().any(|l| l.removal.is_none() && l.weight > 0.5) && composed_ticks < 40 {
                 let base = scene.states[barney].animation.clone();
-                let (matrices, errors) = scene.gestures.compose(&rig, barney, &base, 1.);
+                let (matrices, errors) =
+                    scene
+                        .gestures
+                        .compose(&rig, barney, &base, 1., &rig.default_pose_values());
                 assert!(errors.is_empty(), "{errors:?}");
                 assert!(matrices.iter().all(|m| m.is_finite()));
                 moved |= matrices

@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Pose-parameter blends, autoplay head sequences and head control
+
+**Changed:** Rigs keep pose parameters, full blend grids and autoplay sequences. Composition samples blends by pose parameter and adds autoplay after layers. NPC head control drives head_yaw/pitch from look interests with the SDK think rates.
+
+**Why:** FACE turned Barney's body away from the player; the original turns his head on pose parameters. Blend grids and autoplay are also how the models encode head, body and gesture variation.
+
+**Tested how:/** 312 normal and 21 owned-install tests, strict Clippy/fmt; synthetic blend/head tests; owned Kleiner autoplay/blend checks; attention 26/26; regression batch.
+
+**Result:** Barney looks over his shoulder at the player while facing the monitor.
+
+**Still broken or not tested:** Chest-bias limits, roll, random/synthetic looks, eye-position attachments in the simulation, sequence transitions, IK, bone controllers, the posekey 2D path and locomotion move_yaw blending for base clips.
+
+**Next:** Rerun the native security comparison; then facial flexes or locomotion move_yaw blending.
+
 ## 2026-10-06 Scene FACE events, arrival distance, Combine camera model
 
 **Changed:** FACE events turn standing NPCs toward targets at SDK yaw speed. MOVETO walks until within the event arrival distance (2D). The npc_combine_camera model is set. Unattended-test options: Bevy `--volume`/`--no-focus`, and a quiet, unfocused native oracle.

@@ -7,7 +7,7 @@ pub struct Weights {
     pub bones: [u8; 3],
     pub weights: [f32; 3],
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pose {
     pub position: Vec3,
     pub rotation: Quat,
@@ -35,6 +35,7 @@ pub struct Clip {
 pub mod sequence_flags {
     pub const LOOPING: u32 = 0x0001;
     pub const DELTA: u32 = 0x0004;
+    pub const AUTOPLAY: u32 = 0x0008;
     pub const POST: u32 = 0x0010;
     pub const ALLZEROS: u32 = 0x0020;
     pub const LOCAL: u32 = 0x0200;
@@ -61,6 +62,106 @@ pub struct ClipLayer {
     /// Sequence keyvalues `faceposer` block, used to retime scene gestures.
     #[serde(default)]
     pub faceposer: Option<Faceposer>,
+    /// Pose-parameter blend grid; `Clip::frames` remains the central sample.
+    #[serde(default)]
+    pub blend: Option<BlendGrid>,
+    /// The single sampled animation has no data (STUDIO_ALLZEROS animation).
+    #[serde(default)]
+    pub all_zeros: bool,
+}
+/// Model pose parameter (mstudioposeparamdesc_t); values are normalized 0..1.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PoseParameter {
+    pub name: String,
+    pub start: f32,
+    pub end: f32,
+    pub looping: f32,
+}
+impl PoseParameter {
+    /// Normalized value for an authored setting (Studio_SetPoseParameter).
+    pub fn normalize(&self, value: f32) -> f32 {
+        if self.end == self.start {
+            return 0.;
+        }
+        let mut value = value;
+        if self.looping != 0. {
+            let wrap = (self.start + self.end) / 2. + self.looping / 2.;
+            let shift = self.looping - wrap;
+            value -= self.looping * ((value + shift) / self.looping).floor();
+        }
+        ((value - self.start) / (self.end - self.start)).clamp(0., 1.)
+    }
+    pub fn value(&self, normalized: f32) -> f32 {
+        normalized * (self.end - self.start) + self.start
+    }
+}
+/// One sequence blend axis: rig pose parameter and the sequence's authored range.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlendAxis {
+    pub parameter: usize,
+    pub start: f32,
+    pub end: f32,
+}
+/// Every blend animation of a sequence: `anims[x + y * groups[0]]` as in seqdesc.anim(x, y).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BlendGrid {
+    pub axes: [Option<BlendAxis>; 2],
+    pub groups: [usize; 2],
+    pub anims: Vec<Vec<Vec<Pose>>>,
+    pub all_zeros: Vec<bool>,
+}
+impl BlendGrid {
+    /// SDK Studio_LocalPoseParameter (posekeyindex == 0): local fraction and lower index.
+    fn local(&self, axis: usize, params: &[f32], table: &[PoseParameter]) -> (f32, usize) {
+        let Some(a) = &self.axes[axis] else {
+            return (0., 0);
+        };
+        let Some(pose) = table.get(a.parameter) else {
+            return (0., 0);
+        };
+        let value = params
+            .get(a.parameter)
+            .copied()
+            .unwrap_or_else(|| pose.normalize(0.));
+        let mut value = value;
+        if pose.looping != 0. {
+            let normalized_loop = pose.looping / (pose.end - pose.start);
+            let wrap = 0.5 + normalized_loop / 2.;
+            let shift = normalized_loop - wrap;
+            value -= normalized_loop * ((value + shift) / normalized_loop).floor();
+        }
+        let local_start = (a.start - pose.start) / (pose.end - pose.start);
+        let local_end = (a.end - pose.start) / (pose.end - pose.start);
+        let mut setting = ((value - local_start) / (local_end - local_start)).clamp(0., 1.);
+        if !setting.is_finite() {
+            setting = 0.;
+        }
+        let groups = self.groups[axis].max(1);
+        let mut index = 0;
+        if groups > 2 {
+            index = ((setting * (groups - 1) as f32) as usize).min(groups - 2);
+            setting = setting * (groups - 1) as f32 - index as f32;
+        }
+        (setting, index)
+    }
+    fn anim(&self, x: usize, y: usize) -> Option<usize> {
+        let i = x + y * self.groups[0].max(1);
+        (i < self.anims.len()).then_some(i)
+    }
+}
+/// SDK BlendBones: QuaternionBlend toward `layer` by `s` for bones with sequence weight.
+fn blend_bones(base: &mut [Pose], layer: &[Pose], info: &ClipLayer, s: f32) {
+    let s1 = 1. - s;
+    for (i, (q1, q2)) in base.iter_mut().zip(layer).enumerate() {
+        if info.bone_weights.get(i).is_some_and(|w| *w <= 0.) {
+            continue;
+        }
+        let aligned = quaternion_align(q2.rotation, q1.rotation);
+        q1.rotation =
+            Quat::from_vec4(Vec4::from(q2.rotation) * (1. - s1) + Vec4::from(aligned) * s1)
+                .normalize();
+        q1.position = q1.position * s1 + q2.position * s;
+    }
 }
 /// Faceposer metadata from MDL sequence keyvalues.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -379,6 +480,73 @@ impl Clip {
     pub fn duration(&self) -> f32 {
         self.frames.len().saturating_sub(1) as f32 / self.fps.max(1.)
     }
+    /// CalcPoseSingle subset: blend-grid animations selected by pose parameters, each sampled
+    /// at `cycle`. `None` when the selected animations have no data (PoseIsAllZeros).
+    pub fn sample_posed(
+        &self,
+        cycle: f32,
+        params: &[f32],
+        table: &[PoseParameter],
+    ) -> Option<Vec<Pose>> {
+        let Some(grid) = &self.layer.blend else {
+            return if self.layer.all_zeros {
+                None
+            } else {
+                self.sample(cycle)
+            };
+        };
+        let (s0, i0) = grid.local(0, params, table);
+        let (s1, i1) = grid.local(1, params, table);
+        let pick = |s: f32, i: usize| {
+            if s > 0.999 {
+                (i + 1, None)
+            } else if s < 0.001 {
+                (i, None)
+            } else {
+                (i, Some(s))
+            }
+        };
+        let (x, sx) = pick(s0, i0);
+        let (y, sy) = pick(s1, i1);
+        let row = |y: usize| -> Option<(Vec<Pose>, bool)> {
+            let a = grid.anim(x, y)?;
+            let mut pose = self.sample_frames(&grid.anims[a], cycle)?;
+            let mut zeros = grid.all_zeros.get(a).copied().unwrap_or(false);
+            if let Some(s) = sx {
+                let b = grid.anim(x + 1, y)?;
+                blend_bones(
+                    &mut pose,
+                    &self.sample_frames(&grid.anims[b], cycle)?,
+                    &self.layer,
+                    s,
+                );
+                zeros &= grid.all_zeros.get(b).copied().unwrap_or(false);
+            }
+            Some((pose, zeros))
+        };
+        let (mut pose, mut zeros) = row(y)?;
+        if let Some(s) = sy {
+            let (next, next_zeros) = row(y + 1)?;
+            blend_bones(&mut pose, &next, &self.layer, s);
+            zeros &= next_zeros;
+        }
+        (!zeros).then_some(pose)
+    }
+    fn sample_frames(&self, frames: &[Vec<Pose>], cycle: f32) -> Option<Vec<Pose>> {
+        let last = frames.len().checked_sub(1)?;
+        if !cycle.is_finite() {
+            return None;
+        }
+        let cycle = if self.looping {
+            cycle - cycle.floor()
+        } else {
+            cycle.clamp(0., 1.)
+        };
+        let frame = cycle * last as f32;
+        let a = (frame.floor() as usize).min(last);
+        let b = (a + 1).min(last);
+        Some(interpolate(&frames[a], &frames[b], frame - a as f32))
+    }
     /// Interpolated local poses at a normalized cycle; looping clips wrap, others clamp.
     pub fn sample(&self, cycle: f32) -> Option<Vec<Pose>> {
         let last = self.frames.len().checked_sub(1)?;
@@ -443,6 +611,12 @@ pub struct Rig {
     #[serde(default)]
     pub sequences: Vec<Sequence>,
     pub warnings: Vec<String>,
+    /// Model pose parameters merged by name across included models.
+    #[serde(default)]
+    pub pose_parameters: Vec<PoseParameter>,
+    /// STUDIO_AUTOPLAY sequences, accumulated after layers every frame.
+    #[serde(default)]
+    pub autoplay: Vec<String>,
 }
 impl Rig {
     /// Merge preloaded cohorts without changing model traversal order or label ownership.
@@ -524,7 +698,53 @@ impl Rig {
         cycle: f32,
         weight: f32,
     ) -> Result<(), PoseError> {
-        self.accumulate(pose, sequence, cycle, weight.clamp(0., 1.), 0)
+        let params = self.default_pose_values();
+        self.accumulate(pose, sequence, cycle, weight.clamp(0., 1.), &params, 0)
+    }
+    /// AccumulatePose with explicit normalized pose-parameter values (rig order).
+    pub fn accumulate_pose_with(
+        &self,
+        pose: &mut [Pose],
+        sequence: &str,
+        cycle: f32,
+        weight: f32,
+        params: &[f32],
+    ) -> Result<(), PoseError> {
+        self.accumulate(pose, sequence, cycle, weight.clamp(0., 1.), params, 0)
+    }
+    /// CBaseAnimating resets each pose parameter to the authored value 0.
+    pub fn default_pose_values(&self) -> Vec<f32> {
+        self.pose_parameters
+            .iter()
+            .map(|p| p.normalize(0.))
+            .collect()
+    }
+    pub fn pose_parameter(&self, name: &str) -> Option<usize> {
+        self.pose_parameters
+            .iter()
+            .position(|p| p.name.eq_ignore_ascii_case(name))
+    }
+    /// CalcAutoplaySequences: each autoplay sequence at real-time cycle, weight one.
+    pub fn accumulate_autoplay(
+        &self,
+        pose: &mut [Pose],
+        time: f32,
+        params: &[f32],
+    ) -> Result<(), PoseError> {
+        for name in &self.autoplay {
+            let Some(clip) = self.clips.get(name) else {
+                continue;
+            };
+            let frames = clip.frames.len().saturating_sub(1);
+            let cps = if frames > 0 {
+                clip.fps / frames as f32
+            } else {
+                0.
+            };
+            let cycle = (time * cps).fract();
+            self.accumulate(pose, name, cycle, 1., params, 0)?;
+        }
+        Ok(())
     }
     fn accumulate(
         &self,
@@ -532,6 +752,7 @@ impl Rig {
         sequence: &str,
         cycle: f32,
         weight: f32,
+        params: &[f32],
         depth: usize,
     ) -> Result<(), PoseError> {
         if depth > 8 {
@@ -544,7 +765,8 @@ impl Rig {
         if clip.layer.flags & sequence_flags::LOCAL != 0 {
             return Err(PoseError::Unsupported("local-context sequence"));
         }
-        if let Some(layer) = clip.sample(cycle) {
+        // CalcPoseSingle fails for all-zero animations; SlerpBones is then skipped.
+        if let Some(layer) = clip.sample_posed(cycle, params, &self.pose_parameters) {
             slerp_bones(pose, &layer, &clip.layer, weight)?;
         }
         for auto in &clip.layer.autolayers {
@@ -558,6 +780,7 @@ impl Rig {
                     &auto.sequence,
                     child_cycle,
                     child_weight.clamp(0., 1.),
+                    params,
                     depth + 1,
                 )?;
             }
@@ -1160,5 +1383,85 @@ mod tests {
             rig.matrices("missing", 0.),
             rig.local_matrices(&rig.bind_pose())
         );
+    }
+}
+#[cfg(test)]
+mod blend_tests {
+    use super::*;
+    fn yaw_clip(all_zeros_middle: bool) -> (Clip, Vec<PoseParameter>) {
+        let anim = |angle: f32| {
+            vec![vec![Pose {
+                position: Vec3::ZERO,
+                rotation: Quat::from_rotation_z(angle),
+            }]]
+        };
+        let clip = Clip {
+            events: vec![],
+            fps: 30.,
+            looping: false,
+            frames: anim(0.),
+            layer: ClipLayer {
+                flags: sequence_flags::DELTA | sequence_flags::POST,
+                blend: Some(BlendGrid {
+                    // Reversed authored range, like head_rot_z (66.7 .. -66.7).
+                    axes: [
+                        Some(BlendAxis {
+                            parameter: 0,
+                            start: 60.,
+                            end: -60.,
+                        }),
+                        None,
+                    ],
+                    groups: [3, 1],
+                    anims: vec![anim(1.), anim(0.), anim(-1.)],
+                    all_zeros: vec![false, all_zeros_middle, false],
+                }),
+                ..Default::default()
+            },
+        };
+        (
+            clip,
+            vec![PoseParameter {
+                name: "head_yaw".into(),
+                start: -60.,
+                end: 60.,
+                looping: 0.,
+            }],
+        )
+    }
+    fn angle(p: &[Pose]) -> f32 {
+        let (axis, angle) = p[0].rotation.to_axis_angle();
+        angle * axis.z.signum()
+    }
+    #[test]
+    fn blend_grid_maps_reversed_ranges_and_interpolates() {
+        let (clip, table) = yaw_clip(false);
+        let at = |value: f32| {
+            angle(
+                &clip
+                    .sample_posed(0., &[table[0].normalize(value)], &table)
+                    .unwrap(),
+            )
+        };
+        assert!(at(0.).abs() < 1e-5, "neutral uses the middle blend");
+        // Blend 0 belongs to paramstart (+60), the last blend to paramend (-60).
+        assert!((at(-60.) + 1.).abs() < 1e-4);
+        assert!((at(60.) - 1.).abs() < 1e-4);
+        assert!((at(-30.) + 0.5).abs() < 1e-3, "{}", at(-30.));
+        assert_eq!(table[0].normalize(0.), 0.5);
+    }
+    #[test]
+    fn all_zero_selection_skips_calc_pose_single() {
+        let (clip, table) = yaw_clip(true);
+        assert!(clip.sample_posed(0., &[0.5], &table).is_none());
+        assert!(clip.sample_posed(0., &[0.25], &table).is_some());
+        let single = Clip {
+            layer: ClipLayer {
+                all_zeros: true,
+                ..Default::default()
+            },
+            ..yaw_clip(false).0
+        };
+        assert!(single.sample_posed(0., &[], &table).is_none());
     }
 }

@@ -1032,6 +1032,8 @@ mod tests {
             rigs: BTreeMap::from([(
                 key,
                 Rig {
+                    pose_parameters: Vec::new(),
+                    autoplay: Vec::new(),
                     bones: vec![Bone {
                         name: "door".into(),
                         parent: None,

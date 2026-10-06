@@ -3,7 +3,8 @@ use crate::{bytes, f32le, i16le, i32le, u16le, u32le, vec3, vpk::Vfs};
 use anyhow::{bail, Context, Result};
 use glam::{Mat4, Quat, Vec3};
 use modkit_core::animation::{
-    sequence_flags, AutoLayer, Bone, Clip, ClipLayer, Faceposer, Pose, Rig,
+    sequence_flags, AutoLayer, BlendAxis, BlendGrid, Bone, Clip, ClipLayer, Faceposer, Pose,
+    PoseParameter, Rig,
 };
 use std::collections::BTreeSet;
 fn offset(data: &[u8], field: usize) -> Result<usize> {
@@ -277,7 +278,10 @@ fn clip(
         fps,
         looping,
         frames,
-        layer: ClipLayer::default(),
+        layer: ClipLayer {
+            all_zeros: animation_flags & sequence_flags::ALLZEROS != 0,
+            ..ClipLayer::default()
+        },
     })
 }
 pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
@@ -348,6 +352,69 @@ fn sequence_metadata(data: &[u8], at: usize) -> Result<modkit_core::animation::S
         weight: i32le(data, at + 20)?,
         order: 0,
     })
+}
+/// mstudioposeparamdesc_t table (header 300/304, stride 20).
+fn pose_parameters(data: &[u8]) -> Result<Vec<PoseParameter>> {
+    let count = offset(data, 300)?;
+    if count > 64 {
+        bail!("pose parameter table exceeds limit");
+    }
+    let base = offset(data, 304)?;
+    bytes(data, base, count * 20)?;
+    (0..count)
+        .map(|i| {
+            let at = base + i * 20;
+            Ok(PoseParameter {
+                name: string(data, relative(data, at, at)?)?,
+                start: f32le(data, at + 8)?,
+                end: f32le(data, at + 12)?,
+                looping: f32le(data, at + 16)?,
+            })
+        })
+        .collect()
+}
+/// All blend animations of a sequence with its pose-parameter axes (seqdesc 56..100).
+fn blend_grid(
+    vfs: &Vfs,
+    data: &[u8],
+    ani: Option<&[u8]>,
+    source_bones: &[SourceBone],
+    at: usize,
+    param_map: &[usize],
+    looping: bool,
+) -> Result<BlendGrid> {
+    let blends = offset(data, at + 56)?;
+    let groups = [offset(data, at + 68)?.max(1), offset(data, at + 72)?.max(1)];
+    if blends > 64 || groups[0] * groups[1] != blends {
+        bail!("sequence blend grid does not match its groups");
+    }
+    let table = relative(data, at, at + 60)?;
+    let mut axes = [None, None];
+    for (k, axis) in axes.iter_mut().enumerate() {
+        let index = i32le(data, at + 76 + k * 4)?;
+        if index >= 0 {
+            let parameter = *param_map
+                .get(index as usize)
+                .context("blend pose parameter outside model table")?;
+            *axis = Some(BlendAxis {
+                parameter,
+                start: f32le(data, at + 84 + k * 4)?,
+                end: f32le(data, at + 92 + k * 4)?,
+            });
+        }
+    }
+    let mut grid = BlendGrid {
+        axes,
+        groups,
+        ..Default::default()
+    };
+    for b in 0..blends {
+        let animation = usize::try_from(i16le(data, table + b * 2)?)?;
+        let clip = clip(vfs, data, ani, source_bones, animation, looping)?;
+        grid.all_zeros.push(clip.layer.all_zeros);
+        grid.anims.push(clip.frames);
+    }
+    Ok(grid)
 }
 fn sequence_label(data: &[u8], sequences: usize, base: usize, id: usize) -> Result<String> {
     if id >= sequences {
@@ -487,6 +554,7 @@ fn sequence_layer(
         fade_in: f32le(data, at + 104)?,
         fade_out: f32le(data, at + 108)?,
         faceposer: sequence_faceposer(data, at)?,
+        ..ClipLayer::default()
     })
 }
 const MAX_CLIPS: usize = 1024;
@@ -542,7 +610,9 @@ fn load_sequences(
     let mut selected = BTreeSet::new();
     for id in 0..sequences {
         let metadata = sequence_metadata(data, base + id * 212)?;
-        if wanted.contains(&metadata.name)
+        let autoplay = u32le(data, base + id * 212 + 12)? & sequence_flags::AUTOPLAY != 0;
+        if autoplay
+            || wanted.contains(&metadata.name)
             || (!metadata.activity.is_empty() && wanted.contains(&metadata.activity.to_lowercase()))
         {
             selected.insert(id);
@@ -560,6 +630,18 @@ fn load_sequences(
             }
         }
     }
+    // Local pose parameter indices map to the rig table by name (shared virtual-model params).
+    let param_map = pose_parameters(data)?
+        .into_iter()
+        .map(|param| {
+            if let Some(i) = rig.pose_parameter(&param.name) {
+                i
+            } else {
+                rig.pose_parameters.push(param);
+                rig.pose_parameters.len() - 1
+            }
+        })
+        .collect::<Vec<_>>();
     let remap = rig
         .bones
         .iter()
@@ -591,7 +673,7 @@ fn load_sequences(
                 .push(format!("sequence load budget reached; skipped {name}"));
             continue;
         }
-        // Select the central sample for blend grids; pose-parameter blends are not evaluated yet.
+        // Clip frames hold the central blend; blend grids keep every animation for pose params.
         let blends = offset(data, at + 56)?.max(1);
         let table = relative(data, at, at + 60)?;
         let animation = usize::try_from(i16le(data, table + (blends / 2) * 2)?)?;
@@ -604,11 +686,33 @@ fn load_sequences(
             u32le(data, at + 12)? & 1 != 0,
         )
         .and_then(|clip| {
-            sequence_layer(data, at, &source_bones, &remap, sequences, base)
-                .map(|layer| Clip { layer, ..clip })
+            sequence_layer(data, at, &source_bones, &remap, sequences, base).map(|layer| Clip {
+                layer: ClipLayer {
+                    all_zeros: clip.layer.all_zeros,
+                    ..layer
+                },
+                ..clip
+            })
+        })
+        .and_then(|mut clip| {
+            if blends > 1 {
+                clip.layer.blend = Some(blend_grid(
+                    vfs,
+                    data,
+                    ani.as_deref(),
+                    &source_bones,
+                    at,
+                    &param_map,
+                    clip.looping,
+                )?);
+            }
+            Ok(clip)
         }) {
             Ok(mut clip) => {
-                state.poses += clip.frames.len() * rig.bones.len();
+                state.poses += clip.frames.len() * rig.bones.len()
+                    + clip.layer.blend.as_ref().map_or(0, |g| {
+                        g.anims.iter().map(Vec::len).sum::<usize>() * rig.bones.len()
+                    });
                 let (events, discarded) = sequence_events(data, at)?;
                 clip.events = events;
                 if discarded > 0 {
@@ -617,9 +721,8 @@ fn load_sequences(
                     ));
                 }
                 let delta = clip.layer.flags & sequence_flags::DELTA != 0;
-                for frame in &mut clip.frames {
-                    *frame = rig
-                        .bones
+                let remap_frame = |frame: &Vec<Pose>| -> Vec<Pose> {
+                    rig.bones
                         .iter()
                         .zip(&remap)
                         .map(|(b, id)| {
@@ -627,7 +730,21 @@ fn load_sequences(
                                 .cloned()
                                 .unwrap_or_else(|| default_pose(b, delta))
                         })
-                        .collect();
+                        .collect()
+                };
+                for frame in &mut clip.frames {
+                    *frame = remap_frame(frame);
+                }
+                if let Some(grid) = &mut clip.layer.blend {
+                    for frames in &mut grid.anims {
+                        for frame in frames.iter_mut() {
+                            *frame = remap_frame(frame);
+                        }
+                    }
+                }
+                if clip.layer.flags & sequence_flags::AUTOPLAY != 0 && !rig.autoplay.contains(&name)
+                {
+                    rig.autoplay.push(name.clone());
                 }
                 rig.clips.insert(name, clip);
             }
@@ -696,10 +813,51 @@ mod tests {
             assert_eq!(
                 rig.sequences
                     .iter()
+                    .filter(|s| !rig.autoplay.contains(&s.name))
                     .map(|s| (s.name.as_str(), s.weight))
                     .collect::<Vec<_>>(),
                 expected
             );
+            if model == "models/kleiner.mdl" {
+                // Shared human head/body controls are autoplay pose-parameter blends.
+                assert_eq!(
+                    rig.autoplay,
+                    [
+                        "body_rot_z",
+                        "spine_rot_z",
+                        "neck_trans_x",
+                        "head_rot_z",
+                        "head_rot_y",
+                        "head_rot_x"
+                    ]
+                );
+                let head = rig
+                    .pose_parameter("head_yaw")
+                    .expect("head_yaw pose parameter");
+                let grid = rig.clips["head_rot_z"].layer.blend.as_ref().unwrap();
+                assert_eq!(grid.axes[0].as_ref().unwrap().parameter, head);
+                assert_eq!((grid.groups, grid.anims.len()), ([3, 1], 3));
+                // Default head_yaw 0 selects the neutral middle blend; turning it moves the head.
+                let neutral = rig.local_matrices(&{
+                    let mut pose = rig.bind_pose();
+                    rig.accumulate_autoplay(&mut pose, 0., &rig.default_pose_values())
+                        .unwrap();
+                    pose
+                });
+                let mut turned_params = rig.default_pose_values();
+                turned_params[head] = 1.;
+                let turned = rig.local_matrices(&{
+                    let mut pose = rig.bind_pose();
+                    rig.accumulate_autoplay(&mut pose, 0., &turned_params)
+                        .unwrap();
+                    pose
+                });
+                assert!(neutral
+                    .iter()
+                    .zip(&turned)
+                    .any(|(a, b)| !a.abs_diff_eq(*b, 1e-3)));
+                assert!(turned.iter().all(|m| m.is_finite()));
+            }
             for seq in &rig.sequences {
                 assert!(rig.clips.contains_key(&seq.name));
                 assert!(rig.matrices(&seq.name, 0.37).iter().all(|m| m.is_finite()));

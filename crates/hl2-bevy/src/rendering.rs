@@ -319,7 +319,7 @@ pub fn present_entities(
         // Gesture layers make the pose actor-specific; the entity id keeps cache entries apart.
         let layers = animation
             .entity
-            .map_or(0, |id| game.scene.gestures.signature(id));
+            .map_or(0, |id| game.scene.pose_signature(id));
         let layer_key = match (layers, animation.entity) {
             (0, _) | (_, None) => 0,
             (signature, Some(id)) => signature ^ (id as u64).rotate_left(32),
@@ -974,6 +974,8 @@ mod tests {
             rigs: BTreeMap::from([(
                 key.clone(),
                 Rig {
+                    pose_parameters: Vec::new(),
+                    autoplay: Vec::new(),
                     bones: vec![Bone {
                         name: "root".into(),
                         parent: None,

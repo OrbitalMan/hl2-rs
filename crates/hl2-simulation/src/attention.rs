@@ -138,3 +138,103 @@ mod tests {
         assert_eq!(scene_importance(0.2, 0.15), 0.2);
     }
 }
+/// CAI_BaseActor head control state: head correction goal (pitch, yaw, roll degrees),
+/// last head direction and influence.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Head {
+    pub goal: Vec3,
+    pub direction: Vec3,
+    pub influence: f32,
+}
+/// SDK `UTIL_Approach(target, value, speed)`.
+fn approach(target: f32, value: f32, speed: f32) -> f32 {
+    let delta = target - value;
+    if delta > speed {
+        value + speed
+    } else if delta < -speed {
+        value - speed
+    } else {
+        target
+    }
+}
+impl Head {
+    /// One update of MaintainLookTargets/UpdateHeadControl, scaled from the 0.1 sec NPC think
+    /// to `dt`. `targets` are (direction from the eye, interest); `body` is the body yaw in
+    /// degrees, standing in for the model's "forward" attachment.
+    pub fn update(&mut self, targets: &[(Vec3, f32)], body_yaw: f32, dt: f32) {
+        let thinks = (dt / 0.1).clamp(0., 2.);
+        self.goal *= 0.8f32.powf(thinks);
+        let (sin, cos) = body_yaw.to_radians().sin_cos();
+        let forward = Vec3::new(cos, sin, 0.);
+        let mut head = forward;
+        let mut influence = 0.;
+        for &(dir, interest) in targets {
+            if interest <= 0. || !dir.is_finite() || dir.length_squared() < 1e-6 {
+                continue;
+            }
+            let dir = dir.normalize();
+            if influence == 0. {
+                head = dir;
+                influence = interest;
+            } else {
+                influence = influence * (1. - interest) + interest;
+                let w = interest / influence;
+                head = head * (1. - w) + dir * w;
+            }
+        }
+        if influence > 0. {
+            self.direction = head;
+            self.influence = influence.min(1.);
+        } else {
+            let blend = 0.8f32.powf(thinks);
+            self.direction = (self.direction * blend + head * (1. - blend)).normalize_or(forward);
+            self.influence = (self.influence - 0.2 * thinks).max(0.);
+        }
+        // UpdateHeadControl with scene_clamplookat: target in the forward frame.
+        let local = Vec3::new(
+            self.direction.x * cos + self.direction.y * sin,
+            -self.direction.x * sin + self.direction.y * cos,
+            self.direction.z,
+        );
+        let mut local = local.normalize_or(Vec3::X);
+        local.z *= local.x.clamp(0.1, 1.);
+        let local = local.normalize_or(Vec3::X);
+        let influence = self.influence * (local.x * 2. + 2.).clamp(0., 1.);
+        let yaw = local.y.atan2(local.x).to_degrees();
+        let pitch = -local.z.clamp(-1., 1.).asin().to_degrees();
+        let s0 = (1. - influence + 0.3 * influence).powf(thinks);
+        let s1 = 1. - s0;
+        self.goal.x = approach(self.goal.x * s0 + pitch * s1, self.goal.x, 10. * thinks);
+        self.goal.y = approach(self.goal.y * s0 + yaw * s1, self.goal.y, 30. * thinks);
+        self.goal.z = approach(self.goal.z * s0, self.goal.z, 10. * thinks);
+    }
+}
+#[cfg(test)]
+mod head_tests {
+    use super::*;
+    #[test]
+    fn head_turns_toward_interest_at_think_rates_and_relaxes_without_one() {
+        let mut head = Head::default();
+        // Target 60 degrees to the left of a body facing +X.
+        let dir = Vec3::new(0.5, 3f32.sqrt() / 2., 0.);
+        head.update(&[(dir, 1.)], 0., 0.1);
+        assert!(
+            (head.goal.y - 30.).abs() < 1e-3,
+            "30 degrees per think: {}",
+            head.goal.y
+        );
+        for _ in 0..30 {
+            head.update(&[(dir, 1.)], 0., 0.1);
+        }
+        assert!(head.goal.y > 45. && head.goal.y < 60., "{}", head.goal.y);
+        // Body already facing the target: no correction needed.
+        let mut aligned = Head::default();
+        aligned.update(&[(Vec3::X, 1.)], 0., 0.1);
+        assert!(aligned.goal.y.abs() < 1e-3);
+        // Interest gone: influence and goal relax toward zero.
+        for _ in 0..40 {
+            head.update(&[], 0., 0.1);
+        }
+        assert!(head.influence == 0. && head.goal.y.abs() < 1.);
+    }
+}

@@ -160,17 +160,19 @@ impl GestureLayers {
     pub fn report(&self) -> &BTreeMap<usize, Vec<GestureLayer>> {
         &self.actors
     }
-    /// Base clip, then gesture layers in priority/start order (client AccumulateLayers).
-    /// Unloaded or unsupported layers are skipped and counted in the returned errors.
+    /// Base clip, gesture layers in priority/start order (client AccumulateLayers), then
+    /// autoplay sequences (CalcAutoplaySequences). Unloaded or unsupported layers are
+    /// skipped and counted in the returned errors.
     pub fn compose(
         &self,
         rig: &Rig,
         actor: usize,
         base: &str,
         time: f32,
+        params: &[f32],
     ) -> (Vec<Mat4>, Vec<PoseError>) {
         let layers = self.layers(actor);
-        if layers.is_empty() {
+        if layers.is_empty() && rig.autoplay.is_empty() {
             return (rig.matrices(base, time), Vec::new());
         }
         let mut pose = rig.local_pose(base, time);
@@ -183,15 +185,21 @@ impl GestureLayers {
                 continue;
             };
             let mut trial = pose.clone();
-            match rig.accumulate_pose(
+            match rig.accumulate_pose_with(
                 &mut trial,
                 &layer.sequence,
                 layer.cycle(clip),
                 layer.layer_weight(clip),
+                params,
             ) {
                 Ok(()) => pose = trial,
                 Err(e) => errors.push(e),
             }
+        }
+        let mut trial = pose.clone();
+        match rig.accumulate_autoplay(&mut trial, time, params) {
+            Ok(()) => pose = trial,
+            Err(e) => errors.push(e),
         }
         (rig.local_matrices(&pose), errors)
     }
@@ -369,12 +377,12 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(layers.compose(&rig, 1, "", 0.).0, rig.matrices("", 0.));
+        assert_eq!(layers.compose(&rig, 1, "", 0., &[]).0, rig.matrices("", 0.));
         layers.update(update(&data, 0.65, 1., false));
-        let (_, errors) = layers.compose(&rig, 1, "", 0.);
+        let (_, errors) = layers.compose(&rig, 1, "", 0., &[]);
         assert_eq!(errors, [PoseError::MissingSequence("g_wave".into())]);
         rig.clips.insert("g_wave".into(), clip("gesture", 52));
-        let (matrices, errors) = layers.compose(&rig, 1, "", 0.);
+        let (matrices, errors) = layers.compose(&rig, 1, "", 0., &[]);
         assert!(errors.is_empty());
         let (_, rotation, _) = matrices[0].to_scale_rotation_translation();
         // Cycle 0.55 of 51 intervals: about frame 28 of the rotating test clip.

@@ -153,6 +153,8 @@ mod tests {
         };
         let bind_matrix = glam::Mat4::from_rotation_translation(bind.rotation, bind.position);
         let rig = Rig {
+            pose_parameters: Vec::new(),
+            autoplay: Vec::new(),
             bones: vec![Bone {
                 name: "root".into(),
                 parent: None,
