@@ -8,9 +8,20 @@ Owned VPK/loose/map content -> source-assets bounded decoders -> modkit-core con
 
 AGENTS.md records fixed-step order and renderer invariants. Bevy uses custom materials/lightmaps, separate sky/world/viewmodel/HUD cameras, GPU skinning/current bounds and player/monitor PVS/frustum rejection. Identical material/lightmap pairs share handles. Spatial splitting remains off by default. Replacing Rapier is a separate behavior migration.
 
-## Active bounded plan: private decompilation coverage
+## Active plan: authored NPC gestures with on-demand decompilation
 
-The fresh chat is now authorized to continue the decompilation work. This pass changes private research and public evidence documentation; runtime gesture work remains queued. Preserve the original 22-module project, exports and exact-byte catalogue.
+Owner decision 2026-10-06: resume the Rust rewrite now. Whole-corpus coverage passes stop after pass14; the private index (133,473 addresses with pseudocode, about 94% of baseline executable bytes inside identified functions, zero reviewed names/types) is sufficient for targeted retrieval. For each step below, first identify the responsible retail functions (for example server.dll/client.dll animation-layer, sequence and choreography code) through strings, RTTI, callers and pinned SDK correspondence; retrieve exact bodies by installed path/hash/address; record reviewed findings privately with SDK-versus-retail distinctions. Only then implement in shared crates. Native code stays private; Rust contains original implementation.
+
+1. Preserve raw delta/post transforms, bone masks, autolayers and model-tag dependencies in bounded readers. Preserve base clips and account explicitly for child budgets.
+2. Implement shared layered pose composition with independent synthetic references and owned-data comparisons. Verify retail/native evidence separately from SDK behavior.
+3. Execute choreography gestures with authored timing/tag retiming, ramps, priorities and pause/cancel semantics. Both renderers consume the same composed poses.
+4. Compare a real intro/security scene against original captures/audio/timings, then extend head/facial/lip controls and actor scheduling. Seeded developer actors are not campaign proof.
+
+Validate each step. After two failed attempts at one approach, document it and choose a different evidence-based approach. Full AI, staging, save state, arsenal and shaders remain separate tasks.
+
+## Paused: private decompilation coverage (passes01-14 record)
+
+Coverage passes ran 2026-10-05 and are paused by the owner's 2026-10-06 decision. The record below is retained as history and future reference. Preserve the original 22-module project, exports and exact-byte catalogue.
 
 Bound this pass to: (a) a new path/hash-keyed inventory with PE imports, exports, duplicate groups and explicit scope decisions; (b) read-only inspection of all ten failed exports, with separately recorded baseline and evidence-based recovery attempts on disposable program state; (c) discovery accounting for the existing corpus, including executable bytes outside function bodies, entry/export targets and unresolved call/data-pointer candidates. Keep generated scripts, logs and bodies under private work/hl2-decompiled. Never silently mutate the baseline database or count plausible pointer targets as confirmed functions.
 
@@ -46,20 +57,11 @@ Pass13 bounds the remaining owner hypotheses: inspect at most two preceding save
 4. Keep the exact-byte SQLite catalogue authoritative for export retrieval. The unchanged gamedb parser misses 9,713 successful bodies and has 2,810 range mismatches; it remains a supplemental navigator. Add new evidence through audited, versioned private outputs with module/hash/address identity, preserving original bytes and unresolved references. Track export, naming/type recovery, Rust implementation and native behavior verification separately.
 5. Recover reviewed names, types, state and behavior for animation/choreography and first-level AI, then feed confirmed findings into the existing shared Rust crates and compare them against the original game. Published SDK code corroborates behavior but is not proof of the installed retail implementation.
 
-After each bounded pass, record exact coverage, remaining failures/uncertainties, commands and next step. Completion claims require an explicit runtime scope, justified function discovery and reviewed semantics; a pseudocode export or database import alone is insufficient. All native binaries, scripts, recovered code and databases remain under private work/hl2-decompiled or work/references, outside public source checkouts.
-
-## Queued runtime plan: authored NPC gestures
+After each bounded pass, record exact coverage, remaining failures/uncertainties, commands and next step. Completion claims require an explicit runtime scope, justified function discovery and reviewed semantics; a pseudocode export or database import alone is insufficient.
 
 Final quota checkpoint: passes07-14 completed their bounded audits. The latest index preserves13datasets,133,473observed addresses/133,556variants and zero adopted type/implementation/native-verification rows. Saved122,721entries and temporary10,752entries stay separate;44switch/owner reexports add no addresses. The width pilot failed;45/46orphan dispatch controls remain unmatched. Original project/database hashes and rollback/metadata checks pass. Full decompilation is unfinished.
 
-Next bounded research: trace unresolved dispatchers from raw instruction edges and relocated table words, proving index bounds and checking shared tails. Use pass13's unresolved records; stop nearest-entry guesses and do not define each case as a function. Reconcile listing/decompiler coverage, x87 helper storage and runtime scope. Preserve failures and independently auditable attempts. Finish documentation/whitelist validation and the private handoff in the owner's requested near98% quota margin; gestures remain queued.
-
-1. Preserve raw delta/post transforms, bone masks, autolayers and model-tag dependencies in bounded readers. Preserve base clips and account explicitly for child budgets.
-2. Implement shared layered pose composition with independent synthetic references and owned-data comparisons. Verify retail/native evidence separately from SDK behavior.
-3. Execute choreography gestures with authored timing/tag retiming, ramps, priorities and pause/cancel semantics. Both renderers consume the same composed poses.
-4. Compare a real intro/security scene against original captures/audio/timings, then extend head/facial/lip controls and actor scheduling. Seeded developer actors are not campaign proof.
-
-Validate each step. After two failed attempts at one approach, document it and choose a different evidence-based approach. Full AI, staging, save state, arsenal and shaders remain separate tasks.
+Unstarted pass15 (dropped): trace unresolved dispatchers from raw instruction edges and relocated table words, proving index bounds and checking shared tails. Use pass13's unresolved records; stop nearest-entry guesses and do not define each case as a function. Reconcile listing/decompiler coverage, x87 helper storage and runtime scope. Preserve failures and independently auditable attempts. These remain valid future research if a feature depends on them. All native binaries, scripts, recovered code and databases remain under private work/hl2-decompiled or work/references, outside public source checkouts.
 
 ## Publication validation
 

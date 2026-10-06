@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Priority change: resume Rust rewrite, on-demand decompilation
+
+**Changed:** Owner decision: pause whole-corpus decompilation coverage after pass14 and resume the Rust rewrite with authored NPC gestures. AGENTS.md, STATUS.md and docs/DESIGN.md now make decompilation feature-driven: retrieve and review the relevant retail functions from the private index before implementing each step. A drafted pass15 dispatcher-trace plan was dropped before any run.
+
+**Why:** About 94% of baseline executable bytes already sit inside identified functions with pseudocode (133,473 addresses), but zero have reviewed names/types. Further coverage passes have diminishing returns for the campaign; reviewed semantics of specific systems are what the rewrite needs.
+
+**Tested how:** Documentation-only change: whitelist, local-link and public snapshot checks. No runtime build/test rerun.
+
+**Result:** Handoff documents agree on the new priority. Private research databases are unchanged.
+
+**Still broken or not tested:** Everything listed in STATUS.md; full decompilation, names/ABIs and native parity remain unfinished.
+
+**Next:** Identify retail animation-layer/gesture functions in the index, record reviewed findings privately, then implement raw delta/post/mask/layer readers.
+
 ## 2026-10-05 Callback discovery, ABI and switch evidence; quota handoff
 
 **Changed:** Continued private research through pass14. The exact-byte index now combines13 source datasets,133,473 observed addresses with some pseudocode and133,556 export variants across42 selected modules. Saved entries and10,752 temporary discovery entries remain separate. Public changes document research; runtime code is unchanged.

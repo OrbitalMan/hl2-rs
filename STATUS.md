@@ -1,8 +1,10 @@
 # STATUS
 
-Checkpoint: 2026-10-05, Atlantic/Canary, final quota handoff. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; documentation-only commits follow it. Private research completed bounded passes through coverage-pass-20261005-14; earlier evidence remains frozen. Full decompilation is unfinished. Read AGENTS.md, this file and docs/DESIGN.md first; the newest private continuation checkpoint supersedes history.
+Checkpoint: 2026-10-06, priority change to on-demand decompilation and Rust gestures. Verified runtime revision: `28c0bb3a66c50a9baa60fdda001b850ded4640a1`; documentation-only commits follow it. Private research completed bounded passes through coverage-pass-20261005-14; earlier evidence remains frozen. Full decompilation is unfinished. Read AGENTS.md, this file and docs/DESIGN.md first; the newest private continuation checkpoint supersedes history.
 
-Latest owner instruction: continue decompilation with the database method, then update the handoff documents as the final effort near98% of the five-hour window. The owner corrected an early stop; checkpoints are validation boundaries. This continuation added private discovery, ABI/data/switch controls and an audited retrieval index. NPC gestures remain queued. Rust runtime code is unchanged.
+Latest owner instruction (2026-10-06): resume the Rust rewrite now. Whole-corpus decompilation coverage passes are paused after pass14; decompilation continues on demand per feature through the private pass14 index. Active work is authored NPC gestures (docs/DESIGN.md). The unstarted pass15 dispatcher trace was dropped. Rust runtime code is unchanged at this checkpoint.
+
+Previous instruction (2026-10-05): continue decompilation with the database method. That continuation added private discovery, ABI/data/switch controls and an audited retrieval index.
 
 ## Goal
 
@@ -97,8 +99,8 @@ Private database/native exports and published SDK research corroborate selected 
 
 ## Ideas not tried yet
 
-1. Trace unresolved switch dispatchers from raw branches and relocated table words, proving index bounds and shared-tail relationships. Continue indirect-call/orphan coverage and loader/middleware/tool/variant scope; review x87 helper storage. Use the latest private index in coverage-pass-20261005-14 and preserve frozen evidence/scripts. Continue decompilation before gesture implementation; full completion remains unverified.
-2. Use recovered animation/choreography evidence for bounded raw delta/post/mask/layer readers, shared composition and authored gesture execution, then compare a real first-level scene against original captures/audio/timings. Reuse shared crates and separate reader, scheduler, actor readiness and rendering defects.
+1. Active: use recovered animation/choreography evidence for bounded raw delta/post/mask/layer readers, shared composition and authored gesture execution, then compare a real first-level scene against original captures/audio/timings. Retrieve and review the responsible retail functions from the pass14 index first. Reuse shared crates and separate reader, scheduler, actor readiness and rendering defects.
+2. Paused research, resume only when a feature needs it: trace unresolved switch dispatchers from raw branches and relocated table words, x87 helper storage and loader/middleware/tool/variant scope. The 45 unmatched dispatchers are in replay.dll, shaderapiempty.dll, unicode.dll and vaudio_speex.dll; campaign relevance is unverified.
 3. Resume renderer area/occluder/LOD work with current-view/monitor correctness checks and matched profiles after the requested research priority. Keep spatial splitting opt-in until broader evidence supports a default change.
 
 ## Files that matter
