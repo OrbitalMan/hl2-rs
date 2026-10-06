@@ -53,6 +53,10 @@ struct Options {
     borderless: bool,
     fly: bool,
     movement_script: Option<PathBuf>,
+    /// Master volume, like Source's `volume` convar (0..1).
+    volume: f32,
+    /// Do not take focus at window creation, so unattended tests leave the desktop usable.
+    no_focus: bool,
 }
 impl Options {
     fn parse() -> Result<Self> {
@@ -78,6 +82,8 @@ impl Options {
             borderless: false,
             fly: false,
             movement_script: None,
+            volume: 1.,
+            no_focus: false,
         };
         while let Some(arg) = args.next() {
             let next = |args: &mut std::iter::Skip<std::env::Args>| -> Result<String> {
@@ -110,14 +116,19 @@ impl Options {
                 "--borderless" => options.borderless = true,
                 "--fly" => options.fly = true,
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
+                "--volume" => options.volume = next(&mut args)?.parse()?,
+                "--no-focus" => options.no_focus = true,
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --no-focus (start unfocused for unattended tests)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
                 _ => bail!("unknown option {arg}; use --help"),
             }
+        }
+        if !(0. ..=1.).contains(&options.volume) {
+            bail!("--volume must be between 0 and 1");
         }
         if !(320..=8192).contains(&options.width) || !(240..=8192).contains(&options.height) {
             bail!("window size is outside 320x240..8192x8192");
@@ -291,8 +302,15 @@ fn main() -> Result<()> {
                     file_path: asset_root.to_string_lossy().into_owned(),
                     ..default()
                 })
+                .set(bevy::audio::AudioPlugin {
+                    global_volume: bevy::audio::GlobalVolume::from(bevy::audio::Volume::Linear(
+                        options.volume,
+                    )),
+                    ..default()
+                })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
+                        focused: !options.no_focus,
                         present_mode: if options.uncapped {
                             bevy::window::PresentMode::AutoNoVsync
                         } else {
