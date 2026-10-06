@@ -23,6 +23,8 @@ struct MovementAnimation {
     key: crate::npc::GoalKey,
     sequence: String,
     elapsed: f32,
+    /// Path direction relative to the turning body (move_yaw pose parameter).
+    move_yaw: f32,
     previous: String,
     previous_started: f64,
     previous_done: Option<f64>,
@@ -236,6 +238,8 @@ pub struct Scene {
     templates: BTreeMap<usize, Vec<(usize, bool, bool)>>,
     /// Player feet from the latest tick; FACE targets of `!player` turn toward it.
     player_feet: Vec3,
+    /// Duration of the latest tick (NPC movement turning runs after the scene tick).
+    tick_dt: f32,
 }
 impl Scene {
     pub fn new(world: &World) -> Self {
@@ -263,6 +267,7 @@ impl Scene {
             monitors: crate::monitors::Cameras::new(world),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
+            tick_dt: 0.,
         };
         for e in &world.entities {
             let base_rotation = physics::angles(
@@ -421,6 +426,15 @@ impl Scene {
                         .any(|s| s.activity.eq_ignore_ascii_case("ACT_IDLE"))
             }) {
                 scene.animate(world, id, "ACT_IDLE", false);
+            }
+        }
+        // CNPC_CombineCamera::Spawn: deployed (open idle) unless spawnflag 0x80
+        // (StartInactive), which keeps it closed and disabled.
+        for id in 0..world.entities.len() {
+            if world.entities[id].class() == "npc_combine_camera" {
+                let enabled = number(&world.entities[id], "spawnflags", 0.) as u32 & 0x80 == 0;
+                scene.states[id].enabled = enabled;
+                scene.camera_activity(world, id, false);
             }
         }
         scene.hold_template_children(world);
@@ -750,25 +764,45 @@ impl Scene {
     /// parent's animated attachment (model-scaled). `None` for unknown attachments.
     fn parent_frame(&self, world: &World, parent: usize, attachment: Option<&str>) -> Option<Mat4> {
         let state = self.states.get(parent)?;
-        let base = Mat4::from_rotation_translation(state.rotation, state.origin);
-        let Some(name) = attachment.filter(|n| !n.is_empty()) else {
-            return Some(base);
+        match attachment.filter(|n| !n.is_empty()) {
+            None => Some(Mat4::from_rotation_translation(
+                state.rotation,
+                state.origin,
+            )),
+            Some(name) => self.attachment_frames(world, parent, &[name])[0],
+        }
+    }
+    /// World frames of named animated attachments (one pose evaluation for all names).
+    pub fn attachment_frames(&self, world: &World, id: usize, names: &[&str]) -> Vec<Option<Mat4>> {
+        let none = || vec![None; names.len()];
+        let Some(state) = self.states.get(id) else {
+            return none();
         };
-        let instance = world
-            .model_instances
-            .iter()
-            .find(|i| i.entity == Some(parent))?;
-        let rig = world.rigs.get(&instance.asset_key())?;
-        let attachment = rig.attachment(name)?;
-        let matrices = self.actor_matrices(rig, parent);
-        let local = rig.attachment_matrix(&matrices, attachment)?;
-        let (_, rotation, translation) = local.to_scale_rotation_translation();
-        Some(
-            base * Mat4::from_rotation_translation(
-                rotation.normalize(),
-                translation * instance.scale,
-            ),
-        )
+        let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(id)) else {
+            return none();
+        };
+        let Some(rig) = world.rigs.get(&instance.asset_key()) else {
+            return none();
+        };
+        let found: Vec<_> = names.iter().map(|n| rig.attachment(n)).collect();
+        if found.iter().all(Option::is_none) {
+            return none();
+        }
+        let base = Mat4::from_rotation_translation(state.rotation, state.origin);
+        let matrices = self.actor_matrices(rig, id);
+        found
+            .into_iter()
+            .map(|a| {
+                let local = rig.attachment_matrix(&matrices, a?)?;
+                let (_, rotation, translation) = local.to_scale_rotation_translation();
+                Some(
+                    base * Mat4::from_rotation_translation(
+                        rotation.normalize(),
+                        translation * instance.scale,
+                    ),
+                )
+            })
+            .collect()
     }
     /// SetParent/SetParentAttachment: keep the current world pose as a local offset, or
     /// snap onto the parent frame.
@@ -837,30 +871,78 @@ impl Scene {
             )
             .0
     }
-    /// Normalized pose parameters: model defaults plus head control (head_pitch/yaw/roll).
+    /// Normalized pose parameters: model defaults plus head control (head_pitch/yaw/roll)
+    /// and the server-side body/head flex controllers (CAI_BaseActor UpdateHeadControl adds
+    /// head_rightleft/updown/tilt to the look correction; UpdateBodyControl drives
+    /// body_yaw, spine_yaw and neck_trans from body_rightleft, chest_rightleft and
+    /// head_forwardback).
     pub fn actor_pose_values(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<f32> {
         let mut params = rig.default_pose_values();
-        if let Some(head) = self.heads.get(&id) {
-            for (name, value) in [
-                ("head_pitch", head.goal.x),
-                ("head_yaw", head.goal.y),
-                ("head_roll", head.goal.z),
-            ] {
-                if let Some(i) = rig.pose_parameter(name) {
-                    params[i] = rig.pose_parameters[i].normalize(value);
-                }
+        let flexes = self.flex_controllers.get(&id);
+        let flex = |name: &str| flexes.and_then(|v| v.get(name)).copied();
+        let head = self.heads.get(&id).map(|h| h.goal);
+        for (param, goal, controller) in [
+            ("head_pitch", head.map(|g| g.x), "head_updown"),
+            ("head_yaw", head.map(|g| g.y), "head_rightleft"),
+            ("head_roll", head.map(|g| g.z), "head_tilt"),
+            ("body_yaw", None, "body_rightleft"),
+            ("spine_yaw", None, "chest_rightleft"),
+            ("neck_trans", None, "head_forwardback"),
+            // MaintainLookTargets: gesture blend position from the gesture flexes.
+            ("gesture_height", None, "gesture_updown"),
+            ("gesture_width", None, "gesture_rightleft"),
+        ] {
+            let offset = flex(controller);
+            if goal.is_none() && offset.is_none() {
+                continue;
             }
+            if let Some(i) = rig.pose_parameter(param) {
+                let value = goal.unwrap_or(0.) + offset.unwrap_or(0.);
+                params[i] = rig.pose_parameters[i].normalize(value);
+            }
+        }
+        if let (Some(movement), Some(i)) = (
+            self.states[id].movement_animation.as_ref(),
+            rig.pose_parameter("move_yaw"),
+        ) {
+            params[i] = rig.pose_parameters[i].normalize(movement.move_yaw);
         }
         params
     }
     /// Changes whenever an actor's composed pose inputs change; zero for plain base clips.
     pub fn pose_signature(&self, id: usize) -> u64 {
         let mut hash = self.gestures.signature(id);
+        let mix = |hash: u64, v: f32| {
+            (hash ^ v.to_bits() as u64)
+                .wrapping_mul(0x100000001b3)
+                .rotate_left(9)
+        };
         if let Some(head) = self.heads.get(&id) {
             for v in head.goal.to_array() {
-                hash = (hash ^ v.to_bits() as u64)
-                    .wrapping_mul(0x100000001b3)
-                    .rotate_left(9);
+                hash = mix(hash, v);
+            }
+        }
+        if let Some(m) = self
+            .states
+            .get(id)
+            .and_then(|s| s.movement_animation.as_ref())
+        {
+            hash = mix(hash, m.move_yaw);
+        }
+        if let Some(values) = self.flex_controllers.get(&id) {
+            for name in [
+                "head_updown",
+                "head_rightleft",
+                "head_tilt",
+                "body_rightleft",
+                "chest_rightleft",
+                "head_forwardback",
+                "gesture_updown",
+                "gesture_rightleft",
+            ] {
+                if let Some(v) = values.get(name) {
+                    hash = mix(hash, *v);
+                }
             }
         }
         hash
@@ -875,8 +957,14 @@ impl Scene {
                 self.heads.remove(&actor);
                 continue;
             }
-            let eye = state.origin + Vec3::Z * 64.;
-            let forward = state.rotation * Vec3::X;
+            // CAI_BaseActor: eye position from the animated "eyes" attachment; self-interest
+            // and the head frame follow the animated "forward" attachment.
+            let frames = self.attachment_frames(world, actor, &["eyes", "forward"]);
+            let state = &self.states[actor];
+            let eye = frames[0].map_or(state.origin + Vec3::Z * 64., |m| m.w_axis.truncate());
+            let forward = frames[1]
+                .map(|m| m.x_axis.truncate().normalize_or(Vec3::X))
+                .unwrap_or(state.rotation * Vec3::X);
             let body_yaw = forward.y.atan2(forward.x).to_degrees();
             let targets = self
                 .look_targets
@@ -1063,8 +1151,18 @@ impl Scene {
             return;
         }
         *ready = arrived;
+        // CAI_Motor::MoveFacing/UpdateYaw: the body turns toward the path direction at
+        // MaxYawSpeed (45, x10 per second); move_yaw keeps the legs on the path.
+        let forward = self.states[key.actor].rotation * Vec3::X;
+        let current = forward.y.atan2(forward.x).to_degrees();
+        let body = if animation.is_some() {
+            clamp_yaw(450. * self.tick_dt, current, yaw_degrees)
+        } else {
+            yaw_degrees
+        };
+        let move_yaw = angle_diff(yaw_degrees, body);
         self.states[key.actor].origin = feet;
-        self.states[key.actor].rotation = physics::angles(Vec3::new(0., yaw_degrees, 0.));
+        self.states[key.actor].rotation = physics::angles(Vec3::new(0., body, 0.));
         if let Some((sequence, elapsed)) = animation {
             if self.states[key.actor]
                 .movement_animation
@@ -1077,6 +1175,7 @@ impl Scene {
                     key,
                     sequence: sequence.into(),
                     elapsed,
+                    move_yaw,
                     previous: state.animation.clone(),
                     previous_started: state.animation_started,
                     previous_done: state.animation_done,
@@ -1085,6 +1184,7 @@ impl Scene {
                 state.animation_done = None;
             } else if let Some(m) = &mut self.states[key.actor].movement_animation {
                 m.elapsed = elapsed;
+                m.move_yaw = move_yaw;
             }
         } else {
             self.restore_movement_animation(key.actor);
@@ -1847,6 +1947,18 @@ impl Scene {
                 self.states[id].visible = false;
                 self.states[id].enabled = false;
             }
+            "enable" | "disable" | "toggle" if class == "npc_combine_camera" => {
+                // CNPC_CombineCamera Enable/Disable/Toggle drive its open/closed activity.
+                let enabled = match input.as_str() {
+                    "enable" => true,
+                    "disable" => false,
+                    _ => !self.states[id].enabled,
+                };
+                if enabled != self.states[id].enabled {
+                    self.states[id].enabled = enabled;
+                    self.camera_activity(world, id, true);
+                }
+            }
             "enable" => {
                 self.states[id].enabled = true;
                 if matches!(class, "func_brush" | "func_monitor") {
@@ -2104,6 +2216,19 @@ impl Scene {
             finish.then_some(self.time + clip.duration().max(0.015) as f64);
         true
     }
+    /// Combine camera activity for its enabled state (MaintainActivity toward the ideal
+    /// activity): open idle when enabled; when disabled the close transition plays first
+    /// (if `transition`), then closed idle. The reversed opening transition is not modeled.
+    fn camera_activity(&mut self, world: &World, id: usize, transition: bool) {
+        let open = self.states[id].animation.eq_ignore_ascii_case("idlealert");
+        if self.states[id].enabled {
+            self.animate(world, id, "ACT_COMBINE_CAMERA_OPEN_IDLE", false);
+        } else if transition && open {
+            self.animate(world, id, "ACT_COMBINE_CAMERA_CLOSE", true);
+        } else {
+            self.animate(world, id, "ACT_COMBINE_CAMERA_CLOSED_IDLE", false);
+        }
+    }
     fn begin_sequence(&mut self, world: &World, id: usize) {
         let script = &world.entities[id];
         let name = script.get("m_iszEntity").unwrap_or("");
@@ -2176,6 +2301,36 @@ impl Scene {
         self.states[id].script_actor = Some(actor);
         self.states[id].script_finish = Some(self.time + duration.max(0.015) as f64);
         self.fire(id, "OnBeginSequence", actor);
+    }
+    /// SCRIPT_EVENT_FIREEVENT (1003) animation events crossed this tick by the actor's
+    /// scripted clip fire the script's OnScriptEventNN output (options = NN).
+    fn script_events(&mut self, world: &World, id: usize) {
+        let Some(actor) = self.states[id].script_actor else {
+            return;
+        };
+        let state = &self.states[actor];
+        let Some(clip) = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(actor))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|r| r.clips.get(&state.animation))
+        else {
+            return;
+        };
+        let duration = clip.duration().max(0.015);
+        let now = ((self.time - state.animation_started) as f32 / duration).min(1.);
+        let before = now - self.tick_dt / duration;
+        let fired: Vec<String> = clip
+            .events
+            .iter()
+            .filter(|e| e.id == 1003 && e.cycle > before && e.cycle <= now)
+            .filter_map(|e| e.options.trim().parse::<u32>().ok())
+            .map(|n| format!("OnScriptEvent{n:02}"))
+            .collect();
+        for output in fired {
+            self.fire(id, &output, actor);
+        }
     }
     fn end_sequence(&mut self, world: &World, id: usize, cancel: bool) {
         let actor = self.states[id].script_actor.take();
@@ -2259,6 +2414,7 @@ impl Scene {
     }
     pub fn tick(&mut self, world: &World, player_feet: Vec3, dt: f32) {
         self.time += dt as f64;
+        self.tick_dt = dt;
         self.player_feet = player_feet;
         self.monitors.tick(&self.states, self.time);
         self.look_targets.cleanup(self.time, |id| {
@@ -2291,6 +2447,9 @@ impl Scene {
                     self.fire(id, "OnPostIdleEndSequence", actor);
                 }
             }
+            if e.class() == "scripted_sequence" {
+                self.script_events(world, id);
+            }
             if self.states[id]
                 .script_finish
                 .is_some_and(|t| t <= self.time)
@@ -2303,6 +2462,9 @@ impl Scene {
             {
                 self.states[id].animation_done = None;
                 self.fire(id, "OnAnimationDone", usize::MAX);
+                if e.class() == "npc_combine_camera" {
+                    self.camera_activity(world, id, false);
+                }
             }
             if matches!(
                 e.class(),
@@ -3432,6 +3594,144 @@ mod tests {
             touch_scene.transition,
             Some(("next".into(), "arrival".into()))
         );
+    }
+    #[test]
+    fn combine_cameras_deploy_retract_and_redeploy() {
+        use modkit_core::{
+            animation::{Clip, Rig, Sequence},
+            ModelInstance,
+        };
+        let clip = |frames: usize, looping: bool| Clip {
+            layer: Default::default(),
+            events: Vec::new(),
+            fps: 30.,
+            looping,
+            frames: vec![vec![]; frames],
+        };
+        let seq = |name: &str, activity: &str, order: u32| Sequence {
+            name: name.into(),
+            activity: activity.into(),
+            weight: 1,
+            order,
+        };
+        let w = World {
+            entities: vec![
+                entity("npc_combine_camera", "cam", &[]),
+                entity("npc_combine_camera", "sleeper", &[("spawnflags", "128")]),
+            ],
+            model_instances: (0..2)
+                .map(|id| ModelInstance {
+                    background: false,
+                    model: "camera.mdl".into(),
+                    origin: Vec3::ZERO,
+                    angles: Vec3::ZERO,
+                    skin: 0,
+                    scale: 1.,
+                    kind: "npc_combine_camera".into(),
+                    solid: false,
+                    solid_mode: None,
+                    entity: Some(id),
+                })
+                .collect(),
+            rigs: BTreeMap::from([(
+                "camera.mdl#0".into(),
+                Rig {
+                    clips: BTreeMap::from([
+                        ("idle".into(), clip(11, true)),
+                        ("idlealert".into(), clip(11, true)),
+                        ("ai_retract".into(), clip(48, false)),
+                    ]),
+                    sequences: vec![
+                        seq("idle", "ACT_COMBINE_CAMERA_CLOSED_IDLE", 0),
+                        seq("idlealert", "ACT_COMBINE_CAMERA_OPEN_IDLE", 1),
+                        seq("ai_retract", "ACT_COMBINE_CAMERA_CLOSE", 2),
+                    ],
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&w);
+        // Spawn: deployed unless StartInactive.
+        assert_eq!(scene.states[0].animation, "idlealert");
+        assert_eq!(scene.states[1].animation, "idle");
+        assert!(!scene.states[1].enabled);
+        // Toggle off plays the close transition, then rests in closed idle.
+        scene.send(0, "Toggle", "");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert_eq!(scene.states[0].animation, "ai_retract");
+        for _ in 0..120 {
+            scene.tick(&w, Vec3::ZERO, 0.015);
+        }
+        assert_eq!(scene.states[0].animation, "idle");
+        // Enable redeploys; enabling an enabled camera changes nothing.
+        scene.send(0, "Enable", "");
+        scene.send(1, "Enable", "");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert_eq!(
+            (
+                scene.states[0].animation.as_str(),
+                scene.states[1].animation.as_str()
+            ),
+            ("idlealert", "idlealert")
+        );
+        assert!(
+            scene.diagnostics.unsupported.is_empty(),
+            "{:?}",
+            scene.diagnostics.unsupported
+        );
+    }
+    #[test]
+    fn head_and_body_flexes_offset_actor_pose_parameters() {
+        use modkit_core::animation::{PoseParameter, Rig};
+        let w = World {
+            entities: vec![entity("npc_barney", "barney", &[])],
+            ..Default::default()
+        };
+        let param = |name: &str, start: f32, end: f32| PoseParameter {
+            name: name.into(),
+            start,
+            end,
+            looping: 0.,
+        };
+        let rig = Rig {
+            pose_parameters: vec![
+                param("head_pitch", -30., 30.),
+                param("head_yaw", -60., 60.),
+                param("body_yaw", -30., 30.),
+                param("gesture_height", -1., 1.),
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&w);
+        let rest = scene.actor_pose_values(&rig, 0);
+        let rest_signature = scene.pose_signature(0);
+        // UpdateHeadControl adds head flexes to the look correction; UpdateBodyControl
+        // drives body_yaw from body_rightleft. Values are in controller degrees.
+        scene.flex_controllers.insert(
+            0,
+            BTreeMap::from([
+                ("head_updown".into(), 15.),
+                ("body_rightleft".into(), -15.),
+                ("smile".into(), 1.),
+            ]),
+        );
+        let p = scene.actor_pose_values(&rig, 0);
+        assert!(
+            (p[0] - 0.75).abs() < 1e-6 && (p[2] - 0.25).abs() < 1e-6,
+            "{p:?}"
+        );
+        assert_eq!((p[1], p[3]), (rest[1], rest[3]));
+        assert_ne!(scene.pose_signature(0), rest_signature);
+        scene.heads.insert(
+            0,
+            crate::attention::Head {
+                goal: Vec3::new(10., 30., 0.),
+                ..Default::default()
+            },
+        );
+        let p = scene.actor_pose_values(&rig, 0);
+        assert!((p[0] - (25. + 30.) / 60.).abs() < 1e-6 && (p[1] - 0.75).abs() < 1e-6);
     }
     #[test]
     fn props_parent_to_entities_and_follow_animated_attachments() {

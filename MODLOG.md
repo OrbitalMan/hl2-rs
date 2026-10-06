@@ -2,28 +2,46 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
-## 2026-10-06 Apple Silicon (macOS aarch64) support for hl2-bevy
+## 2026-10-06 Entity render color in Bevy (godray brightness)
 
-**Changed:** Added first-class macOS / Apple Silicon support to `bevy-migration`:
-- `source-assets::install`: Auto-discovers installed Steam content in `~/Library/Application Support/Steam`.
-- `hl2-ui::console`: Multi-target test assertions for non-Windows platforms, eliminating unused variable warnings under strict Clippy.
-- `scripts/build-bevy.sh` & `launch-bevy.sh`: Added POSIX build and launch scripts (with 1080p and borderless variants) generating `bin/build-bevy-info.json` and packaging `bin/bevy-assets`.
-- `.gitignore`: Whitelisted new POSIX scripts.
+**Changed:** Bevy entity materials now apply Source color modulation. rendercolor tints the model, and renderamt sets its alpha outside kRenderNormal. Materials are keyed per (material, lightmap, modulation), so untinted entities still share handles. New fixture test-inputs/bevy-monitors-breen-screen.json frames the trainstation_02 jumbotron face-on at about 25 s, during the broadcast.
 
-**Why:** Enable running the Bevy/wgpu host natively on macOS Apple Silicon without manual path flags or Windows-only script dependencies.
+**Why:** Owner report: the trainstation godrays were overexposed in Bevy (the retained host already applied rendercolor). The shafts are additive prop_dynamic vol_light models tinted to about 19% (rendercolor ~49 45 34), which Bevy drew at full white. The owner also noted the old Breen fixture looks at a wall. jumbotron1's screen layers face +-Y, so the old yaw-180 view is edge-on, and its 7 s capture precedes the broadcast (the Combine slate brush is correct then; the scene starts at about 11 s and its OnTrigger1 hides the slate).
 
-**Tested how:**
-- `cargo test --workspace --locked` (109 shared crate tests, 25 Bevy tests passed).
-- `cargo clippy --workspace --all-targets --locked -- -D warnings` (zero warnings).
-- `cargo fmt --all --check`.
-- Packaged release build with `./scripts/build-bevy.sh` (`bin/hl2-bevy`, `bin/bevy-assets`, SHA256 metadata verified).
-- Launched `./launch-bevy.sh`: Auto-discovered owned Steam installation on macOS, initialized wgpu/Metal clustering and preprocessing, created native AppKit window, and loaded `d1_trainstation_01`.
+**Tested how:** Packaged captures (artifacts/godrays). Regression batch artifacts/godray-regression: only the Breen main view changes (whole frame, dimmer shafts); weapons/Kleiner/campaign identical; movement unchanged from the previous batch (735 px against the old baseline); attention 26/26.
 
-**Result:** Native macOS execution on Apple Silicon via Metal and CoreAudio works out of the box with zero runtime errors.
+**Result:** Godrays are subtle instead of whiting out the hall. The new fixture shows Breen speaking on the jumbotron, with lip sync.
 
-**Still broken or not tested:** Retained Macroquad/OpenGL host on macOS (deprecated by Apple; bevy-migration is primary target). Native Windows GDI font parity (macOS uses portable fontdue). Retained scripts remain Windows-focused.
+**Still broken or not tested:** No native trainstation_02 comparison yet for shaft brightness or the jumbotron, whose dark feed areas render see-through. The accepted partition-breen baseline image predates this change.
 
-**Next:** Propose PR to `bevy-migration` and optionally add `macos-latest` to GitHub Actions workflow.
+**Next:** Model lighting (docs/DESIGN.md step 8).
+
+## 2026-10-06 Scripted-sequence script events (faceplate removal)
+
+**Changed:** While a scripted_sequence plays, SCRIPT_EVENT_FIREEVENT (1003) animation events crossed by the actor's clip fire the script's OnScriptEventNN output, with NN from the event options and the actor as activator.
+
+**Why:** ss_Helmet_Reveal (helmet_reveal, events "1" at cycle 0.417 and "2" at 0.762) removes Barney's head faceplate and toggles the hand copy through these outputs.
+
+**Tested how:** Packaged Bevy captures before, between and after the events (artifacts/reveal): Barney lifts the faceplate, then his face is revealed with helmetBack kept. hl2-simulation tests and strict Clippy/fmt pass.
+
+**Still broken or not tested:** The native side-by-side of security_01 and the reveal was not run. Other studio script events (1000-1008) are not dispatched.
+
+**Next:** Model lighting; Breen fixture framing; godray brightness.
+
+## 2026-10-06 Head/body flexes, Combine camera activities and movement turning
+
+**Changed:** Actor pose parameters now add the server-side flex controllers, following SDK CAI_BaseActor: head_rightleft/updown/tilt on top of the head look correction (UpdateHeadControl), body_yaw/spine_yaw/neck_trans from body_rightleft/chest_rightleft/head_forwardback (UpdateBodyControl), and gesture_height/width from gesture_updown/rightleft (MaintainLookTargets). The values are included in the pose signature. Head control takes its eye position from the animated "eyes" attachment and the self-look direction and head frame from "forward" (shared `Scene::attachment_frames`). npc_combine_camera deploys at spawn (open idle) unless StartInactive. Enable/Disable/Toggle play the retract transition into closed idle, or return to open idle. Walking NPCs turn toward the path at MaxYawSpeed (45 x 10 deg/s) instead of snapping, and the move_yaw pose parameter keeps the legs on the path.
+
+**Why:** Owner steps 5 and 7. Step 6 check: Barney's state origin at his desk equals mark_barneyroom_monitor_3 exactly, and the 18.05 s native/Bevy silhouettes line up within about one unit, so the session 2 ~5-unit offset no longer reproduces.
+
+**Tested how:** 321 normal tests (new synthetic head/body flex and camera activity tests), strict Clippy/fmt. Packaged close-ups at 18.05/21.00/22.45 s against native sessions security-scene-20261006T204141Z and T214010Z. Camera open/retracting/closed captures (artifacts/camera-acts). Walk samples along Barney's route (artifacts/facing).
+
+**Result:** Scene head flexes move Barney's head by their authored degrees. Cameras fold when logic_disable_cameras fires. Path corners turn smoothly.
+
+**Still broken or not tested:** At security_02 21-22.5 s native Barney's head pitches down toward the consoles while Bevy's stays level. Head flexes and gesture pose flexes are ruled out (both near zero there), and the cause is unexplained. The reversed camera-open transition, camera aim pose and eye sprites are not modeled. Entity lighting and shadows: plan recorded in docs/DESIGN.md step 8.
+
+**Next:** Source model lighting (ambient cubes, world lights, normals).
+
 ## 2026-10-06 Lip sync from speech phonemes
 
 **Changed:** New `source-assets::sentence` reads the text VDAT chunk of owned WAVs (SDK CSentence 1.0: word phonemes and emphasis samples, Catmull-Rom emphasis intensity) and flex settings files (`expressions/phonemes*.vfe`). New `hl2-simulation::lipsync` implements the client viseme path: box filter (0.08 s), neighbor crossfade extension, and weak/normal/strong emphasis blending. The pinned SDK was statically compared with retail client.dll AddVisemesForSentence 100bb720, AddViseme 100bb630 and ComputeBlendedSetting 100bbbd0 (private review). Both hosts parse VDAT when loading waves, register the actor's voice with the chosen wave when a scene line plays, and render `Scene::actor_flex_values` (scene controllers plus visemes) through the shared FaceModel path. Scenes flagged ignorePhonemes play without lip sync.
@@ -79,6 +97,27 @@ Newest entries first. Historical entries retain their original wording/test scop
 **Still broken or not tested:** Lids use the previous frame's eye direction. Head pose (native head turns and tilts further toward the player), brow intensity, Source model lighting (ambient cube/local lights), helmet props, delayed flex weights, lip sync and the retained-host flex path. Full regression batch not rerun.
 
 **Next:** Helmet props parented to Barney's attachments, then retained flexes, lip sync and head flexes.
+
+## 2026-10-06 Apple Silicon (macOS aarch64) support for hl2-bevy
+
+**Changed:** Added first-class macOS / Apple Silicon support to `bevy-migration`:
+- `source-assets::install`: Auto-discovers installed Steam content in `~/Library/Application Support/Steam`.
+- `hl2-ui::console`: Multi-target test assertions for non-Windows platforms, eliminating unused variable warnings under strict Clippy.
+- `scripts/build-bevy.sh` & `launch-bevy.sh`: Added POSIX build and launch scripts (with 1080p and borderless variants) generating `bin/build-bevy-info.json` and packaging `bin/bevy-assets`.
+- `.gitignore`: Whitelisted new POSIX scripts.
+
+**Why:** Enable running the Bevy/wgpu host natively on macOS Apple Silicon without manual path flags or Windows-only script dependencies.
+
+**Tested how:**
+- `cargo test --workspace --locked` (109 shared crate tests, 25 Bevy tests passed).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` (zero warnings).
+- `cargo fmt --all --check`.
+- Packaged release build with `./scripts/build-bevy.sh` (`bin/hl2-bevy`, `bin/bevy-assets`, SHA256 metadata verified).
+- Launched `./launch-bevy.sh`: Auto-discovered owned Steam installation on macOS, initialized wgpu/Metal clustering and preprocessing, created native AppKit window, and loaded `d1_trainstation_01`.
+
+**Result:** Native macOS execution on Apple Silicon via Metal and CoreAudio works out of the box with zero runtime errors.
+
+**Still broken or not tested:** Retained Macroquad/OpenGL host on macOS (deprecated by Apple; bevy-migration is primary target). Native Windows GDI font parity (macOS uses portable fontdue). Retained scripts remain Windows-focused.
 
 ## 2026-10-06 Facial flexes render in Bevy
 

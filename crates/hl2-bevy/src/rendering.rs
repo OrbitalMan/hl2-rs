@@ -678,10 +678,15 @@ pub fn spawn_map(
         let definition = loaded.materials.get(&name).unwrap_or(&fallback);
         // Uniforms and proxy clocks belong to this material/lightmap pair, not its owner.
         // Eye projection remains per-mesh UV data, so sharing this handle cannot share gaze.
+        // Entity color modulation: rendercolor tints the model; renderamt is its alpha
+        // outside kRenderNormal (e.g. the trainstation's dim additive vol_light shafts).
+        let modulation = owner
+            .entity()
+            .map_or(Vec4::ONE, |id| entity_modulation(world, id));
         let material = material_handles
-            .entry((name.clone(), lm))
+            .entry((name.clone(), lm, modulation.to_array().map(f32::to_bits)))
             .or_insert_with(|| {
-                materials.add(make_material(
+                let mut material = make_material(
                     definition,
                     bases.get(&name).unwrap_or(&missing).clone(),
                     lm.and_then(|index| lightmaps.get(index))
@@ -689,7 +694,9 @@ pub fn spawn_map(
                         .clone(),
                     irises.get(&name).or_else(|| overlays.get(&name)).cloned(),
                     &white,
-                ))
+                );
+                material.tint *= modulation;
+                materials.add(material)
             })
             .clone();
         stats.meshes += 1;
@@ -853,6 +860,26 @@ pub fn spawn_map(
     }
     stats.skin_joints = skeletons.values().map(|s| s.joints.len()).sum();
     stats.materials = material_handles.len();
+}
+/// Source render color/alpha of an entity (rendercolor, renderamt when rendermode != 0).
+fn entity_modulation(world: &modkit_core::World, id: usize) -> Vec4 {
+    let Some(e) = world.entities.get(id) else {
+        return Vec4::ONE;
+    };
+    let color = e
+        .get("rendercolor")
+        .and_then(modkit_core::parse_vec3)
+        .map_or(Vec3::ONE, |c| {
+            Vec3::from_array(c.to_array()).clamp(Vec3::ZERO, Vec3::splat(255.)) / 255.
+        });
+    let alpha = if e.get("rendermode").is_some_and(|m| m.trim() != "0") {
+        e.get("renderamt")
+            .and_then(|a| a.trim().parse::<f32>().ok())
+            .map_or(1., |a| (a / 255.).clamp(0., 1.))
+    } else {
+        1.
+    };
+    color.extend(alpha)
 }
 pub(crate) fn mesh_from_surface(surface: &Surface, definition: &MaterialData) -> Mesh {
     let mut batch = Batch::default();
