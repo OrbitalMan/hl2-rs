@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Facial flexes render in Bevy
+
+**Changed:** Scene-driven flex controllers now deform actor faces in the Bevy renderer (setup-loaded flex data, per-vertex flex references, retail weighting, GPU and CPU skinning paths). Earlier the same day: the flex track evaluator and Surface flex sources.
+
+**Why:** Scripted scenes need facial animation; Barney's security_02 expressions were missing.
+
+**Tested how:** 315 normal tests, strict Clippy/fmt, owned flex/surface mapping test, packaged security captures, attention 26/26.
+
+**Result:** Barney's expression changes during security_02.
+
+**Still broken or not tested:** Retained host flexes, native facial comparison, delayed weights, lip sync/phonemes, eyelid-eye interaction, normals.
+
+**Next:** Native face comparison at matching times, then lip sync (phoneme tracks to flex settings).
+
 ## 2026-10-06 Facial flex data reader
 
 **Changed:** New `source-assets::flexes`: MDL flex descriptors, controllers, rules and mesh vertex deltas; SDK RunFlexRules and the retail vertex weighting.

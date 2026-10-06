@@ -29,6 +29,8 @@ pub struct LoadedMap {
     pub sky: Option<source_assets::sky::Skybox>,
     pub effects: crate::effects::PreparedEffects,
     pub gaze: BTreeMap<String, source_assets::eyes::Gaze>,
+    /// Facial flex data per NPC model asset key, read at setup.
+    pub flexes: BTreeMap<String, Arc<source_assets::flexes::FlexModel>>,
     pub eyes: BTreeMap<(String, String), source_assets::eyes::Eyeball>,
     pub bsp: Bsp,
     pub revision: u32,
@@ -169,6 +171,7 @@ pub fn load_with_canvas(
     }
     let mut eyes = BTreeMap::new();
     let mut gaze = BTreeMap::new();
+    let mut flexes = BTreeMap::new();
     for (key, surfaces) in &world.model_assets {
         let model = key.split('#').next().unwrap_or(key);
         if world.model_instances.iter().any(|i| {
@@ -176,6 +179,17 @@ pub fn load_with_canvas(
                 && i.entity
                     .is_some_and(|id| world.entities[id].class().starts_with("npc_"))
         }) {
+            match vfs
+                .read(model)
+                .and_then(|d| d.ok_or_else(|| anyhow::anyhow!("model missing")))
+                .and_then(|d| source_assets::flexes::read_flexes(&d))
+            {
+                Ok(model) if !model.meshes.is_empty() => {
+                    flexes.insert(key.clone(), Arc::new(model));
+                }
+                Ok(_) => {}
+                Err(e) => texture_errors.push(format!("{model}: facial flexes: {e:#}")),
+            }
             match source_assets::eyes::load_gaze(&vfs, model) {
                 Ok(metadata) => {
                     gaze.insert(key.clone(), metadata);
@@ -211,6 +225,7 @@ pub fn load_with_canvas(
         effects,
         eyes,
         gaze,
+        flexes,
         sky,
         audio,
         hud,

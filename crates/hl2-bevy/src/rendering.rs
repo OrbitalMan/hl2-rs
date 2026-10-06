@@ -111,6 +111,8 @@ struct Batch {
     colors: Vec<[f32; 4]>,
     indices: Vec<u32>,
     skin: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
+    /// Studio (bodypart, mesh, mesh-local vertex) of each vertex, for facial flexes.
+    flex: Vec<Option<[u16; 3]>>,
 }
 impl Batch {
     /// Group whole triangles, never cut them at cell boundaries. Actual mesh
@@ -173,8 +175,15 @@ impl Batch {
         let rows = material
             .map(|m| m.uv_transform)
             .unwrap_or([[1., 0., 0.], [0., 1., 0.]]);
-        for vertex in &surface.vertices {
+        for (i, vertex) in surface.vertices.iter().enumerate() {
             self.skin.push((vertex.position, vertex.skin.clone()));
+            self.flex.push(surface.flex_source.as_ref().and_then(|f| {
+                Some([
+                    u16::try_from(f.bodypart).ok()?,
+                    u16::try_from(f.mesh).ok()?,
+                    *f.vertex_ids.get(i)?,
+                ])
+            }));
             self.positions.push(
                 source_to_bevy(
                     transform.transform_point3(Vec3::from_array(vertex.position.to_array())),
@@ -239,6 +248,48 @@ pub struct AnimatedMesh {
     key: String,
     scale: f32,
     bind: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
+    /// Facial flex vertex references and the undeformed bind positions they start from.
+    flex: Vec<Option<[u16; 3]>>,
+    flex_base: Vec<glam::Vec3>,
+    flex_signature: u64,
+}
+/// Facial flex data per model asset key (setup-loaded; no frame IO).
+#[derive(Resource, Default)]
+pub struct FlexModels(pub BTreeMap<String, std::sync::Arc<source_assets::flexes::FlexModel>>);
+/// Bind-space position deltas from an actor's flex controller values (retail weighting).
+fn flex_deltas(
+    model: &source_assets::flexes::FlexModel,
+    values: &BTreeMap<String, f32>,
+) -> std::collections::HashMap<[u16; 3], glam::Vec3> {
+    let src: Vec<f32> = model
+        .controllers
+        .iter()
+        .map(|c| values.get(&c.name.to_lowercase()).copied().unwrap_or(0.))
+        .collect();
+    let descriptors = model.run_rules(&src);
+    let mut deltas = std::collections::HashMap::new();
+    for mesh in model.meshes.iter().filter(|m| m.model == 0) {
+        for flex in &mesh.flexes {
+            let Some(weights) = flex.weights(&descriptors) else {
+                continue;
+            };
+            for v in &flex.vertices {
+                let key = [mesh.bodypart as u16, mesh.mesh as u16, v.index];
+                *deltas.entry(key).or_insert(glam::Vec3::ZERO) += v.delta * v.weight(weights);
+            }
+        }
+    }
+    deltas
+}
+fn flex_signature(values: Option<&BTreeMap<String, f32>>) -> u64 {
+    values.map_or(0, |values| {
+        values.iter().fold(0x9e37u64, |hash, (name, v)| {
+            let name_hash = name
+                .bytes()
+                .fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+            (hash ^ name_hash ^ v.to_bits() as u64).wrapping_mul(0x100000001b3)
+        })
+    })
 }
 /// Conjugate rotation by the same basis change used for vertex positions.
 pub(crate) fn entity_transform(origin: glam::Vec3, rotation: glam::Quat) -> Transform {
@@ -253,6 +304,7 @@ pub(crate) fn entity_transform(origin: glam::Vec3, rotation: glam::Quat) -> Tran
         ),
     )
 }
+#[allow(clippy::too_many_arguments)]
 pub fn present_entities(
     game: Res<crate::gameplay::Gameplay>,
     sim: Res<crate::movement::Simulation>,
@@ -264,6 +316,7 @@ pub fn present_entities(
     mut animations: Query<(&mut AnimatedMesh, &Mesh3d, Option<&mut Aabb>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     performance: Option<Res<crate::performance::Performance>>,
+    flex_models: Option<Res<FlexModels>>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "animation");
     for (owner, mut transform, mut visibility) in &mut entities {
@@ -291,6 +344,55 @@ pub fn present_entities(
         let Some(rig) = game.world.rigs.get(&animation.key) else {
             continue;
         };
+        // Facial flexes deform the bind positions before skinning (both GPU and CPU paths).
+        if let (Some(id), Some(model)) = (
+            animation.entity,
+            flex_models
+                .as_deref()
+                .and_then(|f| f.0.get(&animation.key))
+                .filter(|_| !animation.flex.is_empty()),
+        ) {
+            let values = game.scene.flex_controllers.get(&id);
+            let signature = flex_signature(values);
+            if signature != animation.flex_signature {
+                let deltas = values.map(|v| flex_deltas(model, v)).unwrap_or_default();
+                let scale = animation.scale;
+                let mut changed = Vec::new();
+                let anim = &mut *animation;
+                for (i, key) in anim.flex.iter().enumerate() {
+                    let Some(key) = key else {
+                        continue;
+                    };
+                    let target =
+                        anim.flex_base[i] + deltas.get(key).copied().unwrap_or(glam::Vec3::ZERO);
+                    if anim.bind[i].0 != target {
+                        anim.bind[i].0 = target;
+                        changed.push(i);
+                    }
+                }
+                anim.flex_signature = signature;
+                if !changed.is_empty() {
+                    if anim.gpu.is_some() {
+                        if let Some(mut mesh) = meshes.get_mut(&handle.0)
+                            && let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+                                mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+                        {
+                            for &i in &changed {
+                                if let Some(p) = positions.get_mut(i) {
+                                    *p = source_to_bevy(Vec3::from_array(
+                                        (anim.bind[i].0 * scale).to_array(),
+                                    ))
+                                    .to_array();
+                                }
+                            }
+                        }
+                    } else {
+                        // Force the CPU skinning path to rebuild from the deformed bind.
+                        anim.sampled = None;
+                    }
+                }
+            }
+        }
         let (clip, time) = if let Some(id) = animation.entity {
             let state = &game.scene.states[id];
             if !state.visible || state.killed {
@@ -629,7 +731,10 @@ pub fn spawn_map(
                         weapon: None,
                         key: instance.asset_key(),
                         scale: instance.scale,
+                        flex_base: batch.skin.iter().map(|(p, _)| *p).collect(),
                         bind: std::mem::take(&mut batch.skin),
+                        flex: std::mem::take(&mut batch.flex),
+                        flex_signature: 0,
                     }),
                 Owner::Weapon(name) => Some(AnimatedMesh {
                     sampled: None,
@@ -642,6 +747,9 @@ pub fn spawn_map(
                     ),
                     scale: 1.,
                     bind: std::mem::take(&mut batch.skin),
+                    flex: Vec::new(),
+                    flex_base: Vec::new(),
+                    flex_signature: 0,
                 }),
                 Owner::World | Owner::SkyWorld => None,
             }
@@ -846,6 +954,7 @@ mod tests {
             [2055., 0., 2.],
         ];
         Batch {
+            flex: Vec::new(),
             uvs: (0..6).map(|i| [i as f32 * 0.1, -i as f32]).collect(),
             light_uvs: (0..6).map(|i| [0.3, i as f32 * 0.2]).collect(),
             colors: (0..6).map(|i| [i as f32, 0.25, 0.5, 1.]).collect(),
@@ -1045,6 +1154,9 @@ mod tests {
                     weapon: None,
                     key,
                     scale: 2.,
+                    flex: Vec::new(),
+                    flex_base: Vec::new(),
+                    flex_signature: 0,
                     bind: vec![(
                         glam::Vec3::X,
                         Some(Weights {

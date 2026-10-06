@@ -555,6 +555,7 @@ pub(crate) fn install_map(
         loaded.bsp.visibility_index(),
         no_pvs,
     ));
+    commands.insert_resource(rendering::FlexModels(loaded.flexes.clone()));
     let camera_target = monitors::install(&loaded, commands, images);
     rendering::spawn_map(
         &loaded,
