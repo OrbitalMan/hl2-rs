@@ -297,6 +297,19 @@ pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
     };
     let mut state = LoadState::default();
     load_sequences(vfs, path, &data, &wanted, &mut rig, &mut state, 0)?;
+    match crate::eyes::read_attachments(&data) {
+        Ok(attachments) => {
+            rig.attachments = attachments
+                .into_iter()
+                .map(|(name, a)| modkit_core::animation::Attachment {
+                    name,
+                    bone: a.bone,
+                    local: a.local,
+                })
+                .collect();
+        }
+        Err(e) => rig.warnings.push(format!("{path}: attachments: {e:#}")),
+    }
     Ok(rig)
 }
 fn sequence_events(

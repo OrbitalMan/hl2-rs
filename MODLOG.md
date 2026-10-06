@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 FACS eyelids and native face close-ups
+
+**Changed:** Eyeball records now carry their FACS eyelid fields, and actor flexes apply the retail eyelid step (private review: StudioRender 1001bd80). It converts lid raiser/neutral/lowerer weights and the eye's look direction into lid descriptor values before vertex deltas. Flex math moved into shared `source-assets` (`FaceModel`, `descriptor_weights`, `vertex_deltas`) so the retained host can reuse it. Rigs now keep every model attachment. Movement scripts accept `pitch` and `fov` (Source horizontal 4:3 degrees) for zoomed comparison shots, and the private native oracle takes a matching `ORACLE_CLOSEUP`.
+
+**Why:** Native face close-ups at 18.10 s showed Barney's eyes fully open. Bevy left the lid descriptors at zero, which half-closed the upper lids and raised the lower ones.
+
+**Tested how:** 316 normal + 22 owned tests (synthetic eyelid test; owned Barney/Kleiner neutral face has no lid deformation), strict Clippy/fmt. Packaged close-ups `test-inputs/bevy-face-security-1805/2245.json` compared with native session security-scene-20261006T204141Z (scene times 18.10/22.50 s).
+
+**Result:** Bevy lids now match the native open eyes at both times.
+
+**Still broken or not tested:** Lids use the previous frame's eye direction. Head pose (native head turns and tilts further toward the player), brow intensity, Source model lighting (ambient cube/local lights), helmet props, delayed flex weights, lip sync and the retained-host flex path. Full regression batch not rerun.
+
+**Next:** Helmet props parented to Barney's attachments, then retained flexes, lip sync and head flexes.
+
 ## 2026-10-06 Facial flexes render in Bevy
 
 **Changed:** Scene-driven flex controllers now deform actor faces in the Bevy renderer (setup-loaded flex data, per-vertex flex references, retail weighting, GPU and CPU skinning paths). Earlier the same day: the flex track evaluator and Surface flex sources.

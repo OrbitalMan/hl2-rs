@@ -24,6 +24,9 @@ pub struct Eyes {
     tracking_entity: usize,
     tracking_scene: usize,
     projections: Vec<serde_json::Value>,
+    /// Bone-local eye forward/up per (entity, eyeball surface) for FACS eyelids; flexes
+    /// consume the previous presentation's basis.
+    pub lid_bases: BTreeMap<(usize, usize), (glam::Vec3, glam::Vec3)>,
 }
 impl Eyes {
     pub fn new(loaded: &LoadedMap) -> Self {
@@ -49,7 +52,7 @@ impl Eyes {
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"draws":self.draws,"pose_samples":self.pose_samples,"attachment_actors":self.attachment_actors,"origins":self.origins,"tracking_player":self.tracking_player,"tracking_npc":self.tracking_npc,"tracking_entity":self.tracking_entity,"tracking_scene":self.tracking_scene,"projections":self.projections,
             "policy":"newest valid authored LOOKAT interest, shared per actor; nearest-visible fallback outside scripted interests; animated owned eyes attachments supply actor origin/forward; native random/head/facial/PVS latch behavior remains unfinished",
-            "shader":"owned Eyes iris alpha over sclera with retail planar basis; glints, eyelid flexes and Source model lighting remain unfinished"})
+            "shader":"owned Eyes iris alpha over sclera with retail planar basis; glints and Source model lighting remain unfinished; FACS eyelids follow the previous frame's eye basis"})
     }
 }
 fn bone_pose(
@@ -142,6 +145,7 @@ pub fn present(
     eyes.attachment_actors = attachment_actors;
     eyes.origins = origins;
     eyes.projections.clear();
+    eyes.lid_bases.clear();
     eyes.draws = 0;
     eyes.tracking_player = 0;
     eyes.tracking_npc = 0;
@@ -230,6 +234,13 @@ pub fn present(
             .as_ref()
             .map(|s| state.rotation.inverse() * (s.point - state.origin) / mesh_eye.scale);
         let projection = source_assets::eyes::projection(&mesh_eye.eye, bone, local_target);
+        eyes.lid_bases.insert(
+            (owner.0, mesh_eye.eye.surface),
+            source_assets::eyes::local_basis(
+                bone,
+                source_assets::eyes::basis(&mesh_eye.eye, bone, local_target),
+            ),
+        );
         if let Some(selected) = selected {
             if selected.interest.is_some() {
                 eyes.tracking_scene += 1;

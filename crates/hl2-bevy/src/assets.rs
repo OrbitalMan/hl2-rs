@@ -30,7 +30,7 @@ pub struct LoadedMap {
     pub effects: crate::effects::PreparedEffects,
     pub gaze: BTreeMap<String, source_assets::eyes::Gaze>,
     /// Facial flex data per NPC model asset key, read at setup.
-    pub flexes: BTreeMap<String, Arc<source_assets::flexes::FlexModel>>,
+    pub flexes: BTreeMap<String, Arc<source_assets::flexes::FaceModel>>,
     pub eyes: BTreeMap<(String, String), source_assets::eyes::Eyeball>,
     pub bsp: Bsp,
     pub revision: u32,
@@ -174,6 +174,7 @@ pub fn load_with_canvas(
     let mut flexes = BTreeMap::new();
     for (key, surfaces) in &world.model_assets {
         let model = key.split('#').next().unwrap_or(key);
+        let mut face = None;
         if world.model_instances.iter().any(|i| {
             i.asset_key() == *key
                 && i.entity
@@ -185,7 +186,7 @@ pub fn load_with_canvas(
                 .and_then(|d| source_assets::flexes::read_flexes(&d))
             {
                 Ok(model) if !model.meshes.is_empty() => {
-                    flexes.insert(key.clone(), Arc::new(model));
+                    face = Some(model);
                 }
                 Ok(_) => {}
                 Err(e) => texture_errors.push(format!("{model}: facial flexes: {e:#}")),
@@ -199,6 +200,15 @@ pub fn load_with_canvas(
         }
         match source_assets::eyes::load(&vfs, model) {
             Ok(records) => {
+                if let Some(flex) = face.take() {
+                    flexes.insert(
+                        key.clone(),
+                        Arc::new(source_assets::flexes::FaceModel {
+                            flex,
+                            eyes: records.clone(),
+                        }),
+                    );
+                }
                 for eye in records {
                     if let Some(surface) = surfaces.get(eye.surface) {
                         eyes.insert((key.clone(), surface.material.clone()), eye);

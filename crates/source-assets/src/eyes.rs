@@ -14,6 +14,19 @@ pub struct Eyeball {
     pub radius: f32,
     pub z_offset: f32,
     pub iris_scale: f32,
+    /// FACS eyelid controls; `None` for non-FACS eyeballs.
+    pub lids: Option<EyeLids>,
+}
+/// mstudioeyeball_t eyelid fields: flex descriptor indices for the upper/lower lid
+/// raiser, neutral and lowerer, their lid targets, and the lid descriptors written.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct EyeLids {
+    pub upper_flex: [i32; 3],
+    pub lower_flex: [i32; 3],
+    pub upper_target: [f32; 3],
+    pub lower_target: [f32; 3],
+    pub upper_lid: i32,
+    pub lower_lid: i32,
 }
 /// Server actor attention uses the animated "eyes" attachment when available.
 #[derive(Clone, Debug)]
@@ -33,14 +46,23 @@ pub fn load_gaze(vfs: &Vfs, model: &str) -> Result<Gaze> {
 fn decode_gaze(data: &[u8]) -> Result<Gaze> {
     validate_header(data)?;
     let view_offset = vec3(data, 80)?;
+    let attachment = read_attachments(data)?
+        .into_iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("eyes"))
+        .map(|(_, a)| a);
+    Ok(Gaze {
+        view_offset,
+        attachment,
+    })
+}
+/// Every mstudioattachment_t: name, bone and bone-local 3x4 transform.
+pub fn read_attachments(data: &[u8]) -> Result<Vec<(String, Attachment)>> {
+    validate_header(data)?;
     let bones = count(data, 156, 256)?;
     let attachments = count(data, 240, 4096)?;
     let base = usize::try_from(i32le(data, 244)?)?;
     bytes(data, base, attachments * 92)?;
-    let mut result = Gaze {
-        view_offset,
-        attachment: None,
-    };
+    let mut result = Vec::with_capacity(attachments);
     for id in 0..attachments {
         let at = base + id * 92;
         let start = relative(data, at, at)?;
@@ -51,16 +73,13 @@ fn decode_gaze(data: &[u8]) -> Result<Gaze> {
             .position(|b| *b == 0)
             .context("attachment name unterminated or exceeds 1024 bytes")?;
         let name = std::str::from_utf8(&tail[..end])?;
-        if !name.eq_ignore_ascii_case("eyes") {
-            continue;
-        }
         let bone = usize::try_from(i32le(data, at + 8)?)?;
         if bone >= bones {
-            bail!("eyes attachment bone outside skeleton");
+            bail!("attachment {name} bone outside skeleton");
         }
         let flags = crate::u32le(data, at + 4)?;
         if flags & !0x10000 != 0 {
-            bail!("unsupported eyes attachment flags {flags:#x}");
+            bail!("unsupported attachment {name} flags {flags:#x}");
         }
         let mut matrix = [0.; 16];
         matrix[15] = 1.;
@@ -72,14 +91,16 @@ fn decode_gaze(data: &[u8]) -> Result<Gaze> {
         let local = glam::Mat4::from_cols_array(&matrix);
         let determinant = local.determinant();
         if !determinant.is_finite() || determinant.abs() < 1e-8 {
-            bail!("singular eyes attachment transform");
+            bail!("singular attachment {name} transform");
         }
-        result.attachment = Some(Attachment {
-            bone,
-            local,
-            world_align: flags & 0x10000 != 0,
-        });
-        break;
+        result.push((
+            name.to_owned(),
+            Attachment {
+                bone,
+                local,
+                world_align: flags & 0x10000 != 0,
+            },
+        ));
     }
     Ok(result)
 }
@@ -93,9 +114,9 @@ fn validate_header(data: &[u8]) -> Result<()> {
     }
     Ok(())
 }
-/// Retail StudioRender planar iris basis, at default eyeball-size adjustment.
-/// `bone` is the current bone-to-model transform, before entity scale/rotation.
-pub fn projection(eye: &Eyeball, bone: glam::Mat4, target: Option<Vec3>) -> [glam::Vec4; 2] {
+/// Model-space eye forward and up toward `target` (or the authored direction), with the
+/// retail z-offset adjustment. `bone` is the current bone-to-model transform.
+pub fn basis(eye: &Eyeball, bone: glam::Mat4, target: Option<Vec3>) -> (Vec3, Vec3) {
     let origin = bone.transform_point3(eye.origin);
     let authored_up = bone.transform_vector3(eye.up).normalize();
     let fallback = -bone.transform_vector3(eye.forward).normalize();
@@ -108,8 +129,52 @@ pub fn projection(eye: &Eyeball, bone: glam::Mat4, target: Option<Vec3>) -> [gla
         .unwrap_or_else(|| fallback.cross(authored_up).normalize());
     forward = (forward + right * (eye.z_offset * 2.)).normalize();
     let right = forward.cross(authored_up).normalize();
-    let up = right.cross(forward).normalize();
-    let u = -right * eye.iris_scale;
+    (forward, right.cross(forward).normalize())
+}
+/// Bone-local eye forward/up (VectorIRotate of the model-space basis) for eyelids.
+pub fn local_basis(bone: glam::Mat4, (forward, up): (Vec3, Vec3)) -> (Vec3, Vec3) {
+    let inverse = glam::Mat3::from_mat4(bone).transpose();
+    (inverse * forward, inverse * up)
+}
+/// Bone-local basis of an eye looking along its authored direction.
+pub fn rest_basis(eye: &Eyeball) -> (Vec3, Vec3) {
+    local_basis(glam::Mat4::IDENTITY, basis(eye, glam::Mat4::IDENTITY, None))
+}
+/// Retail R_StudioEyelidFACS (StudioRender 1001bd80, reviewed privately): lid angles are
+/// weighted sums of asin(target / radius) over raiser/neutral/lowerer descriptor weights;
+/// the lid descriptors receive the authored-up component of the lid point on the eyeball,
+/// using the eye's bone-local forward/up.
+pub fn apply_eyelids(eye: &Eyeball, weights: &mut [f32], (forward, up): (Vec3, Vec3)) {
+    let Some(lids) = &eye.lids else {
+        return;
+    };
+    let r = eye.radius;
+    let angle = |flex: &[i32; 3], target: &[f32; 3], weights: &[f32]| -> f32 {
+        (0..3)
+            .map(|i| {
+                let w = usize::try_from(flex[i])
+                    .ok()
+                    .and_then(|d| weights.get(d))
+                    .copied()
+                    .unwrap_or(0.);
+                (target[i] / r).clamp(-1., 1.).asin() * w
+            })
+            .sum()
+    };
+    let upper = angle(&lids.upper_flex, &lids.upper_target, weights);
+    let lower = angle(&lids.lower_flex, &lids.lower_target, weights);
+    for (lid, a) in [(lids.upper_lid, upper), (lids.lower_lid, lower)] {
+        if let Some(w) = usize::try_from(lid).ok().and_then(|d| weights.get_mut(d)) {
+            *w = eye.up.dot(forward * (r * a.cos()) + up * (r * a.sin()));
+        }
+    }
+}
+/// Retail StudioRender planar iris basis, at default eyeball-size adjustment.
+/// `bone` is the current bone-to-model transform, before entity scale/rotation.
+pub fn projection(eye: &Eyeball, bone: glam::Mat4, target: Option<Vec3>) -> [glam::Vec4; 2] {
+    let origin = bone.transform_point3(eye.origin);
+    let (forward, up) = basis(eye, bone, target);
+    let u = -forward.cross(up).normalize() * eye.iris_scale;
     let v = -up * eye.iris_scale;
     [u.extend(0.5 - u.dot(origin)), v.extend(0.5 - v.dot(origin))]
 }
@@ -166,6 +231,24 @@ fn decode(data: &[u8]) -> Result<Vec<Eyeball>> {
                 up: vec3(data, at + 28)?,
                 forward: vec3(data, at + 40)?,
                 iris_scale: f32le(data, at + 60)?,
+                lids: if bytes(data, at + 140, 1)?[0] != 0 {
+                    None
+                } else {
+                    let ints = |o: usize| -> Result<[i32; 3]> {
+                        Ok([i32le(data, o)?, i32le(data, o + 4)?, i32le(data, o + 8)?])
+                    };
+                    let floats = |o: usize| -> Result<[f32; 3]> {
+                        Ok([f32le(data, o)?, f32le(data, o + 4)?, f32le(data, o + 8)?])
+                    };
+                    Some(EyeLids {
+                        upper_flex: ints(at + 68)?,
+                        lower_flex: ints(at + 80)?,
+                        upper_target: floats(at + 92)?,
+                        lower_target: floats(at + 104)?,
+                        upper_lid: i32le(data, at + 116)?,
+                        lower_lid: i32le(data, at + 120)?,
+                    })
+                },
             };
             if eye.bone >= bones
                 || eye.radius <= 0.
@@ -239,6 +322,46 @@ mod tests {
             d[at..at + 4].copy_from_slice(&value.to_le_bytes());
         }
         d
+    }
+    #[test]
+    fn facs_eyelids_follow_weighted_targets_and_gaze() {
+        let eye = Eyeball {
+            surface: 0,
+            bone: 0,
+            origin: Vec3::ZERO,
+            up: Vec3::Z,
+            forward: -Vec3::X,
+            radius: 0.5,
+            z_offset: 0.,
+            iris_scale: 1.,
+            lids: Some(EyeLids {
+                upper_flex: [0, 1, 2],
+                lower_flex: [3, 4, 5],
+                upper_target: [0.3, 0.2, -0.25],
+                lower_target: [-0.1, -0.25, -0.3],
+                upper_lid: 6,
+                lower_lid: 7,
+            }),
+        };
+        // Neutral weights, looking straight ahead: lids sit at the neutral targets.
+        let mut w = [0., 1., 0., 0., 1., 0., 0., 0.];
+        apply_eyelids(&eye, &mut w, rest_basis(&eye));
+        assert!(
+            (w[6] - 0.2).abs() < 1e-5 && (w[7] + 0.25).abs() < 1e-5,
+            "{w:?}"
+        );
+        // Looking up raises the lid point's authored-up component.
+        let (f, u) = (
+            Vec3::new(1., 0., 0.3).normalize(),
+            Vec3::new(-0.3, 0., 1.).normalize(),
+        );
+        let mut up = [0., 1., 0., 0., 1., 0., 0., 0.];
+        apply_eyelids(&eye, &mut up, (f, u));
+        assert!(up[6] > w[6] && up[7] > w[7]);
+        // Non-FACS eyeballs leave descriptors alone.
+        let mut untouched = w;
+        apply_eyelids(&Eyeball { lids: None, ..eye }, &mut untouched, (f, u));
+        assert_eq!(untouched, w);
     }
     #[test]
     fn attachment_basis_fallback_and_malformed_records_are_distinguished() {

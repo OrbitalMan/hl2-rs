@@ -136,10 +136,13 @@ pub fn install(
 }
 pub fn present(
     mut sky: ResMut<Sky>,
-    mut world: Query<(&Transform, &mut Camera), With<FlyCamera>>,
-    mut backgrounds: Query<(&SkyCamera, &mut Transform, &mut Camera), (Without<FlyCamera>,)>,
+    mut world: Query<(&Transform, &mut Camera, &Projection), With<FlyCamera>>,
+    mut backgrounds: Query<
+        (&SkyCamera, &mut Transform, &mut Camera, &mut Projection),
+        (Without<FlyCamera>,),
+    >,
 ) {
-    let Ok((world_transform, mut world_camera)) = world.single_mut() else {
+    let Ok((world_transform, mut world_camera, world_projection)) = world.single_mut() else {
         return;
     };
     let eye = glam::Vec3::from_array(bevy_to_source(world_transform.translation).to_array());
@@ -161,7 +164,14 @@ pub fn present(
     };
     sky.frames_2d += u64::from(visible_2d);
     sky.frames_3d += u64::from(visible_3d);
-    for (kind, mut transform, mut camera) in &mut backgrounds {
+    for (kind, mut transform, mut camera, mut projection) in &mut backgrounds {
+        // Follow scripted world FOV changes; keep the sky's own clip planes.
+        if let (Projection::Perspective(sky_p), Projection::Perspective(world_p)) =
+            (&mut *projection, world_projection)
+            && sky_p.fov != world_p.fov
+        {
+            sky_p.fov = world_p.fov;
+        }
         camera.is_active = if kind.0 { visible_2d } else { visible_3d };
         camera.clear_color = if !kind.0 && visible_2d {
             ClearColorConfig::None

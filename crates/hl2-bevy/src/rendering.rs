@@ -253,42 +253,13 @@ pub struct AnimatedMesh {
     flex_base: Vec<glam::Vec3>,
     flex_signature: u64,
 }
-/// Facial flex data per model asset key (setup-loaded; no frame IO).
+/// Facial flex and eyeball data per model asset key (setup-loaded; no frame IO).
 #[derive(Resource, Default)]
-pub struct FlexModels(pub BTreeMap<String, std::sync::Arc<source_assets::flexes::FlexModel>>);
-/// Bind-space position deltas from an actor's flex controller values (retail weighting).
-fn flex_deltas(
-    model: &source_assets::flexes::FlexModel,
-    values: &BTreeMap<String, f32>,
-) -> std::collections::HashMap<[u16; 3], glam::Vec3> {
-    let src: Vec<f32> = model
-        .controllers
-        .iter()
-        .map(|c| values.get(&c.name.to_lowercase()).copied().unwrap_or(0.))
-        .collect();
-    let descriptors = model.run_rules(&src);
-    let mut deltas = std::collections::HashMap::new();
-    for mesh in model.meshes.iter().filter(|m| m.model == 0) {
-        for flex in &mesh.flexes {
-            let Some(weights) = flex.weights(&descriptors) else {
-                continue;
-            };
-            for v in &flex.vertices {
-                let key = [mesh.bodypart as u16, mesh.mesh as u16, v.index];
-                *deltas.entry(key).or_insert(glam::Vec3::ZERO) += v.delta * v.weight(weights);
-            }
-        }
-    }
-    deltas
-}
-fn flex_signature(values: Option<&BTreeMap<String, f32>>) -> u64 {
-    values.map_or(0, |values| {
-        values.iter().fold(0x9e37u64, |hash, (name, v)| {
-            let name_hash = name
-                .bytes()
-                .fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
-            (hash ^ name_hash ^ v.to_bits() as u64).wrapping_mul(0x100000001b3)
-        })
+pub struct FlexModels(pub BTreeMap<String, std::sync::Arc<source_assets::flexes::FaceModel>>);
+/// Descriptor weights quantized to 1/1024: deformation is rebuilt only when it changes.
+fn flex_signature(weights: &[f32]) -> u64 {
+    weights.iter().fold(0x9e37u64, |hash, w| {
+        (hash ^ (w * 1024.).round() as i64 as u64).wrapping_mul(0x100000001b3)
     })
 }
 /// Conjugate rotation by the same basis change used for vertex positions.
@@ -317,6 +288,7 @@ pub fn present_entities(
     mut meshes: ResMut<Assets<Mesh>>,
     performance: Option<Res<crate::performance::Performance>>,
     flex_models: Option<Res<FlexModels>>,
+    eyes: Option<Res<crate::eyes::Eyes>>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "animation");
     for (owner, mut transform, mut visibility) in &mut entities {
@@ -352,10 +324,16 @@ pub fn present_entities(
                 .and_then(|f| f.0.get(&animation.key))
                 .filter(|_| !animation.flex.is_empty()),
         ) {
-            let values = game.scene.flex_controllers.get(&id);
-            let signature = flex_signature(values);
+            let empty = BTreeMap::new();
+            let values = game.scene.flex_controllers.get(&id).unwrap_or(&empty);
+            let weights = model.descriptor_weights(values, |eye| {
+                eyes.as_deref()
+                    .and_then(|e| e.lid_bases.get(&(id, eye.surface)))
+                    .copied()
+            });
+            let signature = flex_signature(&weights);
             if signature != animation.flex_signature {
-                let deltas = values.map(|v| flex_deltas(model, v)).unwrap_or_default();
+                let deltas = model.flex.vertex_deltas(&weights);
                 let scale = animation.scale;
                 let mut changed = Vec::new();
                 let anim = &mut *animation;
@@ -1085,6 +1063,7 @@ mod tests {
                 Rig {
                     pose_parameters: Vec::new(),
                     autoplay: Vec::new(),
+                    attachments: Vec::new(),
                     bones: vec![Bone {
                         name: "root".into(),
                         parent: None,
