@@ -215,8 +215,8 @@ impl Impacts {
             .and_then(|instance| world.rigs.get(&instance.asset_key()))
             .zip(scene.states.get(hit.entity))
             .filter(|(rig, state)| rig.clips.contains_key(&state.animation))
-            .map(|(rig, state)| {
-                let matrices = rig.matrices(&state.animation, scene.animation_time(hit.entity));
+            .map(|(rig, _)| {
+                let matrices = scene.actor_matrices(rig, hit.entity);
                 surfaces
                     .iter()
                     .map(|surface| {

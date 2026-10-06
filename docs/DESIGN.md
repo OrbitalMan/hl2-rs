@@ -14,8 +14,8 @@ Owner decision 2026-10-06: resume the Rust rewrite now. Whole-corpus coverage pa
 
 1. Done 2026-10-06 (except model faceposer tags): raw delta/post transforms, bone masks and autolayers are preserved; children load as dependencies. Next: faceposer tags and an explicit child budget.
 2. Done 2026-10-06: shared composition with synthetic and owned tests; retail AccumulatePose/AddSequenceLayers/SlerpBones statically compared. Native runtime pose comparison is not done.
-3. Execute choreography gestures with authored timing/tag retiming, ramps, priorities and pause/cancel semantics. Both renderers consume the same composed poses.
-4. Compare a real intro/security scene against original captures/audio/timings, then extend head/facial/lip controls and actor scheduling. Seeded developer actors are not campaign proof.
+3. Done 2026-10-06: scene gestures run with tag retiming, intensity, posture suppression and end/cancel fades; both hosts use Scene::actor_matrices. Remaining: native cross-scene priority and empty-name behavior.
+4. Next: compare a real intro/security scene against original-game captures at matching scene times (private oracle wrapper, original settings unchanged), then extend head/facial/lip controls and actor scheduling. Seeded developer actors are not campaign proof.
 
 Validate each step. After two failed attempts at one approach, document it and choose a different evidence-based approach. Full AI, staging, save state, arsenal and shaders remain separate tasks.
 

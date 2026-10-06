@@ -407,7 +407,7 @@ impl Gameplay {
             }).collect();
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"pending":self.selection.pending,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
-            "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
+            "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
             "projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }

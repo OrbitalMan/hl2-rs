@@ -232,7 +232,7 @@ fn sample_key(clip: &modkit_core::animation::Clip, time: f32) -> u32 {
 }
 #[derive(Component)]
 pub struct AnimatedMesh {
-    sampled: Option<(String, u32)>,
+    sampled: Option<(String, u32, u64)>,
     gpu: Option<crate::gpu_skinning::Skeleton>,
     entity: Option<usize>,
     weapon: Option<String>,
@@ -286,7 +286,7 @@ pub fn present_entities(
         }
     }
     let mut updated_joints = std::collections::BTreeSet::new();
-    let mut poses: BTreeMap<(String, String, u32), Vec<glam::Mat4>> = BTreeMap::new();
+    let mut poses: BTreeMap<(String, String, u32, u64), Vec<glam::Mat4>> = BTreeMap::new();
     for (mut animation, handle, aabb) in &mut animations {
         let Some(rig) = game.world.rigs.get(&animation.key) else {
             continue;
@@ -316,17 +316,30 @@ pub fn present_entities(
             continue;
         };
         let key = sample_key(definition, time);
+        // Gesture layers make the pose actor-specific; the entity id keeps cache entries apart.
+        let layers = animation
+            .entity
+            .map_or(0, |id| game.scene.gestures.signature(id));
+        let layer_key = match (layers, animation.entity) {
+            (0, _) | (_, None) => 0,
+            (signature, Some(id)) => signature ^ (id as u64).rotate_left(32),
+        };
         if animation
             .sampled
             .as_ref()
-            .is_some_and(|(name, previous)| name == clip && *previous == key)
+            .is_some_and(|(name, previous, layered)| {
+                name == clip && *previous == key && *layered == layer_key
+            })
         {
             continue;
         }
-        let sampled = (clip.to_owned(), key);
+        let sampled = (clip.to_owned(), key, layer_key);
         let matrices = poses
-            .entry((animation.key.clone(), clip.to_owned(), key))
-            .or_insert_with(|| rig.matrices(clip, time));
+            .entry((animation.key.clone(), clip.to_owned(), key, layer_key))
+            .or_insert_with(|| match animation.entity {
+                Some(id) => game.scene.actor_matrices(rig, id),
+                None => rig.matrices(clip, time),
+            });
         if let Some(skeleton) = &animation.gpu {
             if updated_joints.insert(skeleton.joints[0]) {
                 for ((joint, matrix), bone) in

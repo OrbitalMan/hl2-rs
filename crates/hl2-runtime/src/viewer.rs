@@ -1270,7 +1270,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             if !rig.clips.contains_key(name) {
                 continue;
             }
-            let matrices = rig.matrices(name, scene.animation_time(*id));
+            let matrices = scene.actor_matrices(rig, *id);
             for batch in meshes {
                 for (v, (bind, weights)) in batch.mesh.vertices.iter_mut().zip(&batch.skin) {
                     if let Some(weights) = weights {

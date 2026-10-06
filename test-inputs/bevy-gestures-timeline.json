@@ -1,0 +1,297 @@
+[
+ {
+  "tick": 1,
+  "fly": true,
+  "eye": [
+   -4022,
+   -510,
+   38
+  ],
+  "yaw": -65,
+  "actions": [
+   {
+    "action": "send",
+    "target": "#792",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "trigger_barney_close_exitdoor",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "trigger_storage_close_door_1",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "security_*",
+    "input": "Cancel"
+   },
+   {
+    "action": "send",
+    "target": "barney_ss_*",
+    "input": "CancelSequence"
+   },
+   {
+    "action": "send",
+    "target": "ss_Helmet_Reveal",
+    "input": "CancelSequence"
+   },
+   {
+    "action": "actor_pose",
+    "target": "barney",
+    "origin": [
+     -3336,
+     -340,
+     -32
+    ],
+    "yaw": 90
+   }
+  ]
+ },
+ {
+  "tick": 2,
+  "eye": [
+   -3376,
+   -252,
+   34
+  ],
+  "yaw": -65
+ },
+ {
+  "tick": 3,
+  "actions": [
+   {
+    "action": "send",
+    "target": "security_*",
+    "input": "Cancel"
+   }
+  ]
+ },
+ {
+  "tick": 10,
+  "actions": [
+   {
+    "action": "send",
+    "target": "security_02",
+    "input": "Start"
+   }
+  ],
+  "label": "start"
+ },
+ {
+  "tick": 40,
+  "label": "t40"
+ },
+ {
+  "tick": 70,
+  "label": "t70"
+ },
+ {
+  "tick": 100,
+  "label": "t100"
+ },
+ {
+  "tick": 130,
+  "label": "t130"
+ },
+ {
+  "tick": 160,
+  "label": "t160"
+ },
+ {
+  "tick": 190,
+  "label": "t190"
+ },
+ {
+  "tick": 220,
+  "label": "t220"
+ },
+ {
+  "tick": 250,
+  "label": "t250"
+ },
+ {
+  "tick": 280,
+  "label": "t280"
+ },
+ {
+  "tick": 310,
+  "label": "t310"
+ },
+ {
+  "tick": 340,
+  "label": "t340"
+ },
+ {
+  "tick": 370,
+  "label": "t370"
+ },
+ {
+  "tick": 400,
+  "label": "t400"
+ },
+ {
+  "tick": 430,
+  "label": "t430"
+ },
+ {
+  "tick": 460,
+  "label": "t460"
+ },
+ {
+  "tick": 490,
+  "label": "t490"
+ },
+ {
+  "tick": 520,
+  "label": "t520"
+ },
+ {
+  "tick": 550,
+  "label": "t550"
+ },
+ {
+  "tick": 580,
+  "label": "t580"
+ },
+ {
+  "tick": 610,
+  "label": "t610"
+ },
+ {
+  "tick": 640,
+  "label": "t640"
+ },
+ {
+  "tick": 670,
+  "label": "t670"
+ },
+ {
+  "tick": 700,
+  "label": "t700"
+ },
+ {
+  "tick": 730,
+  "label": "t730"
+ },
+ {
+  "tick": 760,
+  "label": "t760"
+ },
+ {
+  "tick": 790,
+  "label": "t790"
+ },
+ {
+  "tick": 820,
+  "label": "t820"
+ },
+ {
+  "tick": 850,
+  "label": "t850"
+ },
+ {
+  "tick": 880,
+  "label": "t880"
+ },
+ {
+  "tick": 910,
+  "label": "t910"
+ },
+ {
+  "tick": 940,
+  "label": "t940"
+ },
+ {
+  "tick": 970,
+  "label": "t970"
+ },
+ {
+  "tick": 1000,
+  "label": "t1000"
+ },
+ {
+  "tick": 1030,
+  "label": "t1030"
+ },
+ {
+  "tick": 1060,
+  "label": "t1060"
+ },
+ {
+  "tick": 1090,
+  "label": "t1090"
+ },
+ {
+  "tick": 1120,
+  "label": "t1120"
+ },
+ {
+  "tick": 1150,
+  "label": "t1150"
+ },
+ {
+  "tick": 1180,
+  "label": "t1180"
+ },
+ {
+  "tick": 1210,
+  "label": "t1210"
+ },
+ {
+  "tick": 1240,
+  "label": "t1240"
+ },
+ {
+  "tick": 1270,
+  "label": "t1270"
+ },
+ {
+  "tick": 1300,
+  "label": "t1300"
+ },
+ {
+  "tick": 1330,
+  "label": "t1330"
+ },
+ {
+  "tick": 1360,
+  "label": "t1360"
+ },
+ {
+  "tick": 1390,
+  "label": "t1390"
+ },
+ {
+  "tick": 1420,
+  "label": "t1420"
+ },
+ {
+  "tick": 1450,
+  "label": "t1450"
+ },
+ {
+  "tick": 1480,
+  "label": "t1480"
+ },
+ {
+  "tick": 1510,
+  "label": "t1510"
+ },
+ {
+  "tick": 1540,
+  "label": "t1540"
+ },
+ {
+  "tick": 1570,
+  "label": "t1570"
+ },
+ {
+  "tick": 1600,
+  "paused": true,
+  "label": "end"
+ }
+]

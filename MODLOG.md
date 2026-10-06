@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Scene gesture execution
+
+**Changed:** Scene GESTURE events create per-actor layers: SDK tag retiming, intensity weights, posture suppression and RemoveLayer fades. Both hosts compose base clip and layers through `Scene::actor_matrices`. Faceposer keyvalues are parsed, and the clip budget accounts for gesture children.
+
+**Why:** Authored scene gestures were ignored, so actors only played base clips.
+
+**Tested how:** 307 normal and 21 owned tests, strict Clippy/fmt; synthetic retiming/layer tests; owned security_02 playback with Barney's rig; packaged 1,600-tick security timeline and the regression batch (pixel comparisons, movement/weapons/attention verifiers, retained smoke).
+
+**Result:** Barney, Kleiner and the G-Man actor now layer their authored gestures in Bevy. Existing fixtures without gestures are unchanged.
+
+**Still broken or not tested:** Comparison against the original game, cross-scene layer priority, IK, head/facial animation and lip sync. Empty-name gestures produce no layer, and native handling of them is unverified. Posture motion uses scene movement as IsMoving.
+
+**Next:** Capture the same security scene moments in the original game and compare poses/timing; then head pose and facial flexes.
+
 ## 2026-10-06 Shared Source animation layer composition
 
 **Changed:** modkit-core composes Source sequences: delta/post layers, per-bone weights and autolayer ramps through `Rig::accumulate_pose`. source-assets keeps raw delta frames, sequence flags, bone weights, fades and named autolayers, and loads autolayer children with their parents.

@@ -182,6 +182,91 @@ pub fn compiled_ramp(samples: &[Sample], duration: f32, time: f32) -> f32 {
         + 0.5 * (-pre + 3. * start - 3. * end + next) * t * t * t;
     y.clamp(0., 1.)
 }
+/// First tag index with this name (case-insensitive), as CChoreoEvent::FindAbsoluteTag.
+pub fn find_tag(tags: &[Tag], name: &str) -> Option<usize> {
+    tags.iter().position(|t| t.name.eq_ignore_ascii_case(name))
+}
+/// SDK CChoreoEvent::GetOriginalPercentageFromPlaybackPercentage for gesture events.
+/// `playback`/`original` are the absolute tag lists; `linear[i]` marks playback tag i.
+pub fn gesture_original_percentage(
+    playback: &[Tag],
+    original: &[Tag],
+    linear: &[bool],
+    t: f32,
+) -> f32 {
+    let count = playback.len() as isize;
+    if count as usize != original.len() || count == 0 {
+        return t;
+    }
+    if t <= 0. {
+        return 0.;
+    }
+    let bounded = |tags: &[Tag], i: isize| {
+        if i < 0 {
+            0.
+        } else if i >= count {
+            1.
+        } else {
+            tags[i as usize].value
+        }
+    };
+    let (mut s, mut n) = (0., 0.);
+    let mut i = -1;
+    while i < count {
+        s = bounded(playback, i);
+        n = bounded(playback, i + 1);
+        if t >= s && t <= n {
+            break;
+        }
+        i += 1;
+    }
+    let prev = (i - 1).max(-2);
+    let start = i.max(-1);
+    let end = (i + 1).min(count);
+    let next = (i + 2).min(count + 1);
+    let is_tag = |index: isize| index >= 0 && index < count;
+    let is_linear = |index: isize| is_tag(index) && linear.get(index as usize) == Some(&true);
+    if is_tag(start) && is_tag(end) && is_linear(start) && is_linear(end) {
+        let (ps, pe) = (playback[start as usize].value, playback[end as usize].value);
+        let f = (t - ps) / (pe - ps);
+        return (1. - f) * original[start as usize].value + f * original[end as usize].value;
+    }
+    let point = |index: isize| glam::Vec2::new(bounded(playback, index), bounded(original, index));
+    let (mut pre, p_start, p_end, mut post) = (point(prev), point(start), point(end), point(next));
+    if is_linear(start) {
+        pre = p_start - (p_end - p_start);
+    }
+    if is_linear(end) {
+        post = p_end + (p_end - p_start);
+    }
+    let dt = n - s;
+    let f = if dt > 0. { (t - s) / dt } else { 0. }.clamp(0., 1.);
+    catmull_rom_normalize_x(pre, p_start, p_end, post, f).y
+}
+/// mathlib Catmull_Rom_Spline_NormalizeX: neighbor points rescaled to the segment's x span.
+pub fn catmull_rom_normalize_x(
+    p1: glam::Vec2,
+    p2: glam::Vec2,
+    p3: glam::Vec2,
+    p4: glam::Vec2,
+    t: f32,
+) -> glam::Vec2 {
+    let dt = p3.x - p2.x;
+    let (mut p1n, mut p4n) = (p1, p4);
+    if dt != 0. {
+        if p1.x != p2.x {
+            p1n = p2.lerp(p1, dt / (p2.x - p1.x));
+        }
+        if p4.x != p3.x {
+            p4n = p3.lerp(p4, dt / (p4.x - p3.x));
+        }
+    }
+    let (t2, t3) = (t * t, t * t * t);
+    0.5 * ((-p1n + 3. * p2 - 3. * p3 + p4n) * t3
+        + (2. * p1n - 5. * p2 + 4. * p3 - p4n) * t2
+        + (-p1n + p3) * t)
+        + p2
+}
 #[derive(Clone, Debug)]
 pub struct Channel {
     pub name: String,
@@ -717,6 +802,50 @@ mod tests {
         b.extend(0u32.to_le_bytes());
         b.extend(blob);
         b
+    }
+    fn tags(values: &[(&str, f32)]) -> Vec<Tag> {
+        values
+            .iter()
+            .map(|(name, value)| Tag {
+                name: (*name).into(),
+                value: *value,
+            })
+            .collect()
+    }
+    #[test]
+    fn gesture_retiming_follows_sdk_tag_segments() {
+        let playback = tags(&[("apex", 0.25), ("loop", 0.5), ("end", 0.8)]);
+        let original = tags(&[("apex", 0.2), ("loop", 0.3), ("end", 0.6)]);
+        // Untagged, mismatched and nonpositive inputs.
+        assert_eq!(gesture_original_percentage(&[], &[], &[], 0.4), 0.4);
+        assert_eq!(
+            gesture_original_percentage(&playback, &original[..2], &[], 0.4),
+            0.4
+        );
+        assert_eq!(
+            gesture_original_percentage(&playback, &original, &[], -0.1),
+            0.
+        );
+        // Linear loop/end segment interpolates original tags directly.
+        let linear = [false, true, true];
+        let mid = gesture_original_percentage(&playback, &original, &linear, 0.65);
+        assert!((mid - 0.45).abs() < 1e-6);
+        // Tags land on their original percentages and the end maps to one.
+        for (t, want) in [(0.25, 0.2), (0.5, 0.3), (0.8, 0.6), (1., 1.)] {
+            let got = gesture_original_percentage(&playback, &original, &linear, t);
+            assert!((got - want).abs() < 1e-5, "{t}: {got}");
+        }
+        // Identical timelines stay on the identity line between real tags. The SDK's
+        // virtual boundary points coincide with 0 and 1, so the edge segments ease.
+        for i in 5..=16 {
+            let t = i as f32 / 20.;
+            let got = gesture_original_percentage(&playback, &playback, &[], t);
+            assert!((got - t).abs() < 1e-5, "{t}: {got}");
+        }
+        let eased = gesture_original_percentage(&playback, &playback, &[], 0.05);
+        assert!(eased > 0. && eased < 0.05);
+        assert_eq!(find_tag(&playback, "LOOP"), Some(1));
+        assert_eq!(find_tag(&playback, "missing"), None);
     }
     #[test]
     fn compiled_ramps_normalize_irregular_times_and_zero_edges() {

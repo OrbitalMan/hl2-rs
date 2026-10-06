@@ -2,7 +2,9 @@
 use crate::{bytes, f32le, i16le, i32le, u16le, u32le, vec3, vpk::Vfs};
 use anyhow::{bail, Context, Result};
 use glam::{Mat4, Quat, Vec3};
-use modkit_core::animation::{sequence_flags, AutoLayer, Bone, Clip, ClipLayer, Pose, Rig};
+use modkit_core::animation::{
+    sequence_flags, AutoLayer, Bone, Clip, ClipLayer, Faceposer, Pose, Rig,
+};
 use std::collections::BTreeSet;
 fn offset(data: &[u8], field: usize) -> Result<usize> {
     Ok(usize::try_from(i32le(data, field)?)?)
@@ -388,6 +390,63 @@ fn autolayer_records(data: &[u8], at: usize) -> Result<Vec<RawAutoLayer>> {
         })
         .collect()
 }
+/// `mdlkeyvalue { faceposer { ... } }` from the sequence keyvalue text. Text that does
+/// not parse is treated as absent, like a failed KeyValues load.
+fn sequence_faceposer(data: &[u8], at: usize) -> Result<Option<Faceposer>> {
+    let size = offset(data, at + 176)?;
+    if size == 0 {
+        return Ok(None);
+    }
+    if size > 64 * 1024 {
+        bail!("sequence keyvalues exceed limit");
+    }
+    let text = bytes(data, relative(data, at, at + 172)?, size)?;
+    let text = &text[..text.iter().position(|b| *b == 0).unwrap_or(size)];
+    let Ok(entries) = crate::keyvalues::parse(std::str::from_utf8(text)?) else {
+        return Ok(None);
+    };
+    let Some(block) = entries
+        .iter()
+        .find(|e| e.key.eq_ignore_ascii_case("mdlkeyvalue"))
+        .and_then(|e| e.get("faceposer"))
+    else {
+        return Ok(None);
+    };
+    let mut faceposer = Faceposer {
+        kind: block
+            .get("type")
+            .and_then(|e| e.text())
+            .unwrap_or("")
+            .into(),
+        start_loop: "loop".into(),
+        end_loop: "end".into(),
+        tags: Vec::new(),
+    };
+    for entry in block.children() {
+        if entry.key.eq_ignore_ascii_case("startloop") {
+            faceposer.start_loop = entry.text().unwrap_or("").into();
+        } else if entry.key.eq_ignore_ascii_case("endloop") {
+            faceposer.end_loop = entry.text().unwrap_or("").into();
+        } else if entry.key.eq_ignore_ascii_case("tags") {
+            for tag in entry.children() {
+                faceposer
+                    .tags
+                    .push((tag.key.clone(), leading_int(tag.text().unwrap_or(""))));
+            }
+        }
+    }
+    Ok(Some(faceposer))
+}
+/// KeyValues GetInt: leading decimal integer, otherwise zero.
+fn leading_int(text: &str) -> i32 {
+    let text = text.trim_start();
+    let end = text
+        .char_indices()
+        .take_while(|(i, c)| c.is_ascii_digit() || (*i == 0 && (*c == '-' || *c == '+')))
+        .last()
+        .map_or(0, |(i, c)| i + c.len_utf8());
+    text[..end].parse().unwrap_or(0)
+}
 /// Sequence flags, fades, per-bone weights (remapped to rig bones) and named autolayers.
 fn sequence_layer(
     data: &[u8],
@@ -427,10 +486,15 @@ fn sequence_layer(
         autolayers,
         fade_in: f32le(data, at + 104)?,
         fade_out: f32le(data, at + 108)?,
+        faceposer: sequence_faceposer(data, at)?,
     })
 }
+const MAX_CLIPS: usize = 1024;
+/// About 112 MiB of sampled local poses per rig.
+const MAX_POSES: usize = 4 << 20;
 #[derive(Default)]
 struct LoadState {
+    poses: usize,
     seen: BTreeSet<String>,
     ordinal: u32,
     bytes: usize,
@@ -520,11 +584,11 @@ fn load_sequences(
         if rig.clips.contains_key(&name) {
             continue;
         }
-        if rig.clips.len() >= 64 {
-            let warning = "sequence load budget of 64 reached".to_string();
-            if !rig.warnings.contains(&warning) {
-                rig.warnings.push(warning);
-            }
+        // Gesture parents need their autolayer children, so the budget counts clips and
+        // sampled poses rather than requested names.
+        if rig.clips.len() >= MAX_CLIPS || state.poses >= MAX_POSES {
+            rig.warnings
+                .push(format!("sequence load budget reached; skipped {name}"));
             continue;
         }
         // Select the central sample for blend grids; pose-parameter blends are not evaluated yet.
@@ -544,6 +608,7 @@ fn load_sequences(
                 .map(|layer| Clip { layer, ..clip })
         }) {
             Ok(mut clip) => {
+                state.poses += clip.frames.len() * rig.bones.len();
                 let (events, discarded) = sequence_events(data, at)?;
                 clip.events = events;
                 if discarded > 0 {
@@ -682,7 +747,7 @@ mod tests {
     }
     fn layer_data() -> Vec<u8> {
         // Two sequences at 0 and 212; sequence 0 has one autolayer and two bone weights.
-        let mut data = vec![0; 600];
+        let mut data = vec![0; 760];
         for (seq, label) in [(0usize, 440usize), (212, 450)] {
             data[seq + 4..seq + 8].copy_from_slice(&((label - seq) as i32).to_le_bytes());
         }
@@ -702,6 +767,10 @@ mod tests {
         }
         data[520..524].copy_from_slice(&0.5f32.to_le_bytes());
         data[524..528].copy_from_slice(&1f32.to_le_bytes());
+        let kv = b"mdlkeyvalue { faceposer { \"type\" \"gesture\" \"endloop\" \"hold\" \"tags\" { \"apex\" \"12\" \"loop\" \"40x\" } } }\0";
+        data[600..600 + kv.len()].copy_from_slice(kv);
+        data[172..176].copy_from_slice(&600i32.to_le_bytes());
+        data[176..180].copy_from_slice(&(kv.len() as i32).to_le_bytes());
         data
     }
     fn source_bone(name: &str) -> SourceBone {
@@ -731,6 +800,16 @@ mod tests {
         assert_eq!(layer.bone_weights, [1., 0., 0.5]);
         assert_eq!(layer.fade_in, 0.2);
         assert_eq!(layer.fade_out, 0.4);
+        let faceposer = layer.faceposer.as_ref().unwrap();
+        assert!(faceposer.is_gesture());
+        assert_eq!(
+            (faceposer.start_loop.as_str(), faceposer.end_loop.as_str()),
+            ("loop", "hold")
+        );
+        assert_eq!(
+            faceposer.tags,
+            [("apex".to_string(), 12), ("loop".to_string(), 40)]
+        );
         assert_eq!(layer.autolayers.len(), 1);
         let auto = &layer.autolayers[0];
         assert_eq!(auto.sequence, "child");
@@ -767,6 +846,14 @@ mod tests {
         )
         .unwrap();
         let parent = &rig.clips["g_pointright"];
+        let faceposer = parent.layer.faceposer.as_ref().unwrap();
+        assert!(faceposer.is_gesture());
+        for (tag, frame) in [("apex", 12), ("accent", 21), ("loop", 40), ("end", 48)] {
+            assert!(
+                faceposer.tags.contains(&(tag.to_string(), frame)),
+                "{faceposer:?}"
+            );
+        }
         assert_eq!(parent.layer.autolayers.len(), 6);
         assert!(parent.layer.bone_weights.iter().all(|w| *w == 0.));
         assert_eq!(parent.layer.bone_weights.len(), rig.bones.len());

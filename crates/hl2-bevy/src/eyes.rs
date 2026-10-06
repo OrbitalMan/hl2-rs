@@ -96,10 +96,7 @@ pub fn present(
                 return None;
             }
             let rig = game.world.rigs.get(key)?;
-            Some((
-                id,
-                rig.matrices(&state.animation, game.scene.animation_time(id)),
-            ))
+            Some((id, game.scene.actor_matrices(rig, id)))
         })
         .collect();
     let mut candidates = vec![(

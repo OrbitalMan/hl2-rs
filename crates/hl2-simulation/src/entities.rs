@@ -194,6 +194,7 @@ pub struct Scene {
     pub movement_commands: Vec<SceneMoveCommand>,
     movement_ready: BTreeMap<crate::npc::GoalKey, bool>,
     pub look_targets: crate::attention::LookTargets,
+    pub gestures: crate::gestures::GestureLayers,
     pub monitors: crate::monitors::Cameras,
 }
 impl Scene {
@@ -215,6 +216,7 @@ impl Scene {
             movement_commands: Vec::new(),
             movement_ready: BTreeMap::new(),
             look_targets: Default::default(),
+            gestures: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
         };
         for e in &world.entities {
@@ -624,6 +626,13 @@ impl Scene {
         }
         result
     }
+    /// Skinning matrices for an actor: current base clip plus scene gesture layers.
+    /// Both hosts use this so presentation, eyes and impacts see one pose.
+    pub fn actor_matrices(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<glam::Mat4> {
+        self.gestures
+            .compose(rig, id, &self.states[id].animation, self.animation_time(id))
+            .0
+    }
     /// Sequence sampling uses the paused choreography clock, not wall/game time.
     pub fn animation_time(&self, id: usize) -> f32 {
         let state = &self.states[id];
@@ -718,7 +727,8 @@ impl Scene {
             state.animation_done = animation.previous_done;
         }
     }
-    fn clear_scene_animations(&mut self, owner: usize) {
+    fn clear_scene_animations(&mut self, owner: usize, canceled: bool) {
+        self.gestures.release(owner, None, canceled);
         self.movement_commands
             .push(SceneMoveCommand::CancelScene(owner));
         self.movement_ready.retain(|key, _| key.scene != owner);
@@ -855,13 +865,55 @@ impl Scene {
         }
         self.choreography.insert(id, scene);
     }
+    /// ProcessGestureSceneEvent for started events inside their window; RemoveLayer
+    /// after the end. Absent or empty gesture names produce no layer (LookupSequence fails).
+    fn process_gestures(&mut self, id: usize, scene: &Choreography, play: &Playback) {
+        for event in self.gestures.active_events(id) {
+            let e = &scene.data.events[event];
+            if play.elapsed > e.end.unwrap_or(e.start) as f64 {
+                self.gestures.release(id, Some(event), false);
+            }
+        }
+        for &index in scene.order.iter().take(play.next) {
+            let event = &scene.data.events[index];
+            let Some(end) = event.end else {
+                continue;
+            };
+            let duration = end - event.start;
+            if event.kind != EventType::Gesture
+                || !event.active()
+                || event.parameters[0].is_empty()
+                || duration <= 0.
+                || play.elapsed < event.start as f64
+                || play.elapsed > end as f64
+            {
+                continue;
+            }
+            let Some(actor) = event.actor.and_then(|a| play.actors[a]) else {
+                continue;
+            };
+            if self.states[actor].killed {
+                continue;
+            }
+            self.gestures.update(crate::gestures::GestureUpdate {
+                actor,
+                scene: id,
+                event: index,
+                data: &scene.data,
+                playback: (play.elapsed as f32 - event.start) / duration,
+                weight: event.intensity(&scene.data, play.elapsed as f32),
+                priority: event.channel.unwrap_or(0),
+                moving: self.states[actor].movement_animation.is_some(),
+            });
+        }
+    }
     fn cancel_choreography(&mut self, id: usize) {
         if self
             .choreography
             .get_mut(&id)
             .is_some_and(|s| s.playback.take().is_some())
         {
-            self.clear_scene_animations(id);
+            self.clear_scene_animations(id, true);
             self.fire(id, "OnCanceled", id);
         }
     }
@@ -871,7 +923,7 @@ impl Scene {
             let mut scene = self.choreography.remove(&id).unwrap();
             if self.states[id].killed {
                 scene.playback = None;
-                self.clear_scene_animations(id);
+                self.clear_scene_animations(id, true);
             }
             if let Some(mut play) = scene.playback.take() {
                 let mut canceled = false;
@@ -890,7 +942,7 @@ impl Scene {
                     }
                 }
                 if canceled {
-                    self.clear_scene_animations(id);
+                    self.clear_scene_animations(id, true);
                     self.fire(id, "OnCanceled", id);
                 } else {
                     if play.pause.is_none() {
@@ -946,6 +998,9 @@ impl Scene {
                                             self.sounds.push(request);
                                         }
                                     }
+                                }
+                                EventType::Gesture => {
+                                    // Layers start and update in process_gestures each tick.
                                 }
                                 EventType::LookAt => {
                                     // CBaseFlex LOOKAT refreshes NPC interests; non-NPC flex actors are a no-op.
@@ -1160,6 +1215,9 @@ impl Scene {
                         self.look_targets
                             .refresh(actor, target, importance, self.time, id, index);
                     }
+                    if play.pause.is_none() {
+                        self.process_gestures(id, &scene, &play);
+                    }
                     if play.pause.is_none()
                         && play.next == scene.order.len()
                         && play.elapsed > scene.data.stop_time() as f64
@@ -1168,7 +1226,7 @@ impl Scene {
                             self.diagnostics.scene_completions += 1;
                             self.fire(id, "OnCompletion", id);
                         }
-                        self.clear_scene_animations(id);
+                        self.clear_scene_animations(id, false);
                     } else {
                         for actor in 0..self.states.len() {
                             if self.states[actor]
@@ -1768,6 +1826,9 @@ impl Scene {
         self.look_targets.cleanup(self.time, |id| {
             self.states.get(id).is_some_and(|s| !s.killed)
         });
+        let states = &self.states;
+        self.gestures
+            .advance(dt, |id| states.get(id).is_some_and(|s| !s.killed));
         self.tick_choreography(world, dt);
         for id in 0..world.entities.len() {
             let e = &world.entities[id];
@@ -2630,6 +2691,93 @@ mod tests {
         scene.states[monitor].killed = true;
         scene.tick(&world, Vec3::ZERO, 0.015);
         assert!(!scene.look_targets.report().contains_key(&barney));
+    }
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn owned_security_gestures_layer_barney_and_fade_after_cancel() {
+        let game = source_assets::install::discover().unwrap();
+        let data = std::fs::read(game.join("hl2/maps/d1_trainstation_01.bsp")).unwrap();
+        let world = source_assets::bsp::Bsp::parse(&data)
+            .unwrap()
+            .world("d1_trainstation_01")
+            .unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let mut scene = Scene::new(&world);
+        scene.queue.clear();
+        scene.load_choreography(&world, &vfs).unwrap();
+        let entity = |name: &str| {
+            world
+                .entities
+                .iter()
+                .position(|e| {
+                    e.get("targetname")
+                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                })
+                .unwrap()
+        };
+        let id = entity("security_02");
+        let barney = entity("Barney");
+        // The parsed test world has no model instances, so request this scene's names directly.
+        let wanted = scene.choreography[&id]
+            .data
+            .events
+            .iter()
+            .filter(|e| matches!(e.kind, EventType::Gesture | EventType::Sequence))
+            .map(|e| e.parameters[0].to_lowercase())
+            .filter(|n| !n.is_empty())
+            .collect::<BTreeSet<_>>();
+        let rig = source_assets::animation::load(&vfs, "models/barney.mdl", &wanted).unwrap();
+        assert!(rig.warnings.is_empty(), "{:?}", rig.warnings);
+        scene.send(id, "Start", "");
+        let (mut seen, mut composed_ticks, mut moved) = (BTreeSet::new(), 0, false);
+        for _ in 0..2000 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+            let layers = scene.gestures.layers(barney);
+            for layer in layers {
+                assert!((0. ..=1.).contains(&layer.playback), "{layer:?}");
+                assert!((0. ..=1.).contains(&layer.weight), "{layer:?}");
+                seen.insert(layer.sequence.clone());
+            }
+            if layers.iter().any(|l| l.removal.is_none() && l.weight > 0.5) && composed_ticks < 40 {
+                let base = scene.states[barney].animation.clone();
+                let (matrices, errors) = scene.gestures.compose(&rig, barney, &base, 1.);
+                assert!(errors.is_empty(), "{errors:?}");
+                assert!(matrices.iter().all(|m| m.is_finite()));
+                moved |= matrices
+                    .iter()
+                    .zip(rig.matrices(&base, 1.))
+                    .any(|(a, b)| !a.abs_diff_eq(b, 1e-3));
+                composed_ticks += 1;
+            }
+        }
+        assert!(
+            !seen.is_empty(),
+            "security_02 produced no Barney gesture layer"
+        );
+        assert!(
+            composed_ticks > 0 && moved,
+            "gesture layers did not move bones"
+        );
+        // Restart, let a layer start, then cancel: the 0.5 sec RemoveLayer fade drops it.
+        scene.send(id, "Start", "");
+        for _ in 0..2000 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+            if !scene.gestures.layers(barney).is_empty() {
+                break;
+            }
+        }
+        assert!(!scene.gestures.layers(barney).is_empty());
+        scene.send(id, "Cancel", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(scene
+            .gestures
+            .layers(barney)
+            .iter()
+            .all(|l| l.removal.is_some()));
+        for _ in 0..40 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+        }
+        assert!(scene.gestures.layers(barney).is_empty());
     }
     #[test]
     fn no_touch_changelevel_still_accepts_explicit_input() {

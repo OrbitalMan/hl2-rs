@@ -58,6 +58,25 @@ pub struct ClipLayer {
     pub autolayers: Vec<AutoLayer>,
     pub fade_in: f32,
     pub fade_out: f32,
+    /// Sequence keyvalues `faceposer` block, used to retime scene gestures.
+    #[serde(default)]
+    pub faceposer: Option<Faceposer>,
+}
+/// Faceposer metadata from MDL sequence keyvalues.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Faceposer {
+    /// `type`: "gesture" or "posture"; postures fade while the actor moves.
+    pub kind: String,
+    /// Tag name and authored animation frame.
+    pub tags: Vec<(String, i32)>,
+    /// Tags made linear for retiming (`startloop`/`endloop`, default "loop"/"end").
+    pub start_loop: String,
+    pub end_loop: String,
+}
+impl Faceposer {
+    pub fn is_gesture(&self) -> bool {
+        self.kind.eq_ignore_ascii_case("gesture")
+    }
 }
 /// Child sequence accumulated after its parent, ramped by the parent cycle.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -545,13 +564,13 @@ impl Rig {
         }
         Ok(())
     }
-    /// Base-clip playback at seconds. Delta sequences are composed onto the bind pose.
-    pub fn matrices(&self, name: &str, time: f32) -> Vec<Mat4> {
+    /// Base-clip local pose at seconds. Delta sequences are composed onto the bind pose.
+    pub fn local_pose(&self, name: &str, time: f32) -> Vec<Pose> {
         let Some(clip) = self.clips.get(&name.to_lowercase()) else {
-            return self.local_matrices(&self.bind_pose());
+            return self.bind_pose();
         };
         let Some(last) = clip.frames.len().checked_sub(1) else {
-            return self.local_matrices(&self.bind_pose());
+            return self.bind_pose();
         };
         let frames = last.max(1) as f32;
         let frame = if clip.looping {
@@ -563,13 +582,17 @@ impl Rig {
         let b = (a + 1).min(last);
         let sampled = interpolate(&clip.frames[a], &clip.frames[b], frame.fract());
         if clip.layer.flags & sequence_flags::DELTA == 0 {
-            return self.local_matrices(&sampled);
+            return sampled;
         }
         let mut pose = self.bind_pose();
         if slerp_bones(&mut pose, &sampled, &clip.layer, 1.).is_err() {
             pose = self.bind_pose();
         }
-        self.local_matrices(&pose)
+        pose
+    }
+    /// Base-clip playback at seconds.
+    pub fn matrices(&self, name: &str, time: f32) -> Vec<Mat4> {
+        self.local_matrices(&self.local_pose(name, time))
     }
     /// Skinning matrices for already composed local poses; missing bones use bind.
     pub fn local_matrices(&self, poses: &[Pose]) -> Vec<Mat4> {
