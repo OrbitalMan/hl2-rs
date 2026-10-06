@@ -8,7 +8,7 @@
       52
     ],
     "yaw": 0,
-    "actions": [
+    "actions": [{"action":"send","target":"gordon_cop_template","input":"ForceSpawn"},
       {
         "action": "send",
         "target": "barney_security_monitor_1",

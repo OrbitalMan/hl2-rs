@@ -2,7 +2,7 @@
   {
     "time": 0.05,
     "action": "console",
-    "command": "sv_cheats 1; ent_fire #792 Disable; ent_fire trigger_barney_close_exitdoor Disable; ent_fire trigger_storage_close_door_1 Disable; ent_fire security_* Cancel; ent_fire barney_ss_* CancelSequence; ent_fire ss_Helmet_Reveal CancelSequence"
+    "command": "ent_fire gordon_cop_template ForceSpawn; sv_cheats 1; ent_fire #792 Disable; ent_fire trigger_barney_close_exitdoor Disable; ent_fire trigger_storage_close_door_1 Disable; ent_fire security_* Cancel; ent_fire barney_ss_* CancelSequence; ent_fire ss_Helmet_Reveal CancelSequence"
   },
   {
     "time": 0.2,

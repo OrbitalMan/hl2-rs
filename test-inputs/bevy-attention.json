@@ -11,6 +11,11 @@
     "actions": [
       {
         "action": "send",
+        "target": "gordon_cop_template",
+        "input": "ForceSpawn"
+      },
+      {
+        "action": "send",
         "target": "#792",
         "input": "Disable"
       },
@@ -38,7 +43,18 @@
         "action": "send",
         "target": "ss_Helmet_Reveal",
         "input": "CancelSequence"
-      },
+      }
+    ]
+  },
+  {
+    "tick": 2,
+    "eye": [
+      -3376,
+      -252,
+      34
+    ],
+    "yaw": -65,
+    "actions": [
       {
         "action": "actor_pose",
         "target": "barney",
@@ -50,15 +66,6 @@
         "yaw": 90
       }
     ]
-  },
-  {
-    "tick": 2,
-    "eye": [
-      -3376,
-      -252,
-      34
-    ],
-    "yaw": -65
   },
   {
     "tick": 3,

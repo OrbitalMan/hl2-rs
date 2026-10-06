@@ -1,0 +1,79 @@
+[
+ {
+  "tick": 1,
+  "fly": true,
+  "eye": [
+   -4022,
+   -510,
+   38
+  ],
+  "yaw": -65,
+  "actions": [{"action":"send","target":"gordon_cop_template","input":"ForceSpawn"},
+   {
+    "action": "send",
+    "target": "#792",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "trigger_barney_close_exitdoor",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "trigger_storage_close_door_1",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "security_*",
+    "input": "Cancel"
+   },
+   {
+    "action": "send",
+    "target": "barney_ss_*",
+    "input": "CancelSequence"
+   },
+   {
+    "action": "send",
+    "target": "ss_Helmet_Reveal",
+    "input": "CancelSequence"
+   }
+  ]
+ },
+ {
+  "tick": 2,
+  "eye": [
+   -3376,
+   -252,
+   34
+  ],
+  "yaw": -65
+ },
+ {
+  "tick": 3,
+  "actions": [
+   {
+    "action": "send",
+    "target": "security_*",
+    "input": "Cancel"
+   }
+  ]
+ },
+ {
+  "tick": 10,
+  "actions": [
+   {
+    "action": "send",
+    "target": "security_02",
+    "input": "Start"
+   }
+  ],
+  "label": "start"
+ },
+ {
+  "tick": 1213,
+  "paused": true,
+  "label": "scene-1805"
+ }
+]

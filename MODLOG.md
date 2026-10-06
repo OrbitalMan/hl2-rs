@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Native scene oracle, point_template spawning, prop flags and NPC doors
+
+**Changed:** Private native oracle for the security scene. point_template children wait for ForceSpawn. prop_physics motion-disabled/start-asleep flags are honored. NPC routes pass through doors and open them on contact. Barney fixtures force-spawn him like the campaign trigger.
+
+**Why:** The first native comparison showed Barney never reaching his desk in Bevy. The causes: closed doors, a desk that physics wrongly moved, and templated actors existing too early, which is also wasted simulation.
+
+**Tested how:** 308 normal and 21 owned tests, strict Clippy/fmt; synthetic template test; owned security tests with ForceSpawn; native oracle captures; packaged security fixtures and the regression batch.
+
+**Result:** The desk stays at its authored pose. Barney spawns on demand, opens the interrogation-room door and walks to the next door.
+
+**Still broken or not tested:** NPC-touch triggers (trigger_cop_close_door_1 unlocks barney_door_2), so the desk walk and a side-by-side gesture comparison are unfinished. The Combine wall camera is not rendered. Repeat ForceSpawn copies, EnableMotion and door-blocked replanning edge cases are untested.
+
+**Next:** NPC trigger touch (spawnflags 2), then rerun the native/Bevy security comparison at 18.05/22.45 s.
+
 ## 2026-10-06 Scene gesture execution
 
 **Changed:** Scene GESTURE events create per-actor layers: SDK tag retiming, intensity weights, posture suppression and RemoveLayer fades. Both hosts compose base clip and layers through `Scene::actor_matrices`. Faceposer keyvalues are parsed, and the clip budget accounts for gesture children.

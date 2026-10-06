@@ -1038,7 +1038,14 @@ mod tests {
         )?;
         vfs.mount_pak(bsp.lump(40))?;
         let world = bsp.world("d1_trainstation_01")?;
-        let controller = crate::entities::Scene::new(&world);
+        let mut controller = crate::entities::Scene::new(&world);
+        // Speakers created by point_templates exist by the time their scenes run.
+        for (id, e) in world.entities.iter().enumerate() {
+            if e.class() == "point_template" {
+                controller.send(id, "ForceSpawn", "");
+            }
+        }
+        controller.tick(&world, glam::Vec3::ZERO, 0.015);
         let cache = Cache::parse(
             vfs.read("scenes/scenes.image")?
                 .context("scene cache absent")?,

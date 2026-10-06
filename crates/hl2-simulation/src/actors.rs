@@ -77,6 +77,7 @@ pub fn prepare_npcs(
         .map(|g| crate::npc::NavRestrictions::from_world(world, g))
         .unwrap_or_default();
     let mut controller = crate::npc::Controller::new(graph, restrictions);
+    controller.set_doors(world);
     let mut clips = std::collections::BTreeMap::new();
     // Barney's normal human hull and ordinary spawn are verified in the owned executable.
     // Other NPC factories need their own hull/motor evidence before being registered here.
@@ -178,6 +179,9 @@ pub fn tick_npcs(
         }
     }
     for update in controller.tick(physics, &poses, &transients, TICK, false) {
+        if let Some(door) = update.door {
+            scene.npc_open_door(world, door, update.feet);
+        }
         scene.apply_movement(
             update.key,
             update.feet,

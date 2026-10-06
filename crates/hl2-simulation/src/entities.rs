@@ -196,6 +196,9 @@ pub struct Scene {
     pub look_targets: crate::attention::LookTargets,
     pub gestures: crate::gestures::GestureLayers,
     pub monitors: crate::monitors::Cameras,
+    /// point_template children that do not exist until ForceSpawn, with their authored
+    /// visible/enabled state.
+    templates: BTreeMap<usize, Vec<(usize, bool, bool)>>,
 }
 impl Scene {
     pub fn new(world: &World) -> Self {
@@ -218,6 +221,7 @@ impl Scene {
             look_targets: Default::default(),
             gestures: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
+            templates: BTreeMap::new(),
         };
         for e in &world.entities {
             let base_rotation = physics::angles(
@@ -373,6 +377,7 @@ impl Scene {
                 scene.animate(world, id, "ACT_IDLE", false);
             }
         }
+        scene.hold_template_children(world);
         for id in 0..world.entities.len() {
             if world.entities[id].class() == "logic_auto" {
                 scene.fire(id, "OnMapSpawn", usize::MAX);
@@ -382,6 +387,47 @@ impl Scene {
             }
         }
         scene
+    }
+    /// CPointTemplate removes its Template01..16 entities at map spawn unless spawnflag 1
+    /// ("don't remove template entities") is set; they are created by ForceSpawn.
+    fn hold_template_children(&mut self, world: &World) {
+        for (id, e) in world.entities.iter().enumerate() {
+            if e.class() != "point_template" || number(e, "spawnflags", 0.) as u32 & 1 != 0 {
+                continue;
+            }
+            let mut children: Vec<(usize, bool, bool)> = Vec::new();
+            for slot in 1..=16 {
+                let Some(name) = e
+                    .get(&format!("Template{slot:02}"))
+                    .filter(|n| !n.is_empty())
+                else {
+                    continue;
+                };
+                for (child, c) in world.entities.iter().enumerate() {
+                    if child != id
+                        && c.get("targetname")
+                            .is_some_and(|t| t.eq_ignore_ascii_case(name))
+                        && !children.iter().any(|(existing, ..)| *existing == child)
+                    {
+                        let state = &mut self.states[child];
+                        children.push((child, state.visible, state.enabled));
+                        state.killed = true;
+                        state.visible = false;
+                        state.enabled = false;
+                    }
+                }
+            }
+            if !children.is_empty() {
+                self.templates.insert(id, children);
+            }
+        }
+    }
+    /// Whether an entity is a point_template child that has not been spawned yet.
+    pub fn template_pending(&self, id: usize) -> bool {
+        self.templates
+            .values()
+            .flatten()
+            .any(|(child, ..)| *child == id)
     }
     /// Preload map choreography before simulation; no blocking asset reads in tick.
     pub fn load_choreography(&mut self, world: &World, vfs: &Vfs) -> anyhow::Result<usize> {
@@ -1332,6 +1378,20 @@ impl Scene {
         });
         true
     }
+    /// An NPC blocked by a closed door opens it away from itself; locked doors stay shut.
+    pub fn npc_open_door(&mut self, world: &World, id: usize, opener: Vec3) {
+        let Some(state) = self.states.get(id) else {
+            return;
+        };
+        if state.killed || state.locked || state.target != 0. {
+            return;
+        }
+        match world.entities[id].class() {
+            "prop_door_rotating" => self.use_with_opener(world, id, Some(opener)),
+            "func_door" | "func_door_rotating" => self.send(id, "Open", ""),
+            _ => {}
+        }
+    }
     pub fn use_entity(&mut self, world: &World, id: usize) {
         self.use_with_opener(world, id, None);
     }
@@ -1424,6 +1484,21 @@ impl Scene {
                 }
             }
             "cancel" if class == "logic_choreographed_scene" => self.cancel_choreography(id),
+            "forcespawn" if class == "point_template" => {
+                // Templates spawn copies; each authored child is created once here. Repeat
+                // spawns would need new entity instances, which are not implemented.
+                if let Some(children) = self.templates.remove(&id) {
+                    for (child, visible, enabled) in children {
+                        let state = &mut self.states[child];
+                        state.killed = false;
+                        state.visible = visible;
+                        state.enabled = enabled;
+                    }
+                    self.fire(id, "OnEntitySpawned", p.activator);
+                } else {
+                    self.unsupported_input("point_template", "ForceSpawn:repeat");
+                }
+            }
             "kill" => {
                 self.states[id].killed = true;
                 self.states[id].visible = false;
@@ -2585,6 +2660,10 @@ mod tests {
             .position(|e| e.get("targetname") == Some("storage_room_door"))
             .unwrap();
         assert!(scene.states[door].locked);
+        // Barney is a point_template child; spawn him as the campaign does on arrival.
+        assert!(scene.send_named("gordon_cop_template", "ForceSpawn", "", 0.));
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        scene.queue.clear();
         assert!(scene.send_named("security_03", "Start", "", 0.));
         for _ in 0..600 {
             scene.tick(&world, Vec3::ZERO, 0.015);
@@ -2636,6 +2715,11 @@ mod tests {
         };
         let id = entity("security_02");
         let barney = entity("Barney");
+        // Barney is a point_template child; the campaign force-spawns him on arrival.
+        assert!(scene.template_pending(barney));
+        scene.send(entity("gordon_cop_template"), "ForceSpawn", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(!scene.template_pending(barney) && !scene.states[barney].killed);
         let monitor = entity("mark_secmonitor_look_1");
         scene.send(id, "Start", "");
         for _ in 0..50 {
@@ -2717,6 +2801,11 @@ mod tests {
         };
         let id = entity("security_02");
         let barney = entity("Barney");
+        // Barney is a point_template child; the campaign force-spawns him on arrival.
+        assert!(scene.template_pending(barney));
+        scene.send(entity("gordon_cop_template"), "ForceSpawn", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(!scene.template_pending(barney) && !scene.states[barney].killed);
         // The parsed test world has no model instances, so request this scene's names directly.
         let wanted = scene.choreography[&id]
             .data
@@ -2778,6 +2867,51 @@ mod tests {
             scene.tick(&world, Vec3::ZERO, 0.015);
         }
         assert!(scene.gestures.layers(barney).is_empty());
+    }
+    #[test]
+    fn point_template_children_wait_for_force_spawn_and_spawn_once() {
+        let world = World {
+            entities: vec![
+                entity(
+                    "point_template",
+                    "maker",
+                    &[
+                        ("Template01", "actor"),
+                        ("OnEntitySpawned", "relay,Trigger,,0,-1"),
+                    ],
+                ),
+                entity("npc_citizen", "actor", &[]),
+                entity("logic_relay", "relay", &[]),
+                entity(
+                    "point_template",
+                    "keeper",
+                    &[("Template01", "kept"), ("spawnflags", "1")],
+                ),
+                entity("npc_citizen", "kept", &[]),
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        assert!(scene.template_pending(1) && scene.states[1].killed && !scene.states[1].visible);
+        // "Don't remove template entities" keeps the authored entity alive.
+        assert!(!scene.template_pending(4) && !scene.states[4].killed);
+        // Dormant children ignore inputs, like entities that do not exist yet.
+        scene.send(1, "Kill", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        let fired = scene.diagnostics.outputs_fired;
+        scene.send(0, "ForceSpawn", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(!scene.template_pending(1) && !scene.states[1].killed && scene.states[1].visible);
+        assert!(
+            scene.diagnostics.outputs_fired > fired,
+            "OnEntitySpawned fires"
+        );
+        scene.send(0, "ForceSpawn", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(scene
+            .diagnostics
+            .unsupported
+            .contains_key("point_template.ForceSpawn:repeat"));
     }
     #[test]
     fn no_touch_changelevel_still_accepts_explicit_input() {

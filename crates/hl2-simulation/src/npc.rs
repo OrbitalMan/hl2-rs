@@ -102,6 +102,8 @@ pub struct MoveUpdate {
     pub animation_time: f32,
     pub state: GoalState,
     pub contact_normal: Vec3,
+    /// Door this NPC is blocked by and should open (AI navigator door handling).
+    pub door: Option<usize>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct GoalSnapshot {
@@ -299,8 +301,25 @@ pub struct Controller {
     actors: BTreeMap<usize, Actor>,
     goals: BTreeMap<GoalKey, Goal>,
     pending: Vec<MoveUpdate>,
+    /// Door entities NPC routes may pass through by opening them.
+    doors: BTreeSet<usize>,
 }
 impl Controller {
+    /// Doors that block a graph link do not invalidate it; NPCs open them on contact.
+    pub fn set_doors(&mut self, world: &World) {
+        self.doors = world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                matches!(
+                    e.class(),
+                    "prop_door_rotating" | "func_door" | "func_door_rotating"
+                )
+            })
+            .map(|(id, _)| id)
+            .collect();
+    }
     pub fn new(graph: Option<Graph>, restrictions: NavRestrictions) -> Self {
         Self {
             graph,
@@ -308,6 +327,7 @@ impl Controller {
             actors: BTreeMap::new(),
             goals: BTreeMap::new(),
             pending: Vec::new(),
+            doors: BTreeSet::new(),
         }
     }
     pub fn register_actor(
@@ -448,6 +468,7 @@ impl Controller {
                     world,
                     self.graph.as_ref(),
                     &self.restrictions,
+                    &self.doors,
                     actor,
                     pose.feet,
                     Destination {
@@ -464,7 +485,7 @@ impl Controller {
         }
         // A rejected competing scene never owns the actor's pose or animation.
         if goal.state != GoalState::Blocked(GoalBlockReason::ActorBusy) {
-            self.pending.push(update(key, &goal));
+            self.pending.push(update(key, &goal, &self.doors));
         }
         self.goals.insert(key, goal);
         self.status(key).cloned().unwrap()
@@ -475,7 +496,7 @@ impl Controller {
                 let owned = goal.state != GoalState::Blocked(GoalBlockReason::ActorBusy);
                 goal.state = GoalState::Canceled;
                 if owned {
-                    self.pending.push(update(*key, goal));
+                    self.pending.push(update(*key, goal, &self.doors));
                 }
             }
         }
@@ -503,7 +524,7 @@ impl Controller {
                 goal.state,
                 GoalState::Blocked(GoalBlockReason::InvalidInput)
             ) {
-                updates.push(update(*key, goal));
+                updates.push(update(*key, goal, &self.doors));
                 continue;
             }
             let outcome = (|| {
@@ -537,6 +558,7 @@ impl Controller {
                         world,
                         self.graph.as_ref(),
                         &self.restrictions,
+                        &self.doors,
                         actor,
                         goal.feet,
                         Destination {
@@ -553,13 +575,21 @@ impl Controller {
             if let Err(reason) = outcome {
                 goal.state = GoalState::Blocked(reason);
             }
-            updates.push(update(*key, goal));
+            updates.push(update(*key, goal, &self.doors));
         }
         updates
     }
 }
-fn update(key: GoalKey, goal: &Goal) -> MoveUpdate {
+fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>) -> MoveUpdate {
+    let door = match &goal.state {
+        GoalState::Blocked(GoalBlockReason::Collision {
+            blocker: Some(blocker),
+            ..
+        }) if doors.contains(blocker) => Some(*blocker),
+        _ => None,
+    };
     MoveUpdate {
+        door,
         key,
         feet: goal.feet,
         yaw_degrees: goal.yaw,
@@ -764,10 +794,30 @@ struct Destination {
     feet: Vec3,
     tolerance: f32,
 }
+/// A graph link whose only obstruction is a door: NPCs open doors along routes.
+fn door_link<W: NpcCollisionWorld>(
+    world: &W,
+    actor: &Actor,
+    from: Vec3,
+    to: Vec3,
+    query: Query<'_>,
+    doors: &BTreeSet<usize>,
+) -> bool {
+    if doors.is_empty()
+        || !npc_probe::fits(world, to, actor.ground.hull, query)
+        || !npc_probe::stand(world, to, actor.ground, query)
+    {
+        return false;
+    }
+    let moved = npc_probe::ground_move(world, from, to, actor.ground, query);
+    !moved.completed && moved.blocker.is_some_and(|b| doors.contains(&b))
+}
+#[allow(clippy::too_many_arguments)]
 fn plan<W: NpcCollisionWorld>(
     world: &W,
     graph: Option<&Graph>,
     restrictions: &NavRestrictions,
+    doors: &BTreeSet<usize>,
     actor: &Actor,
     start: Vec3,
     destination: Destination,
@@ -827,7 +877,12 @@ fn plan<W: NpcCollisionWorld>(
         })
         .ok_or(GoalBlockReason::NoRoute)?;
     let nodes = search(graph, restrictions, start_node, end_node, |_, from, to| {
-        connector(world, actor, from, to, 0.1, query).then_some(from.distance(to))
+        if connector(world, actor, from, to, 0.1, query) {
+            Some(from.distance(to))
+        } else {
+            // Prefer open routes; a door link costs extra for the open/wait.
+            door_link(world, actor, from, to, query, doors).then(|| from.distance(to) + 128.)
+        }
     })?;
     let mut feet: Vec<_> = nodes
         .iter()

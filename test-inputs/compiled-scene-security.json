@@ -1,5 +1,5 @@
 [
-  {"time":0.05,"action":"console","command":"sv_cheats 1; ent_fire #792 Disable; ent_fire trigger_barney_close_exitdoor Disable; ent_fire trigger_storage_close_door_1 Disable"},
+  {"time":0.05,"action":"console","command":"ent_fire gordon_cop_template ForceSpawn; sv_cheats 1; ent_fire #792 Disable; ent_fire trigger_barney_close_exitdoor Disable; ent_fire trigger_storage_close_door_1 Disable"},
   {"time":0.20,"action":"console","command":"noclip 1; setpos -3480 -350 -16; setang -5 56"},
   {"time":0.25,"action":"console","command":"ent_fire security_* Cancel; ent_fire storage_room_door Close; ent_fire storage_room_door Lock"},
   {"time":0.35,"action":"capture","name":"scene-security-door-baseline"},

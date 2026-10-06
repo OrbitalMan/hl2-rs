@@ -226,7 +226,15 @@ impl Physics {
             let Some(asset) = world.model_assets.get(&instance.asset_key()) else {
                 continue;
             };
-            let dynamic = instance.kind.starts_with("prop_physics");
+            // prop_physics spawnflags: 1 start asleep, 8 motion disabled (static until
+            // EnableMotion, which is not implemented).
+            let prop_flags = instance
+                .entity
+                .and_then(|id| world.entities.get(id))
+                .and_then(|e| e.get("spawnflags"))
+                .and_then(|f| f.parse::<u32>().ok())
+                .unwrap_or(0);
+            let dynamic = instance.kind.starts_with("prop_physics") && prop_flags & 8 == 0;
             // The installed rotating door's VVD bind mesh points along X, but
             // its idle sequence turns the panel along Y. Use the same initial
             // skinned pose as rendering before applying the entity's swing.
@@ -307,6 +315,7 @@ impl Physics {
                 p.bodies.insert(
                     RigidBodyBuilder::dynamic()
                         .position(position)
+                        .sleeping(prop_flags & 1 != 0)
                         .ccd_enabled(true)
                         .linear_damping(0.05)
                         .angular_damping(0.1),

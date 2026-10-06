@@ -1,5 +1,5 @@
 [
-  {"tick":1,"fly":true,"eye":[-3480,-350,-16],"yaw":56,"actions":[
+  {"tick":1,"fly":true,"eye":[-3480,-350,-16],"yaw":56,"actions":[{"action":"send","target":"gordon_cop_template","input":"ForceSpawn"},
     {"action":"send","target":"#792","input":"Disable"},
     {"action":"send","target":"trigger_barney_close_exitdoor","input":"Disable"},
     {"action":"send","target":"trigger_storage_close_door_1","input":"Disable"},

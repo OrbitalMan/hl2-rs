@@ -1,5 +1,5 @@
 [
-  {"time":0.05,"action":"console","command":"sv_cheats 1; ent_fire #792 Disable; ent_fire trigger_barney_close_exitdoor Disable; ent_fire trigger_storage_close_door_1 Disable; ent_fire security_* Cancel; ent_fire barney_ss_* CancelSequence; ent_fire ss_Helmet_Reveal CancelSequence; ent_fire storage_room_door Close; ent_fire storage_room_door Lock"},
+  {"time":0.05,"action":"console","command":"ent_fire gordon_cop_template ForceSpawn; sv_cheats 1; ent_fire #792 Disable; ent_fire trigger_barney_close_exitdoor Disable; ent_fire trigger_storage_close_door_1 Disable; ent_fire security_* Cancel; ent_fire barney_ss_* CancelSequence; ent_fire ss_Helmet_Reveal CancelSequence; ent_fire storage_room_door Close; ent_fire storage_room_door Lock"},
   {"time":0.20,"action":"console","command":"noclip 0; setpos -3362 -250 -32; setang 0 -110"},
   {"time":0.30,"action":"actor_pose","target":"barney","origin":[-3337,-318,-24],"yaw":110},
   {"time":0.40,"action":"capture","name":"barney-movement-seeded"},
