@@ -24,6 +24,7 @@ pub fn discover() -> Result<PathBuf> {
     }
     if let Some(home) = std::env::var_os("HOME") {
         let h = PathBuf::from(home);
+        steam_roots.push(h.join("Library/Application Support/Steam"));
         steam_roots.push(h.join(".steam/steam"));
         steam_roots.push(h.join(".local/share/Steam"));
     }
@@ -69,4 +70,24 @@ pub fn maps(root: &Path) -> Result<Vec<PathBuf>> {
         .collect::<Vec<_>>();
     maps.sort();
     Ok(maps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_root_fails_validation() {
+        let temp = std::env::temp_dir();
+        assert!(validate(temp).is_err());
+    }
+
+    #[test]
+    fn candidate_roots_include_macos_steam_path_when_home_is_present() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let h = PathBuf::from(home);
+            let mac_path = h.join("Library/Application Support/Steam");
+            assert!(mac_path.ends_with("Library/Application Support/Steam"));
+        }
+    }
 }

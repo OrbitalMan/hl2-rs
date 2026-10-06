@@ -12,8 +12,10 @@
 !/Cargo.lock
 !/.github/workflows/rust.yml
 !/launch*.cmd
+!/launch*.sh
 !/scripts/build.ps1
 !/scripts/build-bevy.ps1
+!/scripts/build-bevy.sh
 !/mods/*.json
 !/test-inputs/*.json
 !/docs/*.md

@@ -2,6 +2,29 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Apple Silicon (macOS aarch64) support for hl2-bevy
+
+**Changed:** Added first-class macOS / Apple Silicon support to `bevy-migration`:
+- `source-assets::install`: Auto-discovers installed Steam content in `~/Library/Application Support/Steam`.
+- `hl2-ui::console`: Multi-target test assertions for non-Windows platforms, eliminating unused variable warnings under strict Clippy.
+- `scripts/build-bevy.sh` & `launch-bevy.sh`: Added POSIX build and launch scripts (with 1080p and borderless variants) generating `bin/build-bevy-info.json` and packaging `bin/bevy-assets`.
+- `.gitignore`: Whitelisted new POSIX scripts.
+
+**Why:** Enable running the Bevy/wgpu host natively on macOS Apple Silicon without manual path flags or Windows-only script dependencies.
+
+**Tested how:**
+- `cargo test --workspace --locked` (109 shared crate tests, 25 Bevy tests passed).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` (zero warnings).
+- `cargo fmt --all --check`.
+- Packaged release build with `./scripts/build-bevy.sh` (`bin/hl2-bevy`, `bin/bevy-assets`, SHA256 metadata verified).
+- Launched `./launch-bevy.sh`: Auto-discovered owned Steam installation on macOS, initialized wgpu/Metal clustering and preprocessing, created native AppKit window, and loaded `d1_trainstation_01`.
+
+**Result:** Native macOS execution on Apple Silicon via Metal and CoreAudio works out of the box with zero runtime errors.
+
+**Still broken or not tested:** Retained Macroquad/OpenGL host on macOS (deprecated by Apple; bevy-migration is primary target). Native Windows GDI font parity (macOS uses portable fontdue). Retained scripts remain Windows-focused.
+
+**Next:** Propose PR to `bevy-migration` and optionally add `macos-latest` to GitHub Actions workflow.
+
 ## 2026-10-06 Facial flexes render in Bevy
 
 **Changed:** Scene-driven flex controllers now deform actor faces in the Bevy renderer (setup-loaded flex data, per-vertex flex references, retail weighting, GPU and CPU skinning paths). Earlier the same day: the flex track evaluator and Surface flex sources.
