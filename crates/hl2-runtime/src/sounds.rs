@@ -13,6 +13,8 @@ pub struct Audio {
     cache: HashMap<String, Sound>,
     /// Master volume scale (`--volume`), applied to every request.
     pub master: f32,
+    /// Speech phoneme data found while loading waves (path, sentence, seconds).
+    pub new_sentences: Vec<(String, source_assets::sentence::Sentence, f32)>,
 }
 impl Deref for Audio {
     type Target = hl2_simulation::sounds::Library;
@@ -31,10 +33,13 @@ impl Audio {
             library: hl2_simulation::sounds::Library::new(vfs),
             cache: HashMap::new(),
             master: 1.,
+            new_sentences: Vec::new(),
         }
     }
     pub async fn play(&mut self, vfs: &Vfs, name: &str, looped: bool, volume: f32) -> Result<()> {
-        self.play_request(vfs, &name.into(), looped, volume).await
+        self.play_request(vfs, &name.into(), looped, volume)
+            .await
+            .map(|_| ())
     }
 
     pub async fn play_request(
@@ -43,41 +48,50 @@ impl Audio {
         request: &SoundRequest,
         looped: bool,
         volume: f32,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         let path = match self.resolve(request) {
             Ok(path) => path,
             Err(error) => {
                 self.errors
                     .insert(request.name.clone(), format!("{error:#}"));
-                return Ok(());
+                return Ok(None);
             }
         };
         if self.errors.contains_key(&path) {
-            return Ok(());
+            return Ok(None);
         }
         if !self.cache.contains_key(&path) {
-            let result = (|| -> Result<(Vec<u8>, hl2_simulation::sounds::AudioSummary)> {
+            let result = (|| -> Result<(Vec<u8>, hl2_simulation::sounds::AudioSummary, _)> {
                 let data = vfs
                     .read(&format!("sound/{path}"))?
                     .context("sound asset absent")?;
-                hl2_simulation::sounds::decode(&path, data)
+                let sentence = match source_assets::sentence::vdat_chunk(&data) {
+                    Ok(Some(chunk)) => Some(source_assets::sentence::Sentence::parse(chunk)?),
+                    _ => None,
+                };
+                let (data, summary) = hl2_simulation::sounds::decode(&path, data)?;
+                Ok((data, summary, sentence))
             })();
             match result {
-                Ok((data, summary)) => {
+                Ok((data, summary, sentence)) => {
+                    if let Some(sentence) = sentence {
+                        self.new_sentences
+                            .push((path.clone(), sentence, summary.seconds() as f32));
+                    }
                     self.decoded.insert(path.clone(), summary);
                     let sound = match load_sound_from_bytes(&data).await {
                         Ok(sound) => sound,
                         Err(error) => {
                             self.errors
                                 .insert(path, format!("playback backend: {error}"));
-                            return Ok(());
+                            return Ok(None);
                         }
                     };
                     self.cache.insert(path.clone(), sound);
                 }
                 Err(e) => {
                     self.errors.insert(path, format!("{e:#}"));
-                    return Ok(());
+                    return Ok(None);
                 }
             }
         }
@@ -88,9 +102,9 @@ impl Audio {
                 volume: (volume * self.master).clamp(0., 1.),
             },
         );
-        *self.variants_played.entry(path).or_default() += 1;
+        *self.variants_played.entry(path.clone()).or_default() += 1;
         self.played += 1;
-        Ok(())
+        Ok(Some(path))
     }
     pub async fn ambient(&mut self, vfs: &Vfs, world: &World) -> Result<()> {
         for e in world

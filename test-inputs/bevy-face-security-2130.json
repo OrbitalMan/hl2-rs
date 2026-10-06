@@ -1,0 +1,109 @@
+[
+ {
+  "tick": 1,
+  "fly": true,
+  "eye": [
+   -4022,
+   -510,
+   38
+  ],
+  "yaw": -65,
+  "actions": [
+   {
+    "action": "send",
+    "target": "gordon_cop_template",
+    "input": "ForceSpawn"
+   },
+   {
+    "action": "send",
+    "target": "trigger_cop_close_door_1",
+    "input": "Enable"
+   },
+   {
+    "action": "send",
+    "target": "#792",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "trigger_barney_close_exitdoor",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "trigger_storage_close_door_1",
+    "input": "Disable"
+   },
+   {
+    "action": "send",
+    "target": "security_*",
+    "input": "Cancel"
+   },
+   {
+    "action": "send",
+    "target": "barney_ss_*",
+    "input": "CancelSequence"
+   },
+   {
+    "action": "send",
+    "target": "ss_Helmet_Reveal",
+    "input": "CancelSequence"
+   }
+  ]
+ },
+ {
+  "tick": 2,
+  "eye": [
+   -3376,
+   -252,
+   34
+  ],
+  "yaw": -65,
+  "actions": [
+   {
+    "action": "send",
+    "target": "helmetFaceplate_head",
+    "input": "TurnOff"
+   },
+   {
+    "action": "send",
+    "target": "helmetFaceplate_hand",
+    "input": "TurnOff"
+   },
+   {
+    "action": "send",
+    "target": "logic_disable_cameras",
+    "input": "Trigger"
+   }
+  ]
+ },
+ {
+  "tick": 3,
+  "actions": [
+   {
+    "action": "send",
+    "target": "security_*",
+    "input": "Cancel"
+   }
+  ]
+ },
+ {
+  "tick": 10,
+  "actions": [
+   {
+    "action": "send",
+    "target": "security_02",
+    "input": "Start"
+   }
+  ],
+  "label": "start"
+ },
+ {
+  "tick": 1430,
+  "paused": true,
+  "label": "closeup-2130",
+  "yaw": -59.4,
+  "pitch": 0,
+  "fov": 14
+ }
+]

@@ -324,9 +324,8 @@ pub fn present_entities(
                 .and_then(|f| f.0.get(&animation.key))
                 .filter(|_| !animation.flex.is_empty()),
         ) {
-            let empty = BTreeMap::new();
-            let values = game.scene.flex_controllers.get(&id).unwrap_or(&empty);
-            let weights = model.descriptor_weights(values, |eye| {
+            let values = game.scene.actor_flex_values(id);
+            let weights = model.descriptor_weights(&values, |eye| {
                 eyes.as_deref()
                     .and_then(|e| e.lid_bases.get(&(id, eye.surface)))
                     .copied()

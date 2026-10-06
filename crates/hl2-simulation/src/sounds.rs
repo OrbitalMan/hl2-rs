@@ -166,6 +166,11 @@ pub struct AudioSummary {
     frames: u32,
     seconds: f64,
 }
+impl AudioSummary {
+    pub fn seconds(&self) -> f64 {
+        self.seconds
+    }
+}
 
 fn validate_wav(data: &[u8]) -> Result<()> {
     let mut wav = hound::WavReader::new(Cursor::new(data))?;
@@ -310,6 +315,8 @@ fn playback_bytes(path: &str, data: Vec<u8>) -> Result<(Vec<u8>, &'static str)> 
 pub struct SoundActor {
     pub name: String,
     pub model: String,
+    /// Speaking entity, for lip sync.
+    pub entity: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -638,6 +645,7 @@ mod tests {
             actor: Some(SoundActor {
                 name: "actor diagnostic name".into(),
                 model: model.into(),
+                entity: None,
             }),
         }
     }

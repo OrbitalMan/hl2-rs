@@ -66,3 +66,4 @@ pub(crate) fn records(d: &[u8], size: usize) -> Result<impl Iterator<Item = &[u8
 
 pub mod eyes;
 pub mod flexes;
+pub mod sentence;

@@ -228,6 +228,8 @@ pub struct Scene {
     pub heads: BTreeMap<usize, crate::attention::Head>,
     /// Flex controller values per actor (controller name lowercase -> value in its range).
     pub flex_controllers: BTreeMap<usize, BTreeMap<String, f32>>,
+    /// Speech visemes added on top of the scene flex controllers.
+    pub lipsync: crate::lipsync::LipSync,
     pub monitors: crate::monitors::Cameras,
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
@@ -257,6 +259,7 @@ impl Scene {
             gestures: Default::default(),
             heads: BTreeMap::new(),
             flex_controllers: BTreeMap::new(),
+            lipsync: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
@@ -506,6 +509,7 @@ impl Scene {
         {
             return Ok(0);
         }
+        self.lipsync.load_classes(vfs);
         let bytes = vfs
             .read("scenes/scenes.image")?
             .context("installed scenes.image missing")?;
@@ -678,6 +682,7 @@ impl Scene {
                     .map(|i| i.model.as_str())
                     .unwrap_or(world.entities[actor].get("model").unwrap_or(""))
                     .into(),
+                entity: Some(actor),
             }),
         }
     }
@@ -810,6 +815,15 @@ impl Scene {
             self.states[id].origin = origin;
             self.states[id].rotation = rotation.normalize();
         }
+    }
+    /// Flex controller values a renderer applies: scene/expression controllers plus the
+    /// visemes of any line the actor is speaking (client ProcessVisemes order).
+    pub fn actor_flex_values(&self, id: usize) -> BTreeMap<String, f32> {
+        let mut values = self.flex_controllers.get(&id).cloned().unwrap_or_default();
+        for (name, add) in self.lipsync.visemes(id, self.time) {
+            *values.entry(name).or_insert(0.) += add;
+        }
+        values
     }
     pub fn actor_matrices(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<glam::Mat4> {
         let params = self.actor_pose_values(rig, id);
@@ -1331,13 +1345,20 @@ impl Scene {
                                     if let Some(actor) =
                                         actor.filter(|_| !event.parameters[0].is_empty())
                                     {
-                                        if let Some(request) = self.scene_sound_request(
+                                        if let Some(mut request) = self.scene_sound_request(
                                             world,
                                             id,
                                             &scene.data.actors[event.actor.unwrap()].name,
                                             actor,
                                             &event.parameters[0],
                                         ) {
+                                            // Scenes marked ignorePhonemes play without
+                                            // lip sync (CVoiceData::ShouldIgnorePhonemes).
+                                            if scene.data.ignore_phonemes {
+                                                if let Some(a) = request.actor.as_mut() {
+                                                    a.entity = None;
+                                                }
+                                            }
                                             self.sounds.push(request);
                                         }
                                     }
@@ -2248,6 +2269,7 @@ impl Scene {
             .advance(dt, |id| states.get(id).is_some_and(|s| !s.killed));
         self.tick_choreography(world, dt);
         self.update_heads(world, dt);
+        self.lipsync.cleanup(self.time);
         // ProcessSceneEvents decays every flex controller by 0.95 per NPC think (0.1 s)
         // before scene tracks are applied on the next choreography tick.
         let decay = 0.95f32.powf((dt / 0.1).clamp(0., 2.));

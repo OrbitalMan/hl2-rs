@@ -138,7 +138,7 @@ pub fn load_with_canvas(
     world.warnings.extend(vfs.warnings.iter().cloned());
     normalize_bsp_render_winding(&mut world);
     let model_report = models::append_models(&mut world, &vfs);
-    let gameplay =
+    let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
     let effects = crate::effects::PreparedEffects::load(&vfs);
@@ -222,7 +222,13 @@ pub fn load_with_canvas(
     }
     let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
     let console = hl2_ui::console::Console::load(&vfs, hud.canvas.clone());
-    let audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
+    let mut audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
+    for (wave, sentence, seconds) in audio.sentences.drain(..) {
+        gameplay
+            .scene
+            .lipsync
+            .add_sentence(&wave, sentence, seconds);
+    }
     let sky = match source_assets::sky::load(&vfs, &world.entities, 512) {
         Ok(sky) => sky,
         Err(e) => {

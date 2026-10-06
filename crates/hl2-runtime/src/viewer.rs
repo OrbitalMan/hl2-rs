@@ -1134,8 +1134,17 @@ pub async fn run(mut o: Options) -> Result<()> {
             scene.sounds.push(event.options.clone().into());
             animation_events.push(serde_json::json!({"time":scene.time,"weapon":inventory.active,"clip":inventory.animation,"event":event}));
         }
-        for sound in scene.sounds.drain(..) {
-            audio.play_request(&vfs, &sound, false, 0.4).await?;
+        let sounds = std::mem::take(&mut scene.sounds);
+        for sound in sounds {
+            if let Some(path) = audio.play_request(&vfs, &sound, false, 0.4).await? {
+                for (wave, sentence, seconds) in audio.new_sentences.drain(..) {
+                    scene.lipsync.add_sentence(&wave, sentence, seconds);
+                }
+                // Actor speech drives lip sync from the chosen wave's phonemes.
+                if let Some(actor) = sound.actor.as_ref().and_then(|a| a.entity) {
+                    scene.lipsync.start(actor, &path, scene.time);
+                }
+            }
         }
         if !console.paused()
             && !ui_transition
@@ -1312,10 +1321,9 @@ pub async fn run(mut o: Options) -> Result<()> {
                 .get(&instance.asset_key())
                 .and_then(Option::as_ref)
                 .map(|face| {
-                    let empty = std::collections::BTreeMap::new();
-                    let values = scene.flex_controllers.get(id).unwrap_or(&empty);
+                    let values = scene.actor_flex_values(*id);
                     face.flex
-                        .vertex_deltas(&face.descriptor_weights(values, |_| None))
+                        .vertex_deltas(&face.descriptor_weights(&values, |_| None))
                 })
                 .unwrap_or_default();
             for batch in meshes {

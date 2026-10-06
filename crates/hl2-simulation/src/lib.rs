@@ -21,5 +21,6 @@ pub mod projectile_visuals;
 
 pub mod attention;
 pub mod gestures;
+pub mod lipsync;
 
 pub mod monitors;

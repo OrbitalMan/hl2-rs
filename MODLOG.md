@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Lip sync from speech phonemes
+
+**Changed:** New `source-assets::sentence` reads the text VDAT chunk of owned WAVs (SDK CSentence 1.0: word phonemes and emphasis samples, Catmull-Rom emphasis intensity) and flex settings files (`expressions/phonemes*.vfe`). New `hl2-simulation::lipsync` implements the client viseme path: box filter (0.08 s), neighbor crossfade extension, and weak/normal/strong emphasis blending. The pinned SDK was statically compared with retail client.dll AddVisemesForSentence 100bb720, AddViseme 100bb630 and ComputeBlendedSetting 100bbbd0 (private review). Both hosts parse VDAT when loading waves, register the actor's voice with the chosen wave when a scene line plays, and render `Scene::actor_flex_values` (scene controllers plus visemes) through the shared FaceModel path. Scenes flagged ignorePhonemes play without lip sync.
+
+**Why:** Owner step 4: mouth movement timed to speech.
+
+**Tested how:** Unit tests (VDAT parse/intensity, viseme box filter/cleanup). Owned tests: phoneme VFE files (48 normal, 1 weak, 1 strong settings; aa opens jaw_drop); all 23 Barney waves in d1_trainstation_01 scenes carry phonemes and move the mouth. Strict Clippy/fmt. Packaged Bevy close-ups during ba_thinking01 (21.00/21.30 s) show the lips parting and closing.
+
+**Result:** Barney's mouth follows his lines in Bevy, and the retained host shares the path.
+
+**Still broken or not tested:** Voice time is scene time since the request, not mixer position. phonemedelay/phonemesnap/LOD and streaming delays are fixed at defaults. Native frame-by-frame mouth comparison is limited by about 0.05 s oracle timing jitter. Retained lip sync was not visually checked.
+
+**Next:** Head flexes into head control; Barney's mark offset.
+
 ## 2026-10-06 Retained-host facial flexes and volume option
 
 **Changed:** The retained host now applies the shared `FaceModel` flex path: per-vertex studio flex keys in its draw batches, NPC face models loaded at setup, and scene controller values plus rest-gaze FACS eyelids added to bind positions before CPU skinning. It also accepts `--volume 0..1` as a master scale for all sounds, so unattended tests run at 1%.
