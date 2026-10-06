@@ -99,8 +99,11 @@
   "label": "start"
  },
  {
-  "tick": 1507,
+  "tick": 1213,
   "paused": true,
-  "label": "scene-2245"
+  "label": "closeup-1805",
+  "yaw": -59.4,
+  "pitch": 0,
+  "fov": 14
  }
 ]

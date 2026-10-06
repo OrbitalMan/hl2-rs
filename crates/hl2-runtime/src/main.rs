@@ -38,12 +38,14 @@ pub struct Options {
     pub borderless: bool,
     pub width: i32,
     pub height: i32,
+    pub volume: f32,
 }
 fn options() -> Result<Options> {
     let mut a = std::env::args().skip(1);
     let command = a.next().unwrap_or("view".into());
     if command == "--help" || command == "help" {
-        println!("HL2-RS experimental Rust runtime\n\nCommands: view (default), inspect, verify, export\nOptions: --game <HL2 folder> --map <map> --all (verify every map)\n         --capture <PNG> --frames <N> --position <x,y,z> --yaw <degrees> --pitch <degrees>\n         --output <JSON> --mods <sandbox.json> --smoke (scripted movement/mod test)\n         --input-script <JSON> (timed regression inputs) --time-scale <factor> (default 1)\n         --width <pixels> --height <pixels> (windowed client size; default 1280x720)\n         --borderless (fill the primary desktop without changing display resolution)\n\nStandalone partial reconstruction using installed assets; campaign and NPC AI are incomplete.\nWASD move; click to capture mouse; Esc cancels selection or opens pause; tilde opens console;\nShift faster; F1 debug HUD; F2 fly/walk; Space jump; Tab entity markers; B place block; F5 reload mod; Ctrl crouch; E use; R reload; 1-6 slots/mousewheel weapon selection; Q previous weapon; F3 developer loadout; F4 reset; F12 screenshot; F10 quit.");
+        println!("HL2-RS experimental Rust runtime\n\nCommands: view (default), inspect, verify, export\nOptions: --game <HL2 folder> --map <map> --all (verify every map)\n         --capture <PNG> --frames <N> --position <x,y,z> --yaw <degrees> --pitch <degrees>\n         --output <JSON> --mods <sandbox.json> --smoke (scripted movement/mod test)\n         --input-script <JSON> (timed regression inputs) --time-scale <factor> (default 1)
+         --volume <0..1> (master volume scale, default 1)\n         --width <pixels> --height <pixels> (windowed client size; default 1280x720)\n         --borderless (fill the primary desktop without changing display resolution)\n\nStandalone partial reconstruction using installed assets; campaign and NPC AI are incomplete.\nWASD move; click to capture mouse; Esc cancels selection or opens pause; tilde opens console;\nShift faster; F1 debug HUD; F2 fly/walk; Space jump; Tab entity markers; B place block; F5 reload mod; Ctrl crouch; E use; R reload; 1-6 slots/mousewheel weapon selection; Q previous weapon; F3 developer loadout; F4 reset; F12 screenshot; F10 quit.");
         std::process::exit(0);
     }
     if !["view", "inspect", "verify", "export"].contains(&command.as_str()) {
@@ -68,6 +70,7 @@ fn options() -> Result<Options> {
         borderless: false,
         width: 1280,
         height: 720,
+        volume: 1.,
     };
     while let Some(key) = a.next() {
         if key == "--borderless" {
@@ -100,6 +103,7 @@ fn options() -> Result<Options> {
             "--mods" => o.mods = value.into(),
             "--input-script" => o.input_script = Some(value.into()),
             "--time-scale" => o.time_scale = value.parse()?,
+            "--volume" => o.volume = value.parse()?,
             "--yaw" => o.yaw = value.parse::<f32>()?.to_radians(),
             "--pitch" => o.pitch = value.parse::<f32>()?.to_radians(),
             "--position" => {
@@ -116,6 +120,9 @@ fn options() -> Result<Options> {
     }
     if !(64..=16384).contains(&o.width) || !(64..=16384).contains(&o.height) {
         bail!("window width and height must each be between 64 and 16384 pixels");
+    }
+    if !(0. ..=1.).contains(&o.volume) {
+        bail!("volume must be between 0 and 1");
     }
     if !o.time_scale.is_finite() || !(0.01..=10.).contains(&o.time_scale) {
         bail!("time scale must be finite and between 0.01 and 10");

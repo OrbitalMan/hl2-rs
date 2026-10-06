@@ -1035,6 +1035,7 @@ mod tests {
                 Rig {
                     pose_parameters: Vec::new(),
                     autoplay: Vec::new(),
+                    attachments: Vec::new(),
                     bones: vec![Bone {
                         name: "door".into(),
                         parent: None,

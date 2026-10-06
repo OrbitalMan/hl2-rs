@@ -30,7 +30,7 @@ pub struct LoadedMap {
     pub effects: crate::effects::PreparedEffects,
     pub gaze: BTreeMap<String, source_assets::eyes::Gaze>,
     /// Facial flex data per NPC model asset key, read at setup.
-    pub flexes: BTreeMap<String, Arc<source_assets::flexes::FlexModel>>,
+    pub flexes: BTreeMap<String, Arc<source_assets::flexes::FaceModel>>,
     pub eyes: BTreeMap<(String, String), source_assets::eyes::Eyeball>,
     pub bsp: Bsp,
     pub revision: u32,
@@ -138,7 +138,7 @@ pub fn load_with_canvas(
     world.warnings.extend(vfs.warnings.iter().cloned());
     normalize_bsp_render_winding(&mut world);
     let model_report = models::append_models(&mut world, &vfs);
-    let gameplay =
+    let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
     let effects = crate::effects::PreparedEffects::load(&vfs);
@@ -174,6 +174,7 @@ pub fn load_with_canvas(
     let mut flexes = BTreeMap::new();
     for (key, surfaces) in &world.model_assets {
         let model = key.split('#').next().unwrap_or(key);
+        let mut face = None;
         if world.model_instances.iter().any(|i| {
             i.asset_key() == *key
                 && i.entity
@@ -185,7 +186,7 @@ pub fn load_with_canvas(
                 .and_then(|d| source_assets::flexes::read_flexes(&d))
             {
                 Ok(model) if !model.meshes.is_empty() => {
-                    flexes.insert(key.clone(), Arc::new(model));
+                    face = Some(model);
                 }
                 Ok(_) => {}
                 Err(e) => texture_errors.push(format!("{model}: facial flexes: {e:#}")),
@@ -199,6 +200,15 @@ pub fn load_with_canvas(
         }
         match source_assets::eyes::load(&vfs, model) {
             Ok(records) => {
+                if let Some(flex) = face.take() {
+                    flexes.insert(
+                        key.clone(),
+                        Arc::new(source_assets::flexes::FaceModel {
+                            flex,
+                            eyes: records.clone(),
+                        }),
+                    );
+                }
                 for eye in records {
                     if let Some(surface) = surfaces.get(eye.surface) {
                         eyes.insert((key.clone(), surface.material.clone()), eye);
@@ -212,7 +222,13 @@ pub fn load_with_canvas(
     }
     let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
     let console = hl2_ui::console::Console::load(&vfs, hud.canvas.clone());
-    let audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
+    let mut audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
+    for (wave, sentence, seconds) in audio.sentences.drain(..) {
+        gameplay
+            .scene
+            .lipsync
+            .add_sentence(&wave, sentence, seconds);
+    }
     let sky = match source_assets::sky::load(&vfs, &world.entities, 512) {
         Ok(sky) => sky,
         Err(e) => {

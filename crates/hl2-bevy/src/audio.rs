@@ -19,6 +19,8 @@ pub struct PreparedAudio {
     ambient: Vec<Ambient>,
     bytes: usize,
     cues: usize,
+    /// Speech phoneme data (wave path, sentence, seconds) for lip sync.
+    pub sentences: Vec<(String, source_assets::sentence::Sentence, f32)>,
 }
 impl PreparedAudio {
     pub fn load(vfs: &Vfs, game: &crate::gameplay::Gameplay) -> Self {
@@ -109,19 +111,27 @@ impl PreparedAudio {
         }
         let mut waves = vec![];
         let mut bytes = 0usize;
+        let mut sentences = Vec::new();
         for path in paths {
             let decoded = (|| -> Result<_> {
                 let encoded = vfs
                     .read(&format!("sound/{path}"))?
                     .context("owned sound absent")?;
+                let sentence = match source_assets::sentence::vdat_chunk(&encoded) {
+                    Ok(Some(chunk)) => Some(source_assets::sentence::Sentence::parse(chunk)?),
+                    _ => None,
+                };
                 let (data, summary) = hl2_simulation::sounds::decode(&path, encoded)?;
                 if data.len() > MAX_PRELOADED_BYTES.saturating_sub(bytes) {
                     bail!("owned audio preload exceeds 512 MiB budget");
                 }
-                Ok((data, summary))
+                Ok((data, summary, sentence))
             })();
             match decoded {
-                Ok((data, summary)) => {
+                Ok((data, summary, sentence)) => {
+                    if let Some(sentence) = sentence {
+                        sentences.push((path.clone(), sentence, summary.seconds() as f32));
+                    }
                     bytes += data.len();
                     library.decoded.insert(path.clone(), summary);
                     waves.push((path, data));
@@ -137,6 +147,7 @@ impl PreparedAudio {
             ambient,
             bytes,
             cues: cues.len(),
+            sentences,
         }
     }
 }
@@ -173,7 +184,7 @@ impl Audio {
         looped: bool,
         volume: f32,
         paused: bool,
-    ) -> bool {
+    ) -> Option<String> {
         let path = match self.library.resolve(request) {
             Ok(path) => path,
             Err(error) => {
@@ -181,7 +192,7 @@ impl Audio {
                     .errors
                     .insert(request.name.clone(), format!("{error:#}"));
                 self.failed += 1;
-                return false;
+                return None;
             }
         };
         let Some(handle) = self.handles.get(&path) else {
@@ -190,7 +201,7 @@ impl Audio {
                     .into()
             });
             self.failed += 1;
-            return false;
+            return None;
         };
         let settings = if looped {
             PlaybackSettings::LOOP
@@ -212,7 +223,7 @@ impl Audio {
             },
         ));
         self.requested += 1;
-        true
+        Some(path)
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"preloaded_waves":self.handles.len(),"preloaded_bytes":self.bytes,"referenced_cues":self.cues,
@@ -304,8 +315,13 @@ pub fn queue(
         if count >= MAX_PLAYERS {
             audio.capacity_rejections += 1;
             game.unplayed_sounds += 1;
-        } else if audio.emit(&mut commands, &request, false, 0.4, paused) {
+        } else if let Some(path) = audio.emit(&mut commands, &request, false, 0.4, paused) {
             count += 1;
+            // Actor speech drives lip sync from the chosen wave's phonemes.
+            if let Some(actor) = request.actor.as_ref().and_then(|a| a.entity) {
+                let time = game.scene.time;
+                game.scene.lipsync.start(actor, &path, time);
+            }
         } else {
             game.unplayed_sounds += 1;
         }

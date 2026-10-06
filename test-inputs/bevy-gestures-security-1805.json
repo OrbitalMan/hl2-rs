@@ -8,7 +8,17 @@
    38
   ],
   "yaw": -65,
-  "actions": [{"action":"send","target":"gordon_cop_template","input":"ForceSpawn"},{"action":"send","target":"trigger_cop_close_door_1","input":"Enable"},
+  "actions": [
+   {
+    "action": "send",
+    "target": "gordon_cop_template",
+    "input": "ForceSpawn"
+   },
+   {
+    "action": "send",
+    "target": "trigger_cop_close_door_1",
+    "input": "Enable"
+   },
    {
     "action": "send",
     "target": "#792",
@@ -48,7 +58,24 @@
    -252,
    34
   ],
-  "yaw": -65
+  "yaw": -65,
+  "actions": [
+   {
+    "action": "send",
+    "target": "helmetFaceplate_head",
+    "input": "TurnOff"
+   },
+   {
+    "action": "send",
+    "target": "helmetFaceplate_hand",
+    "input": "TurnOff"
+   },
+   {
+    "action": "send",
+    "target": "logic_disable_cameras",
+    "input": "Trigger"
+   }
+  ]
  },
  {
   "tick": 3,

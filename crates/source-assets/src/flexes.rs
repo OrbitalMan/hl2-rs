@@ -54,6 +54,28 @@ pub struct FlexModel {
     pub rules: Vec<FlexRule>,
     pub meshes: Vec<MeshFlexes>,
 }
+/// A model's flexes together with its eyeballs (whose FACS eyelids write descriptors).
+#[derive(Clone, Debug, Default)]
+pub struct FaceModel {
+    pub flex: FlexModel,
+    pub eyes: Vec<crate::eyes::Eyeball>,
+}
+impl FaceModel {
+    /// Descriptor weights with each eye's bone-local basis, or its rest basis when the
+    /// presentation has not supplied one.
+    pub fn descriptor_weights(
+        &self,
+        values: &std::collections::BTreeMap<String, f32>,
+        basis: impl Fn(&crate::eyes::Eyeball) -> Option<(Vec3, Vec3)>,
+    ) -> Vec<f32> {
+        let eyes: Vec<_> = self
+            .eyes
+            .iter()
+            .map(|e| (e, basis(e).unwrap_or_else(|| crate::eyes::rest_basis(e))))
+            .collect();
+        self.flex.descriptor_weights(values, &eyes)
+    }
+}
 const FLEXES_CONVERTED: u32 = 0x4000;
 fn count(data: &[u8], at: usize, limit: usize) -> Result<usize> {
     let n = usize::try_from(i32le(data, at)?)?;
@@ -220,6 +242,42 @@ fn remap_clamped(value: f32, a: f32, b: f32, c: f32, d: f32) -> f32 {
     c + (d - c) * t
 }
 impl FlexModel {
+    /// Descriptor weights for named controller values (lowercase names, controller ranges):
+    /// RunFlexRules, then retail FACS eyelids for each eyeball with its bone-local
+    /// forward/up basis.
+    pub fn descriptor_weights(
+        &self,
+        values: &std::collections::BTreeMap<String, f32>,
+        eyes: &[(&crate::eyes::Eyeball, (Vec3, Vec3))],
+    ) -> Vec<f32> {
+        let src: Vec<f32> = self
+            .controllers
+            .iter()
+            .map(|c| values.get(&c.name.to_lowercase()).copied().unwrap_or(0.))
+            .collect();
+        let mut weights = self.run_rules(&src);
+        for (eye, basis) in eyes {
+            crate::eyes::apply_eyelids(eye, &mut weights, *basis);
+        }
+        weights
+    }
+    /// Bind-space position deltas keyed by (bodypart, mesh, mesh-local vertex) for the
+    /// first model of each bodypart, with retail vertex weighting (no delayed weights).
+    pub fn vertex_deltas(&self, descriptors: &[f32]) -> std::collections::HashMap<[u16; 3], Vec3> {
+        let mut deltas = std::collections::HashMap::new();
+        for mesh in self.meshes.iter().filter(|m| m.model == 0) {
+            for flex in &mesh.flexes {
+                let Some(weights) = flex.weights(descriptors) else {
+                    continue;
+                };
+                for v in &flex.vertices {
+                    let key = [mesh.bodypart as u16, mesh.mesh as u16, v.index];
+                    *deltas.entry(key).or_insert(Vec3::ZERO) += v.delta * v.weight(weights);
+                }
+            }
+        }
+        deltas
+    }
     /// CStudioHdr::RunFlexRules: controller values (in each controller's own range, model
     /// order) to descriptor weights. Invalid ops are skipped as the SDK CHECK macros do.
     pub fn run_rules(&self, src: &[f32]) -> Vec<f32> {
@@ -518,6 +576,23 @@ mod tests {
                 .any(|c| c.name.eq_ignore_ascii_case("jaw_drop")));
             let neutral = flexes.run_rules(&vec![0.; flexes.controllers.len()]);
             assert!(neutral.iter().all(|w| w.is_finite()));
+            // A neutral face looking along its authored eye direction has open lids: the
+            // FACS eyelid descriptors land on their neutral targets (no lid deformation).
+            let face = FaceModel {
+                flex: flexes.clone(),
+                eyes: crate::eyes::load(&vfs, path).unwrap(),
+            };
+            assert!(face.eyes.iter().all(|e| e.lids.is_some()), "{path}");
+            let rest = face.descriptor_weights(&Default::default(), |_| None);
+            assert!(
+                face.flex
+                    .vertex_deltas(&rest)
+                    .values()
+                    .all(|d| d.length() < 0.05),
+                "{path}: neutral face deforms"
+            );
+            // Without FACS eyelids the same descriptors would half-close the upper lids.
+            assert!(!flexes.vertex_deltas(&neutral).is_empty());
             let jaw = flexes
                 .controllers
                 .iter()

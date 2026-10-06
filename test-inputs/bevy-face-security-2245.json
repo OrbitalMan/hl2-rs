@@ -101,6 +101,9 @@
  {
   "tick": 1507,
   "paused": true,
-  "label": "scene-2245"
+  "label": "closeup-2245",
+  "yaw": -59.4,
+  "pitch": 0,
+  "fov": 14
  }
 ]

@@ -30,6 +30,9 @@ pub struct Command {
     label: Option<String>,
     eye: Option<[f32; 3]>,
     yaw: Option<f32>,
+    pitch: Option<f32>,
+    /// Horizontal 4:3 field of view in degrees, like the Source `fov` command.
+    fov: Option<f32>,
     paused: Option<bool>,
     dev_overlay: Option<bool>,
     fly: Option<bool>,
@@ -69,6 +72,8 @@ pub fn read_script(path: &Path) -> Result<Vec<Command>> {
             || c.side.abs() > 1.
             || c.eye.is_some_and(|p| p.iter().any(|n| !n.is_finite()))
             || c.yaw.is_some_and(|n| !n.is_finite())
+            || c.pitch.is_some_and(|n| !(-89. ..=89.).contains(&n))
+            || c.fov.is_some_and(|n| !(1. ..=170.).contains(&n))
             || c.label.as_ref().is_some_and(|s| s.len() > 128)
         {
             bail!("invalid movement command at tick {}", c.tick);
@@ -95,6 +100,8 @@ pub struct Simulation {
     eye: glam::Vec3,
     pub yaw: f32,
     pub pitch: f32,
+    /// Scripted horizontal 4:3 field of view in degrees (default 75).
+    pub fov: f32,
     input: Input,
     fly: bool,
     paused: bool,
@@ -124,6 +131,7 @@ impl Simulation {
             eye,
             yaw,
             pitch,
+            fov: 75.,
             input: Input::default(),
             fly,
             paused: false,
@@ -276,6 +284,12 @@ impl Simulation {
             }
             if let Some(yaw) = c.yaw {
                 self.yaw = yaw.to_radians();
+            }
+            if let Some(pitch) = c.pitch {
+                self.pitch = pitch.to_radians();
+            }
+            if let Some(fov) = c.fov {
+                self.fov = fov;
             }
             if let Some(fly) = c.fly {
                 self.change_fly(fly);
@@ -580,12 +594,25 @@ fn fixed_step(
         exit.write(AppExit::Success);
     }
 }
-pub(crate) fn present(sim: Res<Simulation>, mut cameras: Query<&mut Transform, With<FlyCamera>>) {
-    if let Ok(mut camera) = cameras.single_mut() {
+/// Source horizontal 4:3 field of view (degrees) to Bevy's vertical field of view.
+pub(crate) fn vertical_fov(degrees: f32) -> f32 {
+    2. * ((degrees.to_radians() / 2.).tan() / (4. / 3.)).atan()
+}
+pub(crate) fn present(
+    sim: Res<Simulation>,
+    mut cameras: Query<(&mut Transform, &mut Projection), With<FlyCamera>>,
+) {
+    if let Ok((mut camera, mut projection)) = cameras.single_mut() {
         *camera = Transform::from_translation(source_to_bevy(sim.eye())).looking_to(
             source_to_bevy(source_direction(sim.yaw, sim.pitch)),
             Vec3::Y,
         );
+        let fov = vertical_fov(sim.fov);
+        if let Projection::Perspective(p) = &mut *projection
+            && p.fov != fov
+        {
+            p.fov = fov;
+        }
     }
 }
 #[cfg(test)]

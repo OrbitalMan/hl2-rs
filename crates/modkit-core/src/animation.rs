@@ -12,6 +12,13 @@ pub struct Pose {
     pub position: Vec3,
     pub rotation: Quat,
 }
+/// Studio attachment (mstudioattachment_t): a named bone-local frame.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Attachment {
+    pub name: String,
+    pub bone: usize,
+    pub local: Mat4,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bone {
     pub name: String,
@@ -617,8 +624,22 @@ pub struct Rig {
     /// STUDIO_AUTOPLAY sequences, accumulated after layers every frame.
     #[serde(default)]
     pub autoplay: Vec<String>,
+    /// Attachments of the root model, in model order.
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 impl Rig {
+    pub fn attachment(&self, name: &str) -> Option<&Attachment> {
+        self.attachments
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+    }
+    /// Model-space attachment frame from skinning matrices (bone pose * inverse bind).
+    pub fn attachment_matrix(&self, matrices: &[Mat4], attachment: &Attachment) -> Option<Mat4> {
+        let skin = matrices.get(attachment.bone)?;
+        let bone = self.bones.get(attachment.bone)?;
+        Some(*skin * bone.inverse_bind.inverse() * attachment.local)
+    }
     /// Merge preloaded cohorts without changing model traversal order or label ownership.
     pub fn merge_sequence_metadata(&mut self, sequences: impl IntoIterator<Item = Sequence>) {
         for sequence in sequences {

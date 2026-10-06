@@ -155,6 +155,7 @@ mod tests {
         let rig = Rig {
             pose_parameters: Vec::new(),
             autoplay: Vec::new(),
+            attachments: Vec::new(),
             bones: vec![Bone {
                 name: "root".into(),
                 parent: None,
