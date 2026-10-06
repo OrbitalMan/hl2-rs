@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Facial flex data reader
+
+**Changed:** New `source-assets::flexes`: MDL flex descriptors, controllers, rules and mesh vertex deltas; SDK RunFlexRules and the retail vertex weighting.
+
+**Why:** First step toward facial animation in scenes (FlexAnimation tracks, expressions, later lip sync).
+
+**Tested how:** Synthetic rule/ramp tests; owned Barney/Kleiner parse and jaw_drop evaluation; strict Clippy.
+
+**Result:** Real flex data parses and evaluates.
+
+**Still broken or not tested:** Not driven by scenes and not rendered yet; delayed weights and wrinkles are not applied.
+
+**Next:** Scene flex tracks to controller values, then CPU vertex deltas in both renderers.
+
 ## 2026-10-06 Pose-parameter blends, autoplay head sequences and head control
 
 **Changed:** Rigs keep pose parameters, full blend grids and autoplay sequences. Composition samples blends by pose parameter and adds autoplay after layers. NPC head control drives head_yaw/pitch from look interests with the SDK think rates.

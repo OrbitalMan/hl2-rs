@@ -1,5 +1,9 @@
 # Local validation â€” 2026-10-05
 
+## Facial flex data reader (2026-10-06)
+
+`source-assets::flexes` reads flex descriptors, controllers (type, name, range), flex rules (RPN ops) and per-mesh flexes. It traverses every model of every bodypart, decodes the four-point target ramp, flexpair and vertex animations (float16 position/normal deltas; wrinkle stride 18), and rejects pre-converted fixed-point files. Rule evaluation follows SDK CStudioHdr::RunFlexRules, including 2-way, n-way, combo, dominate and DME eyelid ops; invalid ops are skipped. Vertex weighting follows the retail StudioRender R_StudioFlexVerts (client 1001c0b0, private static review): target ramp per descriptor and pair, side blend, and speed blend between current and delayed weights (delayed = current here). Owned check: Barney has 73 descriptors, 54 controllers, 63 rules, 4 flexed meshes and 11,329 vertex deltas; Kleiner 71/54/63/7/12,575. Driving `jaw_drop` to its maximum activates mesh flexes on both. Not yet connected to scene tracks or rendering.
+
 ## Native comparison with matched campaign state (2026-10-06)
 
 The native oracle (`security-scene-20261006T163254Z`, 1% volume, no focus steals logged) now folds the room cameras and removes the faceplates before security_02. At 18.05 s, both the original and Bevy Barney turn their heads toward the player; at 22.45 s both face the consoles. Remaining visible differences: the original still wears the separate `helmetBack` prop, his face animates (flexes, not implemented), and our Barney renders about 5 units beside his mark although the simulation reports his feet exactly on `mark_barneyroom_monitor_3` (by projection the original stands on it), so a root offset in his idle pose is suspected and not yet diagnosed. Comparison image: artifacts/head-security/native-vs-bevy.png.
