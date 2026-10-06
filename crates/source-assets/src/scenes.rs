@@ -82,6 +82,150 @@ pub struct FlexTrack {
     pub samples: Vec<FlexSample>,
     pub combo_samples: Vec<FlexSample>,
 }
+impl FlexTrack {
+    pub fn is_active(&self) -> bool {
+        self.flags & 1 != 0
+    }
+    pub fn is_combo(&self) -> bool {
+        self.flags & 2 != 0
+    }
+    /// GetZeroValue: balance tracks rest at 0.5; value tracks at the default edge zero
+    /// (binary scenes carry no edge overrides).
+    fn zero(&self, balance: bool) -> f32 {
+        if balance {
+            0.5
+        } else if self.min != self.max {
+            (0. - self.min) / (self.max - self.min)
+        } else {
+            0.
+        }
+    }
+    fn samples(&self, balance: bool) -> &[FlexSample] {
+        if balance {
+            &self.combo_samples
+        } else {
+            &self.samples
+        }
+    }
+    /// GetBoundedSample: virtual samples at 0 and at the event duration.
+    fn bounded(&self, i: isize, balance: bool, duration: f32) -> (f32, f32, u16) {
+        let samples = self.samples(balance);
+        if i < 0 {
+            (0., self.zero(balance), 0)
+        } else if i as usize >= samples.len() {
+            (duration, self.zero(balance), 0)
+        } else {
+            let s = &samples[i as usize];
+            (s.sample.time, s.sample.value, s.curve_type)
+        }
+    }
+    /// CFlexAnimationTrack::GetFracIntensity for an event-relative time.
+    fn fraction(&self, time: f32, balance: bool, duration: f32) -> f32 {
+        let count = self.samples(balance).len() as isize;
+        if count < 1 {
+            return self.zero(balance);
+        }
+        let mut j = (count / 2).max(1);
+        let mut i = j;
+        let (mut start, mut end) = (
+            self.bounded(i, balance, duration),
+            self.bounded(i + 1, balance, duration),
+        );
+        while i > -2 && i < count + 1 {
+            start = self.bounded(i, balance, duration);
+            end = self.bounded(i + 1, balance, duration);
+            j = (j / 2).max(1);
+            if time < start.0 {
+                i -= j;
+            } else if time > end.0 {
+                i += j;
+            } else {
+                if time == end.0 {
+                    i += 1;
+                    start = self.bounded(i, balance, duration);
+                    end = self.bounded(i + 1, balance, duration);
+                }
+                break;
+            }
+        }
+        let pre = self.bounded((i - 1).max(-1), balance, duration);
+        let next = self.bounded((i + 2).min(count), balance, duration);
+        let dt = end.0 - start.0;
+        let f = if dt > 0. {
+            ((time - start.0) / dt).clamp(0., 1.)
+        } else {
+            0.
+        };
+        let v = |s: (f32, f32, u16)| glam::Vec2::new(s.0, s.1);
+        let early = (start.2 >> 8) & 0xff;
+        let late = end.2 & 0xff;
+        let y = if early == HOLD {
+            start.1
+        } else if late == HOLD {
+            end.1
+        } else {
+            let a = curve(late, v(pre), v(start), v(end), v(next), f);
+            if early == late {
+                a
+            } else {
+                let b = curve(early, v(pre), v(start), v(end), v(next), f);
+                b + (a - b) * f
+            }
+        };
+        y.clamp(0., 1.)
+    }
+    fn internal(&self, time: f32, start: f32, end: Option<f32>, balance: bool) -> f32 {
+        let fraction = match end {
+            Some(end) if time >= start && time <= end => {
+                self.fraction(time - start, balance, end - start)
+            }
+            _ => self.zero(balance),
+        };
+        if !balance && self.min != self.max {
+            fraction * (self.max - self.min) + self.min
+        } else {
+            fraction
+        }
+    }
+    /// CFlexAnimationTrack::GetIntensity at scene time; `side` 0 maps to the `right_`
+    /// controller and 1 to `left_` for combo (stereo) tracks.
+    pub fn intensity(&self, time: f32, start: f32, end: Option<f32>, side: usize) -> f32 {
+        let magnitude = self.internal(time, start, end, false);
+        let mut scale = 1.;
+        if self.is_combo() {
+            let balance = self.internal(time, start, end, true);
+            if side == 0 && balance > 0.5 {
+                scale = (1. - balance) / 0.5;
+            } else if side == 1 && balance < 0.5 {
+                scale = balance / 0.5;
+            }
+        }
+        magnitude * scale
+    }
+}
+const HOLD: u16 = 15;
+/// Interpolator_CurveInterpolate y value for the supported interpolators; unsupported
+/// kinds (B-spline, Kochanek-Bartels, simple cubic, exponential decay) use the default.
+fn curve(
+    kind: u16,
+    pre: glam::Vec2,
+    start: glam::Vec2,
+    end: glam::Vec2,
+    next: glam::Vec2,
+    f: f32,
+) -> f32 {
+    use std::f32::consts::PI;
+    match kind {
+        2 => start.y + (end.y - start.y) * (PI * f * 0.5).sin(),
+        3 => start.y + (end.y - start.y) * (1. - (PI * f * 0.5 + 0.5 * PI).sin()),
+        4 => {
+            let s = f * f * (3. - 2. * f);
+            start.y + (end.y - start.y) * s
+        }
+        6 => start.y + (end.y - start.y) * f,
+        _ => catmull_rom_normalize_x(pre, start, end, next, f).y,
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Speech {
     pub caption_type: i8,
@@ -1062,5 +1206,49 @@ mod tests {
         let mut bad = cache(&original);
         bad[16..20].copy_from_slice(&0u32.to_le_bytes());
         assert!(Cache::parse(bad).is_err());
+    }
+}
+#[cfg(test)]
+mod flex_track_tests {
+    use super::*;
+    fn sample(time: f32, value: f32, curve: u16) -> FlexSample {
+        FlexSample {
+            sample: Sample { time, value },
+            curve_type: curve,
+        }
+    }
+    #[test]
+    fn flex_track_intensity_follows_samples_and_balance() {
+        let linear = 0x0606;
+        let mut track = FlexTrack {
+            controller: "jaw_drop".into(),
+            flags: 1,
+            min: 0.,
+            max: 1.,
+            samples: vec![sample(0.5, 1., linear), sample(1.5, 1., linear)],
+            combo_samples: Vec::new(),
+        };
+        // Event 10..12 s: outside it the zero value applies; inside, the samples.
+        assert_eq!(track.intensity(9., 10., Some(12.), 0), 0.);
+        assert!((track.intensity(11., 10., Some(12.), 0) - 1.).abs() < 1e-5);
+        assert!((track.intensity(10.25, 10., Some(12.), 0) - 0.5).abs() < 1e-5);
+        // A -1..1 controller remaps the 0..1 curve and rests at its zero position.
+        track.min = -1.;
+        assert!((track.intensity(9., 10., Some(12.), 0)).abs() < 1e-5);
+        assert!((track.intensity(11., 10., Some(12.), 0) - 1.).abs() < 1e-5);
+        // Combo balance fully toward side 1 silences side 0.
+        track.min = 0.;
+        track.flags = 3;
+        track.combo_samples = vec![sample(0., 1., linear), sample(2., 1., linear)];
+        assert!(track.intensity(11., 10., Some(12.), 0).abs() < 1e-5);
+        assert!((track.intensity(11., 10., Some(12.), 1) - 1.).abs() < 1e-5);
+        // Hold curves keep the start value across the segment.
+        let hold = FlexTrack {
+            flags: 1,
+            combo_samples: Vec::new(),
+            samples: vec![sample(0.5, 0.2, 0x0f0f), sample(1.5, 0.8, 0x0f0f)],
+            ..track.clone()
+        };
+        assert!((hold.intensity(11., 10., Some(12.), 0) - 0.2).abs() < 1e-5);
     }
 }

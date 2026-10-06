@@ -200,6 +200,8 @@ pub struct Scene {
     pub gestures: crate::gestures::GestureLayers,
     /// CAI_BaseActor head control per actor, driven by look interests.
     pub heads: BTreeMap<usize, crate::attention::Head>,
+    /// Flex controller values per actor (controller name lowercase -> value in its range).
+    pub flex_controllers: BTreeMap<usize, BTreeMap<String, f32>>,
     pub monitors: crate::monitors::Cameras,
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
@@ -228,6 +230,7 @@ impl Scene {
             look_targets: Default::default(),
             gestures: Default::default(),
             heads: BTreeMap::new(),
+            flex_controllers: BTreeMap::new(),
             monitors: crate::monitors::Cameras::new(world),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
@@ -1086,6 +1089,42 @@ impl Scene {
             self.states[actor].rotation = physics::angles(Vec3::new(0., yaw, 0.));
         }
     }
+    /// CBaseFlex::AddFlexAnimation: each active track blends its intensity into the actor's
+    /// controller value by event intensity; stereo tracks drive right_/left_ controllers.
+    fn process_flex_animation(&mut self, scene: &Choreography, play: &Playback) {
+        let time = play.elapsed as f32;
+        for &index in scene.order.iter().take(play.next) {
+            let event = &scene.data.events[index];
+            if event.kind != EventType::FlexAnimation
+                || !event.active()
+                || play.elapsed < event.start as f64
+                || play.elapsed > event.end.unwrap_or(event.start) as f64
+            {
+                continue;
+            }
+            let Some(actor) = event.actor.and_then(|a| play.actors[a]) else {
+                continue;
+            };
+            if self.states[actor].killed {
+                continue;
+            }
+            let weight = event.intensity(&scene.data, time);
+            let values = self.flex_controllers.entry(actor).or_default();
+            for track in event.flex_tracks.iter().filter(|t| t.is_active()) {
+                let name = track.controller.to_lowercase();
+                let sides: &[(usize, String)] = &if track.is_combo() {
+                    vec![(0, format!("right_{name}")), (1, format!("left_{name}"))]
+                } else {
+                    vec![(0, name)]
+                };
+                for (side, controller) in sides {
+                    let value = track.intensity(time, event.start, event.end, *side);
+                    let current = values.entry(controller.clone()).or_insert(0.);
+                    *current = *current * (1. - weight) + value * weight;
+                }
+            }
+        }
+    }
     fn cancel_choreography(&mut self, id: usize) {
         if self
             .choreography
@@ -1180,6 +1219,9 @@ impl Scene {
                                 }
                                 EventType::Gesture => {
                                     // Layers start and update in process_gestures each tick.
+                                }
+                                EventType::FlexAnimation => {
+                                    // Tracks apply in process_flex_animation each tick.
                                 }
                                 EventType::Face => {
                                     // StartFacingSceneEvent needs a target; NPCs turn in process_faces.
@@ -1417,6 +1459,7 @@ impl Scene {
                     if play.pause.is_none() {
                         self.process_gestures(id, &scene, &play);
                         self.process_faces(id, &scene, &mut play, dt);
+                        self.process_flex_animation(&scene, &play);
                     }
                     if play.pause.is_none()
                         && play.next == scene.order.len()
@@ -2061,6 +2104,16 @@ impl Scene {
             .advance(dt, |id| states.get(id).is_some_and(|s| !s.killed));
         self.tick_choreography(world, dt);
         self.update_heads(world, dt);
+        // ProcessSceneEvents decays every flex controller by 0.95 per NPC think (0.1 s)
+        // before scene tracks are applied on the next choreography tick.
+        let decay = 0.95f32.powf((dt / 0.1).clamp(0., 2.));
+        self.flex_controllers.retain(|_, values| {
+            values.retain(|_, v| {
+                *v *= decay;
+                v.abs() > 1e-4
+            });
+            !values.is_empty()
+        });
         for id in 0..world.entities.len() {
             let e = &world.entities[id];
             if self.states[id].killed {
@@ -3050,8 +3103,18 @@ mod tests {
         assert!(rig.warnings.is_empty(), "{:?}", rig.warnings);
         scene.send(id, "Start", "");
         let (mut seen, mut composed_ticks, mut moved) = (BTreeSet::new(), 0, false);
+        let mut flexed = BTreeSet::new();
         for _ in 0..2000 {
             scene.tick(&world, Vec3::ZERO, 0.015);
+            if let Some(values) = scene.flex_controllers.get(&barney) {
+                assert!(values.values().all(|v| v.is_finite()));
+                flexed.extend(
+                    values
+                        .iter()
+                        .filter(|(_, v)| v.abs() > 0.05)
+                        .map(|(k, _)| k.clone()),
+                );
+            }
             let layers = scene.gestures.layers(barney);
             for layer in layers {
                 assert!((0. ..=1.).contains(&layer.playback), "{layer:?}");
@@ -3077,6 +3140,9 @@ mod tests {
             !seen.is_empty(),
             "security_02 produced no Barney gesture layer"
         );
+        // FlexAnimation tracks drive Barney's facial controllers during the scene.
+        assert!(!flexed.is_empty(), "no flex controller moved");
+        eprintln!("FLEXED {flexed:?}");
         assert!(
             composed_ticks > 0 && moved,
             "gesture layers did not move bones"
