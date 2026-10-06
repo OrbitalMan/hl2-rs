@@ -664,6 +664,10 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 "swing",
                 "attack",
                 "death1",
+                // npc_combine_camera deploy/retire activities (matched lowercase).
+                "act_combine_camera_open_idle",
+                "act_combine_camera_closed_idle",
+                "act_combine_camera_close",
             ]
             .into_iter()
             .map(String::from)

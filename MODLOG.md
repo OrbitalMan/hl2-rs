@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Head/body flexes, Combine camera activities and movement turning
+
+**Changed:** Actor pose parameters now add the server-side flex controllers, following SDK CAI_BaseActor: head_rightleft/updown/tilt on top of the head look correction (UpdateHeadControl), body_yaw/spine_yaw/neck_trans from body_rightleft/chest_rightleft/head_forwardback (UpdateBodyControl), and gesture_height/width from gesture_updown/rightleft (MaintainLookTargets). The values are included in the pose signature. Head control takes its eye position from the animated "eyes" attachment and the self-look direction and head frame from "forward" (shared `Scene::attachment_frames`). npc_combine_camera deploys at spawn (open idle) unless StartInactive. Enable/Disable/Toggle play the retract transition into closed idle, or return to open idle. Walking NPCs turn toward the path at MaxYawSpeed (45 x 10 deg/s) instead of snapping, and the move_yaw pose parameter keeps the legs on the path.
+
+**Why:** Owner steps 5 and 7. Step 6 check: Barney's state origin at his desk equals mark_barneyroom_monitor_3 exactly, and the 18.05 s native/Bevy silhouettes line up within about one unit, so the session 2 ~5-unit offset no longer reproduces.
+
+**Tested how:** 321 normal tests (new synthetic head/body flex and camera activity tests), strict Clippy/fmt. Packaged close-ups at 18.05/21.00/22.45 s against native sessions security-scene-20261006T204141Z and T214010Z. Camera open/retracting/closed captures (artifacts/camera-acts). Walk samples along Barney's route (artifacts/facing).
+
+**Result:** Scene head flexes move Barney's head by their authored degrees. Cameras fold when logic_disable_cameras fires. Path corners turn smoothly.
+
+**Still broken or not tested:** At security_02 21-22.5 s native Barney's head pitches down toward the consoles while Bevy's stays level. Head flexes and gesture pose flexes are ruled out (both near zero there), and the cause is unexplained. The reversed camera-open transition, camera aim pose and eye sprites are not modeled. Entity lighting and shadows: plan recorded in docs/DESIGN.md step 8.
+
+**Next:** Source model lighting (ambient cubes, world lights, normals).
+
 ## 2026-10-06 Lip sync from speech phonemes
 
 **Changed:** New `source-assets::sentence` reads the text VDAT chunk of owned WAVs (SDK CSentence 1.0: word phonemes and emphasis samples, Catmull-Rom emphasis intensity) and flex settings files (`expressions/phonemes*.vfe`). New `hl2-simulation::lipsync` implements the client viseme path: box filter (0.08 s), neighbor crossfade extension, and weak/normal/strong emphasis blending. The pinned SDK was statically compared with retail client.dll AddVisemesForSentence 100bb720, AddViseme 100bb630 and ComputeBlendedSetting 100bbbd0 (private review). Both hosts parse VDAT when loading waves, register the actor's voice with the chosen wave when a scene line plays, and render `Scene::actor_flex_values` (scene controllers plus visemes) through the shared FaceModel path. Scenes flagged ignorePhonemes play without lip sync.
