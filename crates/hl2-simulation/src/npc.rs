@@ -294,6 +294,8 @@ struct Goal {
 struct Route {
     nodes: Vec<usize>,
     feet: Vec<Vec3>,
+    /// Door blocking the segment that ends at `feet[i]`, if any.
+    doors: Vec<Option<usize>>,
 }
 pub struct Controller {
     graph: Option<Graph>,
@@ -581,11 +583,22 @@ impl Controller {
     }
 }
 fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>) -> MoveUpdate {
+    // Navigators open a route door ahead of contact: request it while walking the door
+    // segment or within 96 units of its start.
+    let ahead = |index: usize| goal.route.doors.get(index).copied().flatten();
+    let lookahead = ahead(goal.next).or_else(|| {
+        goal.route
+            .feet
+            .get(goal.next)
+            .filter(|start| start.distance(goal.feet) <= 96.)
+            .and_then(|_| ahead(goal.next + 1))
+    });
     let door = match &goal.state {
         GoalState::Blocked(GoalBlockReason::Collision {
             blocker: Some(blocker),
             ..
         }) if doors.contains(blocker) => Some(*blocker),
+        GoalState::Moving => lookahead,
         _ => None,
     };
     MoveUpdate {
@@ -837,6 +850,7 @@ fn plan<W: NpcCollisionWorld>(
         return Ok(Route {
             nodes: Vec::new(),
             feet: vec![end],
+            doors: vec![None],
         });
     }
     let graph = graph.ok_or(GoalBlockReason::MissingGraph)?;
@@ -889,7 +903,17 @@ fn plan<W: NpcCollisionWorld>(
         .map(|n| node_feet(graph, *n, restrictions).unwrap())
         .collect();
     feet.push(end);
-    Ok(Route { nodes, feet })
+    let door_set = doors;
+    let mut doors = vec![None];
+    for pair in feet.windows(2) {
+        let moved = npc_probe::ground_move(world, pair[0], pair[1], actor.ground, query);
+        doors.push(
+            moved
+                .blocker
+                .filter(|b| !moved.completed && door_set.contains(b)),
+        );
+    }
+    Ok(Route { nodes, feet, doors })
 }
 fn search(
     graph: &Graph,

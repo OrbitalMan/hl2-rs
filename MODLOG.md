@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 NPC door lookahead: Barney reaches his desk
+
+**Changed:** NPC routes remember door segments and request the door ahead of contact (within 96 units).
+
+**Why:** The cop-door trigger unlocks barney_door_2 for only one second, before Barney touches the door.
+
+**Tested how:** 308 normal tests, strict Clippy/fmt; packaged security fixtures; movement 26 and attention 26 assertions; native/Bevy side-by-side.
+
+**Result:** Barney walks through both doors and gestures at the desk in Bevy, as in the original.
+
+**Still broken or not tested:** FACE events, exact arrival position, the wall Combine camera, desk material, and a native rerun with the mask fix. The full regression batch was not rerun.
+
+**Next:** FACE events, then rerun the native comparison (mask off) and compare poses.
+
 ## 2026-10-06 Trigger toucher filters
 
 **Changed:** trigger_once/trigger_multiple honor client/NPC/everything toucher flags, and NPCs can activate NPC triggers. Security fixtures enable trigger_cop_close_door_1 as the campaign does earlier.
