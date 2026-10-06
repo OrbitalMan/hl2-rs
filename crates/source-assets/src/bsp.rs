@@ -329,6 +329,7 @@ impl Bsp {
                     background_faces.contains(&(first as usize + local_face)),
                 ))
                 .or_insert_with(|| Surface {
+                    flex_source: None,
                     background: background_faces.contains(&(first as usize + local_face)),
                     material,
                     vertices: Vec::new(),
@@ -392,6 +393,7 @@ impl Bsp {
                 }
                 let count = cells * cells * 6;
                 world.terrain.push(Surface {
+                    flex_source: None,
                     background: batch.background,
                     lightmap: batch.lightmap,
                     material: batch.material.clone(),

@@ -581,6 +581,7 @@ mod tests {
     #[test]
     fn bsp_normalization_faces_up_and_preserves_model_and_collision_copies() {
         let mut surface = modkit_core::Surface {
+            flex_source: None,
             background: false,
             material: "synthetic".into(),
             lightmap: None,
@@ -675,6 +676,7 @@ mod tests {
     fn selection_keeps_toggleable_hidden_entities_but_excludes_sky_and_collision_copies() {
         use modkit_core::{BrushModel, Entity, ModelInstance, Surface, Vertex};
         let surface = |name: &str, background: bool| Surface {
+            flex_source: None,
             material: name.into(),
             background,
             vertices: [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]]

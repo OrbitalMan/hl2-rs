@@ -480,6 +480,38 @@ mod tests {
                 flexes.meshes.len()
             );
             assert!(!flexes.controllers.is_empty() && !flexes.rules.is_empty() && verts > 0);
+            // Every flexed studio mesh has a rendered surface whose vertices cover its deltas.
+            let surfaces = crate::models::read_model(&vfs, path, 0).unwrap();
+            for mesh in &flexes.meshes {
+                let source = surfaces
+                    .iter()
+                    .filter_map(|s| s.flex_source.as_ref())
+                    .find(|f| {
+                        (f.bodypart, f.model, f.mesh) == (mesh.bodypart, mesh.model, mesh.mesh)
+                    });
+                if mesh.model != 0 {
+                    continue;
+                }
+                let source = source.unwrap_or_else(|| {
+                    panic!(
+                        "no surface for flexed mesh {mesh:?}",
+                        mesh = (mesh.bodypart, mesh.mesh)
+                    )
+                });
+                let ids: std::collections::BTreeSet<u16> =
+                    source.vertex_ids.iter().copied().collect();
+                let covered = mesh
+                    .flexes
+                    .iter()
+                    .flat_map(|f| &f.vertices)
+                    .filter(|v| ids.contains(&v.index))
+                    .count();
+                let total: usize = mesh.flexes.iter().map(|f| f.vertices.len()).sum();
+                assert!(
+                    covered * 10 >= total * 9,
+                    "{path}: {covered}/{total} flex vertices rendered"
+                );
+            }
             assert!(flexes
                 .controllers
                 .iter()

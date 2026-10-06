@@ -24,6 +24,17 @@ pub struct Surface {
     pub indices: Vec<u32>,
     #[serde(default)]
     pub lightmap: Option<usize>,
+    /// Studio mesh this surface came from and each vertex's mesh-local index, so facial
+    /// flex vertex deltas can be applied.
+    #[serde(default)]
+    pub flex_source: Option<FlexSource>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FlexSource {
+    pub bodypart: usize,
+    pub model: usize,
+    pub mesh: usize,
+    pub vertex_ids: Vec<u16>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Entity {

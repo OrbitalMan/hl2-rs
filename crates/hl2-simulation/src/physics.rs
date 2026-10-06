@@ -989,6 +989,7 @@ mod tests {
             })
             .collect();
         Surface {
+            flex_source: None,
             background: false,
             material: "synthetic".into(),
             lightmap: None,

@@ -365,7 +365,7 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
     let vvd = vmdl::Vvd::read(&vvd_bytes)?;
     let vtx = vmdl::Vtx::read(&vtx_bytes)?;
     let mut surfaces = Vec::new();
-    for (body, topology) in mdl.body_parts.iter().zip(&vtx.body_parts) {
+    for (body_index, (body, topology)) in mdl.body_parts.iter().zip(&vtx.body_parts).enumerate() {
         let Some(model) = body.models.first() else {
             continue;
         };
@@ -374,7 +374,7 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
             .first()
             .and_then(|m| m.lods.first())
             .context("missing model LOD")?;
-        for (mesh, topology) in model.meshes.iter().zip(&lod.meshes) {
+        for (mesh_index, (mesh, topology)) in model.meshes.iter().zip(&lod.meshes).enumerate() {
             let material = usize::try_from(mesh.material)?;
             let texture_index = if skin_reference_count > 0 {
                 let index = skin
@@ -413,7 +413,9 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
                 lightmap: None,
                 vertices: Vec::new(),
                 indices: Vec::new(),
+                flex_source: None,
             };
+            let mut vertex_ids = Vec::new();
             let base = usize::try_from(model.vertex_offset)?
                 .checked_add(usize::try_from(mesh.vertex_offset)?)
                 .context("model vertex overflow")?;
@@ -442,6 +444,9 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
                                 .get(base + vertex_id)
                                 .context("VVD vertex missing")?;
                             surface.indices.push(surface.vertices.len() as u32);
+                            vertex_ids.push(
+                                u16::try_from(vertex_id).context("mesh vertex id exceeds u16")?,
+                            );
                             surface.vertices.push(Vertex {
                                 position: Vec3::new(
                                     vertex.position.x,
@@ -466,6 +471,12 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
                 }
             }
             if !surface.indices.is_empty() {
+                surface.flex_source = Some(modkit_core::FlexSource {
+                    bodypart: body_index,
+                    model: 0,
+                    mesh: mesh_index,
+                    vertex_ids,
+                });
                 surfaces.push(surface);
             }
         }
@@ -696,6 +707,7 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                     instance.background,
                 ))
                 .or_insert_with(|| Surface {
+                    flex_source: None,
                     background: instance.background,
                     material: surface.material.clone(),
                     lightmap: surface.lightmap,

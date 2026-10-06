@@ -81,6 +81,7 @@ mod tests {
     #[test]
     fn impact_is_clipped_at_surface_edge_and_never_spills_to_parallel_wall() {
         let surface = Surface {
+            flex_source: None,
             background: false,
             material: String::new(),
             lightmap: None,

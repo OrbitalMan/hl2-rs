@@ -303,6 +303,7 @@ mod tests {
     fn flat_world() -> World {
         World {
             surfaces: vec![Surface {
+                flex_source: None,
                 background: false,
                 material: "wall".into(),
                 lightmap: None,
