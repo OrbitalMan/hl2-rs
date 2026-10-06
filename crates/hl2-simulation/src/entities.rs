@@ -1,6 +1,6 @@
 //! Deterministic map entity I/O. Unsupported inputs are reported instead of silently emulated.
 use crate::physics;
-use glam::{Quat, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use modkit_core::{parse_vec3, Entity, World};
 use serde::Serialize;
 use source_assets::{
@@ -146,6 +146,32 @@ pub struct State {
     pub value: f32,
     timer_at: f64,
     outputs: Vec<Output>,
+    /// Movement hierarchy parent (CBaseEntity::SetParent), optionally an attachment.
+    pub parent: Option<Parent>,
+}
+impl State {
+    /// Whether the entity's collider takes part in queries. Gear parented to an animated
+    /// attachment (helmets on NPCs) moves with its parent's hierarchy and must not block
+    /// that parent; native traces skip hierarchy children of the moving entity.
+    pub fn collides(&self) -> bool {
+        !self.killed && self.visible && self.parent.as_ref().is_none_or(|p| p.attachment.is_none())
+    }
+}
+/// A child follows its parent's origin/rotation, or one of its animated attachments,
+/// with a fixed local offset.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Parent {
+    pub entity: usize,
+    pub attachment: Option<String>,
+    pub origin: Vec3,
+    pub rotation: Quat,
+}
+/// Classes whose own movement code positions them; map-spawn `parentname` is not
+/// applied to them here (moving hierarchies remain unfinished).
+fn self_positioned(class: &str) -> bool {
+    ["func_", "prop_door", "prop_physics", "npc_", "trigger_"]
+        .iter()
+        .any(|p| class.starts_with(p))
 }
 #[derive(Default, Serialize)]
 pub struct Diagnostics {
@@ -306,8 +332,12 @@ impl Scene {
             let mut s = State {
                 origin: e.origin(),
                 rotation: base_rotation,
+                // CDynamicProp::Spawn adds EF_NODRAW for StartDisabled.
                 visible: e.get("rendermode") != Some("10")
-                    && (!matches!(e.class(), "func_brush" | "func_monitor") || enabled),
+                    && (!matches!(
+                        e.class(),
+                        "func_brush" | "func_monitor" | "prop_dynamic" | "prop_dynamic_override"
+                    ) || enabled),
                 enabled,
                 killed: false,
                 animation: e
@@ -363,6 +393,7 @@ impl Scene {
                 value: number(e, "startvalue", 0.),
                 timer_at: number(e, "RefireTime", 1.).max(0.015) as f64,
                 outputs,
+                parent: None,
             };
             s.origin = s.base_origin + s.translation * s.fraction;
             s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
@@ -390,6 +421,30 @@ impl Scene {
             }
         }
         scene.hold_template_children(world);
+        // SetupParentsForSpawnList: `parentname` ("name" or "name,attachment") keeps the
+        // spawn world pose. Parents still held by a point_template do not exist yet.
+        for id in 0..world.entities.len() {
+            let e = &world.entities[id];
+            let Some(spec) = e.get("parentname").filter(|n| !n.is_empty()) else {
+                continue;
+            };
+            if self_positioned(e.class()) || scene.template_pending(id) {
+                continue;
+            }
+            let (name, attachment) = match spec.split_once(',') {
+                Some((n, a)) => (n.trim(), Some(a.trim().to_owned())),
+                None => (spec.trim(), None),
+            };
+            let Some(parent) = world.entities.iter().position(|p| {
+                p.get("targetname")
+                    .is_some_and(|t| t.eq_ignore_ascii_case(name))
+            }) else {
+                continue;
+            };
+            if parent != id && !scene.template_pending(parent) {
+                scene.set_parent(world, id, parent, attachment, true);
+            }
+        }
         for id in 0..world.entities.len() {
             if world.entities[id].class() == "logic_auto" {
                 scene.fire(id, "OnMapSpawn", usize::MAX);
@@ -686,6 +741,76 @@ impl Scene {
     }
     /// Skinning matrices for an actor: current base clip plus scene gesture layers.
     /// Both hosts use this so presentation, eyes and impacts see one pose.
+    /// World frame an attached child follows: the parent's origin/rotation, or the
+    /// parent's animated attachment (model-scaled). `None` for unknown attachments.
+    fn parent_frame(&self, world: &World, parent: usize, attachment: Option<&str>) -> Option<Mat4> {
+        let state = self.states.get(parent)?;
+        let base = Mat4::from_rotation_translation(state.rotation, state.origin);
+        let Some(name) = attachment.filter(|n| !n.is_empty()) else {
+            return Some(base);
+        };
+        let instance = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(parent))?;
+        let rig = world.rigs.get(&instance.asset_key())?;
+        let attachment = rig.attachment(name)?;
+        let matrices = self.actor_matrices(rig, parent);
+        let local = rig.attachment_matrix(&matrices, attachment)?;
+        let (_, rotation, translation) = local.to_scale_rotation_translation();
+        Some(
+            base * Mat4::from_rotation_translation(
+                rotation.normalize(),
+                translation * instance.scale,
+            ),
+        )
+    }
+    /// SetParent/SetParentAttachment: keep the current world pose as a local offset, or
+    /// snap onto the parent frame.
+    fn set_parent(
+        &mut self,
+        world: &World,
+        id: usize,
+        parent: usize,
+        attachment: Option<String>,
+        keep_offset: bool,
+    ) {
+        let Some(frame) = self.parent_frame(world, parent, attachment.as_deref()) else {
+            self.unsupported_input(world.entities[id].class(), "SetParent:missing-attachment");
+            return;
+        };
+        let (origin, rotation) = if keep_offset {
+            let state = &self.states[id];
+            let local =
+                frame.inverse() * Mat4::from_rotation_translation(state.rotation, state.origin);
+            let (_, rotation, origin) = local.to_scale_rotation_translation();
+            (origin, rotation.normalize())
+        } else {
+            (Vec3::ZERO, Quat::IDENTITY)
+        };
+        self.states[id].parent = Some(Parent {
+            entity: parent,
+            attachment,
+            origin,
+            rotation,
+        });
+        self.follow_parent(world, id);
+    }
+    /// Move a parented child onto its parent frame and local offset.
+    fn follow_parent(&mut self, world: &World, id: usize) {
+        let Some(parent) = self.states[id].parent.clone() else {
+            return;
+        };
+        if self.states[parent.entity].killed {
+            return;
+        }
+        if let Some(frame) = self.parent_frame(world, parent.entity, parent.attachment.as_deref()) {
+            let pose = frame * Mat4::from_rotation_translation(parent.rotation, parent.origin);
+            let (_, rotation, origin) = pose.to_scale_rotation_translation();
+            self.states[id].origin = origin;
+            self.states[id].rotation = rotation.normalize();
+        }
+    }
     pub fn actor_matrices(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<glam::Mat4> {
         let params = self.actor_pose_values(rig, id);
         self.gestures
@@ -1723,6 +1848,25 @@ impl Scene {
             }
             "turnon" => self.states[id].visible = true,
             "turnoff" => self.states[id].visible = false,
+            "setparent" => {
+                let mut lookup = p.clone();
+                lookup.target = p.parameter.clone();
+                match self.targets(world, &lookup).first() {
+                    Some(&parent) if !p.parameter.is_empty() && parent != id => {
+                        self.set_parent(world, id, parent, None, true)
+                    }
+                    _ => self.states[id].parent = None,
+                }
+            }
+            "setparentattachment" | "setparentattachmentmaintainoffset" => {
+                // CBaseEntity::InputSetParentAttachment needs an existing parent; without
+                // MaintainOffset the child moves onto the attachment.
+                if let Some(parent) = self.states[id].parent.as_ref().map(|p| p.entity) {
+                    let keep = input == "setparentattachmentmaintainoffset";
+                    self.set_parent(world, id, parent, Some(p.parameter.clone()), keep);
+                }
+            }
+            "clearparent" => self.states[id].parent = None,
             "lock" => self.states[id].locked = true,
             "unlock" => self.states[id].locked = false,
             "open" | "close" | "toggle" | "openawayfrom"
@@ -2223,6 +2367,12 @@ impl Scene {
                     self.send(id, "ChangeLevel", "");
                 }
                 self.states[id].touching = inside;
+            }
+        }
+        // Parented children follow this tick's parent poses and animated attachments.
+        for id in 0..self.states.len() {
+            if self.states[id].parent.is_some() && !self.states[id].killed {
+                self.follow_parent(world, id);
             }
         }
         for _ in 0..2048 {
@@ -3260,6 +3410,107 @@ mod tests {
             touch_scene.transition,
             Some(("next".into(), "arrival".into()))
         );
+    }
+    #[test]
+    fn props_parent_to_entities_and_follow_animated_attachments() {
+        use modkit_core::{
+            animation::{Attachment, Bone, Pose, Rig},
+            ModelInstance,
+        };
+        let w = World {
+            entities: vec![
+                entity("npc_barney", "barney", &[("origin", "100 0 0")]),
+                entity(
+                    "prop_dynamic",
+                    "helmet",
+                    &[("origin", "100 0 50"), ("parentname", "barney")],
+                ),
+                entity(
+                    "prop_dynamic",
+                    "plate",
+                    &[("origin", "0 0 0"), ("StartDisabled", "1")],
+                ),
+            ],
+            model_instances: vec![ModelInstance {
+                background: false,
+                model: "barney.mdl".into(),
+                origin: Vec3::new(100., 0., 0.),
+                angles: Vec3::ZERO,
+                skin: 0,
+                scale: 1.,
+                kind: "npc_barney".into(),
+                solid: false,
+                solid_mode: None,
+                entity: Some(0),
+            }],
+            rigs: BTreeMap::from([(
+                "barney.mdl#0".into(),
+                Rig {
+                    bones: vec![Bone {
+                        name: "root".into(),
+                        parent: None,
+                        bind: Pose {
+                            position: Vec3::ZERO,
+                            rotation: Quat::IDENTITY,
+                        },
+                        inverse_bind: Mat4::IDENTITY,
+                    }],
+                    attachments: vec![Attachment {
+                        name: "helmet_attachment".into(),
+                        bone: 0,
+                        local: Mat4::from_translation(Vec3::new(2., 0., 64.)),
+                    }],
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&w);
+        // Map-spawn parentname keeps the authored world offset; StartDisabled hides props.
+        assert_eq!(scene.states[1].parent.as_ref().map(|p| p.entity), Some(0));
+        assert!(!scene.states[2].visible);
+        scene.states[0].origin = Vec3::new(110., 0., 0.);
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert!(scene.states[1]
+            .origin
+            .abs_diff_eq(Vec3::new(110., 0., 50.), 1e-4));
+        // SetParent then SetParentAttachment snaps onto the attachment (logic_barney_init).
+        scene.send(2, "SetParent", "barney");
+        scene.send(2, "SetParentAttachment", "helmet_attachment");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        let parent = scene.states[2].parent.clone().unwrap();
+        assert_eq!(parent.attachment.as_deref(), Some("helmet_attachment"));
+        assert!(scene.states[2]
+            .origin
+            .abs_diff_eq(Vec3::new(112., 0., 64.), 1e-4));
+        // The child follows the parent's rotation and position.
+        scene.states[0].rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert!(scene.states[2]
+            .origin
+            .abs_diff_eq(Vec3::new(110., 2., 64.), 1e-4));
+        assert!(scene.states[2]
+            .rotation
+            .abs_diff_eq(scene.states[0].rotation, 1e-5));
+        // TurnOn/TurnOff toggle drawing; ClearParent keeps the last world pose.
+        scene.send(2, "TurnOn", "");
+        scene.send(2, "ClearParent", "");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert!(scene.states[2].visible && scene.states[2].parent.is_none());
+        scene.states[0].origin = Vec3::ZERO;
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert!(scene.states[2]
+            .origin
+            .abs_diff_eq(Vec3::new(110., 2., 64.), 1e-4));
+        // An unknown attachment is reported and leaves the parent unchanged.
+        scene.send(1, "SetParentAttachment", "missing");
+        scene.tick(&w, Vec3::ZERO, 0.015);
+        assert_eq!(scene.states[1].parent.as_ref().unwrap().attachment, None);
+        assert!(scene
+            .diagnostics
+            .unsupported
+            .keys()
+            .any(|k| k.contains("missing-attachment")));
     }
     #[test]
     fn setting_default_animation_preserves_playback_and_completion() {

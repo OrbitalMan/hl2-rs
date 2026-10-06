@@ -345,12 +345,7 @@ impl Gameplay {
         self.queued_primary = false;
         self.queued_secondary = false;
         for (id, state) in self.scene.states.iter().enumerate() {
-            physics.set_entity(
-                id,
-                state.origin,
-                state.rotation,
-                !state.killed && state.visible,
-            );
+            physics.set_entity(id, state.origin, state.rotation, state.collides());
         }
         for launch in self.inventory.projectile_spawns.drain(..) {
             self.projectiles.spawn(launch, &mut self.scene);

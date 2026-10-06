@@ -195,7 +195,7 @@ pub fn tick_npcs(
     }
     for pose in poses {
         let s = &scene.states[pose.entity];
-        physics.set_entity(pose.entity, s.origin, s.rotation, !s.killed && s.visible);
+        physics.set_entity(pose.entity, s.origin, s.rotation, s.collides());
     }
     physics.refresh_entity_queries();
 }

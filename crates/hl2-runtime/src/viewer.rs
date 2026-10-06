@@ -1062,12 +1062,7 @@ pub async fn run(mut o: Options) -> Result<()> {
             queued_attack = false;
             queued_secondary = false;
             for (id, state) in scene.states.iter().enumerate() {
-                physics.set_entity(
-                    id,
-                    state.origin,
-                    state.rotation,
-                    !state.killed && state.visible,
-                );
+                physics.set_entity(id, state.origin, state.rotation, state.collides());
             }
             for launch in inventory.projectile_spawns.drain(..) {
                 projectiles.spawn(launch, &mut scene);

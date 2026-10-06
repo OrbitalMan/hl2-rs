@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Entity parenting and Barney's helmet props
+
+**Changed:** The simulation now supports movement parenting. Map-spawn `parentname` keeps the spawn offset, and the `SetParent`, `SetParentAttachment`, `SetParentAttachmentMaintainOffset` and `ClearParent` inputs work. Each tick, children follow the parent's pose or animated attachment, using the same composed pose both hosts render. `prop_dynamic` StartDisabled hides the prop. Gear attached to an animated attachment has no collider, so a helmet no longer blocks its wearer. The security fixtures now include the campaign state by security_02: faceplates off (ss_Helmet_Reveal runs in security_01) and logic_disable_cameras triggered.
+
+**Why:** Owner priority: in security_02 Barney wears the separate helmetBack prop, parented by logic_barney_init to helmet_attachment after the template spawn. Only the faceplate comes off, during ss_Helmet_Reveal.
+
+**Tested how:** 317 normal + 22 owned tests (synthetic parenting test), strict Clippy/fmt. Packaged security captures compared with native session security-scene-20261006T204141Z. Regression batch artifacts/helmet-regression: weapons/Kleiner/campaign identical; movement 751 px and Breen 3,383/6,654 px, the same known autoplay differences as the accepted 1bf087f batch. Attention 26/26.
+
+**Result:** helmetBack renders on Barney's head through the whole scene, matching the native close-ups. With the faceplates off, Barney walks to his desk again. (An intermediate build where the solid helmet blocked his route was rejected and fixed.)
+
+**Still broken or not tested:** The faceplate removal in security_01/ss_Helmet_Reveal has not been played or compared yet. Moving brush/physics hierarchies are not parented. Nested hierarchies lag one tick. Retained host not visually checked (shared simulation only).
+
+**Next:** Retained-host flexes, lip sync, head flexes, Barney's mark offset.
+
 ## 2026-10-06 FACS eyelids and native face close-ups
 
 **Changed:** Eyeball records now carry their FACS eyelid fields, and actor flexes apply the retail eyelid step (private review: StudioRender 1001bd80). It converts lid raiser/neutral/lowerer weights and the eye's look direction into lid descriptor values before vertex deltas. Flex math moved into shared `source-assets` (`FaceModel`, `descriptor_weights`, `vertex_deltas`) so the retained host can reuse it. Rigs now keep every model attachment. Movement scripts accept `pitch` and `fov` (Source horizontal 4:3 degrees) for zoomed comparison shots, and the private native oracle takes a matching `ORACLE_CLOSEUP`.

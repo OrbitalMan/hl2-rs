@@ -58,7 +58,24 @@
    -252,
    34
   ],
-  "yaw": -65
+  "yaw": -65,
+  "actions": [
+   {
+    "action": "send",
+    "target": "helmetFaceplate_head",
+    "input": "TurnOff"
+   },
+   {
+    "action": "send",
+    "target": "helmetFaceplate_hand",
+    "input": "TurnOff"
+   },
+   {
+    "action": "send",
+    "target": "logic_disable_cameras",
+    "input": "Trigger"
+   }
+  ]
  },
  {
   "tick": 3,
