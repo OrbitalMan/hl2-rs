@@ -7,7 +7,7 @@ A standalone, partial Rust reconstruction of Half-Life 2 that reads maps, models
 | Operating system | Status | Evidence |
 | --- | --- | --- |
 | Windows 11 64-bit (x86_64) | Primary tested platform | Owner builds, unit and owned-file tests, packaged replays/captures and native-game comparisons; CI runs on `windows-latest`. |
-| macOS 15+ on Apple Silicon (aarch64, Metal) | Tested by a contributor | Build, tests and a `d1_trainstation_01` launch with `./scripts/build-bevy.sh` and `./launch-bevy.sh` ([PR #1](https://github.com/kvalls/hl2-rs/pull/1)). Replays, captures and native comparisons are **not tested**. |
+| macOS 15+ on Apple Silicon (aarch64, Metal) | Tested by a contributor | On an Apple M1 Pro: build, tests, and the packaged build (`./scripts/build-bevy.sh`, `./launch-bevy.sh`) running `d1_trainstation_02`, including the scripted dispenser, Metrocop sequence and queue, with exit code 0 ([PR #1](https://github.com/kvalls/hl2-rs/pull/1)). Replays, captures and native comparisons are **not tested**. |
 | Linux | **Not tested** | Install discovery looks in `~/.steam/steam` and `~/.local/share/Steam`, but neither a build nor the POSIX scripts have been run on Linux. Reports are welcome. |
 | macOS on Intel, other systems | **Not tested** | |
 
