@@ -13,10 +13,6 @@ use std::sync::{Arc, Mutex};
 /// Cameras whose Source materials take the tonemap scale.
 #[derive(Component)]
 pub struct ToneMapped;
-/// Cameras that keep a fixed scale of 1 (LDR 2D sky faces, which already match native
-/// until HDR sky textures are decoded).
-#[derive(Component)]
-pub struct UnitExposure;
 
 /// sRGB byte to linear.
 static LINEAR: std::sync::LazyLock<[f32; 256]> = std::sync::LazyLock::new(|| {
@@ -77,8 +73,7 @@ pub fn update(
     game: Res<Gameplay>,
     time: Res<Time<Real>>,
     capture: Res<crate::CaptureControl>,
-    mut cameras: Query<&mut Exposure, (With<ToneMapped>, Without<UnitExposure>)>,
-    mut unit: Query<&mut Exposure, With<UnitExposure>>,
+    mut cameras: Query<&mut Exposure, With<ToneMapped>>,
 ) {
     state.frames += 1;
     // ResetToneMapping(1.0) when a level starts.
@@ -119,12 +114,6 @@ pub fn update(
     for mut exposure in &mut cameras {
         if exposure.ev100 != ev {
             exposure.ev100 = ev;
-        }
-    }
-    let one = ev100(1.);
-    for mut exposure in &mut unit {
-        if exposure.ev100 != one {
-            exposure.ev100 = one;
         }
     }
 }

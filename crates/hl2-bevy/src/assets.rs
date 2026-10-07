@@ -421,11 +421,12 @@ fn direct_properties(entries: &[Entry]) -> BTreeMap<String, String> {
     properties
 }
 
-/// Tests as evaluated on a DX9, sRGB-capable renderer without HDR (our lightmaps are LDR).
-/// Unknown tests are false, as in retail (which also warns).
+/// Tests as evaluated on a DX9, sRGB-capable renderer in HDR mode (mat_hdr_level 2, the
+/// Source default and the owner's setting). Unknown tests are false, as in retail (which
+/// also warns).
 fn material_condition(test: &str) -> bool {
     let (negate, test) = test.strip_prefix('!').map_or((false, test), |t| (true, t));
-    let value = matches!(test, "srgb" | "ldr");
+    let value = matches!(test, "srgb" | "hdr");
     value != negate
 }
 
@@ -705,9 +706,8 @@ mod tests {
         .unwrap();
         let p = direct_properties(&entries);
         assert_eq!(p["$color2"], "[2.5 2.5 2.5]");
-        assert_eq!(p["$nocull"], "1");
-        assert_eq!(p["$additive"], "1");
-        for absent in ["$alpha", "$translucent", "$x", "srgb?$color2"] {
+        assert_eq!(p["$alpha"], "0.5");
+        for absent in ["$nocull", "$additive", "$translucent", "$x", "srgb?$color2"] {
             assert!(!p.contains_key(absent), "{absent}");
         }
     }

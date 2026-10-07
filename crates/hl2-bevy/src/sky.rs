@@ -87,18 +87,33 @@ pub fn install(
             );
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![[0.; 2]; 4]);
             mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
-            let base = images.add(rendering::image(
-                data.image.width,
-                data.image.height,
-                data.image.rgba.clone(),
-                false,
-            ));
+            // HDR faces are linear RGBA16F, drawn through the shader's linear-base path
+            // (parameters.w = -2 with a white second texture), times the tonemap scale.
+            let (base, linear) = if let Some(hdr) = &data.hdr {
+                let mut image = rendering::image(
+                    hdr.width,
+                    hdr.height,
+                    hdr.rgba.iter().flat_map(|t| t.to_le_bytes()).collect(),
+                    false,
+                );
+                image.texture_descriptor.format =
+                    bevy::render::render_resource::TextureFormat::Rgba16Float;
+                (images.add(image), true)
+            } else {
+                let image = rendering::image(
+                    data.image.width,
+                    data.image.height,
+                    data.image.rgba.clone(),
+                    false,
+                );
+                (images.add(image), false)
+            };
             commands.spawn((
                 crate::campaign::MapOwned,
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(materials.add(rendering::SourceMaterial {
                     tint: Vec4::ONE,
-                    parameters: Vec4::new(0., 1., 0., 0.),
+                    parameters: Vec4::new(0., 1., 0., if linear { -2. } else { 0. }),
                     base,
                     lightmap: white.clone(),
                     iris: white.clone(),
@@ -113,7 +128,7 @@ pub fn install(
         }
     }
     for (is_2d, layer, order) in [(true, 3, -2), (false, 4, -1)] {
-        let mut camera = commands.spawn((
+        commands.spawn((
             crate::campaign::MapOwned,
             Camera3d::default(),
             Camera {
@@ -124,7 +139,9 @@ pub fn install(
             RenderLayers::layer(layer),
             SkyCamera(is_2d),
             Tonemapping::None,
+            // Sky_HDR_DX9 and the miniature 3D skybox both end in TONEMAP_SCALE_LINEAR.
             bevy::camera::Exposure::default(),
+            crate::tonemap::ToneMapped,
             Msaa::Off,
             Projection::Perspective(PerspectiveProjection {
                 fov: 2. * ((75f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
@@ -134,12 +151,6 @@ pub fn install(
             }),
             Transform::IDENTITY,
         ));
-        // The miniature 3D skybox is lightmapped world; the 2D faces stay LDR for now.
-        if is_2d {
-            camera.insert(crate::tonemap::UnitExposure);
-        } else {
-            camera.insert(crate::tonemap::ToneMapped);
-        }
     }
 }
 pub fn present(
