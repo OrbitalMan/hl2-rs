@@ -3,6 +3,7 @@ pub mod bsp;
 pub mod install;
 pub mod keyvalues;
 pub mod lighting;
+pub mod model_lighting;
 pub mod models;
 pub mod monitor_material;
 pub mod navigation;

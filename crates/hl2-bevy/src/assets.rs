@@ -77,6 +77,8 @@ pub struct MaterialData {
     pub camera_vertex_color: bool,
     pub camera_animation: source_assets::monitor_material::Animation,
     pub camera_color2: [f32; 3],
+    /// VertexLitGeneric $halflambert.
+    pub half_lambert: bool,
     /// Affine rows applied to the BSP/model base UVs before repeat sampling.
     pub uv_transform: [[f32; 3]; 2],
 }
@@ -102,6 +104,7 @@ impl Default for MaterialData {
             camera_vertex_color: false,
             camera_animation: Default::default(),
             camera_color2: [1.; 3],
+            half_lambert: false,
             uv_transform: UvTransform::default().rows(),
         }
     }
@@ -420,6 +423,7 @@ fn metadata(definition: &Definition) -> Result<MaterialData> {
         translucent: scalar(p, "$translucent", 0.)?.trunc() != 0.,
         additive: scalar(p, "$additive", 0.)?.trunc() != 0.,
         two_sided: scalar(p, "$nocull", 0.)?.trunc() != 0.,
+        half_lambert: scalar(p, "$halflambert", 0.)?.trunc() != 0.,
         opacity: scalar(p, "$alpha", 1.)?.clamp(0., 1.),
         unlit: definition.shader.eq_ignore_ascii_case("unlitgeneric"),
         eye_fallback: definition.shader.eq_ignore_ascii_case("eyes_dx8"),
@@ -619,6 +623,7 @@ mod tests {
             vertices: [[0., 0., 0.], [0., 1., 0.], [1., 0., 0.]]
                 .into_iter()
                 .map(|position| modkit_core::Vertex {
+                    normal: Default::default(),
                     position: position.into(),
                     uv: Default::default(),
                     color: [255; 4],
@@ -713,6 +718,7 @@ mod tests {
             vertices: [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]]
                 .into_iter()
                 .map(|position| Vertex {
+                    normal: Default::default(),
                     position: position.into(),
                     uv: Default::default(),
                     light_uv: Default::default(),

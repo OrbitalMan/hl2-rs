@@ -90,6 +90,13 @@ impl Bsp {
     pub fn lump(&self, id: usize) -> &[u8] {
         &self.lumps[id]
     }
+    /// Leaf ambient samples, world lights and the leaf tree for model lighting.
+    pub fn model_lighting(&self) -> Result<modkit_core::lighting::LightingData> {
+        crate::model_lighting::read(&self.lumps, &self.lump_versions)
+    }
+    pub fn model_lighting_with(&self, hdr: bool) -> Result<modkit_core::lighting::LightingData> {
+        crate::model_lighting::read_with(&self.lumps, &self.lump_versions, hdr)
+    }
     pub fn visibility_index(&self) -> Result<crate::visibility::VisibilityIndex> {
         crate::visibility::VisibilityIndex::new(&self.lumps, self.lump_versions[10])
     }
@@ -150,6 +157,10 @@ impl Bsp {
                 mins: vec3(record, 0)?,
                 maxs: vec3(record, 12)?,
             });
+        }
+        match self.model_lighting() {
+            Ok(lighting) => world.lighting = Some(std::sync::Arc::new(lighting)),
+            Err(e) => world.warnings.push(format!("model lighting data: {e:#}")),
         }
         Ok(world)
     }
@@ -370,6 +381,7 @@ impl Bsp {
                             dispverts[index(dvstart + (y * side + x) as i32, dispverts.len())?];
                         let pos = p + vec3(dv, 0)? * f32le(dv, 12)?;
                         batch.vertices.push(Vertex {
+                            normal: Default::default(),
                             position: pos,
                             uv: uv(p),
                             color: if face_light.is_some() {
@@ -408,6 +420,7 @@ impl Bsp {
                 let base = batch.vertices.len() as u32;
                 for p in polygon.iter().copied() {
                     batch.vertices.push(Vertex {
+                        normal: Default::default(),
                         position: p,
                         uv: uv(p),
                         color: if face_light.is_some() {

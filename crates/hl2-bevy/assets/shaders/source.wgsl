@@ -8,8 +8,62 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var iris_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var iris_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(8) var<uniform> secondary_uv: mat3x3<f32>;
+struct ModelLighting {
+    params: vec4<f32>,
+    basis: mat4x4<f32>,
+    ambient: array<vec4<f32>, 6>,
+    position: array<vec4<f32>, 4>,
+    color: array<vec4<f32>, 4>,
+    direction: array<vec4<f32>, 4>,
+    attenuation: array<vec4<f32>, 4>,
+    spot: array<vec4<f32>, 4>,
+}
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var<uniform> lighting: ModelLighting;
 fn srgb_to_linear(color: vec3<f32>) -> vec3<f32> {
     return select(pow((color + vec3(0.055)) / 1.055, vec3(2.4)), color / 12.92, color <= vec3(0.04045));
+}
+// Source ambient cube (faces in Source axes) with squared-normal weighting.
+fn ambient_light(n: vec3<f32>) -> vec3<f32> {
+    let s = vec3(n.x, -n.z, n.y);
+    let n2 = s * s;
+    let x = select(lighting.ambient[0].xyz, lighting.ambient[1].xyz, s.x < 0.0);
+    let y = select(lighting.ambient[2].xyz, lighting.ambient[3].xyz, s.y < 0.0);
+    let z = select(lighting.ambient[4].xyz, lighting.ambient[5].xyz, s.z < 0.0);
+    return n2.x * x + n2.y * y + n2.z * z;
+}
+// SDK DoLighting: per light color * cosine (or half-Lambert) * distance/spot attenuation.
+fn model_light(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    var sum = ambient_light(n);
+    let count = i32(lighting.params.y);
+    for (var i = 0; i < 4; i++) {
+        if i >= count { break; }
+        let kind = lighting.position[i].w;
+        let to_light = lighting.position[i].xyz - p;
+        let d2 = max(dot(to_light, to_light), 1e-6);
+        let d = sqrt(d2);
+        var l = to_light / d;
+        var atten = 1.0;
+        if kind > 1.5 {
+            l = -lighting.direction[i].xyz;
+        } else {
+            atten = 1.0 / dot(lighting.attenuation[i].xyz, vec3(1.0, d, d2));
+            if kind > 0.5 {
+                let cos_theta = dot(lighting.direction[i].xyz, -l);
+                var spot = max((cos_theta - lighting.spot[i].y) * lighting.spot[i].z, 0.0001);
+                spot = clamp(pow(spot, lighting.spot[i].x), 0.0, 1.0);
+                atten *= spot;
+            }
+        }
+        var cosine = dot(n, l);
+        if lighting.params.z > 0.5 {
+            let h = cosine * 0.5 + 0.5;
+            cosine = h * h;
+        } else {
+            cosine = max(cosine, 0.0);
+        }
+        sum += lighting.color[i].xyz * cosine * atten;
+    }
+    return sum;
 }
 @fragment
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
@@ -20,6 +74,8 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     }
     base.a = select(base.a, 1.0, parameters.y > 0.5);
     var vertex_color = mesh.color;
+    let lit = lighting.params.x > 0.5;
+    if lit { vertex_color = vec4(1.0, 1.0, 1.0, vertex_color.a); }
     if parameters.w < -0.5 {
         let uv = (secondary_uv * vec3(mesh.uv, 1.0)).xy;
         base = vec4(base.rgb * textureSample(iris_texture, iris_sampler, uv).rgb, base.a);
@@ -31,7 +87,12 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     // LDR atlases are gamma-encoded bytes. Preserve prototype multiplication
     // before converting for the sRGB output target. Source HDR remains absent.
     // Procedural camera images are sampled through an sRGB view and are already linear.
-    let rgb = select(srgb_to_linear(base.rgb * baked), base.rgb, parameters.w < -0.5);
+    var rgb = select(srgb_to_linear(base.rgb * baked), base.rgb, parameters.w < -0.5);
+    if lit {
+        let p = (lighting.basis * vec4(mesh.world_position.xyz, 1.0)).xyz;
+        let n = normalize((lighting.basis * vec4(mesh.world_normal, 0.0)).xyz);
+        rgb = srgb_to_linear(base.rgb) * model_light(p, n);
+    }
     // Bevy Add uses a premultiplied pipeline. Alpha zero retains all of the
     // destination while premultiplying RGB implements Source SrcAlpha/One.
     if parameters.z > 0.5 { return vec4(rgb * base.a, 0.0); }

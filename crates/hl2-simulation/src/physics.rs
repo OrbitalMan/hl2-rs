@@ -974,6 +974,7 @@ mod tests {
     fn box_surface(min: Vec3, max: Vec3) -> Surface {
         let vertices = (0..8)
             .map(|i| modkit_core::Vertex {
+                normal: Default::default(),
                 position: Vec3::new(
                     if i & 1 == 0 { min.x } else { max.x },
                     if i & 2 == 0 { min.y } else { max.y },

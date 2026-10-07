@@ -103,6 +103,7 @@ pub fn install(
                     lightmap: white.clone(),
                     iris: white.clone(),
                     secondary_uv: Mat3::IDENTITY,
+                    lighting: Default::default(),
                     alpha: AlphaMode::Opaque,
                     two_sided: true,
                 })),

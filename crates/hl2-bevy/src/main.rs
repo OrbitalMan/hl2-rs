@@ -354,6 +354,12 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
+            rendering::present_lighting
+                .after(rendering::present_entities)
+                .before(TransformSystems::Propagate),
+        )
+        .add_systems(
+            PostUpdate,
             eyes::present
                 .after(rendering::present_entities)
                 .before(TransformSystems::Propagate),

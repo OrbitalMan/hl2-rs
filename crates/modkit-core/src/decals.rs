@@ -88,6 +88,7 @@ mod tests {
             vertices: [Vec3::ZERO, Vec3::X * 10., Vec3::Y * 10.]
                 .into_iter()
                 .map(|position| crate::Vertex {
+                    normal: Default::default(),
                     position,
                     uv: Vec2::ZERO,
                     color: [255; 4],
