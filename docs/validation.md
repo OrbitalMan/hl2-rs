@@ -2,7 +2,7 @@
 
 ## Native trainstation_02 jumbotron comparison (2026-10-07)
 
-Native view session view-d1_trainstation_02-20261007T053505Z (run_view_oracle.py, eye -3753 -2290 469, yaw -90, about 24 s after load) vs Bevy partition-breen-screen-final. Breen's broadcast, framing and hall lighting match. Native also shows the scene behind through the screen's dark areas (the yellow sign is visible through it), so the see-through dark feed is correct behavior, not a Bevy defect. Native colors are slightly more saturated. Shaft brightness after the rendercolor fix is comparable; no exact luminance match is claimed.
+Native view session view-d1_trainstation_02-20261007T053505Z (run_view_oracle.py, eye -3753 -2290 469, yaw -90, about 24 s after load) vs Bevy partition-breen-screen-final. Breen's broadcast, framing and hall lighting match. Correction (owner review): the yellow shape behind Breen is not see-through. It is his studio backdrop, the infodecal decals/decal_posterbreentv (Combine panels and logo), which Bevy did not render. Static infodecals are now projected (see the static-decal entry); the feed then matches native, apart from a slightly cooler native tint. Native colors are slightly more saturated. Shaft brightness after the rendercolor fix is comparable; no exact luminance match is claimed.
 
 ## Kleiner movement and new regression views (2026-10-07)
 

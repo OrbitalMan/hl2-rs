@@ -75,6 +75,113 @@ pub fn project(
     }
     result
 }
+/// Static map decal (infodecal) on lightmapped world faces: centered on the plane point
+/// nearest `center`, `size` world units wide/high, oriented by each face's texture axes
+/// (decals follow the receiving surface's texture u/v directions), clipped to the decal
+/// rectangle and lit by the receiver's lightmap. Faces farther than `reach` from `center`
+/// are skipped (the engine's +-5 unit placement trace).
+pub fn static_decal(
+    surfaces: &[Surface],
+    center: Vec3,
+    size: Vec2,
+    reach: f32,
+    material: &str,
+) -> Vec<Surface> {
+    use crate::Vertex;
+    if !center.is_finite() || size.min_element() <= 0. || !size.is_finite() {
+        return Vec::new();
+    }
+    let half = size * 0.5;
+    let mut out: Vec<Surface> = Vec::new();
+    for surface in surfaces
+        .iter()
+        .filter(|s| s.lightmap.is_some() && !s.background)
+    {
+        let mut decal = Surface {
+            background: false,
+            material: material.into(),
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            lightmap: surface.lightmap,
+            flex_source: None,
+        };
+        for tri in surface.indices.as_chunks::<3>().0 {
+            let v = tri.map(|i| &surface.vertices[i as usize]);
+            let (p0, p1, p2) = (v[0].position, v[1].position, v[2].position);
+            let normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
+            if normal == Vec3::ZERO || normal.dot(center - p0).abs() > reach {
+                continue;
+            }
+            // World directions of increasing texture u and v on this triangle.
+            let (e1, e2) = (p1 - p0, p2 - p0);
+            let (d1, d2) = (v[1].uv - v[0].uv, v[2].uv - v[0].uv);
+            let det = d1.x * d2.y - d1.y * d2.x;
+            if det.abs() < 1e-9 {
+                continue;
+            }
+            let u_axis = ((e1 * d2.y - e2 * d1.y) / det).normalize_or_zero();
+            let v_axis = ((e2 * d1.x - e1 * d2.x) / det).normalize_or_zero();
+            if u_axis == Vec3::ZERO || v_axis == Vec3::ZERO {
+                continue;
+            }
+            let origin = center - normal * normal.dot(center - p0);
+            let local = |p: Vec3| Vec2::new((p - origin).dot(u_axis), (p - origin).dot(v_axis));
+            // Clip in decal space, carrying barycentric weights for lightmap/color.
+            let mut polygon: Vec<(Vec2, Vec3)> = vec![
+                (local(p0), Vec3::X),
+                (local(p1), Vec3::Y),
+                (local(p2), Vec3::Z),
+            ];
+            for (axis, sign) in [(0, 1.), (0, -1.), (1, 1.), (1, -1.)] {
+                let input = std::mem::take(&mut polygon);
+                for i in 0..input.len() {
+                    let (a, b) = (input[i], input[(i + 1) % input.len()]);
+                    let da = a.0[axis] * sign - half[axis];
+                    let db = b.0[axis] * sign - half[axis];
+                    if da <= 0. {
+                        polygon.push(a);
+                    }
+                    if (da <= 0.) != (db <= 0.) {
+                        let t = da / (da - db);
+                        polygon.push((a.0.lerp(b.0, t), a.1.lerp(b.1, t)));
+                    }
+                }
+                if polygon.is_empty() {
+                    break;
+                }
+            }
+            if polygon.len() < 3 {
+                continue;
+            }
+            let base = decal.vertices.len() as u32;
+            for (uv, w) in &polygon {
+                let position = p0 * w.x + p1 * w.y + p2 * w.z;
+                let color = std::array::from_fn(|c| {
+                    (f32::from(v[0].color[c]) * w.x
+                        + f32::from(v[1].color[c]) * w.y
+                        + f32::from(v[2].color[c]) * w.z)
+                        .round() as u8
+                });
+                decal.vertices.push(Vertex {
+                    position: position + normal * 0.1,
+                    uv: *uv / size + Vec2::splat(0.5),
+                    color,
+                    light_uv: v[0].light_uv * w.x + v[1].light_uv * w.y + v[2].light_uv * w.z,
+                    skin: None,
+                    normal,
+                });
+            }
+            for i in 1..polygon.len() as u32 - 1 {
+                decal.indices.extend([base, base + i, base + i + 1]);
+            }
+        }
+        if !decal.indices.is_empty() {
+            out.push(decal);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,5 +219,53 @@ mod tests {
             && v.uv.min_element() >= -0.001
             && v.uv.max_element() <= 1.001));
         assert!(project(&[surface], Vec3::new(1., 1., 3.), Vec3::Z, 3., 0.).is_empty());
+    }
+    #[test]
+    fn static_decal_follows_texture_axes_clips_to_its_rectangle_and_keeps_lightmap() {
+        // Wall in the XZ plane facing -Y; texture u runs +X, v runs -Z (down).
+        let corner = |x: f32, z: f32| crate::Vertex {
+            normal: Default::default(),
+            position: Vec3::new(x, 0., z),
+            uv: Vec2::new(x / 100., -z / 100.),
+            color: [255; 4],
+            light_uv: Vec2::new(x / 100., z / 100.),
+            skin: None,
+        };
+        let wall = Surface {
+            flex_source: None,
+            background: false,
+            material: "wall".into(),
+            lightmap: Some(3),
+            vertices: vec![
+                corner(0., 0.),
+                corner(100., 100.),
+                corner(100., 0.),
+                corner(0., 100.),
+            ],
+            indices: vec![0, 1, 2, 0, 3, 1],
+        };
+        let decals = static_decal(
+            std::slice::from_ref(&wall),
+            Vec3::new(50., 2., 50.),
+            Vec2::new(20., 10.),
+            5.,
+            "decal",
+        );
+        assert_eq!(decals.len(), 1);
+        let d = &decals[0];
+        assert_eq!((d.lightmap, d.material.as_str()), (Some(3), "decal"));
+        for v in &d.vertices {
+            assert!((v.position.x - 50.).abs() <= 10.01 && (v.position.z - 50.).abs() <= 5.01);
+            assert!(v.uv.min_element() >= -1e-4 && v.uv.max_element() <= 1. + 1e-4);
+            // Top of the decal (high z) maps to texture v = 0.
+            if v.position.z > 54.9 {
+                assert!(v.uv.y < 1e-3, "{v:?}");
+            }
+            assert!((v.light_uv.x - v.position.x / 100.).abs() < 1e-4);
+        }
+        // Out of reach: nothing.
+        assert!(
+            static_decal(&[wall], Vec3::new(50., 20., 50.), Vec2::splat(10.), 5., "d").is_empty()
+        );
     }
 }
