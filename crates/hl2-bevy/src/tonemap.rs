@@ -3,9 +3,13 @@
 //! exposure. Auto exposure samples a luminance histogram of the presented frame.
 use crate::gameplay::Gameplay;
 use bevy::{
+    asset::RenderAssetUsages,
     camera::Exposure,
     prelude::*,
-    render::view::screenshot::{Screenshot, ScreenshotCaptured},
+    render::{
+        gpu_readback::{Readback, ReadbackComplete},
+        render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
+    },
 };
 use hl2_simulation::tonemap::{self, AutoExposure, BINS};
 use std::sync::{Arc, Mutex};
@@ -37,6 +41,10 @@ pub struct Tonemap {
     frames: u64,
     map: String,
     pub readbacks: u64,
+    /// SDK GetBloomAmount state (starts at 1 each level).
+    pub bloom: f32,
+    /// Pre-bloom frame written by the bloom pass (the SDK histogram runs before bloom).
+    presample: Option<Handle<Image>>,
 }
 impl Tonemap {
     pub fn new(forced: Option<f32>) -> Self {
@@ -48,17 +56,16 @@ impl Tonemap {
             frames: 0,
             map: String::new(),
             readbacks: 0,
+            bloom: 1.,
+            presample: None,
         }
-    }
-    pub fn readback_pending(&self) -> bool {
-        *self.pending.lock().expect("tonemap pending")
     }
     pub fn scale(&self) -> f32 {
         self.forced.unwrap_or(self.exposure.current)
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"scale": self.scale(), "forced": self.forced, "auto": self.exposure,
-            "histogram": *self.histogram.lock().expect("tonemap histogram"), "readbacks": self.readbacks})
+            "histogram": *self.histogram.lock().expect("tonemap histogram"), "readbacks": self.readbacks, "bloom": self.bloom})
     }
 }
 
@@ -72,33 +79,54 @@ pub fn update(
     mut state: ResMut<Tonemap>,
     game: Res<Gameplay>,
     time: Res<Time<Real>>,
-    capture: Res<crate::CaptureControl>,
+    mut images: ResMut<Assets<Image>>,
     mut cameras: Query<&mut Exposure, With<ToneMapped>>,
+    mut blooms: Query<&mut crate::bloom::SourceBloom>,
 ) {
     state.frames += 1;
+    let presample = state
+        .presample
+        .get_or_insert_with(|| {
+            let mut image = Image::new_fill(
+                Extent3d {
+                    width: PRESAMPLE.0,
+                    height: PRESAMPLE.1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &[0, 0, 0, 255],
+                TextureFormat::Rgba8Unorm,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            image.texture_descriptor.usage |=
+                TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC;
+            images.add(image)
+        })
+        .clone();
     // ResetToneMapping(1.0) when a level starts.
     if state.map != game.world.name {
         state.map = game.world.name.clone();
         state.exposure = AutoExposure::default();
+        state.bloom = 1.;
         *state.histogram.lock().expect("tonemap histogram") = None;
     }
     if state.forced.is_none() {
-        // Stop sampling once the final capture is requested, so they never share a frame.
-        let request = state.frames.is_multiple_of(INTERVAL) && !capture.requested && {
+        let request = state.frames.is_multiple_of(INTERVAL) && {
             let mut pending = state.pending.lock().expect("tonemap pending");
             !std::mem::replace(&mut *pending, true)
         };
         if request {
             state.readbacks += 1;
             let (histogram, pending) = (state.histogram.clone(), state.pending.clone());
-            commands.spawn(Screenshot::primary_window()).observe(
-                move |event: On<ScreenshotCaptured>| {
-                    if let Some(h) = histogram_of(&event.image) {
+            commands
+                .spawn(Readback::texture(presample.clone()))
+                .observe(move |event: On<ReadbackComplete>, mut commands: Commands| {
+                    if let Some(h) = histogram_of(&event.data) {
                         *histogram.lock().expect("tonemap histogram") = Some(h);
                     }
                     *pending.lock().expect("tonemap pending") = false;
-                },
-            );
+                    commands.entity(event.entity).despawn();
+                });
         }
         let control = game.scene.tonemap;
         let latest = *state.histogram.lock().expect("tonemap histogram");
@@ -110,6 +138,13 @@ pub fn update(
         }
         state.exposure.advance(time.delta_secs(), control);
     }
+    state.bloom = tonemap::ease_bloom(state.bloom, game.scene.tonemap.bloom);
+    for mut bloom in &mut blooms {
+        bloom.amount = state.bloom;
+        if bloom.presample.as_ref() != Some(&presample) {
+            bloom.presample = Some(presample.clone());
+        }
+    }
     let ev = ev100(state.scale());
     for mut exposure in &mut cameras {
         if exposure.ev100 != ev {
@@ -118,20 +153,15 @@ pub fn update(
     }
 }
 
-/// SDK luminance histogram over the central 90% x 85% of the presented frame, sampling
-/// every 4th pixel. Float HDR (retail client 101d8490 scales the comparison by the tonemap
-/// scale only for HDR type 2) measures linear colour before bloom, so the sRGB bytes are
-/// decoded first.
-fn histogram_of(image: &Image) -> Option<[u32; BINS]> {
-    use bevy::render::render_resource::TextureFormat;
-    let swap = match image.texture_descriptor.format {
-        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => false,
-        TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb => true,
-        _ => return None,
-    };
-    let (width, height) = (image.width() as usize, image.height() as usize);
-    let data = image.data.as_ref()?;
-    if width == 0 || height == 0 || data.len() < width * height * 4 {
+/// Presample size (gamma-encoded RGBA8; 1280-byte rows need no readback padding).
+const PRESAMPLE: (u32, u32) = (320, 180);
+
+/// SDK luminance histogram over the central 90% x 85% of the pre-bloom frame. Float HDR
+/// (retail client 101d8490 scales the comparison by the tonemap scale only for HDR type 2)
+/// measures linear colour, so the gamma-encoded presample is decoded first.
+fn histogram_of(data: &[u8]) -> Option<[u32; BINS]> {
+    let (width, height) = (PRESAMPLE.0 as usize, PRESAMPLE.1 as usize);
+    if data.len() < width * height * 4 {
         return None;
     }
     let (x0, x1) = (
@@ -143,11 +173,10 @@ fn histogram_of(image: &Image) -> Option<[u32; BINS]> {
         (height as f32 * 0.925) as usize,
     );
     let mut bins = [0u32; BINS];
-    for y in (y0..y1).step_by(4) {
-        for x in (x0..x1).step_by(4) {
+    for y in y0..y1 {
+        for x in x0..x1 {
             let p = &data[(y * width + x) * 4..][..4];
-            let (r, b) = if swap { (p[2], p[0]) } else { (p[0], p[2]) };
-            let rgb = [r, p[1], b].map(|c| LINEAR[c as usize]);
+            let rgb = [p[0], p[1], p[2]].map(|c| LINEAR[c as usize]);
             if let Some(bin) = tonemap::bin_of(tonemap::luminance(rgb)) {
                 bins[bin] += 1;
             }

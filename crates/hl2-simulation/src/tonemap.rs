@@ -9,6 +9,8 @@ pub struct Control {
     pub min: f32,
     pub max: f32,
     pub rate: f32,
+    /// SetBloomScale (custom bloom scale; mat_bloomscale 1 otherwise).
+    pub bloom: f32,
 }
 impl Default for Control {
     fn default() -> Self {
@@ -16,8 +18,15 @@ impl Default for Control {
             min: 0.5,
             max: 2.,
             rate: 1.,
+            bloom: 1.,
         }
     }
+}
+
+/// SDK GetBloomAmount: the amount eases toward the bloom scale by mat_bloomamount_rate
+/// (0.05) per frame, starting from 1.
+pub fn ease_bloom(current: f32, scale: f32) -> f32 {
+    scale * 0.05 + 0.95 * current
 }
 
 /// Luminance ranges: 16 bins over [0, 1] with (b / 16)^1.5 edges; the top bin also counts
@@ -189,9 +198,8 @@ mod tests {
     #[test]
     fn goal_is_clamped_and_adaptation_follows_retail_rate() {
         let control = Control {
-            min: 0.5,
-            max: 2.,
             rate: 0.35,
+            ..Default::default()
         };
         let mut exposure = AutoExposure::default();
         exposure.set_target(10., control);

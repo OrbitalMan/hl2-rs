@@ -1934,10 +1934,11 @@ impl Scene {
             "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
             "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,
             "settonemaprate" if class == "env_tonemap_controller" => self.tonemap.rate = value,
+            "setbloomscale" if class == "env_tonemap_controller" => self.tonemap.bloom = value,
             "usedefaultautoexposure" if class == "env_tonemap_controller" => {
-                let rate = self.tonemap.rate;
                 self.tonemap = crate::tonemap::Control {
-                    rate,
+                    rate: self.tonemap.rate,
+                    bloom: self.tonemap.bloom,
                     ..Default::default()
                 };
             }

@@ -1,6 +1,7 @@
 //! Isolated Bevy/wgpu host reusing engine-independent Source simulation.
 mod assets;
 mod audio;
+mod bloom;
 mod campaign;
 mod console;
 mod effects;
@@ -222,9 +223,9 @@ struct Status(Arc<Mutex<RunStatus>>);
 #[derive(Component)]
 struct FlyCamera;
 #[derive(Resource, Default)]
-pub(crate) struct CaptureControl {
+struct CaptureControl {
     frames: u64,
-    pub(crate) requested: bool,
+    requested: bool,
     requested_frame: Option<u64>,
     completed_frame: Option<u64>,
 }
@@ -343,6 +344,7 @@ fn main() -> Result<()> {
         )
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
+        .add_plugins(bloom::SourceBloomPlugin)
         .add_plugins(bevy::sprite_render::Material2dPlugin::<hud::HudMaterial>::default())
         .add_plugins(movement::MovementPlugin)
         .add_systems(
@@ -522,6 +524,11 @@ fn setup(
         Tonemapping::None,
         bevy::camera::Exposure::default(),
         tonemap::ToneMapped,
+        // The viewmodel camera draws last in the 3D view, so bloom covers the whole scene.
+        bloom::SourceBloom {
+            amount: 1.,
+            presample: None,
+        },
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
             fov: 2. * ((54f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
@@ -743,11 +750,9 @@ fn monitor(
     }
     if options.frames.is_some() || options.movement_script.is_some() {
         let limit = options.frames.unwrap_or(u64::MAX - 600);
-        // One window screenshot at a time: wait for an exposure histogram readback.
         if (control.frames >= limit || simulation.finished)
             && !simulation.loading()
             && !control.requested
-            && !tonemap.readback_pending()
         {
             control.requested = true;
             control.requested_frame = Some(control.frames);

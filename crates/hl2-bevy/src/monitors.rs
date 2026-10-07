@@ -58,8 +58,11 @@ pub fn install(
         RenderTarget::Image(image.clone().into()),
         RenderLayers::layer(0),
         Tonemapping::None,
-        bevy::camera::Exposure::default(),
-        crate::tonemap::ToneMapped,
+        // Integer HDR draws monitor views before TurnOnToneMapping, after the previous main
+        // view reset the scale to 1 (SDK viewrender.cpp 2080/2090/2214).
+        bevy::camera::Exposure {
+            ev100: crate::tonemap::ev100(1.),
+        },
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
             near: 1.,
