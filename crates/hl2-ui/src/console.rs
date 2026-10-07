@@ -1168,6 +1168,10 @@ mod tests {
         let ranges = resource_font(root, "MenuLarge").unwrap();
         #[cfg(target_os = "windows")]
         assert_eq!(ranges, vec![(16., Some((1., 1080.))), (11., None)]);
+        #[cfg(target_os = "linux")]
+        assert_eq!(ranges, vec![(24., Some((1., 1080.))), (11., None)]);
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        assert_eq!(ranges, vec![(11., None)]);
         assert!(resource_font(root, "Absent").is_none());
         assert!(CellMetrics::from_bytes(b"missing font").is_none());
     }

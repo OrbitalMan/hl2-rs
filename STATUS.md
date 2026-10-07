@@ -14,6 +14,7 @@ Faithful Rust reconstruction of Half-Life 2 and relevant Source behavior using a
 
 - Owned Steam HL2 app220, tested build19307283/patch9912070; other versions **not tested**. Default install `C:/Program Files (x86)/Steam/steamapps/common/Half-Life 2`, or discovered library/HL2_ROOT.
 - Windows11 Pro64-bit, Rust1.99.0 MSVC, Visual Studio C++ tools/Windows SDK; Bevy0.19.1/wgpu and direct Rapier0.26.1. No Source DLL or mod loader dependency.
+- macOS 15+ aarch64 (Apple Silicon), Rust stable, Bevy 0.19.1/wgpu (Metal backend), cpal/CoreAudio, winit/AppKit.
 - Implementation chats: Claude Code desktop (Claude Opus 5.5) since 2026-10-06; earlier Codex Desktop, GPT-6.1 Extra High/Normal Speed. Choose fresh-chat settings explicitly.
 - Active checkout: workspace `outputs/hl2-rs-bevy`, branch `main` (Bevy-only since the 2026-10-07 merge), remote https://github.com/kvalls/hl2-rs. `bevy-migration` is frozen at the merge. Sibling `outputs/hl2-rs` is a detached historical checkout of the former Macroquad main at b4b1731530a9ca146f9d45532f00ef7f9fc69e7d. Preserve macroquad-prototype at f9995dab2640d15cda8d7d7b10d08af7e691c8ea and unverified wip/scripted-scenes at d0a08c8d36e1b7d3496b6627b5a974337641ca9c.
 - Private evidence/checkpoints: workspace `work/hl2-decompiled`, `work/references`, `work/publishing`, reached as `../../work/...` from the active checkout. These are not public runtime dependencies.

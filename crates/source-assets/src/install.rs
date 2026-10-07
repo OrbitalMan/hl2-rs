@@ -2,10 +2,7 @@ use crate::keyvalues;
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
-pub fn discover() -> Result<PathBuf> {
-    if let Some(p) = std::env::var_os("HL2_ROOT") {
-        return validate(PathBuf::from(p));
-    }
+pub fn candidate_steam_roots() -> Vec<PathBuf> {
     let mut steam_roots = vec![
         PathBuf::from(r"C:\Program Files (x86)\Steam"),
         PathBuf::from(r"C:\Program Files\Steam"),
@@ -24,9 +21,18 @@ pub fn discover() -> Result<PathBuf> {
     }
     if let Some(home) = std::env::var_os("HOME") {
         let h = PathBuf::from(home);
+        steam_roots.push(h.join("Library/Application Support/Steam"));
         steam_roots.push(h.join(".steam/steam"));
         steam_roots.push(h.join(".local/share/Steam"));
     }
+    steam_roots
+}
+
+pub fn discover() -> Result<PathBuf> {
+    if let Some(p) = std::env::var_os("HL2_ROOT") {
+        return validate(PathBuf::from(p));
+    }
+    let steam_roots = candidate_steam_roots();
     let mut libraries = steam_roots.clone();
     for root in &steam_roots {
         if let Ok(s) = std::fs::read_to_string(root.join("steamapps/libraryfolders.vdf")) {
@@ -69,4 +75,24 @@ pub fn maps(root: &Path) -> Result<Vec<PathBuf>> {
         .collect::<Vec<_>>();
     maps.sort();
     Ok(maps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_root_fails_validation() {
+        let temp = std::env::temp_dir();
+        assert!(validate(temp).is_err());
+    }
+
+    #[test]
+    fn candidate_roots_include_macos_steam_path_when_home_is_present() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let roots = candidate_steam_roots();
+            let expected = PathBuf::from(home).join("Library/Application Support/Steam");
+            assert!(roots.contains(&expected));
+        }
+    }
 }
