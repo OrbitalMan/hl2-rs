@@ -261,7 +261,9 @@ impl Bsp {
                 .position(|b| *b == 0)
                 .context("unterminated texture string")?;
             let material = std::str::from_utf8(&tail[..end])?.to_lowercase();
-            if material.starts_with("tools/") {
+            // Compile tools are invisible, except toolsblack (an UnlitGeneric black texture),
+            // e.g. the frame around trainstation_02's Combine slate.
+            if material.starts_with("tools/") && !material.starts_with("tools/toolsblack") {
                 continue;
             }
             let width = i32le(td, 16)?.max(1) as f32;

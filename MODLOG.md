@@ -2,6 +2,18 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-07 Combine slate frame and lightmap overbright headroom
+
+**Changed:** World and brush-entity faces using tools/toolsblack* now render (an owned UnlitGeneric black texture); every other tools/ material stays skipped. The lightmap atlas stores gamma(linear / 2) and lightmapped materials restore the factor 2 before the gamma decode, so baked light between 1.0 and 2.0 is no longer clipped. New fixture test-inputs/bevy-monitors-breen-slate.json views the jumbotron before the broadcast starts.
+
+**Why:** Native trainstation_02 shows only the bright Combine slate on the jumbotron at map start; ours showed Breen around a dark slate. The slate func_brush (*87) is framed by four toolsblack faces we skipped. Its `_minlight 255` is not a runtime value: SDK 2013 VRAD (radial.cpp:676/813) bakes a per-luxel floor of `_minlight*128` into the lightmap. Source LDR lightmaps keep 2x headroom (imaterialsystem.h OVERBRIGHT 2.0), which our clamp at 1.0 removed.
+
+**Tested how:** Updated lightmap unit test (linear 2.0 saturates, 1.0 encodes gamma(0.5)=186), 321 normal tests, strict Clippy/fmt. Packaged slate fixture against native view-d1_trainstation_02-20261007T054643Z/slate.png (artifacts/slate): black frame now matches native; screen mean RGB before/after/native (76,97,82)/(80,118,100)/(76,156,154); wall, rail and window regions unchanged within 2 levels.
+
+**Still broken or not tested:** The screen is still greener and darker than native's cyan (UnlitTwoTexture colour path, next step). Native runs the HDR path (HDR lightmaps and auto-exposure tonemapping), which is not implemented. Regression batch not yet rerun.
+
+**Next:** UnlitTwoTexture modulation/sRGB and the pixel grid; rerun the batch and accept baselines.
+
 ## 2026-10-07 Static map decals (Breen's studio backdrop)
 
 **Changed:** infodecal entities without a targetname are now projected at map load onto lightmapped world brush faces (modkit-core::decals::static_decal; hl2-bevy assets add_static_decals). Each decal is sized from its base texture times $decalscale, centered on the plane point within 5 units, oriented by the receiving face's texture axes, clipped to its rectangle and lit by the face's lightmap.

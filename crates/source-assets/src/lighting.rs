@@ -3,6 +3,9 @@ use crate::{bytes, i32le, records};
 use anyhow::{bail, Result};
 use modkit_core::Lightmap;
 const SIZE: usize = 1024;
+/// Source LDR lightmap headroom (imaterialsystem.h OVERBRIGHT): atlas texels hold
+/// gamma(linear / OVERBRIGHT) so baked light up to 2.0 survives the 8-bit atlas.
+pub const OVERBRIGHT: f32 = 2.0;
 #[derive(Clone, Copy)]
 pub struct FaceLight {
     pub page: usize,
@@ -57,9 +60,11 @@ pub fn build(lumps: &[Vec<u8>]) -> Result<(Vec<Lightmap>, Vec<Option<FaceLight>>
                 let scale = 2f32.powi(s[3] as i8 as i32);
                 let target = ((y + dy) * SIZE + x + dx) * 4;
                 for (i, &channel) in s.iter().take(3).enumerate() {
-                    atlas.rgba[target + i] =
-                        ((channel as f32 * scale / 255.).max(0.).powf(1. / 2.2) * 255.).min(255.)
-                            as u8;
+                    atlas.rgba[target + i] = ((channel as f32 * scale / 255. / OVERBRIGHT)
+                        .max(0.)
+                        .powf(1. / 2.2)
+                        * 255.)
+                        .min(255.) as u8;
                 }
                 atlas.rgba[target + 3] = 255;
             }
@@ -100,7 +105,8 @@ mod tests {
         let mut face = vec![0u8; 56];
         face[36..40].copy_from_slice(&1i32.to_le_bytes());
         lumps[7] = face;
-        lumps[8] = vec![255, 0, 0, 0, 0, 255, 0, 0];
+        // Linear 2.0 (255 * 2^1) saturates; linear 1.0 keeps gamma(0.5) = 186.
+        lumps[8] = vec![255, 0, 0, 1, 0, 255, 0, 0];
         let (pages, refs) = build(&lumps).unwrap();
         let r = refs[0].unwrap();
         let p = &pages[r.page];
@@ -108,6 +114,10 @@ mod tests {
         assert_eq!(
             &p.rgba[(r.y * SIZE + r.x - 1) * 4..][..4],
             &[255, 0, 0, 255]
+        );
+        assert_eq!(
+            &p.rgba[(r.y * SIZE + r.x + 1) * 4..][..4],
+            &[0, 186, 0, 255]
         );
     }
 }

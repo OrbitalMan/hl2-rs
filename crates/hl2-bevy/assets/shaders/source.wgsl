@@ -83,9 +83,10 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     }
     base *= tint * vertex_color;
     if base.a < parameters.x { discard; }
-    let baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), parameters.w > 0.5);
-    // LDR atlases are gamma-encoded bytes. Preserve prototype multiplication
-    // before converting for the sRGB output target. Source HDR remains absent.
+    var baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), parameters.w > 0.5);
+    // LDR atlases hold gamma(linear / overbright) bytes; restore the Source 2x headroom in
+    // gamma space so the prototype multiplication is unchanged below 1.0. Source HDR remains absent.
+    if lighting.params.w > 0.0 { baked *= pow(lighting.params.w, 1.0 / 2.2); }
     // Procedural camera images are sampled through an sRGB view and are already linear.
     var rgb = select(srgb_to_linear(base.rgb * baked), base.rgb, parameters.w < -0.5);
     if lit {
