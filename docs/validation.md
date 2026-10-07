@@ -1,5 +1,13 @@
 # Local validation â€” 2026-10-05
 
+## Session 5 jumbotron, lightmap headroom and regression batch (2026-10-07)
+
+Slate (pre-broadcast, tick 230, test-inputs/bevy-monitors-breen-slate.json) vs native view-d1_trainstation_02-20261007T054643Z/slate.png: the toolsblack frame now hides Breen around the slate as in native; screen mean RGB went (76,97,82) -> (80,118,100) after the 2x lightmap headroom -> (78,122,114) after linear UnlitTwoTexture modulation and `srgb?$color2`; native (76,156,154). Glyphs (165,199,199) vs native (175,214,218). The slate luxels are linear 128 in both lightmap lumps; native's HDR path saturates G and B further. A rejected 16x cap gave (105,229,230).
+
+Plaza (d1_trainstation_02, eye -2206 -1669 100.18, yaw 90): new native capture view-d1_trainstation_02-20261007T152043Z/plaza.png. Mean RGB native/old/new: sunlit street (136,121,80)/(94,90,74)/(114,103,74), yellow building (93,78,48)/(73,63,41)/(75,64,42), hotel (87,79,58)/(72,66,49)/(73,66,49). Every sampled region moves toward native; the remaining gap is consistent with the unimplemented HDR path.
+
+Batch artifacts/session5-regression (run_gesture_layer_checks.py): all cases exit 0, captures complete, 0 pose/visibility mismatches; movement 26/26, weapons 17/17, attention 26/26. Pixel changes are expected: brighter sunlit luxels (movement, campaign), static decals (Kleiner scene notes, Breen backdrop) and the monitor colour path. The Breen broadcast now matches native session T053505Z (backdrop panels, logo, scanlines, colour); Breen's framing still differs. Weapons and the Kleiner feed are unchanged within 3 levels. Old baselines: artifacts/baseline-archive-20261007-s5; the batch images are accepted, plus new partition-breen-slate baselines.
+
 ## Native trainstation_02 jumbotron comparison (2026-10-07)
 
 Native view session view-d1_trainstation_02-20261007T053505Z (run_view_oracle.py, eye -3753 -2290 469, yaw -90, about 24 s after load) vs Bevy partition-breen-screen-final. Breen's broadcast, framing and hall lighting match. Correction (owner review): the yellow shape behind Breen is not see-through. It is his studio backdrop, the infodecal decals/decal_posterbreentv (Combine panels and logo), which Bevy did not render. Static infodecals are now projected (see the static-decal entry); the feed then matches native, apart from a slightly cooler native tint. Native colors are slightly more saturated. Shaft brightness after the rendercolor fix is comparable; no exact luminance match is claimed.
