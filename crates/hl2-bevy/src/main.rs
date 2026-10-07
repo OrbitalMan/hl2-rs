@@ -222,9 +222,9 @@ struct Status(Arc<Mutex<RunStatus>>);
 #[derive(Component)]
 struct FlyCamera;
 #[derive(Resource, Default)]
-struct CaptureControl {
+pub(crate) struct CaptureControl {
     frames: u64,
-    requested: bool,
+    pub(crate) requested: bool,
     requested_frame: Option<u64>,
     completed_frame: Option<u64>,
 }
@@ -743,9 +743,11 @@ fn monitor(
     }
     if options.frames.is_some() || options.movement_script.is_some() {
         let limit = options.frames.unwrap_or(u64::MAX - 600);
+        // One window screenshot at a time: wait for an exposure histogram readback.
         if (control.frames >= limit || simulation.finished)
             && !simulation.loading()
             && !control.requested
+            && !tonemap.readback_pending()
         {
             control.requested = true;
             control.requested_frame = Some(control.frames);

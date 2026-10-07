@@ -18,6 +18,17 @@ pub struct ToneMapped;
 #[derive(Component)]
 pub struct UnitExposure;
 
+/// sRGB byte to linear.
+static LINEAR: std::sync::LazyLock<[f32; 256]> = std::sync::LazyLock::new(|| {
+    std::array::from_fn(|i| {
+        let c = i as f32 / 255.;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    })
+});
 /// Readback interval in frames; the SDK refreshes one of 17 histogram queries per frame.
 const INTERVAL: u64 = 8;
 
@@ -43,6 +54,9 @@ impl Tonemap {
             readbacks: 0,
         }
     }
+    pub fn readback_pending(&self) -> bool {
+        *self.pending.lock().expect("tonemap pending")
+    }
     pub fn scale(&self) -> f32 {
         self.forced.unwrap_or(self.exposure.current)
     }
@@ -62,6 +76,7 @@ pub fn update(
     mut state: ResMut<Tonemap>,
     game: Res<Gameplay>,
     time: Res<Time<Real>>,
+    capture: Res<crate::CaptureControl>,
     mut cameras: Query<&mut Exposure, (With<ToneMapped>, Without<UnitExposure>)>,
     mut unit: Query<&mut Exposure, With<UnitExposure>>,
 ) {
@@ -73,7 +88,8 @@ pub fn update(
         *state.histogram.lock().expect("tonemap histogram") = None;
     }
     if state.forced.is_none() {
-        let request = state.frames.is_multiple_of(INTERVAL) && {
+        // Stop sampling once the final capture is requested, so they never share a frame.
+        let request = state.frames.is_multiple_of(INTERVAL) && !capture.requested && {
             let mut pending = state.pending.lock().expect("tonemap pending");
             !std::mem::replace(&mut *pending, true)
         };
@@ -114,7 +130,9 @@ pub fn update(
 }
 
 /// SDK luminance histogram over the central 90% x 85% of the presented frame, sampling
-/// every 4th pixel. Presented pixels are gamma encoded, as in the SDK's screen copy.
+/// every 4th pixel. Float HDR (retail client 101d8490 scales the comparison by the tonemap
+/// scale only for HDR type 2) measures linear colour before bloom, so the sRGB bytes are
+/// decoded first.
 fn histogram_of(image: &Image) -> Option<[u32; BINS]> {
     use bevy::render::render_resource::TextureFormat;
     let swap = match image.texture_descriptor.format {
@@ -140,7 +158,7 @@ fn histogram_of(image: &Image) -> Option<[u32; BINS]> {
         for x in (x0..x1).step_by(4) {
             let p = &data[(y * width + x) * 4..][..4];
             let (r, b) = if swap { (p[2], p[0]) } else { (p[0], p[2]) };
-            let rgb = [r, p[1], b].map(|c| c as f32 / 255.);
+            let rgb = [r, p[1], b].map(|c| LINEAR[c as usize]);
             if let Some(bin) = tonemap::bin_of(tonemap::luminance(rgb)) {
                 bins[bin] += 1;
             }
