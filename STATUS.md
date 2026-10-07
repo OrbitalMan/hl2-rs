@@ -92,8 +92,16 @@ Done later in session 5: (4) eye view-target latch (Breen converges near the bro
 1. `$envmap` cubemap reflections (window panes; native left windows (159,150,118) vs ours ~(70,60,38)). Plan: docs/DESIGN.md step 11a.
 2. Plaza gaps from owner review: info_overlay leaves (lump 45, step 11b; source-assets::overlays parser done and owned-tested: 27 overlays in d1_trainstation_02 with valid faces/texinfo and decoded BasisU/flip; projection and rendering remain), detail-prop foliage ('dprp', step 11c), plaza metrocop position/pose (step 11d).
 3. npc_metropolice (and citizen) ground movement factories, registered only with SDK + retail Spawn evidence; then the campaign-order chain: security_pen_01 -> barney_lead_trigger_1 -> trigger_barney_bang_door -> security_intro_01/01b -> #792 -> security_intro_02 -> security_01 -> security_02, side by side with native (Bevy fixtures: work/publishing/make_campaign_security.py; the door cop is an npc_metropolice from interro_room_template).
-4. LDR mode (retail LDR lightmap table, materialsystem 10062b20/10057340) and a Video options page (owner idea: HDR None/Full, default from the owner's config).
+4. LDR mode (retail LDR lightmap table, materialsystem 10062b20/10057340) on the renderer side; the Video option that selects it belongs to the claimed main menu below.
 5. Static decal projection is inferred; named/brush-entity decals are unsupported. VMT fallback blocks (">=DX90", "hdr_dx9") are not selected.
+
+## Claims (shared work)
+
+One list of priorities, with claims: an item someone takes gets a GitHub issue assigned to them (or an open PR) and is listed here with its owner. Unclaimed items are free. Before starting anything, check open issues and PRs (`gh issue list`, `gh pr list`) and this list; leave claimed items, and the files they touch, alone.
+
+- macOS support (install discovery, POSIX build/launch scripts): PR #1, @OrbitalMan. Changes requested 2026-10-07; the MODLOG entry needs moving to the top and "bevy-migration" changed to "main" after merging.
+- Main menu with settings (menus in hl2-ui, wiring in hl2-bevy, settings persisted next to the build; video, audio, mouse/keys, later "High Dynamic Range: None/Full"): @OrbitalMan, proposed 2026-10-07, issue pending. Keep other work out of the hl2-ui menu code and its hl2-bevy wiring meanwhile.
+- Save/load: deferred by the owner (2026-10-07) until entity/scene state settles; start with a design issue when it resumes.
 
 Native oracle (private work/hl2-decompiled/original-oracle): run_view_oracle.py <map> label=x,y,eyez,pitch,yaw[,fov] and run_security_gesture_oracle.py. Owner-verified cursor-safe setup (2026-10-07): -nomouse (SDK Init_Mouse returns early) + +cl_mouseenable 0 + the game window disabled (EnableWindow FALSE, WS_EX_NOACTIVATE) on appearance + focus guard + ClipCursor release. Earlier runs trapped the cursor (sessions T040936Z rejected, T053505Z had 91 focus grabs).
 

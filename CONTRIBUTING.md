@@ -29,6 +29,10 @@ GitHub Actions runs formatting, strict workspace Clippy and unit tests on Window
 
 See docs/research.md for references and docs/validation.md for tested behavior and limitations. Useful contributions include Source collision and movement fidelity, material rendering, NPC schedules/navigation, choreography, remaining weapons, and campaign state. Open a focused issue or PR with reproduction steps and supporting evidence.
 
+## Coordinating work
+
+STATUS.md is the shared list of what's next, and its "Claims" section records who is working on what. To take an item, open (or comment on) a GitHub issue describing your plan and get it assigned; it is then listed under Claims. Please check open issues and PRs first, and open an issue before larger features so the scope is agreed. MODLOG.md entries go at the top (newest first).
+
 ## Branches
 
 Target `main`, the Bevy/wgpu rewrite. `macroquad-prototype` preserves the original Macroquad implementation and `bevy-migration` the migration branch as merged; both are reference-only. Describe what you tested.
