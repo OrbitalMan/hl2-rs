@@ -12,6 +12,8 @@ Newest entries first. Historical entries retain their original wording/test scop
 
 **Result:** The lab feed shows Kleiner talking; the jumbotron shows Breen face-on. New accepted baselines cover the lighting change, the godray fix and the new views.
 
+Follow-up (owner report: Barney was talking to the default blue screen): all eight security_02 fixtures now also force-spawn kleiner_template, enable barney_security_monitor_1 and switch on kleiner_security_camera_1, as the campaign's triggers do. Rerun batch artifacts/kleiner-monitor-regression: pixel-identical to the new baselines, attention 26/26, and Kleiner is on Barney's monitor in the attention view. The private native security oracle setup gets the same three inputs (not yet run).
+
 **Still broken or not tested:** Kleiner's walk/turn timing against native is not compared. Other NPC classes (metrocops, citizens) are still not registered for movement. No native comparison of the lab feed or jumbotron yet.
 
 **Next:** Native head-pitch analysis; native jumbotron/lab feed comparison once the oracle cursor fix is approved.

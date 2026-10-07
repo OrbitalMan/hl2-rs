@@ -16,6 +16,21 @@
       },
       {
         "action": "send",
+        "target": "kleiner_template",
+        "input": "ForceSpawn"
+      },
+      {
+        "action": "send",
+        "target": "barney_security_monitor_1",
+        "input": "Enable"
+      },
+      {
+        "action": "send",
+        "target": "kleiner_security_camera_1",
+        "input": "SetOnAndTurnOthersOff"
+      },
+      {
+        "action": "send",
         "target": "#792",
         "input": "Disable"
       },
