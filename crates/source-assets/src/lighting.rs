@@ -4,6 +4,8 @@ use anyhow::{bail, Result};
 use modkit_core::Lightmap;
 const SIZE: usize = 1024;
 const ONE: u16 = 0x3c00;
+/// 65535 / 4096: the integer HDR lightmap range.
+pub const MAX_LIGHT: f32 = 65535. / 4096.;
 /// Native HL2 runs the HDR path: use the HDR lighting copies (lightmaps 53 with faces 58,
 /// ambient 51/55, world lights 54) when the map has them, otherwise the LDR copies.
 pub fn use_hdr(lumps: &[Vec<u8>]) -> bool {
@@ -63,10 +65,12 @@ pub fn build(lumps: &[Vec<u8>]) -> Result<(Vec<Lightmap>, Vec<Option<FaceLight>>
                 let s = &samples[(dy * width + dx) * 4..][..4];
                 let scale = 2f32.powi(s[3] as i8 as i32);
                 let target = ((y + dy) * SIZE + x + dx) * 4;
-                // Linear ColorRGBExp32, unclamped (the HDR path keeps the full range).
+                // Linear ColorRGBExp32. Integer HDR lightmaps (retail materialsystem 10062ae0:
+                // min(65535, L * 4096) in 16 bits) cap baked light at 16.
                 for (i, &channel) in s.iter().take(3).enumerate() {
                     atlas.rgba[target + i] =
-                        half::f16::from_f32(channel as f32 * scale / 255.).to_bits();
+                        half::f16::from_f32((channel as f32 * scale / 255.).min(MAX_LIGHT))
+                            .to_bits();
                 }
                 atlas.rgba[target + 3] = ONE;
             }
