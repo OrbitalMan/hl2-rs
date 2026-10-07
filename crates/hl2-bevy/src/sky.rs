@@ -113,7 +113,7 @@ pub fn install(
         }
     }
     for (is_2d, layer, order) in [(true, 3, -2), (false, 4, -1)] {
-        commands.spawn((
+        let mut camera = commands.spawn((
             crate::campaign::MapOwned,
             Camera3d::default(),
             Camera {
@@ -124,6 +124,7 @@ pub fn install(
             RenderLayers::layer(layer),
             SkyCamera(is_2d),
             Tonemapping::None,
+            bevy::camera::Exposure::default(),
             Msaa::Off,
             Projection::Perspective(PerspectiveProjection {
                 fov: 2. * ((75f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
@@ -133,6 +134,12 @@ pub fn install(
             }),
             Transform::IDENTITY,
         ));
+        // The miniature 3D skybox is lightmapped world; the 2D faces stay LDR for now.
+        if is_2d {
+            camera.insert(crate::tonemap::UnitExposure);
+        } else {
+            camera.insert(crate::tonemap::ToneMapped);
+        }
     }
 }
 pub fn present(

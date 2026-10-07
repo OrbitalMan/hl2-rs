@@ -7,7 +7,7 @@ const ONE: u16 = 0x3c00;
 /// Native HL2 runs the HDR path: use the HDR lighting copies (lightmaps 53 with faces 58,
 /// ambient 51/55, world lights 54) when the map has them, otherwise the LDR copies.
 pub fn use_hdr(lumps: &[Vec<u8>]) -> bool {
-    let lump = |id: usize| lumps.get(id).map_or(true, Vec::is_empty);
+    let lump = |id: usize| lumps.get(id).is_none_or(Vec::is_empty);
     lump(7) || (!lump(53) && !lump(58))
 }
 #[derive(Clone, Copy)]

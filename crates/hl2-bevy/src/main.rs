@@ -13,6 +13,7 @@ mod movement;
 mod performance;
 mod rendering;
 mod sky;
+mod tonemap;
 mod visibility;
 use anyhow::{Context, Result, bail};
 use bevy::{
@@ -57,6 +58,8 @@ struct Options {
     volume: f32,
     /// Do not take focus at window creation, so unattended tests leave the desktop usable.
     no_focus: bool,
+    /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
+    tonemap_scale: Option<f32>,
 }
 impl Options {
     fn parse() -> Result<Self> {
@@ -84,6 +87,7 @@ impl Options {
             movement_script: None,
             volume: 1.,
             no_focus: false,
+            tonemap_scale: None,
         };
         while let Some(arg) = args.next() {
             let next = |args: &mut std::iter::Skip<std::env::Args>| -> Result<String> {
@@ -118,9 +122,16 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--volume" => options.volume = next(&mut args)?.parse()?,
                 "--no-focus" => options.no_focus = true,
+                "--tonemap-scale" => {
+                    let scale: f32 = next(&mut args)?.parse()?;
+                    if !(scale.is_finite() && scale > 0.) {
+                        bail!("--tonemap-scale must be positive");
+                    }
+                    options.tonemap_scale = Some(scale);
+                }
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --no-focus (start unfocused for unattended tests)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -290,6 +301,7 @@ fn main() -> Result<()> {
     };
     let mut app = App::new();
     app.insert_resource(options.clone())
+        .insert_resource(tonemap::Tonemap::new(options.tonemap_scale))
         .insert_resource(status.clone())
         .insert_resource(PreparedMap(Some(loaded)))
         .insert_resource(simulation)
@@ -371,6 +383,10 @@ fn main() -> Result<()> {
                 .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         )
         .add_systems(Startup, setup)
+        .add_systems(
+            PostUpdate,
+            tonemap::update.before(TransformSystems::Propagate),
+        )
         .add_systems(
             PostUpdate,
             audio::queue
@@ -504,6 +520,8 @@ fn setup(
         },
         bevy::camera::visibility::RenderLayers::layer(1),
         Tonemapping::None,
+        bevy::camera::Exposure::default(),
+        tonemap::ToneMapped,
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
             fov: 2. * ((54f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
@@ -528,6 +546,8 @@ fn setup(
             Vec3::Y,
         ),
         FlyCamera,
+        bevy::camera::Exposure::default(),
+        tonemap::ToneMapped,
         bevy::camera::visibility::RenderLayers::layer(0).with(5),
     ));
 }
@@ -631,9 +651,10 @@ fn monitor(
     (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
-    (adapter, pvs): (
+    (adapter, pvs, tonemap): (
         Option<Res<RenderAdapterInfo>>,
         Res<visibility::SourceVisibility>,
+        Res<tonemap::Tonemap>,
     ),
     (cameras, draws, map_entities, all_cameras, meshes, images, geometry): DiagnosticQueries,
     (mut exit, performance, render_diagnostics): (
@@ -680,7 +701,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         let mut visible_meshes = 0;
         let mut visible_triangles = 0;

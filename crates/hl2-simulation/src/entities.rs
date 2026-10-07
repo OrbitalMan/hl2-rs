@@ -248,6 +248,8 @@ pub struct Scene {
     /// Speech visemes added on top of the scene flex controllers.
     pub lipsync: crate::lipsync::LipSync,
     pub monitors: crate::monitors::Cameras,
+    /// env_tonemap_controller auto-exposure limits and rate.
+    pub tonemap: crate::tonemap::Control,
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
     templates: BTreeMap<usize, Vec<(usize, bool, bool)>>,
@@ -280,6 +282,7 @@ impl Scene {
             flex_controllers: BTreeMap::new(),
             lipsync: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
+            tonemap: Default::default(),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
             tick_dt: 0.,
@@ -1927,6 +1930,17 @@ impl Scene {
             return;
         }
         match input.as_str() {
+            // CEnvTonemapController: custom auto-exposure limits and the manual tonemap rate.
+            "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
+            "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,
+            "settonemaprate" if class == "env_tonemap_controller" => self.tonemap.rate = value,
+            "usedefaultautoexposure" if class == "env_tonemap_controller" => {
+                let rate = self.tonemap.rate;
+                self.tonemap = crate::tonemap::Control {
+                    rate,
+                    ..Default::default()
+                };
+            }
             "start" if class == "logic_choreographed_scene" => {
                 self.start_choreography(world, id, p.activator)
             }

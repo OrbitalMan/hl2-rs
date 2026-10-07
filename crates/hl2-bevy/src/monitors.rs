@@ -58,6 +58,8 @@ pub fn install(
         RenderTarget::Image(image.clone().into()),
         RenderLayers::layer(0),
         Tonemapping::None,
+        bevy::camera::Exposure::default(),
+        crate::tonemap::ToneMapped,
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
             near: 1.,
