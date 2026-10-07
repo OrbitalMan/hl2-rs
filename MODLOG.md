@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-07 README platforms table; feature list moved to docs/features.md
+
+**Changed:** README.md gains a "Platforms" table near the top: Windows (primary tested), macOS Apple Silicon (tested by a contributor, PR #1), Linux and other systems (**not tested**). The long "Implemented so far" list moved verbatim to docs/features.md; the README keeps a one-paragraph summary with a link.
+
+**Why:** Owner request: show confirmed platforms at a glance and shorten the README. A versioned docs page was chosen over a GitHub wiki so the list stays reviewable in PRs alongside the code.
+
+**Tested how:** Documentation only. Checked that docs/*.md is whitelisted, that no document links to the old README anchor, and that relative links in docs/features.md resolve.
+
+**Result:** README is shorter; the feature list content is unchanged.
+
+**Still broken or not tested:** Linux builds and runs are **not tested**; CI runs on Windows only.
+
+**Next:** Envmap cubemaps (DESIGN 11a) on wip/envmap.
+
 ## 2026-10-06 Apple Silicon (macOS aarch64) support for hl2-bevy
 
 **Changed:** Added first-class macOS / Apple Silicon support to `main`:

@@ -2,6 +2,15 @@
 
 A standalone, partial Rust reconstruction of Half-Life 2 that reads maps, models, textures, animations and sounds from an installed copy. It does not load Valve's game or engine DLLs. The full campaign is not playable yet.
 
+## Platforms
+
+| Operating system | Status | Evidence |
+| --- | --- | --- |
+| Windows 11 64-bit (x86_64) | Primary tested platform | Owner builds, unit and owned-file tests, packaged replays/captures and native-game comparisons; CI runs on `windows-latest`. |
+| macOS 15+ on Apple Silicon (aarch64, Metal) | Tested by a contributor | Build, tests and a `d1_trainstation_01` launch with `./scripts/build-bevy.sh` and `./launch-bevy.sh` ([PR #1](https://github.com/kvalls/hl2-rs/pull/1)). Replays, captures and native comparisons are **not tested**. |
+| Linux | **Not tested** | Install discovery looks in `~/.steam/steam` and `~/.local/share/Steam`, but neither a build nor the POSIX scripts have been run on Linux. Reports are welcome. |
+| macOS on Intel, other systems | **Not tested** | |
+
 ## Branches and contributing
 
 HL2-RS is a Bevy 0.19 / wgpu Rust rewrite. Owned asset readers, shared simulation and rendering are separated following [iw4L](https://github.com/vladtrc/iw4L). On 2026-10-07 the Bevy work was merged into `main` and the original Macroquad/OpenGL host was removed from it.
@@ -26,7 +35,7 @@ Model-authored activity lookup now repairs unsupported implicit NPC idle labels,
 
 ## Build a fresh checkout
 
-You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust stable with the MSVC toolchain, and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. Windows is the primary tested platform. macOS on Apple Silicon (Metal backend) was tested by a contributor: build, tests and a `d1_trainstation_01` launch with `./scripts/build-bevy.sh` and `./launch-bevy.sh`. Replays, captures and native comparisons are Windows-only. Other operating systems are unverified.
+You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust stable with the MSVC toolchain, and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. On macOS use `./scripts/build-bevy.sh` and `./launch-bevy.sh`; see [Platforms](#platforms) for what each system has been tested with.
 
 The tested installation is Steam app 220, build `19307283`, patch `9912070`. Other game builds are unverified. Rust `1.99.0` was used for the recorded Windows checks. Cargo resolves the library versions in `Cargo.lock`; no external mod, loader or Source engine runtime is needed.
 
@@ -76,20 +85,7 @@ The pause menu has working Resume Game, Developer Console and Quit controls. The
 
 ## Implemented so far
 
-- Read-only VPK v1/v2 and loose content mounting, map ZIP content, custom content directories/VPKs, CRC checks, bounded readers.
-- BSP 19/20 and compressed lumps, world geometry, brush submodels, displacement geometry and collision, duplicate entity outputs.
-- VMT patch includes, VTF decoding, primary baked lightmap atlases, opaque/cutout/translucent/additive materials, basic two-texture scrolling and entity tint. Six-face sky backgrounds use installed textures/transforms (RGBS HDR faces when present) and separate 2D/3D leaf visibility. Rendering follows Source's HDR path (mat_hdr_level 2, the default): HDR lightmaps capped at the integer HDR range and an auto-exposure tonemap scale from a pre-bloom luminance histogram, and Source's 8-bit bloom (compared with native HDR captures). Lighting remains approximate. Studio models use leaf ambient cubes and up to four world lights per entity (retail light-cache selection, SDK shader terms); static props are lit per vertex at load. Shadows, bump/specular and environment maps remain absent; an LDR (mat_hdr_level 0) mode is not selectable yet.
-- MDL/VVD/VTX meshes, skins, static props and selected entity models, including the first map's `cycler_actor` G-Man. Bone hierarchies, skinning, selected compressed MDL/ANI clips and bounded sequence-event decoding; viewmodel sound events play at their recorded cycles.
-- Bounded PC AIN37 navigation-graph decoding, preserving hull offsets, link movement masks and editor IDs. A first Barney controller supports collision-validated direct/ground-node routes, authored central walk/run motion and actual-arrival scene gates. Inspection/runtime reports expose rejected routes and missing support. Full NPC schedules and combat AI remain unfinished.
-- Authored v48 model locomotion records, activity names and all blend tracks, with piecewise root-motion sampling, turning and loop accumulation. Barney uses the forward central tracks; weighted pose blends, native motor timing and turning remain unfinished.
-- Fixed 15 ms movement with acceleration, friction, gravity, air movement, jump, airborne crouch/uncrouch, sliding and stepping. World brush planes and convex collider SAT provide stable player hull sweeps; meshes and other shapes retain fallback queries. Collision is not Source prediction or exact collision equivalence.
-- Bounded VPHY/IVP convex collision from matching installed PHY/MDL files for supported static props, with separate convex pieces. Rotating-door collision follows the same initial idle pose as the visible model. Rapier rigid props, interaction and impulses retain approximate mass/material properties and explicit render-mesh fallbacks.
-- Timed entity I/O, target lookup, relays, counters, branches, cases/shuffling, timers, player triggers, doors and a subset of scripted sequences. Installed VSIF/BVCD choreography provides authored Start/Pause/Resume/Cancel, actor-aware speech, triggers, STOPPOINT completion, selected full-body SEQUENCE playback and bounded MOVETO for Barney and Kleiner. Unresolved actor readiness holds SECTION events; unsupported scene control is diagnosed. Complete campaign scenes remain unfinished.
-- Crowbar, pistol, .357, SMG1, AR2 and shotgun primary attacks, shotgun secondary attack, installed scripts/viewmodels, separate reserves, magazine reloads and shell-by-shell shotgun reload/pump/interruption. Shotgun secondary fire consumes two shells and fires twelve pellets; reload interruption retains a delayed shot after release. Crowbar traces use the Source ray/hull/corner sequence with approximate Rapier geometry. NPC models can animate and take damage, but do not implement combat AI.
-- SMG contact grenades with gravity, swept box collision, occluded blast falloff and reserve consumption. AR2 charge/release, current-aim launch, reload/holster veto, swept energy balls, reflection, bounded NPC damage/dissolve handling and timed expiry without blast damage. Free balls use owned effect textures for body, flicker and motion blur; effects and collision remain approximate.
-- Resource-driven PC weapon selection, health/suit/ammunition animation rules, SMG/AR2 secondary-ammo counters, low-health pulse loops, QuickInfo brackets/progress/fades/warning sounds, installed fonts and rounded corners. Primary ammo remains visible during selection. The unarmed white crosshair uses the installed default sprite; weapon crosshairs use installed glyphs. Layout, font-cell scaling and input behavior are compared with selected retail HUD methods and original-engine captures; Windows monochrome weapon crosshairs use the owned font through setup-only GDI rasterization. Selected pistol/SMG dot positions are checked against the original; other HUD fonts and glow remain approximate.
-- PCM WAV, standard Microsoft ADPCM WAV and bounded MP3 decoding for installed ambient/event/weapon audio, including trainstation music and opening G-Man speech. Map changes through `trigger_changelevel` preserve landmark-relative player position and inventory.
-- Common world/mod interfaces in `modkit-core` (`ModPlugin`). The former Macroquad host's JSON sandbox demo was removed with that host. Mods and crossovers with other Rust game rewrites are a goal once the HL2 rewrite reaches 1:1; none are integrated yet.
+In short: owned VPK/BSP/VMT/VTF/MDL/PHY/audio readers; world, displacement, prop and model rendering with baked lightmaps, Source model lighting, HDR auto exposure, bloom, skies and live monitors; fixed-step player movement and collision; entity I/O, doors, triggers and choreographed scenes with layered gestures, facial flexes and lip sync; six weapons (crowbar, pistol, .357, SMG1, AR2, shotgun) with their HUD; and map transitions. The full item-by-item list is in [docs/features.md](docs/features.md).
 
 ## Fidelity work remaining
 
