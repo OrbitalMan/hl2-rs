@@ -8,10 +8,10 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 
 1. Keep game assets, native binaries, decompiled code, databases and research tools outside public source checkouts. Read installed content in place; binary analysis uses private copies. Generated screenshots/reports belong in ignored artifacts/.
 2. Keep .gitignore as a source-only whitelist. Add narrow exceptions for reviewed source, documentation, fixtures or explicitly licensed project resources. Never force-add extracted game content or generated executables.
-3. Commit/push only authorized work and stage only the task's files. The owner already authorized reviewed source commits/pushes to kvalls/hl2-rs, including milestones and checkpoints near 98% of the five-hour quota. Do not repeatedly ask. Never merge unverified replacements into main.
+3. Commit/push only authorized work and stage only the task's files. The owner already authorized reviewed source commits/pushes to kvalls/hl2-rs, including milestones and checkpoints near 98% of the five-hour quota. Do not repeatedly ask. Work on main (Bevy-only since 2026-10-07); keep experimental or unverified work on separate branches until it is validated.
 4. Keep the installed game read-only. Approved private working directories are workspace work/hl2-decompiled, work/references and work/publishing. Other unrelated files remain outside scope unless named by the owner.
 5. Do not put credentials, tokens or passwords in project files, logs or commits.
-6. No FAL, replacement assets, crossovers or unsolicited Discord messages. This phase reconstructs HL2. There is no single-player/offline-only project restriction; multiplayer/netcode fidelity is not implemented or tested.
+6. No FAL, replacement assets, crossovers or unsolicited Discord messages. This phase reconstructs HL2. Mods and crossovers with other Rust game rewrites are the long-term goal after 1:1 fidelity (owner, 2026-10-07); keep `modkit-core::ModPlugin` and shared crates mod-friendly. There is no single-player/offline-only project restriction; multiplayer/netcode fidelity is not implemented or tested.
 
 ## How to work
 
@@ -19,10 +19,10 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 - Current priority (owner decision 2026-10-06): the Rust rewrite resumes with authored NPC gestures. Whole-corpus coverage/discovery passes are paused after pass14. Decompile on demand: for each feature, retrieve the relevant native functions from the private pass14 index by path/hash/address, review them privately and record findings before implementing. Preserve the baseline catalogue; indexing or relaxed-metadata exports do not establish semantic parity.
 - For substantial changes, record a bounded design/validation plan in docs/DESIGN.md before coding. Keep steps independently reviewable and reversible.
 - Use instrumentation and visual evidence together. The owner explicitly authorizes testing, screenshots and computer use. Record positions, timings, state transitions and image comparisons. Test packaged executables. Do not close user-launched games or send input to unrelated apps.
-- Reuse shared implementations: source-assets reads formats; modkit-core owns contracts/player/pose math; hl2-simulation owns shared gameplay/physics; hl2-ui owns portable HUD/menu/console; hl2-bevy and hl2-runtime are adapters. No asset reads/font rasterization in frame systems.
-- Continue the approved Bevy migration on bevy-migration. Ask before materially different large refactors outside that scope. Preserve macroquad-prototype and unverified wip/scripted-scenes; main remains the retained host until replacement validation.
+- Reuse shared implementations: source-assets reads formats; modkit-core owns contracts/player/pose math; hl2-simulation owns shared gameplay/physics; hl2-ui owns portable HUD/menu/console; hl2-bevy is the host adapter. No asset reads/font rasterization in frame systems.
+- HL2-RS is a Bevy Rust rewrite. Owner decision 2026-10-07: bevy-migration merged into main and the former Macroquad host (hl2-runtime) was removed; continue on main. Ask before materially different large refactors. Preserve the macroquad-prototype (historical host), bevy-migration (frozen at the merge) and unverified wip/scripted-scenes branches.
 - Preserve 15 ms order: sample input first; scene -> weapons -> entity collider poses/query refresh -> NPC/projectiles -> rigid physics -> player. Publish presentation before transform propagation and current animation bounds before visibility. Preserve held input, pause and selection semantics.
-- Bevy uses scripts/build-bevy.ps1 and launch-bevy.cmd; retained uses scripts/build.ps1 and launch.cmd. Shared changes require checking both hosts. Keep generated executable/shader metadata current after runtime changes.
+- Build with scripts/build-bevy.ps1 and run launch-bevy.cmd (or the 1080p/borderless variants). Keep generated executable/shader metadata current after runtime changes.
 - Use Cargo.lock. Run relevant tests, strict Clippy and formatting; verify parsers against owned files and rendering through packaged captures. Give exact test commands and expected results. Documentation-only edits require document/whitelist checks, not gameplay rebuilds.
 - Research database/native exports are evidence, not automatic parity. Distinguish inferred names/signatures, SDK behavior and verified retail behavior. Seeded developer actors do not establish ordinary campaign completion.
 - Explain changes plainly: actual behavior, verification, limitations and next bounded step.
@@ -46,13 +46,13 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 - Owned Steam Half-Life 2 app220, tested build19307283/patch9912070; other versions **not tested**. Default installation: C:/Program Files (x86)/Steam/steamapps/common/Half-Life 2; discover another library or use HL2_ROOT.
 - Rust1.99.0 stable MSVC, Visual Studio C++ tools/Windows SDK. Bevy0.19.1/wgpu and direct Rapier0.26.1. Switching to Avian was not requested; comparative physics performance is not tested.
 - Loader: none. Game owning the player: not applicable; Rust simulation owns state and the installation supplies content.
-- Agent: Codex Desktop. Previous implementation run used GPT-6.1 Extra High/Normal Speed; select new-chat settings explicitly.
-- Active checkout: workspace outputs/hl2-rs-bevy on bevy-migration; sibling outputs/hl2-rs remains main.
+- Agent: Claude Code desktop (2026-10-06/07 sessions, Claude Opus 5.5); earlier runs used Codex Desktop with GPT-6.1 Extra High/Normal Speed. Select new-chat settings explicitly.
+- Active checkout: workspace outputs/hl2-rs-bevy on main. Sibling outputs/hl2-rs is a detached historical checkout of the former Macroquad main (b4b1731).
 
 ## Runtime invariants to preserve
 
 - Walking uses shared Player/Physics; F2/--fly enables flight. Escape cancels selection before pause; tilde opens console. Consume transition input and pause simulation/audio. Map workers freeze fixed/script clocks; replace map-owned resources only after success. Missing maps preserve the world; saved/global state transfer is unfinished.
-- HUD uses owned resources and an ordered CPU canvas for both hosts. GDI font rasterization is setup-only.
+- HUD uses owned resources and an ordered CPU canvas. GDI font rasterization is setup-only.
 - Sky background layer3/order-2, miniature sky layer4/order-1, world layer0: independent depth/color clears and BSP 2D/3D eligibility. Current animation bounds and all active player/monitor views drive visibility; missing data fails open, script-hidden/killed entities remain hidden. Spatial splitting is opt-in.
 - Eyes use owned MDL records, animated eyes attachment origin/forward and iris projection before entity transform/scale. Preserve authored LOOKAT ramps, cancellation tails, pause refresh, cycler meshes and one target for both eyes. EyeRefract uses explicit Eyes_dx8 fallback; native head/facial/random/tactical attention is unfinished.
 - Door use carries opener origin, opens linked leaves away and honors explicit direction. Blocked reversal/arbitrary spawn/native linkage remain incomplete.

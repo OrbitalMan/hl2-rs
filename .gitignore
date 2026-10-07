@@ -13,10 +13,8 @@
 !/.github/workflows/rust.yml
 !/launch*.cmd
 !/launch*.sh
-!/scripts/build.ps1
 !/scripts/build-bevy.ps1
 !/scripts/build-bevy.sh
-!/mods/*.json
 !/test-inputs/*.json
 !/docs/*.md
 !/docs/images/hl2-rs-trainstation.png
@@ -26,12 +24,6 @@
 !/crates/hl2-ui/assets/fonts/ProggyClean.ttf
 !/crates/hl2-ui/assets/fonts/LICENSE.txt
 !/crates/hl2-ui/assets/fonts/README.md
-!/third_party/README.md
-!/third_party/**/Cargo.toml
-!/third_party/**/README.md
-!/third_party/**/LICENSE-*
-!/third_party/**/build.rs
-!/third_party/**/src/**/*.rs
 # Generated/private directories remain closed to all extensions.
 **/target/
 /bin/

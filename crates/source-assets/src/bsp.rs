@@ -90,6 +90,13 @@ impl Bsp {
     pub fn lump(&self, id: usize) -> &[u8] {
         &self.lumps[id]
     }
+    /// Leaf ambient samples, world lights and the leaf tree for model lighting.
+    pub fn model_lighting(&self) -> Result<modkit_core::lighting::LightingData> {
+        crate::model_lighting::read(&self.lumps, &self.lump_versions)
+    }
+    pub fn model_lighting_with(&self, hdr: bool) -> Result<modkit_core::lighting::LightingData> {
+        crate::model_lighting::read_with(&self.lumps, &self.lump_versions, hdr)
+    }
     pub fn visibility_index(&self) -> Result<crate::visibility::VisibilityIndex> {
         crate::visibility::VisibilityIndex::new(&self.lumps, self.lump_versions[10])
     }
@@ -151,6 +158,10 @@ impl Bsp {
                 maxs: vec3(record, 12)?,
             });
         }
+        match self.model_lighting() {
+            Ok(lighting) => world.lighting = Some(std::sync::Arc::new(lighting)),
+            Err(e) => world.warnings.push(format!("model lighting data: {e:#}")),
+        }
         Ok(world)
     }
     fn background_clusters(&self) -> Result<BTreeSet<i16>> {
@@ -200,7 +211,7 @@ impl Bsp {
         let model = models.get(model_index).context("BSP missing model")?;
         let first = i32le(model, 40)?;
         let count = i32le(model, 44)?;
-        let use_hdr = self.lump(7).is_empty();
+        let use_hdr = crate::lighting::use_hdr(&self.lumps);
         let faces = records(self.lump(if use_hdr { 58 } else { 7 }), 56)?.collect::<Vec<_>>();
         let lighting = self.lump(if use_hdr { 53 } else { 8 });
         let disps = records(self.lump(26), 176)?.collect::<Vec<_>>();
@@ -250,7 +261,9 @@ impl Bsp {
                 .position(|b| *b == 0)
                 .context("unterminated texture string")?;
             let material = std::str::from_utf8(&tail[..end])?.to_lowercase();
-            if material.starts_with("tools/") {
+            // Compile tools are invisible, except toolsblack (an UnlitGeneric black texture),
+            // e.g. the frame around trainstation_02's Combine slate.
+            if material.starts_with("tools/") && !material.starts_with("tools/toolsblack") {
                 continue;
             }
             let width = i32le(td, 16)?.max(1) as f32;
@@ -370,6 +383,7 @@ impl Bsp {
                             dispverts[index(dvstart + (y * side + x) as i32, dispverts.len())?];
                         let pos = p + vec3(dv, 0)? * f32le(dv, 12)?;
                         batch.vertices.push(Vertex {
+                            normal: Default::default(),
                             position: pos,
                             uv: uv(p),
                             color: if face_light.is_some() {
@@ -408,6 +422,7 @@ impl Bsp {
                 let base = batch.vertices.len() as u32;
                 for p in polygon.iter().copied() {
                     batch.vertices.push(Vertex {
+                        normal: Default::default(),
                         position: p,
                         uv: uv(p),
                         color: if face_light.is_some() {

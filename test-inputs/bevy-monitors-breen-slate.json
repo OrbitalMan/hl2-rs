@@ -1,0 +1,24 @@
+[
+ {
+  "tick": 1,
+  "fly": true,
+  "eye": [
+   -3753,
+   -2290,
+   469
+  ],
+  "yaw": -90,
+  "pitch": 0,
+  "fov": 75,
+  "label": "breen-slate-active"
+ },
+ {
+  "tick": 200,
+  "paused": true,
+  "label": "breen-slate-frozen"
+ },
+ {
+  "tick": 230,
+  "label": "breen-slate-capture"
+ }
+]

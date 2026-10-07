@@ -58,6 +58,11 @@ pub fn install(
         RenderTarget::Image(image.clone().into()),
         RenderLayers::layer(0),
         Tonemapping::None,
+        // Integer HDR draws monitor views before TurnOnToneMapping, after the previous main
+        // view reset the scale to 1 (SDK viewrender.cpp 2080/2090/2214).
+        bevy::camera::Exposure {
+            ev100: crate::tonemap::ev100(1.),
+        },
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
             near: 1.,
@@ -179,11 +184,9 @@ pub fn present_materials(
         let (color, uv) = definition
             .animation
             .sample(definition.color, game.scene.time as f32);
-        let tint = Vec3::new(
-            color[0] * definition.color2[0],
-            color[1] * definition.color2[1],
-            color[2] * definition.color2[2],
-        );
+        let tint = Vec3::from_array(std::array::from_fn(|i| {
+            linear_modulation(color[i] * definition.color2[i])
+        }));
         let secondary_uv = Mat3::from_cols(
             Vec3::new(uv[0][0], uv[1][0], 0.),
             Vec3::new(uv[0][1], uv[1][1], 0.),
@@ -197,5 +200,32 @@ pub fn present_materials(
             material.tint = tint.extend(material.tint.w);
             material.secondary_uv = secondary_uv;
         }
+    }
+}
+
+/// SDK SetModulationPixelShaderDynamicState_LinearColorSpace: ($color * $color2) channels
+/// above 1 stay as they are, the rest go through mathlib GammaToLinear (a 256-entry
+/// pow 2.2 table that returns 1 from 0.95 up).
+pub(crate) fn linear_modulation(channel: f32) -> f32 {
+    if channel > 1. {
+        channel
+    } else if channel < 0. {
+        0.
+    } else if channel >= 0.95 {
+        1.
+    } else {
+        ((channel * 255.).round() / 255.).powf(2.2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn modulation_matches_sdk_gamma_to_linear() {
+        use super::linear_modulation as m;
+        assert_eq!(m(2.5), 2.5);
+        assert_eq!(m(0.96), 1.);
+        assert_eq!(m(-1.), 0.);
+        assert!((m(0.4) - (102f32 / 255.).powf(2.2)).abs() < 1e-6);
     }
 }

@@ -16,6 +16,21 @@
       },
       {
         "action": "send",
+        "target": "kleiner_template",
+        "input": "ForceSpawn"
+      },
+      {
+        "action": "send",
+        "target": "barney_security_monitor_1",
+        "input": "Enable"
+      },
+      {
+        "action": "send",
+        "target": "kleiner_security_camera_1",
+        "input": "SetOnAndTurnOthersOff"
+      },
+      {
+        "action": "send",
         "target": "#792",
         "input": "Disable"
       },
@@ -43,6 +58,21 @@
         "action": "send",
         "target": "ss_Helmet_Reveal",
         "input": "CancelSequence"
+      },
+      {
+        "action": "send",
+        "target": "helmetFaceplate_head",
+        "input": "TurnOff"
+      },
+      {
+        "action": "send",
+        "target": "helmetFaceplate_hand",
+        "input": "TurnOff"
+      },
+      {
+        "action": "send",
+        "target": "logic_disable_cameras",
+        "input": "Trigger"
       }
     ]
   },

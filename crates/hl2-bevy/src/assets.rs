@@ -77,6 +77,8 @@ pub struct MaterialData {
     pub camera_vertex_color: bool,
     pub camera_animation: source_assets::monitor_material::Animation,
     pub camera_color2: [f32; 3],
+    /// VertexLitGeneric $halflambert.
+    pub half_lambert: bool,
     /// Affine rows applied to the BSP/model base UVs before repeat sampling.
     pub uv_transform: [[f32; 3]; 2],
 }
@@ -102,6 +104,7 @@ impl Default for MaterialData {
             camera_vertex_color: false,
             camera_animation: Default::default(),
             camera_color2: [1.; 3],
+            half_lambert: false,
             uv_transform: UvTransform::default().rows(),
         }
     }
@@ -137,6 +140,9 @@ pub fn load_with_canvas(
     let mut world = bsp.world(map).context("decode Source world")?;
     world.warnings.extend(vfs.warnings.iter().cloned());
     normalize_bsp_render_winding(&mut world);
+    // Static infodecals land on world brush faces only, before static props are merged.
+    let mut decal_errors = Vec::new();
+    add_static_decals(&mut world, &vfs, &mut decal_errors);
     let model_report = models::append_models(&mut world, &vfs);
     let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
@@ -156,7 +162,7 @@ pub fn load_with_canvas(
         bail!("map exceeds {MAX_MATERIALS} unique material limit");
     }
     let mut materials = BTreeMap::new();
-    let mut texture_errors = Vec::new();
+    let mut texture_errors = decal_errors;
     let mut decoded_bytes = 0usize;
     let mut texture_cache = BTreeMap::new();
     for name in names {
@@ -255,6 +261,64 @@ pub fn load_with_canvas(
     })
 }
 
+/// CDecal::StaticDecal: infodecals without a targetname are applied at map load (named ones
+/// wait for an input and are not handled yet). Size is the decal's base texture in world
+/// units times `$decalscale`.
+fn add_static_decals(world: &mut World, vfs: &Vfs, errors: &mut Vec<String>) {
+    let decals: Vec<_> = world
+        .entities
+        .iter()
+        .filter(|e| e.class() == "infodecal" && e.get("targetname").is_none_or(str::is_empty))
+        .filter_map(|e| {
+            Some((
+                e.origin(),
+                e.get("texture")?.replace('\\', "/").to_lowercase(),
+            ))
+        })
+        .collect();
+    let mut sizes = BTreeMap::<String, Option<glam::Vec2>>::new();
+    let mut added = Vec::new();
+    for (origin, material) in decals {
+        let size =
+            *sizes
+                .entry(material.clone())
+                .or_insert_with(|| match decal_size(vfs, &material) {
+                    Ok(size) => Some(size),
+                    Err(e) => {
+                        errors.push(format!("infodecal {material}: {e:#}"));
+                        None
+                    }
+                });
+        if let Some(size) = size {
+            added.extend(modkit_core::decals::static_decal(
+                &world.surfaces,
+                origin,
+                size,
+                5.,
+                &material,
+            ));
+        }
+    }
+    world.surfaces.extend(added);
+}
+fn decal_size(vfs: &Vfs, material: &str) -> Result<glam::Vec2> {
+    let definition = definition(vfs, material, 0)?;
+    let base = definition
+        .properties
+        .get("$basetexture")
+        .context("decal has no $basetexture")?;
+    let path = asset_path(base, ".vtf")?;
+    let data = vfs
+        .read(&path)?
+        .with_context(|| format!("VTF absent: {path}"))?;
+    if data.get(..4) != Some(b"VTF\0") || data.len() < 20 {
+        bail!("not a VTF: {path}");
+    }
+    let width = f32::from(u16::from_le_bytes([data[16], data[17]]));
+    let height = f32::from(u16::from_le_bytes([data[18], data[19]]));
+    let scale = scalar(&definition.properties, "$decalscale", 1.)?;
+    Ok(glam::Vec2::new(width, height) * scale)
+}
 /// BSP surfedges retain clockwise triangles, but vmdl's Strip::indices already
 /// reverses model triangles to CCW. Normalize BSP render copies before static
 /// props are merged, keeping original collision copies and model data intact.
@@ -332,15 +396,38 @@ fn asset_path(name: &str, extension: &str) -> Result<String> {
     Ok(format!("materials/{name}{extension}"))
 }
 
+/// Direct material vars, with retail MaterialSystem key conditionals (`test?$var`, optional
+/// `!`): a key whose test fails is skipped, and a passing one replaces the plain value.
 fn direct_properties(entries: &[Entry]) -> BTreeMap<String, String> {
-    entries
-        .iter()
-        .filter_map(|entry| {
-            entry
-                .text()
-                .map(|text| (entry.key.to_lowercase(), text.into()))
-        })
-        .collect()
+    let mut properties = BTreeMap::new();
+    let mut conditional = Vec::new();
+    for entry in entries {
+        let Some(text) = entry.text() else {
+            continue;
+        };
+        let key = entry.key.to_lowercase();
+        match key.split_once('?') {
+            Some((test, name)) if !test.is_empty() => {
+                if material_condition(test) {
+                    conditional.push((name.to_owned(), text.to_owned()));
+                }
+            }
+            _ => {
+                properties.insert(key, text.to_owned());
+            }
+        }
+    }
+    properties.extend(conditional);
+    properties
+}
+
+/// Tests as evaluated on a DX9, sRGB-capable renderer in HDR mode (mat_hdr_level 2, the
+/// Source default and the owner's setting). Unknown tests are false, as in retail (which
+/// also warns).
+fn material_condition(test: &str) -> bool {
+    let (negate, test) = test.strip_prefix('!').map_or((false, test), |t| (true, t));
+    let value = matches!(test, "srgb" | "hdr");
+    value != negate
 }
 
 // Reuse the bounded KeyValues decoder, preserving direct material parameters and
@@ -420,6 +507,7 @@ fn metadata(definition: &Definition) -> Result<MaterialData> {
         translucent: scalar(p, "$translucent", 0.)?.trunc() != 0.,
         additive: scalar(p, "$additive", 0.)?.trunc() != 0.,
         two_sided: scalar(p, "$nocull", 0.)?.trunc() != 0.,
+        half_lambert: scalar(p, "$halflambert", 0.)?.trunc() != 0.,
         opacity: scalar(p, "$alpha", 1.)?.clamp(0., 1.),
         unlit: definition.shader.eq_ignore_ascii_case("unlitgeneric"),
         eye_fallback: definition.shader.eq_ignore_ascii_case("eyes_dx8"),
@@ -610,6 +698,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn conditional_material_vars_follow_retail_tests() {
+        let entries = keyvalues::parse(
+            r#""srgb?$color2" "[2.5 2.5 2.5]" "$color2" "[1 1 1]" "hdr?$alpha" "0.5"
+            "!hdr?$nocull" "1" "ldr?$additive" "1" "360?$translucent" "1" "dx9?$x" "1""#,
+        )
+        .unwrap();
+        let p = direct_properties(&entries);
+        assert_eq!(p["$color2"], "[2.5 2.5 2.5]");
+        assert_eq!(p["$alpha"], "0.5");
+        for absent in ["$nocull", "$additive", "$translucent", "$x", "srgb?$color2"] {
+            assert!(!p.contains_key(absent), "{absent}");
+        }
+    }
+
+    #[test]
     fn bsp_normalization_faces_up_and_preserves_model_and_collision_copies() {
         let mut surface = modkit_core::Surface {
             flex_source: None,
@@ -619,6 +722,7 @@ mod tests {
             vertices: [[0., 0., 0.], [0., 1., 0.], [1., 0., 0.]]
                 .into_iter()
                 .map(|position| modkit_core::Vertex {
+                    normal: Default::default(),
                     position: position.into(),
                     uv: Default::default(),
                     color: [255; 4],
@@ -713,6 +817,7 @@ mod tests {
             vertices: [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]]
                 .into_iter()
                 .map(|position| Vertex {
+                    normal: Default::default(),
                     position: position.into(),
                     uv: Default::default(),
                     light_uv: Default::default(),

@@ -57,7 +57,7 @@ Addresses refer to preferred image addresses in this exact binary, not reusable 
 
 ## Runtime boundary
 
-Installed assets -> `source-assets` readers -> `modkit-core` world/animation/movement contracts -> Rust host, rendering and simulation. `modkit-core::ModPlugin` and JSON sandbox edits operate on that shared representation. Native game DLL loading, hooks and decompiled C compilation are absent.
+Installed assets -> `source-assets` readers -> `modkit-core` world/animation/movement contracts -> Rust host, rendering and simulation. `modkit-core::ModPlugin` remains as a contract on that shared representation; the JSON sandbox that used it was removed with the former Macroquad host on 2026-10-07. Native game DLL loading, hooks and decompiled C compilation are absent.
 
 The Windows input dependency is a vendored Rust miniquad crate, not recovered Valve code. Its virtual-key fallback follows [MapVirtualKeyW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-mapvirtualkeyw); attribution and patch notes are in third_party/README.md.
 

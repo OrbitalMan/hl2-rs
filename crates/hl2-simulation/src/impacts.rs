@@ -314,6 +314,7 @@ mod tests {
                 ]
                 .into_iter()
                 .map(|position| modkit_core::Vertex {
+                    normal: Default::default(),
                     position,
                     uv: glam::Vec2::ZERO,
                     color: [255; 4],

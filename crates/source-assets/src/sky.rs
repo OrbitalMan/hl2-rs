@@ -42,6 +42,40 @@ pub struct SkyFace {
     pub texture: String,
     pub image: vtf::Image,
     pub transform: UvTransform,
+    /// Sky_HDR_DX9 `$hdrcompressedTexture` (RGBS) decoded per texel to linear RGB
+    /// (rgb * alpha * 8) as RGBA16F bits, when the material has one that decodes.
+    pub hdr: Option<HdrImage>,
+}
+
+#[derive(Debug)]
+pub struct HdrImage {
+    pub width: u16,
+    pub height: u16,
+    pub rgba: Vec<u16>,
+}
+impl HdrImage {
+    /// sky_hdr_compressed_rgbs: InputScale 8 times rgb times alpha, read without sRGB.
+    pub fn from_rgbs(image: &vtf::Image) -> Self {
+        let one = half::f16::ONE.to_bits();
+        let rgba = image
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| {
+                let scale = 8. * p[3] as f32 / 255.;
+                [p[0], p[1], p[2]]
+                    .map(|c| half::f16::from_f32(c as f32 / 255. * scale).to_bits())
+                    .into_iter()
+                    .chain([one])
+            })
+            .collect();
+        Self {
+            width: image.width,
+            height: image.height,
+            rgba,
+        }
+    }
 }
 
 /// Affine UV rows. Sampling must clamp after applying the material transform.
@@ -165,7 +199,7 @@ fn material_properties(
     read: &impl Fn(&str) -> Result<Option<Vec<u8>>>,
     material: &str,
     depth: usize,
-) -> Result<(Option<String>, Option<String>)> {
+) -> Result<(Option<String>, Option<String>, Option<String>)> {
     if depth > 8 {
         bail!("sky VMT include cycle/depth limit");
     }
@@ -184,14 +218,16 @@ fn material_properties(
     let root = &entries[0];
     let mut texture = property(root, "$basetexture")?;
     let mut transform = property(root, "$basetexturetransform")?;
+    let mut hdr = property(root, "$hdrcompressedtexture")?;
     if root.key.eq_ignore_ascii_case("patch") {
         let include = root
             .get("include")
             .and_then(|e| e.text())
             .context("sky patch missing include")?;
-        let (base, base_transform) = material_properties(read, include, depth + 1)?;
+        let (base, base_transform, base_hdr) = material_properties(read, include, depth + 1)?;
         texture = texture.or(base);
         transform = transform.or(base_transform);
+        hdr = hdr.or(base_hdr);
         for operation in ["insert", "replace"] {
             if let Some(block) = root.get(operation) {
                 if let Some(value) = property(block, "$basetexture")? {
@@ -207,7 +243,7 @@ fn material_properties(
             }
         }
     }
-    Ok((texture, transform))
+    Ok((texture, transform, hdr))
 }
 
 fn property(block: &keyvalues::Entry, key: &str) -> Result<Option<String>> {
@@ -241,7 +277,7 @@ fn load_using(
     let mut faces = Vec::with_capacity(6);
     for suffix in SUFFIXES {
         let material = format!("skybox/{name}{suffix}");
-        let (texture, transform) = material_properties(read, &material, 0)
+        let (texture, transform, hdr) = material_properties(read, &material, 0)
             .with_context(|| format!("sky {name} face {suffix}"))?;
         let texture =
             texture.with_context(|| format!("sky {name} face {suffix} has no LDR $basetexture"))?;
@@ -278,12 +314,25 @@ fn load_using(
             .transpose()
             .with_context(|| format!("sky {name} face {suffix} UV transform"))?
             .unwrap_or_default();
+        // The HDR face is optional: a missing or undecodable one keeps the LDR face.
+        let hdr = hdr.and_then(|name| {
+            let name = asset_name(&name).ok()?;
+            let name = name
+                .trim_start_matches("materials/")
+                .trim_end_matches(".vtf");
+            let data = read(&format!("materials/{name}.vtf")).ok()??;
+            (data.len() <= 64 * 1024 * 1024).then_some(())?;
+            vtf::decode(&data, max_dimension)
+                .ok()
+                .map(|image| HdrImage::from_rgbs(&image))
+        });
         faces.push(SkyFace {
             suffix,
             material,
             texture,
             image,
             transform,
+            hdr,
         });
     }
     let faces = faces

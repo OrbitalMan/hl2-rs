@@ -3,6 +3,7 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 pub mod animation;
 pub mod decals;
+pub mod lighting;
 pub mod movement;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -14,6 +15,9 @@ pub struct Vertex {
     pub light_uv: Vec2,
     #[serde(default)]
     pub skin: Option<animation::Weights>,
+    /// Unit model-space normal (studio models); zero where unused.
+    #[serde(default)]
+    pub normal: Vec3,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Surface {
@@ -98,6 +102,12 @@ pub struct World {
     pub lightmaps: Vec<Lightmap>,
     #[serde(default)]
     pub rigs: std::collections::BTreeMap<String, animation::Rig>,
+    /// Leaf ambient samples and world lights for model lighting (None if unreadable).
+    #[serde(default)]
+    pub lighting: Option<std::sync::Arc<lighting::LightingData>>,
+    /// Studio illumination origin and flags per model asset key.
+    #[serde(default)]
+    pub illumination: std::collections::BTreeMap<String, lighting::ModelIllumination>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConvexPiece {
@@ -113,7 +123,8 @@ pub struct BackgroundCamera {
 pub struct Lightmap {
     pub width: u16,
     pub height: u16,
-    pub rgba: Vec<u8>,
+    /// Linear, unclamped baked light as IEEE half-float bits (RGBA16F texels).
+    pub rgba: Vec<u16>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BrushModel {

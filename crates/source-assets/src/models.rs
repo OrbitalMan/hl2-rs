@@ -448,6 +448,11 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
                                 u16::try_from(vertex_id).context("mesh vertex id exceeds u16")?,
                             );
                             surface.vertices.push(Vertex {
+                                normal: Vec3::new(
+                                    vertex.normal.x,
+                                    vertex.normal.y,
+                                    vertex.normal.z,
+                                ),
                                 position: Vec3::new(
                                     vertex.position.x,
                                     vertex.position.y,
@@ -699,10 +704,24 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                     .push(format!("{}: {e:#}", instance.model)),
             }
         }
+        let illumination = *world
+            .illumination
+            .entry(instance.asset_key())
+            .or_insert_with(|| read_illumination(vfs, &instance.model).unwrap_or_default());
         if instance.entity.is_some() {
             continue;
         }
         let rotate = rotation(instance.angles);
+        // Static props without baked vertex lighting use the light cache at their
+        // illumination origin; evaluate it once per vertex here.
+        let light = world.lighting.as_deref().map(|data| {
+            let origin = instance.origin + rotate * (illumination.position * instance.scale);
+            let mut state = data.state_at(origin);
+            if illumination.ambient_boost() {
+                data.boost(&mut state, origin);
+            }
+            state
+        });
         for surface in model {
             let out = batches
                 .entry((
@@ -719,15 +738,52 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                     indices: Vec::new(),
                 });
             let base = out.vertices.len() as u32;
-            out.vertices.extend(surface.vertices.iter().map(|v| Vertex {
-                position: instance.origin + rotate * (v.position * instance.scale),
-                ..v.clone()
+            out.vertices.extend(surface.vertices.iter().map(|v| {
+                let position = instance.origin + rotate * (v.position * instance.scale);
+                let normal = (rotate * v.normal).normalize_or_zero();
+                Vertex {
+                    position,
+                    normal,
+                    color: light
+                        .as_ref()
+                        .map_or(v.color, |state| lit_color(state, position, normal)),
+                    ..v.clone()
+                }
             }));
             out.indices.extend(surface.indices.iter().map(|i| base + i));
         }
     }
     world.surfaces = batches.into_values().collect();
     report
+}
+/// Linear vertex lighting as a gamma-encoded byte color (the world shader
+/// multiplies gamma-space texels, then linearizes).
+pub fn lit_color(
+    state: &modkit_core::lighting::LightState,
+    position: Vec3,
+    normal: Vec3,
+) -> [u8; 4] {
+    let light = if normal == Vec3::ZERO {
+        state.ambient.iter().copied().sum::<Vec3>() / 6.
+    } else {
+        state.vertex_light(position, normal, false)
+    };
+    let byte = |c: f32| (c.max(0.).powf(1. / 2.2) * 255.).round().min(255.) as u8;
+    [byte(light.x), byte(light.y), byte(light.z), 255]
+}
+/// studiohdr_t illumposition (offset 92) and flags (offset 152).
+pub fn read_illumination(
+    vfs: &Vfs,
+    model: &str,
+) -> Result<modkit_core::lighting::ModelIllumination> {
+    let mdl = vfs.read(model)?.context("model missing")?;
+    if mdl.get(..4) != Some(b"IDST") {
+        bail!("not a studio model");
+    }
+    Ok(modkit_core::lighting::ModelIllumination {
+        position: crate::vec3(&mdl, 92)?,
+        flags: u32le(&mdl, 152)?,
+    })
 }
 pub fn read_collision(vfs: &Vfs, model: &str) -> Result<Option<Vec<modkit_core::ConvexPiece>>> {
     let stem = model.trim_end_matches(".mdl");

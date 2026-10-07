@@ -159,13 +159,14 @@ fn approach(target: f32, value: f32, speed: f32) -> f32 {
 }
 impl Head {
     /// One update of MaintainLookTargets/UpdateHeadControl, scaled from the 0.1 sec NPC think
-    /// to `dt`. `targets` are (direction from the eye, interest); `body` is the body yaw in
-    /// degrees, standing in for the model's "forward" attachment.
-    pub fn update(&mut self, targets: &[(Vec3, f32)], body_yaw: f32, dt: f32) {
+    /// to `dt`. `targets` are (direction from the eye, interest); `frame` is the world rotation
+    /// of the animated "forward" attachment. It is parented to the head bone, so it already
+    /// carries the animation and the current head pose: like the SDK, the correction is
+    /// measured in that tilted frame, not a level body frame.
+    pub fn update(&mut self, targets: &[(Vec3, f32)], frame: glam::Mat3, dt: f32) {
         let thinks = (dt / 0.1).clamp(0., 2.);
         self.goal *= 0.8f32.powf(thinks);
-        let (sin, cos) = body_yaw.to_radians().sin_cos();
-        let forward = Vec3::new(cos, sin, 0.);
+        let forward = frame.x_axis.normalize_or(Vec3::X);
         let mut head = forward;
         let mut influence = 0.;
         for &(dir, interest) in targets {
@@ -190,12 +191,10 @@ impl Head {
             self.direction = (self.direction * blend + head * (1. - blend)).normalize_or(forward);
             self.influence = (self.influence - 0.2 * thinks).max(0.);
         }
-        // UpdateHeadControl with scene_clamplookat: target in the forward frame.
-        let local = Vec3::new(
-            self.direction.x * cos + self.direction.y * sin,
-            -self.direction.x * sin + self.direction.y * cos,
-            self.direction.z,
-        );
+        // UpdateHeadControl with scene_clamplookat: target in the forward frame. Aligning the
+        // frame's X to it (Studio_AlignIKMatrix) keeps left.z = 0, so MatrixAngles gives
+        // pitch/yaw of the local direction and zero roll.
+        let local = frame.transpose() * self.direction;
         let mut local = local.normalize_or(Vec3::X);
         local.z *= local.x.clamp(0.1, 1.);
         let local = local.normalize_or(Vec3::X);
@@ -213,27 +212,41 @@ impl Head {
 mod head_tests {
     use super::*;
     #[test]
+    fn correction_is_measured_in_the_tilted_forward_frame() {
+        // Head already pitched 20 degrees down (Source pitch down = toward -Z).
+        let frame = glam::Mat3::from_rotation_y(20f32.to_radians());
+        // A self-interest follows the forward attachment: no correction.
+        let mut head = Head::default();
+        head.update(&[(frame.x_axis, 1.)], frame, 0.1);
+        assert!(head.goal.length() < 1e-3, "{:?}", head.goal);
+        // A level target is 20 degrees up from the tilted head: pitch correction -20 at most,
+        // limited to 10 degrees per think, instead of the zero a level frame would give.
+        let mut level = Head::default();
+        level.update(&[(Vec3::X, 1.)], frame, 0.1);
+        assert!((level.goal.x + 10.).abs() < 1e-3, "{:?}", level.goal);
+    }
+    #[test]
     fn head_turns_toward_interest_at_think_rates_and_relaxes_without_one() {
         let mut head = Head::default();
         // Target 60 degrees to the left of a body facing +X.
         let dir = Vec3::new(0.5, 3f32.sqrt() / 2., 0.);
-        head.update(&[(dir, 1.)], 0., 0.1);
+        head.update(&[(dir, 1.)], glam::Mat3::IDENTITY, 0.1);
         assert!(
             (head.goal.y - 30.).abs() < 1e-3,
             "30 degrees per think: {}",
             head.goal.y
         );
         for _ in 0..30 {
-            head.update(&[(dir, 1.)], 0., 0.1);
+            head.update(&[(dir, 1.)], glam::Mat3::IDENTITY, 0.1);
         }
         assert!(head.goal.y > 45. && head.goal.y < 60., "{}", head.goal.y);
         // Body already facing the target: no correction needed.
         let mut aligned = Head::default();
-        aligned.update(&[(Vec3::X, 1.)], 0., 0.1);
+        aligned.update(&[(Vec3::X, 1.)], glam::Mat3::IDENTITY, 0.1);
         assert!(aligned.goal.y.abs() < 1e-3);
         // Interest gone: influence and goal relax toward zero.
         for _ in 0..40 {
-            head.update(&[], 0., 0.1);
+            head.update(&[], glam::Mat3::IDENTITY, 0.1);
         }
         assert!(head.influence == 0. && head.goal.y.abs() < 1.);
     }

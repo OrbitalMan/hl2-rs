@@ -1,6 +1,6 @@
 # Developer overlay font
 
-ProggyClean.ttf by Tristan Grimmer (2004, 2005), distributed under the accompanying MIT license. This is the same font embedded by Macroquad 0.4.16, retained for the developer overlay during the Bevy migration. It is independent of the owned game assets.
+ProggyClean.ttf by Tristan Grimmer (2004, 2005), distributed under the accompanying MIT license. This is the same font embedded by Macroquad 0.4.16; it is used for the developer overlay. It is independent of the owned game assets.
 
 Upstream: https://github.com/bluescan/proggyfonts
 

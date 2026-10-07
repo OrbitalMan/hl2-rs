@@ -3,31 +3,16 @@
   "tick": 1,
   "fly": true,
   "eye": [
-   -4022,
-   -510,
-   38
+   -3360,
+   -291,
+   52
   ],
-  "yaw": -65,
+  "yaw": 0,
   "actions": [
    {
     "action": "send",
     "target": "gordon_cop_template",
     "input": "ForceSpawn"
-   },
-   {
-    "action": "send",
-    "target": "kleiner_template",
-    "input": "ForceSpawn"
-   },
-   {
-    "action": "send",
-    "target": "barney_security_monitor_1",
-    "input": "Enable"
-   },
-   {
-    "action": "send",
-    "target": "kleiner_security_camera_1",
-    "input": "SetOnAndTurnOthersOff"
    },
    {
     "action": "send",
@@ -63,17 +48,17 @@
     "action": "send",
     "target": "ss_Helmet_Reveal",
     "input": "CancelSequence"
+   },
+   {
+    "action": "send",
+    "target": "kleiner_template",
+    "input": "ForceSpawn"
    }
-  ]
+  ],
+  "label": "campaign-state"
  },
  {
   "tick": 2,
-  "eye": [
-   -3376,
-   -252,
-   34
-  ],
-  "yaw": -65,
   "actions": [
    {
     "action": "send",
@@ -89,6 +74,16 @@
     "action": "send",
     "target": "logic_disable_cameras",
     "input": "Trigger"
+   },
+   {
+    "action": "send",
+    "target": "barney_security_monitor_1",
+    "input": "Enable"
+   },
+   {
+    "action": "send",
+    "target": "kleiner_security_camera_1",
+    "input": "SetOnAndTurnOthersOff"
    }
   ]
  },
@@ -114,11 +109,12 @@
   "label": "start"
  },
  {
-  "tick": 1507,
+  "tick": 710,
   "paused": true,
-  "label": "closeup-2245",
-  "yaw": -59.4,
-  "pitch": 0,
-  "fov": 14
+  "label": "kleiner-speaking-1050"
+ },
+ {
+  "tick": 740,
+  "label": "kleiner-capture"
  }
 ]

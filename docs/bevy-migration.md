@@ -1,6 +1,6 @@
-# Bevy migration preview
+# Bevy host
 
-The `bevy-migration` branch adds a Bevy 0.19.1/wgpu host with custom Source materials and shared player movement/collision. It reads an owned, installed Half-Life 2 copy through `source-assets`; `modkit-core` provides the player controller and `hl2-simulation` provides shared collision support. Game assets and Valve DLLs are not included in the repository or package.
+On 2026-10-07 the `bevy-migration` branch was merged into `main`, and the former Macroquad host (`hl2-runtime`) was removed. Sections below keep their migration-era wording where it records history; "retained" there refers to code carried over from that host. `main` provides a Bevy 0.19.1/wgpu host with custom Source materials and shared player movement/collision. It reads an owned, installed Half-Life 2 copy through `source-assets`; `modkit-core` provides the player controller and `hl2-simulation` provides shared collision support. Game assets and Valve DLLs are not included in the repository or package.
 
 This Bevy executable defaults to **walking with collision**, using the retained `Player` and `Physics` code at 15 ms per step. Flight is available with `--fly` or F2. The retained entity I/O, choreography scheduler, conservative Barney locomotion, inventory, six implemented weapons and projectile simulation now run in the Bevy fixed step. Door/prop meshes follow collider poses; available skeletal clips and weapon viewmodels animate. The shared owned-resource HUD now presents health/ammunition, weapon buckets, quick-info and white/yellow crosshairs, including secondary-ammo positioning animations. Owned ambient, scene, weapon, animation-event and HUD cues now play through Bevy audio; existing sinks pause/resume with the host. Owned grenade models, energy-ball sprites, shared smoke/fire/ember/debris/electric emitters and timed AR2 shock rings and clipped impact marks now have Bevy presentation adapters. The portable pause menu/console and asynchronous map host now run in Bevy. Authored triggers preserve landmark-relative position and inventory; console `map` resets them. Saved global/entity state and complete player transfer remain unfinished. The underlying incomplete AI and scene behavior is preserved, not upgraded to full Source parity. Visible geometry and working movement do not establish playable-map support or Source shader parity. The existing runtime remains available through `scripts/build.ps1` and `launch.cmd` for its broader implemented behavior.
 
@@ -22,9 +22,7 @@ macOS (Apple Silicon / POSIX):
 ./launch-bevy.sh --map d1_trainstation_01
 ```
 
-`-DebugBuild` (or `--debug`) selects a debug build. Cargo uses the checked-in lockfile and builds only `hl2-bevy`. Packaging writes `bin/hl2-bevy` (or `.exe` on Windows), copies the viewer's shader assets into `bin/bevy-assets`, and records their hashes in `bin/build-bevy-info.json`. Keep the executable and shader folder together. The launcher requires the packaged executable; rebuilding is necessary after changing source or shaders.
-
-Double-click `launch-bevy-1080p.cmd` (or run `./launch-bevy-1080p.sh`) for a 1920x1080 window or `launch-bevy-borderless.cmd` (or `./launch-bevy-borderless.sh`) for borderless at the primary desktop resolution. Both forward additional arguments to `launch-bevy.cmd` / `launch-bevy.sh`. `launch-1080p.cmd` and `launch-borderless.cmd` still select the retained runtime.
+Double-click `launch-bevy-1080p.cmd` for a 1920x1080 window or `launch-bevy-borderless.cmd` for borderless at the primary desktop resolution. Both forward additional arguments to `launch-bevy.cmd`.
 
 The runtime discovers the installed game. To select a particular installation or display size:
 
@@ -71,14 +69,9 @@ The decoded base-texture limit is **our loader's 512 MiB allocation budget**, no
 
 This is approximate legacy gamma multiplication, not Source's complete material pipeline. Missing render textures use a magenta checker and are named in the report. `_rt_Camera` monitor materials now sample a live 256-square world/actor target with owned secondary textures and literal Sine/TextureScroll proxies. Other DX fallback blocks, general `$color2`/material proxies, normal/specular maps, shadows, fog, refraction and HDR/exposure remain unsupported. Eyes now use owned sclera/iris textures and studio projection; EyeRefract selects its authored Eyes_dx8 fallback, rather than implementing corneal refraction. Transparent surfaces inherited from the shared prebatched world can still contain disconnected faces, limiting depth sorting. Missing animation clips remain bind poses and are reported. Door/entity I/O and prop dynamics use the same incomplete retained simulation as the original host. Owned projectile/impact presentation and actual audio sinks are connected; native particle and audio fidelity remain incomplete. Unsupported scene/NPC inputs remain named diagnostics. Neither better performance nor 1:1 fidelity has been demonstrated.
 
-## Contributor milestones before replacing main
+## Merge into main
 
-1. Compare the custom renderer with matched original/retained-runtime cameras; restore sky visibility/masking, Source material stages and diagnostics without regressions.
-2. Continue separating the existing gameplay host from Macroquad-specific types, preserving its behavior/tests and the migrated player/collision adapter's fixed-step scheduling.
-3. Verify migrated pause/console, projectile/impact effects and campaign transitions against the retained host, then expand NPC/animation/choreography and saved campaign state. Preserve original-game evidence and packaged regressions for each subsystem.
-4. Verify regressions for all retained runtime features and both trainstation levels through ordinary campaign state, document remaining gaps, and only then propose moving the replacement into `main`.
-
-Target Bevy PRs at `bevy-migration`. Shared format/core fixes can target `main` and be brought across separately. The preserved `macroquad-prototype` branch is a reference snapshot, not the active migration target. Do not include game files, private native analysis or databases in a PR.
+The milestones planned before replacing `main` were partly completed: the renderer, gameplay, HUD, audio, console, transitions, animation, choreography and model lighting run in Bevy with packaged regressions and selected native comparisons. The owner chose to merge on 2026-10-07 and continue as a Bevy-only rewrite. Ordinary campaign completion and full fidelity remain unfinished (see STATUS.md). Target PRs at `main`; `macroquad-prototype` and `bevy-migration` are reference snapshots. Do not include game files, private native analysis or databases in a PR.
 
 ## Entity and weapon fixture
 

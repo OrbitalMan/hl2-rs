@@ -68,6 +68,21 @@ fn number(e: &Entity, key: &str, default: f32) -> f32 {
         .filter(|v| v.is_finite())
         .unwrap_or(default)
 }
+/// `!target1`..`!target8` name the scene entity's targetN keys.
+fn resolve_target_slot<'a>(world: &'a World, scene: usize, name: &'a str) -> &'a str {
+    if let Some(slot) = name
+        .strip_prefix('!')
+        .and_then(|s| s.to_lowercase().strip_prefix("target").map(str::to_owned))
+        .and_then(|s| s.parse::<usize>().ok())
+    {
+        if (1..=8).contains(&slot) {
+            return world.entities[scene]
+                .get(&format!("target{slot}"))
+                .unwrap_or("");
+        }
+    }
+    name
+}
 fn scene_actor_class(class: &str) -> bool {
     class.starts_with("npc_")
         || class.starts_with("prop_dynamic")
@@ -233,6 +248,8 @@ pub struct Scene {
     /// Speech visemes added on top of the scene flex controllers.
     pub lipsync: crate::lipsync::LipSync,
     pub monitors: crate::monitors::Cameras,
+    /// env_tonemap_controller auto-exposure limits and rate.
+    pub tonemap: crate::tonemap::Control,
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
     templates: BTreeMap<usize, Vec<(usize, bool, bool)>>,
@@ -265,6 +282,7 @@ impl Scene {
             flex_controllers: BTreeMap::new(),
             lipsync: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
+            tonemap: Default::default(),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
             tick_dt: 0.,
@@ -575,6 +593,23 @@ impl Scene {
         );
         self.diagnostics.scenes_loaded = self.choreography.len();
     }
+    /// Every actor-class entity a scene actor name can resolve to, including killed and
+    /// template-pending ones (`!activator` is unknown before playback and resolves to none).
+    fn scene_actor_candidates(&self, world: &World, scene: usize, name: &str) -> Vec<usize> {
+        let name = resolve_target_slot(world, scene, name).to_lowercase();
+        world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, entity)| {
+                scene_actor_class(entity.class())
+                    && entity
+                        .get("targetname")
+                        .is_some_and(|target| glob(&name, &target.to_lowercase()))
+            })
+            .map(|(id, _)| id)
+            .collect()
+    }
     fn scene_actor(
         &self,
         world: &World,
@@ -582,18 +617,7 @@ impl Scene {
         name: &str,
         activator: usize,
     ) -> Option<usize> {
-        let mut name = name;
-        if let Some(slot) = name
-            .strip_prefix('!')
-            .and_then(|s| s.to_lowercase().strip_prefix("target").map(str::to_owned))
-            .and_then(|s| s.parse::<usize>().ok())
-        {
-            if (1..=8).contains(&slot) {
-                name = world.entities[scene]
-                    .get(&format!("target{slot}"))
-                    .unwrap_or("");
-            }
-        }
+        let name = resolve_target_slot(world, scene, name);
         if name.eq_ignore_ascii_case("!activator") {
             return (activator < self.states.len()).then_some(activator);
         }
@@ -739,20 +763,23 @@ impl Scene {
                 {
                     continue;
                 }
-                let Some(actor) = event.actor.and_then(|a| {
-                    self.scene_actor(world, *id, &scene.data.actors[a].name, usize::MAX)
-                }) else {
+                let Some(actor) = event.actor else {
                     continue;
                 };
-                if let Some(instance) = world
-                    .model_instances
-                    .iter()
-                    .find(|i| i.entity == Some(actor))
+                // Preparation runs at load, before point_template children (Barney, Kleiner)
+                // are force-spawned, so include every entity the name can resolve to.
+                for actor in self.scene_actor_candidates(world, *id, &scene.data.actors[actor].name)
                 {
-                    result
-                        .entry(instance.asset_key())
-                        .or_default()
-                        .insert(event.parameters[0].to_lowercase());
+                    if let Some(instance) = world
+                        .model_instances
+                        .iter()
+                        .find(|i| i.entity == Some(actor))
+                    {
+                        result
+                            .entry(instance.asset_key())
+                            .or_default()
+                            .insert(event.parameters[0].to_lowercase());
+                    }
                 }
             }
         }
@@ -962,10 +989,10 @@ impl Scene {
             let frames = self.attachment_frames(world, actor, &["eyes", "forward"]);
             let state = &self.states[actor];
             let eye = frames[0].map_or(state.origin + Vec3::Z * 64., |m| m.w_axis.truncate());
-            let forward = frames[1]
-                .map(|m| m.x_axis.truncate().normalize_or(Vec3::X))
-                .unwrap_or(state.rotation * Vec3::X);
-            let body_yaw = forward.y.atan2(forward.x).to_degrees();
+            let frame = frames[1].map_or(glam::Mat3::from_quat(state.rotation), |m| {
+                glam::Mat3::from_mat4(m)
+            });
+            let forward = frame.x_axis;
             let targets = self
                 .look_targets
                 .report()
@@ -984,7 +1011,7 @@ impl Scene {
                 })
                 .collect::<Vec<_>>();
             let head = self.heads.entry(actor).or_default();
-            head.update(&targets, body_yaw, dt);
+            head.update(&targets, frame, dt);
             if targets.is_empty() && head.influence == 0. && head.goal.length() < 0.01 {
                 self.heads.remove(&actor);
             }
@@ -1903,6 +1930,18 @@ impl Scene {
             return;
         }
         match input.as_str() {
+            // CEnvTonemapController: custom auto-exposure limits and the manual tonemap rate.
+            "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
+            "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,
+            "settonemaprate" if class == "env_tonemap_controller" => self.tonemap.rate = value,
+            "setbloomscale" if class == "env_tonemap_controller" => self.tonemap.bloom = value,
+            "usedefaultautoexposure" if class == "env_tonemap_controller" => {
+                self.tonemap = crate::tonemap::Control {
+                    rate: self.tonemap.rate,
+                    bloom: self.tonemap.bloom,
+                    ..Default::default()
+                };
+            }
             "start" if class == "logic_choreographed_scene" => {
                 self.start_choreography(world, id, p.activator)
             }
@@ -3306,6 +3345,59 @@ mod tests {
             .events
             .iter()
             .any(|e| e.kind == EventType::StopPoint && (e.start - 9.59397).abs() < 1e-6));
+    }
+    #[test]
+    #[ignore = "requires owned HL2 scene cache"]
+    fn owned_template_actors_get_scene_gesture_clips_before_force_spawn() {
+        let game = source_assets::install::discover().unwrap();
+        let data = std::fs::read(game.join("hl2/maps/d1_trainstation_01.bsp")).unwrap();
+        let mut world = source_assets::bsp::Bsp::parse(&data)
+            .unwrap()
+            .world("d1_trainstation_01")
+            .unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let entity = |world: &World, name: &str| {
+            world
+                .entities
+                .iter()
+                .position(|e| {
+                    e.get("targetname")
+                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                })
+                .unwrap()
+        };
+        for (name, model) in [
+            ("Barney", "models/barney.mdl"),
+            ("kleiner", "models/kleiner.mdl"),
+        ] {
+            let id = entity(&world, name);
+            world.model_instances.push(modkit_core::ModelInstance {
+                background: false,
+                model: model.into(),
+                origin: world.entities[id].origin(),
+                angles: Vec3::ZERO,
+                skin: 0,
+                scale: 1.,
+                kind: world.entities[id].class().into(),
+                solid: true,
+                solid_mode: None,
+                entity: Some(id),
+            });
+        }
+        let mut scene = Scene::new(&world);
+        scene.queue.clear();
+        scene.load_choreography(&world, &vfs).unwrap();
+        // Both are point_template children: pending (killed) until ForceSpawn.
+        assert!(scene.template_pending(entity(&world, "Barney")));
+        assert!(scene.template_pending(entity(&world, "kleiner")));
+        let clips = scene.required_animation_clips(&world);
+        let barney = &clips["models/barney.mdl#0"];
+        assert!(
+            barney.contains("gesture08") && barney.contains("posture01"),
+            "{barney:?}"
+        );
+        let kleiner = &clips["models/kleiner.mdl#0"];
+        assert!(kleiner.contains("kposture01"), "{kleiner:?}");
     }
     #[test]
     #[ignore = "requires owned HL2 scene cache; isolated LOOKAT execution, not native AI parity"]

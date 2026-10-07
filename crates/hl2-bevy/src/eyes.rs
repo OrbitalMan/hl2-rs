@@ -24,6 +24,8 @@ pub struct Eyes {
     tracking_entity: usize,
     tracking_scene: usize,
     projections: Vec<serde_json::Value>,
+    /// SDK CBaseFlex m_viewtarget: the last eye target persists per actor while valid.
+    view_targets: BTreeMap<usize, glam::Vec3>,
     /// Bone-local eye forward/up per (entity, eyeball surface) for FACS eyelids; flexes
     /// consume the previous presentation's basis.
     pub lid_bases: BTreeMap<(usize, usize), (glam::Vec3, glam::Vec3)>,
@@ -230,6 +232,31 @@ pub fn present(
                     interest: None,
                 })
         });
+        if selected.is_none() {
+            // CAI_BaseActor::MaintainLookTargets: without a target, keep the latched view
+            // target while ValidEyeTarget holds, else look 128 units ahead with jitter.
+            let (eye, forward) = candidates
+                .iter()
+                .find(|(id, _, _)| *id == Some(owner.0))
+                .map_or(
+                    (world_origin, state.rotation * head_forward),
+                    |(_, p, f)| (*p, *f),
+                );
+            let point = eyes
+                .view_targets
+                .get(&owner.0)
+                .copied()
+                .filter(|&p| valid_eye_target(eye, forward, p))
+                .unwrap_or_else(|| random_view_target(eye, forward, owner.0, game.scene.time));
+            *selected = Some(Selected {
+                point,
+                label: "view".into(),
+                interest: None,
+            });
+        }
+        if let Some(selected) = selected.as_ref() {
+            eyes.view_targets.insert(owner.0, selected.point);
+        }
         let local_target = selected
             .as_ref()
             .map(|s| state.rotation.inverse() * (s.point - state.origin) / mesh_eye.scale);
@@ -247,7 +274,7 @@ pub fn present(
             }
             if selected.label == "player" {
                 eyes.tracking_player += 1;
-            } else {
+            } else if selected.label != "view" {
                 eyes.tracking_entity += 1;
                 let id = selected
                     .label
@@ -291,5 +318,55 @@ pub fn present(
             }
             eyes.draws += 1;
         }
+    }
+}
+
+/// SDK CAI_BaseActor::ValidEyeTarget: at least 1 unit away and within 75 degrees of the head.
+fn valid_eye_target(eye: glam::Vec3, forward: glam::Vec3, target: glam::Vec3) -> bool {
+    let delta = target - eye;
+    delta.length() >= 1. && delta.normalize().dot(forward) > 0.259
+}
+
+/// SDK random view: eye + head * 128 + right * U(-32, 32) + up * U(-16, 16), with
+/// VectorVectors axes. The jitter is a deterministic hash of the actor and scene clock.
+fn random_view_target(eye: glam::Vec3, forward: glam::Vec3, actor: usize, time: f64) -> glam::Vec3 {
+    let forward = forward.normalize_or(glam::Vec3::X);
+    let right = if forward.x.abs() < 1e-6 && forward.y.abs() < 1e-6 {
+        glam::Vec3::NEG_Y
+    } else {
+        forward.cross(glam::Vec3::Z).normalize()
+    };
+    let up = right.cross(forward);
+    let mut seed = (actor as u64 ^ (time * 1000.) as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mut unit = || {
+        seed ^= seed >> 29;
+        seed = seed.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        (seed >> 40) as f32 / (1u64 << 24) as f32 * 2. - 1.
+    };
+    eye + forward * 128. + right * (unit() * 32.) + up * (unit() * 16.)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn view_target_is_ahead_within_sdk_jitter_and_valid() {
+        let eye = glam::Vec3::new(10., 20., 30.);
+        for actor in 0..32 {
+            let p = random_view_target(eye, glam::Vec3::X, actor, actor as f64 * 0.37);
+            let d = p - eye;
+            assert!((d.x - 128.).abs() < 1e-4 && d.y.abs() <= 32. && d.z.abs() <= 16.);
+            assert!(valid_eye_target(eye, glam::Vec3::X, p));
+        }
+        assert!(!valid_eye_target(
+            eye,
+            glam::Vec3::X,
+            eye - glam::Vec3::X * 50.
+        ));
+        assert!(!valid_eye_target(
+            eye,
+            glam::Vec3::X,
+            eye + glam::Vec3::X * 0.5
+        ));
     }
 }

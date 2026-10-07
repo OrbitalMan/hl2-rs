@@ -52,6 +52,8 @@ pub fn prepare_actor_animations(
         }
     }
 }
+/// NPC classes registered with the shared human ground-movement controller.
+pub const GROUND_HUMANS: [&str; 2] = ["npc_barney", "npc_kleiner"];
 pub fn prepare_npcs(
     world: &mut World,
     vfs: &Vfs,
@@ -79,13 +81,14 @@ pub fn prepare_npcs(
     let mut controller = crate::npc::Controller::new(graph, restrictions);
     controller.set_doors(world);
     let mut clips = std::collections::BTreeMap::new();
-    // Barney's normal human hull and ordinary spawn are verified in the owned executable.
+    // Normal human hull, step movement and ground/door capabilities are verified per factory:
+    // Barney (owned executable) and Kleiner (retail CNPC_Kleiner::Spawn, matching SDK 2013).
     // Other NPC factories need their own hull/motor evidence before being registered here.
     for instance in &world.model_instances {
         let Some(actor) = instance.entity else {
             continue;
         };
-        if world.entities[actor].class() != "npc_barney" {
+        if !GROUND_HUMANS.contains(&world.entities[actor].class()) {
             continue;
         }
         let loaded = (|| -> anyhow::Result<_> {

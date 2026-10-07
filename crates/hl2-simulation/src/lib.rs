@@ -24,3 +24,4 @@ pub mod gestures;
 pub mod lipsync;
 
 pub mod monitors;
+pub mod tonemap;

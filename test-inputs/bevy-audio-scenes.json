@@ -5,7 +5,10 @@
     {"action":"send","target":"trigger_storage_close_door_1","input":"Disable"},
     {"action":"send","target":"security_*","input":"Cancel"},
     {"action":"send","target":"barney_ss_*","input":"CancelSequence"},
-    {"action":"send","target":"ss_Helmet_Reveal","input":"CancelSequence"}
+    {"action":"send","target":"ss_Helmet_Reveal","input":"CancelSequence"},
+    {"action":"send","target":"helmetFaceplate_head","input":"TurnOff"},
+    {"action":"send","target":"helmetFaceplate_hand","input":"TurnOff"},
+    {"action":"send","target":"logic_disable_cameras","input":"Trigger"}
   ]},
   {"tick":10,"actions":[{"action":"send","target":"security_03","input":"Start"}],"label":"scene-start"},
   {"tick":70,"label":"speech-playing"},

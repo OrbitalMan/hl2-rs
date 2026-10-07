@@ -1,9 +1,0 @@
-[package]
-name = "quad-alsa-sys"
-version = "0.3.2"
-edition = "2021"
-license = "MIT"
-description = "Workspace compatibility re-export of the shared ALSA bindings"
-
-[dependencies]
-alsa-sys = "=0.3.1"

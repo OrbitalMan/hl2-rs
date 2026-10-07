@@ -13,7 +13,7 @@ use bevy::{
     prelude::*,
     reflect::TypePath,
     render::render_resource::{
-        AsBindGroup, Extent3d, FrontFace, PrimitiveTopology, RenderPipelineDescriptor,
+        AsBindGroup, Extent3d, FrontFace, PrimitiveTopology, RenderPipelineDescriptor, ShaderType,
         SpecializedMeshPipelineError, TextureDimension, TextureFormat,
     },
     shader::ShaderRef,
@@ -40,8 +40,86 @@ pub struct SourceMaterial {
     pub(crate) iris: Handle<Image>,
     #[uniform(8)]
     pub(crate) secondary_uv: Mat3,
+    #[uniform(9)]
+    pub(crate) lighting: ModelLighting,
     pub(crate) alpha: AlphaMode,
     pub(crate) two_sided: bool,
+}
+/// Source model lighting for one entity: ambient cube plus up to four local
+/// lights, positions/directions in Bevy space and colors linear.
+#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+pub struct ModelLighting {
+    /// x = lit model, y = local light count, z = half-Lambert.
+    pub params: Vec4,
+    /// Draw space to Bevy world space (Mat4 default is identity), except for the
+    /// view model, which is drawn by a fixed camera at the origin.
+    pub basis: Mat4,
+    /// Source cube faces +X, -X, +Y, -Y, +Z, -Z.
+    pub ambient: [Vec4; 6],
+    /// w = 0 point, 1 spot, 2 directional.
+    pub position: [Vec4; 4],
+    pub color: [Vec4; 4],
+    pub direction: [Vec4; 4],
+    /// Constant, linear, quadratic.
+    pub attenuation: [Vec4; 4],
+    /// Exponent, outer cosine, 1 / (inner - outer).
+    pub spot: [Vec4; 4],
+}
+impl ModelLighting {
+    /// Shared CPU light state converted for the shader.
+    pub fn from_state(state: &modkit_core::lighting::LightState, half_lambert: bool) -> Self {
+        use modkit_core::lighting::ShaderLightKind;
+        let mut out = Self {
+            params: Vec4::new(
+                1.,
+                state.lights.len().min(4) as f32,
+                f32::from(half_lambert),
+                0.,
+            ),
+            ..Default::default()
+        };
+        for (face, color) in out.ambient.iter_mut().zip(&state.ambient) {
+            *face = Vec3::from_array(color.to_array()).extend(0.);
+        }
+        for (i, light) in state.lights.iter().take(4).enumerate() {
+            let kind = match light.kind {
+                ShaderLightKind::Point => 0.,
+                ShaderLightKind::Spot => 1.,
+                ShaderLightKind::Directional => 2.,
+            };
+            out.position[i] =
+                source_to_bevy(Vec3::from_array(light.position.to_array())).extend(kind);
+            out.color[i] = Vec3::from_array(light.color.to_array()).extend(0.);
+            out.direction[i] =
+                source_to_bevy(Vec3::from_array(light.direction.to_array())).extend(0.);
+            out.attenuation[i] = Vec3::from_array(light.attenuation).extend(0.);
+            let scale = if light.inner > light.outer {
+                1. / (light.inner - light.outer)
+            } else {
+                1.
+            };
+            out.spot[i] = Vec4::new(light.exponent, light.outer, scale, 0.);
+        }
+        out
+    }
+    /// Unlit-data fallback: the former constant 180/255 gamma gray.
+    fn fallback(half_lambert: bool) -> Self {
+        let gray = (180f32 / 255.).powf(2.2);
+        Self {
+            params: Vec4::new(1., 0., f32::from(half_lambert), 0.),
+            ambient: [Vec4::new(gray, gray, gray, 0.); 6],
+            ..Default::default()
+        }
+    }
+}
+/// A model draw lit from its entity's (or the view's) illumination origin.
+#[derive(Component)]
+pub struct ModelLit {
+    entity: Option<usize>,
+    key: String,
+    scale: f32,
+    half_lambert: bool,
+    last: Option<(glam::Vec3, bool)>,
 }
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct MaterialKey {
@@ -109,6 +187,10 @@ struct Batch {
     uvs: Vec<[f32; 2]>,
     light_uvs: Vec<[f32; 2]>,
     colors: Vec<[f32; 4]>,
+    /// Source-space unit normals.
+    normals: Vec<glam::Vec3>,
+    /// Studio-model surfaces (lit per entity rather than by lightmap).
+    model: bool,
     indices: Vec<u32>,
     skin: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
     /// Studio (bodypart, mesh, mesh-local vertex) of each vertex, for facial flexes.
@@ -125,6 +207,7 @@ impl Batch {
             || self.uvs.len() != self.positions.len()
             || self.light_uvs.len() != self.positions.len()
             || self.colors.len() != self.positions.len()
+            || self.normals.len() != self.positions.len()
             || self.skin.len() != self.positions.len()
         {
             return vec![self];
@@ -161,6 +244,7 @@ impl Batch {
                         batch.uvs.push(self.uvs[index]);
                         batch.light_uvs.push(self.light_uvs[index]);
                         batch.colors.push(self.colors[index]);
+                        batch.normals.push(self.normals[index]);
                         batch.skin.push(self.skin[index].clone());
                         new
                     });
@@ -172,6 +256,8 @@ impl Batch {
     }
     fn append(&mut self, surface: &Surface, transform: Mat4, material: Option<&MaterialData>) {
         let offset = self.positions.len() as u32;
+        self.model |= surface.flex_source.is_some();
+        let rotation = Mat3::from_mat4(transform);
         let rows = material
             .map(|m| m.uv_transform)
             .unwrap_or([[1., 0., 0.], [0., 1., 0.]]);
@@ -197,6 +283,12 @@ impl Batch {
             ]);
             self.light_uvs.push(vertex.light_uv.to_array());
             self.colors.push(vertex.color.map(|v| f32::from(v) / 255.));
+            let normal = glam::Vec3::from_array(vertex.normal.to_array());
+            self.normals.push(
+                glam::Mat3::from_cols_array(&rotation.to_cols_array())
+                    .mul_vec3(normal)
+                    .normalize_or_zero(),
+            );
         }
         self.indices
             .extend(surface.indices.iter().map(|i| i + offset));
@@ -212,7 +304,21 @@ impl Batch {
             },
         );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 1., 0.]; count]);
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_NORMAL,
+            self.normals
+                .iter()
+                .map(|n| {
+                    let n = source_to_bevy(Vec3::from_array(n.to_array()));
+                    if n == Vec3::ZERO {
+                        [0., 1., 0.]
+                    } else {
+                        n.to_array()
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+        debug_assert_eq!(self.normals.len(), count);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, self.light_uvs);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
@@ -248,6 +354,8 @@ pub struct AnimatedMesh {
     key: String,
     scale: f32,
     bind: Vec<(glam::Vec3, Option<modkit_core::animation::Weights>)>,
+    /// Source-space bind normals for the CPU skinning path.
+    normals: Vec<glam::Vec3>,
     /// Facial flex vertex references and the undeformed bind positions they start from.
     flex: Vec<Option<[u16; 3]>>,
     flex_base: Vec<glam::Vec3>,
@@ -450,12 +558,122 @@ pub fn present_entities(
                 })
                 .collect();
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            if animation.normals.len() == animation.bind.len() {
+                let normals: Vec<_> = animation
+                    .bind
+                    .iter()
+                    .zip(&animation.normals)
+                    .map(|((_, weights), normal)| {
+                        let n = weights.as_ref().map_or(*normal, |w| {
+                            skin_normal(*normal, w, matrices).normalize_or_zero()
+                        });
+                        source_to_bevy(Vec3::from_array(n.to_array())).to_array()
+                    })
+                    .collect();
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            }
             if let (Some(mut aabb), Some(bounds)) = (aabb, mesh.compute_aabb()) {
                 *aabb = bounds;
             }
             animation.sampled = Some(sampled);
         }
     }
+}
+/// Recompute each lit model's light state when its illumination origin moves
+/// (retail light cache at origin + rotation * illumposition * scale).
+pub fn present_lighting(
+    game: Res<crate::gameplay::Gameplay>,
+    sim: Res<crate::movement::Simulation>,
+    mut draws: Query<(
+        &mut ModelLit,
+        &MeshMaterial3d<SourceMaterial>,
+        &InheritedVisibility,
+    )>,
+    mut materials: ResMut<Assets<SourceMaterial>>,
+    performance: Option<Res<crate::performance::Performance>>,
+) {
+    let _timing = crate::performance::scope(performance.as_deref(), "model lighting");
+    let Some(data) = game.world.lighting.as_deref() else {
+        return;
+    };
+    let mut states =
+        BTreeMap::<Option<usize>, (glam::Vec3, modkit_core::lighting::LightState)>::new();
+    // The view model camera sits at the origin looking down +X; map that space onto the
+    // player's view so world-space lights and the ambient cube line up.
+    let view = Transform::from_translation(source_to_bevy(sim.eye()))
+        .looking_to(
+            source_to_bevy(crate::source_direction(sim.yaw, sim.pitch)),
+            Vec3::Y,
+        )
+        .to_matrix()
+        * Transform::IDENTITY
+            .looking_to(Vec3::X, Vec3::Y)
+            .to_matrix()
+            .inverse();
+    for (mut lit, material, visible) in &mut draws {
+        if !visible.get() && lit.last.is_some() {
+            continue;
+        }
+        let illumination = game
+            .world
+            .illumination
+            .get(&lit.key)
+            .copied()
+            .unwrap_or_default();
+        let origin = match lit.entity {
+            Some(id) => {
+                let state = &game.scene.states[id];
+                let (origin, rotation) = sim
+                    .physics
+                    .entity_pose(id)
+                    .unwrap_or((state.origin, state.rotation));
+                origin + rotation * (illumination.position * lit.scale)
+            }
+            None => glam::Vec3::from_array(sim.eye().to_array()),
+        };
+        if lit.entity.is_some()
+            && lit.last.is_some_and(|(last, hl)| {
+                last.distance_squared(origin) < 1. && hl == lit.half_lambert
+            })
+        {
+            continue;
+        }
+        let (_, state) = states.entry(lit.entity).or_insert_with(|| {
+            let mut state = data.state_at(origin);
+            if illumination.ambient_boost() {
+                data.boost(&mut state, origin);
+            }
+            (origin, state)
+        });
+        let mut uniform = ModelLighting::from_state(state, lit.half_lambert);
+        if lit.entity.is_none() {
+            uniform.basis = view;
+        }
+        if let Some(mut material) = materials.get_mut(&material.0)
+            && material.lighting != uniform
+        {
+            material.lighting = uniform;
+        }
+        lit.last = Some((origin, lit.half_lambert));
+    }
+}
+/// Rotate a bind normal by the weighted bone matrices (CPU skinning path).
+fn skin_normal(
+    normal: glam::Vec3,
+    weights: &modkit_core::animation::Weights,
+    matrices: &[glam::Mat4],
+) -> glam::Vec3 {
+    let mut out = glam::Vec3::ZERO;
+    let mut total = 0.;
+    for (&bone, &weight) in weights.bones.iter().zip(&weights.weights) {
+        if weight > 0.
+            && let Some(m) = matrices.get(usize::from(bone))
+        {
+            out += m.transform_vector3(normal) * weight;
+            total += weight;
+        }
+    }
+    if total > 0. { out } else { normal }
 }
 #[derive(Component)]
 pub struct WeaponMesh(String);
@@ -562,15 +780,15 @@ pub fn spawn_map(
                 .as_ref()
                 .zip(m.camera_overlay_path.as_ref())
                 .map(|(overlay, path)| {
+                    // UnlitTwoTexture reads $texture2 through an sRGB view (SDK
+                    // EnableSRGBRead), so the camera branch multiplies linear colors.
                     let handle = texture_handles
-                        .entry(path.clone())
+                        .entry(format!("{path}#srgb"))
                         .or_insert_with(|| {
-                            images.add(image(
-                                overlay.width,
-                                overlay.height,
-                                overlay.rgba.clone(),
-                                true,
-                            ))
+                            let mut overlay =
+                                image(overlay.width, overlay.height, overlay.rgba.clone(), true);
+                            overlay.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+                            images.add(overlay)
                         })
                         .clone();
                     (name.clone(), handle)
@@ -580,7 +798,16 @@ pub fn spawn_map(
     let lightmaps: Vec<_> = world
         .lightmaps
         .iter()
-        .map(|lm| images.add(image(lm.width, lm.height, lm.rgba.clone(), false)))
+        .map(|lm| {
+            let mut lightmap = image(
+                lm.width,
+                lm.height,
+                lm.rgba.iter().flat_map(|t| t.to_le_bytes()).collect(),
+                false,
+            );
+            lightmap.texture_descriptor.format = TextureFormat::Rgba16Float;
+            images.add(lightmap)
+        })
         .collect();
     let mut batches: BTreeMap<(Owner, String, Option<usize>, usize), Batch> = BTreeMap::new();
     let skipped = 0usize;
@@ -683,8 +910,18 @@ pub fn spawn_map(
         let modulation = owner
             .entity()
             .map_or(Vec4::ONE, |id| entity_modulation(world, id));
+        // Studio models carry per-entity light state, so their materials are not shared.
+        let lit = batch.model
+            && matches!(owner, Owner::Entity(_) | Owner::Weapon(_))
+            && !definition.unlit
+            && !definition.camera;
         let material = material_handles
-            .entry((name.clone(), lm, modulation.to_array().map(f32::to_bits)))
+            .entry((
+                name.clone(),
+                lm,
+                modulation.to_array().map(f32::to_bits),
+                lit.then(|| owner.clone()),
+            ))
             .or_insert_with(|| {
                 let mut material = make_material(
                     definition,
@@ -696,6 +933,9 @@ pub fn spawn_map(
                     &white,
                 );
                 material.tint *= modulation;
+                if lit {
+                    material.lighting = ModelLighting::fallback(definition.half_lambert);
+                }
                 materials.add(material)
             })
             .clone();
@@ -716,6 +956,7 @@ pub fn spawn_map(
                         key: instance.asset_key(),
                         scale: instance.scale,
                         flex_base: batch.skin.iter().map(|(p, _)| *p).collect(),
+                        normals: batch.normals.clone(),
                         bind: std::mem::take(&mut batch.skin),
                         flex: std::mem::take(&mut batch.flex),
                         flex_signature: 0,
@@ -730,6 +971,7 @@ pub fn spawn_map(
                         loaded.gameplay.weapons[name].viewmodel.to_lowercase()
                     ),
                     scale: 1.,
+                    normals: batch.normals.clone(),
                     bind: std::mem::take(&mut batch.skin),
                     flex: Vec::new(),
                     flex_base: Vec::new(),
@@ -837,12 +1079,40 @@ pub fn spawn_map(
                 draw.insert(Visibility::Hidden);
             }
         }
-        if let Owner::Weapon(name) = owner {
+        if let Owner::Weapon(name) = &owner {
             draw.insert((
-                WeaponMesh(name),
+                WeaponMesh(name.clone()),
                 bevy::camera::visibility::RenderLayers::layer(1),
                 Visibility::Hidden,
             ));
+        }
+        if lit {
+            let (entity, key, scale) = match &owner {
+                Owner::Entity(id) => {
+                    let instance = world.model_instances.iter().find(|i| i.entity == Some(*id));
+                    (
+                        Some(*id),
+                        instance.map(|i| i.asset_key()).unwrap_or_default(),
+                        instance.map_or(1., |i| i.scale),
+                    )
+                }
+                Owner::Weapon(weapon) => (
+                    None,
+                    format!(
+                        "{}#0",
+                        loaded.gameplay.weapons[weapon].viewmodel.to_lowercase()
+                    ),
+                    1.,
+                ),
+                Owner::World | Owner::SkyWorld => unreachable!("lit draws are model owned"),
+            };
+            draw.insert(ModelLit {
+                entity,
+                key,
+                scale,
+                half_lambert: definition.half_lambert,
+                last: None,
+            });
         }
         if let Some(animation) = animation {
             if let Some(skeleton) = &animation.gpu {
@@ -923,6 +1193,7 @@ pub(crate) fn make_material(
         ),
         iris: iris.unwrap_or_else(|| white.clone()),
         secondary_uv: Mat3::IDENTITY,
+        lighting: ModelLighting::default(),
         base,
         lightmap: if definition.unlit {
             white.clone()
@@ -962,6 +1233,8 @@ mod tests {
             uvs: (0..6).map(|i| [i as f32 * 0.1, -i as f32]).collect(),
             light_uvs: (0..6).map(|i| [0.3, i as f32 * 0.2]).collect(),
             colors: (0..6).map(|i| [i as f32, 0.25, 0.5, 1.]).collect(),
+            normals: (0..6).map(|i| glam::Vec3::new(0., 0., i as f32)).collect(),
+            model: false,
             skin: positions
                 .iter()
                 .map(|p| (glam::Vec3::from_array(*p), None))
@@ -1159,6 +1432,7 @@ mod tests {
                     weapon: None,
                     key,
                     scale: 2.,
+                    normals: Vec::new(),
                     flex: Vec::new(),
                     flex_base: Vec::new(),
                     flex_signature: 0,

@@ -2,6 +2,136 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-07 Source bloom, pre-bloom exposure histogram, monitors at scale 1
+
+**Changed:** Source 8-bit bloom as a Bevy Core3d post pass on the viewmodel camera (the last 3D camera, so it covers sky, world and viewmodel and runs before the HUD): gamma-space Shape (pow 2.2 times luminance with r_bloomtint 0.3/0.59/0.11) over a quarter-size 4-tap (4x4) downsample, 13-tap Gaussian blur in X and Y (SDK offsets/weights; Y times the bloom amount), additive composite onto the gamma frame (Engine_Post BloomFactor 1). env_tonemap_controller SetBloomScale sets the scale; the amount eases by 0.05 per frame from 1 (GetBloomAmount). The exposure histogram now reads a 320x180 pre-bloom presample by GPU readback (the SDK histogram runs before bloom) instead of window screenshots. Monitor (camera feed) views render at tonemap scale 1. Dev profile: no debug info for dependencies, line tables for our crates (target/debug 36 GB -> 3 GB).
+
+**Why:** Native HDR shows bloom around bright windows and screens, and our world stayed 10-20% darker. With bloom in the screenshot the histogram dropped our exposure (plaza 1.45), which is why it must measure before bloom. SDK viewrender.cpp draws monitors before TurnOnToneMapping after the previous main view reset the integer-HDR scale to 1 (lines 2080, 2090, 2214), so applying the scale to the feed and the screen doubled it.
+
+**Tested how:** 328 normal tests, strict Clippy/fmt. Packaged captures vs settled native HDR: hall wall (162,142,101) vs (159,139,100), screen (170,140,106) vs (181,153,121), plaza street (152,137,97) vs (162,144,100), sky (103,102,104) vs (102,101,102), exposure plaza 1.95 vs 2.00, hall 2.00 vs 1.88, slate 0.651 vs 0.65. Regression batch artifacts/bloom-regression: complete, 0 mismatches, movement 26/26, weapons 17/17, attention 26/26; contact sheet inspected (bloom on bright monitors/explosion, HUD unaffected).
+
+**Still broken or not tested:** Window panes need `$envmap` cubemaps (native left windows 159 vs ours ~70). Plaza buildings remain ~15% darker. Bloom is not applied to monitor feeds (matches Source). No LDR mode. Batch images depend on frame timing (auto exposure).
+
+**Next:** Environment maps, then the plaza items (info_overlay leaves, detail props, metrocop).
+
+## 2026-10-07 Source HDR path: HDR lightmaps, auto exposure, HDR sky
+
+**Changed:** Rendering now follows Source's HDR path (mat_hdr_level 2). Maps with HDR lighting use the HDR lightmap, ambient and world-light lumps; the lightmap atlas is linear RGBA16F capped at 16 (retail integer HDR range). Every Source material and sprite multiplies its output by the tonemap scale (Bevy camera exposure on the world, viewmodel, monitor and sky cameras). Auto exposure follows SDK viewpostprocess.cpp (17-bin histogram of the presented frame's linear luminance over the central 90% x 85%, 2% bright pixels at 60%, minimum 3% median, V-weighted 10-sample goal) and retail materialsystem 10062660 adaptation (rate x 2, accelerated darkening, step capped at 1/64), with env_tonemap_controller SetAutoExposureMin/Max, SetTonemapRate and UseDefaultAutoExposure. Sky faces with `$hdrcompressedTexture` decode RGBS (rgb x alpha x 8). VMT conditionals evaluate `hdr?` true and `ldr?` false. `--tonemap-scale S` forces a scale (mat_force_tonemap_scale). Histogram readbacks never share a frame with the final capture.
+
+**Why:** Owner screenshots showed their game uses "High Dynamic Range: Full" (mat_hdr_level 2, tonemap scale 1.35 in the console) and a much brighter Combine slate. The native oracle's private config (mirrored by Steam Cloud) had mat_hdr_level 0, so all earlier native captures were LDR; the oracle now passes +mat_hdr_level 2 +skill 2 and can echo cvars per view (ORACLE_QUERY) after a dwell (ORACLE_DWELL). Evidence: SDK stdshaders (FinalOutput TONEMAP_SCALE_LINEAR in LightmappedGeneric, VertexLitGeneric, UnlitTwoTexture, Sky_HDR_DX9, sprites), SDK viewpostprocess.cpp; retail materialsystem 10062660 (adaptation), 10062ae0 (integer HDR lightmap encoding), 10057340/10062b20 (LDR lightmap table, for a future LDR mode), client 101d8490 (histogram query). Private notes: work/hl2-decompiled/material-20261007/README.md.
+
+**Tested how:** Unit tests for histogram bins/target, goal averaging, retail adaptation, Bevy exposure mapping, HDR atlas cap, conditionals; 328 normal tests, strict Clippy/fmt. Native HDR captures with settled exposure (view-d1_trainstation_02-20261007T164900Z: plaza 2.00, hall 1.88; T165556Z slate 0.65). Bevy: plaza 1.80-1.98, hall during the broadcast 1.92 with the screen at (184,158,123) vs native (181,153,121), slate 0.69 with native's cyan/white-glyph look. Regression batch artifacts/hdr-regression: all cases complete, 0 pose mismatches, movement 26/26, weapons 17/17, attention 26/26; every image changes (exposure). Readback cost about +0.3 ms CPU and +0.2 ms GPU at the 60 fps cap. Rejected: gamma-space histogram (hall pinned at 0.5) and unclamped float lightmaps (white slate).
+
+**Still broken or not tested:** The world is still about 10-20% darker than native (no bloom; SetBloomScale .4 is visible in native around windows). Window panes need `$envmap` cubemaps. No LDR mode or options menu yet (owner idea: Video options with HDR None/Full). Auto exposure depends on frame timing, so batch images are not bit-reproducible. HDR on maps without HDR lumps falls back to LDR data with the tonemap scale.
+
+**Next:** Bloom (SDK Bloom/Downsample shaders), environment maps, then the LDR mode for the options menu.
+
+## 2026-10-07 Eyes keep a latched view target (Breen looks into the broadcast camera)
+
+**Changed:** Actor eyes now follow SDK CBaseFlex/CAI_BaseActor view-target semantics: the last chosen eye target persists per actor while ValidEyeTarget holds (at least 1 unit away, within 75 degrees of the head). With no scene interest or visible candidate, the eyes look at a point 128 units ahead of the head with the SDK's right +-32 / up +-16 jitter (deterministic per actor and scene clock), so both eyes converge instead of staying parallel.
+
+**Why:** Owner review: native Breen's eyes focus on the broadcast camera while ours looked into infinity. instinct.vcd's `LookAt camera_tv_breen` event is authored inactive, so the native focus comes from the default view target (SDK ai_baseactor.cpp MaintainLookTargets random view and ValidEyeTarget). The camera is near the 128-unit point in front of Breen.
+
+**Tested how:** New unit test; 324 normal tests, strict Clippy/fmt; packaged Breen broadcast report: eye target was none, now "view" at (919, 7517, -237) with both eyes sharing it; attention fixtures 26/26. Feed close-up shows slightly converged irises (256 px feed; not compared side by side with native at that resolution).
+
+**Still broken or not tested:** Native random look-target selection among nearby entities, blink on target change and head-direction decay are approximated by the existing nearest-visible fallback. No native close-up comparison yet.
+
+**Next:** HDR lighting path (owner report: native broadcast screen is much brighter).
+
+## 2026-10-07 Monitor screen colour: VMT conditionals and linear UnlitTwoTexture modulation
+
+**Changed:** The VMT reader applies retail MaterialSystem key conditionals (`test?$var`, optional `!`): passing keys replace the plain value, failing keys are skipped. Tests are evaluated for a DX9 sRGB-capable renderer without HDR (`srgb`, `ldr` true; `hdr`, `lowfill`, `360` and unknown tests false). Camera monitor materials (UnlitTwoTexture) now read $texture2 through an sRGB view and convert the ($color x $color2) modulation to linear like SDK SetModulationPixelShaderDynamicState_LinearColorSpace (channels above 1 unchanged; mathlib GammaToLinear table, 1.0 from 0.95).
+
+**Why:** The jumbotron screen (dev/dev_combinemonitor_3) sets `srgb?$color2 "[2.5 2.5 2.5]"`, which we ignored, so the 0.4 $color proxy dimmed the feed, and the scanline texture was multiplied as gamma bytes. Evidence: SDK 2013 unlittwotexture_dx9.cpp/_ps2x.fxc (both samplers sRGB-read, result = base x texture2 x modulation), BaseVSShader.cpp:652, BaseShader.h ApplyColor2Factor, mathlib color_conversion.cpp; retail materialsystem.dll 1003c230 (conditional tests, return value = skip) and 1003b300 (a passing conditional replaces the plain var). Private notes: work/hl2-decompiled/material-20261007/README.md.
+
+**Tested how:** New unit tests for conditionals and modulation; 323 normal tests, strict Clippy/fmt. Packaged slate fixture vs native slate.png: screen mean RGB (78,122,114) vs native (76,156,154) (was (80,118,100)); white glyphs (165,199,199) vs (175,214,218); scanline grid and black frame match. World regions unchanged. Rejected experiment: a 16x lightmap cap gave (105,229,230), far brighter than native; no constant was fitted.
+
+**Still broken or not tested:** Native runs the HDR path: the slate luxels are linear 128 in both lumps, and native's HDR lightmap range and TONEMAP_SCALE_LINEAR saturate the poster further (native G and B equal, ours G > B). HDR lightmaps/tonemapping are not implemented. Fallback block selection (">=DX90", "hdr_dx9", ...) is not implemented. The conditional change affects every material that uses `ldr?`/`srgb?` keys; the regression batch is the next check.
+
+**Next:** Rerun the regression batch and accept baselines; HDR lighting remains a separate, larger plan.
+
+## 2026-10-07 Combine slate frame and lightmap overbright headroom
+
+**Changed:** World and brush-entity faces using tools/toolsblack* now render (an owned UnlitGeneric black texture); every other tools/ material stays skipped. The lightmap atlas stores gamma(linear / 2) and lightmapped materials restore the factor 2 before the gamma decode, so baked light between 1.0 and 2.0 is no longer clipped. New fixture test-inputs/bevy-monitors-breen-slate.json views the jumbotron before the broadcast starts.
+
+**Why:** Native trainstation_02 shows only the bright Combine slate on the jumbotron at map start; ours showed Breen around a dark slate. The slate func_brush (*87) is framed by four toolsblack faces we skipped. Its `_minlight 255` is not a runtime value: SDK 2013 VRAD (radial.cpp:676/813) bakes a per-luxel floor of `_minlight*128` into the lightmap. Source LDR lightmaps keep 2x headroom (imaterialsystem.h OVERBRIGHT 2.0), which our clamp at 1.0 removed.
+
+**Tested how:** Updated lightmap unit test (linear 2.0 saturates, 1.0 encodes gamma(0.5)=186), 321 normal tests, strict Clippy/fmt. Packaged slate fixture against native view-d1_trainstation_02-20261007T054643Z/slate.png (artifacts/slate): black frame now matches native; screen mean RGB before/after/native (76,97,82)/(80,118,100)/(76,156,154); wall, rail and window regions unchanged within 2 levels.
+
+**Still broken or not tested:** The screen is still greener and darker than native's cyan (UnlitTwoTexture colour path, next step). Native runs the HDR path (HDR lightmaps and auto-exposure tonemapping), which is not implemented. Regression batch not yet rerun.
+
+**Next:** UnlitTwoTexture modulation/sRGB and the pixel grid; rerun the batch and accept baselines.
+
+## 2026-10-07 Static map decals (Breen's studio backdrop)
+
+**Changed:** infodecal entities without a targetname are now projected at map load onto lightmapped world brush faces (modkit-core::decals::static_decal; hl2-bevy assets add_static_decals). Each decal is sized from its base texture times $decalscale, centered on the plane point within 5 units, oriented by the receiving face's texture axes, clipped to its rectangle and lit by the face's lightmap.
+
+**Why:** Owner review of the native jumbotron: the yellow Combine logo behind Breen is his studio backdrop (decals/decal_posterbreentv), not see-through screen areas as I had first recorded. SDK 2013 world.cpp CDecal::StaticDecal places static decals on world brushes; props are excluded by its trace filter.
+
+**Tested how:** New decal unit test, 321 normal tests, strict Clippy/fmt. Packaged Breen fixture: the feed now shows the backdrop with the logo, matching native session view-d1_trainstation_02-20261007T053505Z. **Not run:** the full regression batch with decals (baselines will change wherever static decals exist).
+
+**Still broken or not tested:** Named (triggered) infodecals, decals on brush entities, engine-exact decal projection/orientation (inferred from Source behavior, engine code not reviewed), decal shaders (DecalModulate). Combine slate: native shows only a bright slate while the rest of the screen is off. The slate func_brush (*87) is surrounded by four tools/toolsblack faces (SURF_NOLIGHT), which our BSP builder skips as tools/ materials, so Breen shows around the slate. Native slate brightness (_minlight 255) and the screen's "pixel" look (UnlitTwoTexture: sRGB-read base x texture2, HDR tonemap scale) are not matched yet.
+
+**Next:** Render tools/toolsblack as opaque black, apply func_brush _minlight, compare the screen shader and pixel grid with native, rerun the batch and accept baselines.
+
+## 2026-10-07 Scene gestures for template-spawned actors (Barney's head-down at 21-22.5 s)
+
+**Changed:** Choreography clip preparation now resolves every entity a scene actor name can match, including point_template children that are still pending (Barney, Kleiner), so their scene gesture and posture clips load with the map. Head control now measures its correction in the full 3D frame of the animated "forward" attachment, which is parented to the head bone (SDK UpdateHeadControl), instead of a level yaw-only frame. The Bevy report lists per-actor gesture composition errors (`gesture_compose_errors`). The regression batch drops the superseded edge-on Breen and empty-lab cases, whose fixtures are deleted and baselines retired.
+
+**Why:** Owner report: Bevy Barney was stiff (no arm/body motion) compared with native. Investigation of the unexplained native head-down at security_02 21-22.5 s: native plays rubNeck (Gesture08) and thinking (posture01). The shared composition raised Barney's right hand from z 40.8 to 64.7 at 21.6 s, but the Bevy report showed MissingSequence for posture01/gesture08 (Barney) and kposture01/kgesture04 (Kleiner). scene_actor skips killed entities, and template children are killed until ForceSpawn, so their clips were never prepared at load. Every scene gesture for these actors was dropped in Bevy.
+
+**Tested how:** 320 normal and 26 owned tests (new owned test: template-pending Barney/Kleiner require gesture08/posture01/kposture01 before ForceSpawn; new head-frame unit test), strict Clippy/fmt. Packaged close-ups at 21.00/21.30/22.45 s now match native (head bowed, hand at neck); wide 21.30 s view matches the native pose. Batch artifacts/trimmed-regression: all complete, 0 pose/visibility mismatches, attention 26/26. Kleiner-scene changes (Kleiner now gestures); weapons varies only in the HUD health box between runs. Baselines accepted.
+
+**Result:** Barney's and Kleiner's authored gestures and postures play in Bevy, which explains the native head pitch (it is the gesture, not head control).
+
+**Still broken or not tested:** Native comparison of the full timeline after this fix; other template-spawned NPCs are covered by the same fix but untested.
+
+**Next:** Native trainstation_02 jumbotron/godray comparison; campaign-order reveal chain.
+
+## 2026-10-07 Kleiner scene movement and new regression views
+
+**Changed:** npc_kleiner is registered with the shared human ground-movement controller, like Barney, so scene MOVETO events move him. New regression cases: test-inputs/bevy-monitors-breen-screen.json (face-on jumbotron during the broadcast) and test-inputs/bevy-monitors-kleiner-scene.json (Kleiner on Barney's monitor in campaign state). The new baselines are accepted, with the previous ones archived locally.
+
+**Why:** Owner report: the old Kleiner case showed an empty lab and the old Breen case an edge-on screen. Kleiner is a kleiner_template child, and security02 opens with `MoveTo marks_kleiner_catwalk_1` (0.01 s); because only Barney was registered, Kleiner stayed at his spawn, 110 units outside the lab camera. SDK 2013 npc_kleiner.cpp and the retail CNPC_Kleiner::Spawn (server.dll 10391cd0, reviewed privately) agree on HULL_HUMAN, SOLID_BBOX, MOVETYPE_STEP and capabilities 0x801801 (ground move, open doors, turn head, animated face) plus friendly-damage immunity.
+
+**Tested how:** hl2-simulation tests (139), strict Clippy/fmt. Regression batch artifacts/kleiner-regression: all 11 cases complete with 0 pose/visibility mismatches. Diff counts against the old baselines are unchanged from the lighting batch, except weapons (view-model lighting basis). Attention verifier 26/26. Kleiner reaches (-850, 2334) and speaks on the monitor at 10.5 s; Barney's faceplate is off and the cameras are folded in the attention fixtures.
+
+**Result:** The lab feed shows Kleiner talking; the jumbotron shows Breen face-on. New accepted baselines cover the lighting change, the godray fix and the new views.
+
+Follow-up (owner report: Barney was talking to the default blue screen): all eight security_02 fixtures now also force-spawn kleiner_template, enable barney_security_monitor_1 and switch on kleiner_security_camera_1, as the campaign's triggers do. Rerun batch artifacts/kleiner-monitor-regression: pixel-identical to the new baselines, attention 26/26, and Kleiner is on Barney's monitor in the attention view. The private native security oracle setup gets the same three inputs (not yet run).
+
+**Still broken or not tested:** Kleiner's walk/turn timing against native is not compared. Other NPC classes (metrocops, citizens) are still not registered for movement. No native comparison of the lab feed or jumbotron yet.
+
+**Next:** Native head-pitch analysis; native jumbotron/lab feed comparison once the oracle cursor fix is approved.
+
+## 2026-10-07 Bevy becomes main; Macroquad host removed
+
+**Changed:** At the owner's request, bevy-migration was merged into main (main's docs-only commit b4b1731 was merged in first) and main now fast-forwards to it. The former Macroquad/OpenGL host was removed: crates/hl2-runtime, its launchers (launch.cmd, launch-borderless.cmd, launch-1080p.cmd), scripts/build.ps1, the vendored third_party/miniquad and quad-alsa-sys shim, its 13 input-script fixtures and the mods/*.json sandbox files. Cargo.lock only drops the 20 packages of that stack. AGENTS, README, CONTRIBUTING, STATUS, docs and CI now describe a Bevy-only rewrite on main. macroquad-prototype, bevy-migration (frozen at the merge) and wip/scripted-scenes are preserved.
+
+**Why:** Owner decision: Bevy is far ahead of the old host, so checking both hosts after shared changes was overhead. Removing the old host keeps the repository clean.
+
+**Tested how:** After removal: 319 normal tests (9 removed with the old host) and 25 owned tests, strict Clippy/fmt, packaged Bevy build, and the movement (26/26) and entities/weapons (17/17) packaged fixtures with their verifiers.
+
+**Result:** One host. The shared crates (source-assets, modkit-core, hl2-simulation, hl2-ui) are unchanged.
+
+**Still broken or not tested:** History and the macroquad-prototype branch still hold the old host; its features that Bevy lacks (JSON sandbox, inspect/verify/export subcommands) are gone from main.
+
+**Next:** Scene MOVETO for Kleiner (lab feed), Breen face-on regression case, native head-pitch analysis.
+
+## 2026-10-07 Source model lighting (leaf ambient cubes and world lights)
+
+**Changed:** Models are now lit the way the retail engine's light cache does it, instead of with a constant gray. New `modkit-core::lighting`: leaf ambient samples weighted by 1/(d^2+1); world lights with Source falloff, styles and a world-only visibility trace (8-unit slack); up to four local lights kept by luminance and the rest folded into the ambient cube; skipping lights flagged as already baked into the cube; the ambient boost for flagged models; SDK vertex shader terms. New `source-assets::model_lighting` reads the leaf tree, the LDR/HDR leaf ambient lumps (matching the lightmap choice), world lights and sky faces. `Vertex.normal` carries VVD normals, and the studio illumposition/flags are read per model. Static props are baked once per vertex at load, which applies to both hosts. Bevy model draws get a per-entity lighting uniform that is recomputed when the illumination origin moves. The shader evaluates ambient cube + diffuse (+ $halflambert) on the linearized base texture, with skinned normals on both GPU and CPU paths. The view model maps its camera space onto the player's view for lighting.
+
+**Why:** Owner report that entities lack the map's lighting (DESIGN step 8). Retail engine.dll was reviewed privately (lighting-20261007/README.md): Mod_LoadLeafs, Mod_LeafAmbientColorAtPos, light-cache selection, the draw-time ambient boost and the light-to-shader conversion. SDK 2013 corroborated ColorRGBExp32ToVector (its factor of 255) and the light-descriptor cone math.
+
+**Tested how:** 328 normal tests (7 new lighting/decoder tests) and 25 owned tests (d1_trainstation_01: 535 world lights, 13,479 ambient samples), strict Clippy/fmt. Packaged Barney close-ups against native: at 18.05 s, mean skin RGB is 95/66/45 (Bevy) vs 93/64/42 (native), with luminance percentiles 48/67/93 vs 45/65/90; at 22.45 s the helmet and hair tones match (confirmed by the owner). A new private generic native view oracle (run_view_oracle.py) captured the d1_trainstation_03 corridor: the door is equally dark and the pistol view model lit similarly. Regression batch artifacts/lighting-regression: every case completes with 0 pose/visibility mismatches; images change wherever models appear (expected relighting). Retained smoke capture renders with baked static props.
+
+**Result:** Barney, props and the view model now pick up the map's ambient color and nearby lights. Face shading follows the native key light.
+
+**Still broken or not tested:** Shadows; bump/phong/specular (native helmet sheen); flex normal deltas; styled lights are treated as on; the skylight uses sky-face polygons instead of a surface-flag trace; HDR tonemapping; the retail 162-sample static-prop path. The retained host does not light dynamic models. The first native corridor capture was rejected because the game took focus and trapped the owner's cursor. The oracle now records the user's foreground window before launch and passes +cl_mouseenable 0.
+
+**Next:** Explain the native head-down pitch at 21-22.5 s; trainstation_02 jumbotron/godray native comparison; campaign-order reveal chain.
+
 ## 2026-10-06 Entity render color in Bevy (godray brightness)
 
 **Changed:** Bevy entity materials now apply Source color modulation. rendercolor tints the model, and renderamt sets its alpha outside kRenderNormal. Materials are keyed per (material, lightmap, modulation), so untinted entities still share handles. New fixture test-inputs/bevy-monitors-breen-screen.json frames the trainstation_02 jumbotron face-on at about 25 s, during the broadcast.
