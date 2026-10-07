@@ -1,8 +1,0 @@
-{
-  "name": "Cross-game sandbox",
-  "blocks": [
-    { "position": [180, 0, -32], "size": 32, "color": [50, 190, 230, 255] },
-    { "position": [180, 40, -32], "size": 32, "color": [235, 165, 55, 255] },
-    { "position": [180, 0, 0], "size": 32, "color": [115, 220, 110, 255] }
-  ]
-}

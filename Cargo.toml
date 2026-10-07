@@ -1,8 +1,6 @@
 [workspace]
-members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-simulation", "crates/hl2-ui", "crates/hl2-runtime", "crates/hl2-bevy"]
-default-members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-simulation", "crates/hl2-ui", "crates/hl2-runtime"]
+members = ["crates/modkit-core", "crates/source-assets", "crates/hl2-simulation", "crates/hl2-ui", "crates/hl2-bevy"]
 resolver = "2"
-exclude = ["third_party/miniquad", "third_party/quad-alsa-sys"]
 
 [workspace.dependencies]
 anyhow = "1"
@@ -19,7 +17,3 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
-
-[patch.crates-io]
-miniquad = { path = "third_party/miniquad" }
-quad-alsa-sys = { path = "third_party/quad-alsa-sys" }
