@@ -1,5 +1,9 @@
 # Local validation â€” 2026-10-05
 
+## Native trainstation_02 jumbotron comparison (2026-10-07)
+
+Native view session view-d1_trainstation_02-20261007T053505Z (run_view_oracle.py, eye -3753 -2290 469, yaw -90, about 24 s after load) vs Bevy partition-breen-screen-final. Breen's broadcast, framing and hall lighting match. Native also shows the scene behind through the screen's dark areas (the yellow sign is visible through it), so the see-through dark feed is correct behavior, not a Bevy defect. Native colors are slightly more saturated. Shaft brightness after the rendercolor fix is comparable; no exact luminance match is claimed.
+
 ## Kleiner movement and new regression views (2026-10-07)
 
 npc_kleiner uses the shared human ground controller (SDK and retail spawn agree). Batch artifacts/kleiner-regression (run_gesture_layer_checks.py, now 11 cases including partition-breen-screen-final and partition-kleiner-scene-final): all complete, 0 pose/visibility mismatches, attention 26/26. The previous partition baselines are archived in artifacts/baseline-archive-20261007, and the batch's images are accepted as new baselines (lighting, godray fix, new views).
