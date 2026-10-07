@@ -14,7 +14,7 @@ Faithful Rust reconstruction of Half-Life 2 and relevant Source behavior using a
 
 - Owned Steam HL2 app220, tested build19307283/patch9912070; other versions **not tested**. Default install `C:/Program Files (x86)/Steam/steamapps/common/Half-Life 2`, or discovered library/HL2_ROOT.
 - Windows11 Pro64-bit, Rust1.99.0 MSVC, Visual Studio C++ tools/Windows SDK; Bevy0.19.1/wgpu and direct Rapier0.26.1. No Source DLL or mod loader dependency.
-- macOS 15+ aarch64 (Apple Silicon), Rust stable, Bevy 0.19.1/wgpu (Metal backend), cpal/CoreAudio, winit/AppKit.
+- macOS 15+ aarch64 (Apple Silicon), Rust stable, Bevy 0.19.1/wgpu (Metal backend), cpal/CoreAudio, winit/AppKit: tested by a contributor (@OrbitalMan, PR #1). Windows remains the primary tested platform; replays, captures and native comparisons in this file are Windows-only.
 - Implementation chats: Claude Code desktop (Claude Opus 5.5) since 2026-10-06; earlier Codex Desktop, GPT-6.1 Extra High/Normal Speed. Choose fresh-chat settings explicitly.
 - Active checkout: workspace `outputs/hl2-rs-bevy`, branch `main` (Bevy-only since the 2026-10-07 merge), remote https://github.com/kvalls/hl2-rs. `bevy-migration` is frozen at the merge. Sibling `outputs/hl2-rs` is a detached historical checkout of the former Macroquad main at b4b1731530a9ca146f9d45532f00ef7f9fc69e7d. Preserve macroquad-prototype at f9995dab2640d15cda8d7d7b10d08af7e691c8ea and unverified wip/scripted-scenes at d0a08c8d36e1b7d3496b6627b5a974337641ca9c.
 - Private evidence/checkpoints: workspace `work/hl2-decompiled`, `work/references`, `work/publishing`, reached as `../../work/...` from the active checkout. These are not public runtime dependencies.
@@ -41,7 +41,7 @@ Faithful Rust reconstruction of Half-Life 2 and relevant Source behavior using a
 - Exact Havok/VPhysics dynamics, animated collision, moving platforms and blocked-door handling. Rapier/Avian comparative performance is **not tested**; a physics migration was not requested.
 - Source HDR/fog/shadows/refraction/material stages, area portals/occluders/LODs, recursive camera/proxy fidelity, complete particle effects/DSP/soundscapes and VGUI/console parity.
 - Station03 has25 known unsupported-material errors, unchanged in the latest campaign fixture. The local zero-byte d2_coast_02.bsp is a known rejection.
-- Other platforms, native/campaign-wide144FPS and complete pixel parity are **not tested** or established.
+- Platforms other than Windows and contributor-tested macOS Apple Silicon, native/campaign-wide144FPS and complete pixel parity are **not tested** or established.
 
 ## Which game owns the player
 
@@ -100,7 +100,7 @@ Done later in session 5: (4) eye view-target latch (Breen converges near the bro
 
 One list of priorities, with claims: an item someone takes gets a GitHub issue assigned to them (or an open PR) and is listed here with its owner. Unclaimed items are free. Before starting anything, check open issues and PRs (`gh issue list`, `gh pr list`) and this list; leave claimed items, and the files they touch, alone.
 
-- macOS support (install discovery, POSIX build/launch scripts): PR #1, @OrbitalMan. Changes requested 2026-10-07; the MODLOG entry needs moving to the top and "bevy-migration" changed to "main" after merging.
+- Done: macOS support (install discovery, POSIX build/launch scripts), PR #1 by @OrbitalMan, merged 2026-10-07 (ad480e1) after Windows CI passed.
 - Main menu with settings (menus in hl2-ui, wiring in hl2-bevy, settings persisted next to the build; video, audio, mouse/keys, later "High Dynamic Range: None/Full"): @OrbitalMan, proposed 2026-10-07, issue pending. Keep other work out of the hl2-ui menu code and its hl2-bevy wiring meanwhile.
 - Save/load: deferred by the owner (2026-10-07) until entity/scene state settles; start with a design issue when it resumes.
 

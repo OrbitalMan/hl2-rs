@@ -2,6 +2,27 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-06 Apple Silicon (macOS aarch64) support for hl2-bevy
+
+**Changed:** Added first-class macOS / Apple Silicon support to `main`:
+- `source-assets::install`: Auto-discovers installed Steam content in `~/Library/Application Support/Steam`.
+- `hl2-ui::console`: Multi-target test assertions for non-Windows platforms, eliminating unused variable warnings under strict Clippy.
+- `scripts/build-bevy.sh` & `launch-bevy.sh`: Added POSIX build and launch scripts (with 1080p and borderless variants) generating `bin/build-bevy-info.json` and packaging `bin/bevy-assets`.
+- `.gitignore`: Whitelisted new POSIX scripts.
+
+**Why:** Enable running the Bevy/wgpu host natively on macOS Apple Silicon without manual path flags or Windows-only script dependencies.
+
+**Tested how:**
+- `cargo test --workspace --locked` (109 shared crate tests, 25 Bevy tests passed).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` (zero warnings).
+- `cargo fmt --all --check`.
+- Packaged release build with `./scripts/build-bevy.sh` (`bin/hl2-bevy`, `bin/bevy-assets`, SHA256 metadata verified).
+- Launched `./launch-bevy.sh`: Auto-discovered owned Steam installation on macOS, initialized wgpu/Metal clustering and preprocessing, created native AppKit window, and loaded `d1_trainstation_01`.
+
+**Result:** Native macOS execution on Apple Silicon via Metal and CoreAudio works out of the box with zero runtime errors.
+
+**Still broken or not tested:** Retained Macroquad/OpenGL host on macOS (deprecated by Apple; main is primary target). Native Windows GDI font parity (macOS uses portable fontdue). Retained scripts remain Windows-focused.
+
 ## 2026-10-07 Source bloom, pre-bloom exposure histogram, monitors at scale 1
 
 **Changed:** Source 8-bit bloom as a Bevy Core3d post pass on the viewmodel camera (the last 3D camera, so it covers sky, world and viewmodel and runs before the HUD): gamma-space Shape (pow 2.2 times luminance with r_bloomtint 0.3/0.59/0.11) over a quarter-size 4-tap (4x4) downsample, 13-tap Gaussian blur in X and Y (SDK offsets/weights; Y times the bloom amount), additive composite onto the gamma frame (Engine_Post BloomFactor 1). env_tonemap_controller SetBloomScale sets the scale; the amount eases by 0.05 per frame from 1 (GetBloomAmount). The exposure histogram now reads a 320x180 pre-bloom presample by GPU readback (the SDK histogram runs before bloom) instead of window screenshots. Monitor (camera feed) views render at tonemap scale 1. Dev profile: no debug info for dependencies, line tables for our crates (target/debug 36 GB -> 3 GB).
@@ -227,27 +248,6 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Still broken or not tested:** Lids use the previous frame's eye direction. Head pose (native head turns and tilts further toward the player), brow intensity, Source model lighting (ambient cube/local lights), helmet props, delayed flex weights, lip sync and the retained-host flex path. Full regression batch not rerun.
 
 **Next:** Helmet props parented to Barney's attachments, then retained flexes, lip sync and head flexes.
-
-## 2026-10-06 Apple Silicon (macOS aarch64) support for hl2-bevy
-
-**Changed:** Added first-class macOS / Apple Silicon support to `bevy-migration`:
-- `source-assets::install`: Auto-discovers installed Steam content in `~/Library/Application Support/Steam`.
-- `hl2-ui::console`: Multi-target test assertions for non-Windows platforms, eliminating unused variable warnings under strict Clippy.
-- `scripts/build-bevy.sh` & `launch-bevy.sh`: Added POSIX build and launch scripts (with 1080p and borderless variants) generating `bin/build-bevy-info.json` and packaging `bin/bevy-assets`.
-- `.gitignore`: Whitelisted new POSIX scripts.
-
-**Why:** Enable running the Bevy/wgpu host natively on macOS Apple Silicon without manual path flags or Windows-only script dependencies.
-
-**Tested how:**
-- `cargo test --workspace --locked` (109 shared crate tests, 25 Bevy tests passed).
-- `cargo clippy --workspace --all-targets --locked -- -D warnings` (zero warnings).
-- `cargo fmt --all --check`.
-- Packaged release build with `./scripts/build-bevy.sh` (`bin/hl2-bevy`, `bin/bevy-assets`, SHA256 metadata verified).
-- Launched `./launch-bevy.sh`: Auto-discovered owned Steam installation on macOS, initialized wgpu/Metal clustering and preprocessing, created native AppKit window, and loaded `d1_trainstation_01`.
-
-**Result:** Native macOS execution on Apple Silicon via Metal and CoreAudio works out of the box with zero runtime errors.
-
-**Still broken or not tested:** Retained Macroquad/OpenGL host on macOS (deprecated by Apple; bevy-migration is primary target). Native Windows GDI font parity (macOS uses portable fontdue). Retained scripts remain Windows-focused.
 
 ## 2026-10-06 Facial flexes render in Bevy
 

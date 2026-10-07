@@ -26,7 +26,7 @@ Model-authored activity lookup now repairs unsupported implicit NPC idle labels,
 
 ## Build a fresh checkout
 
-You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust stable with the MSVC toolchain, and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. Other operating systems are unverified.
+You need an owned, installed Steam PC copy of Half-Life 2, Windows 64-bit, Rust stable with the MSVC toolchain, and Visual Studio C++ build tools with a Windows SDK. The renderer uses Bevy/wgpu (tested on Windows with the default backend); GPU and RAM minimums have not been measured. Windows is the primary tested platform. macOS on Apple Silicon (Metal backend) was tested by a contributor: build, tests and a `d1_trainstation_01` launch with `./scripts/build-bevy.sh` and `./launch-bevy.sh`. Replays, captures and native comparisons are Windows-only. Other operating systems are unverified.
 
 The tested installation is Steam app 220, build `19307283`, patch `9912070`. Other game builds are unverified. Rust `1.99.0` was used for the recorded Windows checks. Cargo resolves the library versions in `Cargo.lock`; no external mod, loader or Source engine runtime is needed.
 
