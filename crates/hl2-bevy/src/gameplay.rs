@@ -400,7 +400,32 @@ impl Gameplay {
                 serde_json::json!({"entity":id,"name":e.get("targetname"),"class":e.class(),
                     "origin":origin.to_array(),"rotation":rotation.to_array(),"visible":state.visible,"killed":state.killed})
             }).collect();
-        serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"pending":self.selection.pending,
+        // Composition failures drop a gesture layer silently in presentation; surface them.
+        let compose_errors: BTreeMap<usize, Vec<String>> = self
+            .scene
+            .gestures
+            .report()
+            .keys()
+            .filter_map(|&id| {
+                let instance = self
+                    .world
+                    .model_instances
+                    .iter()
+                    .find(|i| i.entity == Some(id))?;
+                let rig = self.world.rigs.get(&instance.asset_key())?;
+                let params = self.scene.actor_pose_values(rig, id);
+                let (_, errors) = self.scene.gestures.compose(
+                    rig,
+                    id,
+                    &self.scene.states[id].animation,
+                    self.scene.animation_time(id),
+                    &params,
+                );
+                (!errors.is_empty())
+                    .then(|| (id, errors.iter().map(|e| format!("{e:?}")).collect()))
+            })
+            .collect();
+        serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
             "projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
