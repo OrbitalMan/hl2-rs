@@ -22,7 +22,7 @@ macOS (Apple Silicon / POSIX):
 ./launch-bevy.sh --map d1_trainstation_01
 ```
 
-`-DebugBuild` (or `--debug` on macOS) selects a debug build. Cargo uses the checked-in lockfile and builds only `hl2-bevy`. Packaging writes `bin/hl2-bevy.exe` (or `bin/hl2-bevy` on macOS), copies the viewer's shader assets into `bin/bevy-assets`, and records their hashes in `bin/build-bevy-info.json`. Keep the executable and shader folder together. The launcher requires the packaged executable; rebuilding is necessary after changing source or shaders.
+The build script, not the launcher, selects a debug build: `.\scriptsuild-bevy.ps1 -DebugBuild` on Windows or `./scripts/build-bevy.sh --debug` on macOS. The launcher then runs whichever build was last packaged into `bin/`. Cargo uses the checked-in lockfile and builds only `hl2-bevy`. Packaging writes `bin/hl2-bevy.exe` (or `bin/hl2-bevy` on macOS), copies the viewer's shader assets into `bin/bevy-assets`, and records their hashes in `bin/build-bevy-info.json`. Keep the executable and shader folder together. The launcher requires the packaged executable; rebuilding is necessary after changing source or shaders.
 
 Double-click `launch-bevy-1080p.cmd` (or run `./launch-bevy-1080p.sh`) for a 1920x1080 window or `launch-bevy-borderless.cmd` (or `./launch-bevy-borderless.sh`) for borderless at the primary desktop resolution. Both forward additional arguments to `launch-bevy.cmd` / `launch-bevy.sh`.
 
