@@ -1,5 +1,9 @@
 # Local validation â€” 2026-10-05
 
+## Session 5 HDR path vs native HDR (2026-10-07)
+
+Native reference: owner's real game runs mat_hdr_level 2; the oracle now passes +mat_hdr_level 2 +skill 2 (console confirms). Earlier native captures in this file were LDR (mat_hdr_level 0 in the oracle's Steam-Cloud-mirrored config). Settled native session view-d1_trainstation_02-20261007T164900Z (ORACLE_DWELL 15): mat_hdr_tonemapscale plaza 1.998, hall 1.880. Bevy (wip/hdr-path at merge) plaza scale 1.80-1.98: street (132,120,87) vs native (162,144,100), sky (93,92,93) vs (102,101,102). Hall during the broadcast (tick 1660) scale 1.92: wall (143,127,93) vs (159,139,100), screen (184,158,123) vs (181,153,121), left windows (68,58,37) vs (159,150,118) (envmap absent). Slate (native T165556Z scale 0.65): Bevy 0.69, cyan screen with white glyphs as native; native brighter while its exposure was still adapting. Regression batch artifacts/hdr-regression: complete, 0 mismatches, movement 26/26, weapons 17/17, attention 26/26; images change everywhere (exposure); baselines archived to artifacts/baseline-archive-20261007-hdr and replaced.
+
 ## Session 5 jumbotron, lightmap headroom and regression batch (2026-10-07)
 
 Slate (pre-broadcast, tick 230, test-inputs/bevy-monitors-breen-slate.json) vs native view-d1_trainstation_02-20261007T054643Z/slate.png: the toolsblack frame now hides Breen around the slate as in native; screen mean RGB went (76,97,82) -> (80,118,100) after the 2x lightmap headroom -> (78,122,114) after linear UnlitTwoTexture modulation and `srgb?$color2`; native (76,156,154). Glyphs (165,199,199) vs native (175,214,218). The slate luxels are linear 128 in both lightmap lumps; native's HDR path saturates G and B further. A rejected 16x cap gave (105,229,230).
