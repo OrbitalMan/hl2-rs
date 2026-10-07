@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-07 Kleiner scene movement and new regression views
+
+**Changed:** npc_kleiner is registered with the shared human ground-movement controller, like Barney, so scene MOVETO events move him. New regression cases: test-inputs/bevy-monitors-breen-screen.json (face-on jumbotron during the broadcast) and test-inputs/bevy-monitors-kleiner-scene.json (Kleiner on Barney's monitor in campaign state). The new baselines are accepted, with the previous ones archived locally.
+
+**Why:** Owner report: the old Kleiner case showed an empty lab and the old Breen case an edge-on screen. Kleiner is a kleiner_template child, and security02 opens with `MoveTo marks_kleiner_catwalk_1` (0.01 s); because only Barney was registered, Kleiner stayed at his spawn, 110 units outside the lab camera. SDK 2013 npc_kleiner.cpp and the retail CNPC_Kleiner::Spawn (server.dll 10391cd0, reviewed privately) agree on HULL_HUMAN, SOLID_BBOX, MOVETYPE_STEP and capabilities 0x801801 (ground move, open doors, turn head, animated face) plus friendly-damage immunity.
+
+**Tested how:** hl2-simulation tests (139), strict Clippy/fmt. Regression batch artifacts/kleiner-regression: all 11 cases complete with 0 pose/visibility mismatches. Diff counts against the old baselines are unchanged from the lighting batch, except weapons (view-model lighting basis). Attention verifier 26/26. Kleiner reaches (-850, 2334) and speaks on the monitor at 10.5 s; Barney's faceplate is off and the cameras are folded in the attention fixtures.
+
+**Result:** The lab feed shows Kleiner talking; the jumbotron shows Breen face-on. New accepted baselines cover the lighting change, the godray fix and the new views.
+
+**Still broken or not tested:** Kleiner's walk/turn timing against native is not compared. Other NPC classes (metrocops, citizens) are still not registered for movement. No native comparison of the lab feed or jumbotron yet.
+
+**Next:** Native head-pitch analysis; native jumbotron/lab feed comparison once the oracle cursor fix is approved.
+
 ## 2026-10-07 Bevy becomes main; Macroquad host removed
 
 **Changed:** At the owner's request, bevy-migration was merged into main (main's docs-only commit b4b1731 was merged in first) and main now fast-forwards to it. The former Macroquad/OpenGL host was removed: crates/hl2-runtime, its launchers (launch.cmd, launch-borderless.cmd, launch-1080p.cmd), scripts/build.ps1, the vendored third_party/miniquad and quad-alsa-sys shim, its 13 input-script fixtures and the mods/*.json sandbox files. Cargo.lock only drops the 20 packages of that stack. AGENTS, README, CONTRIBUTING, STATUS, docs and CI now describe a Bevy-only rewrite on main. macroquad-prototype, bevy-migration (frozen at the merge) and wip/scripted-scenes are preserved.

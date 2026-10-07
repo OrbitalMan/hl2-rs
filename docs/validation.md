@@ -1,5 +1,9 @@
 # Local validation â€” 2026-10-05
 
+## Kleiner movement and new regression views (2026-10-07)
+
+npc_kleiner uses the shared human ground controller (SDK and retail spawn agree). Batch artifacts/kleiner-regression (run_gesture_layer_checks.py, now 11 cases including partition-breen-screen-final and partition-kleiner-scene-final): all complete, 0 pose/visibility mismatches, attention 26/26. The previous partition baselines are archived in artifacts/baseline-archive-20261007, and the batch's images are accepted as new baselines (lighting, godray fix, new views).
+
 ## Source model lighting (2026-10-07)
 
 328 normal and 25 owned tests, strict Clippy/fmt. Native close-ups (oracle session security-scene-20261006T204141Z) vs packaged Bevy test-inputs/bevy-face-security-1805/2245.json in artifacts/lighting: skin RGB is 95/66/45 vs 93/64/42 at 18.05 s, and helmet/hair tones match at 22.45 s. Native corridor view-d1_trainstation_03-20261007T041303Z vs the campaign fixture (artifacts/lighting/compare-corridor.png): door and pistol lighting match. The earlier corridor session T040936Z is rejected (cursor captured). Regression batch artifacts/lighting-regression: all cases complete, 0 pose/visibility mismatches, and station03 keeps its known 25 texture errors. Pixel changes are model relighting; the Breen baseline predates the godray fix. Retained smoke artifacts/lighting/retained-smoke.png.
