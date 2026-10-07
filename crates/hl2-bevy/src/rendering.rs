@@ -781,15 +781,15 @@ pub fn spawn_map(
                 .as_ref()
                 .zip(m.camera_overlay_path.as_ref())
                 .map(|(overlay, path)| {
+                    // UnlitTwoTexture reads $texture2 through an sRGB view (SDK
+                    // EnableSRGBRead), so the camera branch multiplies linear colors.
                     let handle = texture_handles
-                        .entry(path.clone())
+                        .entry(format!("{path}#srgb"))
                         .or_insert_with(|| {
-                            images.add(image(
-                                overlay.width,
-                                overlay.height,
-                                overlay.rgba.clone(),
-                                true,
-                            ))
+                            let mut overlay =
+                                image(overlay.width, overlay.height, overlay.rgba.clone(), true);
+                            overlay.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+                            images.add(overlay)
                         })
                         .clone();
                     (name.clone(), handle)

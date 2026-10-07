@@ -396,15 +396,37 @@ fn asset_path(name: &str, extension: &str) -> Result<String> {
     Ok(format!("materials/{name}{extension}"))
 }
 
+/// Direct material vars, with retail MaterialSystem key conditionals (`test?$var`, optional
+/// `!`): a key whose test fails is skipped, and a passing one replaces the plain value.
 fn direct_properties(entries: &[Entry]) -> BTreeMap<String, String> {
-    entries
-        .iter()
-        .filter_map(|entry| {
-            entry
-                .text()
-                .map(|text| (entry.key.to_lowercase(), text.into()))
-        })
-        .collect()
+    let mut properties = BTreeMap::new();
+    let mut conditional = Vec::new();
+    for entry in entries {
+        let Some(text) = entry.text() else {
+            continue;
+        };
+        let key = entry.key.to_lowercase();
+        match key.split_once('?') {
+            Some((test, name)) if !test.is_empty() => {
+                if material_condition(test) {
+                    conditional.push((name.to_owned(), text.to_owned()));
+                }
+            }
+            _ => {
+                properties.insert(key, text.to_owned());
+            }
+        }
+    }
+    properties.extend(conditional);
+    properties
+}
+
+/// Tests as evaluated on a DX9, sRGB-capable renderer without HDR (our lightmaps are LDR).
+/// Unknown tests are false, as in retail (which also warns).
+fn material_condition(test: &str) -> bool {
+    let (negate, test) = test.strip_prefix('!').map_or((false, test), |t| (true, t));
+    let value = matches!(test, "srgb" | "ldr");
+    value != negate
 }
 
 // Reuse the bounded KeyValues decoder, preserving direct material parameters and
@@ -673,6 +695,22 @@ fn cached_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditional_material_vars_follow_retail_tests() {
+        let entries = keyvalues::parse(
+            r#""srgb?$color2" "[2.5 2.5 2.5]" "$color2" "[1 1 1]" "hdr?$alpha" "0.5"
+            "!hdr?$nocull" "1" "ldr?$additive" "1" "360?$translucent" "1" "dx9?$x" "1""#,
+        )
+        .unwrap();
+        let p = direct_properties(&entries);
+        assert_eq!(p["$color2"], "[2.5 2.5 2.5]");
+        assert_eq!(p["$nocull"], "1");
+        assert_eq!(p["$additive"], "1");
+        for absent in ["$alpha", "$translucent", "$x", "srgb?$color2"] {
+            assert!(!p.contains_key(absent), "{absent}");
+        }
+    }
 
     #[test]
     fn bsp_normalization_faces_up_and_preserves_model_and_collision_copies() {
