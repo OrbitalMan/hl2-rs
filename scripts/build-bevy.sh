@@ -30,6 +30,10 @@ if [[ ! -d "$SHADER_SOURCE" ]]; then
     echo "Bevy shader assets are missing from crates/hl2-bevy/assets." >&2
     exit 1
 fi
+if [[ -z "$(find "$SHADER_SOURCE" -type f ! -name ".*" 2>/dev/null)" ]]; then
+    echo "Bevy shader assets are empty." >&2
+    exit 1
+fi
 
 PROFILE_NAME="release"
 CARGO_ARGS=("build" "--locked" "-p" "hl2-bevy" "--bin" "hl2-bevy")
@@ -56,10 +60,33 @@ fi
 PACKAGE_ROOT="$PROJECT_ROOT/bin"
 SHADER_DEST="$PACKAGE_ROOT/bevy-assets"
 
+WORKSPACE_PREFIX="${PROJECT_ROOT%/}/"
+case "$PACKAGE_ROOT"/ in
+    "$WORKSPACE_PREFIX"*) ;;
+    *)
+        echo "Bevy package destination is outside the project." >&2
+        exit 1
+        ;;
+esac
+
+if [[ "$SHADER_DEST" != "$PACKAGE_ROOT/bevy-assets" ]]; then
+    echo "Bevy package destination is outside the project." >&2
+    exit 1
+fi
+
+for package_path in "$PACKAGE_ROOT" "$SHADER_DEST"; do
+    if [[ -L "$package_path" ]]; then
+        echo "Bevy package destination must not be a link: $package_path" >&2
+        exit 1
+    fi
+done
+
 mkdir -p "$PACKAGE_ROOT"
 
-# Replace shader destination directory so removed shaders cannot linger
-rm -rf "$SHADER_DEST"
+# Only replace this verified generated directory, so removed shaders cannot linger.
+if [[ -d "$SHADER_DEST" ]]; then
+    rm -rf "$SHADER_DEST"
+fi
 cp -R "$SHADER_SOURCE" "$SHADER_DEST"
 find "$SHADER_DEST" -name ".DS_Store" -delete 2>/dev/null || true
 
