@@ -25,7 +25,7 @@ fn short3(d: &[u8], o: usize) -> Result<Vec3> {
 }
 
 pub fn read(lumps: &[Vec<u8>], versions: &[u32]) -> Result<LightingData> {
-    read_with(lumps, versions, lumps.get(7).is_none_or(Vec::is_empty))
+    read_with(lumps, versions, crate::lighting::use_hdr(lumps))
 }
 /// Read the HDR (`hdr`) or LDR copy of the ambient samples and world lights.
 pub fn read_with(lumps: &[Vec<u8>], versions: &[u32], hdr: bool) -> Result<LightingData> {

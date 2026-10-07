@@ -1,4 +1,5 @@
 #import bevy_pbr::forward_io::VertexOutput
+#import bevy_pbr::mesh_view_bindings::view
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> tint: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var base_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var base_sampler: sampler;
@@ -83,17 +84,17 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     }
     base *= tint * vertex_color;
     if base.a < parameters.x { discard; }
-    var baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), parameters.w > 0.5);
-    // LDR atlases hold gamma(linear / overbright) bytes; restore the Source 2x headroom in
-    // gamma space so the prototype multiplication is unchanged below 1.0. Source HDR remains absent.
-    if lighting.params.w > 0.0 { baked *= pow(lighting.params.w, 1.0 / 2.2); }
+    let baked = select(textureSample(lightmap_texture, lightmap_sampler, mesh.uv_b).rgb, vec3(1.0), parameters.w > 0.5);
+    // Lightmaps are linear and unclamped (Source HDR path); white fallbacks are 1.0.
     // Procedural camera images are sampled through an sRGB view and are already linear.
-    var rgb = select(srgb_to_linear(base.rgb * baked), base.rgb, parameters.w < -0.5);
+    var rgb = select(srgb_to_linear(base.rgb) * baked, base.rgb, parameters.w < -0.5);
     if lit {
         let p = (lighting.basis * vec4(mesh.world_position.xyz, 1.0)).xyz;
         let n = normalize((lighting.basis * vec4(mesh.world_normal, 0.0)).xyz);
         rgb = srgb_to_linear(base.rgb) * model_light(p, n);
     }
+    // Source FinalOutput TONEMAP_SCALE_LINEAR: the camera's exposure is the tonemap scale.
+    rgb *= view.exposure;
     // Bevy Add uses a premultiplied pipeline. Alpha zero retains all of the
     // destination while premultiplying RGB implements Source SrcAlpha/One.
     if parameters.z > 0.5 { return vec4(rgb * base.a, 0.0); }

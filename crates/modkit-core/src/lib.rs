@@ -123,7 +123,8 @@ pub struct BackgroundCamera {
 pub struct Lightmap {
     pub width: u16,
     pub height: u16,
-    pub rgba: Vec<u8>,
+    /// Linear, unclamped baked light as IEEE half-float bits (RGBA16F texels).
+    pub rgba: Vec<u16>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BrushModel {

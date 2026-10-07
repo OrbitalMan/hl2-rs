@@ -49,8 +49,7 @@ pub struct SourceMaterial {
 /// lights, positions/directions in Bevy space and colors linear.
 #[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
 pub struct ModelLighting {
-    /// x = lit model, y = local light count, z = half-Lambert, w = baked lightmap
-    /// overbright (0 = none: white or unlit lightmap).
+    /// x = lit model, y = local light count, z = half-Lambert.
     pub params: Vec4,
     /// Draw space to Bevy world space (Mat4 default is identity), except for the
     /// view model, which is drawn by a fixed camera at the origin.
@@ -799,7 +798,16 @@ pub fn spawn_map(
     let lightmaps: Vec<_> = world
         .lightmaps
         .iter()
-        .map(|lm| images.add(image(lm.width, lm.height, lm.rgba.clone(), false)))
+        .map(|lm| {
+            let mut lightmap = image(
+                lm.width,
+                lm.height,
+                lm.rgba.iter().flat_map(|t| t.to_le_bytes()).collect(),
+                false,
+            );
+            lightmap.texture_descriptor.format = TextureFormat::Rgba16Float;
+            images.add(lightmap)
+        })
         .collect();
     let mut batches: BTreeMap<(Owner, String, Option<usize>, usize), Batch> = BTreeMap::new();
     let skipped = 0usize;
@@ -925,9 +933,6 @@ pub fn spawn_map(
                     &white,
                 );
                 material.tint *= modulation;
-                if !definition.unlit && lm.is_some_and(|index| index < lightmaps.len()) {
-                    material.lighting.params.w = source_assets::lighting::OVERBRIGHT;
-                }
                 if lit {
                     material.lighting = ModelLighting::fallback(definition.half_lambert);
                 }

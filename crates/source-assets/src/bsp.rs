@@ -211,7 +211,7 @@ impl Bsp {
         let model = models.get(model_index).context("BSP missing model")?;
         let first = i32le(model, 40)?;
         let count = i32le(model, 44)?;
-        let use_hdr = self.lump(7).is_empty();
+        let use_hdr = crate::lighting::use_hdr(&self.lumps);
         let faces = records(self.lump(if use_hdr { 58 } else { 7 }), 56)?.collect::<Vec<_>>();
         let lighting = self.lump(if use_hdr { 53 } else { 8 });
         let disps = records(self.lump(26), 176)?.collect::<Vec<_>>();

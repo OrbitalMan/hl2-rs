@@ -3,9 +3,13 @@ use crate::{bytes, i32le, records};
 use anyhow::{bail, Result};
 use modkit_core::Lightmap;
 const SIZE: usize = 1024;
-/// Source LDR lightmap headroom (imaterialsystem.h OVERBRIGHT): atlas texels hold
-/// gamma(linear / OVERBRIGHT) so baked light up to 2.0 survives the 8-bit atlas.
-pub const OVERBRIGHT: f32 = 2.0;
+const ONE: u16 = 0x3c00;
+/// Native HL2 runs the HDR path: use the HDR lighting copies (lightmaps 53 with faces 58,
+/// ambient 51/55, world lights 54) when the map has them, otherwise the LDR copies.
+pub fn use_hdr(lumps: &[Vec<u8>]) -> bool {
+    let lump = |id: usize| lumps.get(id).map_or(true, Vec::is_empty);
+    lump(7) || (!lump(53) && !lump(58))
+}
 #[derive(Clone, Copy)]
 pub struct FaceLight {
     pub page: usize,
@@ -15,7 +19,7 @@ pub struct FaceLight {
     pub height: usize,
 }
 pub fn build(lumps: &[Vec<u8>]) -> Result<(Vec<Lightmap>, Vec<Option<FaceLight>>)> {
-    let hdr = lumps[7].is_empty();
+    let hdr = use_hdr(lumps);
     let data = &lumps[if hdr { 53 } else { 8 }];
     let faces = records(&lumps[if hdr { 58 } else { 7 }], 56)?;
     let mut pages = Vec::<Lightmap>::new();
@@ -46,7 +50,7 @@ pub fn build(lumps: &[Vec<u8>]) -> Result<(Vec<Lightmap>, Vec<Option<FaceLight>>
             pages.push(Lightmap {
                 width: SIZE as u16,
                 height: SIZE as u16,
-                rgba: vec![255; SIZE * SIZE * 4],
+                rgba: vec![ONE; SIZE * SIZE * 4],
             });
             x = 1;
             y = 1;
@@ -59,27 +63,25 @@ pub fn build(lumps: &[Vec<u8>]) -> Result<(Vec<Lightmap>, Vec<Option<FaceLight>>
                 let s = &samples[(dy * width + dx) * 4..][..4];
                 let scale = 2f32.powi(s[3] as i8 as i32);
                 let target = ((y + dy) * SIZE + x + dx) * 4;
+                // Linear ColorRGBExp32, unclamped (the HDR path keeps the full range).
                 for (i, &channel) in s.iter().take(3).enumerate() {
-                    atlas.rgba[target + i] = ((channel as f32 * scale / 255. / OVERBRIGHT)
-                        .max(0.)
-                        .powf(1. / 2.2)
-                        * 255.)
-                        .min(255.) as u8;
+                    atlas.rgba[target + i] =
+                        half::f16::from_f32(channel as f32 * scale / 255.).to_bits();
                 }
-                atlas.rgba[target + 3] = 255;
+                atlas.rgba[target + 3] = ONE;
             }
         }
         // Duplicate edge texels to prevent filtering from leaking into neighboring faces.
         for dy in 0..height {
             for (source, dest) in [(x, x - 1), (x + width - 1, x + width)] {
-                let color: [u8; 4] =
+                let color: [u16; 4] =
                     atlas.rgba[((y + dy) * SIZE + source) * 4..][..4].try_into()?;
                 atlas.rgba[((y + dy) * SIZE + dest) * 4..][..4].copy_from_slice(&color);
             }
         }
         for dx in 0..width + 2 {
             for (source, dest) in [(y, y - 1), (y + height - 1, y + height)] {
-                let color: [u8; 4] =
+                let color: [u16; 4] =
                     atlas.rgba[(source * SIZE + x - 1 + dx) * 4..][..4].try_into()?;
                 atlas.rgba[(dest * SIZE + x - 1 + dx) * 4..][..4].copy_from_slice(&color);
             }
@@ -105,19 +107,16 @@ mod tests {
         let mut face = vec![0u8; 56];
         face[36..40].copy_from_slice(&1i32.to_le_bytes());
         lumps[7] = face;
-        // Linear 2.0 (255 * 2^1) saturates; linear 1.0 keeps gamma(0.5) = 186.
+        // Linear 2.0 (255 * 2^1) and 1.0 are both kept; the border copies the edge texel.
         lumps[8] = vec![255, 0, 0, 1, 0, 255, 0, 0];
         let (pages, refs) = build(&lumps).unwrap();
         let r = refs[0].unwrap();
         let p = &pages[r.page];
-        assert_eq!(&p.rgba[(r.y * SIZE + r.x) * 4..][..4], &[255, 0, 0, 255]);
-        assert_eq!(
-            &p.rgba[(r.y * SIZE + r.x - 1) * 4..][..4],
-            &[255, 0, 0, 255]
-        );
-        assert_eq!(
-            &p.rgba[(r.y * SIZE + r.x + 1) * 4..][..4],
-            &[0, 186, 0, 255]
-        );
+        let texel = |x: usize| -> [f32; 4] {
+            std::array::from_fn(|i| half::f16::from_bits(p.rgba[(r.y * SIZE + x) * 4 + i]).to_f32())
+        };
+        assert_eq!(texel(r.x), [2., 0., 0., 1.]);
+        assert_eq!(texel(r.x - 1), [2., 0., 0., 1.]);
+        assert_eq!(texel(r.x + 1), [0., 1., 0., 1.]);
     }
 }
