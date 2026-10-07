@@ -7,6 +7,7 @@ pub mod model_lighting;
 pub mod models;
 pub mod monitor_material;
 pub mod navigation;
+pub mod overlays;
 pub mod phy;
 pub mod scenes;
 pub mod sky;

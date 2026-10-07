@@ -90,7 +90,7 @@ Done in session 5: (1) Combine slate: tools/toolsblack renders; `_minlight` is a
 Done later in session 5: (4) eye view-target latch (Breen converges near the broadcast camera), (5) Source HDR path + auto exposure + RGBS HDR sky, (6) bloom and pre-bloom histogram, monitors at scale 1. See docs/DESIGN.md steps 9-11 and MODLOG.
 
 1. `$envmap` cubemap reflections (window panes; native left windows (159,150,118) vs ours ~(70,60,38)). Plan: docs/DESIGN.md step 11a.
-2. Plaza gaps from owner review: info_overlay leaves (lump 45, step 11b), detail-prop foliage ('dprp', step 11c), plaza metrocop position/pose (step 11d).
+2. Plaza gaps from owner review: info_overlay leaves (lump 45, step 11b; source-assets::overlays parser done and owned-tested: 27 overlays in d1_trainstation_02 with valid faces/texinfo and decoded BasisU/flip; projection and rendering remain), detail-prop foliage ('dprp', step 11c), plaza metrocop position/pose (step 11d).
 3. npc_metropolice (and citizen) ground movement factories, registered only with SDK + retail Spawn evidence; then the campaign-order chain: security_pen_01 -> barney_lead_trigger_1 -> trigger_barney_bang_door -> security_intro_01/01b -> #792 -> security_intro_02 -> security_01 -> security_02, side by side with native (Bevy fixtures: work/publishing/make_campaign_security.py; the door cop is an npc_metropolice from interro_room_template).
 4. LDR mode (retail LDR lightmap table, materialsystem 10062b20/10057340) and a Video options page (owner idea: HDR None/Full, default from the owner's config).
 5. Static decal projection is inferred; named/brush-entity decals are unsupported. VMT fallback blocks (">=DX90", "hdr_dx9") are not selected.
