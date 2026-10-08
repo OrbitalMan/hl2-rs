@@ -235,6 +235,8 @@ pub struct Scene {
     pub diagnostics: Diagnostics,
     pub transition: Option<(String, String)>,
     pub sounds: Vec<crate::sounds::SoundRequest>,
+    /// ambient_generic m_fActive after inputs; unset entities keep their spawn state.
+    ambient_active: BTreeMap<usize, bool>,
     unsupported: BTreeSet<String>,
     choreography: BTreeMap<usize, Choreography>,
     pub movement_commands: Vec<SceneMoveCommand>,
@@ -272,6 +274,7 @@ impl Scene {
             diagnostics: Diagnostics::default(),
             transition: None,
             sounds: Vec::new(),
+            ambient_active: BTreeMap::new(),
             unsupported: BTreeSet::new(),
             choreography: BTreeMap::new(),
             movement_commands: Vec::new(),
@@ -710,6 +713,7 @@ impl Scene {
         cue: &str,
     ) -> crate::sounds::SoundRequest {
         crate::sounds::SoundRequest {
+            ambient: None,
             name: cue.into(),
             actor: Some(crate::sounds::SoundActor {
                 name: world.entities[actor].get("targetname").unwrap_or("").into(),
@@ -2162,9 +2166,40 @@ impl Scene {
                     p.activator,
                 );
             }
-            "playsound" if class == "ambient_generic" => {
-                if let Some(sound) = e.get("message") {
-                    self.sounds.push(sound.into());
+            "playsound" | "stopsound" | "togglesound" if class == "ambient_generic" => {
+                // SDK CAmbientGeneric: looping sounds are active from spawn unless they start
+                // silent; PlaySound restarts an inactive sound, StopSound stops an active one,
+                // and only looping sounds stay active.
+                let flags = e
+                    .get("spawnflags")
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .unwrap_or(0);
+                let looping = flags & 32 == 0;
+                let active = *self
+                    .ambient_active
+                    .get(&id)
+                    .unwrap_or(&(looping && flags & 16 == 0));
+                let play = match input.as_str() {
+                    "playsound" => !active,
+                    "stopsound" => false,
+                    _ => !active,
+                };
+                if let Some(sound) = e.get("message").filter(|m| !m.is_empty()) {
+                    if play {
+                        self.ambient_active.insert(id, looping);
+                        self.sounds.push(crate::sounds::SoundRequest {
+                            name: sound.into(),
+                            actor: None,
+                            ambient: Some(crate::sounds::AmbientControl::Play(id)),
+                        });
+                    } else if active && input != "playsound" {
+                        self.ambient_active.insert(id, false);
+                        self.sounds.push(crate::sounds::SoundRequest {
+                            name: sound.into(),
+                            actor: None,
+                            ambient: Some(crate::sounds::AmbientControl::Stop(id)),
+                        });
+                    }
                 }
             }
             "changelevel" if class == "trigger_changelevel" => {
@@ -2680,6 +2715,45 @@ mod tests {
                 .map(|(k, v)| (k.into(), v.into()))
                 .collect(),
         }
+    }
+    #[test]
+    fn ambient_inputs_follow_sdk_active_state() {
+        use crate::sounds::AmbientControl::{Play, Stop};
+        let world = World {
+            entities: vec![
+                // Looping, start silent, play everywhere: a barrier's touch hum.
+                entity(
+                    "ambient_generic",
+                    "close",
+                    &[("message", "hum"), ("spawnflags", "17")],
+                ),
+                // Not looping: every PlaySound plays it again.
+                entity(
+                    "ambient_generic",
+                    "once",
+                    &[("message", "beep"), ("spawnflags", "48")],
+                ),
+            ],
+            ..World::default()
+        };
+        let mut scene = Scene::new(&world);
+        let run = |scene: &mut Scene, id: usize, input: &str| {
+            scene.send(id, input, "");
+            scene.tick(&world, Vec3::ZERO, 0.015);
+            std::mem::take(&mut scene.sounds)
+                .into_iter()
+                .filter_map(|r| r.ambient)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(&mut scene, 0, "PlaySound"), [Play(0)]);
+        assert_eq!(run(&mut scene, 0, "PlaySound"), []);
+        assert_eq!(run(&mut scene, 0, "StopSound"), [Stop(0)]);
+        assert_eq!(run(&mut scene, 0, "StopSound"), []);
+        assert_eq!(run(&mut scene, 0, "ToggleSound"), [Play(0)]);
+        assert_eq!(run(&mut scene, 0, "ToggleSound"), [Stop(0)]);
+        assert_eq!(run(&mut scene, 1, "PlaySound"), [Play(1)]);
+        assert_eq!(run(&mut scene, 1, "PlaySound"), [Play(1)]);
+        assert_eq!(run(&mut scene, 1, "StopSound"), []);
     }
     fn choreography(events: &[(EventType, f32, &str)]) -> Arc<ChoreoScene> {
         let mut data = b"bvcd\x04".to_vec();

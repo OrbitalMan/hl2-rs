@@ -1,7 +1,7 @@
 //! Preload owned cue alternatives before App::run; systems use only memory/assets.
 use anyhow::{Context, Result, bail};
 use bevy::{audio::AudioSinkPlayback, prelude::*};
-use hl2_simulation::sounds::{Library, SoundRequest};
+use hl2_simulation::sounds::{AmbientControl, Library, SoundRequest};
 use source_assets::vpk::Vfs;
 use std::collections::{BTreeSet, HashMap};
 
@@ -77,9 +77,13 @@ fn backend_wav(data: Vec<u8>, looped: bool) -> Result<Vec<u8>> {
 /// `--mute-ambient`: skip map-start ambient_generic loops so test recordings isolate cues.
 pub static MUTE_AMBIENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+#[derive(Clone)]
 struct Ambient {
     request: SoundRequest,
+    /// SDK m_fLooping (spawnflags 32 clear).
     looped: bool,
+    /// Active from spawn (looping and not start silent).
+    at_spawn: bool,
     volume: f32,
     pitch: f32,
     /// Source origin and soundlevel; soundlevel 0 plays everywhere.
@@ -88,7 +92,8 @@ struct Ambient {
 pub struct PreparedAudio {
     library: Library,
     waves: Vec<(String, Vec<u8>)>,
-    ambient: Vec<Ambient>,
+    /// Every ambient_generic with a message, by entity index.
+    ambient: HashMap<usize, Ambient>,
     bytes: usize,
     cues: usize,
     /// Speech phoneme data (wave path, sentence, seconds) for lip sync.
@@ -98,14 +103,14 @@ impl PreparedAudio {
     pub fn load(vfs: &Vfs, game: &crate::gameplay::Gameplay) -> Self {
         let mut library = Library::new(vfs);
         let mut cues = BTreeSet::new();
-        let mut ambient = Vec::new();
+        let mut ambient = HashMap::new();
         let origin_of = |entity: &modkit_core::Entity| {
             entity
                 .get("origin")
                 .and_then(modkit_core::parse_vec3)
                 .map_or(glam::Vec3::ZERO, |v| glam::Vec3::from_array(v.to_array()))
         };
-        for entity in &game.world.entities {
+        for (id, entity) in game.world.entities.iter().enumerate() {
             if entity.class() != "ambient_generic" {
                 continue;
             }
@@ -117,10 +122,6 @@ impl PreparedAudio {
                 .get("spawnflags")
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(0);
-            // SDK CAmbientGeneric: only looping sounds that do not start silent play at spawn.
-            if flags & (16 | 32) != 0 {
-                continue;
-            }
             let number = |key: &str| entity.get(key).and_then(|s| s.trim().parse::<f32>().ok());
             // volrun = clamp(health * 10, 0, 100); m_iHealth defaults to 0 (silent).
             let volume = (number("health").unwrap_or(0.) * 10.).clamp(0., 100.) / 100.;
@@ -155,13 +156,19 @@ impl PreparedAudio {
                         .find(|e| e.get("targetname") == Some(n))
                 })
                 .unwrap_or(entity);
-            ambient.push(Ambient {
-                request: name.into(),
-                looped: true,
-                volume,
-                pitch,
-                spatial: (origin_of(source), soundlevel),
-            });
+            ambient.insert(
+                id,
+                Ambient {
+                    request: name.into(),
+                    looped: flags & 32 == 0,
+                    // SDK CAmbientGeneric: only looping sounds that do not start silent play at
+                    // spawn; others wait for PlaySound.
+                    at_spawn: flags & (16 | 32) == 0,
+                    volume,
+                    pitch,
+                    spatial: (origin_of(source), soundlevel),
+                },
+            );
         }
         cues.extend(
             game.scene
@@ -214,7 +221,7 @@ impl PreparedAudio {
         );
         let mut paths = BTreeSet::new();
         let looped: BTreeSet<String> = ambient
-            .iter()
+            .values()
             .filter(|a| a.looped)
             .filter_map(|a| library.all_alternatives(&a.request.name).ok())
             .flatten()
@@ -290,6 +297,7 @@ pub struct Audio {
     resume_changes: u64,
     /// Per positioned player this frame: (wave, distance, applied volume before global).
     spatial: Vec<(String, f32, f32)>,
+    ambient: HashMap<usize, Ambient>,
 }
 /// `--audio-trace PATH`: one JSON line per sound request, sink start and sink removal,
 /// with the sink's last observed playback position, for diagnosing cut-off sounds.
@@ -323,6 +331,8 @@ pub struct SoundPlayer {
     volume: f32,
     /// Source origin and soundlevel for distance gain (SDK GetDistGainFromSoundLevel).
     spatial: Option<(glam::Vec3, f32)>,
+    /// The ambient_generic entity this sound belongs to.
+    ambient: Option<usize>,
 }
 impl Audio {
     fn emit(
@@ -331,7 +341,7 @@ impl Audio {
         request: &SoundRequest,
         looped: bool,
         (volume, pitch, spatial): (f32, f32, Option<(glam::Vec3, f32)>),
-        paused: bool,
+        (paused, ambient): (bool, Option<usize>),
     ) -> Option<String> {
         let path = match self.library.resolve(request) {
             Ok(path) => path,
@@ -364,6 +374,7 @@ impl Audio {
                 observed: false,
                 volume,
                 spatial,
+                ambient,
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
@@ -424,9 +435,17 @@ pub fn install(
         pause_changes: 0,
         resume_changes: 0,
         spatial: Vec::new(),
+        ambient: prepared.ambient,
     };
     let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
-    for ambient in prepared.ambient.into_iter().filter(|_| !mute) {
+    let mut spawn: Vec<(usize, Ambient)> = audio
+        .ambient
+        .iter()
+        .filter(|(_, a)| a.at_spawn && !mute)
+        .map(|(id, a)| (*id, a.clone()))
+        .collect();
+    spawn.sort_by_key(|(id, _)| *id);
+    for (id, ambient) in spawn {
         if audio.requested >= MAX_PLAYERS as u64 {
             audio.capacity_rejections += 1;
             continue;
@@ -436,7 +455,7 @@ pub fn install(
             &ambient.request,
             ambient.looped,
             (ambient.volume, ambient.pitch, Some(ambient.spatial)),
-            false,
+            (false, Some(id)),
         );
     }
     commands.insert_resource(audio);
@@ -446,7 +465,12 @@ pub fn queue(
     mut audio: ResMut<Audio>,
     mut game: ResMut<crate::gameplay::Gameplay>,
     (simulation, mut trace): (Res<crate::movement::Simulation>, Option<ResMut<AudioTrace>>),
-    mut players: Query<(&SoundPlayer, &mut PlaybackSettings, Option<&mut AudioSink>)>,
+    mut players: Query<(
+        Entity,
+        &SoundPlayer,
+        &mut PlaybackSettings,
+        Option<&mut AudioSink>,
+    )>,
     global: Res<GlobalVolume>,
 ) {
     let listener = glam::Vec3::from_array(simulation.eye().to_array());
@@ -461,7 +485,9 @@ pub fn queue(
     }
     let mut count = 0;
     audio.spatial.clear();
-    for (player, mut settings, sink) in &mut players {
+    let mut owned = Vec::new();
+    for (entity, player, mut settings, sink) in &mut players {
+        owned.push((entity, player.ambient));
         count += 1;
         settings.paused = paused;
         let mut sink = sink;
@@ -484,16 +510,44 @@ pub fn queue(
     }
     for request in &game.sound_requests {
         if let Some(trace) = trace.as_deref_mut() {
-            trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused}));
+            trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused,
+                "ambient":request.ambient.map(|c| format!("{c:?}"))}));
         }
     }
     for request in std::mem::take(&mut game.sound_requests) {
+        // ambient_generic inputs replace or stop that entity's own sound (SDK SendSound).
+        if let Some(control) = request.ambient {
+            let (AmbientControl::Play(id) | AmbientControl::Stop(id)) = control;
+            for (entity, player) in &owned {
+                if player == &Some(id) {
+                    commands.entity(*entity).despawn();
+                }
+            }
+            if let (AmbientControl::Play(_), Some(ambient)) =
+                (control, audio.ambient.get(&id).cloned())
+                && ambient.volume > 0.
+                && !MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                audio.emit(
+                    &mut commands,
+                    &ambient.request,
+                    ambient.looped,
+                    (ambient.volume, ambient.pitch, Some(ambient.spatial)),
+                    (paused, Some(id)),
+                );
+            }
+            continue;
+        }
         if count >= MAX_PLAYERS {
             audio.capacity_rejections += 1;
             game.unplayed_sounds += 1;
-        } else if let Some(path) =
-            audio.emit(&mut commands, &request, false, (0.4, 100., None), paused)
-        {
+        } else if let Some(path) = audio.emit(
+            &mut commands,
+            &request,
+            false,
+            (0.4, 100., None),
+            (paused, None),
+        ) {
             count += 1;
             // Actor speech drives lip sync from the chosen wave's phonemes.
             if let Some(actor) = request.actor.as_ref().and_then(|a| a.entity) {

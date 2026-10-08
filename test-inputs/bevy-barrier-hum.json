@@ -1,0 +1,12 @@
+[
+  {"tick":1,"label":"approach-start","eye":[-1856,-780,60],"yaw":90,"pitch":0},
+  {"tick":60,"label":"walk-in","forward":1},
+  {"tick":200,"label":"at-barrier"},
+  {"tick":600,"label":"walk-out","forward":-1},
+  {"tick":740,"label":"outside"},
+  {"tick":1000,"label":"return","forward":1},
+  {"tick":1140,"label":"at-barrier-again"},
+  {"tick":1540,"label":"leave-again","forward":-1},
+  {"tick":1680,"label":"outside-again"},
+  {"tick":1800,"label":"done"}
+]
