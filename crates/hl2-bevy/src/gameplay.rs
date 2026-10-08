@@ -105,6 +105,17 @@ impl Gameplay {
     /// After the player move: HL2 fall damage on landing, then death (Event_Killed/DeathSound).
     /// Returns true when the player died this tick.
     pub fn player_outcome(&mut self, player: &mut modkit_core::movement::Player) -> bool {
+        // DMG_FALL, DMG_DROWN, DMG_POISON and DMG_RADIATION bypass armor (OnTakeDamage_Alive).
+        const NO_ARMOR: u32 = 32 | 16384 | 131072 | 262144;
+        for (amount, kind) in std::mem::take(&mut self.scene.player_damage) {
+            if amount < 0. {
+                if self.inventory.health > 0. {
+                    self.inventory.health = (self.inventory.health - amount).min(100.);
+                }
+            } else {
+                self.inventory.damage_player(amount, kind & NO_ARMOR == 0);
+            }
+        }
         let mut fell = false;
         if let Some(speed) = player.landed {
             let damage = hl2_simulation::gameplay::fall_damage(speed);

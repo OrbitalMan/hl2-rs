@@ -190,6 +190,17 @@ fn self_positioned(class: &str) -> bool {
         .iter()
         .any(|p| class.starts_with(p))
 }
+#[derive(Clone, Copy, Debug)]
+struct HurtState {
+    /// m_flDamage (grows under damagemodel 1).
+    damage: f32,
+    /// Next HurtThink; None when the think is cleared.
+    next: Option<f64>,
+    reset_at: f64,
+    /// The player was hurt by the last HurtAllTouchers.
+    hurt_player: bool,
+}
+
 #[derive(Default, Serialize)]
 pub struct Diagnostics {
     pub inputs_delivered: u64,
@@ -239,6 +250,9 @@ pub struct Scene {
     ambient_active: BTreeMap<usize, bool>,
     /// env_soundscape selection for the local player (SDK server soundscape system).
     pub soundscape: crate::soundscapes::Selector,
+    /// Damage dealt to the player this tick (amount, Source damage-type bits); negative heals.
+    pub player_damage: Vec<(f32, u32)>,
+    hurt: BTreeMap<usize, HurtState>,
     unsupported: BTreeSet<String>,
     choreography: BTreeMap<usize, Choreography>,
     pub movement_commands: Vec<SceneMoveCommand>,
@@ -278,6 +292,8 @@ impl Scene {
             sounds: Vec::new(),
             ambient_active: BTreeMap::new(),
             soundscape: crate::soundscapes::Selector::new(world),
+            player_damage: Vec::new(),
+            hurt: BTreeMap::new(),
             unsupported: BTreeSet::new(),
             choreography: BTreeMap::new(),
             movement_commands: Vec::new(),
@@ -1785,6 +1801,53 @@ impl Scene {
             self.fire(id, "OnPlay", id);
         }
     }
+    /// SDK CTriggerHurt for the player: Touch schedules HurtThink at once, which deals
+    /// damage x 0.5 every 0.5 s while touched (damagemodel 1 doubles up to damagecap and
+    /// forgives after 3 s without a hit); leaving without a hit in the last think deals
+    /// damage x 0.5. NPC touchers are not hurt here yet.
+    fn trigger_hurt(&mut self, e: &Entity, id: usize, inside: bool, was_inside: bool) {
+        let base = number(e, "damage", 0.);
+        let cap = number(e, "damagecap", 20.);
+        let doubling = number(e, "damagemodel", 0.) as u32 == 1;
+        let kind = number(e, "damagetype", 0.) as u32;
+        let time = self.time;
+        let hurt = self.hurt.entry(id).or_insert(HurtState {
+            damage: base,
+            next: None,
+            reset_at: 0.,
+            hurt_player: false,
+        });
+        let mut hurt_now = false;
+        if inside && hurt.next.is_none() {
+            hurt.next = Some(time);
+        }
+        if hurt.next.is_some_and(|next| time >= next) {
+            hurt.hurt_player = inside;
+            if inside {
+                self.player_damage.push((hurt.damage * 0.5, kind));
+                hurt_now = true;
+            }
+            if doubling {
+                if hurt_now {
+                    hurt.damage = (hurt.damage * 2.).min(cap);
+                    hurt.reset_at = time + 3.;
+                } else if time > hurt.reset_at {
+                    hurt.damage = base;
+                }
+            }
+            hurt.next = hurt_now.then_some(time + 0.5);
+        }
+        if was_inside && !inside {
+            if !hurt.hurt_player {
+                self.player_damage.push((hurt.damage * 0.5, kind));
+                hurt_now = true;
+            }
+            hurt.hurt_player = false;
+        }
+        if hurt_now && base != 0. {
+            self.fire(id, "OnHurtPlayer", usize::MAX);
+        }
+    }
     pub fn fire(&mut self, id: usize, name: &str, activator: usize) {
         let Some(state) = self.states.get_mut(id) else {
             return;
@@ -2635,6 +2698,9 @@ impl Scene {
                     if e.class() == "trigger_once" {
                         self.states[id].enabled = false;
                     }
+                }
+                if e.class() == "trigger_hurt" {
+                    self.trigger_hurt(e, id, player, self.states[id].touching && npc.is_none());
                 }
                 // SF_CHANGELEVEL_NOTOUCH (0x2) leaves the ChangeLevel input available,
                 // but must not change maps when the player overlaps the brush.
@@ -3733,6 +3799,69 @@ mod tests {
             .diagnostics
             .unsupported
             .contains_key("point_template.ForceSpawn:repeat"));
+    }
+    #[test]
+    fn trigger_hurt_follows_sdk_think_timing() {
+        let cube = modkit_core::BrushModel {
+            id: 1,
+            brushes: vec![modkit_core::Brush {
+                planes: [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z]
+                    .into_iter()
+                    .map(|normal| modkit_core::Plane {
+                        normal,
+                        distance: 8.,
+                    })
+                    .collect(),
+                contents: 1,
+            }],
+            mins: Vec3::splat(-8.),
+            maxs: Vec3::splat(8.),
+            ..Default::default()
+        };
+        let hurt = |model: &str| World {
+            entities: vec![entity(
+                "trigger_hurt",
+                "pain",
+                &[
+                    ("model", "*1"),
+                    ("damage", "10"),
+                    ("damagecap", "30"),
+                    ("damagemodel", model),
+                    ("damagetype", "0"),
+                ],
+            )],
+            brush_models: vec![cube.clone()],
+            ..Default::default()
+        };
+        let world = hurt("0");
+        let mut scene = Scene::new(&world);
+        let mut dealt = Vec::new();
+        // Inside for one second (67 ticks), then outside.
+        for tick in 0..80 {
+            let at = if tick < 67 {
+                Vec3::ZERO
+            } else {
+                Vec3::X * 100.
+            };
+            scene.tick(&world, at, 0.015);
+            for (amount, _) in scene.player_damage.drain(..) {
+                dealt.push((tick, amount));
+            }
+        }
+        // Immediate hit, then every 0.5 s (about 34 ticks): 5 per think, none on leaving
+        // because the last think hurt the player.
+        assert_eq!(dealt.len(), 2, "{dealt:?}");
+        assert!(dealt.iter().all(|&(_, a)| a == 5.));
+        assert!((33..=35).contains(&(dealt[1].0 - dealt[0].0)), "{dealt:?}");
+        // Doubling: 5, 10, 15 (capped at 30 x 0.5).
+        let world = hurt("1");
+        let mut scene = Scene::new(&world);
+        let mut amounts = Vec::new();
+        for _ in 0..110 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+            amounts.extend(scene.player_damage.drain(..).map(|(a, _)| a));
+        }
+        assert_eq!(amounts, [5., 10., 15., 15.]);
     }
     #[test]
     fn no_touch_changelevel_still_accepts_explicit_input() {
