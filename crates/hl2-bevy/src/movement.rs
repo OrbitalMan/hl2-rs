@@ -366,6 +366,11 @@ impl Simulation {
                 self.player.step(self.input, &self.physics, TICK);
                 self.eye = self.player.eye();
             }
+            if let Some(game) = game.as_deref_mut() {
+                let world = game.world.clone();
+                game.scene
+                    .update_soundscape(&world, glam::Vec3::from_array(self.eye.to_array()));
+            }
         }
         if game.as_ref().is_some_and(|g| g.scene.transition.is_some()) {
             self.loading = true;

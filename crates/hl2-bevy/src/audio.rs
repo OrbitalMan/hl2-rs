@@ -2,6 +2,7 @@
 use anyhow::{Context, Result, bail};
 use bevy::{audio::AudioSinkPlayback, prelude::*};
 use hl2_simulation::sounds::{AmbientControl, Library, SoundRequest};
+use hl2_simulation::soundscapes::{Command as SoundscapeCommand, Definitions, Playback};
 use source_assets::vpk::Vfs;
 use std::collections::{BTreeSet, HashMap};
 
@@ -94,6 +95,7 @@ pub struct PreparedAudio {
     waves: Vec<(String, Vec<u8>)>,
     /// Every ambient_generic with a message, by entity index.
     ambient: HashMap<usize, Ambient>,
+    soundscapes: Definitions,
     bytes: usize,
     cues: usize,
     /// Speech phoneme data (wave path, sentence, seconds) for lip sync.
@@ -220,12 +222,30 @@ impl PreparedAudio {
             .map(str::to_owned),
         );
         let mut paths = BTreeSet::new();
-        let looped: BTreeSet<String> = ambient
+        let mut looped: BTreeSet<String> = ambient
             .values()
             .filter(|a| a.looped)
             .filter_map(|a| library.all_alternatives(&a.request.name).ok())
             .flatten()
             .collect();
+        // Every wave the map's soundscapes can play; their loops use the looping conversion.
+        let soundscapes = Definitions::load(vfs, &game.world.name);
+        let names: Vec<&str> = game
+            .world
+            .entities
+            .iter()
+            .filter(|e| e.class().starts_with("env_soundscape"))
+            .filter_map(|e| e.get("soundscape"))
+            .collect();
+        let (loops, randoms) = soundscapes.waves_by_kind(names);
+        looped.extend(loops.iter().cloned());
+        paths.extend(loops);
+        paths.extend(randoms);
+        for (index, error) in soundscapes.errors.iter().enumerate() {
+            library
+                .errors
+                .insert(format!("soundscapes {index}"), error.clone());
+        }
         for cue in &cues {
             match library.all_alternatives(cue) {
                 Ok(variants) => paths.extend(variants),
@@ -271,6 +291,7 @@ impl PreparedAudio {
             library,
             waves,
             ambient,
+            soundscapes,
             bytes,
             cues: cues.len(),
             sentences,
@@ -298,6 +319,12 @@ pub struct Audio {
     /// Per positioned player this frame: (wave, distance, applied volume before global).
     spatial: Vec<(String, f32, f32)>,
     ambient: HashMap<usize, Ambient>,
+    soundscapes: Definitions,
+    soundscape: Playback,
+    /// Current volume of each soundscape loop handle.
+    soundscape_volumes: HashMap<u64, f32>,
+    soundscape_time: Option<f64>,
+    soundscape_plays: u64,
 }
 /// `--audio-trace PATH`: one JSON line per sound request, sink start and sink removal,
 /// with the sink's last observed playback position, for diagnosing cut-off sounds.
@@ -333,6 +360,8 @@ pub struct SoundPlayer {
     spatial: Option<(glam::Vec3, f32)>,
     /// The ambient_generic entity this sound belongs to.
     ambient: Option<usize>,
+    /// The soundscape loop handle this sound belongs to.
+    soundscape: Option<u64>,
 }
 impl Audio {
     fn emit(
@@ -341,7 +370,7 @@ impl Audio {
         request: &SoundRequest,
         looped: bool,
         (volume, pitch, spatial): (f32, f32, Option<(glam::Vec3, f32)>),
-        (paused, ambient): (bool, Option<usize>),
+        (paused, ambient, soundscape): (bool, Option<usize>, Option<u64>),
     ) -> Option<String> {
         let path = match self.library.resolve(request) {
             Ok(path) => path,
@@ -375,6 +404,7 @@ impl Audio {
                 volume,
                 spatial,
                 ambient,
+                soundscape,
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
@@ -398,7 +428,9 @@ impl Audio {
             "pending_sinks":self.pending_sinks,"active_sinks":self.active_sinks,"paused_sinks":self.paused_sinks,
             "pause_changes":self.pause_changes,"resume_changes":self.resume_changes,"spatial":self.spatial,
             "variants":self.library.variants_played,"decoded":self.library.decoded,"errors":self.library.errors,
-            "mixing":"ambient_generic loops use Source distance gain; stereo panning, DSP and soundscapes are not implemented"})
+            "soundscape":{"definitions":self.soundscapes.len(),"active":self.soundscape.active(),"started":self.soundscape.started,
+                "loops":self.soundscape.loops(),"random_plays":self.soundscape_plays,"unknown":self.soundscape.unknown},
+            "mixing":"ambient_generic loops and positional soundscape sounds use Source distance gain; stereo panning and DSP are not implemented"})
     }
 }
 pub fn install(
@@ -436,6 +468,11 @@ pub fn install(
         resume_changes: 0,
         spatial: Vec::new(),
         ambient: prepared.ambient,
+        soundscapes: prepared.soundscapes,
+        soundscape: Playback::default(),
+        soundscape_volumes: HashMap::new(),
+        soundscape_time: None,
+        soundscape_plays: 0,
     };
     let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
     let mut spawn: Vec<(usize, Ambient)> = audio
@@ -455,7 +492,7 @@ pub fn install(
             &ambient.request,
             ambient.looped,
             (ambient.volume, ambient.pitch, Some(ambient.spatial)),
-            (false, Some(id)),
+            (false, Some(id), None),
         );
     }
     commands.insert_resource(audio);
@@ -487,13 +524,25 @@ pub fn queue(
     audio.spatial.clear();
     let mut owned = Vec::new();
     for (entity, player, mut settings, sink) in &mut players {
-        owned.push((entity, player.ambient));
+        owned.push((entity, player.ambient, player.soundscape));
         count += 1;
         settings.paused = paused;
         let mut sink = sink;
+        // Soundscape loops fade; their current volume replaces the spawn volume.
+        let base = player
+            .soundscape
+            .and_then(|h| audio.soundscape_volumes.get(&h).copied())
+            .unwrap_or(player.volume);
+        if let (None, Some(_), Some(sink)) =
+            (player.spatial, player.soundscape, sink.as_deref_mut())
+        {
+            sink.set_volume(bevy::audio::Volume::Linear(
+                base.clamp(0., 1.) * global.volume.to_linear(),
+            ));
+        }
         if let (Some((origin, soundlevel)), Some(sink)) = (player.spatial, sink.as_deref_mut()) {
             let gain = hl2_simulation::sounds::dist_gain(soundlevel, listener.distance(origin));
-            let volume = (player.volume * gain).clamp(0., 1.);
+            let volume = (base * gain).clamp(0., 1.);
             sink.set_volume(bevy::audio::Volume::Linear(
                 volume * global.volume.to_linear(),
             ));
@@ -518,7 +567,7 @@ pub fn queue(
         // ambient_generic inputs replace or stop that entity's own sound (SDK SendSound).
         if let Some(control) = request.ambient {
             let (AmbientControl::Play(id) | AmbientControl::Stop(id)) = control;
-            for (entity, player) in &owned {
+            for (entity, player, _) in &owned {
                 if player == &Some(id) {
                     commands.entity(*entity).despawn();
                 }
@@ -533,7 +582,7 @@ pub fn queue(
                     &ambient.request,
                     ambient.looped,
                     (ambient.volume, ambient.pitch, Some(ambient.spatial)),
-                    (paused, Some(id)),
+                    (paused, Some(id), None),
                 );
             }
             continue;
@@ -546,7 +595,7 @@ pub fn queue(
             &request,
             false,
             (0.4, 100., None),
-            (paused, None),
+            (paused, None, None),
         ) {
             count += 1;
             // Actor speech drives lip sync from the chosen wave's phonemes.
@@ -556,6 +605,91 @@ pub fn queue(
             }
         } else {
             game.unplayed_sounds += 1;
+        }
+    }
+    // Client soundscape frame: scene time drives fades and random sounds, so pause freezes
+    // them (dt 0). The server-side selection ran in the fixed tick.
+    let now = game.scene.time;
+    let dt = audio
+        .soundscape_time
+        .map_or(0., |t| (now - t).max(0.) as f32);
+    audio.soundscape_time = Some(now);
+    let forward = glam::Vec3::from_array(
+        crate::source_direction(simulation.yaw, simulation.pitch).to_array(),
+    );
+    let right = glam::Vec3::new(simulation.yaw.sin(), -simulation.yaw.cos(), 0.);
+    let params = game.scene.soundscape.params.clone();
+    let audio = &mut *audio;
+    let operations = audio.soundscape.update(
+        &audio.soundscapes,
+        params.as_ref(),
+        now,
+        dt,
+        (listener, forward, right),
+    );
+    let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
+    for operation in operations {
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.write(
+                serde_json::json!({"event":"soundscape","operation":format!("{operation:?}"),
+                "frame":audio.frame,"scene_time":now}),
+            );
+        }
+        match operation {
+            SoundscapeCommand::StartLoop {
+                handle,
+                wave,
+                volume,
+                pitch,
+                spatial,
+            } => {
+                audio.soundscape_volumes.insert(handle, volume);
+                if !mute {
+                    audio.emit(
+                        &mut commands,
+                        &wave.into(),
+                        true,
+                        (volume, pitch, spatial),
+                        (paused, None, Some(handle)),
+                    );
+                }
+            }
+            SoundscapeCommand::LoopVolume { handle, volume } => {
+                audio.soundscape_volumes.insert(handle, volume);
+            }
+            SoundscapeCommand::StopLoop { handle } => {
+                audio.soundscape_volumes.remove(&handle);
+                for (entity, _, owner) in &owned {
+                    if owner == &Some(handle) {
+                        commands.entity(*entity).despawn();
+                    }
+                }
+            }
+            SoundscapeCommand::Play {
+                wave,
+                volume,
+                pitch,
+                spatial,
+            } => {
+                audio.soundscape_plays += 1;
+                if mute {
+                    continue;
+                }
+                if count >= MAX_PLAYERS {
+                    audio.capacity_rejections += 1;
+                } else if audio
+                    .emit(
+                        &mut commands,
+                        &wave.into(),
+                        false,
+                        (volume, pitch.max(1.), spatial),
+                        (paused, None, None),
+                    )
+                    .is_some()
+                {
+                    count += 1;
+                }
+            }
         }
     }
 }
