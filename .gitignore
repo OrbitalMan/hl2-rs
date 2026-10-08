@@ -11,6 +11,8 @@
 !/Cargo.toml
 !/Cargo.lock
 !/.github/workflows/rust.yml
+!/.vscode/launch.json
+!/.vscode/tasks.json
 !/launch*.cmd
 !/launch*.sh
 !/scripts/build-bevy.ps1

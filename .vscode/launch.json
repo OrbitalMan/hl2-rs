@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug HL2-RS (macOS/Linux)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/hl2-bevy",
+      "args": [
+        "--map",
+        "d1_trainstation_01"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build Bevy Runtime (Debug)",
+      "sourceLanguages": [
+        "rust"
+      ]
+    },
+    {
+      "name": "Debug HL2-RS (Windows)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/hl2-bevy.exe",
+      "args": [
+        "--map",
+        "d1_trainstation_01"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build Bevy Runtime (Debug)",
+      "sourceLanguages": [
+        "rust"
+      ]
+    }
+  ]
+}
