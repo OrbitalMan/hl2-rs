@@ -1,6 +1,6 @@
 # STATUS
 
-Checkpoint: 2026-10-08 session 7 owner-report milestone, validated on `wip/owner-reports-20261008` before publication to main. Plaza Combine barriers now select proximity texture frames from the local player center and animate; Kleiner monitor scanlines scroll downward. 344 normal + 33 owned tests, strict Clippy/fmt, release build and packaged movement/weapons/attention checks 26/17/26 pass. The weapon-switch cutoff remains unresolved and was not reproduced. The corrected seeded-HUD capture renders its blue graphics, with 31 identical frozen burst frames.
+Checkpoint: 2026-10-08 session 7 owner-report milestone, validated on `wip/owner-reports-20261008` and published as main `2a914fc`. Plaza Combine barriers now select proximity texture frames from the local player center and animate; Kleiner monitor scanlines scroll downward. 344 normal + 33 owned tests, strict Clippy/fmt, release build and packaged movement/weapons/attention checks 26/17/26 pass. The weapon-switch cutoff remains unresolved and was not reproduced. The corrected seeded-HUD capture renders its blue graphics, with 31 identical frozen burst frames.
 
 ## Current session 7 (2026-10-08)
 
