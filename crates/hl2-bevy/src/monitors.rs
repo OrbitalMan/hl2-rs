@@ -3,6 +3,8 @@ use crate::{
     assets::LoadedMap, campaign::MapOwned, gameplay::Gameplay, movement::Simulation, sky::Sky,
     source_to_bevy,
 };
+/// Fixed exposure of monitor camera feeds; see the camera spawn.
+const MONITOR_FEED_SCALE: f32 = 2.;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
@@ -61,13 +63,12 @@ pub fn install(
         RenderTarget::Image(image.clone().into()),
         RenderLayers::layer(0),
         Tonemapping::None,
-        // Monitor views render before TurnOnToneMapping (SDK viewrender.cpp 2080/2090). Only
-        // integer HDR resets the scale to 1 after the main view (2214); with the scale kept,
-        // the feed is drawn at the current exposure. Native HDR Kleiner-screen comparison
-        // (2026-10-08) matches the kept scale.
-        crate::tonemap::ToneMapped,
+        // Monitor views render before TurnOnToneMapping (SDK viewrender.cpp 2080/2090/2214).
+        // Native HDR screens measure a constant 2x over a scale-1 feed at both high and low
+        // main exposures (Kleiner screen at 1.86, plaza slate at 0.68; 2026-10-08), so feeds
+        // render at a fixed scale of 2. The source of the factor is not yet identified.
         bevy::camera::Exposure {
-            ev100: crate::tonemap::ev100(1.),
+            ev100: crate::tonemap::ev100(MONITOR_FEED_SCALE),
         },
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
