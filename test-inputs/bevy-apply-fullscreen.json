@@ -1,0 +1,73 @@
+[
+  {
+    "tick": 1,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "open-pause-menu"
+  },
+  {
+    "tick": 2,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": ["down"]
+        }
+      }
+    ]
+  },
+  {
+    "tick": 3,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": ["enter"]
+        }
+      }
+    ],
+    "label": "open-options"
+  },
+  {
+    "tick": 5,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "pointer": [680.0, 168.0],
+          "click": true
+        }
+      }
+    ],
+    "label": "switch-to-video-tab"
+  },
+  {
+    "tick": 7,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "pointer": [530.0, 250.0],
+          "click": true
+        }
+      }
+    ],
+    "label": "toggle-borderless-fullscreen"
+  },
+  {
+    "tick": 9,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "pointer": [700.0, 568.0],
+          "click": true
+        }
+      }
+    ],
+    "label": "click-ok-apply-and-close"
+  }
+]

@@ -1,0 +1,70 @@
+[
+  {
+    "tick": 1,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "open-pause-menu"
+  },
+  {
+    "tick": 2,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": ["down"]
+        }
+      }
+    ]
+  },
+  {
+    "tick": 3,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": ["enter"]
+        }
+      }
+    ],
+    "label": "open-options"
+  },
+  {
+    "tick": 5,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "pointer": [606.0, 216.0],
+          "click": true
+        }
+      }
+    ],
+    "label": "cycle-resolution-to-1920x1080"
+  },
+  {
+    "tick": 7,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "pointer": [700.0, 568.0],
+          "click": true
+        }
+      }
+    ],
+    "label": "click-ok-apply-and-close"
+  },
+  {
+    "tick": 12,
+    "forward": 1.0,
+    "label": "walk-forward-in-new-resolution"
+  },
+  {
+    "tick": 20,
+    "forward": 0.0,
+    "label": "stop-in-new-resolution"
+  }
+]

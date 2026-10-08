@@ -45,6 +45,11 @@ const COMMANDS: &[(&str, &str)] = &[
     ("echo", "echo <text>: print text"),
     ("toggleconsole", "toggleconsole: close or open the console"),
     ("quit", "quit: exit and save the runtime report"),
+    ("volume", "volume [0..1]: query or set master audio volume"),
+    ("sensitivity", "sensitivity [value]: query or set mouse sensitivity"),
+    ("fov", "fov [degrees]: query or set camera field of view"),
+    ("mat_hdr_level", "mat_hdr_level [0|2]: query or set HDR level (0=None, 2=Full)"),
+    ("mainmenu", "mainmenu: show the main menu"),
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -53,6 +58,8 @@ pub enum Mode {
     Gameplay,
     Pause,
     Console,
+    MainMenu,
+    Options,
 }
 
 #[derive(Debug, PartialEq)]
@@ -74,6 +81,7 @@ pub enum Effect {
         delay: f64,
     },
     Quit,
+    ApplyConfig(Box<crate::config::Config>),
 }
 
 pub struct Console {
@@ -99,8 +107,11 @@ pub struct Console {
     menu_layout: MenuLayout,
     mono: Option<FontFace>,
     developer_font: Option<FontFace>,
-    menu_labels: [String; 3],
+    menu_labels: Vec<String>,
+    main_menu_labels: Vec<String>,
     style: Style,
+    pub options: crate::options::OptionsState,
+    pub config: crate::config::Config,
 }
 
 /// Positive native font heights describe Windows character cells, not pixels per EM.
@@ -263,7 +274,15 @@ fn text(
         font.draw_baseline(value, origin, em, scale, color);
     }
 }
-fn rectangle_lines(canvas: &Canvas, x: f32, y: f32, w: f32, h: f32, thickness: f32, color: Color) {
+pub(crate) fn rectangle_lines(
+    canvas: &Canvas,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    thickness: f32,
+    color: Color,
+) {
     canvas.rectangle(x, y, w, thickness, color);
     canvas.rectangle(x, y + h - thickness, w, thickness, color);
     canvas.rectangle(x, y, thickness, h, color);
@@ -294,7 +313,7 @@ pub struct Input {
     pub click: bool,
 }
 impl Input {
-    fn pressed(&self, key: Key) -> bool {
+    pub(crate) fn pressed(&self, key: Key) -> bool {
         self.keys.contains(&key)
     }
 }
@@ -339,6 +358,12 @@ fn scheme_color(root: &keyvalues::Entry, name: &str) -> Option<Color> {
 
 impl Default for Console {
     fn default() -> Self {
+        let config = crate::config::Config::default();
+        let options = crate::options::OptionsState::new(
+            config.clone(),
+            crate::options::OptionsLabels::default(),
+            std::collections::BTreeMap::new(),
+        );
         let mut console = Self {
             canvas: Canvas::default(),
             mode: Mode::Gameplay,
@@ -362,12 +387,21 @@ impl Default for Console {
             menu_layout: MenuLayout::default(),
             mono: None,
             developer_font: None,
-            menu_labels: [
+            menu_labels: vec![
                 "RESUME GAME".into(),
+                "OPTIONS".into(),
+                "DEVELOPER CONSOLE".into(),
+                "QUIT".into(),
+            ],
+            main_menu_labels: vec![
+                "NEW GAME".into(),
+                "OPTIONS".into(),
                 "DEVELOPER CONSOLE".into(),
                 "QUIT".into(),
             ],
             style: Style::default(),
+            options,
+            config,
         };
         console.log("HL2-RS developer console. Type help for implemented commands.");
         console.log("Other Source commands are not implemented in this runtime.");
@@ -380,29 +414,61 @@ impl Console {
         let windows = std::env::var_os("WINDIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| "C:/Windows".into());
-        let font = |file| {
+        let font = |file: &str, mac_file: &str, linux_vfs: &str| {
             std::fs::read(windows.join("Fonts").join(file))
+                .or_else(|_| {
+                    std::fs::read(format!("/System/Library/Fonts/Supplemental/{mac_file}"))
+                })
+                .or_else(|_| std::fs::read(format!("/Library/Fonts/{mac_file}")))
                 .ok()
+                .or_else(|| vfs.read(linux_vfs).ok().flatten())
                 .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
         };
+        let developer_font = FontFace::load(
+            include_bytes!("../assets/fonts/ProggyClean.ttf"),
+            canvas.clone(),
+        )
+        .ok();
+        let menu_font = font(
+            "verdanab.ttf",
+            "Verdana Bold.ttf",
+            "resource/linux_fonts/liberationsans-bold.ttf",
+        )
+        .or_else(|| developer_font.clone());
+        let ui_font = font(
+            "tahoma.ttf",
+            "Tahoma.ttf",
+            "resource/linux_fonts/liberationsans-regular.ttf",
+        )
+        .or_else(|| developer_font.clone());
+        let mono = font(
+            "lucon.ttf",
+            "Courier New.ttf",
+            "resource/linux_fonts/DejaVuSansMono.ttf",
+        )
+        .or_else(|| developer_font.clone());
+        let config = crate::config::Config::load_or_default();
+        let options = crate::options::OptionsState::load(vfs, config.clone());
         let mut console = Self {
             canvas: canvas.clone(),
-            developer_font: FontFace::load(
-                include_bytes!("../assets/fonts/ProggyClean.ttf"),
-                canvas.clone(),
-            )
-            .ok(),
-            font: font("tahoma.ttf"),
-            menu_font: font("verdanab.ttf"),
-            mono: font("lucon.ttf").or_else(|| {
-                vfs.read("resource/linux_fonts/DejaVuSansMono.ttf")
-                    .ok()
-                    .flatten()
-                    .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
-            }),
+            developer_font,
+            font: ui_font,
+            menu_font,
+            mono,
+            options,
+            config,
             ..Default::default()
         };
-        if let Ok(bytes) = std::fs::read(windows.join("Fonts/verdanab.ttf")) {
+        let menu_bytes = std::fs::read(windows.join("Fonts/verdanab.ttf"))
+            .or_else(|_| std::fs::read("/System/Library/Fonts/Supplemental/Verdana Bold.ttf"))
+            .or_else(|_| std::fs::read("/Library/Fonts/Verdana Bold.ttf"))
+            .ok()
+            .or_else(|| {
+                vfs.read("resource/linux_fonts/liberationsans-bold.ttf")
+                    .ok()
+                    .flatten()
+            });
+        if let Some(bytes) = menu_bytes {
             console.menu_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
         }
         if let Some(bytes) = vfs.read("resource/HALFLIFE2.ttf").ok().flatten() {
@@ -500,13 +566,25 @@ impl Console {
             .and_then(|roots| roots.into_iter().next())
         {
             if let Some(tokens) = root.get("Tokens") {
-                for (i, key) in [
-                    (0, "GameUI_GameMenu_ResumeGame"),
-                    (2, "GameUI_GameMenu_Quit"),
-                ] {
-                    if let Some(label) = tokens.get(key).and_then(|entry| entry.text()) {
-                        console.menu_labels[i] = label.to_uppercase();
-                    }
+                let lookup = |k: &str| {
+                    tokens
+                        .get(k)
+                        .and_then(|entry| entry.text())
+                        .map(str::to_uppercase)
+                };
+                if let Some(l) = lookup("GameUI_GameMenu_ResumeGame") {
+                    console.menu_labels[0] = l;
+                }
+                if let Some(l) = lookup("GameUI_GameMenu_Options") {
+                    console.menu_labels[1] = l.clone();
+                    console.main_menu_labels[1] = l;
+                }
+                if let Some(l) = lookup("GameUI_GameMenu_Quit") {
+                    console.menu_labels[3] = l.clone();
+                    console.main_menu_labels[3] = l;
+                }
+                if let Some(l) = lookup("GameUI_GameMenu_NewGame") {
+                    console.main_menu_labels[0] = l;
                 }
             }
         }
@@ -520,6 +598,8 @@ impl Console {
             Mode::Gameplay => Mode::Pause,
             Mode::Pause => Mode::Gameplay,
             Mode::Console => self.previous,
+            Mode::Options => self.previous,
+            Mode::MainMenu => Mode::MainMenu,
         };
     }
     pub fn toggle(&mut self) {
@@ -707,11 +787,84 @@ impl Console {
                 }
                 self.toggle();
             }
+            "mainmenu" => {
+                if !args.is_empty() {
+                    return Err(usage());
+                }
+                self.previous = self.mode;
+                self.mode = Mode::MainMenu;
+            }
             "quit" => {
                 if !args.is_empty() {
                     return Err(usage());
                 }
                 return Ok(Some(Effect::Quit));
+            }
+            "volume" => {
+                if args.is_empty() {
+                    self.log(format!("\"volume\" = \"{:.2}\"", self.config.audio.volume));
+                } else if args.len() == 1 {
+                    let vol: f32 = args[0].parse().map_err(|_| usage())?;
+                    let vol = vol.clamp(0.0, 1.0);
+                    self.config.audio.volume = vol;
+                    let _ = self.config.save();
+                    self.log(format!("volume {:.2}", vol));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "sensitivity" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"sensitivity\" = \"{:.2}\"",
+                        self.config.mouse.sensitivity
+                    ));
+                } else if args.len() == 1 {
+                    let sens: f32 = args[0].parse().map_err(|_| usage())?;
+                    let sens = sens.clamp(0.1, 20.0);
+                    self.config.mouse.sensitivity = sens;
+                    let _ = self.config.save();
+                    self.log(format!("sensitivity {:.2}", sens));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "fov" => {
+                if args.is_empty() {
+                    self.log(format!("\"fov\" = \"{:.0}\"", self.config.video.fov));
+                } else if args.len() == 1 {
+                    let fov: f32 = args[0].parse().map_err(|_| usage())?;
+                    let fov = fov.clamp(50.0, 120.0);
+                    self.config.video.fov = fov;
+                    let _ = self.config.save();
+                    self.log(format!("fov {:.0}", fov));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_hdr_level" => {
+                if args.is_empty() {
+                    let lvl = match self.config.video.hdr {
+                        crate::config::HdrMode::None => 0,
+                        crate::config::HdrMode::Full => 2,
+                    };
+                    self.log(format!("\"mat_hdr_level\" = \"{lvl}\""));
+                } else if args.len() == 1 {
+                    let lvl: u8 = args[0].parse().map_err(|_| usage())?;
+                    self.config.video.hdr = match lvl {
+                        0 => crate::config::HdrMode::None,
+                        2 => crate::config::HdrMode::Full,
+                        _ => return Err("mat_hdr_level must be 0 (None) or 2 (Full)".into()),
+                    };
+                    let _ = self.config.save();
+                    self.log(format!("mat_hdr_level {lvl}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
             }
             _ => return Err(usage()),
         }
@@ -740,31 +893,64 @@ impl Console {
     }
     /// Called before gameplay input collection. Opening characters are drained by the host.
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
-        if self.mode == Mode::Pause {
-            if input.pressed(Key::Up) {
-                self.menu_selection = (self.menu_selection + 2) % 3;
-            }
-            if input.pressed(Key::Down) {
-                self.menu_selection = (self.menu_selection + 1) % 3;
-            }
-            let pointer = input.pointer;
-            let geometry = self.menu_layout.geometry(self.canvas.height());
-            for i in 0..3 {
-                let rect = Rect::new(
-                    geometry.menu.x,
-                    geometry.menu.y + i as f32 * geometry.item_tall,
-                    250. * self.canvas.height() / 480.,
-                    geometry.item_tall,
-                );
-                if pointer.is_some_and(|p| rect.contains(p)) {
-                    self.menu_selection = i;
-                    if input.click {
-                        return self.activate_menu();
-                    }
+        if self.mode == Mode::Options {
+            let res = self
+                .options
+                .input(input, vec2(self.canvas.width(), self.canvas.height()));
+            match res {
+                crate::options::OptionsResult::Ok(cfg) => {
+                    self.config = cfg.clone();
+                    let _ = self.config.save();
+                    self.mode = self.previous;
+                    return vec![Effect::ApplyConfig(Box::new(cfg))];
+                }
+                crate::options::OptionsResult::Apply(cfg) => {
+                    self.config = cfg.clone();
+                    let _ = self.config.save();
+                    return vec![Effect::ApplyConfig(Box::new(cfg))];
+                }
+                crate::options::OptionsResult::Cancel => {
+                    self.mode = self.previous;
+                    return Vec::new();
+                }
+                crate::options::OptionsResult::None => {
+                    return Vec::new();
                 }
             }
-            if input.pressed(Key::Enter) {
-                return self.activate_menu();
+        }
+        if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
+            let labels = if self.mode == Mode::MainMenu {
+                &self.main_menu_labels
+            } else {
+                &self.menu_labels
+            };
+            let count = labels.len();
+            if count > 0 {
+                if input.pressed(Key::Up) {
+                    self.menu_selection = (self.menu_selection + count - 1) % count;
+                }
+                if input.pressed(Key::Down) {
+                    self.menu_selection = (self.menu_selection + 1) % count;
+                }
+                let pointer = input.pointer;
+                let geometry = self.menu_layout.geometry(self.canvas.height());
+                for i in 0..count {
+                    let rect = Rect::new(
+                        geometry.menu.x,
+                        geometry.menu.y + i as f32 * geometry.item_tall,
+                        250. * self.canvas.height() / 480.,
+                        geometry.item_tall,
+                    );
+                    if pointer.is_some_and(|p| rect.contains(p)) {
+                        self.menu_selection = i;
+                        if input.click {
+                            return self.activate_menu();
+                        }
+                    }
+                }
+                if input.pressed(Key::Enter) {
+                    return self.activate_menu();
+                }
             }
             return Vec::new();
         }
@@ -837,9 +1023,21 @@ impl Console {
         Vec::new()
     }
     fn activate_menu(&mut self) -> Vec<Effect> {
+        let is_main = self.mode == Mode::MainMenu;
         match self.menu_selection {
-            0 => self.mode = Mode::Gameplay,
-            1 => self.toggle(),
+            0 => {
+                if is_main {
+                    return vec![Effect::Map("d1_trainstation_02".into())];
+                } else {
+                    self.mode = Mode::Gameplay;
+                }
+            }
+            1 => {
+                self.previous = self.mode;
+                self.mode = Mode::Options;
+                self.options.reset(self.config.clone());
+            }
+            2 => self.toggle(),
             _ => return vec![Effect::Quit],
         }
         Vec::new()
@@ -894,6 +1092,11 @@ impl Console {
         if self.mode == Mode::Gameplay {
             return;
         }
+        if self.mode == Mode::Options {
+            self.options
+                .draw(&self.canvas, self.font.as_ref(), self.menu_font.as_ref());
+            return;
+        }
         let scale = self.canvas.height() / 720.;
         let text = |content: &str, x, y, size, color, mono: bool| {
             text(
@@ -904,7 +1107,7 @@ impl Console {
                 1.,
                 if mono {
                     self.mono.as_ref()
-                } else if self.mode == Mode::Pause {
+                } else if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
                     self.menu_font.as_ref()
                 } else {
                     self.font.as_ref()
@@ -912,8 +1115,16 @@ impl Console {
                 color,
             );
         };
-        if self.mode == Mode::Pause {
-            // The accepted retail in-game capture has no global dimming rectangle.
+        if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
+            if self.mode == Mode::MainMenu {
+                self.canvas.rectangle(
+                    0.,
+                    0.,
+                    self.canvas.width(),
+                    self.canvas.height(),
+                    Color::new(0.04, 0.05, 0.07, 0.95),
+                );
+            }
             let geometry = self.menu_layout.geometry(self.canvas.height());
             if let Some(face) = &self.title_face {
                 let em = geometry.title_tall * self.title_metrics.em_per_cell;
@@ -942,7 +1153,12 @@ impl Console {
                     WHITE,
                 );
             }
-            for (i, label) in self.menu_labels.iter().enumerate() {
+            let labels = if self.mode == Mode::MainMenu {
+                &self.main_menu_labels
+            } else {
+                &self.menu_labels
+            };
+            for (i, label) in labels.iter().enumerate() {
                 draw_cell_text(
                     &self.canvas,
                     label,
@@ -1340,11 +1556,19 @@ mod tests {
             click: true,
             ..Default::default()
         });
+        assert_eq!(console.mode, Mode::Options);
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+        console.input(&Input {
+            pointer: Some(geometry.menu + vec2(5., geometry.item_tall * 2.5)),
+            click: true,
+            ..Default::default()
+        });
         assert_eq!(console.mode, Mode::Console);
         console.escape();
         assert_eq!(console.mode, Mode::Pause);
         console.input(&Input {
-            keys: [Key::Down].into(),
+            keys: [Key::Down, Key::Down, Key::Down].into(),
             ..Default::default()
         });
         assert_eq!(
@@ -1354,5 +1578,38 @@ mod tests {
             }),
             vec![Effect::Quit]
         );
+    }
+
+    #[test]
+    fn main_menu_and_options_configuration_interaction() {
+        let mut console = Console {
+            mode: Mode::MainMenu,
+            ..Default::default()
+        };
+        let geometry = console.menu_layout.geometry(console.canvas.height());
+        // Click New Game
+        assert_eq!(
+            console.input(&Input {
+                pointer: Some(geometry.menu + vec2(5., geometry.item_tall * 0.5)),
+                click: true,
+                ..Default::default()
+            }),
+            vec![Effect::Map("d1_trainstation_02".into())]
+        );
+        // Click Options
+        console.input(&Input {
+            pointer: Some(geometry.menu + vec2(5., geometry.item_tall * 1.5)),
+            click: true,
+            ..Default::default()
+        });
+        assert_eq!(console.mode, Mode::Options);
+        // Console command changes setting
+        console.mode = Mode::Console;
+        let effects = console.submit("volume 0.5; sensitivity 2.5; fov 90; mat_hdr_level 0");
+        assert_eq!(console.config.audio.volume, 0.5);
+        assert_eq!(console.config.mouse.sensitivity, 2.5);
+        assert_eq!(console.config.video.fov, 90.0);
+        assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
+        assert_eq!(effects.len(), 4);
     }
 }

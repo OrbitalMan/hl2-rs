@@ -27,6 +27,9 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 - Use Cargo.lock. Run relevant tests, strict Clippy and formatting; verify parsers against owned files and rendering through packaged captures. Give exact test commands and expected results. Documentation-only edits require document/whitelist checks, not gameplay rebuilds.
 - Research database/native exports are evidence, not automatic parity. Distinguish inferred names/signatures, SDK behavior and verified retail behavior. Seeded developer actors do not establish ordinary campaign completion.
 - Explain changes plainly: actual behavior, verification, limitations and next bounded step.
+- When hitting sandbox or offline environment barriers or fundamental architectural choices, ask the owner for guidance promptly rather than looping on inaccessible files or retrying blocked commands.
+- Resolution scaling: distinguish window presentation dimensions from internal 3D render target resolution (rendering at a configured lower resolution such as 720p and upscaling/filtering to a higher-resolution fullscreen display for performance).
+- Feature and functionality fidelity: for any feature or functionality, the original in-game / Source engine implementation behavior strictly overrides current or temporary implementations, unless explicitly asked otherwise by the owner. Decompile and inspect the original game/SDK implementation as the authoritative reference.
 
 ## Honesty
 

@@ -1,0 +1,34 @@
+[
+  {
+    "tick": 1,
+    "ui": [
+      {
+        "action": "escape"
+      }
+    ],
+    "label": "pause-menu"
+  },
+  {
+    "tick": 2,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": ["down"]
+        }
+      }
+    ]
+  },
+  {
+    "tick": 3,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": ["enter"]
+        }
+      }
+    ],
+    "label": "options-dialog"
+  }
+]

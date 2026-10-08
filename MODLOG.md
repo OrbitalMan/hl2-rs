@@ -1,5 +1,55 @@
 # MODLOG
 
+## 2026-10-08 Main Menu and Native Source Settings Suite
+
+**Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session).
+
+**Changed:**
+- `crates/hl2-ui/src/config.rs`: Implemented persistent JSON configuration system (`Config`, `VideoSettings`, `AudioSettings`, `MouseSettings`, `HdrMode`), saved alongside the binary (`bin/hl2-config.json` via `std::env::current_exe()`) without modifying the read-only game installation. Includes serialization and robust default key bindings.
+- `crates/hl2-ui/src/options.rs`: Implemented native Source VGUI-styled 4-tab Options dialog (`Keyboard`, `Mouse`, `Audio`, `Video`).
+  - Extracted UTF-16/UCS-2 localized strings from installed game resources (`resource/gameui_english.txt` and `resource/valve_english.txt`).
+  - Tab 1 (Keyboard): Interactive key rebinding with scrolling list, mapping actions (`+forward`, `+jump`, `+duck`, `+use`, `+reload`, etc.) to pressed keys.
+  - Tab 2 (Mouse): Reverse mouse toggle and sensitivity slider (0.5..10.0 scale).
+  - Tab 3 (Audio): Master volume slider (0.0..1.0).
+  - Tab 4 (Video): Resolution selection cycling (720p, 1080p, 1440p, 4K), Windowed/Borderless toggle, Field of View slider (60..120°), and HDR mode toggle (None / Full) planned for the future LDR mode.
+  - Action buttons: OK, Cancel, Apply.
+- `crates/hl2-ui/src/console.rs`:
+  - Added `Mode::MainMenu` and `Mode::Options` to console UI state machine.
+  - Extended pause menu and main menu layouts to 4 items with localized tokens:
+    - Pause menu: `RESUME GAME`, `OPTIONS`, `DEVELOPER CONSOLE`, `QUIT`.
+    - Main menu: `NEW GAME`, `OPTIONS`, `DEVELOPER CONSOLE`, `QUIT`.
+  - Added runtime console commands: `volume`, `sensitivity`, `fov`, `mat_hdr_level`, and `mainmenu`.
+  - Emits `Effect::ApplyConfig(Box<Config>)` on Apply/OK or convar changes to synchronize with host.
+- `crates/hl2-bevy/src/main.rs`:
+  - `Options::parse()` reads saved configuration as default values for width, height, borderless, volume, and camera FOV, overridden by CLI arguments when supplied.
+  - Added `--main-menu` CLI argument to launch directly into the native Main Menu.
+- `crates/hl2-bevy/src/movement.rs`:
+  - Added `parse_keycode` helper and action binding checkers (`action_pressed`, `action_just_pressed`).
+  - Applied configured mouse sensitivity and invert pitch to view simulation angles.
+  - Wired gameplay action keys and movement axes to read from user bindings in `Config`.
+  - Updated `console_effects` to handle `Effect::ApplyConfig`, updating camera FOV, audio volume, and window mode/resolution at runtime.
+  - Fixed wgpu attachment size validation crash (`differing sizes: depth (1280, 720, 1) vs color (3456, 2168, 1)`) by refactoring video configuration updates into `apply_video_config_to_window`: prevents stomping `window.resolution` with windowed dimensions when transitioning to or running in `BorderlessFullscreen`.
+- `AGENTS.md`: Documented owner guidance rules, render scaling architecture, and the rule that original in-game implementation behavior strictly overrides current/temporary implementations.
+- `../AGENTS.md` & `../HL2Wiki/video_modes_and_resolution.md`: Established workspace-level reverse engineering strategy and documented Source engine `mat_setvideomode`, display modes, and resolution scaling.
+
+**Why:** Implement the native Half-Life 2 Main Menu, Options dialog, and settings persistence suite as requested, and fix the wgpu validation crash when switching to fullscreen and applying options.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all 166 non-ignored unit tests passed across `hl2-ui`, `hl2-bevy`, `hl2-simulation`, `source-assets`, and `modkit-core`.
+- Added unit tests:
+  - `hl2_ui::config::tests::config_defaults_and_serialization`: checks default config generation, JSON roundtrip, and path calculation.
+  - `hl2_ui::console::tests::main_menu_and_options_configuration_interaction`: verifies menu pointer interactions, Options dialog navigation, drafting, Apply/OK effect emission, and cancelation.
+  - `hl2_bevy::movement::tests::config_key_bindings_and_mouse_sensitivity_are_respected`: verifies custom key bindings (`KeyI`, `KeyJ`), mouse sensitivity scaling (6.0), and inverted pitch.
+  - `hl2_bevy::movement::tests::config_effect_updates_simulation_fov_and_console_config`: verifies `Effect::ApplyConfig` updates simulation FOV and console config.
+  - `hl2_bevy::movement::tests::video_config_does_not_override_resolution_in_borderless_fullscreen`: verifies that applying video settings when transitioning to or running in borderless fullscreen preserves native display resolution and does not stomp `window.resolution`, keeping wgpu depth and swapchain color attachments synchronized.
+- Live execution and input script verification:
+  - Ran `./launch-bevy.sh --game "../Half-Life 2" --frames 35 --no-focus --movement-script "test-inputs/bevy-apply-fullscreen.json" --capture "artifacts/test-apply-fullscreen.png" --report "artifacts/test-apply-fullscreen.json"`.
+  - Executed runtime transition into Options -> Video tab -> toggle Borderless Fullscreen -> click OK/Apply and close dialog: successfully transitioned, captured 3456x2168 full frame, and exited cleanly with exit code 0.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed with 0 warnings.
+- `cargo fmt --all --check`: passed with 0 formatting differences.
+
+**Result:** Main Menu and Options dialog fully operational and integrated with Bevy host. Settings persist cleanly to `hl2-config.json` next to the executable.
+
 ## 2026-10-08 session 8: weapon-selection tick, godray regression, pause freeze, shield mipmaps
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.

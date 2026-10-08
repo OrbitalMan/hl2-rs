@@ -69,9 +69,12 @@ struct Options {
     no_focus: bool,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
     tonemap_scale: Option<f32>,
+    /// Start in the Source-native main menu instead of unpausing directly into gameplay.
+    main_menu: bool,
 }
 impl Options {
     fn parse() -> Result<Self> {
+        let config = hl2_ui::config::Config::load_or_default();
         let mut args = std::env::args().skip(1);
         let mut game = None;
         let mut options = Self {
@@ -91,15 +94,16 @@ impl Options {
             cpu_skinning: false,
             no_pvs: false,
             world_partition: false,
-            width: 1280,
-            height: 720,
-            borderless: false,
+            width: config.video.width,
+            height: config.video.height,
+            borderless: config.video.borderless,
             fly: false,
             movement_script: None,
-            volume: 1.,
+            volume: config.audio.volume,
             audio_trace: None,
             no_focus: false,
             tonemap_scale: None,
+            main_menu: false,
         };
         while let Some(arg) = args.next() {
             let next = |args: &mut std::iter::Skip<std::env::Args>| -> Result<String> {
@@ -147,6 +151,7 @@ impl Options {
                     }
                     options.tonemap_scale = Some(scale);
                 }
+                "--main-menu" => options.main_menu = true,
                 "--help" | "-h" => {
                     println!(
                         "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
@@ -307,6 +312,7 @@ fn main() -> Result<()> {
         options.fly,
         movement_commands,
     );
+    simulation.fov = loaded.console.config.video.fov;
     simulation.run_after_script = options.capture_live;
     let status = Status::default();
     let packaged_assets = std::env::current_exe()?
@@ -523,7 +529,11 @@ fn setup(
             options.world_partition,
         ),
     );
-    commands.insert_resource(console::Console::new(ui));
+    let mut console_ui = console::Console::new(ui);
+    if options.main_menu {
+        console_ui.source.mode = hl2_ui::console::Mode::MainMenu;
+    }
+    commands.insert_resource(console_ui);
     commands.spawn((
         Camera2d,
         Camera {

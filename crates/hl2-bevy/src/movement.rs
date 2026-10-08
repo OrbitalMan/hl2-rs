@@ -117,6 +117,7 @@ pub struct Simulation {
     /// Keep simulating with idle input after the script ends (`--capture-live` bursts).
     pub run_after_script: bool,
     pub dev_overlay: bool,
+    pub pending_video_config: Option<hl2_ui::config::VideoSettings>,
 }
 impl Simulation {
     pub fn new(
@@ -148,6 +149,7 @@ impl Simulation {
             finished: false,
             run_after_script: false,
             dev_overlay: false,
+            pending_video_config: None,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -259,6 +261,11 @@ impl Simulation {
                     }
                 }
                 Effect::Quit => ui.quit_requested = true,
+                Effect::ApplyConfig(cfg) => {
+                    self.fov = cfg.video.fov;
+                    self.pending_video_config = Some(cfg.video.clone());
+                    ui.source.config = *cfg;
+                }
             }
         }
     }
@@ -419,13 +426,115 @@ type InputDevices<'w, 's> = (
     Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>,
     MessageReader<'w, 's, bevy::input::keyboard::KeyboardInput>,
 );
+pub fn parse_keycode(name: &str) -> Option<KeyCode> {
+    match name {
+        "KeyA" => Some(KeyCode::KeyA),
+        "KeyB" => Some(KeyCode::KeyB),
+        "KeyC" => Some(KeyCode::KeyC),
+        "KeyD" => Some(KeyCode::KeyD),
+        "KeyE" => Some(KeyCode::KeyE),
+        "KeyF" => Some(KeyCode::KeyF),
+        "KeyG" => Some(KeyCode::KeyG),
+        "KeyH" => Some(KeyCode::KeyH),
+        "KeyI" => Some(KeyCode::KeyI),
+        "KeyJ" => Some(KeyCode::KeyJ),
+        "KeyK" => Some(KeyCode::KeyK),
+        "KeyL" => Some(KeyCode::KeyL),
+        "KeyM" => Some(KeyCode::KeyM),
+        "KeyN" => Some(KeyCode::KeyN),
+        "KeyO" => Some(KeyCode::KeyO),
+        "KeyP" => Some(KeyCode::KeyP),
+        "KeyQ" => Some(KeyCode::KeyQ),
+        "KeyR" => Some(KeyCode::KeyR),
+        "KeyS" => Some(KeyCode::KeyS),
+        "KeyT" => Some(KeyCode::KeyT),
+        "KeyU" => Some(KeyCode::KeyU),
+        "KeyV" => Some(KeyCode::KeyV),
+        "KeyW" => Some(KeyCode::KeyW),
+        "KeyX" => Some(KeyCode::KeyX),
+        "KeyY" => Some(KeyCode::KeyY),
+        "KeyZ" => Some(KeyCode::KeyZ),
+        "Digit0" => Some(KeyCode::Digit0),
+        "Digit1" => Some(KeyCode::Digit1),
+        "Digit2" => Some(KeyCode::Digit2),
+        "Digit3" => Some(KeyCode::Digit3),
+        "Digit4" => Some(KeyCode::Digit4),
+        "Digit5" => Some(KeyCode::Digit5),
+        "Digit6" => Some(KeyCode::Digit6),
+        "Digit7" => Some(KeyCode::Digit7),
+        "Digit8" => Some(KeyCode::Digit8),
+        "Digit9" => Some(KeyCode::Digit9),
+        "Space" => Some(KeyCode::Space),
+        "ControlLeft" | "Ctrl" => Some(KeyCode::ControlLeft),
+        "ControlRight" => Some(KeyCode::ControlRight),
+        "ShiftLeft" | "Shift" => Some(KeyCode::ShiftLeft),
+        "ShiftRight" => Some(KeyCode::ShiftRight),
+        "AltLeft" | "Alt" => Some(KeyCode::AltLeft),
+        "AltRight" => Some(KeyCode::AltRight),
+        "ArrowUp" | "Up" => Some(KeyCode::ArrowUp),
+        "ArrowDown" | "Down" => Some(KeyCode::ArrowDown),
+        "ArrowLeft" | "Left" => Some(KeyCode::ArrowLeft),
+        "ArrowRight" | "Right" => Some(KeyCode::ArrowRight),
+        "Enter" => Some(KeyCode::Enter),
+        "Backspace" => Some(KeyCode::Backspace),
+        "Delete" => Some(KeyCode::Delete),
+        "Home" => Some(KeyCode::Home),
+        "End" => Some(KeyCode::End),
+        "PageUp" => Some(KeyCode::PageUp),
+        "PageDown" => Some(KeyCode::PageDown),
+        "Tab" => Some(KeyCode::Tab),
+        "Escape" => Some(KeyCode::Escape),
+        "F1" => Some(KeyCode::F1),
+        "F2" => Some(KeyCode::F2),
+        "F3" => Some(KeyCode::F3),
+        "F4" => Some(KeyCode::F4),
+        "F5" => Some(KeyCode::F5),
+        "F6" => Some(KeyCode::F6),
+        "F7" => Some(KeyCode::F7),
+        "F8" => Some(KeyCode::F8),
+        "F9" => Some(KeyCode::F9),
+        "F10" => Some(KeyCode::F10),
+        "F11" => Some(KeyCode::F11),
+        "F12" => Some(KeyCode::F12),
+        _ => None,
+    }
+}
+
+fn action_pressed(
+    action: &str,
+    default_key: KeyCode,
+    keys: &ButtonInput<KeyCode>,
+    config: Option<&hl2_ui::config::Config>,
+) -> bool {
+    let key = config
+        .and_then(|c| c.keys.get(action))
+        .and_then(|name| parse_keycode(name))
+        .unwrap_or(default_key);
+    keys.pressed(key)
+}
+
+fn action_just_pressed(
+    action: &str,
+    default_key: KeyCode,
+    keys: &ButtonInput<KeyCode>,
+    config: Option<&hl2_ui::config::Config>,
+) -> bool {
+    let key = config
+        .and_then(|c| c.keys.get(action))
+        .and_then(|name| parse_keycode(name))
+        .unwrap_or(default_key);
+    keys.just_pressed(key)
+}
+
 fn controls(
     (keys, buttons, mouse, scroll, mut characters): InputDevices,
-    mut windows: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
+    mut windows: Query<(&mut Window, &mut CursorOptions), With<PrimaryWindow>>,
+    monitors: Query<&bevy::window::Monitor, With<bevy::window::PrimaryMonitor>>,
     mut sim: ResMut<Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
     mut ui: Option<ResMut<crate::console::Console>>,
+    global_volume: Option<ResMut<bevy::audio::GlobalVolume>>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
         if let Some(ui) = ui.as_deref_mut() {
@@ -433,7 +542,7 @@ fn controls(
         }
         exit.write(AppExit::Success);
     }
-    let Ok((window, mut cursor)) = windows.single_mut() else {
+    let Ok((mut window, mut cursor)) = windows.single_mut() else {
         return;
     };
     let text: String = characters
@@ -479,10 +588,24 @@ fn controls(
                     .map(|v| glam::Vec2::from_array(v.to_array())),
                 click: buttons.just_pressed(MouseButton::Left),
             });
+            let has_apply = effects
+                .iter()
+                .any(|e| matches!(e, hl2_ui::console::Effect::ApplyConfig(_)));
             sim.console_effects(ui, game, effects);
+            if has_apply {
+                if let Some(mut gv) = global_volume {
+                    *gv = bevy::audio::GlobalVolume::from(bevy::audio::Volume::Linear(
+                        ui.source.config.audio.volume,
+                    ));
+                }
+            }
+        }
+        if let Some(video_cfg) = sim.pending_video_config.take() {
+            apply_video_config_to_window(&mut window, &video_cfg, &monitors);
         }
         sim.transition = ui.source.mode != before;
         sim.paused = ui.source.paused();
+        let cfg = Some(&ui.source.config);
         if sim.transition || sim.paused {
             cursor.grab_mode = if sim.paused {
                 CursorGrabMode::None
@@ -490,7 +613,7 @@ fn controls(
                 CursorGrabMode::Locked
             };
             cursor.visible = sim.paused;
-            sim.jump_suppressed |= keys.pressed(KeyCode::Space);
+            sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
         } else if !sim.paused
             && buttons.just_pressed(MouseButton::Left)
             && cursor.grab_mode == CursorGrabMode::None
@@ -498,27 +621,31 @@ fn controls(
             sim.transition = true;
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
-            sim.jump_suppressed |= keys.pressed(KeyCode::Space);
+            sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
         }
         if ui.quit_requested {
             exit.write(AppExit::Success);
         }
-    } else if keys.just_pressed(KeyCode::Escape) && !cancel_selection || !window.focused {
-        sim.transition = !sim.paused;
-        sim.paused = true;
-        cursor.grab_mode = CursorGrabMode::None;
-        cursor.visible = true;
-        sim.jump_suppressed |= keys.pressed(KeyCode::Space);
-    } else if buttons.just_pressed(MouseButton::Left) {
-        sim.transition = sim.paused || cursor.grab_mode == CursorGrabMode::None;
-        if sim.transition {
-            sim.jump_suppressed |= keys.pressed(KeyCode::Space);
+    } else {
+        let cfg = ui.as_ref().map(|u| &u.source.config);
+        if keys.just_pressed(KeyCode::Escape) && !cancel_selection || !window.focused {
+            sim.transition = !sim.paused;
+            sim.paused = true;
+            cursor.grab_mode = CursorGrabMode::None;
+            cursor.visible = true;
+            sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
+        } else if buttons.just_pressed(MouseButton::Left) {
+            sim.transition = sim.paused || cursor.grab_mode == CursorGrabMode::None;
+            if sim.transition {
+                sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
+            }
+            sim.paused = false;
+            cursor.grab_mode = CursorGrabMode::Locked;
+            cursor.visible = false;
         }
-        sim.paused = false;
-        cursor.grab_mode = CursorGrabMode::Locked;
-        cursor.visible = false;
     }
-    if !keys.pressed(KeyCode::Space) {
+    let cfg = ui.as_ref().map(|u| &u.source.config);
+    if !action_pressed("+jump", KeyCode::Space, &keys, cfg) {
         sim.jump_suppressed = false;
     }
     if let Some(game) = game.as_deref_mut() {
@@ -536,29 +663,29 @@ fn controls(
     }
     if let Some(game) = game.as_deref_mut() {
         use crate::gameplay::Action;
-        for (key, action) in [
-            (KeyCode::F3, Action::Loadout),
-            (KeyCode::KeyE, Action::Use),
-            (KeyCode::KeyR, Action::Reload),
-            (KeyCode::KeyQ, Action::Previous),
-            (KeyCode::KeyG, Action::Impulse),
+        for (action_name, default_key, action) in [
+            ("loadout", KeyCode::F3, Action::Loadout),
+            ("+use", KeyCode::KeyE, Action::Use),
+            ("+reload", KeyCode::KeyR, Action::Reload),
+            ("lastinv", KeyCode::KeyQ, Action::Previous),
+            ("impulse", KeyCode::KeyG, Action::Impulse),
         ] {
-            if keys.just_pressed(key) {
+            if action_just_pressed(action_name, default_key, &keys, cfg) {
                 game.actions.push(action);
             }
         }
-        for (slot, key) in [
-            KeyCode::Digit1,
-            KeyCode::Digit2,
-            KeyCode::Digit3,
-            KeyCode::Digit4,
-            KeyCode::Digit5,
-            KeyCode::Digit6,
+        for (slot, (action_name, default_key)) in [
+            ("slot1", KeyCode::Digit1),
+            ("slot2", KeyCode::Digit2),
+            ("slot3", KeyCode::Digit3),
+            ("slot4", KeyCode::Digit4),
+            ("slot5", KeyCode::Digit5),
+            ("slot6", KeyCode::Digit6),
         ]
         .into_iter()
         .enumerate()
         {
-            if keys.just_pressed(key) {
+            if action_just_pressed(action_name, default_key, &keys, cfg) {
                 game.actions.push(Action::Slot { slot });
             }
         }
@@ -568,20 +695,28 @@ fn controls(
             });
         }
     }
-    sim.yaw -= mouse.delta.x * 0.001152;
-    sim.pitch = (sim.pitch - mouse.delta.y * 0.001152).clamp(-1.55, 1.55);
+    let (sensitivity, invert) = cfg
+        .map(|c| (c.mouse.sensitivity, c.mouse.invert))
+        .unwrap_or((3.0, false));
+    let sens_scale = (sensitivity / 3.0).clamp(0.01, 10.0);
+    sim.yaw -= mouse.delta.x * 0.001152 * sens_scale;
+    let pitch_factor = if invert { -1.0 } else { 1.0 };
+    sim.pitch =
+        (sim.pitch - mouse.delta.y * 0.001152 * sens_scale * pitch_factor).clamp(-1.55, 1.55);
     if keys.just_pressed(KeyCode::F2) {
         let fly = !sim.fly;
         sim.change_fly(fly);
     }
     sim.input = Input {
-        forward: f32::from(keys.pressed(KeyCode::KeyW)) - f32::from(keys.pressed(KeyCode::KeyS)),
-        side: f32::from(keys.pressed(KeyCode::KeyD)) - f32::from(keys.pressed(KeyCode::KeyA)),
+        forward: f32::from(action_pressed("+forward", KeyCode::KeyW, &keys, cfg))
+            - f32::from(action_pressed("+back", KeyCode::KeyS, &keys, cfg)),
+        side: f32::from(action_pressed("+moveright", KeyCode::KeyD, &keys, cfg))
+            - f32::from(action_pressed("+moveleft", KeyCode::KeyA, &keys, cfg)),
         yaw: sim.yaw,
-        jump: keys.pressed(KeyCode::Space) && !sim.jump_suppressed,
-        crouch: keys.pressed(KeyCode::ControlLeft),
-        sprint: keys.pressed(KeyCode::ShiftLeft),
-        slow: keys.pressed(KeyCode::AltLeft),
+        jump: action_pressed("+jump", KeyCode::Space, &keys, cfg) && !sim.jump_suppressed,
+        crouch: action_pressed("+duck", KeyCode::ControlLeft, &keys, cfg),
+        sprint: action_pressed("+speed", KeyCode::ShiftLeft, &keys, cfg),
+        slow: action_pressed("+walk", KeyCode::AltLeft, &keys, cfg),
     };
 }
 fn fixed_step(
@@ -597,6 +732,33 @@ fn fixed_step(
         exit.write(AppExit::Success);
     }
 }
+/// Applies video configuration to a Bevy Window, honoring display mode and avoiding
+/// desynchronization between window presentation resolution and wgpu attachments.
+pub(crate) fn apply_video_config_to_window(
+    window: &mut bevy::window::Window,
+    cfg: &hl2_ui::config::VideoSettings,
+    monitors: &Query<&bevy::window::Monitor, With<bevy::window::PrimaryMonitor>>,
+) {
+    let target_size = bevy::math::UVec2::new(cfg.width, cfg.height);
+    let new_mode = if cfg.borderless {
+        let modes = monitors.iter().flat_map(|m| m.video_modes.iter()).filter(|v| v.physical_size == target_size);
+        let best = modes.max_by_key(|v| (v.refresh_rate_millihertz, v.bit_depth)).copied();
+        bevy::window::WindowMode::Fullscreen(
+            bevy::window::MonitorSelection::Current,
+            best.map_or(bevy::window::VideoModeSelection::Current, bevy::window::VideoModeSelection::Specific),
+        )
+    } else {
+        bevy::window::WindowMode::Windowed
+    };
+    
+    if window.mode != new_mode {
+        window.mode = new_mode;
+    }
+    if !cfg.borderless && window.resolution.physical_size() != target_size {
+        window.resolution.set(cfg.width as f32, cfg.height as f32);
+    }
+}
+
 /// Source horizontal 4:3 field of view (degrees) to Bevy's vertical field of view.
 pub(crate) fn vertical_fov(degrees: f32) -> f32 {
     2. * ((degrees.to_radians() / 2.).tan() / (4. / 3.)).atan()
@@ -835,4 +997,162 @@ mod tests {
             std::time::Duration::from_millis(15)
         );
     }
+    #[test]
+    fn config_key_bindings_and_mouse_sensitivity_are_respected() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        sim.focused = true;
+        let mut custom_config = hl2_ui::config::Config::default();
+        custom_config.mouse.sensitivity = 6.0;
+        custom_config.mouse.invert = true;
+        custom_config.keys.insert("+forward".into(), "KeyI".into());
+        custom_config.keys.insert("+jump".into(), "KeyJ".into());
+
+        let mut ui = crate::console::Console::new(Default::default());
+        ui.source.config = custom_config;
+
+        app.insert_resource(sim)
+            .insert_resource(ui)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .insert_resource(AccumulatedMouseMotion {
+                delta: Vec2::new(50., 50.),
+            })
+            .add_message::<AppExit>()
+            .add_message::<bevy::input::keyboard::KeyboardInput>();
+
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            CursorOptions {
+                grab_mode: CursorGrabMode::Locked,
+                visible: false,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+
+        // Press remapped keys KeyI and KeyJ
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyI);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyJ);
+
+        app.world_mut().run_system_once(controls).unwrap();
+
+        let sim = app.world().resource::<Simulation>();
+        assert_eq!(sim.input.forward, 1.0);
+        assert!(sim.input.jump);
+        // With 6.0 sensitivity (scale 2.0) and inverted pitch:
+        // yaw: -50 * 0.001152 * 2.0 = -0.1152
+        // pitch: 0 - 50 * 0.001152 * 2.0 * (-1.0) = +0.1152
+        assert!((sim.yaw - (-0.1152)).abs() < 1e-4);
+        assert!((sim.pitch - 0.1152).abs() < 1e-4);
+    }
+    #[test]
+    fn config_effect_updates_simulation_fov_and_console_config() {
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::console::Console::new(Default::default());
+        assert_eq!(sim.fov, 75.0);
+
+        let mut new_config = ui.source.config.clone();
+        new_config.video.fov = 90.0;
+        new_config.audio.volume = 0.42;
+
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::ApplyConfig(Box::new(
+                new_config.clone(),
+            ))],
+        );
+
+        assert_eq!(sim.fov, 90.0);
+        assert_eq!(ui.source.config.video.fov, 90.0);
+        assert_eq!(ui.source.config.audio.volume, 0.42);
+    }
+    
+
+    
+    #[test]
+    fn applies_video_config_safely() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::window::{WindowMode, WindowResolution, PrimaryWindow};
+        let mut app = App::new();
+        app.world_mut().spawn((
+            bevy::window::Monitor {
+                name: Some("Test".into()),
+                video_modes: vec![bevy::window::VideoMode {
+                    physical_size: UVec2::new(1280, 720),
+                    bit_depth: 32,
+                    refresh_rate_millihertz: 60000,
+                }],
+                physical_position: IVec2::ZERO,
+                physical_width: 1920,
+                physical_height: 1080,
+                refresh_rate_millihertz: Some(60000),
+                scale_factor: 1.0,
+            },
+            bevy::window::PrimaryMonitor,
+        ));
+        app.world_mut().spawn((
+            Window {
+                resolution: WindowResolution::new(1920, 1080),
+                mode: WindowMode::Windowed,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.insert_resource(Simulation::new(
+            &World::default(),
+            glam::Vec3::ZERO,
+            0.,
+            0.,
+            false,
+            vec![],
+        ));
+        let mut sim = app.world_mut().resource_mut::<Simulation>();
+        sim.pending_video_config = Some(hl2_ui::config::VideoSettings {
+            width: 1280,
+            height: 720,
+            borderless: true,
+            fov: 75.0,
+            hdr: hl2_ui::config::HdrMode::Full,
+        });
+        
+        app.world_mut().run_system_once(|
+            mut windows: Query<&mut Window, With<PrimaryWindow>>,
+            monitors: Query<&bevy::window::Monitor, With<bevy::window::PrimaryMonitor>>,
+            mut sim: ResMut<Simulation>,
+        | {
+            let mut window = windows.single_mut().unwrap();
+            if let Some(cfg) = sim.pending_video_config.take() {
+                apply_video_config_to_window(&mut window, &cfg, &monitors);
+            }
+        }).unwrap();
+        
+        let window = app.world_mut().query::<&Window>().single(app.world());
+        assert!(matches!(window.unwrap().mode, WindowMode::Fullscreen(_, _)));
+    }
+
 }

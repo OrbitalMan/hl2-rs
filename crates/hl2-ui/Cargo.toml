@@ -12,6 +12,7 @@ hl2-simulation.workspace = true
 fontdue = "0.9.3"
 ttf-parser = "0.25.1"
 serde.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi"] }
