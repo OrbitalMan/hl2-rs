@@ -319,15 +319,29 @@ pub struct SoundActor {
     pub entity: Option<usize>,
 }
 
+/// ambient_generic sound control (SDK CAmbientGeneric InputPlaySound/InputStopSound).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AmbientControl {
+    /// Stop the entity's current sound and start it again.
+    Play(usize),
+    Stop(usize),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundRequest {
     pub name: String,
     pub actor: Option<SoundActor>,
+    /// Set for ambient_generic inputs; the host applies the entity's own parameters.
+    pub ambient: Option<AmbientControl>,
 }
 
 impl From<String> for SoundRequest {
     fn from(name: String) -> Self {
-        Self { name, actor: None }
+        Self {
+            name,
+            actor: None,
+            ambient: None,
+        }
     }
 }
 
@@ -801,6 +815,7 @@ mod tests {
 
     fn speech_request(cue: &str, model: &str) -> SoundRequest {
         SoundRequest {
+            ambient: None,
             name: cue.into(),
             actor: Some(SoundActor {
                 name: "actor diagnostic name".into(),
