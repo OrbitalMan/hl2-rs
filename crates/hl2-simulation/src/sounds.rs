@@ -333,8 +333,10 @@ pub struct SoundRequest {
     pub actor: Option<SoundActor>,
     /// Set for ambient_generic inputs; the host applies the entity's own parameters.
     pub ambient: Option<AmbientControl>,
-    /// Emit volume (EmitSound_t m_flVolume); None keeps the host's default cue volume.
+    /// Emit volume (EmitSound_t m_flVolume); None uses the script volume.
     pub volume: Option<f32>,
+    /// World position for distance gain with the script soundlevel; None is unspatialized.
+    pub origin: Option<glam::Vec3>,
 }
 
 impl From<String> for SoundRequest {
@@ -344,6 +346,7 @@ impl From<String> for SoundRequest {
             actor: None,
             ambient: None,
             volume: None,
+            origin: None,
         }
     }
 }
@@ -409,6 +412,9 @@ pub struct ScriptParams {
     pub volume: f32,
     pub pitch: f32,
     pub soundlevel: f32,
+    /// Interval bounds (low, high) that each emission draws from.
+    pub volume_range: (f32, f32),
+    pub pitch_range: (f32, f32),
 }
 impl Default for ScriptParams {
     fn default() -> Self {
@@ -416,7 +422,20 @@ impl Default for ScriptParams {
             volume: 1.,
             pitch: 100.,
             soundlevel: 75.,
+            volume_range: (1., 1.),
+            pitch_range: (100., 100.),
         }
+    }
+}
+fn interval_bounds(text: &str) -> Option<(f32, f32)> {
+    let values = text
+        .split(',')
+        .map(|v| v.trim().parse::<f32>().ok().filter(|v| v.is_finite()))
+        .collect::<Option<Vec<_>>>()?;
+    match values[..] {
+        [v] => Some((v, v)),
+        [a, b] => Some((a, b)),
+        _ => None,
     }
 }
 fn interval(text: &str) -> Option<f32> {
@@ -468,15 +487,26 @@ fn script_params(entry: &source_assets::keyvalues::Entry) -> ScriptParams {
         let Some(text) = child.text() else { continue };
         let key = child.key.to_ascii_lowercase();
         match key.as_str() {
-            "volume" if text.eq_ignore_ascii_case("VOL_NORM") => params.volume = 1.,
-            "volume" => params.volume = interval(text).unwrap_or(params.volume),
+            "volume" if text.eq_ignore_ascii_case("VOL_NORM") => {
+                params.volume = 1.;
+                params.volume_range = (1., 1.);
+            }
+            "volume" => {
+                params.volume = interval(text).unwrap_or(params.volume);
+                params.volume_range = interval_bounds(text).unwrap_or(params.volume_range);
+            }
             "pitch" => {
-                params.pitch = match text.to_ascii_uppercase().as_str() {
-                    "PITCH_NORM" => 100.,
-                    "PITCH_LOW" => 95.,
-                    "PITCH_HIGH" => 120.,
-                    other => interval(other).unwrap_or(params.pitch),
-                }
+                let named = match text.to_ascii_uppercase().as_str() {
+                    "PITCH_NORM" => Some(100.),
+                    "PITCH_LOW" => Some(95.),
+                    "PITCH_HIGH" => Some(120.),
+                    _ => None,
+                };
+                params.pitch = named.or_else(|| interval(text)).unwrap_or(params.pitch);
+                params.pitch_range = named
+                    .map(|p| (p, p))
+                    .or_else(|| interval_bounds(text))
+                    .unwrap_or(params.pitch_range);
             }
             "soundlevel" => params.soundlevel = soundlevel_value(text).unwrap_or(params.soundlevel),
             "attenuation" => {
@@ -494,6 +524,8 @@ pub struct Library {
     actors: ActorRegistry,
     available: HashMap<String, Vec<bool>>,
     rng: u64,
+    /// Separate stream for volume/pitch draws so wave selection is unchanged.
+    param_rng: u64,
     pub variants_played: BTreeMap<String, usize>,
     pub decoded: BTreeMap<String, AudioSummary>,
     pub errors: BTreeMap<String, String>,
@@ -580,11 +612,29 @@ impl Library {
             actors,
             available: HashMap::new(),
             rng: 0x92ea79123,
+            param_rng: 0x51ab_2c3d_4e5f_6071,
             variants_played: BTreeMap::new(),
             decoded: BTreeMap::new(),
             errors,
             played: 0,
         }
+    }
+    /// One emission's volume and pitch drawn inside the script intervals
+    /// (CSoundParametersInternal random volume/pitch), plus the soundlevel.
+    pub fn draw_params(&mut self, name: &str) -> (f32, f32, f32) {
+        let p = self.params(name);
+        let mut draw = |(low, high): (f32, f32)| {
+            if high == low {
+                return low;
+            }
+            self.param_rng ^= self.param_rng << 13;
+            self.param_rng ^= self.param_rng >> 7;
+            self.param_rng ^= self.param_rng << 17;
+            low + (high - low) * ((self.param_rng >> 40) as f32 / (1u64 << 24) as f32)
+        };
+        let volume = draw(p.volume_range);
+        let pitch = draw(p.pitch_range);
+        (volume, pitch, p.soundlevel)
     }
     /// Script volume/pitch/soundlevel; raw waves use the SDK defaults.
     pub fn params(&self, name: &str) -> ScriptParams {
@@ -809,6 +859,7 @@ mod tests {
                 .unwrap(),
             available: HashMap::new(),
             rng: 0x92ea79123,
+            param_rng: 0x51ab_2c3d_4e5f_6071,
             variants_played: BTreeMap::new(),
             decoded: BTreeMap::new(),
             errors: BTreeMap::new(),
@@ -820,6 +871,7 @@ mod tests {
         SoundRequest {
             ambient: None,
             volume: None,
+            origin: None,
             name: cue.into(),
             actor: Some(SoundActor {
                 name: "actor diagnostic name".into(),
@@ -1120,7 +1172,9 @@ mod tests {
             ScriptParams {
                 volume: 1.,
                 pitch: 100.,
-                soundlevel: 75.
+                soundlevel: 75.,
+                volume_range: (1., 1.),
+                pitch_range: (95., 105.),
             }
         );
         assert_eq!(
@@ -1128,7 +1182,9 @@ mod tests {
             ScriptParams {
                 volume: 0.32,
                 pitch: 120.,
-                soundlevel: 66.
+                soundlevel: 66.,
+                volume_range: (0.32, 0.32),
+                pitch_range: (120., 120.),
             }
         );
         assert_eq!(p[2].soundlevel, 0.);

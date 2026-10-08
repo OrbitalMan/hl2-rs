@@ -590,13 +590,19 @@ pub fn queue(
         if count >= MAX_PLAYERS {
             audio.capacity_rejections += 1;
             game.unplayed_sounds += 1;
-        } else if let Some(path) = audio.emit(
-            &mut commands,
-            &request,
-            false,
-            (request.volume.unwrap_or(0.4), 100., None),
-            (paused, None, None),
-        ) {
+        } else if let Some(path) = {
+            // EmitSound: script volume/pitch drawn per emission unless the caller set the
+            // volume; positioned requests use the script soundlevel for distance gain.
+            let (volume, pitch, soundlevel) = audio.library.draw_params(&request.name);
+            let spatial = request.origin.map(|o| (o, soundlevel));
+            audio.emit(
+                &mut commands,
+                &request,
+                false,
+                (request.volume.unwrap_or(volume), pitch, spatial),
+                (paused, None, None),
+            )
+        } {
             count += 1;
             // Actor speech drives lip sync from the chosen wave's phonemes.
             if let Some(actor) = request.actor.as_ref().and_then(|a| a.entity) {
