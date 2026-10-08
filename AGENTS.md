@@ -29,7 +29,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 - Explain changes plainly: actual behavior, verification, limitations and next bounded step.
 - When hitting sandbox or offline environment barriers or fundamental architectural choices, ask the owner for guidance promptly rather than looping on inaccessible files or retrying blocked commands.
 - Resolution scaling: distinguish window presentation dimensions from internal 3D render target resolution (rendering at a configured lower resolution such as 720p and upscaling/filtering to a higher-resolution fullscreen display for performance).
-- Feature and functionality fidelity: for any feature or functionality, the original in-game / Source engine implementation behavior strictly overrides current or temporary implementations, unless explicitly asked otherwise by the owner. Decompile and inspect the original game/SDK implementation as the authoritative reference.
+- Feature fidelity: prioritize verified behavior of the owned retail game unless the owner explicitly requests a deviation. Consult official SDK references within their license terms and, where legally permitted, targeted private binary analysis. Implement behavior independently in Rust. Never use leaked source or copy or mechanically translate Valve implementation code into the project. Keep native analysis and game assets outside public source checkouts.
 
 ## Honesty
 
