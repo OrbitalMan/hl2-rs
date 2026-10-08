@@ -102,6 +102,34 @@ pub struct Gameplay {
     pub footsteps: hl2_simulation::footsteps::Footsteps,
 }
 impl Gameplay {
+    /// After the player move: HL2 fall damage on landing, then death (Event_Killed/DeathSound).
+    /// Returns true when the player died this tick.
+    pub fn player_outcome(&mut self, player: &mut modkit_core::movement::Player) -> bool {
+        let mut fell = false;
+        if let Some(speed) = player.landed {
+            let damage = hl2_simulation::gameplay::fall_damage(speed);
+            if damage > 0. && self.inventory.damage_player(damage, false) > 0. {
+                self.scene.sounds.push("Player.FallDamage".into());
+                fell = true;
+            }
+        }
+        if player.dead || self.inventory.health > 0. {
+            return false;
+        }
+        player.dead = true;
+        player.crouched = false;
+        self.scene.sounds.push(
+            if fell {
+                "Player.FallGib"
+            } else {
+                "Player.Death"
+            }
+            .into(),
+        );
+        // Event_Killed holsters the active weapon; HEV_DEAD suit sentences are not scheduled yet.
+        self.inventory.previous = std::mem::take(&mut self.inventory.active);
+        true
+    }
     /// SDK step sounds for one movement tick: UpdateStepSound with the state before the move,
     /// then the jump or landing step the move produced.
     pub fn step_sounds(

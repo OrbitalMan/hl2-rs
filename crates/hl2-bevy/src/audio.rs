@@ -217,6 +217,9 @@ impl PreparedAudio {
                 "HealthVial.Touch",
                 "ItemBattery.Touch",
                 "BaseCombatCharacter.AmmoPickup",
+                "Player.FallDamage",
+                "Player.FallGib",
+                "Player.Death",
             ]
             .into_iter()
             .map(str::to_owned),
