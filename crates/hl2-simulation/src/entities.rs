@@ -237,6 +237,8 @@ pub struct Scene {
     pub sounds: Vec<crate::sounds::SoundRequest>,
     /// ambient_generic m_fActive after inputs; unset entities keep their spawn state.
     ambient_active: BTreeMap<usize, bool>,
+    /// env_soundscape selection for the local player (SDK server soundscape system).
+    pub soundscape: crate::soundscapes::Selector,
     unsupported: BTreeSet<String>,
     choreography: BTreeMap<usize, Choreography>,
     pub movement_commands: Vec<SceneMoveCommand>,
@@ -275,6 +277,7 @@ impl Scene {
             transition: None,
             sounds: Vec::new(),
             ambient_active: BTreeMap::new(),
+            soundscape: crate::soundscapes::Selector::new(world),
             unsupported: BTreeSet::new(),
             choreography: BTreeMap::new(),
             movement_commands: Vec::new(),
@@ -1771,6 +1774,15 @@ impl Scene {
             self.choreography.insert(id, scene);
         }
     }
+    /// SDK FrameUpdatePostEntityThink soundscape pass for the player's ear (eye) position,
+    /// after player movement; a newly active env_soundscape fires OnPlay.
+    pub fn update_soundscape(&mut self, world: &World, ear: Vec3) {
+        let states = &self.states;
+        let enabled = |id: usize| states.get(id).is_some_and(|s| s.enabled && !s.killed);
+        if let Some(id) = self.soundscape.update(world, ear, enabled) {
+            self.fire(id, "OnPlay", id);
+        }
+    }
     pub fn fire(&mut self, id: usize, name: &str, activator: usize) {
         let Some(state) = self.states.get_mut(id) else {
             return;
@@ -2015,6 +2027,9 @@ impl Scene {
                 if matches!(class, "func_brush" | "func_monitor") {
                     self.states[id].visible = false;
                 }
+            }
+            "toggleenabled" if class.starts_with("env_soundscape") => {
+                self.states[id].enabled = !self.states[id].enabled;
             }
             "toggle" if !door => {
                 self.states[id].enabled = !self.states[id].enabled;

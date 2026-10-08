@@ -384,7 +384,7 @@ fn eligible_waves(waves: &[Wave], gender: ActorGender) -> Vec<usize> {
     }
 }
 
-fn playback_path(wave: &str) -> String {
+pub fn playback_path(wave: &str) -> String {
     // PSkipSoundChars skips only Source's defined modifiers. `$` is a literal
     // template byte, not a modifier; removing it could hide unresolved paths.
     wave.trim_start_matches(['*', '?', '!', '#', '>', '<', '^', '@', ')', '}'])

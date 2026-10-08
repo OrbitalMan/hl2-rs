@@ -1,5 +1,25 @@
 # Sources and native research
 
+## Parallel REA reverse-engineering (from 2026-10-08)
+
+The owner runs Codex agents in parallel that reverse-engineer the owned Half-Life 2 installation with [REA](https://github.com/morluto/rea). Their results go to the private `work/hl2-decompiled` workspace (for example `coverage-pass-20261008-15`), never into this checkout. Before starting a feature, check that workspace for new REA or coverage output on it and read its README. Other agents' folders are read-only for a session; each session records its own findings in `work/hl2-decompiled/<topic>-<date>/README.md`. The research order is unchanged: official SDK 2013 first, then retail evidence (pass14 index, REA output), then native comparisons. REA output is evidence, not automatic parity; distinguish inferred names/signatures from verified retail behavior as for the pass14 index.
+
+## Third-party reference: LuckerParty specs (2026-10-08, queued)
+
+[r0pi0x/LuckerParty](https://github.com/r0pi0x/LuckerParty) is a Counter-Strike: Source rewrite on Bevy 0.19.1 and avian3d, dual MIT/Apache-2.0, first pushed 2026-10-08. Reviewed at 507aba2 in a private clone (`work/references/luckerparty`, outside this checkout). Its `specs/` folder holds 30 behavior specs, all marked "draft". Each says it was written from the public Source SDK 2013 only (fall damage from server measurements). Its spec workflow also allows reading decompiled or leaked code, so this project treats the specs as **unverified secondary pointers**: every fact used here must be confirmed in our own SDK clone (b8cfb12), the pass14 retail index or native HDR captures, and cited to that evidence. No LuckerParty code is imported. Adapting a small piece (for example a WGSL shader) requires its MIT copyright notice and a MODLOG note.
+
+Compared with this project:
+- **Behind ours or equal:** sound distance gain (their curve is an unverified inverse-distance hypothesis; ours is the retail `GetDistGainFromSoundLevel`), soundscapes (same SDK rules as our 12d notes), movement, entity I/O, triggers, doors, brush overlays, LightmappedGeneric envmaps/self-illumination, HDR tone mapping.
+- **Useful reading guides for remaining renderer work (owner item 5):**
+  - `specs/cs_source/shaders.md` "Bumped lightmaps": bump basis vectors, the four-page order per style, weighting (LightmappedGeneric squares the clamped dot), upload encoding of bump pages and the 1-texel page borders (RenderDoc-observed in CS:S LDR). For Kleiner's rocky brick. Confirm in SDK lightmappedgeneric/vrad code and against native HDR (`mat_hdr_level 2`); their LDR notes may not transfer.
+  - `specs/cs_source/ropes.md`: move_rope/keyframe_rope node counts by Type, 50 Hz Verlet with 3 constraint sweeps, settle pre-simulation, slack rule, Catmull-Rom subdivision, camera-facing strip and minimum pixel width. Their native CS:S measurement fit gravity 800 better than the SDK's 1500; measure HL2 cables against native before choosing.
+  - `specs/cs_source/sprites_dust.md`: env_sprite size/orientation from `$spriteorientation`, render modes 3/5/9, glow occlusion and distance fade, renderamt applied more than once in glow modes; func_dustmotes. For the plaza gate's green light sprite and the small screen's glow.
+  - `specs/cs_source/water.md`, `shadows_sky.md`: DX9 water passes and fog, render-to-texture shadows and shadow_control. Needed for later maps.
+  - `specs/cs_source/overlays_decals.md`: overlay face lists include displacement faces built from listed sides (owner item 3); its decal-on-displacement question is open there too.
+- **Not covered:** detail props (item 2), displacement overlay projection details, NPCs/choreography.
+
+Order: after soundscapes (12d), when each renderer item starts, read the matching spec first, then verify in the SDK, record the verdict in the item's private README and DESIGN step, and compare with native HDR.
+
 ## Latest private checkpoint: pass14
 
 The exact-byte retrieval index audits13 immutable source datasets:126inventory identities,42modules with exports,133,473distinct observed addresses with some pseudocode,133,556export variants,51,823candidate/control rows,268,939recorded calls and94,824string records. Saved122,721entries and10,752temporary discovery entries remain separate. Sixteen original errors/recoveries and39failed variants are preserved. Reviewed names/types, Rust implementation and native verification tables remain empty. All native code, binaries, tools and databases stay outside this repository.
