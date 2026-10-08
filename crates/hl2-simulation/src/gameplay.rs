@@ -1065,22 +1065,12 @@ impl Inventory {
         let id = hit.entity;
         let entity = world.entities.get(id);
         let flesh = entity.is_some_and(|e| e.class().starts_with("npc_"));
-        if !flesh {
-            self.impacts.push((hit, melee));
-        }
+        // SDK UTIL_ImpactTrace: every bullet and player-crowbar hit plays the hit surface's
+        // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
+        // WeaponSound(MELEE_HIT) is the NPC-operator path.
+        self.impacts.push((hit, melee));
         if melee {
             self.animate("hitcenter1", scene.time);
-            play_sound(
-                scene,
-                weapon,
-                if flesh {
-                    "melee_hit"
-                } else {
-                    "melee_hit_world"
-                },
-                world,
-                "",
-            );
         }
         self.hits += 1;
         physics.impulse(id, direction, if melee { 4. } else { 1. });

@@ -61,6 +61,8 @@ pub struct Texture {
     pub image: Arc<vtf::Image>,
     pub scale: f32,
 }
+/// Surface property of NPC hitboxes (HL2 humans and Combine use "flesh").
+const FLESH: &str = "flesh";
 #[derive(Default)]
 pub struct Impacts {
     pub marks: Vec<Mark>,
@@ -143,6 +145,8 @@ impl Impacts {
     pub fn required_sound_requests(&self) -> Vec<crate::sounds::SoundRequest> {
         self.surfaceprops
             .values()
+            .map(String::as_str)
+            .chain([FLESH])
             .filter_map(|p| self.property(p, "bulletimpact"))
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
@@ -167,14 +171,18 @@ impl Impacts {
         }
         None
     }
-    pub fn add(
-        &mut self,
-        hit: RayHit,
-        melee: bool,
-        world: &World,
-        physics: &Physics,
-        scene: &mut Scene,
-    ) {
+    pub fn add(&mut self, hit: RayHit, world: &World, physics: &Physics, scene: &mut Scene) {
+        // NPC hitboxes use the flesh surface: impact sound only, no decal here.
+        if world
+            .entities
+            .get(hit.entity)
+            .is_some_and(|e| e.class().starts_with("npc_"))
+        {
+            if let Some(sound) = self.property(FLESH, "bulletimpact") {
+                scene.sounds.push(sound.into());
+            }
+            return;
+        }
         let (surfaces, origin, rotation, scale): (&[Surface], _, _, _) =
             if let Some(e) = world.entities.get(hit.entity) {
                 let state = &scene.states[hit.entity];
@@ -251,10 +259,9 @@ impl Impacts {
             .get(&receiver.material)
             .map(String::as_str)
             .unwrap_or("default");
-        if !melee {
-            if let Some(sound) = self.property(prop, "bulletimpact") {
-                scene.sounds.push(sound.into());
-            }
+        // Bullets and the player's crowbar alike (SDK PlayImpactSound).
+        if let Some(sound) = self.property(prop, "bulletimpact") {
+            scene.sounds.push(sound.into());
         }
         let family = match self
             .property(prop, "gamematerial")
@@ -356,7 +363,6 @@ mod tests {
                     position: GVec3::ZERO,
                     normal: GVec3::Z,
                 },
-                false,
                 &world,
                 &physics,
                 &mut scene,
@@ -379,7 +385,6 @@ mod tests {
                 position: GVec3::Z * 10.,
                 normal: GVec3::Z,
             },
-            false,
             &world,
             &physics,
             &mut scene,
@@ -433,7 +438,6 @@ mod tests {
                 position: center,
                 normal,
             },
-            false,
             &world,
             &physics,
             &mut scene,
@@ -466,7 +470,7 @@ mod tests {
             .impact_ray(GVec3::new(-3260., -2024., 128.), GVec3::X, 100.)
             .unwrap();
         let mut impacts = Impacts::new(&vfs, &world);
-        impacts.add(hit, false, &world, &physics, &mut scene);
+        impacts.add(hit, &world, &physics, &mut scene);
         assert_eq!(impacts.created, 1);
         assert_eq!(impacts.marks[0].entity, hit.entity);
     }
