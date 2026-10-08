@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Bevy Runtime",
+      "type": "shell",
+      "command": "./scripts/build-bevy.sh",
+      "windows": {
+        "command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\build-bevy.ps1"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build Bevy Runtime (Debug)",
+      "type": "shell",
+      "command": "./scripts/build-bevy.sh --debug",
+      "windows": {
+        "command": "powershell -ExecutionPolicy Bypass -File .\\scripts\\build-bevy.ps1 -DebugBuild"
+      },
+      "group": "build",
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}
