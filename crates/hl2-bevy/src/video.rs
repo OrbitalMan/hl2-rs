@@ -8,33 +8,27 @@ use bevy::window::PrimaryMonitor;
 pub(crate) fn apply_video_config_to_window(
     window: &mut bevy::window::Window,
     cfg: &hl2_ui::config::VideoSettings,
-    monitors: &Query<&bevy::window::Monitor, With<PrimaryMonitor>>,
+    _monitors: &Query<&bevy::window::Monitor, With<PrimaryMonitor>>,
 ) {
-    let target_size = bevy::math::UVec2::new(cfg.width, cfg.height);
     let new_mode = if cfg.borderless {
-        let modes = monitors
-            .iter()
-            .flat_map(|m| m.video_modes.iter())
-            .filter(|v| v.physical_size == target_size);
-        let best = modes
-            .max_by_key(|v| (v.refresh_rate_millihertz, v.bit_depth))
-            .copied();
-        bevy::window::WindowMode::Fullscreen(
-            bevy::window::MonitorSelection::Current,
-            best.map_or(
-                bevy::window::VideoModeSelection::Current,
-                bevy::window::VideoModeSelection::Specific,
-            ),
-        )
+        bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current)
     } else {
         bevy::window::WindowMode::Windowed
     };
 
-    if window.mode != new_mode {
+    let mode_changed = window.mode != new_mode;
+    if mode_changed {
         window.mode = new_mode;
     }
-    if !cfg.borderless && window.resolution.physical_size() != target_size {
-        window.resolution.set(cfg.width as f32, cfg.height as f32);
+
+    // Only set resolution when in windowed mode and not transitioning between modes.
+    // Setting resolution in fullscreen or during mode switch causes wgpu render attachment size mismatches.
+    if !mode_changed && window.mode == bevy::window::WindowMode::Windowed && !cfg.borderless {
+        let current_logical_w = window.resolution.width().round() as u32;
+        let current_logical_h = window.resolution.height().round() as u32;
+        if current_logical_w != cfg.width || current_logical_h != cfg.height {
+            window.resolution.set(cfg.width as f32, cfg.height as f32);
+        }
     }
 }
 
@@ -96,6 +90,118 @@ mod tests {
             .unwrap();
 
         let window = app.world_mut().query::<&Window>().single(app.world());
-        assert!(matches!(window.unwrap().mode, WindowMode::Fullscreen(_, _)));
+        assert!(matches!(
+            window.unwrap().mode,
+            WindowMode::BorderlessFullscreen(_)
+        ));
+    }
+
+    #[test]
+    fn changes_resolution_in_windowed_mode() {
+        let mut app = App::new();
+        app.world_mut().spawn((
+            Window {
+                resolution: WindowResolution::new(1920, 1080),
+                mode: WindowMode::Windowed,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+
+        let cfg = hl2_ui::config::VideoSettings {
+            width: 1280,
+            height: 720,
+            borderless: false,
+            fov: 75.0,
+            hdr: hl2_ui::config::HdrMode::Full,
+        };
+
+        app.world_mut()
+            .run_system_once(
+                move |mut windows: Query<&mut Window, With<PrimaryWindow>>,
+                      monitors: Query<&bevy::window::Monitor, With<PrimaryMonitor>>| {
+                    let mut window = windows.single_mut().unwrap();
+                    apply_video_config_to_window(&mut window, &cfg, &monitors);
+                },
+            )
+            .unwrap();
+
+        let window = app
+            .world_mut()
+            .query::<&Window>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(window.mode, WindowMode::Windowed);
+        assert_eq!(window.width() as u32, 1280);
+        assert_eq!(window.height() as u32, 720);
+    }
+
+    #[test]
+    fn mode_transition_defers_resolution_change() {
+        let mut app = App::new();
+        app.world_mut().spawn((
+            Window {
+                resolution: WindowResolution::new(1920, 1080),
+                mode: WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+
+        let cfg = hl2_ui::config::VideoSettings {
+            width: 1280,
+            height: 720,
+            borderless: false,
+            fov: 75.0,
+            hdr: hl2_ui::config::HdrMode::Full,
+        };
+
+        // First apply: transitions mode from BorderlessFullscreen to Windowed.
+        // Resolution must NOT be mutated in the same frame to prevent wgpu attachment mismatch.
+        app.world_mut()
+            .run_system_once(
+                |mut windows: Query<&mut Window, With<PrimaryWindow>>,
+                 monitors: Query<&bevy::window::Monitor, With<PrimaryMonitor>>| {
+                    let mut window = windows.single_mut().unwrap();
+                    let cfg = hl2_ui::config::VideoSettings {
+                        width: 1280,
+                        height: 720,
+                        borderless: false,
+                        fov: 75.0,
+                        hdr: hl2_ui::config::HdrMode::Full,
+                    };
+                    apply_video_config_to_window(&mut window, &cfg, &monitors);
+                },
+            )
+            .unwrap();
+
+        let window = app
+            .world_mut()
+            .query::<&Window>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(window.mode, WindowMode::Windowed);
+        // Resolution preserved on transition frame
+        assert_eq!(window.width() as u32, 1920);
+        assert_eq!(window.height() as u32, 1080);
+
+        // Subsequent frame while already Windowed applies resolution
+        app.world_mut()
+            .run_system_once(
+                move |mut windows: Query<&mut Window, With<PrimaryWindow>>,
+                      monitors: Query<&bevy::window::Monitor, With<PrimaryMonitor>>| {
+                    let mut window = windows.single_mut().unwrap();
+                    apply_video_config_to_window(&mut window, &cfg, &monitors);
+                },
+            )
+            .unwrap();
+
+        let window = app
+            .world_mut()
+            .query::<&Window>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(window.width() as u32, 1280);
+        assert_eq!(window.height() as u32, 720);
     }
 }

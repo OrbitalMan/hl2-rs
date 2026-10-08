@@ -358,8 +358,7 @@ fn main() -> Result<()> {
                             bevy::window::PresentMode::AutoVsync
                         },
                         title: "HL2-RS | Bevy/wgpu migration | gameplay migration preview".into(),
-                        resolution: WindowResolution::new(options.width, options.height)
-                            .with_scale_factor_override(1.),
+                        resolution: WindowResolution::new(options.width, options.height),
                         mode: if options.borderless {
                             WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
                         } else {
