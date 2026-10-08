@@ -7,6 +7,75 @@ use std::collections::{BTreeSet, HashMap};
 
 const MAX_PRELOADED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_PLAYERS: usize = 256;
+/// rodio 0.22 keeps each player alive with mono 48 kHz silence spans of 512 samples. A
+/// sound appended in another format has its first 512 samples resampled as if they were in
+/// that filler format (the weapon-selection tick's attack played 2.2x fast and lost ~12 ms).
+/// Sounds are therefore converted once at load to this rate; stereo one-shots also start
+/// with one filler-length span of silence so the misread span is silent.
+const BACKEND_RATE: u32 = 48_000;
+const BACKEND_FILLER_SAMPLES: usize = 512;
+
+/// Resample interleaved samples with Catmull-Rom interpolation (each channel separately).
+fn resample(samples: &[f32], channels: usize, from: u32, to: u32) -> Vec<f32> {
+    let frames = samples.len() / channels;
+    if from == to || frames == 0 {
+        return samples.to_vec();
+    }
+    let out_frames = (frames as u64 * u64::from(to)).div_ceil(u64::from(from)) as usize;
+    let at = |frame: isize, channel: usize| -> f32 {
+        samples[frame.clamp(0, frames as isize - 1) as usize * channels + channel]
+    };
+    let mut out = Vec::with_capacity(out_frames * channels);
+    for i in 0..out_frames {
+        let position = i as f64 * f64::from(from) / f64::from(to);
+        let (base, t) = (
+            position.floor() as isize,
+            (position - position.floor()) as f32,
+        );
+        for channel in 0..channels {
+            let [p0, p1, p2, p3] = [-1, 0, 1, 2].map(|d| at(base + d, channel));
+            out.push(
+                p1 + 0.5
+                    * t
+                    * (p2 - p0
+                        + t * (2. * p0 - 5. * p1 + 4. * p2 - p3 + t * (3. * (p1 - p2) + p3 - p0))),
+            );
+        }
+    }
+    out
+}
+
+/// 16-bit PCM WAV at the backend rate; see [`BACKEND_RATE`].
+fn backend_wav(data: Vec<u8>, looped: bool) -> Result<Vec<u8>> {
+    let (channels, rate, samples) = hl2_simulation::sounds::wav_samples(&data)?;
+    if rate == BACKEND_RATE && channels == 1 {
+        return Ok(data);
+    }
+    let mut pcm = resample(&samples, usize::from(channels), rate, BACKEND_RATE);
+    if channels != 1 && !looped {
+        pcm.splice(0..0, std::iter::repeat_n(0., BACKEND_FILLER_SAMPLES));
+    }
+    let bytes = u32::try_from(pcm.len() * 2).context("converted audio exceeds WAV size")?;
+    let mut wav = Vec::with_capacity(44 + pcm.len() * 2);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + bytes).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&channels.to_le_bytes());
+    wav.extend_from_slice(&BACKEND_RATE.to_le_bytes());
+    wav.extend_from_slice(&(BACKEND_RATE * u32::from(channels) * 2).to_le_bytes());
+    wav.extend_from_slice(&(channels * 2).to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&bytes.to_le_bytes());
+    for sample in pcm {
+        wav.extend_from_slice(&((sample.clamp(-1., 1.) * 32767.).round() as i16).to_le_bytes());
+    }
+    Ok(wav)
+}
+/// `--mute-ambient`: skip map-start ambient_generic loops so test recordings isolate cues.
+pub static MUTE_AMBIENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 struct Ambient {
     request: SoundRequest,
@@ -101,6 +170,12 @@ impl PreparedAudio {
             .map(str::to_owned),
         );
         let mut paths = BTreeSet::new();
+        let looped: BTreeSet<String> = ambient
+            .iter()
+            .filter(|a| a.looped)
+            .filter_map(|a| library.all_alternatives(&a.request.name).ok())
+            .flatten()
+            .collect();
         for cue in &cues {
             match library.all_alternatives(cue) {
                 Ok(variants) => paths.extend(variants),
@@ -122,6 +197,7 @@ impl PreparedAudio {
                     _ => None,
                 };
                 let (data, summary) = hl2_simulation::sounds::decode(&path, encoded)?;
+                let data = backend_wav(data, looped.contains(&path))?;
                 if data.len() > MAX_PRELOADED_BYTES.saturating_sub(bytes) {
                     bail!("owned audio preload exceeds 512 MiB budget");
                 }
@@ -291,7 +367,8 @@ pub fn install(
         pause_changes: 0,
         resume_changes: 0,
     };
-    for ambient in prepared.ambient {
+    let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
+    for ambient in prepared.ambient.into_iter().filter(|_| !mute) {
         if audio.requested >= MAX_PLAYERS as u64 {
             audio.capacity_rejections += 1;
             continue;
@@ -422,6 +499,78 @@ mod tests {
     use bevy::audio::{Decodable, Source};
 
     #[test]
+    fn backend_resampling_preserves_tone_and_pads_stereo_one_shots() {
+        // A 1.8 kHz tone (the selection tick's bursts) at 22050 Hz keeps its level and pitch.
+        let tone: Vec<f32> = (0..22050)
+            .map(|i| (i as f32 * std::f32::consts::TAU * 1800. / 22050.).sin() * 0.5)
+            .collect();
+        let out = resample(&tone, 1, 22050, BACKEND_RATE);
+        assert_eq!(out.len(), 48000);
+        let rms = |x: &[f32]| (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
+        assert!((rms(&out) / rms(&tone) - 1.).abs() < 0.01);
+        let crossings = out.windows(2).filter(|w| w[0] <= 0. && w[1] > 0.).count();
+        assert!((1799..=1801).contains(&crossings));
+        assert_eq!(resample(&tone, 1, 22050, 22050), tone);
+        // Stereo one-shots start with one filler span of silence; loops and mono do not.
+        let wav = |channels: u16, frames: usize| {
+            let data = [0x00u8, 0x40].repeat(frames * usize::from(channels));
+            let mut wav = b"RIFF".to_vec();
+            wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+            wav.extend_from_slice(b"WAVEfmt     ");
+            wav.extend_from_slice(&channels.to_le_bytes());
+            wav.extend_from_slice(&44100u32.to_le_bytes());
+            wav.extend_from_slice(&(44100 * 2 * u32::from(channels)).to_le_bytes());
+            wav.extend_from_slice(&(2 * channels).to_le_bytes());
+            wav.extend_from_slice(b" data");
+            wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            wav.extend_from_slice(&data);
+            wav
+        };
+        let samples = |bytes: Vec<u8>| hl2_simulation::sounds::wav_samples(&bytes).unwrap();
+        let (channels, rate, one_shot) = samples(backend_wav(wav(2, 441), false).unwrap());
+        assert_eq!((channels, rate), (2, BACKEND_RATE));
+        assert_eq!(one_shot.len(), BACKEND_FILLER_SAMPLES + 2 * 480);
+        assert!(one_shot[..BACKEND_FILLER_SAMPLES].iter().all(|&v| v == 0.));
+        assert!((one_shot[BACKEND_FILLER_SAMPLES] - 0.5).abs() < 1e-3);
+        assert_eq!(
+            samples(backend_wav(wav(2, 441), true).unwrap()).2.len(),
+            2 * 480
+        );
+        assert_eq!(
+            samples(backend_wav(wav(1, 441), false).unwrap()).2.len(),
+            480
+        );
+    }
+    /// Plain 8-bit unsigned or 16-bit signed PCM samples of a RIFF WAVE, as f32.
+    fn pcm_samples(bytes: &[u8]) -> Option<Vec<f32>> {
+        let (mut offset, mut bits) = (12, None);
+        while offset + 8 <= bytes.len() {
+            let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize;
+            let body = bytes.get(offset + 8..offset + 8 + size)?;
+            match &bytes[offset..offset + 4] {
+                b"fmt " if u16::from_le_bytes([body[0], body[1]]) == 1 => {
+                    bits = Some(u16::from_le_bytes([body[14], body[15]]))
+                }
+                b"data" => {
+                    return match bits? {
+                        8 => Some(body.iter().map(|&b| (f32::from(b) - 128.) / 128.).collect()),
+                        16 => Some(
+                            body.as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|c| f32::from(i16::from_le_bytes(*c)) / 32768.)
+                                .collect(),
+                        ),
+                        _ => None,
+                    };
+                }
+                _ => {}
+            }
+            offset += 8 + size + (size & 1);
+        }
+        None
+    }
+    #[test]
     #[ignore = "requires an owned installed Half-Life 2 copy"]
     fn installed_weapon_selection_backend_preserves_full_duration() {
         let root = source_assets::install::discover().unwrap();
@@ -471,7 +620,20 @@ mod tests {
                 };
                 let decoder = source.decoder();
                 let duration = decoder.total_duration().unwrap().as_secs_f64();
-                let samples = decoder.count() as u64;
+                let decoded: Vec<f32> = source.decoder().collect();
+                let samples = decoded.len() as u64;
+                // The backend's samples must equal the file's, from the very first one.
+                let expected_samples =
+                    pcm_samples(&source.bytes).unwrap_or_else(|| decoded.clone());
+                let first = decoded
+                    .iter()
+                    .zip(&expected_samples)
+                    .position(|(a, b)| (a - b).abs() > 1. / 64.);
+                println!(
+                    "{cue} {path}: first differing sample {first:?}; first 8 backend {:?} file {:?}",
+                    &decoded[..8],
+                    &expected_samples[..8]
+                );
                 println!("{cue} {path}: {samples}/{expected} samples, {duration:.6} seconds");
                 assert_eq!(samples, expected, "backend truncated {path}");
                 assert!(

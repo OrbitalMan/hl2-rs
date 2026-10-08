@@ -538,6 +538,24 @@ impl Library {
     }
 }
 
+/// Interleaved samples in -1..1 of PCM WAV bytes produced by [`decode`]:
+/// (channels, sample rate, samples). 8-bit WAV is unsigned, as RIFF defines it.
+pub fn wav_samples(data: &[u8]) -> Result<(u16, u32, Vec<f32>)> {
+    let mut wav = hound::WavReader::new(Cursor::new(data))?;
+    let spec = wav.spec();
+    let samples = match (spec.sample_format, spec.bits_per_sample) {
+        (hound::SampleFormat::Float, 32) => wav.samples::<f32>().collect::<Result<Vec<_>, _>>()?,
+        (hound::SampleFormat::Int, bits @ 1..=32) => {
+            let scale = 1. / (1u64 << (bits - 1)) as f32;
+            wav.samples::<i32>()
+                .map(|s| s.map(|s| s as f32 * scale))
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => bail!("unsupported WAV sample format"),
+    };
+    Ok((spec.channels, spec.sample_rate, samples))
+}
+
 /// Decode bounded owned audio into backend-independent WAV bytes and metadata.
 pub fn decode(path: &str, encoded: Vec<u8>) -> Result<(Vec<u8>, AudioSummary)> {
     let (data, codec) = playback_bytes(path, encoded)?;
@@ -927,6 +945,42 @@ mod tests {
         assert!(playback_bytes("large.wav", vec![0; MAX_ENCODED_AUDIO + 1]).is_err());
     }
 
+    #[test]
+    fn wav_samples_reads_unsigned_8_bit_and_signed_16_bit() {
+        for (bits, raw, expected) in [
+            (8u16, vec![128u8, 255, 0], vec![0., 127. / 128., -1.]),
+            (
+                16,
+                vec![0, 0, 0xff, 0x7f, 0, 0x80],
+                vec![0., 32767. / 32768., -1.],
+            ),
+        ] {
+            let mut cursor = Cursor::new(Vec::new());
+            let mut writer = hound::WavWriter::new(
+                &mut cursor,
+                hound::WavSpec {
+                    channels: 1,
+                    sample_rate: 22050,
+                    bits_per_sample: bits,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            if bits == 8 {
+                for b in &raw {
+                    writer.write_sample(*b as i8 ^ i8::MIN).unwrap();
+                }
+            } else {
+                for c in raw.as_chunks::<2>().0 {
+                    writer.write_sample(i16::from_le_bytes(*c)).unwrap();
+                }
+            }
+            writer.finalize().unwrap();
+            let (channels, rate, samples) = wav_samples(&cursor.into_inner()).unwrap();
+            assert_eq!((channels, rate), (1, 22050));
+            assert_eq!(samples, expected);
+        }
+    }
     #[test]
     fn valid_pcm_keeps_its_rate_channels_and_samples() {
         let mut cursor = Cursor::new(Vec::new());
