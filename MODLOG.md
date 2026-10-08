@@ -7,6 +7,7 @@
 **Changed:**
 - Owner priority change: player features first, then the rest of the arsenal (DESIGN 13).
 - Player (DESIGN 13a, SDK CSingleplayRules::FlPlayerFallDamage, CBasePlayer::Event_Killed/DeathSound/PlayerDeathThink, respawn): HL2 fall damage from 526.5 to 922.5 u/s (armor ignored) with Player.FallDamage; death holsters the weapon, sets the dead view height (14), freezes input, plays Player.Death or Player.FallGib; after every button is released, one press restarts the map (singleplayer reload without saves). `Inventory::damage_player`, shared `Player::dead`/`landed`. Death cues are preloaded. Fixture `test-inputs/bevy-player-death.json`.
+- trigger_hurt (SDK CTriggerHurt, player only): immediate hit on touch, damage x 0.5 every 0.5 s, damagemodel 1 doubling to damagecap with 3 s forgiveness, leave damage when the last think missed, negative damage heals, OnHurtPlayer; DMG_FALL/DROWN/POISON/RADIATION bypass armor. Unit-tested; batch artifacts/hurt-regression 26/17/26. Maps: trainstation_01 turret_hurt_1 (start disabled), trainstation_04 one, canals_01 two; not exercised in a packaged run.
 - Detail sprites (DESIGN 11c, branch `wip/detail-sprites-20261008`, not merged): `source_assets::details` decoder and a per-view billboard renderer (vertex shader facing and squared-distance fade).
 
 **Why:** Owner request to finish player features (death etc.) before more renderer work; detail sprites were the queued item 2.

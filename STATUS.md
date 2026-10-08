@@ -13,8 +13,9 @@ Supersedes session 8's open items where they conflict. Claude Code desktop, mode
 - **Third-party specs:** r0pi0x/LuckerParty (CS:S Bevy rewrite) reviewed; its specs are unverified SDK-derived pointers for ropes, env_sprite, bumped lightmaps and water (docs/research.md). **Parallel REA agents** add retail evidence under work/hl2-decompiled (pass15); check per feature.
 
 - **Player death (DESIGN 13a): merged.** HL2 fall damage, death (dead view height, holster, Player.Death/FallGib) and press-to-respawn (map restart while saves are deferred). Packaged `test-inputs/bevy-player-death.json`. Native death view not compared (oracle `hurtme` rejected twice).
+- **trigger_hurt: merged** (SDK timing, doubling model, heal, armor bypass by damage type; player only, unit-tested, no packaged map run).
 - **Detail sprites (DESIGN 11c): WIP on `wip/detail-sprites-20261008`.** Decoder and per-view billboard renderer work in a packaged capture (3,622 sprites); native comparison, bursts and batch pending.
-- **Owner priority (2026-10-08, late):** player features first (death done; trigger_hurt, damage scaling/fades/indicator, pain/HEV sentences, drowning next), then the rest of the arsenal (frag, crossbow, RPG, gravity gun, bug bait), DESIGN 13.
+- **Owner priority (2026-10-08, late):** player features first (death and trigger_hurt done; damage scaling/fades/indicator, pain/HEV sentences, drowning next), then the rest of the arsenal (frag, crossbow, RPG, gravity gun, bug bait), DESIGN 13.
 
 Remaining work, in the owner's order: (0) DESIGN 13a player remainder, then 13b arsenal; previous order follows. (1) audio follow-ups: outside soundscape level (+6.6 dB), NPC speech positioning, own-sound spatialization evidence (REA), DSP; (2) detail sprites/leaf decals (DESIGN 11c; decoder on `wip/detail-sprites-20261008`, rendering next); (3) displacement overlays and fade distances; (4) npc_metropolice movement/idle and the campaign-order security chain; (5) renderer LDR, env_cubemap for brush entities/models, bumped lightmaps (LuckerParty shaders.md as a reading guide), ropes, env_sprite (green light) and screen glow, monitor brightness.
 
