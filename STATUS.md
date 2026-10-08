@@ -16,7 +16,7 @@ Supersedes session 7's open items below where they conflict. Claude Code desktop
 - **Bump/rocky walls (owner, 2026-10-08):** Kleiner's lab brick looks rocky in native and flat in ours: bumped (directional) lightmaps, item 5.
 - **PR #2 (@OrbitalMan):** HDR lightmap/sky `Image::new` format fix + VS Code configs + README macOS section. Reviewed: tree identical to a tested local merge (352 tests, Clippy/fmt, packaged captures unchanged). Owner will merge after CI.
 
-Remaining work, in the owner's order: (1) env_soundscape (DESIGN 12d: room-dependent background in spawn room / station / outside), then positional PlaySound inputs and script cue volume/pitch; (2) detail sprites/leaf decals (DESIGN 11c); (3) displacement overlays and fade distances; (4) npc_metropolice movement/idle and the campaign-order security chain; (5) renderer LDR, env_cubemap for brush entities/models (likely the olive Combine panels), bumped lightmaps; plus the green light sprite and screen glow.
+Remaining work, in the owner's order: (0) finish wip/ambient-inputs-20261008 (barrier close hum must loop while near, per owner; unit-tested, packaged check pending); (1) env_soundscape (DESIGN 12d: room-dependent background in spawn room / station / outside), then positional PlaySound inputs and script cue volume/pitch; (2) detail sprites/leaf decals (DESIGN 11c); (3) displacement overlays and fade distances; (4) npc_metropolice movement/idle and the campaign-order security chain; (5) renderer LDR, env_cubemap for brush entities/models (likely the olive Combine panels), bumped lightmaps; plus the green light sprite and screen glow.
 
 ## Previous session 7 (2026-10-08)
 
