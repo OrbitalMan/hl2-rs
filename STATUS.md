@@ -1,6 +1,6 @@
 # STATUS
 
-Checkpoint: 2026-10-07 session 5 final handoff (~85% of the 5-hour window). main d69176e+: 692b4d2 toolsblack/2x headroom (superseded by HDR), a2d57db VMT conditionals + linear UnlitTwoTexture, 1028388 eye view-target latch, HDR path (HDR lumps, lightmaps capped at 16, auto exposure, RGBS sky, conditionals in HDR mode), bloom (pre-bloom histogram, monitor feeds at scale 1), dev profile without dependency debug info. Owner game is HDR Full; the oracle now passes +mat_hdr_level 2 (earlier native captures were LDR). Checks: 328 normal tests, strict Clippy/fmt; batch artifacts/bloom-regression accepted (movement 26, weapons 17, attention 26). Session 4 handoff (main through 5e127e5) is history.
+Checkpoint: 2026-10-08 session 6 handoff (~90% of the 5-hour window). main 356fc76: PR #1 macOS merged (ad480e1) with docs follow-ups, README Platforms table + docs/features.md, debug-flag docs fix, viewmodel flicker fix (bloom ordering, 45cfb23) with `--capture-burst N`, LightmappedGeneric envmaps with SDK masks and bump normals (dde1d9d), `$selfillum` (a1b80b6), info_overlay brush fragments (356fc76). Checks at 356fc76: 338 normal + 30 owned tests, strict Clippy/fmt, batch artifacts/overlays-regression (movement 26, weapons 17, attention 26), viewmodel burst 0/121 lost. Session 5 history follows.
 
 Latest owner instructions (2026-10-06): resume the Rust rewrite now; whole-corpus decompilation coverage is paused after pass14, with decompilation on demand per feature through the private pass14 index. Bevy is the target host; the retained host gets only a quick smoke check per shared change. Keep working until the owner says stop or usage nears 98% of the 5-hour window. Commit/push at each milestone. Computer use, screen testing and native original-game comparisons are authorized. Active work: scene gestures and the first-level security scene (docs/DESIGN.md).
 
@@ -84,7 +84,11 @@ Private database/native exports and published SDK research corroborate selected 
 - Private gesture evidence: work/hl2-decompiled/animation-next-2026-10-05.md, owned census and pinned SDK notes.65 named plus59 empty active gesture occurrences; native handling of empty events is unproven. That research note has older build headers; current revisions/builds are above.
 - Uncapped/profiled1080 station02: CPU skinning35.05→GPU66.85FPS; PVS disabled66.69→enabled156.94; subsequent material package174.72. Separate local comparisons with run variation/profiling overhead, not one isolated cumulative benchmark or campaign guarantee. Spatial gains are small/experimental; see docs/performance.md.
 
-## Open work (session 5, in order)
+## Open work (session 6 handoff, in order)
+
+Next session, in order: (1) owner reports from 2026-10-08 below (weapon-switch sound cut halfway; plaza Combine barriers: distance fade + animated material; Kleiner monitor scanlines must scroll top to bottom). (2) Detail sprites for the plaza leaves and park grass: trainstation_02 worldspawn has `detailmaterial "detail/detailsprites"` and `detailvbsp "detail.vbsp"`; read the 'dprp' game lump (SDK gamebspfile.h) and SDK client detailobjectsystem.cpp (DESIGN 11c). (3) Overlays on displacement faces (retail 10148b90) and fade distances. (4) npc_metropolice ground movement + campaign security chain (11d). (5) LDR mode. (6) env_cubemap for brush entities/models, bumped lightmaps.
+
+Session 5 list (history):
 
 Done in session 5: (1) Combine slate: tools/toolsblack renders; `_minlight` is a VRAD bake (already in the lightmap), and the atlas now keeps Source's 2x overbright headroom (692b4d2). (2) Monitor colour: retail VMT key conditionals (`srgb?$color2 2.5`), sRGB-read $texture2 and linear modulation (a2d57db). (3) Regression batch artifacts/session5-regression accepted (docs/validation.md); new native plaza capture confirms the brighter sunlit luxels move toward native.
 
