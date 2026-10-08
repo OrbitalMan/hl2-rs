@@ -1,5 +1,17 @@
 # Local validation — 2026-10-05
 
+## Audio verification method (session 8, 2026-10-08)
+
+Use this method for any "sound is cut / sounds different" report. Sink lifetimes and sample counts alone missed a real defect.
+
+1. **Lifecycle:** run the packaged game with `--audio-trace <file.jsonl>`. Each line records a request (cue, frame, scene time, paused), a sink start, and a removal with `last_position` vs `duration`. A sound removed early shows `remaining` well above the ~10 ms position granularity.
+2. **Decoder values:** the owned ignored test `installed_weapon_selection_backend_preserves_full_duration` compares the backend decoder's samples with the WAV's PCM, from the first sample.
+3. **What actually reaches Windows:** record only the game's process tree with the private Microsoft ApplicationLoopback build. Arguments: `<pid> includetree <out.wav> <dwell ms>`. The tool prints "10 seconds" but honours the dwell; the session 8 files are 40 s long. Do not use whole-endpoint loopback, which picks up other apps. Use `--mute-ambient` so the non-positional map ambients do not mask cues.
+4. **Measure, don't eyeball:** align each occurrence to the source WAV by cross-correlation, using later parts of the sound so an altered onset cannot bias the alignment. Then compare the energy of each authored segment relative to the first (dB), and per-window correlation and gain over the first 30 ms. Avoid fixed-window envelopes normalised to their maximum: window alignment with a sharp attack biases them. Avoid high-pass cutoffs inside the sound's own band.
+5. Reference recordings: the original file, and when useful a local one-off recording of another player (e.g. the historical Macroquad host). Native HL2 per-process recording is the parity reference when available.
+
+Known backend behaviour: rodio 0.22 misreads the first 512 samples of any sound not in its mono 48 kHz filler format, so all waves are converted to 48 kHz at load (`hl2-bevy/src/audio.rs`).
+
 ## Owner report milestone (2026-10-08, Codex gpt-6.1-sol)
 
 Owner follow-up correction: only plaza barrier proximity fading is fixed; scrolling animation remains broken. Earlier changing-UV observations did not prove visible motion. Frozen bursts establish rendering stability only. Revalidate temporal animation in an unpaused packaged run beside native HDR before marking it fixed. This correction changes documentation only; runtime tests/builds were **not rerun**.

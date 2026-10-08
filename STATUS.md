@@ -1,8 +1,21 @@
 # STATUS
 
-Checkpoint: 2026-10-08 session 7 owner-report milestone, implemented on `wip/owner-reports-20261008` and published as main `2a914fc`. Owner follow-up: plaza Combine barrier proximity fading is fixed, but barrier scrolling animation is still broken. The earlier animation-success claim is withdrawn; changing uploaded UV values did not establish visible native-equivalent animation. Kleiner monitor scanlines scroll downward. 344 normal + 33 owned tests, strict Clippy/fmt, release build and packaged movement/weapons/attention checks 26/17/26 pass. The weapon-switch cutoff remains unresolved and was not reproduced. The corrected seeded-HUD capture renders its blue graphics, with 31 identical frozen burst frames.
+Checkpoint: 2026-10-08 session 8 (Claude Code desktop, claude-opus-5-5) on main. Weapon-selection tick cutoff FIXED (rodio 0.22 filler-format bug; audio resampled to 48 kHz at load; owner confirmed by ear). Session 7 godray regression fixed (rendercolor dropped by the UnlitTwoTexture path). Exposure/bloom freeze while paused. Plaza shield scroll verified against native; far look fixed with authored VTF mips. 347 normal + 33 owned tests, strict Clippy/fmt, batch artifacts/session8-final 26/17/26.
 
-## Current session 7 (2026-10-08)
+## Current session 8 (2026-10-08)
+
+Supersedes session 7's open items below where they conflict. Claude Code desktop, model `claude-opus-5-5`.
+
+- **Weapon-switch tick: fixed.** The owner narrowed it to the slot-move tick (`wpn_moveselect.wav`, 8-bit 22 kHz). It was audible in scripted runs too. Process recordings showed the attack missing for ~12 ms. Cause: rodio 0.22 players start with a mono 48 kHz filler span, and the first 512 samples of any other format are resampled as 48 kHz mono. All waves are now converted to 48 kHz at load; stereo one-shots get one silent span first. Burst levels match the file within 0.1 dB, and the owner confirmed by ear. Method: docs/validation.md "Audio verification method". New `--audio-trace`, `--mute-ambient`.
+- **Godrays: fixed** (regression from session 7's barrier work). UnlitTwoTexture tint now includes entity rendercolor. Hall views match native HDR. The regression batch's Breen hall view had shown it (mean luma 170 vs 91) but was accepted without investigation; compare batch images against the previous batch, not only the verifiers.
+- **Pause:** exposure and bloom adaptation now freeze with the paused game. The Escape pause menu gives 150 identical frames. Use the real Escape path (`"ui":[{"action":"escape"}]`) in pause tests; `paused: true` does not show the menu.
+- **Plaza barriers:** scroll speed and direction match native (frame-series cross-correlation). Authored mips now give the native smudged-plasma look at distance (600-1000 units vs native HDR). Remaining around the gate: Combine wall panels olive vs native blue-steel, missing green light sprite, missing blue glow around the small screen.
+- **Kleiner HUD:** `overlay_kleinertv` (func_monitor) renders in the batch main view during security_02 (disabled only OnCompletion). The `-feed-final` images are raw camera feeds and never include it.
+- **Still open (audio):** map `ambient_generic` loops play non-positionally everywhere at load: the owner's loud office hum, the shield hum not fading with distance, and no room-dependent background. Next: Source attenuation per SDK `sound.cpp` (radius to soundlevel `40 + 20 log10(r/36)`; soundscript soundlevel when the message is a script; only looping, non-silent ambients start at spawn) and retail `GetDistGainFromSoundLevel` (engine 10216bd0 -> 10216a20, disassembled privately), then `env_soundscape`.
+
+Remaining work, in the owner's order: (1) positional ambient_generic + soundscapes (owner reports); (2) detail sprites/leaf decals (DESIGN 11c); (3) displacement overlays and fade distances; (4) npc_metropolice movement/idle and the campaign-order security chain; (5) renderer LDR, env_cubemap for brush entities/models (likely the olive Combine panels), bumped lightmaps; plus the green light sprite and screen glow.
+
+## Previous session 7 (2026-10-08)
 
 This section supersedes the older handoff's owner-report queue below. Work followed official Source SDK 2013 at `b8cfb12` first, then exact read-only pass14 retrieval where needed, and original Rust implementation on the experimental branch. Whole-corpus discovery remains paused. Codex Desktop model provenance for this session: `gpt-6.1-sol`, verified from the current turn context; subagents inherited it.
 
