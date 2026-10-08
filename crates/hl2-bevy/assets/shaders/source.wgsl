@@ -27,6 +27,7 @@ struct ModelLighting {
 @group(#{MATERIAL_BIND_GROUP}) @binding(14) var<uniform> envmap_saturation: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(15) var envmap_mask_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(16) var envmap_mask_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(17) var<uniform> self_illum: vec4<f32>;
 // SDK lightmappedgeneric_ps2_3_x.h CUBEMAP: reflection of the eye vector about the face
 // normal, sampled in Source axes. Retail integer HDR stores cubemaps as linear/16 and
 // multiplies by ENV_MAP_SCALE 16 (shaderapidx9 c30.z), so texels are capped at 16.
@@ -136,13 +137,17 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     // Lightmaps are linear and unclamped (Source HDR path); white fallbacks are 1.0.
     // Procedural camera images are sampled through an sRGB view and are already linear.
     var rgb = select(srgb_to_linear(base.rgb) * baked, base.rgb, parameters.w < -0.5);
-    if envmap_tint.w > 0.5 {
-        rgb += envmap_specular(mesh, base_alpha);
-    }
     if lit {
         let p = (lighting.basis * vec4(mesh.world_position.xyz, 1.0)).xyz;
         let n = normalize((lighting.basis * vec4(mesh.world_normal, 0.0)).xyz);
         rgb = srgb_to_linear(base.rgb) * model_light(p, n);
+    }
+    // SDK $selfillum: diffuse = lerp(diffuse, tint * albedo, base alpha), before specular.
+    if self_illum.w > 0.5 {
+        rgb = mix(rgb, self_illum.xyz * srgb_to_linear(base.rgb), base_alpha);
+    }
+    if envmap_tint.w > 0.5 {
+        rgb += envmap_specular(mesh, base_alpha);
     }
     // Source FinalOutput TONEMAP_SCALE_LINEAR: the camera's exposure is the tonemap scale.
     rgb *= view.exposure;

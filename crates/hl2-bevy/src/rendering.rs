@@ -63,6 +63,9 @@ pub struct SourceMaterial {
     #[texture(15)]
     #[sampler(16)]
     pub(crate) envmap_mask: Handle<Image>,
+    /// xyz = $selfillumtint, w = 1 when $selfillum applies.
+    #[uniform(17)]
+    pub(crate) self_illum: Vec4,
     pub(crate) alpha: AlphaMode,
     pub(crate) two_sided: bool,
 }
@@ -1299,6 +1302,9 @@ pub(crate) fn make_material(
                 },
         ),
         envmap_mask: white.clone(),
+        self_illum: definition
+            .self_illum
+            .map_or(Vec4::ZERO, |tint| Vec3::from_array(tint).extend(1.)),
         base,
         lightmap: if definition.unlit {
             white.clone()

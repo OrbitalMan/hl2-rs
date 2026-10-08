@@ -97,6 +97,8 @@ pub struct MaterialData {
     pub envmap_mask_path: Option<String>,
     pub envmap_mask_alpha: bool,
     pub envmap_bump: bool,
+    /// $selfillum with $selfillumtint: diffuse = lerp(diffuse, tint * albedo, base alpha).
+    pub self_illum: Option<[f32; 3]>,
 }
 
 impl Default for MaterialData {
@@ -133,6 +135,7 @@ impl Default for MaterialData {
             envmap_mask_path: None,
             envmap_mask_alpha: false,
             envmap_bump: false,
+            self_illum: None,
         }
     }
 }
@@ -602,6 +605,25 @@ fn vector3(value: &str) -> Result<[f32; 3]> {
     Ok(values.map(|v| v / if bytes { 255. } else { 1. }))
 }
 
+/// $selfillum tint for LightmappedGeneric/VertexLitGeneric (SDK dx9 helpers): the base alpha
+/// selects self-illumination, so an opaque base texture clears the flag. $selfillummask and
+/// $selfillumfresnel (alternate VertexLitGeneric modes) are not supported.
+fn self_illum(definition: &Definition, base: Option<&Image>) -> Result<Option<[f32; 3]>> {
+    let p = &definition.properties;
+    let shader = definition.shader.to_ascii_lowercase();
+    if !matches!(shader.as_str(), "lightmappedgeneric" | "vertexlitgeneric")
+        || scalar(p, "$selfillum", 0.)?.trunc() == 0.
+        || !base.is_some_and(|base| base.translucent)
+    {
+        return Ok(None);
+    }
+    p.get("$selfillumtint")
+        .map_or(Ok([1.; 3]), |tint| {
+            vector3(tint).context("invalid VMT $selfillumtint")
+        })
+        .map(Some)
+}
+
 /// How a texture shapes a LightmappedGeneric envmap (SDK lightmappedgeneric_dx9_helper.cpp).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct EnvmapMask {
@@ -764,6 +786,10 @@ fn load_material(
         }
         Err(error) => errors.push(format!("{name}: {error:#}")),
     }
+    match self_illum(&definition, material.base.as_deref()) {
+        Ok(tint) => material.self_illum = tint,
+        Err(error) => errors.push(format!("{name}: selfillum: {error:#}")),
+    }
     let envmap = envmap_parameters(&definition, &mut material)
         .and_then(|()| load_envmap(vfs, &definition, decoded_bytes));
     let envmap = envmap.and_then(|cube| {
@@ -875,6 +901,39 @@ fn cached_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn self_illum_needs_a_translucent_base() {
+        let definition = |shader: &str, pairs: &[(&str, &str)]| Definition {
+            shader: shader.into(),
+            properties: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            proxies: Vec::new(),
+        };
+        let image = |translucent| Image {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+            format: 15,
+            translucent,
+        };
+        let lit = definition("LightmappedGeneric", &[("$selfillum", "1")]);
+        assert_eq!(self_illum(&lit, Some(&image(true))).unwrap(), Some([1.; 3]));
+        assert_eq!(self_illum(&lit, Some(&image(false))).unwrap(), None);
+        assert_eq!(self_illum(&lit, None).unwrap(), None);
+        let tinted = definition(
+            "VertexLitGeneric",
+            &[("$selfillum", "1"), ("$selfillumtint", "[2 1 .5]")],
+        );
+        assert_eq!(
+            self_illum(&tinted, Some(&image(true))).unwrap(),
+            Some([2., 1., 0.5])
+        );
+        let unlit = definition("UnlitGeneric", &[("$selfillum", "1")]);
+        assert_eq!(self_illum(&unlit, Some(&image(true))).unwrap(), None);
+    }
 
     #[test]
     fn envmap_mask_follows_sdk_bump_rules() {

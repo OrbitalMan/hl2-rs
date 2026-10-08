@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-08 $selfillum for LightmappedGeneric and VertexLitGeneric
+
+**Changed:** Materials with `$selfillum` (LightmappedGeneric, VertexLitGeneric) blend toward `$selfillumtint` x albedo by the base alpha before the envmap is added, as in SDK lightmappedgeneric_ps2_3_x.h and vertexlit_and_unlit_generic_ps2x.fxc. The flag is cleared when the base texture has no alpha (SDK dx9 helpers). `$selfillummask`, `$selfillumfresnel` and `$selfillum_envmapmask_alpha` are not supported.
+
+**Why:** The trainstation hall windows (window002e and the left arch windows) were far darker than native.
+
+**Tested how:** 335 normal tests (new self-illum rule test), strict Clippy and fmt. Packaged hall capture vs native HDR view-d1_trainstation_02-20261007T164900Z: upper windows (147,154,164)/(135,140,150) vs native (146,153,163)/(131,137,147), up from (99,102,94)/(59,57,49); left windows (197,187,141)/(192,182,142) vs native (200,189,142)/(196,186,145), up from (72,61,37)/(82,69,43); wall unchanged (140,123,86) vs (140,124,87). Regression batch artifacts/selfillum-regression: all cases exit 0, no pose/visibility mismatches, campaign's 25 known texture errors only. Changes against artifacts/envmap-regression are self-illuminated surfaces: hall windows in the Breen views, the AR2's red rings, the pistol's sight dots and a book in the attention room. Verifiers: movement 26/26, weapons 17/17, attention 26/26. Viewmodel burst: 0 of 121 frames lost.
+
+**Result:** The hall's upper and left windows match native within about 4 levels.
+
+**Still broken or not tested:** The self-illum mask/fresnel modes. Native viewmodel glows were not compared side by side.
+
+**Next:** info_overlay projection (DESIGN 11b).
+
 ## 2026-10-08 LightmappedGeneric $envmap cubemap reflections with masks and bump normals
 
 **Changed:**
@@ -28,7 +42,7 @@ Newest entries first. Historical entries retain their original wording/test scop
 - Mask and bump UVs reuse the base texture transform. Displacement normals use the base face.
 - Textures have no mip chain, so distant normal-mapped sheen can alias.
 - LDR-mode envmaps (an sRGB path is coded) are **not tested**.
-- The hall's left "windows" are the trainstation_arch001 prop texture (static-prop lighting), and the upper hall windows need `$selfillum`.
+- The hall's left and upper windows needed `$selfillum` (next entry); an intermediate attribution to the trainstation_arch001 prop's lighting was wrong.
 
 **Next:** `$selfillum`, then info_overlay projection (DESIGN 11b).
 
