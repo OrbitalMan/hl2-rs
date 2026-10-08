@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-08 session 9 (later): crowbar surface sounds, footsteps, script cue levels
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed:**
+- Crowbar (SDK basebludgeonweapon/weapon_crowbar/fx_hl2_impacts): a player melee hit plays the hit surface's `bulletimpact` sound like bullets; the player crowbar no longer plays melee_hit/melee_hit_world (NPC-operator cues). NPC hits from any weapon play the flesh impact sound. Fixture `test-inputs/bevy-crowbar-surfaces.json`.
+- Footsteps (`hl2_simulation::footsteps`, SDK UpdateStepSound/PlayStepSound, HL2 jump/landing constants): step timer 400/300 ms (+100 crouched), walk/run thresholds 90/220 (60/80 crouched), material volumes (0.2/0.5, dirt 0.25/0.55, vent 0.4/0.7, x0.65 crouched), alternating stepleft/stepright, jump step 1.0, landing 0.85/1.0 above 303 u/s. Ground surface from `Impacts::ground_property` (shared receiver lookup). The shared Player reports `jumped`/`landed`. Fixture `test-inputs/bevy-footsteps.json`.
+- Game cues use the sound script's volume and pitch drawn per emission (separate random stream) instead of a fixed 0.4/100; impact sounds are positioned at the hit with the script soundlevel. `SoundRequest` gained `volume` and `origin`.
+
+**Why:** Owner reports: no player footsteps; the crowbar sounded the same on every hit. Script levels are the DESIGN 12b follow-up.
+
+**Tested how:**
+- 365 normal tests, owned tests, strict Clippy/fmt.
+- Packaged crowbar run: Concrete/Tile/Concrete BulletImpact by floor with rotating variants; open-air swing plays only the swing.
+- Packaged footstep run: tile walk 400 ms at 0.2, concrete sprint 300 ms at 0.5, crouch 500 ms at 0.13, jump 1.0; normal jump landing silent.
+- Batches artifacts/melee-regression, footsteps-regression, cues-regression: 26/17/26. The first cue build changed Breen's monitor lip sync (0.16% of feed pixels) because parameter draws shared the wave-selection generator; with a separate stream two reruns are pixel-identical to the previous batch.
+
+**Result:** Crowbar hits sound by surface, the player has footsteps, and cue levels follow the scripts.
+
+**Still broken or not tested:** native comparison of footstep and weapon levels is inconclusive (low correlation, likely native DSP/pitch; private footsteps-melee-20261008, cue-levels-20261008); how native spatializes the local player's own sounds; NPC speech stays unpositioned; ladders/water steps; model-level surfaceprops for props.
+
+**Next:** detail sprites (DESIGN 11c, branch wip/detail-sprites-20261008).
+
 ## 2026-10-08 session 9: barrier close-hum loop, env_soundscape backgrounds
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
