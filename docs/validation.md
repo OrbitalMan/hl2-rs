@@ -1,6 +1,7 @@
-# Local validation â€” 2026-10-05
+# Local validation — 2026-10-05
 
 Viewmodel flicker fix (2026-10-08): weapons fixture with `--capture-burst 120`, two runs, 0 of 121 frames without the viewmodel; before the fix 1-9 of 61 frames per run lost it (bisect 0dc8291/1028388/6a7455d clean, 8ee25d2/1640df0/994df99 affected; captures in artifacts/flicker). Batch artifacts/bloomfix-regression: captures within 9 levels of artifacts/bloom-regression, movement 26/26, weapons 17/17, attention 26/26.
+
 ## Session 5 HDR path vs native HDR (2026-10-07)
 
 Native reference: owner's real game runs mat_hdr_level 2; the oracle now passes +mat_hdr_level 2 +skill 2 (console confirms). Earlier native captures in this file were LDR (mat_hdr_level 0 in the oracle's Steam-Cloud-mirrored config). Settled native session view-d1_trainstation_02-20261007T164900Z (ORACLE_DWELL 15): mat_hdr_tonemapscale plaza 1.998, hall 1.880. Bevy (wip/hdr-path at merge) plaza scale 1.80-1.98: street (132,120,87) vs native (162,144,100), sky (93,92,93) vs (102,101,102). Hall during the broadcast (tick 1660) scale 1.92: wall (143,127,93) vs (159,139,100), screen (184,158,123) vs (181,153,121), left windows (68,58,37) vs (159,150,118) (envmap absent). Slate (native T165556Z scale 0.65): Bevy 0.69, cyan screen with white glyphs as native; native brighter while its exposure was still adapting. Regression batch artifacts/hdr-regression: complete, 0 mismatches, movement 26/26, weapons 17/17, attention 26/26; images change everywhere (exposure); baselines archived to artifacts/baseline-archive-20261007-hdr and replaced.
