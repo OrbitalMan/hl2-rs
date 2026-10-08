@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## Owner report milestone (2026-10-08, Codex gpt-6.1-sol)
+
+344 normal and 33 owned workspace tests passed; strict `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check` and diff checks passed. Packaged SHA256 `6E6C7FE4ED4C5988553739F37F596F33CB632F8765937AEAFC3B0B4D0330A3B2`.
+
+Run `C:/Python310/python.exe ../../work/publishing/run_gesture_layer_checks.py <new-outdir>` then verify_bevy_movement.py `<outdir>/partition-movement-final.json --capture <outdir>/partition-movement-final.png`, verify_bevy_entities_weapons.py `<outdir>/partition-weapons-final.json` and verify_bevy_attention.py `<outdir>`: 26/17/26 passed in artifacts/owner-reports-regression. Captures completed with zero pose/visibility mismatches; station03 retained its 25 known material errors. Historical pixel baselines differ; no image-identity claim.
+
+Weapons `--capture-burst 120` with volume0.01/no-focus and flicker_check.py: 0/121 lost. Barrier positions (-1856,-650/-800/-1200,eyeZ60), yaw90/pitch0, exposure2, times1.50/1.95 select near frame0, middle24/25 (close layer2), far30 black. 61-frame bursts have no shield-region disappearance; small unrelated pixel variations remain. Four monitor times10.65/10.8/10.95/11.1 show Y translations -9.6915/-9.828/-9.9645/-10.101; frozen 31-frame bursts are identical and only establish rendering stability. Corrected seeded HUD fixture renders the separate owned additive brush. Native HDR references are private oracle T012742Z (shield; module-hash helper failed) and T014407Z (monitor; actual loaded hashes verified). These are controlled views, not a campaign playthrough or complete pixel parity.
+
+Audio: exact decoded sample counts and isolated full-tail correlations passed on the prior F5930198 package. Two contaminated system-loopback captures were rejected. Owner cutoff not reproduced; focused manual/native audible switching **not tested**. The one 640x360 window was this scoped audio run; future audio runs use1280x720. New runtime captures use normal1280x720.
+
 Viewmodel flicker fix (2026-10-08): weapons fixture with `--capture-burst 120`, two runs, 0 of 121 frames without the viewmodel; before the fix 1-9 of 61 frames per run lost it (bisect 0dc8291/1028388/6a7455d clean, 8ee25d2/1640df0/994df99 affected; captures in artifacts/flicker). Batch artifacts/bloomfix-regression: captures within 9 levels of artifacts/bloom-regression, movement 26/26, weapons 17/17, attention 26/26.
 
 ## Session 5 HDR path vs native HDR (2026-10-07)

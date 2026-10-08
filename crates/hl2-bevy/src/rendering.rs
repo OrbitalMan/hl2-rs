@@ -850,6 +850,33 @@ pub fn spawn_map(
                 })
         })
         .collect();
+    let two_textures: BTreeMap<_, _> = loaded
+        .materials
+        .iter()
+        .filter_map(|(name, m)| {
+            let textures = m.two_texture.as_ref()?;
+            let mut upload = |path: &str, frames: &crate::assets::TextureFrames| {
+                frames
+                    .iter()
+                    .enumerate()
+                    .map(|(i, frame)| {
+                        texture_handles
+                            .entry(format!("{path}#frame{i}#srgb"))
+                            .or_insert_with(|| {
+                                let mut image =
+                                    image(frame.width, frame.height, frame.rgba.clone(), true);
+                                image.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+                                images.add(image)
+                            })
+                            .clone()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let base = upload(m.base_path.as_deref()?, &textures.base_frames);
+            let second = upload(&textures.second_path, &textures.second_frames);
+            Some((name.clone(), (base, second)))
+        })
+        .collect();
     let envmaps: BTreeMap<_, _> = loaded
         .materials
         .iter()
@@ -1005,7 +1032,7 @@ pub fn spawn_map(
                 name.clone(),
                 lm,
                 modulation.to_array().map(f32::to_bits),
-                lit.then(|| owner.clone()),
+                (lit || definition.two_texture.is_some()).then(|| owner.clone()),
             ))
             .or_insert_with(|| {
                 let mut material = make_material(
@@ -1018,6 +1045,13 @@ pub fn spawn_map(
                     (&white, &black_cube),
                 );
                 material.tint *= modulation;
+                if let Some((base, second)) = two_textures.get(&name) {
+                    material.base = base[0].clone();
+                    material.iris = second[0].clone();
+                    material.tint =
+                        Vec3::from_array(definition.tint.map(crate::monitors::linear_modulation))
+                            .extend(1.);
+                }
                 // World and brush surfaces only: model envmaps are not loaded yet.
                 if let Some(envmap) = envmaps.get(&name).filter(|_| !batch.model) {
                     material.envmap = envmap.clone();
@@ -1149,12 +1183,32 @@ pub fn spawn_map(
         }
         if definition.camera {
             draw.insert(crate::monitors::MonitorMaterial {
+                name: name.clone(),
                 animation: definition.camera_animation.clone(),
                 color: definition.tint,
                 color2: definition.camera_color2,
             });
             // Avoid sampling a render attachment while drawing into that same attachment.
             draw.insert(bevy::camera::visibility::RenderLayers::layer(5));
+        }
+        if let Some(textures) = definition.two_texture.as_ref()
+            && let Some((base, second)) = two_textures.get(&name)
+        {
+            let center = owner
+                .entity()
+                .and_then(|id| world.entities[id].get("model"))
+                .and_then(|model| model.strip_prefix('*'))
+                .and_then(|id| id.parse::<usize>().ok())
+                .and_then(|id| world.brush_models.iter().find(|m| m.id == id))
+                .map_or(glam::Vec3::ZERO, |model| (model.mins + model.maxs) * 0.5);
+            draw.insert(crate::material_proxies::TwoTextureDraw {
+                entity: owner.entity(),
+                center,
+                frames: textures.frames.clone(),
+                scroll: textures.scroll.clone(),
+                base: base.clone(),
+                second: second.clone(),
+            });
         }
         if let Some(id) = owner.entity() {
             draw.insert(SourceEntity(id));
@@ -1280,6 +1334,8 @@ pub(crate) fn make_material(
                 } else {
                     -1.
                 }
+            } else if definition.two_texture.is_some() {
+                -3.
             } else {
                 f32::from(iris.is_some())
             },

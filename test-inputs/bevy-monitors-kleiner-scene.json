@@ -82,6 +82,11 @@
    },
    {
     "action": "send",
+    "target": "overlay_kleinertv",
+    "input": "Enable"
+   },
+   {
+    "action": "send",
     "target": "kleiner_security_camera_1",
     "input": "SetOnAndTurnOthersOff"
    }

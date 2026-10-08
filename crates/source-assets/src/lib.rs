@@ -9,6 +9,7 @@ pub mod monitor_material;
 pub mod navigation;
 pub mod overlays;
 pub mod phy;
+pub mod proximity_material;
 pub mod scenes;
 pub mod sky;
 pub mod sounds;

@@ -68,6 +68,7 @@ struct Layout {
     /// Start of the chosen mip (frame 0, face 0).
     offset: usize,
     faces: usize,
+    frames: usize,
 }
 fn layout(data: &[u8], max_dimension: usize) -> Result<Layout> {
     if bytes(data, 0, 4)? != b"VTF\0" {
@@ -164,11 +165,38 @@ fn layout(data: &[u8], max_dimension: usize) -> Result<Layout> {
         height: (full_h >> mip).max(1),
         offset,
         faces,
+        frames,
     })
 }
 pub fn decode(data: &[u8], max_dimension: usize) -> Result<Image> {
     let l = layout(data, max_dimension)?;
     decode_face(data, &l, 0)
+}
+/// All frames of a 2D texture at one mip, checked against the caller's decoded budget
+/// before allocating. VTF storage orders each mip by frame, then cube face.
+pub fn decode_frames(data: &[u8], max_dimension: usize, byte_budget: usize) -> Result<Vec<Image>> {
+    let l = layout(data, max_dimension)?;
+    if l.faces != 1 {
+        bail!("animated 2D texture cannot be a cubemap");
+    }
+    let decoded = l
+        .width
+        .checked_mul(l.height)
+        .and_then(|n| n.checked_mul(4))
+        .and_then(|n| n.checked_mul(l.frames))
+        .context("VTF animation size overflow")?;
+    if decoded > byte_budget {
+        bail!("VTF animation exceeds decoded byte budget");
+    }
+    // Validate the entire chosen mip before any frame allocations.
+    bytes(
+        data,
+        l.offset,
+        size(l.format, l.width, l.height)? * l.frames,
+    )?;
+    (0..l.frames)
+        .map(|frame| decode_face(data, &l, frame))
+        .collect()
 }
 /// Image data of a cubemap: six faces in Source order +X, -X, +Y, -Y, +Z, -Z (the same
 /// layer order and orientation as a D3D/wgpu cube texture). The 7.0-7.4 spheremap face is
@@ -377,6 +405,65 @@ mod tests {
         let mut d = cube_fixture(0, &[1, 2, 3, 4], 1);
         d[20..24].copy_from_slice(&0u32.to_le_bytes());
         d
+    }
+    #[test]
+    fn animation_frames_follow_mip_frame_order_and_enforce_budget() {
+        let mut data = rgba_only();
+        data[24..26].copy_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&[5, 6, 7, 8, 9, 10, 11, 12]);
+        let frames = decode_frames(&data, 512, 12).unwrap();
+        assert_eq!(
+            frames.iter().map(|f| f.rgba.clone()).collect::<Vec<_>>(),
+            vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8], vec![9, 10, 11, 12]]
+        );
+        assert!(decode_frames(&data, 512, 11).is_err());
+        assert!(decode_frames(&data[..data.len() - 1], 512, 12).is_err());
+        assert!(decode_frames(&cube_fixture(0, &[1, 2, 3, 4], 7), 512, 100).is_err());
+        // A smaller mip precedes all frames of the chosen large mip.
+        data[16..18].copy_from_slice(&2u16.to_le_bytes());
+        data[18..20].copy_from_slice(&2u16.to_le_bytes());
+        data[56] = 2;
+        data.extend_from_slice(&[21; 16]);
+        data.extend_from_slice(&[22; 16]);
+        data.extend_from_slice(&[23; 16]);
+        let large = decode_frames(&data, 2, 48).unwrap();
+        assert_eq!(
+            large.iter().map(|f| f.rgba[0]).collect::<Vec<_>>(),
+            vec![21, 22, 23]
+        );
+        assert_eq!(
+            decode_frames(&data, 1, 12).unwrap()[2].rgba,
+            vec![9, 10, 11, 12]
+        );
+    }
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn owned_combine_barrier_frames_fade_to_black() {
+        let vfs = crate::vpk::Vfs::mount(std::path::Path::new(
+            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
+        ))
+        .unwrap();
+        for name in ["comshieldwall", "comshieldwall_close"] {
+            let data = vfs
+                .read(&format!("materials/effects/combineshield/{name}.vtf"))
+                .unwrap()
+                .unwrap();
+            let frames = decode_frames(&data, 2048, 64 * 1024 * 1024).unwrap();
+            assert_eq!(frames.len(), if name == "comshieldwall" { 31 } else { 1 });
+            let energy = |image: &Image| {
+                image
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| u64::from(c[0]) + u64::from(c[1]) + u64::from(c[2]))
+                    .sum::<u64>()
+            };
+            assert!(energy(&frames[0]) > 0);
+            if frames.len() == 31 {
+                assert_eq!(energy(&frames[30]), 0);
+            }
+        }
     }
     #[test]
     #[ignore = "requires owned HL2 installation"]

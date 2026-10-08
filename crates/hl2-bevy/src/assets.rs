@@ -19,6 +19,16 @@ const MAX_TEXTURE_DIMENSION: usize = 2048;
 const MAX_TEXTURE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DECODED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_MATERIALS: usize = 16384;
+pub type TextureFrames = Arc<Vec<Arc<Image>>>;
+
+#[derive(Debug)]
+pub struct TwoTexture {
+    pub base_frames: TextureFrames,
+    pub second_frames: TextureFrames,
+    pub second_path: String,
+    pub frames: source_assets::proximity_material::Frames,
+    pub scroll: source_assets::monitor_material::Animation,
+}
 
 pub struct LoadedMap {
     pub world: Arc<World>,
@@ -99,6 +109,7 @@ pub struct MaterialData {
     pub envmap_bump: bool,
     /// $selfillum with $selfillumtint: diffuse = lerp(diffuse, tint * albedo, base alpha).
     pub self_illum: Option<[f32; 3]>,
+    pub two_texture: Option<TwoTexture>,
 }
 
 impl Default for MaterialData {
@@ -136,6 +147,7 @@ impl Default for MaterialData {
             envmap_mask_alpha: false,
             envmap_bump: false,
             self_illum: None,
+            two_texture: None,
         }
     }
 }
@@ -195,11 +207,13 @@ pub fn load_with_canvas(
     let mut texture_errors = decal_errors;
     let mut decoded_bytes = 0usize;
     let mut texture_cache = BTreeMap::new();
+    let mut frame_cache = BTreeMap::new();
     for name in names {
         let material = load_material(
             &vfs,
             &name,
             &mut texture_cache,
+            &mut frame_cache,
             &mut decoded_bytes,
             &mut texture_errors,
         );
@@ -706,6 +720,7 @@ fn load_material(
     vfs: &Vfs,
     name: &str,
     cache: &mut BTreeMap<String, Arc<Image>>,
+    frame_cache: &mut BTreeMap<String, TextureFrames>,
     decoded_bytes: &mut usize,
     errors: &mut Vec<String>,
 ) -> MaterialData {
@@ -734,7 +749,10 @@ fn load_material(
         material.camera_vertex_color =
             scalar(&definition.properties, "$vertexcolor", 0.).unwrap_or(0.) != 0.;
         material.camera_animation =
-            source_assets::monitor_material::Animation::parse(&definition.proxies);
+            source_assets::monitor_material::Animation::parse_with_properties(
+                &definition.proxies,
+                &definition.properties,
+            );
         if let Some(color) = definition.properties.get("$color2") {
             let color = color
                 .trim()
@@ -764,6 +782,74 @@ fn load_material(
                 }
                 Err(e) => errors.push(format!("{name}: monitor overlay: {e:#}")),
             }
+        }
+        return material;
+    }
+    if definition.shader.eq_ignore_ascii_case("UnlitTwoTexture") {
+        let textures = (|| -> Result<_> {
+            let frames = source_assets::proximity_material::Frames::parse(
+                &definition.proxies,
+                &definition.properties,
+            )?;
+            let mut load = |key: &str| -> Result<(String, TextureFrames)> {
+                let path = asset_path(
+                    definition
+                        .properties
+                        .get(key)
+                        .context("two-texture material texture absent")?,
+                    ".vtf",
+                )?;
+                let cache_key = format!(
+                    "{path}#{}",
+                    if frames.active() { "frames" } else { "single" }
+                );
+                if let Some(images) = frame_cache.get(&cache_key) {
+                    return Ok((path, images.clone()));
+                }
+                let data = vfs.read(&path)?.context("two-texture VTF absent")?;
+                if data.len() > MAX_TEXTURE_BYTES {
+                    bail!("encoded VTF exceeds 64 MiB");
+                }
+                let images = if frames.active() {
+                    vtf::decode_frames(
+                        &data,
+                        MAX_TEXTURE_DIMENSION,
+                        MAX_DECODED_BYTES.saturating_sub(*decoded_bytes),
+                    )?
+                } else {
+                    vec![vtf::decode(&data, MAX_TEXTURE_DIMENSION)?]
+                };
+                let bytes = images.iter().map(|i| i.rgba.len()).sum::<usize>();
+                if bytes > MAX_DECODED_BYTES.saturating_sub(*decoded_bytes) {
+                    bail!("map decoded texture budget exceeds 512 MiB");
+                }
+                *decoded_bytes += bytes;
+                let images = Arc::new(images.into_iter().map(Arc::new).collect::<Vec<_>>());
+                frame_cache.insert(cache_key, images.clone());
+                Ok((path, images))
+            };
+            let (base_path, base_frames) = load("$basetexture")?;
+            let (second_path, second_frames) = load("$texture2")?;
+            let scroll = source_assets::monitor_material::Animation::parse(&definition.proxies);
+            Ok((
+                base_path,
+                TwoTexture {
+                    base_frames,
+                    second_frames,
+                    second_path,
+                    frames,
+                    scroll,
+                },
+            ))
+        })();
+        match textures {
+            Ok((path, textures)) => {
+                material.base_path = Some(path);
+                material.base = textures.base_frames.first().cloned();
+                material.two_texture = Some(textures);
+                material.unlit = true;
+            }
+            Err(error) => errors.push(format!("{name}: two-texture: {error:#}")),
         }
         return material;
     }

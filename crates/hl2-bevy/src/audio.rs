@@ -360,3 +360,70 @@ pub fn observe(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::audio::{Decodable, Source};
+
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn installed_weapon_selection_backend_preserves_full_duration() {
+        let root = source_assets::install::discover().unwrap();
+        let vfs = Vfs::mount(&root).unwrap();
+        let library = Library::new(&vfs);
+        let mut cues: BTreeSet<String> = [
+            "Player.WeaponSelectionMoveSlot",
+            "Player.WeaponSelectionClose",
+            "Player.WeaponSelected",
+            "Player.DenyWeaponSelection",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let wanted = ["draw", "drawempty", "ir_draw"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        for weapon in hl2_simulation::gameplay::definitions(&vfs)
+            .unwrap()
+            .values()
+        {
+            let rig = source_assets::animation::load(&vfs, &weapon.viewmodel, &wanted).unwrap();
+            for (name, clip) in &rig.clips {
+                for event in &clip.events {
+                    if (event.id == 5004 || event.name == "AE_CL_PLAYSOUND")
+                        && !event.options.is_empty()
+                    {
+                        println!(
+                            "{} {name}: sound {} at cycle {}",
+                            weapon.viewmodel, event.options, event.cycle
+                        );
+                        cues.insert(event.options.clone());
+                    }
+                }
+            }
+        }
+        for cue in cues {
+            for path in library.all_alternatives(&cue).unwrap() {
+                let encoded = vfs.read(&format!("sound/{path}")).unwrap().unwrap();
+                let (bytes, summary) = hl2_simulation::sounds::decode(&path, encoded).unwrap();
+                let summary = serde_json::to_value(summary).unwrap();
+                let expected =
+                    summary["frames"].as_u64().unwrap() * summary["channels"].as_u64().unwrap();
+                let source = AudioSource {
+                    bytes: bytes.into(),
+                };
+                let decoder = source.decoder();
+                let duration = decoder.total_duration().unwrap().as_secs_f64();
+                let samples = decoder.count() as u64;
+                println!("{cue} {path}: {samples}/{expected} samples, {duration:.6} seconds");
+                assert_eq!(samples, expected, "backend truncated {path}");
+                assert!(
+                    (duration - summary["seconds"].as_f64().unwrap()).abs() < 1e-6,
+                    "backend changed duration of {path}"
+                );
+            }
+        }
+    }
+}

@@ -2,6 +2,8 @@
 
 A standalone, partial Rust reconstruction of Half-Life 2 that reads maps, models, textures, animations and sounds from an installed copy. It does not load Valve's game or engine DLLs. The full campaign is not playable yet.
 
+Plaza Combine shields now use authored proximity frames and texture scrolling. Kleiner monitor scanline ramps and the seeded blue HUD overlay are verified in controlled Windows captures. Ordinary campaign timing, full material parity and the reported weapon-switch sound cutoff remain unresolved.
+
 ## Platforms
 
 | Operating system | Status | Evidence |

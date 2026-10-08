@@ -9,6 +9,7 @@ mod eyes;
 mod gameplay;
 mod gpu_skinning;
 mod hud;
+mod material_proxies;
 mod monitors;
 mod movement;
 mod performance;
@@ -366,6 +367,7 @@ fn main() -> Result<()> {
                 sky::present,
                 monitors::present,
                 monitors::present_materials,
+                material_proxies::present,
                 hud::present,
             )
                 .before(TransformSystems::Propagate),
@@ -656,18 +658,29 @@ type DiagnosticQueries<'w, 's> = (
     Res<'w, Assets<Mesh>>,
     Res<'w, Assets<Image>>,
     Query<'w, 's, (&'static ViewVisibility, &'static rendering::DrawTriangles)>,
+    Query<
+        'w,
+        's,
+        (
+            &'static Name,
+            &'static material_proxies::TwoTextureDraw,
+            &'static MeshMaterial3d<rendering::SourceMaterial>,
+        ),
+    >,
+);
+type RenderResources<'w> = (
+    Option<Res<'w, RenderAdapterInfo>>,
+    Res<'w, visibility::SourceVisibility>,
+    Res<'w, tonemap::Tonemap>,
+    Res<'w, Assets<rendering::SourceMaterial>>,
 );
 fn monitor(
     mut commands: Commands,
     (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
-    (adapter, pvs, tonemap): (
-        Option<Res<RenderAdapterInfo>>,
-        Res<visibility::SourceVisibility>,
-        Res<tonemap::Tonemap>,
-    ),
-    (cameras, draws, map_entities, all_cameras, meshes, images, geometry): DiagnosticQueries,
+    (adapter, pvs, tonemap, source_materials): RenderResources,
+    (cameras, draws, map_entities, all_cameras, meshes, images, geometry, two_textures): DiagnosticQueries,
     (mut exit, performance, render_diagnostics): (
         MessageWriter<AppExit>,
         Option<Res<performance::Performance>>,
@@ -714,6 +727,21 @@ fn monitor(
         }
         report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
+        report.presentation["two_texture_materials"] = serde_json::json!(
+            two_textures
+                .iter()
+                .filter_map(|(name, draw, handle)| {
+                    let material = source_materials.get(&handle.0)?;
+                    Some(
+                        serde_json::json!({"name":name.as_str(),"entity":draw.entity,
+                "base_frames":draw.base.len(),"second_frames":draw.second.len(),
+                "base_frame":draw.base.iter().position(|h|h==&material.base),
+                "second_frame":draw.second.iter().position(|h|h==&material.iris),
+                "secondary_uv":material.secondary_uv.to_cols_array(),"time":game.scene.time}),
+                    )
+                })
+                .collect::<Vec<_>>()
+        );
         let mut visible_meshes = 0;
         let mut visible_triangles = 0;
         let mut total_triangles = 0;

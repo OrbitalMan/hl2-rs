@@ -1,8 +1,28 @@
 # MODLOG
 
+## 2026-10-08 plaza barrier materials and monitor proxy motion
+
+**Agent/model:** Codex Desktop, `gpt-6.1-sol` (verified session metadata); materially involved research/implementation subagents inherited this model.
+
+**Changed:** Bounded 2D VTF frame decoding, ordered PlayerProximity/Subtract/Clamp frame proxies, independent brush material instances and UnlitTwoTexture texture multiplication/scrolling. Monitor proxies now evaluate literal LinearRamp and translation-only TextureTransform in authored order. The seeded Kleiner fixture enables its separate blue Combine HUD brush. AGENTS requires model attribution; historical entries without individual evidence say "not recorded".
+
+**Why:** Native plaza shields select darker authored frames with distance from the local player's center; they are not permanently bright panes. Kleiner's scanline material uses a negative Y ramp to scroll top to bottom. The blue graphics come from `overlay_kleinertv`, enabled by security_01, not the camera shader.
+
+**Tested how:** SDK b8cfb12 first, exact read-only pass14 retail retrievals and owned VMT/VTF/BSP checks (private barriers-20261008, monitor-scroll-20261008 and weapon-switch-audio-20261008). `cargo test --locked --workspace`: 344 passed; owned `cargo test --locked --workspace -- --ignored`: 33 passed; strict all-target Clippy and fmt passed. `scripts/build-bevy.ps1`: SHA256 `6E6C7FE4ED4C5988553739F37F596F33CB632F8765937AEAFC3B0B4D0330A3B2`, built 2026-10-08T01:39:14.6464456Z. Packaged regression batch + movement26, weapons17, attention26 assertions passed. Weapons burst: 0/121 missing with flicker_check.py. Barrier near/mid/far two phases and 61-frame bursts; monitor four clock samples and 31-frame bursts; corrected HUD capture at 1280x720. Native HDR2 shield and monitor references; owner's native screenshot independently identifies the HUD texture.
+
+**Result:** Authored distance frames and scrolling observed. HUD graphics render over the camera. No playback fix: per-process audio recordings reproduce full sound tails; the owner's halfway cutoff remains unresolved. Owned decoder regression added.
+
+**Still broken or not tested:** Ordinary campaign security/HUD timing, focused manual weapon selection and native audible comparison, complete proxy vocabulary, UnlitTwoTexture envmaps, full lighting/color parity, detail sprites, displacement overlays and overlay fade distances. Barrier native capture lacked fresh loaded-module hash proof (failed helper); later monitor capture verified hashes. Initial paused barrier and black intro monitor captures were rejected. Two system-loopback attempts were contaminated; per-process capture replaced that approach. The regression helper's older image baselines differ substantially, so assertion success does not establish identical pixels. No new FPS benchmark.
+
+**Next:** Diagnose weapon cutoff only with a new reproduction; detail sprites and leaf decals per DESIGN11c, then displacement overlays/fades, Metrocop movement/idle + campaign security comparison, renderer LDR/brush-model cubemaps/directional lightmaps. OrbitalMan retains menu/settings ownership.
+
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+Each entry records **Agent/model**. Historical entries without per-entry provenance are marked "not recorded"; general session environment notes do not establish an individual entry's author or model.
+
 ## 2026-10-08 info_overlay fragments on brush faces
+
+**Agent/model:** not recorded.
 
 **Changed:** source-assets::overlays builds fragments per the retail COverlayMgr brush path (private overlay-20261008/README.md: engine.dll 10149db0, 10147b70, 1014c970, 1014d230, 1014c700, 1014cbd0, 1014a6c0):
 - V = normalize(N x U), negated by the VBSP flip bit. Quad corners are origin + uv.x U + uv.y V, with texcoords (U0,V0), (U0,V1), (U1,V1), (U1,V0).
@@ -26,6 +46,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 
 ## 2026-10-08 $selfillum for LightmappedGeneric and VertexLitGeneric
 
+**Agent/model:** not recorded.
+
 **Changed:** Materials with `$selfillum` (LightmappedGeneric, VertexLitGeneric) blend toward `$selfillumtint` x albedo by the base alpha before the envmap is added, as in SDK lightmappedgeneric_ps2_3_x.h and vertexlit_and_unlit_generic_ps2x.fxc. The flag is cleared when the base texture has no alpha (SDK dx9 helpers). `$selfillummask`, `$selfillumfresnel` and `$selfillum_envmapmask_alpha` are not supported.
 
 **Why:** The trainstation hall windows (window002e and the left arch windows) were far darker than native.
@@ -39,6 +61,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 **Next:** info_overlay projection (DESIGN 11b).
 
 ## 2026-10-08 LightmappedGeneric $envmap cubemap reflections with masks and bump normals
+
+**Agent/model:** not recorded.
 
 **Changed:**
 - source-assets::vtf decodes cubemap faces (`decode_cube`: the six faces of frame 0; the 7.0-7.4 spheremap is skipped; RGBA16161616F HDR cubemaps are kept as half floats) and reports translucency (one/eight-bit alpha flags).
@@ -70,6 +94,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 
 ## 2026-10-08 Fix the blinking weapon viewmodel (bloom pass ordering)
 
+**Agent/model:** not recorded.
+
 **Changed:** The Source bloom pass (hl2-bevy bloom.rs) now runs in Bevy's `Core3dSystems::PostProcess` set, after the camera's main pass, instead of being ordered only `.before(tonemapping)`. New test option `--capture-burst N` saves the N frames after `--capture` as `<capture>-1.png` ... `<capture>-N.png`, so flicker can be measured. Private helpers: work/publishing/flicker_check.py (counts frames without viewmodel pixels) and flicker_bisect_step.sh.
 
 **Why:** Owner report: the weapon viewmodel blinked in and out. The bloom system was not placed in a Core3d set, so the parallel render schedule could run it before the viewmodel camera's main pass. On those frames its post-process swap discarded the weapon drawn afterwards. Bisected with burst captures (the burst option patched onto each tested commit): 0dc8291, 1028388 and 6a7455d clean (0 of 61 frames lost); 8ee25d2 (bloom, session 5) and later lose 1-9 of 61 frames, including 1640df0 (before this session and the macOS merge) and 994df99. SDK viewrender.cpp RenderView draws the viewmodel (DrawViewModels), then the fade/overlays, then DoEnginePostProcessing (bloom), so bloom on the viewmodel camera after its main pass matches Source.
@@ -84,6 +110,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 
 ## 2026-10-07 README platforms table; feature list moved to docs/features.md
 
+**Agent/model:** not recorded.
+
 **Changed:** README.md gains a "Platforms" table near the top: Windows (primary tested), macOS Apple Silicon (tested by a contributor, PR #1), Linux and other systems (**not tested**). The long "Implemented so far" list moved verbatim to docs/features.md; the README keeps a one-paragraph summary with a link.
 
 **Why:** Owner request: show confirmed platforms at a glance and shorten the README. A versioned docs page was chosen over a GitHub wiki so the list stays reviewable in PRs alongside the code.
@@ -97,6 +125,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 **Next:** Envmap cubemaps (DESIGN 11a) on wip/envmap.
 
 ## 2026-10-06 Apple Silicon (macOS aarch64) support for hl2-bevy
+
+**Agent/model:** not recorded.
 
 **Changed:** Added first-class macOS / Apple Silicon support to `main`:
 - `source-assets::install`: Auto-discovers installed Steam content in `~/Library/Application Support/Steam`.
@@ -119,6 +149,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 
 ## 2026-10-07 Source bloom, pre-bloom exposure histogram, monitors at scale 1
 
+**Agent/model:** not recorded.
+
 **Changed:** Source 8-bit bloom as a Bevy Core3d post pass on the viewmodel camera (the last 3D camera, so it covers sky, world and viewmodel and runs before the HUD): gamma-space Shape (pow 2.2 times luminance with r_bloomtint 0.3/0.59/0.11) over a quarter-size 4-tap (4x4) downsample, 13-tap Gaussian blur in X and Y (SDK offsets/weights; Y times the bloom amount), additive composite onto the gamma frame (Engine_Post BloomFactor 1). env_tonemap_controller SetBloomScale sets the scale; the amount eases by 0.05 per frame from 1 (GetBloomAmount). The exposure histogram now reads a 320x180 pre-bloom presample by GPU readback (the SDK histogram runs before bloom) instead of window screenshots. Monitor (camera feed) views render at tonemap scale 1. Dev profile: no debug info for dependencies, line tables for our crates (target/debug 36 GB -> 3 GB).
 
 **Why:** Native HDR shows bloom around bright windows and screens, and our world stayed 10-20% darker. With bloom in the screenshot the histogram dropped our exposure (plaza 1.45), which is why it must measure before bloom. SDK viewrender.cpp draws monitors before TurnOnToneMapping after the previous main view reset the integer-HDR scale to 1 (lines 2080, 2090, 2214), so applying the scale to the feed and the screen doubled it.
@@ -130,6 +162,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 **Next:** Environment maps, then the plaza items (info_overlay leaves, detail props, metrocop).
 
 ## 2026-10-07 Source HDR path: HDR lightmaps, auto exposure, HDR sky
+
+**Agent/model:** not recorded.
 
 **Changed:** Rendering now follows Source's HDR path (mat_hdr_level 2). Maps with HDR lighting use the HDR lightmap, ambient and world-light lumps; the lightmap atlas is linear RGBA16F capped at 16 (retail integer HDR range). Every Source material and sprite multiplies its output by the tonemap scale (Bevy camera exposure on the world, viewmodel, monitor and sky cameras). Auto exposure follows SDK viewpostprocess.cpp (17-bin histogram of the presented frame's linear luminance over the central 90% x 85%, 2% bright pixels at 60%, minimum 3% median, V-weighted 10-sample goal) and retail materialsystem 10062660 adaptation (rate x 2, accelerated darkening, step capped at 1/64), with env_tonemap_controller SetAutoExposureMin/Max, SetTonemapRate and UseDefaultAutoExposure. Sky faces with `$hdrcompressedTexture` decode RGBS (rgb x alpha x 8). VMT conditionals evaluate `hdr?` true and `ldr?` false. `--tonemap-scale S` forces a scale (mat_force_tonemap_scale). Histogram readbacks never share a frame with the final capture.
 
@@ -143,6 +177,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 
 ## 2026-10-07 Eyes keep a latched view target (Breen looks into the broadcast camera)
 
+**Agent/model:** not recorded.
+
 **Changed:** Actor eyes now follow SDK CBaseFlex/CAI_BaseActor view-target semantics: the last chosen eye target persists per actor while ValidEyeTarget holds (at least 1 unit away, within 75 degrees of the head). With no scene interest or visible candidate, the eyes look at a point 128 units ahead of the head with the SDK's right +-32 / up +-16 jitter (deterministic per actor and scene clock), so both eyes converge instead of staying parallel.
 
 **Why:** Owner review: native Breen's eyes focus on the broadcast camera while ours looked into infinity. instinct.vcd's `LookAt camera_tv_breen` event is authored inactive, so the native focus comes from the default view target (SDK ai_baseactor.cpp MaintainLookTargets random view and ValidEyeTarget). The camera is near the 128-unit point in front of Breen.
@@ -154,6 +190,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 **Next:** HDR lighting path (owner report: native broadcast screen is much brighter).
 
 ## 2026-10-07 Monitor screen colour: VMT conditionals and linear UnlitTwoTexture modulation
+
+**Agent/model:** not recorded.
 
 **Changed:** The VMT reader applies retail MaterialSystem key conditionals (`test?$var`, optional `!`): passing keys replace the plain value, failing keys are skipped. Tests are evaluated for a DX9 sRGB-capable renderer without HDR (`srgb`, `ldr` true; `hdr`, `lowfill`, `360` and unknown tests false). Camera monitor materials (UnlitTwoTexture) now read $texture2 through an sRGB view and convert the ($color x $color2) modulation to linear like SDK SetModulationPixelShaderDynamicState_LinearColorSpace (channels above 1 unchanged; mathlib GammaToLinear table, 1.0 from 0.95).
 
@@ -167,6 +205,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 
 ## 2026-10-07 Combine slate frame and lightmap overbright headroom
 
+**Agent/model:** not recorded.
+
 **Changed:** World and brush-entity faces using tools/toolsblack* now render (an owned UnlitGeneric black texture); every other tools/ material stays skipped. The lightmap atlas stores gamma(linear / 2) and lightmapped materials restore the factor 2 before the gamma decode, so baked light between 1.0 and 2.0 is no longer clipped. New fixture test-inputs/bevy-monitors-breen-slate.json views the jumbotron before the broadcast starts.
 
 **Why:** Native trainstation_02 shows only the bright Combine slate on the jumbotron at map start; ours showed Breen around a dark slate. The slate func_brush (*87) is framed by four toolsblack faces we skipped. Its `_minlight 255` is not a runtime value: SDK 2013 VRAD (radial.cpp:676/813) bakes a per-luxel floor of `_minlight*128` into the lightmap. Source LDR lightmaps keep 2x headroom (imaterialsystem.h OVERBRIGHT 2.0), which our clamp at 1.0 removed.
@@ -179,6 +219,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 
 ## 2026-10-07 Static map decals (Breen's studio backdrop)
 
+**Agent/model:** not recorded.
+
 **Changed:** infodecal entities without a targetname are now projected at map load onto lightmapped world brush faces (modkit-core::decals::static_decal; hl2-bevy assets add_static_decals). Each decal is sized from its base texture times $decalscale, centered on the plane point within 5 units, oriented by the receiving face's texture axes, clipped to its rectangle and lit by the face's lightmap.
 
 **Why:** Owner review of the native jumbotron: the yellow Combine logo behind Breen is his studio backdrop (decals/decal_posterbreentv), not see-through screen areas as I had first recorded. SDK 2013 world.cpp CDecal::StaticDecal places static decals on world brushes; props are excluded by its trace filter.
@@ -190,6 +232,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 **Next:** Render tools/toolsblack as opaque black, apply func_brush _minlight, compare the screen shader and pixel grid with native, rerun the batch and accept baselines.
 
 ## 2026-10-07 Scene gestures for template-spawned actors (Barney's head-down at 21-22.5 s)
+
+**Agent/model:** not recorded.
 
 **Changed:** Choreography clip preparation now resolves every entity a scene actor name can match, including point_template children that are still pending (Barney, Kleiner), so their scene gesture and posture clips load with the map. Head control now measures its correction in the full 3D frame of the animated "forward" attachment, which is parented to the head bone (SDK UpdateHeadControl), instead of a level yaw-only frame. The Bevy report lists per-actor gesture composition errors (`gesture_compose_errors`). The regression batch drops the superseded edge-on Breen and empty-lab cases, whose fixtures are deleted and baselines retired.
 
@@ -204,6 +248,8 @@ The BSP world fills the new `World::overlays` (lightmapped by the face's lightma
 **Next:** Native trainstation_02 jumbotron/godray comparison; campaign-order reveal chain.
 
 ## 2026-10-07 Kleiner scene movement and new regression views
+
+**Agent/model:** not recorded.
 
 **Changed:** npc_kleiner is registered with the shared human ground-movement controller, like Barney, so scene MOVETO events move him. New regression cases: test-inputs/bevy-monitors-breen-screen.json (face-on jumbotron during the broadcast) and test-inputs/bevy-monitors-kleiner-scene.json (Kleiner on Barney's monitor in campaign state). The new baselines are accepted, with the previous ones archived locally.
 
@@ -221,6 +267,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-07 Bevy becomes main; Macroquad host removed
 
+**Agent/model:** not recorded.
+
 **Changed:** At the owner's request, bevy-migration was merged into main (main's docs-only commit b4b1731 was merged in first) and main now fast-forwards to it. The former Macroquad/OpenGL host was removed: crates/hl2-runtime, its launchers (launch.cmd, launch-borderless.cmd, launch-1080p.cmd), scripts/build.ps1, the vendored third_party/miniquad and quad-alsa-sys shim, its 13 input-script fixtures and the mods/*.json sandbox files. Cargo.lock only drops the 20 packages of that stack. AGENTS, README, CONTRIBUTING, STATUS, docs and CI now describe a Bevy-only rewrite on main. macroquad-prototype, bevy-migration (frozen at the merge) and wip/scripted-scenes are preserved.
 
 **Why:** Owner decision: Bevy is far ahead of the old host, so checking both hosts after shared changes was overhead. Removing the old host keeps the repository clean.
@@ -234,6 +282,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Scene MOVETO for Kleiner (lab feed), Breen face-on regression case, native head-pitch analysis.
 
 ## 2026-10-07 Source model lighting (leaf ambient cubes and world lights)
+
+**Agent/model:** not recorded.
 
 **Changed:** Models are now lit the way the retail engine's light cache does it, instead of with a constant gray. New `modkit-core::lighting`: leaf ambient samples weighted by 1/(d^2+1); world lights with Source falloff, styles and a world-only visibility trace (8-unit slack); up to four local lights kept by luminance and the rest folded into the ambient cube; skipping lights flagged as already baked into the cube; the ambient boost for flagged models; SDK vertex shader terms. New `source-assets::model_lighting` reads the leaf tree, the LDR/HDR leaf ambient lumps (matching the lightmap choice), world lights and sky faces. `Vertex.normal` carries VVD normals, and the studio illumposition/flags are read per model. Static props are baked once per vertex at load, which applies to both hosts. Bevy model draws get a per-entity lighting uniform that is recomputed when the illumination origin moves. The shader evaluates ambient cube + diffuse (+ $halflambert) on the linearized base texture, with skinned normals on both GPU and CPU paths. The view model maps its camera space onto the player's view for lighting.
 
@@ -249,6 +299,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Entity render color in Bevy (godray brightness)
 
+**Agent/model:** not recorded.
+
 **Changed:** Bevy entity materials now apply Source color modulation. rendercolor tints the model, and renderamt sets its alpha outside kRenderNormal. Materials are keyed per (material, lightmap, modulation), so untinted entities still share handles. New fixture test-inputs/bevy-monitors-breen-screen.json frames the trainstation_02 jumbotron face-on at about 25 s, during the broadcast.
 
 **Why:** Owner report: the trainstation godrays were overexposed in Bevy (the retained host already applied rendercolor). The shafts are additive prop_dynamic vol_light models tinted to about 19% (rendercolor ~49 45 34), which Bevy drew at full white. The owner also noted the old Breen fixture looks at a wall. jumbotron1's screen layers face +-Y, so the old yaw-180 view is edge-on, and its 7 s capture precedes the broadcast (the Combine slate brush is correct then; the scene starts at about 11 s and its OnTrigger1 hides the slate).
@@ -263,6 +315,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Scripted-sequence script events (faceplate removal)
 
+**Agent/model:** not recorded.
+
 **Changed:** While a scripted_sequence plays, SCRIPT_EVENT_FIREEVENT (1003) animation events crossed by the actor's clip fire the script's OnScriptEventNN output, with NN from the event options and the actor as activator.
 
 **Why:** ss_Helmet_Reveal (helmet_reveal, events "1" at cycle 0.417 and "2" at 0.762) removes Barney's head faceplate and toggles the hand copy through these outputs.
@@ -274,6 +328,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Model lighting; Breen fixture framing; godray brightness.
 
 ## 2026-10-06 Head/body flexes, Combine camera activities and movement turning
+
+**Agent/model:** not recorded.
 
 **Changed:** Actor pose parameters now add the server-side flex controllers, following SDK CAI_BaseActor: head_rightleft/updown/tilt on top of the head look correction (UpdateHeadControl), body_yaw/spine_yaw/neck_trans from body_rightleft/chest_rightleft/head_forwardback (UpdateBodyControl), and gesture_height/width from gesture_updown/rightleft (MaintainLookTargets). The values are included in the pose signature. Head control takes its eye position from the animated "eyes" attachment and the self-look direction and head frame from "forward" (shared `Scene::attachment_frames`). npc_combine_camera deploys at spawn (open idle) unless StartInactive. Enable/Disable/Toggle play the retract transition into closed idle, or return to open idle. Walking NPCs turn toward the path at MaxYawSpeed (45 x 10 deg/s) instead of snapping, and the move_yaw pose parameter keeps the legs on the path.
 
@@ -289,6 +345,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Lip sync from speech phonemes
 
+**Agent/model:** not recorded.
+
 **Changed:** New `source-assets::sentence` reads the text VDAT chunk of owned WAVs (SDK CSentence 1.0: word phonemes and emphasis samples, Catmull-Rom emphasis intensity) and flex settings files (`expressions/phonemes*.vfe`). New `hl2-simulation::lipsync` implements the client viseme path: box filter (0.08 s), neighbor crossfade extension, and weak/normal/strong emphasis blending. The pinned SDK was statically compared with retail client.dll AddVisemesForSentence 100bb720, AddViseme 100bb630 and ComputeBlendedSetting 100bbbd0 (private review). Both hosts parse VDAT when loading waves, register the actor's voice with the chosen wave when a scene line plays, and render `Scene::actor_flex_values` (scene controllers plus visemes) through the shared FaceModel path. Scenes flagged ignorePhonemes play without lip sync.
 
 **Why:** Owner step 4: mouth movement timed to speech.
@@ -302,6 +360,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Head flexes into head control; Barney's mark offset.
 
 ## 2026-10-06 Retained-host facial flexes and volume option
+
+**Agent/model:** not recorded.
 
 **Changed:** The retained host now applies the shared `FaceModel` flex path: per-vertex studio flex keys in its draw batches, NPC face models loaded at setup, and scene controller values plus rest-gaze FACS eyelids added to bind positions before CPU skinning. It also accepts `--volume 0..1` as a master scale for all sounds, so unattended tests run at 1%.
 
@@ -317,6 +377,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Entity parenting and Barney's helmet props
 
+**Agent/model:** not recorded.
+
 **Changed:** The simulation now supports movement parenting. Map-spawn `parentname` keeps the spawn offset, and the `SetParent`, `SetParentAttachment`, `SetParentAttachmentMaintainOffset` and `ClearParent` inputs work. Each tick, children follow the parent's pose or animated attachment, using the same composed pose both hosts render. `prop_dynamic` StartDisabled hides the prop. Gear attached to an animated attachment has no collider, so a helmet no longer blocks its wearer. The security fixtures now include the campaign state by security_02: faceplates off (ss_Helmet_Reveal runs in security_01) and logic_disable_cameras triggered.
 
 **Why:** Owner priority: in security_02 Barney wears the separate helmetBack prop, parented by logic_barney_init to helmet_attachment after the template spawn. Only the faceplate comes off, during ss_Helmet_Reveal.
@@ -330,6 +392,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Retained-host flexes, lip sync, head flexes, Barney's mark offset.
 
 ## 2026-10-06 FACS eyelids and native face close-ups
+
+**Agent/model:** not recorded.
 
 **Changed:** Eyeball records now carry their FACS eyelid fields, and actor flexes apply the retail eyelid step (private review: StudioRender 1001bd80). It converts lid raiser/neutral/lowerer weights and the eye's look direction into lid descriptor values before vertex deltas. Flex math moved into shared `source-assets` (`FaceModel`, `descriptor_weights`, `vertex_deltas`) so the retained host can reuse it. Rigs now keep every model attachment. Movement scripts accept `pitch` and `fov` (Source horizontal 4:3 degrees) for zoomed comparison shots, and the private native oracle takes a matching `ORACLE_CLOSEUP`.
 
@@ -345,6 +409,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Facial flexes render in Bevy
 
+**Agent/model:** not recorded.
+
 **Changed:** Scene-driven flex controllers now deform actor faces in the Bevy renderer (setup-loaded flex data, per-vertex flex references, retail weighting, GPU and CPU skinning paths). Earlier the same day: the flex track evaluator and Surface flex sources.
 
 **Why:** Scripted scenes need facial animation; Barney's security_02 expressions were missing.
@@ -358,6 +424,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Native face comparison at matching times, then lip sync (phoneme tracks to flex settings).
 
 ## 2026-10-06 Facial flex data reader
+
+**Agent/model:** not recorded.
 
 **Changed:** New `source-assets::flexes`: MDL flex descriptors, controllers, rules and mesh vertex deltas; SDK RunFlexRules and the retail vertex weighting.
 
@@ -373,6 +441,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Pose-parameter blends, autoplay head sequences and head control
 
+**Agent/model:** not recorded.
+
 **Changed:** Rigs keep pose parameters, full blend grids and autoplay sequences. Composition samples blends by pose parameter and adds autoplay after layers. NPC head control drives head_yaw/pitch from look interests with the SDK think rates.
 
 **Why:** FACE turned Barney's body away from the player; the original turns his head on pose parameters. Blend grids and autoplay are also how the models encode head, body and gesture variation.
@@ -386,6 +456,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Rerun the native security comparison; then facial flexes or locomotion move_yaw blending.
 
 ## 2026-10-06 Scene FACE events, arrival distance, Combine camera model
+
+**Agent/model:** not recorded.
 
 **Changed:** FACE events turn standing NPCs toward targets at SDK yaw speed. MOVETO walks until within the event arrival distance (2D). The npc_combine_camera model is set. Unattended-test options: Bevy `--volume`/`--no-focus`, and a quiet, unfocused native oracle.
 
@@ -401,6 +473,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 NPC door lookahead: Barney reaches his desk
 
+**Agent/model:** not recorded.
+
 **Changed:** NPC routes remember door segments and request the door ahead of contact (within 96 units).
 
 **Why:** The cop-door trigger unlocks barney_door_2 for only one second, before Barney touches the door.
@@ -414,6 +488,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** FACE events, then rerun the native comparison (mask off) and compare poses.
 
 ## 2026-10-06 Trigger toucher filters
+
+**Agent/model:** not recorded.
 
 **Changed:** trigger_once/trigger_multiple honor client/NPC/everything toucher flags, and NPCs can activate NPC triggers. Security fixtures enable trigger_cop_close_door_1 as the campaign does earlier.
 
@@ -429,6 +505,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Native scene oracle, point_template spawning, prop flags and NPC doors
 
+**Agent/model:** not recorded.
+
 **Changed:** Private native oracle for the security scene. point_template children wait for ForceSpawn. prop_physics motion-disabled/start-asleep flags are honored. NPC routes pass through doors and open them on contact. Barney fixtures force-spawn him like the campaign trigger.
 
 **Why:** The first native comparison showed Barney never reaching his desk in Bevy. The causes: closed doors, a desk that physics wrongly moved, and templated actors existing too early, which is also wasted simulation.
@@ -442,6 +520,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** NPC trigger touch (spawnflags 2), then rerun the native/Bevy security comparison at 18.05/22.45 s.
 
 ## 2026-10-06 Scene gesture execution
+
+**Agent/model:** not recorded.
 
 **Changed:** Scene GESTURE events create per-actor layers: SDK tag retiming, intensity weights, posture suppression and RemoveLayer fades. Both hosts compose base clip and layers through `Scene::actor_matrices`. Faceposer keyvalues are parsed, and the clip budget accounts for gesture children.
 
@@ -457,6 +537,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-06 Shared Source animation layer composition
 
+**Agent/model:** not recorded.
+
 **Changed:** modkit-core composes Source sequences: delta/post layers, per-bone weights and autolayer ramps through `Rig::accumulate_pose`. source-assets keeps raw delta frames, sequence flags, bone weights, fades and named autolayers, and loads autolayer children with their parents.
 
 **Why:** Real NPC gestures are masked parents whose children are delta layers. The old absolute delta conversion and base-clip-only path could not reproduce them.
@@ -470,6 +552,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Scene gesture layers: faceposer tag retiming, intensity and end fades, then compose them in both hosts.
 
 ## 2026-10-06 Priority change: resume Rust rewrite, on-demand decompilation
+
+**Agent/model:** not recorded.
 
 **Changed:** Owner decision: pause whole-corpus decompilation coverage after pass14 and resume the Rust rewrite with authored NPC gestures. AGENTS.md, STATUS.md and docs/DESIGN.md now make decompilation feature-driven: retrieve and review the relevant retail functions from the private index before implementing each step. A drafted pass15 dispatcher-trace plan was dropped before any run.
 
@@ -485,6 +569,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-05 Callback discovery, ABI and switch evidence; quota handoff
 
+**Agent/model:** not recorded.
+
 **Changed:** Continued private research through pass14. The exact-byte index now combines13 source datasets,133,473 observed addresses with some pseudocode and133,556 export variants across42 selected modules. Saved entries and10,752 temporary discovery entries remain separate. Public changes document research; runtime code is unchanged.
 
 **Why:** Export success, listing ownership and decompiler switch recovery do not establish complete discovery or trustworthy ABIs. Preserve failures, variants and module/hash/address identity before using native evidence in Rust.
@@ -498,6 +584,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Raw branch/table-bound/shared-tail evidence for unresolved dispatchers, x87 helper storage and runtime scope. Preserve the final private checkpoint near the owner's requested quota margin; gestures remain queued.
 
 ## 2026-10-05 Continued discovery and optional-module databases
+
+**Agent/model:** not recorded.
 
 **Changed:** Resumed authorized private research after the owner corrected an early stop. A private baseline clone adds 9,850 candidate exports. Seventeen optional modules expand saved coverage to 42 modules/122,721 entries with some pseudocode. Separate raw-flow/disassembly passes produce 34 and 11 temporary bodies. Public changes document evidence only.
 
@@ -513,6 +601,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-05 Private database coverage and failed-export recovery
 
+**Agent/model:** not recorded.
+
 **Changed:** Continued private decompilation with a 126-path hashed PE inventory, discovery audits, three new loader-referenced module exports, eleven supplemental failed-body recoveries and a path/hash/address SQLite evidence ledger. Public changes are evidence documentation only.
 
 **Why:** The 22-module export denominator omitted runtime modules and did not establish function discovery. Preserve original errors and uncertain signatures while improving database retrieval and recording unresolved coverage.
@@ -526,6 +616,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Review bounded unlabelled RTTI/vtable/orphan-code candidates and remaining optional loader branches on disposable projects, then extend a new audited database version. NPC gestures remain queued.
 
 ## 2026-10-05 Decompilation priority for the new chat
+
+**Agent/model:** not recorded.
 
 **Changed:** Updated AGENTS.md, STATUS.md and docs/DESIGN.md with the owner's new decompilation priority, plus a private inventory/failure checkpoint.
 
@@ -541,6 +633,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-05 Fresh-chat documentation handoff
 
+**Agent/model:** not recorded.
+
 **Changed:** Reworked AGENTS.md, added STATUS.md and docs/DESIGN.md, updated this log and changed .gitignore to a source-only whitelist.
 
 **Why:** Preserve verified state, existing authorization and failed approaches without rereading the entire chat.
@@ -554,6 +648,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Start a fresh chat in the Bevy checkout; read AGENTS.md, STATUS.md and docs/DESIGN.md before continuing.
 
 ## 2026-10-05 Native crosshairs and optional spatial batches —28c0bb3
+
+**Agent/model:** not recorded.
 
 **Changed:** Shared owned Windows glyph rasterization/placement, Bevy1080p/borderless launchers, optional spatial batches/render-candidate diagnostics and targeted retained build tooling.
 
@@ -569,6 +665,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-05 Shared materials and model activity —c2b5220 /322afaa
 
+**Agent/model:** not recorded.
+
 **Changed:** Shared authored material/lightmap handles and avoided unchanged GPU uploads; added owned label/activity/weight resolution and corrected unsupported Kleiner idle.
 
 **Why:** Reduce preparation overhead and use model-authored animations instead of assumed labels.
@@ -582,6 +680,8 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 **Next:** Preserve raw delta/post transforms, masks and child dependencies before gestures.
 
 ## 2026-10-05 GPU skinning and cached BSP PVS —df6af1b /b888144
+
+**Agent/model:** not recorded.
 
 **Changed:** GPU skinning/current bounds/shared iris poses; conservative PVS across active player/monitor views with script visibility/fail-open behavior.
 
@@ -597,15 +697,21 @@ Follow-up (owner report: Barney was talking to the default blue screen): all eig
 
 ## 2026-10-05 - animated attention attachments
 
+**Agent/model:** not recorded.
+
 Actor gaze origin/forward now come from the owned animated eyes attachment, with model view-offset fallback. Eye presentation caches one skin pose per visible actor and shares it with iris projection, preserving cycler meshes. Malformed/singular/overflowing attachment records are rejected; PVS latching, native head-pose controls and full layered animation remain unfinished.
 
 
 ## 2026-10-05 - authored scene attention
 
+**Agent/model:** not recorded.
+
 Shared simulation now executes compiled LOOKAT events with normalized-time scene/event ramps, timed deduplicated interests, target aliases, pause refresh and cancellation expiry. Bevy projects both eyes toward one selected actor target; monitor/player/self behavior is capture-verified in a deliberately seeded security02 fixture. Retained simulation/reporting consumes the same queue. Head/facial controls and native random/tactical attention remain unfinished; this is not campaign or retail AI parity.
 
 
 ## 2026-10-05: shared pause/console and Bevy campaign host
+
+**Agent/model:** not recorded.
 
 Moved the retained console parser/history/cheat gates and resource-driven pause layout into hl2-ui. Both hosts now provide explicit input and consume the same canvas. Bevy opens Resume/Console/Quit, supports the existing command subset and preserves selection/capture/held-input ordering. Console rendering clips output to its panel and handles Unicode character boundaries.
 
@@ -616,11 +722,15 @@ Added asynchronous owned-map decoding with simulation/script clocks frozen while
 
 ## 2026-10-05: shared effects presented in Bevy
 
+**Agent/model:** not recorded.
+
 Extracted retained projectile billboard/RNG/blur and impact selection/clipping into hl2-simulation, leaving rendering adapters in each host. Bevy now presents owned SMG grenades, energy balls, impact/explosion sprites and bullet marks with depth testing. Decals retain destination-color blending and doubled modulation, and follow moving receiver transforms. Testing found a retained door-mark failure: projection used raw MDL vertices instead of the animated idle pose and rejected the one-unit collision/visual gap. Both hosts now project onto the current posed mesh with a bounded same-receiver correction. Native studio deformation and complete particles remain unfinished.
 
 Packaged effect fixtures pass 40 checks, including real observed draws, frozen simulation, secondary reserves, explosion completion and marked-door transform agreement. The full combined weapon fixture and retained packaged smoke are checked separately. Source assets stay installed and private capture evidence stays ignored.
 
 ## 2026-10-05: shared HUD presentation in Bevy
+
+**Agent/model:** not recorded.
 
 Moved the retained owned-resource HUD into engine-independent hl2-ui with an explicit ordered CPU canvas. Both renderers use the same layout/font/crosshair/animation logic. Bevy now draws health/ammo, weapon buckets, quick-info and secondary ammo through a separate overlay camera with normal/additive materials. Asset loading stays outside systems; glyph textures and meshes are reused.
 
@@ -629,16 +739,22 @@ Packaged white-crosshair captures match the accepted retail five-pixel positions
 
 ## 2026-10-04: Bevy entity, weapon and animated presentation bridge
 
+**Agent/model:** not recorded.
+
 Moved the tested entities/gameplay/NPC/projectile/selection implementations into hl2-simulation and retained host re-exports. Shared actor/viewmodel preparation preserves clip loading. Bevy now runs scene, weapon, moving collider, NPC/projectile, rigid-body and player state in retained order. Local entity meshes follow authoritative poses/visibility; CPU skeletal animation updates bounds; an independent viewmodel pass preserves the existing projection. F3, weapon buckets/wheel, confirming/fire/reload/previous, E use and G test impulse are connected. Quick-click and pause/selection suppression regressions pass. Packaged bench and station-door/secondary-weapon fixtures pass; HUD/audio/effects/campaign host migration remains next.
 
 
 ## 2026-10-04: shared collision and Bevy player movement
+
+**Agent/model:** not recorded.
 
 Extracted the existing collision/Rapier adapter, convex sweeps and NPC probes into `hl2-simulation` unchanged, preserving their 25 tests and retained-runtime imports. Bevy now uses the same Source-coordinate player and collision code at 15 ms per step, with input/look before simulation and camera presentation afterward. Default walking, flight toggle and pause/resume are supported; input capture consumes transition-frame mouse movement and held jump until release.
 
 The packaged bench fixture passes 26 movement/pause assertions, including the native collision height, one-time air crouch lift with retained eye/momentum, air uncrouching and jump rearming. Rendering remains static and rigid bodies are frozen until presentation is synchronized. Weapons/HUD, pause UI/console, entity I/O/scenes, NPC animation/AI and audio remain migration work. See `docs/validation.md` for package and test evidence.
 
 ## 2026-10-04: separate Bevy/wgpu host preview
+
+**Agent/model:** not recorded.
 
 Preserved the original host on `macroquad-prototype` and added `bevy-migration` for the long-term Bevy/wgpu work. Main keeps the retained runtime until verified replacements are available. README and contributor guidance identify the branch and executable each feature belongs to.
 
@@ -648,6 +764,8 @@ Validation: 241 normal tests and nine owned-install checks pass, with formatting
 
 ## 2026-10-04: G-Man speech and authored locomotion data
 
+**Agent/model:** not recorded.
+
 Fixed the first-map G-Man omission with explicit `cycler_actor` model and scene-actor support, corroborated by retail factory/RTTI and actor lookup. The packaged debug-camera fixture resolves 17 authored intro events. Its initial run exposed compressed voice failures; standard Microsoft ADPCM now decodes in memory, preserves recorded frame counts and successfully requests playback of both opening lines. Facial animation, gestures, intro cameras and compositing remain unfinished.
 
 Added bounded PC AIN37 decoding and optional inspect/runtime reports, preserving hull offsets, raw masks/metadata and Hammer IDs. Added v48 authored movement records and activity/all-blend metadata, plus piecewise motion sampling, turning and positive/negative loops. Owned walk/run tracks match 80 units/1s and 125.87412 units/0.6s. These readers do not yet implement NPC pathfinding, weighted blending, motor planning or movement readiness.
@@ -655,6 +773,8 @@ Added bounded PC AIN37 decoding and optional inspect/runtime reports, preserving
 Validation: 210 workspace tests, six owned-install checks, formatting and strict Clippy pass. The rebuilt launcher package passes 12 G-Man, 33 scene-controller/sequence and 20 secondary-projectile assertions. A graph census decodes 72 and rejects six mismatched revisions across 78 loadable installed maps; the known empty coast map remains rejected. Private evidence and game files remain outside public source.
 
 ## 2026-10-04: crosshair, secondary projectiles and authored scenes
+
+**Agent/model:** not recorded.
 
 Corrected the oversized unarmed crosshair by identifying the native height accessor and reproducing both texture-coordinate insets. Packaged720/1080 captures now match the original five pixel positions; odd viewport rounding also passes. Font rasterization and tone mapping remain separate work.
 
@@ -668,6 +788,8 @@ Validation:192 workspace tests, both owned-install checks, strict Clippy and for
 
 ## 2026-10-03: air crouch, stable contacts and pause/console
 
+**Agent/model:** not recorded.
+
 Air crouching now tucks the feet once while preserving head height and momentum; standing clearance gates air unducking. Reviewed retail sliding rules and analytical world-brush/convex sweeps correct reproduced wall-contact jump interruptions. Native PHY compound integration and full VPhysics parity remain unfinished.
 
 Added a working resource-based pause menu and bounded developer console with cheat gates, history/editing/completion, position/angle commands and owned map loading. Focus freezes simulation and suppresses attack/jump leakage. The menu uses the owned title font and calibrated 720p metrics. Full console, save/options and paused audio remain open.
@@ -676,11 +798,15 @@ Added a working resource-based pause menu and bounded developer console with che
 
 ## 2026-10-03: publication and automatic empty fire
 
+**Agent/model:** not recorded.
+
 Published the reviewed Rust source to kvalls/hl2-rs with fresh-checkout instructions, contribution boundaries and a labeled runtime screenshot. The public main branch starts from a clean source snapshot; older local research history stays private. Windows formatting, Clippy and unit checks run for main pushes and contributor pull requests.
 
 SMG1/AR2 now use a reviewed empty-fire latch and per-weapon half-second sound throttle. Empty clicks retain the primary deadline and animation; the next eligible attempt reloads, and idle reload uses a strictly elapsed primary deadline. Four regression tests cover held/released input, throttle boundaries, independent weapon state and reload completion. Other secondary attacks, autoswitch ranking and custom reload flags remain incomplete.
 
 ## 2026-10-03: depth, secondary fire and retail input/movement
+
+**Agent/model:** not recorded.
 
 Separated OpenGL depth testing and writes in the vendored backend, preserving depth clears between sky/world/viewmodel passes. Matching trainstation views reproduce then remove hidden light shafts, entrance columns and barrier effects; a front-side capture retains the visible columns.
 
@@ -691,6 +817,8 @@ Selection now consumes already-held attack buttons when Slot/Wheel opens the men
 Fresh-clone build instructions and contribution boundaries were added for public source sharing. Game assets, native analysis, captures and research tools remain separate. Full campaign, NPC AI and Source rendering/collision parity remain unfinished; docs/validation.md records the checks and package fingerprint.
 
 ## 2026-10-02
+
+**Agent/model:** not recorded.
 
 The original executable remains read-only, with the earlier save/config snapshots preserved. Work is focused on HL2 fidelity; no FAL assets or crossovers were added.
 
@@ -705,6 +833,8 @@ Research tools and private decompiler output belong in ../../work/hl2-decompiled
 
 ### 2026-10-02: weapon selector, impacts and separate sky world
 
+**Agent/model:** not recorded.
+
 - Preserve nested sound-script wave alternatives; use distinct crowbar flesh/world sounds and hit animation.
 - Add receiver-clipped installed impact textures and inherited surface-property bullet sounds. Marks follow rigid props and brush entities; keep a bounded local pool.
 - Implement six-bucket UI with installed weapon icons, wheel cycling, confirmation, cancellation and previous-weapon switching; cancel reload on switch. Only crowbar and pistol combat are implemented.
@@ -712,6 +842,8 @@ Research tools and private decompiler output belong in ../../work/hl2-decompiled
 - Validation: 36/36 unit tests and workspace Clippy pass; packaged interactive run recorded three hit decals and multiple metal-impact sound variants with zero audio errors. Wheel UI rendered correctly; live confirmation needs a faster-input retest because its timeout expired between automation calls. Installed maps 78/79 parse with only the known empty coast map failure.
 
 ### 2026-10-02: retail HUD, six primary weapons and sky visibility
+
+**Agent/model:** not recorded.
 
 The earlier selector was a provisional design. This pass replaces it with installed resource dimensions, fonts/cell metrics, corners, labels and input behavior, checked against selected retail methods and a localized original-engine capture. Numeric HUD animation rules, bounded low-health loops and QuickInfo progress/fades/warning audio now run. Native GDI rasterization, damage messages and the remaining HUD panels/gates are still incomplete.
 
@@ -723,9 +855,13 @@ Original-game research writes, localization copy, inspection tools and native ps
 
 ### LDR sky asset groundwork
 
+**Agent/model:** not recorded.
+
 Added a bounded six-face LDR sky loader resolving VMT base textures and transforms, with eight synthetic tests. HDR rendering, cube drawing and leaf gating integration remain unfinished. All 109 workspace tests and strict Clippy passed; the final package was rebuilt and smoke-tested.
 
 ### 2026-10-03: database audit, sky rendering and movement collision
+
+**Agent/model:** not recorded.
 
 Integrated the six-face LDR sky background with verified retail orientation, installed material transforms, clamped sampling and separate BSP 2D/3D eligibility. It draws before scenery/world without depth writes. Matched original-engine views corroborate cloud orientation; HDR, fog and sky polygon masks remain unfinished.
 
@@ -735,6 +871,8 @@ The supplied Database Method was tested privately across all exports. Unchanged 
 
 ### 2026-10-03: air crouch, console, static PHY and secondary HUD
 
+**Agent/model:** not recorded.
+
 Air crouching preserves head height with a one-time foot lift, and stable world/convex hull sweeps correct reproduced wall-jump contacts. Added a resource-driven pause menu and bounded console with cheat gates, history, completion and map loading. Original ground-duck timers, prediction and full Source command/UI coverage remain unfinished.
 
 Added a bounded original Rust PHY reader and separate installed convex pieces for supported solid static props. Bench standing height now agrees with the owned original measurement. Rotating-door collision applies the visible model's initial idle pose, fixing the station entrance's closed-door walkthrough and invisible open-shaped blocker.
@@ -743,18 +881,26 @@ Primary ammo stays visible during weapon selection. Unarmed crosshairs use the i
 
 ### 2026-10-04: Barney scene movement and actor-aware speech
 
+**Agent/model:** not recorded.
+
 Added Barney's native default model and owned MDL eye metadata, dedicated NPC collision masks/probes, bounded human ground routes and authored central walk/run locomotion. Scene MOVETO requests now persist while SECTION waits for actual arrival; the controller continues while only the scene clock is paused. UI pause freezes both, blocked routes hold the gate, and cancel/script ownership prevents stale pose changes. The controlled security03 fixture verifies player blocking, arrival-driven door output and cancellation without a manual scene Resume. It explicitly seeds a preceding authored target and is not a complete campaign replay.
 
 Symbolic speech carries the resolved actor model through the installed gender registry and retains native tagged wave/fallback behavior. The first-map owned census resolves all 72 actors and decodes all 75 registered alternatives. Native RNG/mixing, localized combined lines and lip sync remain open. See validation for tests and packaged checks; native motor timing, weighted blends, general NPC AI, facial/eye rendering and the playable first level remain unfinished.
 
 ### Bevy audio adapter
 
+**Agent/model:** not recorded.
+
 Shared owned sound-script selection, actor gender, WAV/MS ADPCM/MP3 decoding and viewmodel event cursor now serve both hosts. Bevy preloads references outside systems and plays ambient/scene/weapon/HUD requests through monitored audio sinks, including host pause/resume. Packaged door/weapon and controlled scene fixtures, full tests and strict Clippy passed. Source spatial audio/DSP, soundscapes and lipsync remain unfinished; this does not complete the campaign.
 
 ### Bevy sky, iris projection and prop door swing
 
+**Agent/model:** not recorded.
+
 Restored owned LDR cube/miniature sky passes before the playable world, with current-leaf visibility and depth occlusion. Eyes now use authored studio metadata and separate iris textures; gaze uses a bounded visible player/NPC approximation. EyeRefract uses its owned Eyes_dx8 fallback, with refraction/flex/glints still missing. Prop door use carries the opener position to linked leaves and respects explicit swing direction, fixing the opposite inward/outward entrance behavior. Native door blockers and full gaze/choreography logic remain unfinished.
 
 ## Deferred prop-door opener inputs
+
+**Agent/model:** not recorded.
 
 Added shared OpenAwayFrom target resolution, preserved locks/fixed directions and stopped repeated opening inputs from resetting the swing. Two regression tests and an owned packaged entrance fixture cover named/current origins, player/caller/activator lookup and both sides. Full native door linkage/blocking remains unfinished.

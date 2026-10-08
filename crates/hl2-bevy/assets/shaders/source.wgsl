@@ -129,7 +129,9 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     if parameters.w < -0.5 {
         let uv = (secondary_uv * vec3(mesh.uv, 1.0)).xy;
         base = vec4(base.rgb * textureSample(iris_texture, iris_sampler, uv).rgb, base.a);
-        if parameters.w > -1.5 { vertex_color = vec4(1.0); }
+        if parameters.w > -1.5 || parameters.w < -2.5 { vertex_color = vec4(1.0); }
+        // SDK UnlitTwoTexture returns alpha 1; distance fade lives in the VTF frames.
+        if parameters.w < -2.5 { base.a = 1.0; }
     }
     base *= tint * vertex_color;
     if base.a < parameters.x { discard; }

@@ -36,7 +36,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 
 ## Keep these files updated
 
-- MODLOG.md: newest first; Changed / Why / Tested how / Result / Still broken or not tested / Next.
+- MODLOG.md: newest first; Agent/model / Changed / Why / Tested how / Result / Still broken or not tested / Next. Record the agent application and exact model identifier when available; distinguish contributor work and materially involved subagents. Never guess a model from the date or the current chat. Use "not recorded" for historical entries without evidence, and state when only a model family is known.
 - STATUS.md: verified revision/builds, current problems, evidence, rejected approaches, reproduction commands and next work.
 - docs/DESIGN.md: architecture and substantial plans. README.md: tested capabilities/limitations. docs/validation.md and docs/performance.md: detailed evidence.
 - Private work/publishing/continuation.md: precise local checkpoint before quota exhaustion or handoff. When the owner requests a fresh chat, finish the handoff and await further instructions here instead of continuing implementation in this chat.

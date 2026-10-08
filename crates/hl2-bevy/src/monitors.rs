@@ -18,6 +18,8 @@ pub struct Monitors {
     pub target: Handle<Image>,
     materials: Vec<String>,
     material_details: serde_json::Value,
+    material_samples: Vec<serde_json::Value>,
+    proxy_sample_time: f64,
     active: Vec<usize>,
     selected: Option<usize>,
     frames: u64,
@@ -29,6 +31,7 @@ impl Monitors {
             "selected":self.selected.map(|id| serde_json::json!({"entity":id,"name":game.world.entities[id].get("targetname"),
                 "origin":game.scene.states[id].origin.to_array(),"fov":game.scene.monitors.cameras[&id].fov})),
             "rendered_frames":self.frames,"visibility_error":self.error,
+            "proxy_sample_time":self.proxy_sample_time,"material_samples":self.material_samples,
             "state":game.scene.monitors,
             "limitations":"BSP bounds/PVS eligibility, shared live world/actor feed; native area connectivity, client list ordering, remaining monitor proxies/fog and monitor sky rendering remain incomplete; recursive monitor feedback is excluded"})
     }
@@ -80,6 +83,8 @@ pub fn install(
             .map(|(n, _)| n.clone())
             .collect(),
         material_details: serde_json::json!(loaded.materials.iter().filter(|(_,m)|m.camera).map(|(name,m)| serde_json::json!({"material":name,"overlay":m.camera_overlay_path,"unsupported_proxies":m.camera_animation.unsupported})).collect::<Vec<_>>()),
+        material_samples: Vec::new(),
+        proxy_sample_time: 0.,
         active: vec![],
         selected: None,
         frames: 0,
@@ -163,12 +168,14 @@ pub fn present(
 
 #[derive(Component)]
 pub struct MonitorMaterial {
+    pub name: String,
     pub animation: source_assets::monitor_material::Animation,
     pub color: [f32; 3],
     pub color2: [f32; 3],
 }
 pub fn present_materials(
     game: Res<Gameplay>,
+    mut monitors: ResMut<Monitors>,
     draws: Query<(
         &MonitorMaterial,
         &MeshMaterial3d<crate::rendering::SourceMaterial>,
@@ -177,6 +184,8 @@ pub fn present_materials(
 ) {
     // Shared materials use one authored proxy and scene clock on every draw.
     let mut updated = std::collections::HashSet::new();
+    monitors.material_samples.clear();
+    monitors.proxy_sample_time = game.scene.time;
     for (definition, handle) in &draws {
         if !updated.insert(handle.0.id()) {
             continue;
@@ -187,11 +196,7 @@ pub fn present_materials(
         let tint = Vec3::from_array(std::array::from_fn(|i| {
             linear_modulation(color[i] * definition.color2[i])
         }));
-        let secondary_uv = Mat3::from_cols(
-            Vec3::new(uv[0][0], uv[1][0], 0.),
-            Vec3::new(uv[0][1], uv[1][1], 0.),
-            Vec3::new(uv[0][2], uv[1][2], 1.),
-        );
+        let secondary_uv = uv_matrix(uv);
         if materials
             .get(&handle.0)
             .is_some_and(|m| m.tint.truncate() != tint || m.secondary_uv != secondary_uv)
@@ -200,7 +205,21 @@ pub fn present_materials(
             material.tint = tint.extend(material.tint.w);
             material.secondary_uv = secondary_uv;
         }
+        if let Some(material) = materials.get(&handle.0) {
+            monitors.material_samples.push(serde_json::json!({
+                "material":definition.name,"handle":format!("{:?}",handle.0.id()),
+                "color":material.tint.to_array(),
+                "secondary_uv":material.secondary_uv.to_cols_array_2d()
+            }));
+        }
     }
+}
+fn uv_matrix(uv: [[f32; 3]; 2]) -> Mat3 {
+    Mat3::from_cols(
+        Vec3::new(uv[0][0], uv[1][0], 0.),
+        Vec3::new(uv[0][1], uv[1][1], 0.),
+        Vec3::new(uv[0][2], uv[1][2], 1.),
+    )
 }
 
 /// SDK SetModulationPixelShaderDynamicState_LinearColorSpace: ($color * $color2) channels
@@ -220,6 +239,13 @@ pub(crate) fn linear_modulation(channel: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scanline_matrix_translates_texture_coordinates_downward_over_time() {
+        use bevy::prelude::{Vec2, Vec3};
+        let uv = super::uv_matrix([[1., 0., 0.], [0., 1., -0.91]]);
+        let transformed = (uv * Vec3::new(0.25, 0.75, 1.)).truncate();
+        assert!((transformed - Vec2::new(0.25, -0.16)).length() < 1e-6);
+    }
     #[test]
     fn modulation_matches_sdk_gamma_to_linear() {
         use super::linear_modulation as m;
