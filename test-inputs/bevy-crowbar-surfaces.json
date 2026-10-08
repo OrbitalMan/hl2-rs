@@ -1,0 +1,154 @@
+[
+ {
+  "tick": 1,
+  "label": "spawn",
+  "yaw": 270,
+  "pitch": -80,
+  "actions": [
+   {
+    "action": "loadout"
+   },
+   {
+    "action": "slot",
+    "slot": 0
+   }
+  ]
+ },
+ {
+  "tick": 2,
+  "actions": [
+   {
+    "action": "confirm"
+   }
+  ]
+ },
+ {
+  "tick": 100,
+  "label": "spawn-swing0",
+  "primary": true
+ },
+ {
+  "tick": 101
+ },
+ {
+  "tick": 145,
+  "label": "spawn-swing1",
+  "primary": true
+ },
+ {
+  "tick": 146
+ },
+ {
+  "tick": 190,
+  "label": "spawn-swing2",
+  "primary": true
+ },
+ {
+  "tick": 191
+ },
+ {
+  "tick": 235,
+  "label": "spawn-swing3",
+  "primary": true
+ },
+ {
+  "tick": 236
+ },
+ {
+  "tick": 280,
+  "label": "hall",
+  "eye": [
+   -4304,
+   -722,
+   128
+  ],
+  "pitch": -80
+ },
+ {
+  "tick": 340,
+  "label": "hall-swing0",
+  "primary": true
+ },
+ {
+  "tick": 341
+ },
+ {
+  "tick": 385,
+  "label": "hall-swing1",
+  "primary": true
+ },
+ {
+  "tick": 386
+ },
+ {
+  "tick": 430,
+  "label": "hall-swing2",
+  "primary": true
+ },
+ {
+  "tick": 431
+ },
+ {
+  "tick": 475,
+  "label": "hall-swing3",
+  "primary": true
+ },
+ {
+  "tick": 476
+ },
+ {
+  "tick": 520,
+  "label": "outside",
+  "eye": [
+   -3104,
+   -2018,
+   128
+  ],
+  "pitch": -80
+ },
+ {
+  "tick": 580,
+  "label": "outside-swing0",
+  "primary": true
+ },
+ {
+  "tick": 581
+ },
+ {
+  "tick": 625,
+  "label": "outside-swing1",
+  "primary": true
+ },
+ {
+  "tick": 626
+ },
+ {
+  "tick": 670,
+  "label": "outside-swing2",
+  "primary": true
+ },
+ {
+  "tick": 671
+ },
+ {
+  "tick": 715,
+  "label": "outside-swing3",
+  "primary": true
+ },
+ {
+  "tick": 716
+ },
+ {
+  "tick": 760,
+  "label": "air",
+  "pitch": 30,
+  "primary": true
+ },
+ {
+  "tick": 761
+ },
+ {
+  "tick": 820,
+  "label": "done"
+ }
+]
