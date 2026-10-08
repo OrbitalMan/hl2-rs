@@ -311,7 +311,10 @@ impl Impacts {
             .is_some_and(|e| e.class().starts_with("npc_"))
         {
             if let Some(sound) = self.property(FLESH, "bulletimpact") {
-                scene.sounds.push(sound.into());
+                scene.sounds.push(crate::sounds::SoundRequest {
+                    origin: Some(hit.position),
+                    ..sound.into()
+                });
             }
             return;
         }
@@ -333,7 +336,10 @@ impl Impacts {
         let prop = prop.as_str();
         // Bullets and the player's crowbar alike (SDK PlayImpactSound).
         if let Some(sound) = self.property(prop, "bulletimpact") {
-            scene.sounds.push(sound.into());
+            scene.sounds.push(crate::sounds::SoundRequest {
+                origin: Some(hit.position),
+                ..sound.into()
+            });
         }
         let family = match self
             .property(prop, "gamematerial")
