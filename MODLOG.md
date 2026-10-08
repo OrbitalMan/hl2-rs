@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-10-08 session 8 (later): positional ambients, security fixtures, monitor brightness investigation, PR #2 review
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- `ambient_generic` playback per SDK CAmbientGeneric. Distance gain from the retail engine's `GetDistGainFromSoundLevel` (engine.dll 10216bd0 -> 10216a20, disassembled privately; stock convars snd_refdb 60, refdist 36, gain_min 0.01, foliage loss 4).
+- Sound script volume/pitch/soundlevel parsing in `Library::params`.
+- Report `audio.spatial`.
+- Seeded security fixtures (`bevy-attention*`, `bevy-monitors-kleiner-scene`) now enable `overlay_kleinertv` (security_01 OnTrigger2) and kill `scene1_start`, `scene2_start` and `intro_music`. The G-man intro had started six seconds in.
+- Resampler test WAV header uses escapes, not raw control bytes.
+- Monitor feeds: kept-exposure and fixed-2 experiments were reverted; scale 1 remains.
+
+**Why:** Owner reports: loud hum everywhere, shield hum should fade with distance, the blue HUD was missing in the Barney batch cases, G-man speech played during those cases, and the Kleiner screen looked too dim.
+
+**Tested how:**
+- 349 normal tests, strict Clippy/fmt.
+- Packaged reports at five plaza distances (gate hum 1.0/0.85/0.30/0.14/0.08 at 14/132/332/632/988 units).
+- Audio trace of the attention fixture: the G-man cues are gone.
+- Attention verifier 26/26 with the overlay visible.
+- Native HDR security scene at 10.5 s from the Kleiner camera, plus native lab views after the intro.
+- Regression batch artifacts/session8-audio.
+
+**Result:** The shield hum is positional. The HUD overlay renders in the Barney cases, and those runs no longer play the G-man intro.
+
+**Still broken or not tested:**
+- The Kleiner screen and plaza slate are ~2x dim (linear) vs native. A feed-scale fix regressed hall exposure (wall 109 vs 129) and was reverted.
+- Bumped lightmaps (rocky brick).
+- env_soundscape, panning/DSP, positional PlaySound inputs, script cue volume for game requests.
+- Native audio recording of the hum.
+- Rejected this session: native lab captures blocked by the G-man intro camera (wait out the intro with ORACLE_INTRO_SECONDS=55 plus intro deactivation), and the `kept`/`fixed 2` monitor scales.
+
+**Next:** env_soundscape (DESIGN 12d), then detail sprites (11c).
+
 ## 2026-10-08 session 8: weapon-selection tick, godray regression, pause freeze, shield mipmaps
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
