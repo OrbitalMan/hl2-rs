@@ -510,7 +510,8 @@ pub fn queue(
     }
     for request in &game.sound_requests {
         if let Some(trace) = trace.as_deref_mut() {
-            trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused}));
+            trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused,
+                "ambient":request.ambient.map(|c| format!("{c:?}"))}));
         }
     }
     for request in std::mem::take(&mut game.sound_requests) {

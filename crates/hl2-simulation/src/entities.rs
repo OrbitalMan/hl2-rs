@@ -2737,7 +2737,7 @@ mod tests {
             ..World::default()
         };
         let mut scene = Scene::new(&world);
-        let mut run = |scene: &mut Scene, id: usize, input: &str| {
+        let run = |scene: &mut Scene, id: usize, input: &str| {
             scene.send(id, input, "");
             scene.tick(&world, Vec3::ZERO, 0.015);
             std::mem::take(&mut scene.sounds)
