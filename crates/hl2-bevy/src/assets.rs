@@ -385,6 +385,7 @@ fn rendered_material_names(world: &World) -> BTreeSet<String> {
     // Includes displacements and already-transformed static props. terrain is a
     // duplicate collision representation, and unused model_assets are not draws.
     append(&world.surfaces);
+    append(&world.overlays);
     for (id, entity) in world.entities.iter().enumerate() {
         if !visible_entity(world, id) {
             continue;

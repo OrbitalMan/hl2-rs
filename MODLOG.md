@@ -2,6 +2,28 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-08 info_overlay fragments on brush faces
+
+**Changed:** source-assets::overlays builds fragments per the retail COverlayMgr brush path (private overlay-20261008/README.md: engine.dll 10149db0, 10147b70, 1014c970, 1014d230, 1014c700, 1014cbd0, 1014a6c0):
+- V = normalize(N x U), negated by the VBSP flip bit. Quad corners are origin + uv.x U + uv.y V, with texcoords (U0,V0), (U0,V1), (U1,V1), (U1,V0).
+- Each listed face is fanned (triangles of area <= 1 are skipped); each triangle is flattened onto the overlay plane and clips the quad.
+- Clipped vertices get bilinear texcoords from their inverse-bilinear position in the quad (SDK PointInQuadToBarycentric convention), are projected back onto the face along N and pushed 0.1 units off it (0x1031d910 = 0.1f).
+
+The BSP world fills the new `World::overlays` (lightmapped by the face's lightmap; not decal/impact receivers), and the Bevy host draws them like world surfaces.
+
+**Why:** DESIGN 11b. The plaza "leaves" attribution in the session 5 plan was wrong: d1_trainstation_02's 27 overlays are ivy, wall posters/graffiti, floor stains, blood and two trash decals; none are leaves.
+
+**Tested how:**
+- 338 normal tests (new: one-face quad, face clipping, flipped V and bilinear corners) and 30 owned tests (new: trainstation_02 gives 26 overlay surfaces / 474 triangles with valid lightmap pages; the 27th overlay's two trash decals are on displacements). Strict Clippy and fmt.
+- Packaged captures vs native HDR: the ivy on the station's outer wall (view T005456Z) matches in placement and shape; the floor around a hall stain (T005326Z) is within 1-2 levels.
+- Regression batch artifacts/overlays-regression: all exits 0, verifiers 26/17/26, no viewmodel drops (burst 120). Image changes are confined to the Breen views (the wall stain behind the translucent jumbotron).
+
+**Result:** Overlay decals appear on brush faces.
+
+**Still broken or not tested:** Overlays on displacement faces (the retail displacement-space path, 10148b90), overlay fade distances (HDR fade lump), render-order sorting, and overlays on brush-entity faces.
+
+**Next:** Owner reports: weapon-switch sound cut halfway, plaza Combine barrier fade/animation, Kleiner monitor scanlines; then the plaza leaves/park grass (detail props, DESIGN 11c).
+
 ## 2026-10-08 $selfillum for LightmappedGeneric and VertexLitGeneric
 
 **Changed:** Materials with `$selfillum` (LightmappedGeneric, VertexLitGeneric) blend toward `$selfillumtint` x albedo by the base alpha before the envmap is added, as in SDK lightmappedgeneric_ps2_3_x.h and vertexlit_and_unlit_generic_ps2x.fxc. The flag is cleared when the base texture has no alpha (SDK dx9 helpers). `$selfillummask`, `$selfillumfresnel` and `$selfillum_envmapmask_alpha` are not supported.

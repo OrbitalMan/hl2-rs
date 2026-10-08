@@ -921,6 +921,9 @@ pub fn spawn_map(
     for surface in &world.surfaces {
         append(surface, Mat4::IDENTITY, Owner::World);
     }
+    for surface in &world.overlays {
+        append(surface, Mat4::IDENTITY, Owner::World);
+    }
     for (id, entity) in world.entities.iter().enumerate() {
         if !visible_entity(world, id) {
             continue;

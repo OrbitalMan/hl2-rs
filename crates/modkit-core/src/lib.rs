@@ -93,6 +93,10 @@ pub struct World {
     pub brush_models: Vec<BrushModel>,
     #[serde(default)]
     pub terrain: Vec<Surface>,
+    /// info_overlay fragments on world faces (drawn like world surfaces; not decal or impact
+    /// receivers).
+    #[serde(default)]
+    pub overlays: Vec<Surface>,
     #[serde(default)]
     pub model_assets: std::collections::BTreeMap<String, Vec<Surface>>,
     /// Collision convexes are separate from visible model triangles.

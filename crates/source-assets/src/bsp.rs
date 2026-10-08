@@ -230,6 +230,23 @@ impl Bsp {
         };
         let mut batches: BTreeMap<(String, Option<usize>, bool), Surface> = BTreeMap::new();
         let mut displacement_count = 0;
+        // info_overlay records and the world brush faces they reference (model 0 only).
+        let overlays = if model_index == 0 {
+            match crate::overlays::read(self.lump(45)) {
+                Ok(overlays) => overlays,
+                Err(e) => {
+                    world.warnings.push(format!("info_overlay records: {e:#}"));
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        let overlay_faces: BTreeSet<usize> = overlays
+            .iter()
+            .flat_map(|o| o.faces.iter().filter_map(|&f| usize::try_from(f).ok()))
+            .collect();
+        let mut overlay_targets: BTreeMap<usize, OverlayTarget> = BTreeMap::new();
         if first < 0
             || count < 0
             || (first as usize)
@@ -356,6 +373,24 @@ impl Bsp {
                     Ok(Vec2::ZERO)
                 }
             };
+            let face_index = first as usize + local_face;
+            if i16le(f, 12)? < 0 && overlay_faces.contains(&face_index) {
+                overlay_targets.insert(
+                    face_index,
+                    OverlayTarget {
+                        polygon: polygon.clone(),
+                        normal: face_normal,
+                        light: LightMapping {
+                            s: vec3(info, 32)?,
+                            s_offset: f32le(info, 44)? - i32le(f, 28)? as f32,
+                            t: vec3(info, 48)?,
+                            t_offset: f32le(info, 60)? - i32le(f, 32)? as f32,
+                            face: face_light,
+                        },
+                        background: background_faces.contains(&face_index),
+                    },
+                );
+            }
             let batch = batches
                 .entry((
                     material.clone(),
@@ -463,6 +498,61 @@ impl Bsp {
             }
         }
         world.surfaces = batches.into_values().collect();
+        for overlay in &overlays {
+            let material =
+                match texinfo_material(&texinfo, &texdata, strings, table, overlay.texinfo) {
+                    Ok(material) => material,
+                    Err(e) => {
+                        world
+                            .warnings
+                            .push(format!("info_overlay {}: {e:#}", overlay.id));
+                        continue;
+                    }
+                };
+            let mut pieces: BTreeMap<(Option<usize>, bool), Surface> = BTreeMap::new();
+            for target in overlay
+                .faces
+                .iter()
+                .filter_map(|&f| overlay_targets.get(&usize::try_from(f).ok()?))
+            {
+                for mut polygon in overlay.fragments(&target.polygon, target.normal) {
+                    // Counter-clockwise around the face normal (the host's front face; world
+                    // faces get the same orientation from their winding normalization).
+                    let area = (1..polygon.len() - 1).fold(Vec3::ZERO, |sum, i| {
+                        sum + (polygon[i].position - polygon[0].position)
+                            .cross(polygon[i + 1].position - polygon[0].position)
+                    });
+                    if area.dot(target.normal) < 0. {
+                        polygon.reverse();
+                    }
+                    let page = target.light.face.map(|l| l.page);
+                    let surface =
+                        pieces
+                            .entry((page, target.background))
+                            .or_insert_with(|| Surface {
+                                flex_source: None,
+                                background: target.background,
+                                material: material.clone(),
+                                vertices: Vec::new(),
+                                indices: Vec::new(),
+                                lightmap: page,
+                            });
+                    let base = surface.vertices.len() as u32;
+                    surface.vertices.extend(polygon.iter().map(|v| Vertex {
+                        normal: target.normal,
+                        position: v.position,
+                        uv: v.uv,
+                        color: [255; 4],
+                        skin: None,
+                        light_uv: target.light.uv(v.position),
+                    }));
+                    for i in 1..polygon.len() as u32 - 1 {
+                        surface.indices.extend([base, base + i, base + i + 1]);
+                    }
+                }
+            }
+            world.overlays.extend(pieces.into_values());
+        }
         let planes = records(self.lump(1), 20)?
             .map(|p| {
                 Ok(Plane {
@@ -538,6 +628,58 @@ impl Bsp {
         }
         Ok(world)
     }
+}
+
+/// A world brush face that info_overlays project onto.
+struct OverlayTarget {
+    polygon: Vec<Vec3>,
+    normal: Vec3,
+    light: LightMapping,
+    background: bool,
+}
+
+/// The face's lightmap texture vectors relative to its lightmap mins, and its atlas rect.
+struct LightMapping {
+    s: Vec3,
+    s_offset: f32,
+    t: Vec3,
+    t_offset: f32,
+    face: Option<crate::lighting::FaceLight>,
+}
+impl LightMapping {
+    /// Same mapping as world faces: luxel coordinates clamped to the face's rect, centered.
+    fn uv(&self, p: Vec3) -> Vec2 {
+        let Some(l) = self.face else {
+            return Vec2::ZERO;
+        };
+        let x = (self.s.dot(p) + self.s_offset).clamp(0., (l.width - 1) as f32);
+        let y = (self.t.dot(p) + self.t_offset).clamp(0., (l.height - 1) as f32);
+        Vec2::new(
+            (l.x as f32 + x + 0.5) / 1024.,
+            (l.y as f32 + y + 0.5) / 1024.,
+        )
+    }
+}
+
+/// Material name of a texinfo (texdata string table entry), lower-case.
+fn texinfo_material(
+    texinfo: &[&[u8]],
+    texdata: &[&[u8]],
+    strings: &[u8],
+    table: &[u8],
+    ti: i16,
+) -> Result<String> {
+    let info = texinfo[index(i32::from(ti), texinfo.len())?];
+    let td = texdata[index(i32le(info, 68)?, texdata.len())?];
+    let offset = u32le(table, index(i32le(td, 12)?, table.len() / 4)? * 4)? as usize;
+    let tail = strings
+        .get(offset..)
+        .context("texture string outside lump")?;
+    let end = tail
+        .iter()
+        .position(|b| *b == 0)
+        .context("unterminated texture string")?;
+    Ok(std::str::from_utf8(&tail[..end])?.to_lowercase())
 }
 
 #[cfg(test)]
@@ -670,5 +812,31 @@ mod tests {
             }
         }
         assert!(front * 100 > total * 99, "{front}/{total}");
+    }
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn owned_trainstation_overlays_become_lightmapped_fragments() {
+        let vfs = crate::vpk::Vfs::mount(std::path::Path::new(
+            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
+        ))
+        .unwrap();
+        let bytes = vfs.read("maps/d1_trainstation_02.bsp").unwrap().unwrap();
+        let bsp = Bsp::parse(&bytes).unwrap();
+        let world = bsp.world("d1_trainstation_02").unwrap();
+        let triangles: usize = world.overlays.iter().map(|s| s.indices.len() / 3).sum();
+        assert!(triangles > 0);
+        let pages = world.lightmaps.len();
+        for s in &world.overlays {
+            assert!(s.lightmap.is_none_or(|p| p < pages));
+            assert!(s
+                .vertices
+                .iter()
+                .all(|v| v.position.is_finite() && v.uv.is_finite()));
+        }
+        let materials: BTreeSet<_> = world.overlays.iter().map(|s| s.material.as_str()).collect();
+        eprintln!(
+            "{} overlay surfaces, {triangles} triangles, materials {materials:?}",
+            world.overlays.len()
+        );
     }
 }
