@@ -61,8 +61,11 @@ pub fn install(
         RenderTarget::Image(image.clone().into()),
         RenderLayers::layer(0),
         Tonemapping::None,
-        // Integer HDR draws monitor views before TurnOnToneMapping, after the previous main
-        // view reset the scale to 1 (SDK viewrender.cpp 2080/2090/2214).
+        // Monitor views render before TurnOnToneMapping (SDK viewrender.cpp 2080/2090). Only
+        // integer HDR resets the scale to 1 after the main view (2214); with the scale kept,
+        // the feed is drawn at the current exposure. Native HDR Kleiner-screen comparison
+        // (2026-10-08) matches the kept scale.
+        crate::tonemap::ToneMapped,
         bevy::camera::Exposure {
             ev100: crate::tonemap::ev100(1.),
         },
