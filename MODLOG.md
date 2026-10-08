@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-08 session 9: barrier close-hum loop, env_soundscape backgrounds
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed:**
+- ambient_generic PlaySound/StopSound/ToggleSound follow SDK CAmbientGeneric m_fActive and restart/stop that entity's own sound with its parameters (`AmbientControl`); `--audio-trace` request lines name the control. Fixture `test-inputs/bevy-barrier-hum.json`.
+- New `hl2_simulation::soundscapes`: soundscape manifest/map scripts, SDK server selection for env_soundscape/proxy (Scene::update_soundscape after player movement; Enable/Disable/ToggleEnabled; OnPlay), SDK client playback commands. The Bevy host preloads reachable waves, plays ambient and positional loops and random one-shots, fades by scene time (pause freezes it), honours `--mute-ambient`, traces commands and reports `audio.soundscape`. Fixture `test-inputs/bevy-soundscapes.json`.
+- docs/research.md: LuckerParty specs as unverified pointers; parallel REA workflow. DESIGN 12d/12e plans.
+
+**Why:** Owner reports: the barrier's close hum played once instead of looping; the background should change between the spawn room, the station hall and outside.
+
+**Tested how:**
+- `cargo test --locked --workspace` 360 passed; owned soundscape test (trainstation scripts and waves) passed; strict all-target Clippy and fmt.
+- Packaged barrier walk-in/out with `--audio-trace` and per-process recording: loop continuous while inside (7.8 s and 6.7 s), stops on leaving, twice.
+- Packaged soundscape tour (fly and walking): Interrogation -> Turnstyle -> TerminalSquare -> Turnstyle, with crossfades and random city sounds.
+- Native per-process recordings at the same places (oracle, HDR, `snd_mute_losefocus 0`): background medians within 3 dB at spawn and hall; outside ours is 6.6 dB louder.
+- Regression batches artifacts/ambient-inputs-regression and artifacts/soundscapes-regression: movement 26, weapons 17, attention 26; images match the previous batch (Breen slate exposure varies run to run, 0.64-0.68).
+
+**Result:** The close hum loops while touching the barrier. Each area has its own background, switching with the original crossfade.
+
+**Still broken or not tested:** outside background level (+6.6 dB vs native, cause unverified); DSP room effects, stereo panning, the close hum's spin-up/fade presets, trigger_soundscape, soundscape carry-over across level transitions; owner listening check. Rejected: console soundscape debug through the oracle hung native twice.
+
+**Next:** crowbar surface sounds (branch wip/melee-footsteps-20261008) and footsteps (DESIGN 12e).
+
 ## 2026-10-08 session 8 (later): positional ambients, security fixtures, monitor brightness investigation, PR #2 review
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
