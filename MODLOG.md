@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-10-08 session 9 (end): player fall damage, death and respawn; detail sprite WIP
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed:**
+- Owner priority change: player features first, then the rest of the arsenal (DESIGN 13).
+- Player (DESIGN 13a, SDK CSingleplayRules::FlPlayerFallDamage, CBasePlayer::Event_Killed/DeathSound/PlayerDeathThink, respawn): HL2 fall damage from 526.5 to 922.5 u/s (armor ignored) with Player.FallDamage; death holsters the weapon, sets the dead view height (14), freezes input, plays Player.Death or Player.FallGib; after every button is released, one press restarts the map (singleplayer reload without saves). `Inventory::damage_player`, shared `Player::dead`/`landed`. Death cues are preloaded. Fixture `test-inputs/bevy-player-death.json`.
+- Detail sprites (DESIGN 11c, branch `wip/detail-sprites-20261008`, not merged): `source_assets::details` decoder and a per-view billboard renderer (vertex shader facing and squared-distance fade).
+
+**Why:** Owner request to finish player features (death etc.) before more renderer work; detail sprites were the queued item 2.
+
+**Tested how:**
+- Unit tests: fall-damage curve and armor bypass, landing speed and frozen dead input, detail decoder (synthetic and owned: 7 sprites, 3,622 records, 66 leaves), fade/corner/lighting math. Workspace tests, strict Clippy/fmt.
+- Packaged death run: fatal drop -> pl_fallpain1 + body_medium_break2 (FallGib), eye 14, weapon holstered, respawn at the map start with 100 health after a press.
+- Packaged park-grass capture: 3,622 sprites in 66 leaf meshes render bottom-anchored and facing the camera (not compared with native yet).
+- Batch artifacts/death-regression: movement 26, weapons 17, attention 26; Breen feed pixel-identical to the footsteps baseline.
+
+**Still broken or not tested:** native death-view comparison (oracle `hurtme` had no effect twice; rejected); trigger_hurt, skill scaling, damage fades/indicator, pain/HEV sentences, drowning; the death view's exact native interpolation/tint; detail sprites vs native, flicker bursts and per-leaf sort order.
+
+**Next:** DESIGN 13a remainder, then 13b arsenal (frag, crossbow, RPG, gravity gun, bug bait).
+
 ## 2026-10-08 session 9 (later): crowbar surface sounds, footsteps, script cue levels
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.

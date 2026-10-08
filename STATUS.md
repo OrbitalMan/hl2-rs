@@ -1,6 +1,6 @@
 # STATUS
 
-Checkpoint: 2026-10-08 session 9 (Claude Code desktop, claude-opus-5-5) on main. Merged: barrier close-hum loop (ambient_generic PlaySound/StopSound per SDK m_fActive; packaged walk-in/out recording loops and stops twice) and env_soundscape backgrounds (SDK selection + client playback; native per-process recordings compared). PR #2 merged by the owner. 360 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26.
+Checkpoint: 2026-10-08 session 9 handoff (Claude Code desktop, claude-opus-5-5) on main. Merged: player fall damage/death/respawn, crowbar surface sounds, footsteps, script cue levels, barrier close-hum loop (ambient_generic PlaySound/StopSound per SDK m_fActive; packaged walk-in/out recording loops and stops twice) and env_soundscape backgrounds (SDK selection + client playback; native per-process recordings compared). PR #2 merged by the owner. 360 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26.
 
 ## Current session 9 (2026-10-08)
 
@@ -12,7 +12,11 @@ Supersedes session 8's open items where they conflict. Claude Code desktop, mode
 - **Footsteps and crowbar (owner reports, DESIGN 12e): merged.** The crowbar plays the hit surface's impact sound with rotating variants (flesh on NPCs, for every weapon); the player has SDK footsteps (timing, volumes, crouch, jump/landing) on the ground surface's step sounds; game cues use script volume/pitch, impacts are positioned. Native level comparisons for footsteps and the pistol are inconclusive (recorded privately); the player's own-sound spatialization is unverified.
 - **Third-party specs:** r0pi0x/LuckerParty (CS:S Bevy rewrite) reviewed; its specs are unverified SDK-derived pointers for ropes, env_sprite, bumped lightmaps and water (docs/research.md). **Parallel REA agents** add retail evidence under work/hl2-decompiled (pass15); check per feature.
 
-Remaining work, in the owner's order: (1) audio follow-ups: outside soundscape level (+6.6 dB), NPC speech positioning, own-sound spatialization evidence (REA), DSP; (2) detail sprites/leaf decals (DESIGN 11c; decoder on `wip/detail-sprites-20261008`, rendering next); (3) displacement overlays and fade distances; (4) npc_metropolice movement/idle and the campaign-order security chain; (5) renderer LDR, env_cubemap for brush entities/models, bumped lightmaps (LuckerParty shaders.md as a reading guide), ropes, env_sprite (green light) and screen glow, monitor brightness.
+- **Player death (DESIGN 13a): merged.** HL2 fall damage, death (dead view height, holster, Player.Death/FallGib) and press-to-respawn (map restart while saves are deferred). Packaged `test-inputs/bevy-player-death.json`. Native death view not compared (oracle `hurtme` rejected twice).
+- **Detail sprites (DESIGN 11c): WIP on `wip/detail-sprites-20261008`.** Decoder and per-view billboard renderer work in a packaged capture (3,622 sprites); native comparison, bursts and batch pending.
+- **Owner priority (2026-10-08, late):** player features first (death done; trigger_hurt, damage scaling/fades/indicator, pain/HEV sentences, drowning next), then the rest of the arsenal (frag, crossbow, RPG, gravity gun, bug bait), DESIGN 13.
+
+Remaining work, in the owner's order: (0) DESIGN 13a player remainder, then 13b arsenal; previous order follows. (1) audio follow-ups: outside soundscape level (+6.6 dB), NPC speech positioning, own-sound spatialization evidence (REA), DSP; (2) detail sprites/leaf decals (DESIGN 11c; decoder on `wip/detail-sprites-20261008`, rendering next); (3) displacement overlays and fade distances; (4) npc_metropolice movement/idle and the campaign-order security chain; (5) renderer LDR, env_cubemap for brush entities/models, bumped lightmaps (LuckerParty shaders.md as a reading guide), ropes, env_sprite (green light) and screen glow, monitor brightness.
 
 ## Current session 8 (2026-10-08)
 
