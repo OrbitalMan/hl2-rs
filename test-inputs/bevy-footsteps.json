@@ -1,0 +1,81 @@
+[
+ {
+  "tick": 1,
+  "label": "hall",
+  "eye": [
+   -4304,
+   -722,
+   128
+  ],
+  "yaw": 270,
+  "pitch": 0
+ },
+ {
+  "tick": 40,
+  "label": "walk",
+  "forward": 1
+ },
+ {
+  "tick": 180,
+  "label": "stop"
+ },
+ {
+  "tick": 200,
+  "label": "sprint-start",
+  "eye": [
+   -3104,
+   -2018,
+   128
+  ],
+  "yaw": 0
+ },
+ {
+  "tick": 240,
+  "label": "sprint",
+  "forward": 1,
+  "sprint": true
+ },
+ {
+  "tick": 360,
+  "label": "sprint-stop"
+ },
+ {
+  "tick": 400,
+  "label": "crouch-walk",
+  "forward": -1,
+  "crouch": true
+ },
+ {
+  "tick": 540,
+  "label": "stand",
+  "crouch": false
+ },
+ {
+  "tick": 580,
+  "label": "jump",
+  "jump": true
+ },
+ {
+  "tick": 582,
+  "label": "air"
+ },
+ {
+  "tick": 680,
+  "label": "spawn",
+  "eye": [
+   -4304,
+   -224,
+   0
+  ],
+  "yaw": 90
+ },
+ {
+  "tick": 720,
+  "label": "spawn-walk",
+  "forward": 1
+ },
+ {
+  "tick": 800,
+  "label": "done"
+ }
+]

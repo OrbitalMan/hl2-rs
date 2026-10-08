@@ -8,11 +8,13 @@ pub mod physics;
 
 pub mod actors;
 pub mod entities;
+pub mod footsteps;
 pub mod gameplay;
 pub mod npc;
 pub mod projectiles;
 pub mod selection;
 pub mod sounds;
+pub mod soundscapes;
 
 pub mod campaign;
 pub mod explosion_particles;

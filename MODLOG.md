@@ -68,6 +68,108 @@
 
 **Result:** Main Menu and Options dialog fully operational and integrated with Bevy host. Settings persist cleanly to `hl2-config.json` next to the executable.
 
+## 2026-10-08 session 9 (end): player fall damage, death and respawn; detail sprite WIP
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed:**
+- Owner priority change: player features first, then the rest of the arsenal (DESIGN 13).
+- Player (DESIGN 13a, SDK CSingleplayRules::FlPlayerFallDamage, CBasePlayer::Event_Killed/DeathSound/PlayerDeathThink, respawn): HL2 fall damage from 526.5 to 922.5 u/s (armor ignored) with Player.FallDamage; death holsters the weapon, sets the dead view height (14), freezes input, plays Player.Death or Player.FallGib; after every button is released, one press restarts the map (singleplayer reload without saves). `Inventory::damage_player`, shared `Player::dead`/`landed`. Death cues are preloaded. Fixture `test-inputs/bevy-player-death.json`.
+- trigger_hurt (SDK CTriggerHurt, player only): immediate hit on touch, damage x 0.5 every 0.5 s, damagemodel 1 doubling to damagecap with 3 s forgiveness, leave damage when the last think missed, negative damage heals, OnHurtPlayer; DMG_FALL/DROWN/POISON/RADIATION bypass armor. Unit-tested; batch artifacts/hurt-regression 26/17/26. Maps: trainstation_01 turret_hurt_1 (start disabled), trainstation_04 one, canals_01 two; not exercised in a packaged run.
+- Detail sprites (DESIGN 11c, branch `wip/detail-sprites-20261008`, not merged): `source_assets::details` decoder and a per-view billboard renderer (vertex shader facing and squared-distance fade).
+
+**Why:** Owner request to finish player features (death etc.) before more renderer work; detail sprites were the queued item 2.
+
+**Tested how:**
+- Unit tests: fall-damage curve and armor bypass, landing speed and frozen dead input, detail decoder (synthetic and owned: 7 sprites, 3,622 records, 66 leaves), fade/corner/lighting math. Workspace tests, strict Clippy/fmt.
+- Packaged death run: fatal drop -> pl_fallpain1 + body_medium_break2 (FallGib), eye 14, weapon holstered, respawn at the map start with 100 health after a press.
+- Packaged park-grass capture: 3,622 sprites in 66 leaf meshes render bottom-anchored and facing the camera (not compared with native yet).
+- Batch artifacts/death-regression: movement 26, weapons 17, attention 26; Breen feed pixel-identical to the footsteps baseline.
+
+**Still broken or not tested:** native death-view comparison (oracle `hurtme` had no effect twice; rejected); trigger_hurt, skill scaling, damage fades/indicator, pain/HEV sentences, drowning; the death view's exact native interpolation/tint; detail sprites vs native, flicker bursts and per-leaf sort order.
+
+**Next:** DESIGN 13a remainder, then 13b arsenal (frag, crossbow, RPG, gravity gun, bug bait).
+
+## 2026-10-08 session 9 (later): crowbar surface sounds, footsteps, script cue levels
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed:**
+- Crowbar (SDK basebludgeonweapon/weapon_crowbar/fx_hl2_impacts): a player melee hit plays the hit surface's `bulletimpact` sound like bullets; the player crowbar no longer plays melee_hit/melee_hit_world (NPC-operator cues). NPC hits from any weapon play the flesh impact sound. Fixture `test-inputs/bevy-crowbar-surfaces.json`.
+- Footsteps (`hl2_simulation::footsteps`, SDK UpdateStepSound/PlayStepSound, HL2 jump/landing constants): step timer 400/300 ms (+100 crouched), walk/run thresholds 90/220 (60/80 crouched), material volumes (0.2/0.5, dirt 0.25/0.55, vent 0.4/0.7, x0.65 crouched), alternating stepleft/stepright, jump step 1.0, landing 0.85/1.0 above 303 u/s. Ground surface from `Impacts::ground_property` (shared receiver lookup). The shared Player reports `jumped`/`landed`. Fixture `test-inputs/bevy-footsteps.json`.
+- Game cues use the sound script's volume and pitch drawn per emission (separate random stream) instead of a fixed 0.4/100; impact sounds are positioned at the hit with the script soundlevel. `SoundRequest` gained `volume` and `origin`.
+
+**Why:** Owner reports: no player footsteps; the crowbar sounded the same on every hit. Script levels are the DESIGN 12b follow-up.
+
+**Tested how:**
+- 365 normal tests, owned tests, strict Clippy/fmt.
+- Packaged crowbar run: Concrete/Tile/Concrete BulletImpact by floor with rotating variants; open-air swing plays only the swing.
+- Packaged footstep run: tile walk 400 ms at 0.2, concrete sprint 300 ms at 0.5, crouch 500 ms at 0.13, jump 1.0; normal jump landing silent.
+- Batches artifacts/melee-regression, footsteps-regression, cues-regression: 26/17/26. The first cue build changed Breen's monitor lip sync (0.16% of feed pixels) because parameter draws shared the wave-selection generator; with a separate stream two reruns are pixel-identical to the previous batch.
+
+**Result:** Crowbar hits sound by surface, the player has footsteps, and cue levels follow the scripts.
+
+**Still broken or not tested:** native comparison of footstep and weapon levels is inconclusive (low correlation, likely native DSP/pitch; private footsteps-melee-20261008, cue-levels-20261008); how native spatializes the local player's own sounds; NPC speech stays unpositioned; ladders/water steps; model-level surfaceprops for props.
+
+**Next:** detail sprites (DESIGN 11c, branch wip/detail-sprites-20261008).
+
+## 2026-10-08 session 9: barrier close-hum loop, env_soundscape backgrounds
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed:**
+- ambient_generic PlaySound/StopSound/ToggleSound follow SDK CAmbientGeneric m_fActive and restart/stop that entity's own sound with its parameters (`AmbientControl`); `--audio-trace` request lines name the control. Fixture `test-inputs/bevy-barrier-hum.json`.
+- New `hl2_simulation::soundscapes`: soundscape manifest/map scripts, SDK server selection for env_soundscape/proxy (Scene::update_soundscape after player movement; Enable/Disable/ToggleEnabled; OnPlay), SDK client playback commands. The Bevy host preloads reachable waves, plays ambient and positional loops and random one-shots, fades by scene time (pause freezes it), honours `--mute-ambient`, traces commands and reports `audio.soundscape`. Fixture `test-inputs/bevy-soundscapes.json`.
+- docs/research.md: LuckerParty specs as unverified pointers; parallel REA workflow. DESIGN 12d/12e plans.
+
+**Why:** Owner reports: the barrier's close hum played once instead of looping; the background should change between the spawn room, the station hall and outside.
+
+**Tested how:**
+- `cargo test --locked --workspace` 360 passed; owned soundscape test (trainstation scripts and waves) passed; strict all-target Clippy and fmt.
+- Packaged barrier walk-in/out with `--audio-trace` and per-process recording: loop continuous while inside (7.8 s and 6.7 s), stops on leaving, twice.
+- Packaged soundscape tour (fly and walking): Interrogation -> Turnstyle -> TerminalSquare -> Turnstyle, with crossfades and random city sounds.
+- Native per-process recordings at the same places (oracle, HDR, `snd_mute_losefocus 0`): background medians within 3 dB at spawn and hall; outside ours is 6.6 dB louder.
+- Regression batches artifacts/ambient-inputs-regression and artifacts/soundscapes-regression: movement 26, weapons 17, attention 26; images match the previous batch (Breen slate exposure varies run to run, 0.64-0.68).
+
+**Result:** The close hum loops while touching the barrier. Each area has its own background, switching with the original crossfade.
+
+**Still broken or not tested:** outside background level (+6.6 dB vs native, cause unverified); DSP room effects, stereo panning, the close hum's spin-up/fade presets, trigger_soundscape, soundscape carry-over across level transitions; owner listening check. Rejected: console soundscape debug through the oracle hung native twice.
+
+**Next:** crowbar surface sounds (branch wip/melee-footsteps-20261008) and footsteps (DESIGN 12e).
+
+## 2026-10-08 session 8 (later): positional ambients, security fixtures, monitor brightness investigation, PR #2 review
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- `ambient_generic` playback per SDK CAmbientGeneric. Distance gain from the retail engine's `GetDistGainFromSoundLevel` (engine.dll 10216bd0 -> 10216a20, disassembled privately; stock convars snd_refdb 60, refdist 36, gain_min 0.01, foliage loss 4).
+- Sound script volume/pitch/soundlevel parsing in `Library::params`.
+- Report `audio.spatial`.
+- Seeded security fixtures (`bevy-attention*`, `bevy-monitors-kleiner-scene`) now enable `overlay_kleinertv` (security_01 OnTrigger2) and kill `scene1_start`, `scene2_start` and `intro_music`. The G-man intro had started six seconds in.
+- Resampler test WAV header uses escapes, not raw control bytes.
+- Monitor feeds: kept-exposure and fixed-2 experiments were reverted; scale 1 remains.
+
+**Why:** Owner reports: loud hum everywhere, shield hum should fade with distance, the blue HUD was missing in the Barney batch cases, G-man speech played during those cases, and the Kleiner screen looked too dim.
+
+**Tested how:**
+- 349 normal tests, strict Clippy/fmt.
+- Packaged reports at five plaza distances (gate hum 1.0/0.85/0.30/0.14/0.08 at 14/132/332/632/988 units).
+- Audio trace of the attention fixture: the G-man cues are gone.
+- Attention verifier 26/26 with the overlay visible.
+- Native HDR security scene at 10.5 s from the Kleiner camera, plus native lab views after the intro.
+- Regression batch artifacts/session8-audio.
+
+**Result:** The shield hum is positional. The HUD overlay renders in the Barney cases, and those runs no longer play the G-man intro.
+
+**Still broken or not tested:**
+- The Kleiner screen and plaza slate are ~2x dim (linear) vs native. A feed-scale fix regressed hall exposure (wall 109 vs 129) and was reverted.
+- Bumped lightmaps (rocky brick).
+- env_soundscape, panning/DSP, positional PlaySound inputs, script cue volume for game requests.
+- Native audio recording of the hum.
+- Rejected this session: native lab captures blocked by the G-man intro camera (wait out the intro with ORACLE_INTRO_SECONDS=55 plus intro deactivation), and the `kept`/`fixed 2` monitor scales.
+
+**Next:** env_soundscape (DESIGN 12d), then detail sprites (11c).
+
 ## 2026-10-08 session 8: weapon-selection tick, godray regression, pause freeze, shield mipmaps
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.

@@ -1,0 +1,10 @@
+[
+  {"tick":1,"label":"spawn","yaw":270,"pitch":0},
+  {"tick":800,"label":"interrogation"},
+  {"tick":801,"label":"hall-enter","eye":[-4304,-722,128],"yaw":270},
+  {"tick":1600,"label":"hall"},
+  {"tick":1601,"label":"outside-enter","eye":[-3104,-2018,128],"yaw":0},
+  {"tick":2400,"label":"outside"},
+  {"tick":2401,"label":"hall-return","eye":[-4304,-722,128],"yaw":270},
+  {"tick":2800,"label":"done"}
+]

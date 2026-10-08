@@ -99,8 +99,82 @@ pub struct Gameplay {
     pub sound_cues: Vec<String>,
     pub sound_requests: Vec<hl2_simulation::sounds::SoundRequest>,
     weapon_sounds: hl2_simulation::sounds::WeaponAnimationSounds,
+    pub footsteps: hl2_simulation::footsteps::Footsteps,
 }
 impl Gameplay {
+    /// After the player move: HL2 fall damage on landing, then death (Event_Killed/DeathSound).
+    /// Returns true when the player died this tick.
+    pub fn player_outcome(&mut self, player: &mut modkit_core::movement::Player) -> bool {
+        // DMG_FALL, DMG_DROWN, DMG_POISON and DMG_RADIATION bypass armor (OnTakeDamage_Alive).
+        const NO_ARMOR: u32 = 32 | 16384 | 131072 | 262144;
+        for (amount, kind) in std::mem::take(&mut self.scene.player_damage) {
+            if amount < 0. {
+                if self.inventory.health > 0. {
+                    self.inventory.health = (self.inventory.health - amount).min(100.);
+                }
+            } else {
+                self.inventory.damage_player(amount, kind & NO_ARMOR == 0);
+            }
+        }
+        let mut fell = false;
+        if let Some(speed) = player.landed {
+            let damage = hl2_simulation::gameplay::fall_damage(speed);
+            if damage > 0. && self.inventory.damage_player(damage, false) > 0. {
+                self.scene.sounds.push("Player.FallDamage".into());
+                fell = true;
+            }
+        }
+        if player.dead || self.inventory.health > 0. {
+            return false;
+        }
+        player.dead = true;
+        player.crouched = false;
+        self.scene.sounds.push(
+            if fell {
+                "Player.FallGib"
+            } else {
+                "Player.Death"
+            }
+            .into(),
+        );
+        // Event_Killed holsters the active weapon; HEV_DEAD suit sentences are not scheduled yet.
+        self.inventory.previous = std::mem::take(&mut self.inventory.active);
+        true
+    }
+    /// SDK step sounds for one movement tick: UpdateStepSound with the state before the move,
+    /// then the jump or landing step the move produced.
+    pub fn step_sounds(
+        &mut self,
+        physics: &Physics,
+        before: hl2_simulation::footsteps::State,
+        feet: Vec3,
+        player: &modkit_core::movement::Player,
+    ) {
+        let world = self.world.clone();
+        let surface_at = |game: &Self, at: Vec3| {
+            game.impacts
+                .ground_property(&world, physics, &game.scene, at, 4.)
+                .map(|prop| game.impacts.step_surface(&prop))
+        };
+        let mut steps = Vec::new();
+        let mut footsteps = std::mem::take(&mut self.footsteps);
+        steps.extend(footsteps.update(before, TICK, || surface_at(self, feet)));
+        if player.jumped {
+            steps.extend(footsteps.jump(surface_at(self, feet)));
+        }
+        if let Some(fall) = player.landed {
+            steps.extend(footsteps.land(fall, || surface_at(self, player.feet)));
+        }
+        self.footsteps = footsteps;
+        for step in steps {
+            self.scene
+                .sounds
+                .push(hl2_simulation::sounds::SoundRequest {
+                    volume: Some(step.volume),
+                    ..step.sound.into()
+                });
+        }
+    }
     #[cfg(test)]
     pub(crate) fn synthetic(world: World) -> Self {
         Self {
@@ -123,6 +197,7 @@ impl Gameplay {
             sound_cues: vec![],
             sound_requests: vec![],
             weapon_sounds: Default::default(),
+            footsteps: Default::default(),
         }
     }
     pub fn load_with_campaign(
@@ -159,6 +234,7 @@ impl Gameplay {
             sound_cues: vec![],
             sound_requests: vec![],
             weapon_sounds: Default::default(),
+            footsteps: Default::default(),
         })
     }
     pub fn consume_attacks(&mut self) {
@@ -376,9 +452,8 @@ impl Gameplay {
         {
             self.scene.sounds.push(event.options.into());
         }
-        for (hit, melee) in self.inventory.impacts.drain(..) {
-            self.impacts
-                .add(hit, melee, &self.world, physics, &mut self.scene);
+        for (hit, _melee) in self.inventory.impacts.drain(..) {
+            self.impacts.add(hit, &self.world, physics, &mut self.scene);
         }
         for sound in self.scene.sounds.drain(..) {
             self.sound_cues.push(sound.name.clone());

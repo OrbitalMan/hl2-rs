@@ -1,5 +1,9 @@
 # Local validation — 2026-10-05
 
+## Soundscapes and barrier hum (session 9, 2026-10-08)
+
+Barrier: packaged `test-inputs/bevy-barrier-hum.json` with `--audio-trace` and a per-process recording; the touch loop (2.69 s) stays continuous for 7.8 s and 6.7 s inside the trigger and stops on leaving. Soundscapes: packaged `test-inputs/bevy-soundscapes.json` (spawn, hall at (-4304,-722) eye 128, outside at (-3104,-2018) eye 128, 12 s each) and native oracle views at the same places with `ORACLE_SETUP="volume 0.05;snd_mute_losefocus 0"`, both recorded per process. Background medians (dB): spawn -56.0 native / -58.7 ours, hall -53.5 / -51.9, outside -44.7 / -38.1 (open). Native stays silent while unfocused unless `snd_mute_losefocus 0`. Batches artifacts/ambient-inputs-regression and artifacts/soundscapes-regression: 26/17/26.
+
 ## Audio verification method (session 8, 2026-10-08)
 
 Use this method for any "sound is cut / sounds different" report. Sink lifetimes and sample counts alone missed a real defect.

@@ -182,6 +182,14 @@ struct EmptyFire {
     next_sound: f64,
 }
 
+/// CSingleplayRules::FlPlayerFallDamage with the HL2_DLL constants: damage grows linearly
+/// from the maximum safe fall speed (526.5) to 100 at the fatal speed (922.5).
+pub fn fall_damage(fall_speed: f32) -> f32 {
+    const MAX_SAFE: f32 = 526.5;
+    const FATAL: f32 = 922.5;
+    ((fall_speed - MAX_SAFE) * (100. / (FATAL - MAX_SAFE))).max(0.)
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Inventory {
@@ -966,6 +974,28 @@ impl Inventory {
             lifetime: weapon.secondary_lifetime,
         });
     }
+    /// CBasePlayer::OnTakeDamage_Alive health/armor accounting. Armor absorbs 80% at one
+    /// armor point per two damage points, except for DMG_FALL/DROWN/POISON/RADIATION
+    /// (`armor` false). Returns the health removed; the dead take no damage.
+    pub fn damage_player(&mut self, amount: f32, armor: bool) -> f32 {
+        if self.health <= 0. || !amount.is_finite() || amount <= 0. {
+            return 0.;
+        }
+        let mut health_damage = amount;
+        if armor && self.armor > 0. {
+            health_damage = amount * 0.2;
+            let armor_cost = (amount - health_damage).max(1.);
+            if armor_cost > self.armor {
+                health_damage = amount - self.armor;
+                self.armor = 0.;
+            } else {
+                self.armor -= armor_cost;
+            }
+        }
+        let before = self.health;
+        self.health = (self.health - health_damage).max(0.);
+        before - self.health
+    }
     pub fn apply_projectile_damage(
         &mut self,
         events: Vec<crate::projectiles::Damage>,
@@ -980,24 +1010,9 @@ impl Inventory {
             }
             match damage.target {
                 DamageTarget::Player => {
-                    if self.health <= 0. {
-                        continue;
-                    }
-                    // Default singleplayer armor accounting from CBasePlayer.
-                    // Difficulty scaling, damage HUD, pain/death and knockback
+                    // Difficulty scaling, damage HUD, pain sounds and knockback
                     // still need their separate native player implementation.
-                    let mut health_damage = damage.amount;
-                    if self.armor > 0. {
-                        health_damage = damage.amount * 0.2;
-                        let armor_cost = (damage.amount - health_damage).max(1.);
-                        if armor_cost > self.armor {
-                            health_damage = damage.amount - self.armor;
-                            self.armor = 0.;
-                        } else {
-                            self.armor -= armor_cost;
-                        }
-                    }
-                    self.health = (self.health - health_damage).max(0.);
+                    self.damage_player(damage.amount, true);
                 }
                 DamageTarget::Entity(id) => {
                     let Some(entity) = world.entities.get(id) else {
@@ -1065,22 +1080,12 @@ impl Inventory {
         let id = hit.entity;
         let entity = world.entities.get(id);
         let flesh = entity.is_some_and(|e| e.class().starts_with("npc_"));
-        if !flesh {
-            self.impacts.push((hit, melee));
-        }
+        // SDK UTIL_ImpactTrace: every bullet and player-crowbar hit plays the hit surface's
+        // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
+        // WeaponSound(MELEE_HIT) is the NPC-operator path.
+        self.impacts.push((hit, melee));
         if melee {
             self.animate("hitcenter1", scene.time);
-            play_sound(
-                scene,
-                weapon,
-                if flesh {
-                    "melee_hit"
-                } else {
-                    "melee_hit_world"
-                },
-                world,
-                "",
-            );
         }
         self.hits += 1;
         physics.impulse(id, direction, if melee { 4. } else { 1. });
@@ -1305,6 +1310,25 @@ fn ammo_pickup(class: &str) -> Option<(&'static str, i32)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fall_damage_and_armor_exceptions_follow_sdk() {
+        use super::*;
+        assert_eq!(fall_damage(500.), 0.);
+        assert!((fall_damage(922.5) - 100.).abs() < 1e-3);
+        assert!((fall_damage(693.) - 42.05).abs() < 0.05);
+        let mut inv = Inventory {
+            health: 100.,
+            armor: 50.,
+            ..Default::default()
+        };
+        // Falls ignore armor; other damage spends one armor point per two absorbed.
+        assert_eq!(inv.damage_player(30., false), 30.);
+        assert_eq!(inv.armor, 50.);
+        assert_eq!(inv.damage_player(30., true), 6.);
+        assert_eq!(inv.armor, 26.);
+        assert_eq!(inv.damage_player(500., false), 64.);
+        assert_eq!(inv.damage_player(10., true), 0.);
+    }
     #[test]
     fn map_clock_transfer_preserves_remaining_cooldown_reload_and_charge() {
         use super::*;

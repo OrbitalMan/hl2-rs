@@ -190,6 +190,17 @@ fn self_positioned(class: &str) -> bool {
         .iter()
         .any(|p| class.starts_with(p))
 }
+#[derive(Clone, Copy, Debug)]
+struct HurtState {
+    /// m_flDamage (grows under damagemodel 1).
+    damage: f32,
+    /// Next HurtThink; None when the think is cleared.
+    next: Option<f64>,
+    reset_at: f64,
+    /// The player was hurt by the last HurtAllTouchers.
+    hurt_player: bool,
+}
+
 #[derive(Default, Serialize)]
 pub struct Diagnostics {
     pub inputs_delivered: u64,
@@ -235,6 +246,13 @@ pub struct Scene {
     pub diagnostics: Diagnostics,
     pub transition: Option<(String, String)>,
     pub sounds: Vec<crate::sounds::SoundRequest>,
+    /// ambient_generic m_fActive after inputs; unset entities keep their spawn state.
+    ambient_active: BTreeMap<usize, bool>,
+    /// env_soundscape selection for the local player (SDK server soundscape system).
+    pub soundscape: crate::soundscapes::Selector,
+    /// Damage dealt to the player this tick (amount, Source damage-type bits); negative heals.
+    pub player_damage: Vec<(f32, u32)>,
+    hurt: BTreeMap<usize, HurtState>,
     unsupported: BTreeSet<String>,
     choreography: BTreeMap<usize, Choreography>,
     pub movement_commands: Vec<SceneMoveCommand>,
@@ -272,6 +290,10 @@ impl Scene {
             diagnostics: Diagnostics::default(),
             transition: None,
             sounds: Vec::new(),
+            ambient_active: BTreeMap::new(),
+            soundscape: crate::soundscapes::Selector::new(world),
+            player_damage: Vec::new(),
+            hurt: BTreeMap::new(),
             unsupported: BTreeSet::new(),
             choreography: BTreeMap::new(),
             movement_commands: Vec::new(),
@@ -710,6 +732,9 @@ impl Scene {
         cue: &str,
     ) -> crate::sounds::SoundRequest {
         crate::sounds::SoundRequest {
+            ambient: None,
+            volume: None,
+            origin: None,
             name: cue.into(),
             actor: Some(crate::sounds::SoundActor {
                 name: world.entities[actor].get("targetname").unwrap_or("").into(),
@@ -1767,6 +1792,62 @@ impl Scene {
             self.choreography.insert(id, scene);
         }
     }
+    /// SDK FrameUpdatePostEntityThink soundscape pass for the player's ear (eye) position,
+    /// after player movement; a newly active env_soundscape fires OnPlay.
+    pub fn update_soundscape(&mut self, world: &World, ear: Vec3) {
+        let states = &self.states;
+        let enabled = |id: usize| states.get(id).is_some_and(|s| s.enabled && !s.killed);
+        if let Some(id) = self.soundscape.update(world, ear, enabled) {
+            self.fire(id, "OnPlay", id);
+        }
+    }
+    /// SDK CTriggerHurt for the player: Touch schedules HurtThink at once, which deals
+    /// damage x 0.5 every 0.5 s while touched (damagemodel 1 doubles up to damagecap and
+    /// forgives after 3 s without a hit); leaving without a hit in the last think deals
+    /// damage x 0.5. NPC touchers are not hurt here yet.
+    fn trigger_hurt(&mut self, e: &Entity, id: usize, inside: bool, was_inside: bool) {
+        let base = number(e, "damage", 0.);
+        let cap = number(e, "damagecap", 20.);
+        let doubling = number(e, "damagemodel", 0.) as u32 == 1;
+        let kind = number(e, "damagetype", 0.) as u32;
+        let time = self.time;
+        let hurt = self.hurt.entry(id).or_insert(HurtState {
+            damage: base,
+            next: None,
+            reset_at: 0.,
+            hurt_player: false,
+        });
+        let mut hurt_now = false;
+        if inside && hurt.next.is_none() {
+            hurt.next = Some(time);
+        }
+        if hurt.next.is_some_and(|next| time >= next) {
+            hurt.hurt_player = inside;
+            if inside {
+                self.player_damage.push((hurt.damage * 0.5, kind));
+                hurt_now = true;
+            }
+            if doubling {
+                if hurt_now {
+                    hurt.damage = (hurt.damage * 2.).min(cap);
+                    hurt.reset_at = time + 3.;
+                } else if time > hurt.reset_at {
+                    hurt.damage = base;
+                }
+            }
+            hurt.next = hurt_now.then_some(time + 0.5);
+        }
+        if was_inside && !inside {
+            if !hurt.hurt_player {
+                self.player_damage.push((hurt.damage * 0.5, kind));
+                hurt_now = true;
+            }
+            hurt.hurt_player = false;
+        }
+        if hurt_now && base != 0. {
+            self.fire(id, "OnHurtPlayer", usize::MAX);
+        }
+    }
     pub fn fire(&mut self, id: usize, name: &str, activator: usize) {
         let Some(state) = self.states.get_mut(id) else {
             return;
@@ -2012,6 +2093,9 @@ impl Scene {
                     self.states[id].visible = false;
                 }
             }
+            "toggleenabled" if class.starts_with("env_soundscape") => {
+                self.states[id].enabled = !self.states[id].enabled;
+            }
             "toggle" if !door => {
                 self.states[id].enabled = !self.states[id].enabled;
                 if matches!(class, "func_brush" | "func_monitor") {
@@ -2162,9 +2246,44 @@ impl Scene {
                     p.activator,
                 );
             }
-            "playsound" if class == "ambient_generic" => {
-                if let Some(sound) = e.get("message") {
-                    self.sounds.push(sound.into());
+            "playsound" | "stopsound" | "togglesound" if class == "ambient_generic" => {
+                // SDK CAmbientGeneric: looping sounds are active from spawn unless they start
+                // silent; PlaySound restarts an inactive sound, StopSound stops an active one,
+                // and only looping sounds stay active.
+                let flags = e
+                    .get("spawnflags")
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .unwrap_or(0);
+                let looping = flags & 32 == 0;
+                let active = *self
+                    .ambient_active
+                    .get(&id)
+                    .unwrap_or(&(looping && flags & 16 == 0));
+                let play = match input.as_str() {
+                    "playsound" => !active,
+                    "stopsound" => false,
+                    _ => !active,
+                };
+                if let Some(sound) = e.get("message").filter(|m| !m.is_empty()) {
+                    if play {
+                        self.ambient_active.insert(id, looping);
+                        self.sounds.push(crate::sounds::SoundRequest {
+                            name: sound.into(),
+                            actor: None,
+                            ambient: Some(crate::sounds::AmbientControl::Play(id)),
+                            volume: None,
+                            origin: None,
+                        });
+                    } else if active && input != "playsound" {
+                        self.ambient_active.insert(id, false);
+                        self.sounds.push(crate::sounds::SoundRequest {
+                            name: sound.into(),
+                            actor: None,
+                            ambient: Some(crate::sounds::AmbientControl::Stop(id)),
+                            volume: None,
+                            origin: None,
+                        });
+                    }
                 }
             }
             "changelevel" if class == "trigger_changelevel" => {
@@ -2580,6 +2699,9 @@ impl Scene {
                         self.states[id].enabled = false;
                     }
                 }
+                if e.class() == "trigger_hurt" {
+                    self.trigger_hurt(e, id, player, self.states[id].touching && npc.is_none());
+                }
                 // SF_CHANGELEVEL_NOTOUCH (0x2) leaves the ChangeLevel input available,
                 // but must not change maps when the player overlaps the brush.
                 if inside
@@ -2680,6 +2802,45 @@ mod tests {
                 .map(|(k, v)| (k.into(), v.into()))
                 .collect(),
         }
+    }
+    #[test]
+    fn ambient_inputs_follow_sdk_active_state() {
+        use crate::sounds::AmbientControl::{Play, Stop};
+        let world = World {
+            entities: vec![
+                // Looping, start silent, play everywhere: a barrier's touch hum.
+                entity(
+                    "ambient_generic",
+                    "close",
+                    &[("message", "hum"), ("spawnflags", "17")],
+                ),
+                // Not looping: every PlaySound plays it again.
+                entity(
+                    "ambient_generic",
+                    "once",
+                    &[("message", "beep"), ("spawnflags", "48")],
+                ),
+            ],
+            ..World::default()
+        };
+        let mut scene = Scene::new(&world);
+        let run = |scene: &mut Scene, id: usize, input: &str| {
+            scene.send(id, input, "");
+            scene.tick(&world, Vec3::ZERO, 0.015);
+            std::mem::take(&mut scene.sounds)
+                .into_iter()
+                .filter_map(|r| r.ambient)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(&mut scene, 0, "PlaySound"), [Play(0)]);
+        assert_eq!(run(&mut scene, 0, "PlaySound"), []);
+        assert_eq!(run(&mut scene, 0, "StopSound"), [Stop(0)]);
+        assert_eq!(run(&mut scene, 0, "StopSound"), []);
+        assert_eq!(run(&mut scene, 0, "ToggleSound"), [Play(0)]);
+        assert_eq!(run(&mut scene, 0, "ToggleSound"), [Stop(0)]);
+        assert_eq!(run(&mut scene, 1, "PlaySound"), [Play(1)]);
+        assert_eq!(run(&mut scene, 1, "PlaySound"), [Play(1)]);
+        assert_eq!(run(&mut scene, 1, "StopSound"), []);
     }
     fn choreography(events: &[(EventType, f32, &str)]) -> Arc<ChoreoScene> {
         let mut data = b"bvcd\x04".to_vec();
@@ -3638,6 +3799,69 @@ mod tests {
             .diagnostics
             .unsupported
             .contains_key("point_template.ForceSpawn:repeat"));
+    }
+    #[test]
+    fn trigger_hurt_follows_sdk_think_timing() {
+        let cube = modkit_core::BrushModel {
+            id: 1,
+            brushes: vec![modkit_core::Brush {
+                planes: [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z]
+                    .into_iter()
+                    .map(|normal| modkit_core::Plane {
+                        normal,
+                        distance: 8.,
+                    })
+                    .collect(),
+                contents: 1,
+            }],
+            mins: Vec3::splat(-8.),
+            maxs: Vec3::splat(8.),
+            ..Default::default()
+        };
+        let hurt = |model: &str| World {
+            entities: vec![entity(
+                "trigger_hurt",
+                "pain",
+                &[
+                    ("model", "*1"),
+                    ("damage", "10"),
+                    ("damagecap", "30"),
+                    ("damagemodel", model),
+                    ("damagetype", "0"),
+                ],
+            )],
+            brush_models: vec![cube.clone()],
+            ..Default::default()
+        };
+        let world = hurt("0");
+        let mut scene = Scene::new(&world);
+        let mut dealt = Vec::new();
+        // Inside for one second (67 ticks), then outside.
+        for tick in 0..80 {
+            let at = if tick < 67 {
+                Vec3::ZERO
+            } else {
+                Vec3::X * 100.
+            };
+            scene.tick(&world, at, 0.015);
+            for (amount, _) in scene.player_damage.drain(..) {
+                dealt.push((tick, amount));
+            }
+        }
+        // Immediate hit, then every 0.5 s (about 34 ticks): 5 per think, none on leaving
+        // because the last think hurt the player.
+        assert_eq!(dealt.len(), 2, "{dealt:?}");
+        assert!(dealt.iter().all(|&(_, a)| a == 5.));
+        assert!((33..=35).contains(&(dealt[1].0 - dealt[0].0)), "{dealt:?}");
+        // Doubling: 5, 10, 15 (capped at 30 x 0.5).
+        let world = hurt("1");
+        let mut scene = Scene::new(&world);
+        let mut amounts = Vec::new();
+        for _ in 0..110 {
+            scene.tick(&world, Vec3::ZERO, 0.015);
+            amounts.extend(scene.player_damage.drain(..).map(|(a, _)| a));
+        }
+        assert_eq!(amounts, [5., 10., 15., 15.]);
     }
     #[test]
     fn no_touch_changelevel_still_accepts_explicit_input() {

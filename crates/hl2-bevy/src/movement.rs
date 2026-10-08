@@ -118,6 +118,8 @@ pub struct Simulation {
     pub run_after_script: bool,
     pub dev_overlay: bool,
     pub pending_video_config: Option<hl2_ui::config::VideoSettings>,
+    /// PlayerDeathThink: every button must be released before one press respawns.
+    death_buttons_released: bool,
 }
 impl Simulation {
     pub fn new(
@@ -150,6 +152,7 @@ impl Simulation {
             run_after_script: false,
             dev_overlay: false,
             pending_video_config: None,
+            death_buttons_released: true,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -185,7 +188,7 @@ impl Simulation {
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"player": self.player, "eye": self.eye.to_array(), "fly": self.fly,
-            "paused": self.paused(), "dev_overlay":self.dev_overlay, "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
+            "paused": self.paused(), "dev_overlay":self.dev_overlay, "dead": self.player.dead, "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
             "samples": self.samples, "colliders": self.physics.colliders.len(),
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
@@ -370,8 +373,44 @@ impl Simulation {
                     .normalize_or_zero();
                 self.eye += direction * if self.input.sprint { 900. } else { 300. } * TICK;
             } else {
+                let before = hl2_simulation::footsteps::State {
+                    velocity: self.player.velocity,
+                    grounded: self.player.grounded,
+                    crouched: self.player.crouched,
+                    noclip: false,
+                };
+                let feet = self.player.feet;
                 self.player.step(self.input, &self.physics, TICK);
                 self.eye = self.player.eye();
+                if let Some(game) = game.as_deref_mut() {
+                    game.step_sounds(&self.physics, before, feet, &self.player);
+                    if game.player_outcome(&mut self.player) {
+                        self.death_buttons_released = false;
+                        self.eye = self.player.eye();
+                    }
+                }
+            }
+            if let Some(game) = game.as_deref_mut() {
+                let world = game.world.clone();
+                game.scene
+                    .update_soundscape(&world, glam::Vec3::from_array(self.eye.to_array()));
+            }
+        }
+        if self.player.dead && !self.paused() && !self.transition {
+            let any_button = self.input.forward != 0.
+                || self.input.side != 0.
+                || self.input.jump
+                || self.input.crouch
+                || game.as_deref().is_some_and(|g| g.primary || g.secondary);
+            if !self.death_buttons_released {
+                self.death_buttons_released = !any_button;
+            } else if any_button
+                && let (Some(game), Some(ui)) = (game.as_deref(), ui.as_deref_mut())
+            {
+                // Singleplayer respawn() issues "reload": the last save, else the map again.
+                // Saves are not implemented, so the current map restarts fresh.
+                ui.map_request = Some(game.world.name.clone());
+                self.loading = true;
             }
         }
         if game.as_ref().is_some_and(|g| g.scene.transition.is_some()) {
