@@ -52,6 +52,19 @@ cd hl2-rs
 
 The repository contains source, not a prebuilt executable. Building creates `bin/hl2-bevy.exe` and its shader folder `bin/bevy-assets`. If PowerShell blocks the local build script, invoke `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-bevy.ps1` for that process. To uninstall, remove the checkout; the game installation is read-only.
 
+### macOS
+
+On macOS (Apple Silicon / POSIX) with the Rust toolchain installed, use the provided shell scripts to build and launch the game. Steam installations in `~/Library/Application Support/Steam` are automatically discovered.
+
+```bash
+git clone https://github.com/kvalls/hl2-rs.git
+cd hl2-rs
+./scripts/build-bevy.sh
+./launch-bevy.sh
+```
+
+Building creates `bin/hl2-bevy` and the `bin/bevy-assets` shader folder. The executable and shader folder must remain together.
+
 ## Play the current build
 
 Double-click `launch-bevy.cmd` in this folder. It launches `bin/hl2-bevy.exe`, the packaged release build. Rust is needed only for rebuilding. The default map is `d1_trainstation_02`.
