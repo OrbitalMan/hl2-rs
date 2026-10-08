@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-10-09 Video Resolution Scaling and Display Metrics Architecture
+
+**Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session).
+
+**Changed:**
+- `crates/hl2-bevy/src/video.rs`:
+  - Structured display and resolution management into modular submodules: `display` (`DisplayMetrics`), `resolution` (`ResolutionPlan`), and `mode` (`desired_mode`).
+  - Added physical-to-logical resolution scaling calculations ($\text{Logical Size} = \text{Physical Resolution} / \text{Scale Factor}$) preventing oversized window backing textures and GPU depth attachment extent mismatch errors (`wgpu` validation error: `Attachments have differing sizes`) on High-DPI / Retina displays.
+  - Implemented macOS workspace fullscreen detection (`is_workspace_fullscreen`) to protect against window resizing while in AppKit native workspace fullscreen.
+  - Added unit tests: `changes_resolution_with_scale_factor` and `workspace_fullscreen_protected_from_resolution_desync`.
+
+**Why:** Changing resolution in windowed mode on High-DPI/Retina screens caused physical textures to exceed monitor bounds, leading to OS window clamping, desynchronization between color and depth attachments, and wgpu crash with blinking magenta screen.
+
+**Tested how:**
+- `cargo test --bin hl2-bevy`: 44 unit tests passing (including new scale factor and workspace fullscreen tests).
+- `cargo clippy -p hl2-bevy --all-targets`: passed with 0 warnings.
+- `cargo fmt --check`: passed cleanly.
+- `target/debug/hl2-bevy --frames 60 --no-focus`: verified 60 frames on Apple M1 Pro (Metal backend) loading `d1_trainstation_02` with 0 validation errors.
+
+**Result:** Clean resolution scaling and crash-free display mode and resolution switching.
+
 ## 2026-10-08 Video and Window Display Decoupling
 
 **Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session).
