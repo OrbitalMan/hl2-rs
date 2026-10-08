@@ -91,14 +91,17 @@ pub fn install(
             // HDR faces are linear RGBA16F, drawn through the shader's linear-base path
             // (parameters.w = -2 with a white second texture), times the tonemap scale.
             let (base, linear) = if let Some(hdr) = &data.hdr {
-                let mut image = rendering::image(
-                    hdr.width,
-                    hdr.height,
+                let image = Image::new(
+                    bevy::render::render_resource::Extent3d {
+                        width: hdr.width.into(),
+                        height: hdr.height.into(),
+                        depth_or_array_layers: 1,
+                    },
+                    bevy::render::render_resource::TextureDimension::D2,
                     hdr.rgba.iter().flat_map(|t| t.to_le_bytes()).collect(),
-                    false,
+                    bevy::render::render_resource::TextureFormat::Rgba16Float,
+                    RenderAssetUsages::RENDER_WORLD,
                 );
-                image.texture_descriptor.format =
-                    bevy::render::render_resource::TextureFormat::Rgba16Float;
                 (images.add(image), true)
             } else {
                 let image = rendering::image(
