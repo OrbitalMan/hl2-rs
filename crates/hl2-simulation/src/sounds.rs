@@ -524,6 +524,8 @@ pub struct Library {
     actors: ActorRegistry,
     available: HashMap<String, Vec<bool>>,
     rng: u64,
+    /// Separate stream for volume/pitch draws so wave selection is unchanged.
+    param_rng: u64,
     pub variants_played: BTreeMap<String, usize>,
     pub decoded: BTreeMap<String, AudioSummary>,
     pub errors: BTreeMap<String, String>,
@@ -610,6 +612,7 @@ impl Library {
             actors,
             available: HashMap::new(),
             rng: 0x92ea79123,
+            param_rng: 0x51ab_2c3d_4e5f_6071,
             variants_played: BTreeMap::new(),
             decoded: BTreeMap::new(),
             errors,
@@ -621,10 +624,13 @@ impl Library {
     pub fn draw_params(&mut self, name: &str) -> (f32, f32, f32) {
         let p = self.params(name);
         let mut draw = |(low, high): (f32, f32)| {
-            self.rng ^= self.rng << 13;
-            self.rng ^= self.rng >> 7;
-            self.rng ^= self.rng << 17;
-            low + (high - low) * ((self.rng >> 40) as f32 / (1u64 << 24) as f32)
+            if high == low {
+                return low;
+            }
+            self.param_rng ^= self.param_rng << 13;
+            self.param_rng ^= self.param_rng >> 7;
+            self.param_rng ^= self.param_rng << 17;
+            low + (high - low) * ((self.param_rng >> 40) as f32 / (1u64 << 24) as f32)
         };
         let volume = draw(p.volume_range);
         let pitch = draw(p.pitch_range);
