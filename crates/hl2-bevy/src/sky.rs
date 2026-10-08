@@ -56,6 +56,7 @@ pub fn install(
 ) {
     if let Some(sky) = &loaded.sky {
         let white = images.add(rendering::image(1, 1, vec![255; 4], false));
+        let black_cube = images.add(rendering::black_cube());
         for (face, data) in sky.faces.iter().enumerate() {
             let corners = [(-1., -1.), (-1., 1.), (1., 1.), (1., -1.)];
             let mut mesh = Mesh::new(
@@ -119,6 +120,11 @@ pub fn install(
                     iris: white.clone(),
                     secondary_uv: Mat3::IDENTITY,
                     lighting: Default::default(),
+                    envmap: black_cube.clone(),
+                    envmap_tint: Vec4::ZERO,
+                    envmap_contrast: Vec4::ZERO,
+                    envmap_saturation: Vec4::ZERO,
+                    envmap_mask: white.clone(),
                     alpha: AlphaMode::Opaque,
                     two_sided: true,
                 })),
