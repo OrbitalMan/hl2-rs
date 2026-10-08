@@ -208,6 +208,22 @@ impl Material for SourceMaterial {
         Ok(())
     }
 }
+/// A repeating sRGB texture with its authored VTF mip chain (largest first), sampled
+/// trilinearly like Source's default texture filtering.
+fn mip_image(chain: &[source_assets::vtf::Image]) -> Image {
+    let top = &chain[0];
+    let mut result = image(top.width, top.height, top.rgba.clone(), true);
+    // Image::new checks one level; the remaining mips follow it in the same buffer.
+    result.data = Some(
+        chain
+            .iter()
+            .flat_map(|mip| mip.rgba.iter().copied())
+            .collect(),
+    );
+    result.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+    result.texture_descriptor.mip_level_count = chain.len() as u32;
+    result
+}
 pub(crate) fn image(width: u16, height: u16, rgba: Vec<u8>, repeat: bool) -> Image {
     let mut image = Image::new(
         Extent3d {
@@ -859,15 +875,10 @@ pub fn spawn_map(
                 frames
                     .iter()
                     .enumerate()
-                    .map(|(i, frame)| {
+                    .map(|(i, chain)| {
                         texture_handles
-                            .entry(format!("{path}#frame{i}#srgb"))
-                            .or_insert_with(|| {
-                                let mut image =
-                                    image(frame.width, frame.height, frame.rgba.clone(), true);
-                                image.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
-                                images.add(image)
-                            })
+                            .entry(format!("{path}#frame{i}#mips#srgb"))
+                            .or_insert_with(|| images.add(mip_image(chain)))
                             .clone()
                     })
                     .collect::<Vec<_>>()

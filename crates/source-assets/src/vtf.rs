@@ -2,7 +2,7 @@
 //! (including RGBA16161616F HDR cubemaps).
 use crate::{bytes, u16le, u32le};
 use anyhow::{bail, Context, Result};
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Image {
     pub width: u16,
     pub height: u16,
