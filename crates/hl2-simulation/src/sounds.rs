@@ -859,6 +859,7 @@ mod tests {
                 .unwrap(),
             available: HashMap::new(),
             rng: 0x92ea79123,
+            param_rng: 0x51ab_2c3d_4e5f_6071,
             variants_played: BTreeMap::new(),
             decoded: BTreeMap::new(),
             errors: BTreeMap::new(),
