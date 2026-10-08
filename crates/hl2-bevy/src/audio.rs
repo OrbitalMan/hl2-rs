@@ -594,7 +594,7 @@ pub fn queue(
             &mut commands,
             &request,
             false,
-            (0.4, 100., None),
+            (request.volume.unwrap_or(0.4), 100., None),
             (paused, None, None),
         ) {
             count += 1;

@@ -363,8 +363,18 @@ impl Simulation {
                     .normalize_or_zero();
                 self.eye += direction * if self.input.sprint { 900. } else { 300. } * TICK;
             } else {
+                let before = hl2_simulation::footsteps::State {
+                    velocity: self.player.velocity,
+                    grounded: self.player.grounded,
+                    crouched: self.player.crouched,
+                    noclip: false,
+                };
+                let feet = self.player.feet;
                 self.player.step(self.input, &self.physics, TICK);
                 self.eye = self.player.eye();
+                if let Some(game) = game.as_deref_mut() {
+                    game.step_sounds(&self.physics, before, feet, &self.player);
+                }
             }
             if let Some(game) = game.as_deref_mut() {
                 let world = game.world.clone();

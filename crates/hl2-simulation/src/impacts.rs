@@ -50,6 +50,13 @@ fn receiver(
     }
     nearest
 }
+struct Located<'a> {
+    surfaces: std::borrow::Cow<'a, [Surface]>,
+    center: GVec3,
+    normal: GVec3,
+    scale: f32,
+    prop: String,
+}
 pub struct Mark {
     pub id: usize,
     pub vertices: Vec<decals::DecalVertex>,
@@ -147,7 +154,10 @@ impl Impacts {
             .values()
             .map(String::as_str)
             .chain([FLESH])
-            .filter_map(|p| self.property(p, "bulletimpact"))
+            .flat_map(|p| {
+                ["bulletimpact", "stepleft", "stepright"].map(|key| self.property(p, key))
+            })
+            .flatten()
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .map(Into::into)
@@ -171,23 +181,20 @@ impl Impacts {
         }
         None
     }
-    pub fn add(&mut self, hit: RayHit, world: &World, physics: &Physics, scene: &mut Scene) {
-        // NPC hitboxes use the flesh surface: impact sound only, no decal here.
-        if world
-            .entities
-            .get(hit.entity)
-            .is_some_and(|e| e.class().starts_with("npc_"))
-        {
-            if let Some(sound) = self.property(FLESH, "bulletimpact") {
-                scene.sounds.push(sound.into());
-            }
-            return;
-        }
+    /// The surface a hit lands on, in the hit entity's local frame, and its surface property.
+    /// Err(true) means no receiving face was found near the hit.
+    fn locate<'a>(
+        &self,
+        hit: &RayHit,
+        world: &'a World,
+        physics: &Physics,
+        scene: &Scene,
+    ) -> Result<Located<'a>, bool> {
         let (surfaces, origin, rotation, scale): (&[Surface], _, _, _) =
             if let Some(e) = world.entities.get(hit.entity) {
                 let state = &scene.states[hit.entity];
                 if state.killed {
-                    return;
+                    return Err(false);
                 }
                 let (origin, rotation) = physics
                     .entity_pose(hit.entity)
@@ -205,11 +212,11 @@ impl Impacts {
                     .find(|i| i.entity == Some(hit.entity))
                 {
                     let Some(surfaces) = world.model_assets.get(&instance.asset_key()) else {
-                        return;
+                        return Err(false);
                     };
                     (&surfaces[..], origin, rotation, instance.scale)
                 } else {
-                    return;
+                    return Err(false);
                 }
             } else {
                 (&world.surfaces[..], GVec3::ZERO, glam::Quat::IDENTITY, 1.)
@@ -242,7 +249,7 @@ impl Impacts {
                     })
                     .collect::<Vec<_>>()
             });
-        let surfaces = posed.as_deref().unwrap_or(surfaces);
+        let surfaces_ref = posed.as_deref().unwrap_or(surfaces);
         let center = rotation.inverse() * (hit.position - origin) / scale;
         let normal = rotation.inverse() * hit.normal;
         let gap = if hit.entity < world.entities.len() {
@@ -250,15 +257,80 @@ impl Impacts {
         } else {
             0.
         };
-        let Some((receiver, center)) = receiver(surfaces, center, normal, gap) else {
-            self.unclippable += 1;
-            return;
+        let Some((receiver, center)) = receiver(surfaces_ref, center, normal, gap) else {
+            return Err(true);
         };
         let prop = self
             .surfaceprops
             .get(&receiver.material)
-            .map(String::as_str)
-            .unwrap_or("default");
+            .cloned()
+            .unwrap_or_else(|| "default".into());
+        let surfaces = match posed {
+            Some(posed) => std::borrow::Cow::Owned(posed),
+            None => std::borrow::Cow::Borrowed(surfaces),
+        };
+        Ok(Located {
+            surfaces,
+            center,
+            normal,
+            scale,
+            prop,
+        })
+    }
+    /// Surface property under a point (SDK CategorizeGroundSurface reads the ground trace's
+    /// surface); None when nothing is within `depth` below.
+    pub fn ground_property(
+        &self,
+        world: &World,
+        physics: &Physics,
+        scene: &Scene,
+        feet: GVec3,
+        depth: f32,
+    ) -> Option<String> {
+        let hit = physics.impact_ray(feet + GVec3::Z * 2., -GVec3::Z, depth + 2.)?;
+        self.locate(&hit, world, physics, scene)
+            .ok()
+            .map(|l| l.prop)
+    }
+    /// Footstep sounds and game material of a surface property.
+    pub fn step_surface(&self, prop: &str) -> crate::footsteps::Surface {
+        crate::footsteps::Surface {
+            step_left: self.property(prop, "stepleft"),
+            step_right: self.property(prop, "stepright"),
+            material: self
+                .property(prop, "gamematerial")
+                .and_then(|m| m.chars().next())
+                .unwrap_or('C'),
+        }
+    }
+    pub fn add(&mut self, hit: RayHit, world: &World, physics: &Physics, scene: &mut Scene) {
+        // NPC hitboxes use the flesh surface: impact sound only, no decal here.
+        if world
+            .entities
+            .get(hit.entity)
+            .is_some_and(|e| e.class().starts_with("npc_"))
+        {
+            if let Some(sound) = self.property(FLESH, "bulletimpact") {
+                scene.sounds.push(sound.into());
+            }
+            return;
+        }
+        let located = match self.locate(&hit, world, physics, scene) {
+            Ok(located) => located,
+            Err(unclippable) => {
+                self.unclippable += usize::from(unclippable);
+                return;
+            }
+        };
+        let Located {
+            surfaces,
+            center,
+            normal,
+            scale,
+            prop,
+        } = located;
+        let surfaces = &surfaces[..];
+        let prop = prop.as_str();
         // Bullets and the player's crowbar alike (SDK PlayImpactSound).
         if let Some(sound) = self.property(prop, "bulletimpact") {
             scene.sounds.push(sound.into());

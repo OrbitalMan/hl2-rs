@@ -717,6 +717,7 @@ impl Scene {
     ) -> crate::sounds::SoundRequest {
         crate::sounds::SoundRequest {
             ambient: None,
+            volume: None,
             name: cue.into(),
             actor: Some(crate::sounds::SoundActor {
                 name: world.entities[actor].get("targetname").unwrap_or("").into(),
@@ -2206,6 +2207,7 @@ impl Scene {
                             name: sound.into(),
                             actor: None,
                             ambient: Some(crate::sounds::AmbientControl::Play(id)),
+                            volume: None,
                         });
                     } else if active && input != "playsound" {
                         self.ambient_active.insert(id, false);
@@ -2213,6 +2215,7 @@ impl Scene {
                             name: sound.into(),
                             actor: None,
                             ambient: Some(crate::sounds::AmbientControl::Stop(id)),
+                            volume: None,
                         });
                     }
                 }
