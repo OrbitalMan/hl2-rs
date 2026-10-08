@@ -16,6 +16,7 @@ mod performance;
 mod rendering;
 mod sky;
 mod tonemap;
+mod video;
 mod visibility;
 use anyhow::{Context, Result, bail};
 use bevy::{

@@ -1,5 +1,23 @@
 # MODLOG
 
+## 2026-10-08 Video and Window Display Decoupling
+
+**Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session).
+
+**Changed:**
+- `crates/hl2-bevy/src/video.rs`: Created dedicated module for window display mode, resolution changes, wgpu depth attachment synchronization (`apply_video_config_to_window`), FOV conversion (`vertical_fov`), and associated safety unit tests (`applies_video_config_safely`).
+- `crates/hl2-bevy/src/main.rs`: Registered `mod video;`.
+- `crates/hl2-bevy/src/movement.rs`: Decoupled video and window management logic from input/movement simulation. Factored display query parameters into `DisplayDevices` tuple alias, satisfying clippy complexity limits.
+
+**Why:** Separate concerns by decoupling display/video management from the player movement and physics simulation module.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all unit tests passing (including `video::tests::applies_video_config_safely`).
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed with 0 warnings.
+- `cargo fmt --all --check`: passed cleanly.
+
+**Result:** Clean modular architectural boundaries between display/window configuration and player simulation.
+
 ## 2026-10-08 Main Menu and Native Source Settings Suite
 
 **Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session).
