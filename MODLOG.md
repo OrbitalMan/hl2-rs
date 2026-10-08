@@ -2,6 +2,20 @@
 
 Newest entries first. Historical entries retain their original wording/test scope; current state is in STATUS.md. This is a Rust rewrite. New entries follow the [requested MODLOG template](https://github.com/trevaintdead/ai-game-modding-guides/blob/main/templates/MODLOG-template.md).
 
+## 2026-10-08 Fix the blinking weapon viewmodel (bloom pass ordering)
+
+**Changed:** The Source bloom pass (hl2-bevy bloom.rs) now runs in Bevy's `Core3dSystems::PostProcess` set, after the camera's main pass, instead of being ordered only `.before(tonemapping)`. New test option `--capture-burst N` saves the N frames after `--capture` as `<capture>-1.png` ... `<capture>-N.png`, so flicker can be measured. Private helpers: work/publishing/flicker_check.py (counts frames without viewmodel pixels) and flicker_bisect_step.sh.
+
+**Why:** Owner report: the weapon viewmodel blinked in and out. The bloom system was not placed in a Core3d set, so the parallel render schedule could run it before the viewmodel camera's main pass. On those frames its post-process swap discarded the weapon drawn afterwards. Bisected with burst captures (the burst option patched onto each tested commit): 0dc8291, 1028388 and 6a7455d clean (0 of 61 frames lost); 8ee25d2 (bloom, session 5) and later lose 1-9 of 61 frames, including 1640df0 (before this session and the macOS merge) and 994df99. SDK viewrender.cpp RenderView draws the viewmodel (DrawViewModels), then the fade/overlays, then DoEnginePostProcessing (bloom), so bloom on the viewmodel camera after its main pass matches Source.
+
+**Tested how:** Weapons fixture with `--capture-burst 120`: two runs, 0 of 121 frames without the viewmodel (before: 1-9 of 61 per run). 331 normal tests, strict Clippy and fmt. Regression batch artifacts/bloomfix-regression: all cases exit 0, captures within 9 levels of the accepted bloom-regression baselines, no pose/visibility mismatches, campaign's 25 known station03 texture errors only; verifiers movement 26/26, weapons 17/17, attention 26/26.
+
+**Result:** The viewmodel draws every frame in the tested fixture. Earlier single-frame captures could not show the bug; the accepted bloom-regression weapons capture happened to land on a good frame.
+
+**Still broken or not tested:** Other Core3d ordering assumptions were not audited beyond this pass. Ordinary play was **not tested** by an automated check; the owner's live report is the reference.
+
+**Next:** Envmap masks (`$normalmapalphaenvmapmask`, `$envmapmask`) on wip/envmap before it merges.
+
 ## 2026-10-07 README platforms table; feature list moved to docs/features.md
 
 **Changed:** README.md gains a "Platforms" table near the top: Windows (primary tested), macOS Apple Silicon (tested by a contributor, PR #1), Linux and other systems (**not tested**). The long "Implemented so far" list moved verbatim to docs/features.md; the README keeps a one-paragraph summary with a link.

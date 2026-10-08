@@ -2,7 +2,11 @@
 //! gamma-space shaped quarter-size downsample, a 13-tap Gaussian blur in X and Y (Y scaled
 //! by the bloom amount) and an additive composite before the HUD.
 use bevy::{
-    core_pipeline::{FullscreenShader, schedule::Core3d, tonemapping::tonemapping},
+    core_pipeline::{
+        FullscreenShader,
+        schedule::{Core3d, Core3dSystems},
+        tonemapping::tonemapping,
+    },
     prelude::*,
     render::{
         Render, RenderApp, RenderStartup, RenderSystems,
@@ -42,7 +46,15 @@ impl Plugin for SourceBloomPlugin {
                     prepare_textures.in_set(RenderSystems::PrepareResources),
                 ),
             )
-            .add_systems(Core3d, source_bloom.before(tonemapping));
+            // After the main pass (PostProcess set), before tonemapping: ordered only
+            // `.before(tonemapping)`, the executor could run it before the viewmodel camera's
+            // main pass, and the post-process swap then discarded the weapon on some frames.
+            .add_systems(
+                Core3d,
+                source_bloom
+                    .in_set(Core3dSystems::PostProcess)
+                    .before(tonemapping),
+            );
     }
 }
 

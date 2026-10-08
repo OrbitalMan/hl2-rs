@@ -40,6 +40,8 @@ struct Options {
     map: String,
     frames: Option<u64>,
     capture: Option<PathBuf>,
+    /// Also save this many consecutive frames after the capture (flicker checks).
+    capture_burst: u32,
     monitor_capture: Option<PathBuf>,
     report: PathBuf,
     position: Option<Vec3>,
@@ -71,6 +73,7 @@ impl Options {
             map: "d1_trainstation_02".into(),
             frames: None,
             capture: None,
+            capture_burst: 0,
             monitor_capture: None,
             report: "artifacts/bevy-report.json".into(),
             position: None,
@@ -100,6 +103,7 @@ impl Options {
                 "--map" => options.map = next(&mut args)?,
                 "--frames" => options.frames = Some(next(&mut args)?.parse()?),
                 "--capture" => options.capture = Some(next(&mut args)?.into()),
+                "--capture-burst" => options.capture_burst = next(&mut args)?.parse()?,
                 "--capture-monitor" => options.monitor_capture = Some(next(&mut args)?.into()),
                 "--report" => options.report = next(&mut args)?.into(),
                 "--position" => {
@@ -132,7 +136,7 @@ impl Options {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -770,10 +774,24 @@ fn monitor(
                 exit.write(AppExit::Success);
             }
         }
-        if control
-            .completed_frame
-            .is_some_and(|frame| control.frames >= frame + 5)
-        {
+        // Burst frames: PNG-N.png for each of the frames after the requested capture.
+        if let (Some(path), Some(frame)) = (&options.capture, control.requested_frame) {
+            let index = control.frames - frame;
+            if (1..=u64::from(options.capture_burst)).contains(&index) {
+                let burst = path.with_file_name(format!(
+                    "{}-{index}.png",
+                    path.file_stem().unwrap_or_default().to_string_lossy()
+                ));
+                commands
+                    .spawn(Screenshot::primary_window())
+                    .observe(bevy::render::view::screenshot::save_to_disk(burst));
+            }
+        }
+        if control.completed_frame.is_some_and(|frame| {
+            control.frames >= frame + 5
+                && control.frames
+                    >= control.requested_frame.unwrap_or(0) + u64::from(options.capture_burst) + 5
+        }) {
             exit.write(AppExit::Success);
         }
         if control
