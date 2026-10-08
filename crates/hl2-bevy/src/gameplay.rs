@@ -376,9 +376,8 @@ impl Gameplay {
         {
             self.scene.sounds.push(event.options.into());
         }
-        for (hit, melee) in self.inventory.impacts.drain(..) {
-            self.impacts
-                .add(hit, melee, &self.world, physics, &mut self.scene);
+        for (hit, _melee) in self.inventory.impacts.drain(..) {
+            self.impacts.add(hit, &self.world, physics, &mut self.scene);
         }
         for sound in self.scene.sounds.drain(..) {
             self.sound_cues.push(sound.name.clone());
