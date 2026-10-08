@@ -81,6 +81,9 @@ struct Ambient {
     request: SoundRequest,
     looped: bool,
     volume: f32,
+    pitch: f32,
+    /// Source origin and soundlevel; soundlevel 0 plays everywhere.
+    spatial: (glam::Vec3, f32),
 }
 pub struct PreparedAudio {
     library: Library,
@@ -96,29 +99,69 @@ impl PreparedAudio {
         let mut library = Library::new(vfs);
         let mut cues = BTreeSet::new();
         let mut ambient = Vec::new();
+        let origin_of = |entity: &modkit_core::Entity| {
+            entity
+                .get("origin")
+                .and_then(modkit_core::parse_vec3)
+                .map_or(glam::Vec3::ZERO, |v| glam::Vec3::from_array(v.to_array()))
+        };
         for entity in &game.world.entities {
             if entity.class() != "ambient_generic" {
                 continue;
             }
-            if let Some(name) = entity.get("message").filter(|name| !name.is_empty()) {
-                cues.insert(name.to_owned());
-                let flags = entity
-                    .get("spawnflags")
-                    .and_then(|s| s.parse::<u32>().ok())
-                    .unwrap_or(0);
-                if flags & 16 == 0 {
-                    let volume = entity
-                        .get("health")
-                        .and_then(|s| s.parse::<f32>().ok())
-                        .unwrap_or(5.)
-                        / 10.;
-                    ambient.push(Ambient {
-                        request: name.into(),
-                        looped: flags & 32 == 0,
-                        volume: volume * 0.3,
-                    });
-                }
+            let Some(name) = entity.get("message").filter(|name| !name.is_empty()) else {
+                continue;
+            };
+            cues.insert(name.to_owned());
+            let flags = entity
+                .get("spawnflags")
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0);
+            // SDK CAmbientGeneric: only looping sounds that do not start silent play at spawn.
+            if flags & (16 | 32) != 0 {
+                continue;
             }
+            let number = |key: &str| entity.get(key).and_then(|s| s.trim().parse::<f32>().ok());
+            // volrun = clamp(health * 10, 0, 100); m_iHealth defaults to 0 (silent).
+            let volume = (number("health").unwrap_or(0.) * 10.).clamp(0., 100.) / 100.;
+            if volume <= 0. {
+                continue;
+            }
+            let pitch = number("pitch")
+                .filter(|p| *p > 0.)
+                .unwrap_or(100.)
+                .min(255.);
+            let radius = number("radius").unwrap_or(0.);
+            // A raw wave's soundlevel comes from its radius (40 dB at 36 units); a sound
+            // script keeps its own soundlevel (SDK EmitAmbientSound).
+            let soundlevel = if name.to_ascii_lowercase().contains(".wav")
+                || name.to_ascii_lowercase().contains(".mp3")
+            {
+                if radius > 0. && flags & 1 == 0 {
+                    (40. + 20. * (radius / 36.).log10()).trunc()
+                } else {
+                    0.
+                }
+            } else {
+                library.params(name).soundlevel
+            };
+            let source = entity
+                .get("SourceEntityName")
+                .filter(|n| !n.is_empty())
+                .and_then(|n| {
+                    game.world
+                        .entities
+                        .iter()
+                        .find(|e| e.get("targetname") == Some(n))
+                })
+                .unwrap_or(entity);
+            ambient.push(Ambient {
+                request: name.into(),
+                looped: true,
+                volume,
+                pitch,
+                spatial: (origin_of(source), soundlevel),
+            });
         }
         cues.extend(
             game.scene
@@ -245,6 +288,8 @@ pub struct Audio {
     paused: bool,
     pause_changes: u64,
     resume_changes: u64,
+    /// Per positioned player this frame: (wave, distance, applied volume before global).
+    spatial: Vec<(String, f32, f32)>,
 }
 /// `--audio-trace PATH`: one JSON line per sound request, sink start and sink removal,
 /// with the sink's last observed playback position, for diagnosing cut-off sounds.
@@ -274,6 +319,10 @@ pub struct SoundPlayer {
     path: String,
     queued_frame: u64,
     observed: bool,
+    /// Volume before distance gain and the global volume.
+    volume: f32,
+    /// Source origin and soundlevel for distance gain (SDK GetDistGainFromSoundLevel).
+    spatial: Option<(glam::Vec3, f32)>,
 }
 impl Audio {
     fn emit(
@@ -281,7 +330,7 @@ impl Audio {
         commands: &mut Commands,
         request: &SoundRequest,
         looped: bool,
-        volume: f32,
+        (volume, pitch, spatial): (f32, f32, Option<(glam::Vec3, f32)>),
         paused: bool,
     ) -> Option<String> {
         let path = match self.library.resolve(request) {
@@ -313,10 +362,18 @@ impl Audio {
                 path: path.clone(),
                 queued_frame: self.frame,
                 observed: false,
+                volume,
+                spatial,
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
-                volume: bevy::audio::Volume::Linear(volume.clamp(0., 1.)),
+                // Spatial sounds start silent; `queue` applies their distance gain.
+                volume: bevy::audio::Volume::Linear(if spatial.is_some() {
+                    0.
+                } else {
+                    volume.clamp(0., 1.)
+                }),
+                speed: pitch / 100.,
                 paused,
                 ..settings
             },
@@ -328,9 +385,9 @@ impl Audio {
         serde_json::json!({"preloaded_waves":self.handles.len(),"preloaded_bytes":self.bytes,"referenced_cues":self.cues,
             "requested":self.requested,"started_sinks":self.started,"failed_requests":self.failed,"capacity_rejections":self.capacity_rejections,
             "pending_sinks":self.pending_sinks,"active_sinks":self.active_sinks,"paused_sinks":self.paused_sinks,
-            "pause_changes":self.pause_changes,"resume_changes":self.resume_changes,
+            "pause_changes":self.pause_changes,"resume_changes":self.resume_changes,"spatial":self.spatial,
             "variants":self.library.variants_played,"decoded":self.library.decoded,"errors":self.library.errors,
-            "mixing":"retained 2D volume policy; Source spatialization/DSP/soundscapes are not implemented"})
+            "mixing":"ambient_generic loops use Source distance gain; stereo panning, DSP and soundscapes are not implemented"})
     }
 }
 pub fn install(
@@ -366,6 +423,7 @@ pub fn install(
         paused: false,
         pause_changes: 0,
         resume_changes: 0,
+        spatial: Vec::new(),
     };
     let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
     for ambient in prepared.ambient.into_iter().filter(|_| !mute) {
@@ -377,7 +435,7 @@ pub fn install(
             commands,
             &ambient.request,
             ambient.looped,
-            ambient.volume,
+            (ambient.volume, ambient.pitch, Some(ambient.spatial)),
             false,
         );
     }
@@ -388,8 +446,10 @@ pub fn queue(
     mut audio: ResMut<Audio>,
     mut game: ResMut<crate::gameplay::Gameplay>,
     (simulation, mut trace): (Res<crate::movement::Simulation>, Option<ResMut<AudioTrace>>),
-    mut players: Query<(&mut PlaybackSettings, Option<&AudioSink>), With<SoundPlayer>>,
+    mut players: Query<(&SoundPlayer, &mut PlaybackSettings, Option<&mut AudioSink>)>,
+    global: Res<GlobalVolume>,
 ) {
+    let listener = glam::Vec3::from_array(simulation.eye().to_array());
     let paused = simulation.paused();
     if paused != audio.paused {
         if paused {
@@ -400,9 +460,20 @@ pub fn queue(
         audio.paused = paused;
     }
     let mut count = 0;
-    for (mut settings, sink) in &mut players {
+    audio.spatial.clear();
+    for (player, mut settings, sink) in &mut players {
         count += 1;
         settings.paused = paused;
+        let mut sink = sink;
+        if let (Some((origin, soundlevel)), Some(sink)) = (player.spatial, sink.as_deref_mut()) {
+            let gain = hl2_simulation::sounds::dist_gain(soundlevel, listener.distance(origin));
+            let volume = (player.volume * gain).clamp(0., 1.);
+            sink.set_volume(bevy::audio::Volume::Linear(
+                volume * global.volume.to_linear(),
+            ));
+            let distance = listener.distance(origin);
+            audio.spatial.push((player.path.clone(), distance, volume));
+        }
         if let Some(sink) = sink {
             if paused && !sink.is_paused() {
                 sink.pause();
@@ -420,7 +491,9 @@ pub fn queue(
         if count >= MAX_PLAYERS {
             audio.capacity_rejections += 1;
             game.unplayed_sounds += 1;
-        } else if let Some(path) = audio.emit(&mut commands, &request, false, 0.4, paused) {
+        } else if let Some(path) =
+            audio.emit(&mut commands, &request, false, (0.4, 100., None), paused)
+        {
             count += 1;
             // Actor speech drives lip sync from the chosen wave's phonemes.
             if let Some(actor) = request.actor.as_ref().and_then(|a| a.entity) {
@@ -516,12 +589,12 @@ mod tests {
             let data = [0x00u8, 0x40].repeat(frames * usize::from(channels));
             let mut wav = b"RIFF".to_vec();
             wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
-            wav.extend_from_slice(b"WAVEfmt     ");
+            wav.extend_from_slice(b"WAVEfmt \x10\0\0\0\x01\0");
             wav.extend_from_slice(&channels.to_le_bytes());
             wav.extend_from_slice(&44100u32.to_le_bytes());
             wav.extend_from_slice(&(44100 * 2 * u32::from(channels)).to_le_bytes());
             wav.extend_from_slice(&(2 * channels).to_le_bytes());
-            wav.extend_from_slice(b" data");
+            wav.extend_from_slice(b"\x10\0data");
             wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
             wav.extend_from_slice(&data);
             wav
