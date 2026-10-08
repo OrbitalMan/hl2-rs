@@ -31,6 +31,10 @@ pub struct Player {
     pub eye_height: f32,
     jump_held: bool,
     surface_friction: f32,
+    /// This step started a jump (SDK CheckJumpButton success).
+    pub jumped: bool,
+    /// This step landed; the fall speed carried from the last airborne tick.
+    pub landed: Option<f32>,
 }
 impl Player {
     pub fn new(eye: Vec3) -> Self {
@@ -43,6 +47,8 @@ impl Player {
             eye_height: 64.,
             jump_held: false,
             surface_friction: 1.,
+            jumped: false,
+            landed: None,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -50,6 +56,10 @@ impl Player {
     }
     pub fn step(&mut self, input: Input, world: &impl CollisionWorld, dt: f32) {
         self.ticks += 1;
+        // PlayerMove stores the fall velocity while airborne; CheckFalling uses it on landing.
+        let fall_speed = if self.grounded { 0. } else { -self.velocity.z };
+        self.jumped = false;
+        self.landed = None;
         let mins = Vec3::new(-16., -16., 0.);
         let standing = Vec3::new(16., 16., 72.);
         let ducked = Vec3::new(16., 16., 36.);
@@ -132,6 +142,7 @@ impl Player {
         let jumping = input.jump && !self.jump_held && self.grounded;
         self.jump_held = input.jump;
         if jumping {
+            self.jumped = true;
             self.grounded = false;
             if self.crouched {
                 self.velocity.z = 160.;
@@ -230,6 +241,9 @@ impl Player {
         if self.grounded {
             self.velocity.z = 0.;
             self.feet -= Vec3::Z * 2. * ground.fraction;
+            if fall_speed > 0. {
+                self.landed = Some(fall_speed);
+            }
         }
     }
 }

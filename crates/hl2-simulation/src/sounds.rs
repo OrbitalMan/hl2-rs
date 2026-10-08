@@ -327,12 +327,14 @@ pub enum AmbientControl {
     Stop(usize),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SoundRequest {
     pub name: String,
     pub actor: Option<SoundActor>,
     /// Set for ambient_generic inputs; the host applies the entity's own parameters.
     pub ambient: Option<AmbientControl>,
+    /// Emit volume (EmitSound_t m_flVolume); None keeps the host's default cue volume.
+    pub volume: Option<f32>,
 }
 
 impl From<String> for SoundRequest {
@@ -341,6 +343,7 @@ impl From<String> for SoundRequest {
             name,
             actor: None,
             ambient: None,
+            volume: None,
         }
     }
 }
@@ -816,6 +819,7 @@ mod tests {
     fn speech_request(cue: &str, model: &str) -> SoundRequest {
         SoundRequest {
             ambient: None,
+            volume: None,
             name: cue.into(),
             actor: Some(SoundActor {
                 name: "actor diagnostic name".into(),

@@ -99,8 +99,43 @@ pub struct Gameplay {
     pub sound_cues: Vec<String>,
     pub sound_requests: Vec<hl2_simulation::sounds::SoundRequest>,
     weapon_sounds: hl2_simulation::sounds::WeaponAnimationSounds,
+    pub footsteps: hl2_simulation::footsteps::Footsteps,
 }
 impl Gameplay {
+    /// SDK step sounds for one movement tick: UpdateStepSound with the state before the move,
+    /// then the jump or landing step the move produced.
+    pub fn step_sounds(
+        &mut self,
+        physics: &Physics,
+        before: hl2_simulation::footsteps::State,
+        feet: Vec3,
+        player: &modkit_core::movement::Player,
+    ) {
+        let world = self.world.clone();
+        let surface_at = |game: &Self, at: Vec3| {
+            game.impacts
+                .ground_property(&world, physics, &game.scene, at, 4.)
+                .map(|prop| game.impacts.step_surface(&prop))
+        };
+        let mut steps = Vec::new();
+        let mut footsteps = std::mem::take(&mut self.footsteps);
+        steps.extend(footsteps.update(before, TICK, || surface_at(self, feet)));
+        if player.jumped {
+            steps.extend(footsteps.jump(surface_at(self, feet)));
+        }
+        if let Some(fall) = player.landed {
+            steps.extend(footsteps.land(fall, || surface_at(self, player.feet)));
+        }
+        self.footsteps = footsteps;
+        for step in steps {
+            self.scene
+                .sounds
+                .push(hl2_simulation::sounds::SoundRequest {
+                    volume: Some(step.volume),
+                    ..step.sound.into()
+                });
+        }
+    }
     #[cfg(test)]
     pub(crate) fn synthetic(world: World) -> Self {
         Self {
@@ -123,6 +158,7 @@ impl Gameplay {
             sound_cues: vec![],
             sound_requests: vec![],
             weapon_sounds: Default::default(),
+            footsteps: Default::default(),
         }
     }
     pub fn load_with_campaign(
@@ -159,6 +195,7 @@ impl Gameplay {
             sound_cues: vec![],
             sound_requests: vec![],
             weapon_sounds: Default::default(),
+            footsteps: Default::default(),
         })
     }
     pub fn consume_attacks(&mut self) {
