@@ -77,7 +77,7 @@ pub fn ev100(scale: f32) -> f32 {
 pub fn update(
     mut commands: Commands,
     mut state: ResMut<Tonemap>,
-    game: Res<Gameplay>,
+    (game, sim): (Res<Gameplay>, Res<crate::movement::Simulation>),
     time: Res<Time<Real>>,
     mut images: ResMut<Assets<Image>>,
     mut cameras: Query<&mut Exposure, With<ToneMapped>>,
@@ -110,7 +110,10 @@ pub fn update(
         state.bloom = 1.;
         *state.histogram.lock().expect("tonemap histogram") = None;
     }
-    if state.forced.is_none() {
+    // A paused game freezes everything, exposure and bloom adaptation included (owner
+    // observation of native HL2, 2026-10-08); the last exposure stays on the cameras.
+    let paused = sim.paused();
+    if state.forced.is_none() && !paused {
         let request = state.frames.is_multiple_of(INTERVAL) && {
             let mut pending = state.pending.lock().expect("tonemap pending");
             !std::mem::replace(&mut *pending, true)
@@ -138,7 +141,9 @@ pub fn update(
         }
         state.exposure.advance(time.delta_secs(), control);
     }
-    state.bloom = tonemap::ease_bloom(state.bloom, game.scene.tonemap.bloom);
+    if !paused {
+        state.bloom = tonemap::ease_bloom(state.bloom, game.scene.tonemap.bloom);
+    }
     for mut bloom in &mut blooms {
         bloom.amount = state.bloom;
         if bloom.presample.as_ref() != Some(&presample) {

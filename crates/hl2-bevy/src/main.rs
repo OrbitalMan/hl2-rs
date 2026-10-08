@@ -43,6 +43,9 @@ struct Options {
     capture: Option<PathBuf>,
     /// Also save this many consecutive frames after the capture (flicker checks).
     capture_burst: u32,
+    /// Keep the simulation running after a movement script ends, so burst frames show
+    /// motion over time instead of one frozen frame.
+    capture_live: bool,
     monitor_capture: Option<PathBuf>,
     report: PathBuf,
     position: Option<Vec3>,
@@ -75,6 +78,7 @@ impl Options {
             frames: None,
             capture: None,
             capture_burst: 0,
+            capture_live: false,
             monitor_capture: None,
             report: "artifacts/bevy-report.json".into(),
             position: None,
@@ -105,6 +109,7 @@ impl Options {
                 "--frames" => options.frames = Some(next(&mut args)?.parse()?),
                 "--capture" => options.capture = Some(next(&mut args)?.into()),
                 "--capture-burst" => options.capture_burst = next(&mut args)?.parse()?,
+                "--capture-live" => options.capture_live = true,
                 "--capture-monitor" => options.monitor_capture = Some(next(&mut args)?.into()),
                 "--report" => options.report = next(&mut args)?.into(),
                 "--position" => {
@@ -284,7 +289,7 @@ fn main() -> Result<()> {
         .map(|p| movement::read_script(p))
         .transpose()?
         .unwrap_or_default();
-    let simulation = movement::Simulation::new(
+    let mut simulation = movement::Simulation::new(
         &loaded.world,
         options
             .position
@@ -295,6 +300,7 @@ fn main() -> Result<()> {
         options.fly,
         movement_commands,
     );
+    simulation.run_after_script = options.capture_live;
     let status = Status::default();
     let packaged_assets = std::env::current_exe()?
         .parent()
@@ -810,6 +816,8 @@ fn monitor(
                     "{}-{index}.png",
                     path.file_stem().unwrap_or_default().to_string_lossy()
                 ));
+                // Scene time per burst frame, so live bursts can be compared over time.
+                info!("capture burst {index} scene_time {:.4}", game.scene.time);
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(bevy::render::view::screenshot::save_to_disk(burst));

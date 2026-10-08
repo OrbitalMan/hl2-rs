@@ -1048,9 +1048,13 @@ pub fn spawn_map(
                 if let Some((base, second)) = two_textures.get(&name) {
                     material.base = base[0].clone();
                     material.iris = second[0].clone();
-                    material.tint =
-                        Vec3::from_array(definition.tint.map(crate::monitors::linear_modulation))
-                            .extend(1.);
+                    // SDK SetModulationPixelShaderDynamicState_LinearColorSpace: $color times
+                    // the entity's color modulation (rendercolor, e.g. the dim vol_light
+                    // shafts), then GammaToLinear per channel. The shader returns alpha 1.
+                    material.tint = Vec3::from_array(std::array::from_fn(|i| {
+                        crate::monitors::linear_modulation(definition.tint[i] * modulation[i])
+                    }))
+                    .extend(1.);
                 }
                 // World and brush surfaces only: model envmaps are not loaded yet.
                 if let Some(envmap) = envmaps.get(&name).filter(|_| !batch.model) {
