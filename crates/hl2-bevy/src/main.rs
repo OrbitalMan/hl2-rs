@@ -63,6 +63,8 @@ struct Options {
     movement_script: Option<PathBuf>,
     /// Master volume, like Source's `volume` convar (0..1).
     volume: f32,
+    /// JSON-lines sound lifecycle trace (requests, sink starts, removals).
+    audio_trace: Option<PathBuf>,
     /// Do not take focus at window creation, so unattended tests leave the desktop usable.
     no_focus: bool,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
@@ -95,6 +97,7 @@ impl Options {
             fly: false,
             movement_script: None,
             volume: 1.,
+            audio_trace: None,
             no_focus: false,
             tonemap_scale: None,
         };
@@ -132,6 +135,7 @@ impl Options {
                 "--fly" => options.fly = true,
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--volume" => options.volume = next(&mut args)?.parse()?,
+                "--audio-trace" => options.audio_trace = Some(next(&mut args)?.into()),
                 "--no-focus" => options.no_focus = true,
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
@@ -142,7 +146,7 @@ impl Options {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -312,6 +316,9 @@ fn main() -> Result<()> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
     };
     let mut app = App::new();
+    if let Some(path) = &options.audio_trace {
+        app.insert_resource(audio::AudioTrace::create(path)?);
+    }
     app.insert_resource(options.clone())
         .insert_resource(tonemap::Tonemap::new(options.tonemap_scale))
         .insert_resource(status.clone())

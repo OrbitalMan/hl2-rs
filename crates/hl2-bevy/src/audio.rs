@@ -170,6 +170,29 @@ pub struct Audio {
     pause_changes: u64,
     resume_changes: u64,
 }
+/// `--audio-trace PATH`: one JSON line per sound request, sink start and sink removal,
+/// with the sink's last observed playback position, for diagnosing cut-off sounds.
+#[derive(Resource)]
+pub struct AudioTrace {
+    file: std::io::BufWriter<std::fs::File>,
+    start: std::time::Instant,
+    live: HashMap<Entity, (String, f64, f32)>,
+}
+impl AudioTrace {
+    pub fn create(path: &std::path::Path) -> Result<Self> {
+        Ok(Self {
+            file: std::io::BufWriter::new(std::fs::File::create(path)?),
+            start: std::time::Instant::now(),
+            live: HashMap::new(),
+        })
+    }
+    fn write(&mut self, mut line: serde_json::Value) {
+        use std::io::Write;
+        line["t"] = serde_json::json!(self.start.elapsed().as_secs_f64());
+        // Tracing must never stop the game; a failed write only loses diagnostics.
+        let _ = writeln!(self.file, "{line}").and_then(|()| self.file.flush());
+    }
+}
 #[derive(Component)]
 pub struct SoundPlayer {
     path: String,
@@ -287,7 +310,7 @@ pub fn queue(
     mut commands: Commands,
     mut audio: ResMut<Audio>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    simulation: Res<crate::movement::Simulation>,
+    (simulation, mut trace): (Res<crate::movement::Simulation>, Option<ResMut<AudioTrace>>),
     mut players: Query<(&mut PlaybackSettings, Option<&AudioSink>), With<SoundPlayer>>,
 ) {
     let paused = simulation.paused();
@@ -311,6 +334,11 @@ pub fn queue(
             }
         }
     }
+    for request in &game.sound_requests {
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused}));
+        }
+    }
     for request in std::mem::take(&mut game.sound_requests) {
         if count >= MAX_PLAYERS {
             audio.capacity_rejections += 1;
@@ -331,7 +359,34 @@ pub fn observe(
     mut commands: Commands,
     mut audio: ResMut<Audio>,
     mut players: Query<(Entity, &mut SoundPlayer, Option<&AudioSink>)>,
+    (mut trace, mut removed): (Option<ResMut<AudioTrace>>, RemovedComponents<SoundPlayer>),
 ) {
+    if let Some(trace) = trace.as_deref_mut() {
+        for entity in removed.read() {
+            if let Some((path, seconds, position)) = trace.live.remove(&entity) {
+                trace.write(serde_json::json!({"event":"removed","path":path,"frame":audio.frame,
+                    "last_position":position,"duration":seconds,"remaining":seconds - f64::from(position)}));
+            }
+        }
+        for (entity, player, sink) in &players {
+            let Some(sink) = sink else { continue };
+            let position = sink.position().as_secs_f32();
+            if let Some(live) = trace.live.get_mut(&entity) {
+                live.2 = position;
+            } else {
+                let seconds = audio
+                    .library
+                    .decoded
+                    .get(&player.path)
+                    .map_or(0., |summary| summary.seconds());
+                trace
+                    .live
+                    .insert(entity, (player.path.clone(), seconds, position));
+                trace.write(serde_json::json!({"event":"started","path":player.path,"frame":audio.frame,
+                    "queued_frame":player.queued_frame,"position":position,"duration":seconds,"volume":sink.volume().to_linear(),"paused":sink.is_paused()}));
+            }
+        }
+    }
     audio.frame += 1;
     audio.pending_sinks = 0;
     audio.active_sinks = 0;
