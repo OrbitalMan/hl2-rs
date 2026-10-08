@@ -2,6 +2,8 @@
 
 ## Owner report milestone (2026-10-08, Codex gpt-6.1-sol)
 
+Owner follow-up correction: only plaza barrier proximity fading is fixed; scrolling animation remains broken. Earlier changing-UV observations did not prove visible motion. Frozen bursts establish rendering stability only. Revalidate temporal animation in an unpaused packaged run beside native HDR before marking it fixed. This correction changes documentation only; runtime tests/builds were **not rerun**.
+
 344 normal and 33 owned workspace tests passed; strict `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check` and diff checks passed. Packaged SHA256 `6E6C7FE4ED4C5988553739F37F596F33CB632F8765937AEAFC3B0B4D0330A3B2`.
 
 Run `C:/Python310/python.exe ../../work/publishing/run_gesture_layer_checks.py <new-outdir>` then verify_bevy_movement.py `<outdir>/partition-movement-final.json --capture <outdir>/partition-movement-final.png`, verify_bevy_entities_weapons.py `<outdir>/partition-weapons-final.json` and verify_bevy_attention.py `<outdir>`: 26/17/26 passed in artifacts/owner-reports-regression. Captures completed with zero pose/visibility mismatches; station03 retained its 25 known material errors. Historical pixel baselines differ; no image-identity claim.
