@@ -19,7 +19,8 @@ const MAX_TEXTURE_DIMENSION: usize = 2048;
 const MAX_TEXTURE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DECODED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_MATERIALS: usize = 16384;
-pub type TextureFrames = Arc<Vec<Arc<Image>>>;
+/// Animation frames, each with its authored mip chain (largest first).
+pub type TextureFrames = Arc<Vec<Arc<Vec<Image>>>>;
 
 #[derive(Debug)]
 pub struct TwoTexture {
@@ -810,16 +811,17 @@ fn load_material(
                 if data.len() > MAX_TEXTURE_BYTES {
                     bail!("encoded VTF exceeds 64 MiB");
                 }
-                let images = if frames.active() {
-                    vtf::decode_frames(
-                        &data,
-                        MAX_TEXTURE_DIMENSION,
-                        MAX_DECODED_BYTES.saturating_sub(*decoded_bytes),
-                    )?
-                } else {
-                    vec![vtf::decode(&data, MAX_TEXTURE_DIMENSION)?]
-                };
-                let bytes = images.iter().map(|i| i.rgba.len()).sum::<usize>();
+                // Source samples the authored mips with distance; the shield frames'
+                // smaller mips are part of their far look.
+                let mut images = vtf::decode_frame_mips(
+                    &data,
+                    MAX_TEXTURE_DIMENSION,
+                    MAX_DECODED_BYTES.saturating_sub(*decoded_bytes),
+                )?;
+                if !frames.active() {
+                    images.truncate(1);
+                }
+                let bytes = images.iter().flatten().map(|i| i.rgba.len()).sum::<usize>();
                 if bytes > MAX_DECODED_BYTES.saturating_sub(*decoded_bytes) {
                     bail!("map decoded texture budget exceeds 512 MiB");
                 }
@@ -845,7 +847,11 @@ fn load_material(
         match textures {
             Ok((path, textures)) => {
                 material.base_path = Some(path);
-                material.base = textures.base_frames.first().cloned();
+                material.base = textures
+                    .base_frames
+                    .first()
+                    .and_then(|chain| chain.first())
+                    .map(|top| Arc::new(top.clone()));
                 material.two_texture = Some(textures);
                 material.unlit = true;
             }

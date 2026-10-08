@@ -43,6 +43,9 @@ struct Options {
     capture: Option<PathBuf>,
     /// Also save this many consecutive frames after the capture (flicker checks).
     capture_burst: u32,
+    /// Keep the simulation running after a movement script ends, so burst frames show
+    /// motion over time instead of one frozen frame.
+    capture_live: bool,
     monitor_capture: Option<PathBuf>,
     report: PathBuf,
     position: Option<Vec3>,
@@ -60,6 +63,8 @@ struct Options {
     movement_script: Option<PathBuf>,
     /// Master volume, like Source's `volume` convar (0..1).
     volume: f32,
+    /// JSON-lines sound lifecycle trace (requests, sink starts, removals).
+    audio_trace: Option<PathBuf>,
     /// Do not take focus at window creation, so unattended tests leave the desktop usable.
     no_focus: bool,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
@@ -75,6 +80,7 @@ impl Options {
             frames: None,
             capture: None,
             capture_burst: 0,
+            capture_live: false,
             monitor_capture: None,
             report: "artifacts/bevy-report.json".into(),
             position: None,
@@ -91,6 +97,7 @@ impl Options {
             fly: false,
             movement_script: None,
             volume: 1.,
+            audio_trace: None,
             no_focus: false,
             tonemap_scale: None,
         };
@@ -105,6 +112,7 @@ impl Options {
                 "--frames" => options.frames = Some(next(&mut args)?.parse()?),
                 "--capture" => options.capture = Some(next(&mut args)?.into()),
                 "--capture-burst" => options.capture_burst = next(&mut args)?.parse()?,
+                "--capture-live" => options.capture_live = true,
                 "--capture-monitor" => options.monitor_capture = Some(next(&mut args)?.into()),
                 "--report" => options.report = next(&mut args)?.into(),
                 "--position" => {
@@ -127,6 +135,10 @@ impl Options {
                 "--fly" => options.fly = true,
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--volume" => options.volume = next(&mut args)?.parse()?,
+                "--audio-trace" => options.audio_trace = Some(next(&mut args)?.into()),
+                "--mute-ambient" => {
+                    audio::MUTE_AMBIENT.store(true, std::sync::atomic::Ordering::Relaxed)
+                }
                 "--no-focus" => options.no_focus = true,
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
@@ -137,7 +149,7 @@ impl Options {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -284,7 +296,7 @@ fn main() -> Result<()> {
         .map(|p| movement::read_script(p))
         .transpose()?
         .unwrap_or_default();
-    let simulation = movement::Simulation::new(
+    let mut simulation = movement::Simulation::new(
         &loaded.world,
         options
             .position
@@ -295,6 +307,7 @@ fn main() -> Result<()> {
         options.fly,
         movement_commands,
     );
+    simulation.run_after_script = options.capture_live;
     let status = Status::default();
     let packaged_assets = std::env::current_exe()?
         .parent()
@@ -306,6 +319,9 @@ fn main() -> Result<()> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
     };
     let mut app = App::new();
+    if let Some(path) = &options.audio_trace {
+        app.insert_resource(audio::AudioTrace::create(path)?);
+    }
     app.insert_resource(options.clone())
         .insert_resource(tonemap::Tonemap::new(options.tonemap_scale))
         .insert_resource(status.clone())
@@ -810,6 +826,8 @@ fn monitor(
                     "{}-{index}.png",
                     path.file_stem().unwrap_or_default().to_string_lossy()
                 ));
+                // Scene time per burst frame, so live bursts can be compared over time.
+                info!("capture burst {index} scene_time {:.4}", game.scene.time);
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(bevy::render::view::screenshot::save_to_disk(burst));

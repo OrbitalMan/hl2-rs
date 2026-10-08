@@ -2,7 +2,7 @@
 //! (including RGBA16161616F HDR cubemaps).
 use crate::{bytes, u16le, u32le};
 use anyhow::{bail, Context, Result};
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Image {
     pub width: u16,
     pub height: u16,
@@ -69,8 +69,14 @@ struct Layout {
     offset: usize,
     faces: usize,
     frames: usize,
+    /// Authored mips stored below the chosen one.
+    smaller_mips: usize,
 }
 fn layout(data: &[u8], max_dimension: usize) -> Result<Layout> {
+    layout_level(data, max_dimension, 0)
+}
+/// The mip `below` levels under the largest mip that fits `max_dimension`.
+fn layout_level(data: &[u8], max_dimension: usize, below: usize) -> Result<Layout> {
     if bytes(data, 0, 4)? != b"VTF\0" {
         bail!("not a VTF texture");
     }
@@ -147,6 +153,10 @@ fn layout(data: &[u8], max_dimension: usize) -> Result<Layout> {
     while mip + 1 < mip_count && (full_w >> mip).max(full_h >> mip) > max_dimension.max(1) {
         mip += 1;
     }
+    mip = mip
+        .checked_add(below)
+        .filter(|&mip| mip < mip_count)
+        .context("VTF mip outside its chain")?;
     for level in ((mip + 1)..mip_count).rev() {
         let w = (full_w >> level).max(1);
         let h = (full_h >> level).max(1);
@@ -166,6 +176,7 @@ fn layout(data: &[u8], max_dimension: usize) -> Result<Layout> {
         offset,
         faces,
         frames,
+        smaller_mips: mip_count - 1 - mip,
     })
 }
 pub fn decode(data: &[u8], max_dimension: usize) -> Result<Image> {
@@ -196,6 +207,43 @@ pub fn decode_frames(data: &[u8], max_dimension: usize, byte_budget: usize) -> R
     )?;
     (0..l.frames)
         .map(|frame| decode_face(data, &l, frame))
+        .collect()
+}
+/// Every frame's authored mip chain, from the largest mip that fits `max_dimension` down to
+/// the smallest stored mip. Source samples these hand-made or tool-made levels with distance,
+/// so they are uploaded as they are rather than regenerated.
+pub fn decode_frame_mips(
+    data: &[u8],
+    max_dimension: usize,
+    byte_budget: usize,
+) -> Result<Vec<Vec<Image>>> {
+    let top = layout(data, max_dimension)?;
+    if top.faces != 1 {
+        bail!("animated 2D texture cannot be a cubemap");
+    }
+    let levels = (0..=top.smaller_mips)
+        .map(|below| layout_level(data, max_dimension, below))
+        .collect::<Result<Vec<_>>>()?;
+    let mut decoded = 0usize;
+    for l in &levels {
+        decoded = l
+            .width
+            .checked_mul(l.height)
+            .and_then(|n| n.checked_mul(4 * l.frames))
+            .and_then(|n| n.checked_add(decoded))
+            .context("VTF mip chain size overflow")?;
+        // Validate every level before any frame allocations.
+        bytes(
+            data,
+            l.offset,
+            size(l.format, l.width, l.height)? * l.frames,
+        )?;
+    }
+    if decoded > byte_budget {
+        bail!("VTF mip chain exceeds decoded byte budget");
+    }
+    (0..top.frames)
+        .map(|frame| levels.iter().map(|l| decode_face(data, l, frame)).collect())
         .collect()
 }
 /// Image data of a cubemap: six faces in Source order +X, -X, +Y, -Y, +Z, -Z (the same
@@ -332,6 +380,50 @@ mod tests {
         let b = [0, 0, 0, 248, 255, 255, 255, 255];
         let p = color_block(&b, false).unwrap();
         assert_eq!(p[0][3], 0);
+    }
+    /// A 7.1 RGBA8888 header with the given size, frames and mips; no low-res image.
+    fn header(w: u16, h: u16, frames: u16, mips: u8) -> Vec<u8> {
+        let mut d = vec![0; 64];
+        d[..4].copy_from_slice(b"VTF\0");
+        d[4..8].copy_from_slice(&7u32.to_le_bytes());
+        d[8..12].copy_from_slice(&1u32.to_le_bytes());
+        d[12..16].copy_from_slice(&64u32.to_le_bytes());
+        d[16..18].copy_from_slice(&w.to_le_bytes());
+        d[18..20].copy_from_slice(&h.to_le_bytes());
+        d[24..26].copy_from_slice(&frames.to_le_bytes());
+        d[56] = mips;
+        d
+    }
+    #[test]
+    fn frame_mips_follow_storage_order() {
+        // Smallest mip first; within a mip, frame by frame. Texel value = mip * 16 + frame.
+        let mut d = header(4, 2, 2, 3);
+        for (mip, (w, h)) in [(2, (1, 1)), (1, (2, 1)), (0, (4, 2))] {
+            for frame in 0..2u8 {
+                for _ in 0..w * h {
+                    d.extend_from_slice(&[mip * 16 + frame, 0, 0, 255]);
+                }
+            }
+        }
+        let frames = decode_frame_mips(&d, 512, 1 << 20).unwrap();
+        assert_eq!(frames.len(), 2);
+        for (frame, chain) in frames.iter().enumerate() {
+            let sizes: Vec<_> = chain.iter().map(|i| (i.width, i.height)).collect();
+            assert_eq!(sizes, [(4, 2), (2, 1), (1, 1)]);
+            for (mip, image) in chain.iter().enumerate() {
+                assert!(image
+                    .rgba
+                    .chunks(4)
+                    .all(|p| p[0] as usize == mip * 16 + frame));
+            }
+        }
+        // The dimension cap drops the top mip; the budget covers the whole chain.
+        let capped = decode_frame_mips(&d, 2, 1 << 20).unwrap();
+        assert_eq!(capped[1].len(), 2);
+        assert_eq!(capped[1][0].rgba[0], 16 + 1);
+        assert!(decode_frame_mips(&d, 512, 4 * (8 + 2 + 1) * 2 - 1).is_err());
+        // Truncated storage is rejected before allocation.
+        assert!(decode_frame_mips(&d[..d.len() - 1], 512, 1 << 20).is_err());
     }
     #[test]
     fn truncated_vtf_is_error() {

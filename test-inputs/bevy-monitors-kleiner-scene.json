@@ -77,6 +77,21 @@
    },
    {
     "action": "send",
+    "target": "scene1_start",
+    "input": "Kill"
+   },
+   {
+    "action": "send",
+    "target": "intro_music",
+    "input": "Kill"
+   },
+   {
+    "action": "send",
+    "target": "scene2_start",
+    "input": "Kill"
+   },
+   {
+    "action": "send",
     "target": "barney_security_monitor_1",
     "input": "Enable"
    },

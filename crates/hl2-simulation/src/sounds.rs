@@ -538,6 +538,68 @@ impl Library {
     }
 }
 
+/// Source distance gain (retail engine `GetDistGainFromSoundLevel`, engine.dll 10216bd0 and
+/// 10216a20) with the stock convars snd_refdb 60, snd_refdist 36, snd_gain 1, snd_gain_max 1,
+/// snd_gain_min 0.01 and snd_foliage_db_loss 4. Soundlevel 0 (SNDLVL_NONE) plays everywhere.
+pub fn dist_gain(soundlevel: f32, distance: f32) -> f32 {
+    const REF_DB: f32 = 60.;
+    const REF_DIST: f32 = 36.;
+    const GAIN: f32 = 1.;
+    const GAIN_MAX: f32 = 1.;
+    const GAIN_MIN: f32 = 0.01;
+    const FOLIAGE_DB_LOSS: f32 = 4.;
+    if soundlevel == 0. {
+        return GAIN;
+    }
+    let dist_mult = 10f32.powf(REF_DB * 0.05) / 10f32.powf(soundlevel * 0.05) / REF_DIST;
+    if dist_mult == 0. {
+        return GAIN;
+    }
+    let relative =
+        dist_mult * distance * 10f32.powf(distance * (1. / 1200.) * FOLIAGE_DB_LOSS * 0.05);
+    let mut gain = if f64::from(relative) > 0.1 {
+        GAIN / relative
+    } else {
+        GAIN * 10.
+    };
+    if gain > 0.5 {
+        // Soft knee above half gain; loud (> 90 dB) sounds compress less steeply.
+        let level = (20. * (10f32.powf(REF_DB / 20.) / (REF_DIST * dist_mult)).log10()) as i32;
+        let power = if level as f32 > 90. {
+            2.5 - (level as f32 - 90.) * 1.7 * 0.02
+        } else {
+            2.5
+        };
+        let knee = -1. / (0.5f32.powf(power) * -0.5);
+        gain = GAIN_MAX * (1. - 1. / (gain.powf(power) * knee));
+    }
+    if GAIN_MIN > gain {
+        gain = (2. - GAIN_MIN * relative) * GAIN_MIN;
+        if gain <= 0. {
+            gain = 0.001;
+        }
+    }
+    gain
+}
+
+/// Interleaved samples in -1..1 of PCM WAV bytes produced by [`decode`]:
+/// (channels, sample rate, samples). 8-bit WAV is unsigned, as RIFF defines it.
+pub fn wav_samples(data: &[u8]) -> Result<(u16, u32, Vec<f32>)> {
+    let mut wav = hound::WavReader::new(Cursor::new(data))?;
+    let spec = wav.spec();
+    let samples = match (spec.sample_format, spec.bits_per_sample) {
+        (hound::SampleFormat::Float, 32) => wav.samples::<f32>().collect::<Result<Vec<_>, _>>()?,
+        (hound::SampleFormat::Int, bits @ 1..=32) => {
+            let scale = 1. / (1u64 << (bits - 1)) as f32;
+            wav.samples::<i32>()
+                .map(|s| s.map(|s| s as f32 * scale))
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => bail!("unsupported WAV sample format"),
+    };
+    Ok((spec.channels, spec.sample_rate, samples))
+}
+
 /// Decode bounded owned audio into backend-independent WAV bytes and metadata.
 pub fn decode(path: &str, encoded: Vec<u8>) -> Result<(Vec<u8>, AudioSummary)> {
     let (data, codec) = playback_bytes(path, encoded)?;
@@ -927,6 +989,68 @@ mod tests {
         assert!(playback_bytes("large.wav", vec![0; MAX_ENCODED_AUDIO + 1]).is_err());
     }
 
+    #[test]
+    fn dist_gain_follows_the_retail_curve() {
+        // SNDLVL_NONE is not attenuated.
+        assert_eq!(dist_gain(0., 5000.), 1.);
+        // At the 36-unit reference distance a 60 dB sound has relative distance ~1, which the
+        // soft knee maps to 1 - 1/(2/0.5^2.5) = 1 - 0.5^2.5 / 2.
+        let knee = 1. - 0.5f32.powf(2.5) / 2.;
+        assert!((dist_gain(60., 36.) - knee).abs() < 0.01);
+        // Gain at the knee boundary is continuous (0.5 on both sides).
+        let at = |d: f32| dist_gain(60., d);
+        let boundary = (1..10000)
+            .map(|d| d as f32 * 0.1)
+            .find(|&d| at(d) <= 0.5)
+            .unwrap();
+        assert!((at(boundary) - 0.5).abs() < 0.01);
+        // Falls monotonically with distance; below 0.01 it ramps toward zero and is then
+        // held at the 0.001 floor (a small step up from the ramp's last values, as in retail).
+        let gains: Vec<f32> = (1..400).map(|i| at(i as f32 * 25.)).collect();
+        let floor = gains.iter().position(|&g| g == 0.001).unwrap();
+        assert!(gains[..floor].windows(2).all(|w| w[1] <= w[0] + 1e-6));
+        assert!(gains[floor..].iter().all(|&g| g == 0.001));
+        assert!(gains[floor - 1] < 0.001);
+        assert_eq!(at(1e6), 0.001);
+        // Louder sounds reach farther.
+        assert!(dist_gain(90., 1000.) > dist_gain(75., 1000.));
+    }
+    #[test]
+    fn wav_samples_reads_unsigned_8_bit_and_signed_16_bit() {
+        for (bits, raw, expected) in [
+            (8u16, vec![128u8, 255, 0], vec![0., 127. / 128., -1.]),
+            (
+                16,
+                vec![0, 0, 0xff, 0x7f, 0, 0x80],
+                vec![0., 32767. / 32768., -1.],
+            ),
+        ] {
+            let mut cursor = Cursor::new(Vec::new());
+            let mut writer = hound::WavWriter::new(
+                &mut cursor,
+                hound::WavSpec {
+                    channels: 1,
+                    sample_rate: 22050,
+                    bits_per_sample: bits,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            if bits == 8 {
+                for b in &raw {
+                    writer.write_sample(*b as i8 ^ i8::MIN).unwrap();
+                }
+            } else {
+                for c in raw.as_chunks::<2>().0 {
+                    writer.write_sample(i16::from_le_bytes(*c)).unwrap();
+                }
+            }
+            writer.finalize().unwrap();
+            let (channels, rate, samples) = wav_samples(&cursor.into_inner()).unwrap();
+            assert_eq!((channels, rate), (1, 22050));
+            assert_eq!(samples, expected);
+        }
+    }
     #[test]
     fn valid_pcm_keeps_its_rate_channels_and_samples() {
         let mut cursor = Cursor::new(Vec::new());

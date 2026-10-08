@@ -114,6 +114,8 @@ pub struct Simulation {
     host_tick: u64,
     samples: Vec<Sample>,
     pub finished: bool,
+    /// Keep simulating with idle input after the script ends (`--capture-live` bursts).
+    pub run_after_script: bool,
     pub dev_overlay: bool,
 }
 impl Simulation {
@@ -144,6 +146,7 @@ impl Simulation {
             host_tick: 0,
             samples: vec![],
             finished: false,
+            run_after_script: false,
             dev_overlay: false,
         }
     }
@@ -264,7 +267,7 @@ impl Simulation {
         mut game: Option<&mut crate::gameplay::Gameplay>,
         mut ui: Option<&mut crate::console::Console>,
     ) {
-        if self.finished || self.loading {
+        if (self.finished && !self.run_after_script) || self.loading {
             return;
         }
         if !self.commands.is_empty() {

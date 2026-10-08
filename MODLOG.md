@@ -1,5 +1,42 @@
 # MODLOG
 
+## 2026-10-08 session 8: weapon-selection tick, godray regression, pause freeze, shield mipmaps
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed:**
+- Audio (fixes the owner's weapon-switch report): every preloaded wave is resampled once to 48 kHz 16-bit (Catmull-Rom) in `hl2-bevy/src/audio.rs`. Stereo one-shots get one 512-sample silent span first. rodio 0.22 starts each player with a mono 48 kHz, 512-sample filler span, so a sound in another format had its first 512 samples played as 48 kHz mono. The 22 kHz `wpn_moveselect.wav` tick lost its attack: about 12 ms missing, then 2.2x too fast. New diagnostics: `--audio-trace JSONL` (per-sound request/start/removal with last sink position) and `--mute-ambient` (skip map ambient loops for isolated recordings). Shared `hl2_simulation::sounds::wav_samples`.
+- Godrays: UnlitTwoTexture tint is linear($color x entity rendercolor) again (SDK `SetModulationPixelShaderDynamicState_LinearColorSpace`). Session 7's barrier path had overwritten it with $color alone, which whited out the trainstation vol_light shafts (rendercolor ~49 45 34).
+- Pause: auto exposure and bloom adaptation freeze while paused (owner: native freezes everything). `--capture-live` keeps simulating during a capture burst, to verify motion over time.
+- Plaza shields: `source_assets::vtf::decode_frame_mips` and mip-chain upload for UnlitTwoTexture, so far shields show the authored smudged-plasma mips instead of sharp cracks.
+
+**Why:** Owner reports 2026-10-08 (tick cutoff, godrays, pause, far shield look).
+
+**Tested how:**
+- Tick: process-tree loopback recordings (private Microsoft ApplicationLoopback build) of the packaged game with ambient muted, plus a one-off local recording of the historical Macroquad host. Burst energies relative to the attack:
+  - file: -10.4/-10.4/-7.4/-10.4/-10.4 dB
+  - Macroquad: -10.3/-10.2/-7.4/-9.9/-10.3 dB
+  - Bevy before: -7.4/-7.3/-4.4/-7.3/-7.4 dB
+  - Bevy after: -10.5/-10.4/-7.5/-10.4/-10.5 dB
+  Attack windows after the fix: correlation 0.993-0.998, gain 0.99-1.01. The owner confirmed by ear.
+- Barrier scroll: matched native HDR frame series by normalised cross-correlation (0.73-0.83 vs 0.43 median), and the times advance like native's (~2 s steps, 14.1 s period).
+- Pause: Escape pause menu, 150 live frames pixel-identical.
+- Godrays: native HDR hall views vs before/after.
+- Shields: native HDR at 600-1000 units.
+- `cargo test --locked --workspace`: 347 passed; owned ignored tests: 33 passed; strict all-target Clippy and fmt pass.
+- Packaged batch artifacts/session8-final: verifiers movement 26, weapons 17, attention 26. The Breen hall view's mean luma is 91 (session 6: 90.9; session 7: 170, the godray regression).
+
+**Result:** The selection tick plays like the original file. Godrays match native again. Pause freezes exposure. Shield scrolling was already native-equivalent; its far look now matches.
+
+**Still broken or not tested:**
+- Map ambients are still non-positional and play everywhere: no Source distance attenuation, no `env_soundscape`. This is the owner's loud-hum report and the barrier hum not fading.
+- Native HL2 audio was not recorded for the tick; Macroquad and the file are the references.
+- Stereo one-shots start 5.3 ms late.
+- Combine wall panels are olive vs native blue-steel (likely envmap/bump). The green light sprite and the plaza screen's blue glow are missing.
+- Rejected this session: the ambient-masking hypothesis (Macroquad had the same ambients), a biased 10 ms high-pass envelope comparison, and a `setpause` native capture whose screenshots were taken outside the pause.
+
+**Next:** Source ambient_generic attenuation (retail engine `GetDistGainFromSoundLevel` 10216bd0/10216a20, recorded privately) and soundscapes. Then detail sprites (DESIGN 11c) and the remaining owner-order items.
+
 ## 2026-10-08 plaza barrier materials and monitor proxy motion
 
 **Agent/model:** Codex Desktop, `gpt-6.1-sol` (verified session metadata); materially involved research/implementation subagents inherited this model.
