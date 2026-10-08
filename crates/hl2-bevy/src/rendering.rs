@@ -908,13 +908,17 @@ pub fn spawn_map(
         .lightmaps
         .iter()
         .map(|lm| {
-            let mut lightmap = image(
-                lm.width,
-                lm.height,
+            let lightmap = Image::new(
+                Extent3d {
+                    width: lm.width.into(),
+                    height: lm.height.into(),
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
                 lm.rgba.iter().flat_map(|t| t.to_le_bytes()).collect(),
-                false,
+                TextureFormat::Rgba16Float,
+                RenderAssetUsages::RENDER_WORLD,
             );
-            lightmap.texture_descriptor.format = TextureFormat::Rgba16Float;
             images.add(lightmap)
         })
         .collect();
@@ -1660,5 +1664,54 @@ mod tests {
         assert_eq!(alpha_mode(&material), AlphaMode::Mask(0.5));
         material.additive = true;
         assert_eq!(alpha_mode(&material), AlphaMode::Add);
+    }
+
+    #[test]
+    fn image_constructor_accepts_f16_hdr_pixels_without_panicking() {
+        let hdr_data = vec![0u8; 16 * 16 * 8]; // 16x16, 8 bytes per pixel (4 * f16)
+        let image = Image::new(
+            Extent3d {
+                width: 16,
+                height: 16,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            hdr_data,
+            TextureFormat::Rgba16Float,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba16Float);
+    }
+
+    #[test]
+    fn helper_creates_rgba8unorm_image_without_panicking() {
+        let ldr_data = vec![255u8; 16 * 16 * 4]; // 16x16, 4 bytes per pixel (Rgba8Unorm)
+        let img = image(16, 16, ldr_data, false);
+        assert_eq!(img.texture_descriptor.format, TextureFormat::Rgba8Unorm);
+    }
+
+    #[test]
+    #[should_panic(expected = "Pixel data, size and format have to match")]
+    fn image_constructor_panics_if_ldr_pixels_are_provided_for_hdr() {
+        let ldr_data = vec![0u8; 16 * 16 * 4]; // 4 bytes per pixel, invalid for Rgba16Float
+        Image::new(
+            Extent3d {
+                width: 16,
+                height: 16,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            ldr_data,
+            TextureFormat::Rgba16Float,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Pixel data, size and format have to match")]
+    fn helper_panics_if_hdr_pixels_are_provided_for_rgba8unorm() {
+        let hdr_data = vec![0u8; 16 * 16 * 8]; // 8 bytes per pixel, invalid for Rgba8Unorm
+        // This is exactly the scenario that caused the original crash!
+        image(16, 16, hdr_data, false);
     }
 }
