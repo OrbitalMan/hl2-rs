@@ -104,12 +104,12 @@ pub struct Simulation {
     pub fov: f32,
     input: Input,
     fly: bool,
-    paused: bool,
-    loading: bool,
-    focused: bool,
-    jump_suppressed: bool,
-    transition: bool,
-    commands: Vec<Command>,
+    pub paused: bool,
+    pub loading: bool,
+    pub focused: bool,
+    pub jump_suppressed: bool,
+    pub transition: bool,
+    pub commands: Vec<Command>,
     next: usize,
     host_tick: u64,
     samples: Vec<Sample>,
@@ -438,6 +438,9 @@ impl Simulation {
         self.finished = !self.commands.is_empty() && self.next == self.commands.len();
     }
 }
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MovementControlsSet;
+
 pub struct MovementPlugin;
 impl Plugin for MovementPlugin {
     fn build(&self, app: &mut App) {
@@ -449,7 +452,9 @@ impl Plugin for MovementPlugin {
         ))
         .add_systems(
             RunFixedMainLoop,
-            controls.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+            controls
+                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
+                .in_set(MovementControlsSet),
         )
         .add_systems(FixedUpdate, fixed_step)
         .add_systems(
@@ -458,16 +463,11 @@ impl Plugin for MovementPlugin {
         );
     }
 }
-type InputDevices<'w, 's> = (
+type InputDevices<'w> = (
     Res<'w, ButtonInput<KeyCode>>,
     Res<'w, ButtonInput<MouseButton>>,
     Res<'w, AccumulatedMouseMotion>,
     Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>,
-    MessageReader<'w, 's, bevy::input::keyboard::KeyboardInput>,
-);
-type DisplayDevices<'w, 's> = (
-    Query<'w, 's, (&'static mut Window, &'static mut CursorOptions), With<PrimaryWindow>>,
-    Query<'w, 's, &'static bevy::window::Monitor, With<bevy::window::PrimaryMonitor>>,
 );
 pub fn parse_keycode(name: &str) -> Option<KeyCode> {
     match name {
@@ -543,7 +543,7 @@ pub fn parse_keycode(name: &str) -> Option<KeyCode> {
     }
 }
 
-fn action_pressed(
+pub(crate) fn action_pressed(
     action: &str,
     default_key: KeyCode,
     keys: &ButtonInput<KeyCode>,
@@ -569,125 +569,21 @@ fn action_just_pressed(
     keys.just_pressed(key)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn controls(
-    (keys, buttons, mouse, scroll, mut characters): InputDevices,
-    (mut windows, monitors): DisplayDevices,
-    video_viewport: Option<Res<crate::video::VideoViewport>>,
+    (keys, buttons, mouse, scroll): InputDevices,
+    windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut sim: ResMut<Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
-    mut exit: MessageWriter<AppExit>,
-    mut ui: Option<ResMut<crate::console::Console>>,
-    global_volume: Option<ResMut<bevy::audio::GlobalVolume>>,
+    ui: Option<Res<crate::console::Console>>,
 ) {
-    if keys.just_pressed(KeyCode::F10) {
-        if let Some(ui) = ui.as_deref_mut() {
-            ui.quit_requested = true;
-        }
-        exit.write(AppExit::Success);
-    }
-    let Ok((mut window, mut cursor)) = windows.single_mut() else {
+    let Ok((window, cursor)) = windows.single() else {
         return;
     };
-    let text: String = characters
-        .read()
-        .filter(|e| e.state == bevy::input::ButtonState::Pressed)
-        .filter_map(|e| e.text.as_ref())
-        .map(|s| s.as_str())
-        .collect();
     if keys.just_pressed(KeyCode::F1) && window.focused {
         sim.dev_overlay = !sim.dev_overlay;
     }
     if !sim.commands.is_empty() {
         return;
-    }
-    sim.transition = false;
-    sim.focused = window.focused;
-    let cancel_selection = keys.just_pressed(KeyCode::Escape)
-        && !sim.paused
-        && game.as_ref().is_some_and(|g| g.selection.pending.is_some());
-    if cancel_selection && let Some(game) = game.as_deref_mut() {
-        game.actions.push(crate::gameplay::Action::Cancel);
-    }
-    if let Some(ui) = ui.as_deref_mut() {
-        let before = ui.source.mode;
-        ui.source.canvas.resize(window.width(), window.height());
-        if keys.just_pressed(KeyCode::Escape) && !cancel_selection {
-            ui.source.escape();
-        }
-        if keys.just_pressed(KeyCode::Backquote) {
-            ui.source.toggle();
-        }
-        if !window.focused && !ui.source.paused() {
-            ui.source.mode = hl2_ui::console::Mode::Pause;
-        }
-        if ui.source.mode == before
-            && let Some(game) = game.as_deref_mut()
-        {
-            let effects = ui.source.input(&hl2_ui::console::Input {
-                text,
-                keys: crate::console::keys(&keys),
-                pointer: window.cursor_position().map(|v| {
-                    let offset = video_viewport
-                        .as_ref()
-                        .map_or(Vec2::ZERO, |vp| vp.logical_offset);
-                    glam::Vec2::new(v.x - offset.x, v.y - offset.y)
-                }),
-                click: buttons.just_pressed(MouseButton::Left),
-            });
-            let has_apply = effects
-                .iter()
-                .any(|e| matches!(e, hl2_ui::console::Effect::ApplyConfig(_)));
-            sim.console_effects(ui, game, effects);
-            if has_apply && let Some(mut gv) = global_volume {
-                *gv = bevy::audio::GlobalVolume::from(bevy::audio::Volume::Linear(
-                    ui.source.config.audio.volume,
-                ));
-            }
-        }
-        if let Some(video_cfg) = sim.pending_video_config.take() {
-            crate::video::apply_video_config_to_window(&mut window, &video_cfg, &monitors);
-        }
-        sim.transition = ui.source.mode != before;
-        sim.paused = ui.source.paused();
-        let cfg = Some(&ui.source.config);
-        if sim.transition || sim.paused {
-            cursor.grab_mode = if sim.paused {
-                CursorGrabMode::None
-            } else {
-                CursorGrabMode::Locked
-            };
-            cursor.visible = sim.paused;
-            sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
-        } else if !sim.paused
-            && buttons.just_pressed(MouseButton::Left)
-            && cursor.grab_mode == CursorGrabMode::None
-        {
-            sim.transition = true;
-            cursor.grab_mode = CursorGrabMode::Locked;
-            cursor.visible = false;
-            sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
-        }
-        if ui.quit_requested {
-            exit.write(AppExit::Success);
-        }
-    } else {
-        let cfg = ui.as_ref().map(|u| &u.source.config);
-        if keys.just_pressed(KeyCode::Escape) && !cancel_selection || !window.focused {
-            sim.transition = !sim.paused;
-            sim.paused = true;
-            cursor.grab_mode = CursorGrabMode::None;
-            cursor.visible = true;
-            sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
-        } else if buttons.just_pressed(MouseButton::Left) {
-            sim.transition = sim.paused || cursor.grab_mode == CursorGrabMode::None;
-            if sim.transition {
-                sim.jump_suppressed |= action_pressed("+jump", KeyCode::Space, &keys, cfg);
-            }
-            sim.paused = false;
-            cursor.grab_mode = CursorGrabMode::Locked;
-            cursor.visible = false;
-        }
     }
     let cfg = ui.as_ref().map(|u| &u.source.config);
     if !action_pressed("+jump", KeyCode::Space, &keys, cfg) {
@@ -797,9 +693,17 @@ pub(crate) fn present(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn step_input(app: &mut App) {
+        app.world_mut()
+            .run_system_once(crate::ui::update_ui)
+            .unwrap();
+        app.world_mut().run_system_once(controls).unwrap();
+    }
+
     #[test]
     fn capturing_discards_pointer_motion_and_consumes_held_jump_until_release() {
-        use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.insert_resource(Simulation::new(
             &World::default(),
@@ -830,7 +734,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         let sim = app.world().resource::<Simulation>();
         assert!(sim.transition && sim.jump_suppressed);
         assert_eq!((sim.yaw, sim.pitch), (0., 0.));
@@ -838,21 +742,20 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .clear();
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         assert!(!app.world().resource::<Simulation>().input.jump);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release(KeyCode::Space);
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Space);
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         assert!(app.world().resource::<Simulation>().input.jump);
     }
     #[test]
     fn ui_open_close_and_resume_consume_pointer_attack_and_held_jump() {
-        use bevy::ecs::system::RunSystemOnce;
         use hl2_ui::console::Mode;
         let mut app = App::new();
         app.insert_resource(Simulation::new(
@@ -883,7 +786,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Backquote);
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         assert_eq!(
             app.world()
                 .resource::<crate::console::Console>()
@@ -904,7 +807,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         let sim = app.world().resource::<Simulation>();
         assert!(!sim.paused && sim.transition && sim.jump_suppressed && !sim.input.jump);
         assert_eq!((sim.yaw, sim.pitch), (0., 0.));
@@ -919,7 +822,7 @@ mod tests {
             .resource_mut::<crate::console::Console>()
             .source
             .mode = Mode::Pause;
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         assert!(app.world().resource::<Simulation>().paused);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -927,7 +830,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         assert!(
             app.world().resource::<Simulation>().paused,
             "click outside Resume cannot close the menu"
@@ -935,7 +838,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
-        app.world_mut().run_system_once(controls).unwrap();
+        step_input(&mut app);
         assert!(app.world().resource::<Simulation>().transition);
         assert!(!app.world().resource::<Simulation>().paused);
     }

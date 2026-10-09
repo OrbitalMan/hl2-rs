@@ -1,6 +1,32 @@
 # MODLOG
 
-## 2026-10-09 Viewport Renderer Output Resolution and Letterboxing/Pillarboxing
+## 2026-10-09 Decouple UI & Canvas from Movement into Dedicated ui.rs & Fix Letterbox Hit-Testing
+
+**Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session, Gemini 3.8 Flash).
+
+**Changed:**
+- `crates/hl2-bevy/src/ui.rs`:
+  - Created dedicated UI module and Bevy plugin (`UiPlugin`) for UI canvas management, text/keyboard input forwarding, cursor grab/visibility toggles, settings propagation, and pointer hit-testing.
+  - Implemented `cursor_to_canvas`: maps window coordinates to UI canvas coordinates offset by `video_viewport.logical_offset`, returning `None` if the cursor is outside the active viewport (e.g. over letterbox/pillarbox black stripes).
+  - Implemented `resize_canvas`: guarantees UI canvas dimensions match `video_viewport.logical_size` (or window logical size) prior to processing UI input, resolving the 1:1 hit-test mismatch between visual centering and click coordinates.
+  - Added unit tests: `cursor_to_canvas_maps_inside_letterbox_viewport`, `resize_canvas_resizes_to_viewport_logical_size`, and `update_ui_system_resizes_canvas_and_syncs_mode`.
+- `crates/hl2-bevy/src/movement.rs`:
+  - Stripped all UI, text event forwarding, pointer translation, canvas resizing, and video configuration application logic out of `movement::controls`.
+  - Restored `movement.rs` to solely handle player simulation and motion: walking, jumping, ducking, sprinting, noclip flight, weapon selection, and mouse look.
+  - Updated movement unit tests to step input via `update_ui` then `controls`.
+- `crates/hl2-bevy/src/main.rs`:
+  - Declared `mod ui;` and registered `ui::UiPlugin` in `RunFixedMainLoopSystems::BeforeFixedMainLoop`, ordered before `movement::MovementControlsSet`.
+
+**Why:** The user requested to stop bloating `movement.rs` with canvas and UI-related code, move UI and canvas logic to a dedicated file, and fix button hit-test offsets in letterboxed/pillarboxed viewports where visual button centers did not match clickable regions.
+
+**Tested how:**
+- `cargo test --workspace`: all 171 tests passed (50 hl2-bevy, 33 hl2-ui, 88 source-assets).
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed with 0 warnings.
+- `cargo fmt --check`: passed cleanly.
+
+**Result:** `movement.rs` is solely focused on player movement. UI and canvas logic is isolated in `ui.rs`. Button hit-testing matches visual positions 1:1 in letterbox/pillarbox viewports.
+
+
 
 **Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session, Gemini 3.8 Flash).
 

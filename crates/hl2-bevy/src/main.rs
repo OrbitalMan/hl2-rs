@@ -16,6 +16,7 @@ mod performance;
 mod rendering;
 mod sky;
 mod tonemap;
+mod ui;
 mod video;
 mod visibility;
 use anyhow::{Context, Result, bail};
@@ -374,6 +375,7 @@ fn main() -> Result<()> {
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
         .add_plugins(bloom::SourceBloomPlugin)
         .add_plugins(bevy::sprite_render::Material2dPlugin::<hud::HudMaterial>::default())
+        .add_plugins(ui::UiPlugin)
         .add_plugins(movement::MovementPlugin)
         .add_systems(PreUpdate, crate::video::update_viewports)
         .add_systems(
