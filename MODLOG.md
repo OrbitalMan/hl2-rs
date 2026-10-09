@@ -1,5 +1,22 @@
 # MODLOG
 
+## 2026-10-09 UI/input and player-movement boundary
+
+**Agent/model:** Codex Desktop; exact model identifier not exposed in this session.
+
+**Changed:**
+- Added portable `hl2-ui::input` binding lookup, including a unit test for configured/default resolution. It deliberately remains native-key-type agnostic.
+- Kept viewport fitting, pointer translation, and canvas resize in `hl2-ui::viewport`; `hl2-bevy::video` now converts explicitly between its Bevy math types and the portable crate's `glam` types, so the two dependency versions do not leak across the boundary.
+- Moved Bevy keyboard/mouse-to-gameplay adaptation into `crates/hl2-bevy/src/input.rs`; `ui.rs` handles UI focus/text/pointer/cursor state, while `input.rs` handles captured gameplay actions and character intent.
+- Moved player-view camera publication into `crates/hl2-bevy/src/camera.rs`; `movement.rs` schedules fixed character movement and no longer contains native event mapping or camera presentation.
+- Recorded the bounded architecture and fixed-step ordering in `docs/DESIGN.md`.
+
+**Why:** Continue separating portable UI/render/input policy from Bevy platform adaptation and stop UI/render concerns accumulating in the character-movement module.
+
+**Tested how:** `cargo fmt --all --check`; `cargo test --locked -p hl2-ui -p hl2-bevy` (91 passed, 2 owned-install tests ignored); `cargo clippy --locked -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`.
+
+**Result:** Existing menu capture, held-jump, remapped key, mouse sensitivity, viewport, and camera scheduling tests stay green. Packaged runtime capture and workspace-wide validation are not tested in this session.
+
 ## 2026-10-09 Decouple UI & Canvas from Movement into Dedicated ui.rs & Fix Letterbox Hit-Testing
 
 **Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session, Gemini 3.8 Flash).

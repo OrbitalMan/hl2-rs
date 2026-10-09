@@ -2,6 +2,7 @@
 mod assets;
 mod audio;
 mod bloom;
+mod camera;
 mod campaign;
 mod console;
 mod effects;
@@ -9,6 +10,7 @@ mod eyes;
 mod gameplay;
 mod gpu_skinning;
 mod hud;
+mod input;
 mod material_proxies;
 mod monitors;
 mod movement;
@@ -386,7 +388,7 @@ fn main() -> Result<()> {
             RunFixedMainLoop,
             campaign::poll
                 .in_set(bevy::app::RunFixedMainLoopSystems::AfterFixedMainLoop)
-                .before(movement::present),
+                .before(camera::present_player_view),
         )
         .add_systems(
             PostUpdate,

@@ -16,13 +16,11 @@ pub fn cursor_to_canvas(
     viewport: Option<&VideoViewport>,
     window: &Window,
 ) -> Option<glam::Vec2> {
-    let cursor = cursor_pos?;
-    let (offset, size) = viewport.map_or(
-        (Vec2::ZERO, Vec2::new(window.width(), window.height())),
-        |vp| (vp.logical_offset, vp.logical_size),
-    );
-    let p = glam::Vec2::new(cursor.x - offset.x, cursor.y - offset.y);
-    (p.x >= 0.0 && p.y >= 0.0 && p.x <= size.x && p.y <= size.y).then_some(p)
+    hl2_ui::viewport::cursor_to_canvas(
+        cursor_pos.map(|p| glam::Vec2::new(p.x, p.y)),
+        viewport.map(|v| v.bounds()).as_ref(),
+        glam::Vec2::new(window.width(), window.height()),
+    )
 }
 
 /// Resizes the UI canvas to match the active viewport logical size.
@@ -31,10 +29,11 @@ pub fn resize_canvas(
     viewport: Option<&VideoViewport>,
     window: &Window,
 ) {
-    let (width, height) = viewport
-        .map(|vp| (vp.logical_size.x, vp.logical_size.y))
-        .unwrap_or_else(|| (window.width(), window.height()));
-    canvas.resize(width, height);
+    hl2_ui::viewport::resize_canvas(
+        canvas,
+        viewport.map(|v| v.bounds()).as_ref(),
+        glam::Vec2::new(window.width(), window.height()),
+    );
 }
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -150,7 +149,7 @@ pub fn update_ui(
             };
             cursor.visible = sim.paused;
             sim.jump_suppressed |=
-                crate::movement::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+                crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
         } else if !sim.paused
             && buttons.just_pressed(MouseButton::Left)
             && cursor.grab_mode == CursorGrabMode::None
@@ -159,7 +158,7 @@ pub fn update_ui(
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
             sim.jump_suppressed |=
-                crate::movement::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+                crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
         }
         if ui.quit_requested {
             exit.write(AppExit::Success);
@@ -172,12 +171,12 @@ pub fn update_ui(
             cursor.grab_mode = CursorGrabMode::None;
             cursor.visible = true;
             sim.jump_suppressed |=
-                crate::movement::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+                crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
         } else if buttons.just_pressed(MouseButton::Left) {
             sim.transition = sim.paused || cursor.grab_mode == CursorGrabMode::None;
             if sim.transition {
                 sim.jump_suppressed |=
-                    crate::movement::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+                    crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
             }
             sim.paused = false;
             cursor.grab_mode = CursorGrabMode::Locked;

@@ -1,5 +1,10 @@
 # STATUS
 
+## Current session 10 (2026-10-09)
+
+- **UI/input/movement boundary: validated.** `hl2-ui` now owns portable viewport geometry, pointer-to-canvas translation, canvas resizing, and persisted binding lookup. `hl2-bevy::video` converts explicitly at the Bevy/portable `glam` version boundary; `hl2-bevy::ui` remains the native event/window adapter only. Bevy gameplay-input conversion moved out of `movement.rs` into `input.rs`, and camera presentation moved into `camera.rs`; movement retains the fixed character simulation. Existing menu/pause/capture behavior and binding/mouse tests pass. This is a structural refactor; packaged runtime capture is **not tested** in this session.
+- **Verification:** `cargo test --locked -p hl2-ui -p hl2-bevy` (91 passed, 2 owned-install tests ignored); `cargo clippy --locked -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`; `cargo fmt --all --check` pass. Workspace-wide checks and a packaged capture remain next if this refactor is retained.
+
 Checkpoint: 2026-10-08 session 9 handoff (Claude Code desktop, claude-opus-5-5) on main. Merged: player fall damage/death/respawn, crowbar surface sounds, footsteps, script cue levels, barrier close-hum loop (ambient_generic PlaySound/StopSound per SDK m_fActive; packaged walk-in/out recording loops and stops twice) and env_soundscape backgrounds (SDK selection + client playback; native per-process recordings compared). PR #2 merged by the owner. 360 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26.
 
 ## Current session 9 (2026-10-08)

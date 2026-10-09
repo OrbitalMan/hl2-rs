@@ -1,12 +1,7 @@
 //! Host adapter for the retained Source-coordinate player and collision code.
-use crate::{FlyCamera, source_direction, source_to_bevy};
+use crate::source_direction;
 use anyhow::{Result, bail};
-use bevy::{
-    app::RunFixedMainLoopSystems,
-    input::mouse::AccumulatedMouseMotion,
-    prelude::*,
-    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
-};
+use bevy::{app::RunFixedMainLoopSystems, prelude::*};
 use hl2_simulation::physics::Physics;
 use modkit_core::{
     World,
@@ -102,7 +97,7 @@ pub struct Simulation {
     pub pitch: f32,
     /// Scripted horizontal 4:3 field of view in degrees (default 75).
     pub fov: f32,
-    input: Input,
+    pub(crate) input: Input,
     fly: bool,
     pub paused: bool,
     pub loading: bool,
@@ -193,7 +188,7 @@ impl Simulation {
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
     }
-    fn change_fly(&mut self, fly: bool) {
+    pub(crate) fn set_fly(&mut self, fly: bool) {
         if self.fly != fly {
             self.fly = fly;
             self.player = Player::new(self.eye);
@@ -305,7 +300,7 @@ impl Simulation {
                 self.fov = fov;
             }
             if let Some(fly) = c.fly {
-                self.change_fly(fly);
+                self.set_fly(fly);
             }
             if let Some(enabled) = c.dev_overlay {
                 self.dev_overlay = enabled;
@@ -452,213 +447,16 @@ impl Plugin for MovementPlugin {
         ))
         .add_systems(
             RunFixedMainLoop,
-            controls
+            crate::input::controls
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
                 .in_set(MovementControlsSet),
         )
         .add_systems(FixedUpdate, fixed_step)
         .add_systems(
             RunFixedMainLoop,
-            present.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop),
+            crate::camera::present_player_view.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop),
         );
     }
-}
-type InputDevices<'w> = (
-    Res<'w, ButtonInput<KeyCode>>,
-    Res<'w, ButtonInput<MouseButton>>,
-    Res<'w, AccumulatedMouseMotion>,
-    Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>,
-);
-pub fn parse_keycode(name: &str) -> Option<KeyCode> {
-    match name {
-        "KeyA" => Some(KeyCode::KeyA),
-        "KeyB" => Some(KeyCode::KeyB),
-        "KeyC" => Some(KeyCode::KeyC),
-        "KeyD" => Some(KeyCode::KeyD),
-        "KeyE" => Some(KeyCode::KeyE),
-        "KeyF" => Some(KeyCode::KeyF),
-        "KeyG" => Some(KeyCode::KeyG),
-        "KeyH" => Some(KeyCode::KeyH),
-        "KeyI" => Some(KeyCode::KeyI),
-        "KeyJ" => Some(KeyCode::KeyJ),
-        "KeyK" => Some(KeyCode::KeyK),
-        "KeyL" => Some(KeyCode::KeyL),
-        "KeyM" => Some(KeyCode::KeyM),
-        "KeyN" => Some(KeyCode::KeyN),
-        "KeyO" => Some(KeyCode::KeyO),
-        "KeyP" => Some(KeyCode::KeyP),
-        "KeyQ" => Some(KeyCode::KeyQ),
-        "KeyR" => Some(KeyCode::KeyR),
-        "KeyS" => Some(KeyCode::KeyS),
-        "KeyT" => Some(KeyCode::KeyT),
-        "KeyU" => Some(KeyCode::KeyU),
-        "KeyV" => Some(KeyCode::KeyV),
-        "KeyW" => Some(KeyCode::KeyW),
-        "KeyX" => Some(KeyCode::KeyX),
-        "KeyY" => Some(KeyCode::KeyY),
-        "KeyZ" => Some(KeyCode::KeyZ),
-        "Digit0" => Some(KeyCode::Digit0),
-        "Digit1" => Some(KeyCode::Digit1),
-        "Digit2" => Some(KeyCode::Digit2),
-        "Digit3" => Some(KeyCode::Digit3),
-        "Digit4" => Some(KeyCode::Digit4),
-        "Digit5" => Some(KeyCode::Digit5),
-        "Digit6" => Some(KeyCode::Digit6),
-        "Digit7" => Some(KeyCode::Digit7),
-        "Digit8" => Some(KeyCode::Digit8),
-        "Digit9" => Some(KeyCode::Digit9),
-        "Space" => Some(KeyCode::Space),
-        "ControlLeft" | "Ctrl" => Some(KeyCode::ControlLeft),
-        "ControlRight" => Some(KeyCode::ControlRight),
-        "ShiftLeft" | "Shift" => Some(KeyCode::ShiftLeft),
-        "ShiftRight" => Some(KeyCode::ShiftRight),
-        "AltLeft" | "Alt" => Some(KeyCode::AltLeft),
-        "AltRight" => Some(KeyCode::AltRight),
-        "ArrowUp" | "Up" => Some(KeyCode::ArrowUp),
-        "ArrowDown" | "Down" => Some(KeyCode::ArrowDown),
-        "ArrowLeft" | "Left" => Some(KeyCode::ArrowLeft),
-        "ArrowRight" | "Right" => Some(KeyCode::ArrowRight),
-        "Enter" => Some(KeyCode::Enter),
-        "Backspace" => Some(KeyCode::Backspace),
-        "Delete" => Some(KeyCode::Delete),
-        "Home" => Some(KeyCode::Home),
-        "End" => Some(KeyCode::End),
-        "PageUp" => Some(KeyCode::PageUp),
-        "PageDown" => Some(KeyCode::PageDown),
-        "Tab" => Some(KeyCode::Tab),
-        "Escape" => Some(KeyCode::Escape),
-        "F1" => Some(KeyCode::F1),
-        "F2" => Some(KeyCode::F2),
-        "F3" => Some(KeyCode::F3),
-        "F4" => Some(KeyCode::F4),
-        "F5" => Some(KeyCode::F5),
-        "F6" => Some(KeyCode::F6),
-        "F7" => Some(KeyCode::F7),
-        "F8" => Some(KeyCode::F8),
-        "F9" => Some(KeyCode::F9),
-        "F10" => Some(KeyCode::F10),
-        "F11" => Some(KeyCode::F11),
-        "F12" => Some(KeyCode::F12),
-        _ => None,
-    }
-}
-
-pub(crate) fn action_pressed(
-    action: &str,
-    default_key: KeyCode,
-    keys: &ButtonInput<KeyCode>,
-    config: Option<&hl2_ui::config::Config>,
-) -> bool {
-    let key = config
-        .and_then(|c| c.keys.get(action))
-        .and_then(|name| parse_keycode(name))
-        .unwrap_or(default_key);
-    keys.pressed(key)
-}
-
-fn action_just_pressed(
-    action: &str,
-    default_key: KeyCode,
-    keys: &ButtonInput<KeyCode>,
-    config: Option<&hl2_ui::config::Config>,
-) -> bool {
-    let key = config
-        .and_then(|c| c.keys.get(action))
-        .and_then(|name| parse_keycode(name))
-        .unwrap_or(default_key);
-    keys.just_pressed(key)
-}
-
-fn controls(
-    (keys, buttons, mouse, scroll): InputDevices,
-    windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>,
-    mut sim: ResMut<Simulation>,
-    mut game: Option<ResMut<crate::gameplay::Gameplay>>,
-    ui: Option<Res<crate::console::Console>>,
-) {
-    let Ok((window, cursor)) = windows.single() else {
-        return;
-    };
-    if keys.just_pressed(KeyCode::F1) && window.focused {
-        sim.dev_overlay = !sim.dev_overlay;
-    }
-    if !sim.commands.is_empty() {
-        return;
-    }
-    let cfg = ui.as_ref().map(|u| &u.source.config);
-    if !action_pressed("+jump", KeyCode::Space, &keys, cfg) {
-        sim.jump_suppressed = false;
-    }
-    if let Some(game) = game.as_deref_mut() {
-        game.buttons(
-            buttons.pressed(MouseButton::Left),
-            buttons.pressed(MouseButton::Right),
-        );
-    }
-    sim.input = Input::default();
-    if sim.paused() || sim.transition || cursor.grab_mode == CursorGrabMode::None {
-        if let Some(game) = game.as_deref_mut() {
-            game.consume_attacks();
-        }
-        return;
-    }
-    if let Some(game) = game.as_deref_mut() {
-        use crate::gameplay::Action;
-        for (action_name, default_key, action) in [
-            ("loadout", KeyCode::F3, Action::Loadout),
-            ("+use", KeyCode::KeyE, Action::Use),
-            ("+reload", KeyCode::KeyR, Action::Reload),
-            ("lastinv", KeyCode::KeyQ, Action::Previous),
-            ("impulse", KeyCode::KeyG, Action::Impulse),
-        ] {
-            if action_just_pressed(action_name, default_key, &keys, cfg) {
-                game.actions.push(action);
-            }
-        }
-        for (slot, (action_name, default_key)) in [
-            ("slot1", KeyCode::Digit1),
-            ("slot2", KeyCode::Digit2),
-            ("slot3", KeyCode::Digit3),
-            ("slot4", KeyCode::Digit4),
-            ("slot5", KeyCode::Digit5),
-            ("slot6", KeyCode::Digit6),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if action_just_pressed(action_name, default_key, &keys, cfg) {
-                game.actions.push(Action::Slot { slot });
-            }
-        }
-        if let Some(scroll) = scroll.as_deref().filter(|s| s.delta.y != 0.) {
-            game.actions.push(Action::Wheel {
-                delta: if scroll.delta.y > 0. { -1 } else { 1 },
-            });
-        }
-    }
-    let (sensitivity, invert) = cfg
-        .map(|c| (c.mouse.sensitivity, c.mouse.invert))
-        .unwrap_or((3.0, false));
-    let sens_scale = (sensitivity / 3.0).clamp(0.01, 10.0);
-    sim.yaw -= mouse.delta.x * 0.001152 * sens_scale;
-    let pitch_factor = if invert { -1.0 } else { 1.0 };
-    sim.pitch =
-        (sim.pitch - mouse.delta.y * 0.001152 * sens_scale * pitch_factor).clamp(-1.55, 1.55);
-    if keys.just_pressed(KeyCode::F2) {
-        let fly = !sim.fly;
-        sim.change_fly(fly);
-    }
-    sim.input = Input {
-        forward: f32::from(action_pressed("+forward", KeyCode::KeyW, &keys, cfg))
-            - f32::from(action_pressed("+back", KeyCode::KeyS, &keys, cfg)),
-        side: f32::from(action_pressed("+moveright", KeyCode::KeyD, &keys, cfg))
-            - f32::from(action_pressed("+moveleft", KeyCode::KeyA, &keys, cfg)),
-        yaw: sim.yaw,
-        jump: action_pressed("+jump", KeyCode::Space, &keys, cfg) && !sim.jump_suppressed,
-        crouch: action_pressed("+duck", KeyCode::ControlLeft, &keys, cfg),
-        sprint: action_pressed("+speed", KeyCode::ShiftLeft, &keys, cfg),
-        slow: action_pressed("+walk", KeyCode::AltLeft, &keys, cfg),
-    };
 }
 fn fixed_step(
     mut sim: ResMut<Simulation>,
@@ -673,33 +471,22 @@ fn fixed_step(
         exit.write(AppExit::Success);
     }
 }
-pub(crate) fn present(
-    sim: Res<Simulation>,
-    mut cameras: Query<(&mut Transform, &mut Projection), With<FlyCamera>>,
-) {
-    if let Ok((mut camera, mut projection)) = cameras.single_mut() {
-        *camera = Transform::from_translation(source_to_bevy(sim.eye())).looking_to(
-            source_to_bevy(source_direction(sim.yaw, sim.pitch)),
-            Vec3::Y,
-        );
-        let fov = crate::video::vertical_fov(sim.fov);
-        if let Projection::Perspective(p) = &mut *projection
-            && p.fov != fov
-        {
-            p.fov = fov;
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::system::RunSystemOnce;
+    use bevy::{
+        ecs::system::RunSystemOnce,
+        input::mouse::AccumulatedMouseMotion,
+        window::{CursorGrabMode, CursorOptions, PrimaryWindow},
+    };
 
     fn step_input(app: &mut App) {
         app.world_mut()
             .run_system_once(crate::ui::update_ui)
             .unwrap();
-        app.world_mut().run_system_once(controls).unwrap();
+        app.world_mut()
+            .run_system_once(crate::input::controls)
+            .unwrap();
     }
 
     #[test]
@@ -967,7 +754,9 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyJ);
 
-        app.world_mut().run_system_once(controls).unwrap();
+        app.world_mut()
+            .run_system_once(crate::input::controls)
+            .unwrap();
 
         let sim = app.world().resource::<Simulation>();
         assert_eq!(sim.input.forward, 1.0);

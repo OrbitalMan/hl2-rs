@@ -100,62 +100,59 @@ impl VideoViewport {
         let win_h = window.resolution.physical_height().max(1);
         let scale = window.scale_factor().max(1.0);
 
-        let target_w = target_w.max(1);
-        let target_h = target_h.max(1);
-
-        let target_aspect = target_w as f32 / target_h as f32;
-        let win_aspect = win_w as f32 / win_h as f32;
-
-        let (vp_w, vp_h, offset_x, offset_y) = if (win_aspect - target_aspect).abs() < 1e-4 {
-            (win_w, win_h, 0, 0)
-        } else if win_aspect > target_aspect {
-            // Window is wider than target aspect ratio:
-            // Pillarbox (vertical black stripes on left & right sides)
-            let vp_h = win_h;
-            let vp_w = ((win_h as f32 * target_aspect).round() as u32).min(win_w);
-            let offset_x = (win_w - vp_w) / 2;
-            (vp_w, vp_h, offset_x, 0)
-        } else {
-            // Window is taller than target aspect ratio:
-            // Letterbox (horizontal black stripes on top & bottom sides)
-            let vp_w = win_w;
-            let vp_h = ((win_w as f32 / target_aspect).round() as u32).min(win_h);
-            let offset_y = (win_h - vp_h) / 2;
-            (vp_w, vp_h, 0, offset_y)
-        };
+        let bounds = hl2_ui::viewport::ViewportBounds::compute(
+            glam::UVec2::new(target_w, target_h),
+            glam::UVec2::new(win_w, win_h),
+            scale,
+        );
 
         let physical_rect = Viewport {
-            physical_position: UVec2::new(offset_x, offset_y),
-            physical_size: UVec2::new(vp_w.max(1), vp_h.max(1)),
+            physical_position: UVec2::new(bounds.physical_offset.x, bounds.physical_offset.y),
+            physical_size: UVec2::new(bounds.physical_size.x, bounds.physical_size.y),
             depth: 0.0..1.0,
         };
-        let logical_offset = Vec2::new(offset_x as f32 / scale, offset_y as f32 / scale);
-        let logical_size = Vec2::new(vp_w as f32 / scale, vp_h as f32 / scale);
 
         Self {
-            target_resolution: UVec2::new(target_w, target_h),
+            target_resolution: UVec2::new(bounds.target_resolution.x, bounds.target_resolution.y),
             physical_rect,
-            logical_offset,
-            logical_size,
+            logical_offset: Vec2::new(bounds.logical_offset.x, bounds.logical_offset.y),
+            logical_size: Vec2::new(bounds.logical_size.x, bounds.logical_size.y),
+        }
+    }
+
+    /// Returns the portable viewport bounds.
+    pub fn bounds(&self) -> hl2_ui::viewport::ViewportBounds {
+        hl2_ui::viewport::ViewportBounds {
+            target_resolution: glam::UVec2::new(self.target_resolution.x, self.target_resolution.y),
+            physical_offset: glam::UVec2::new(
+                self.physical_rect.physical_position.x,
+                self.physical_rect.physical_position.y,
+            ),
+            physical_size: glam::UVec2::new(
+                self.physical_rect.physical_size.x,
+                self.physical_rect.physical_size.y,
+            ),
+            logical_offset: glam::Vec2::new(self.logical_offset.x, self.logical_offset.y),
+            logical_size: glam::Vec2::new(self.logical_size.x, self.logical_size.y),
         }
     }
 
     /// Whether black stripes are present (aspect ratio mismatch).
     #[allow(dead_code)]
     pub fn has_black_stripes(&self) -> bool {
-        self.physical_rect.physical_position != UVec2::ZERO
+        self.bounds().has_black_stripes()
     }
 
     /// True if vertical black stripes (pillarboxing) on left/right sides.
     #[allow(dead_code)]
     pub fn is_vertical_stripes(&self) -> bool {
-        self.physical_rect.physical_position.x > 0
+        self.bounds().is_vertical_stripes()
     }
 
     /// True if horizontal black stripes (letterboxing) on top/bottom sides.
     #[allow(dead_code)]
     pub fn is_horizontal_stripes(&self) -> bool {
-        self.physical_rect.physical_position.y > 0
+        self.bounds().is_horizontal_stripes()
     }
 }
 
