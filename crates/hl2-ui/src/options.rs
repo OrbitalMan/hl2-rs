@@ -354,14 +354,34 @@ impl OptionsState {
                     24.0 * scale,
                 );
                 if input.click && res_rect.contains(p) {
-                    let common_resolutions =
-                        [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
+                    let common_resolutions = [
+                        (640, 480),   // 4:3
+                        (800, 600),   // 4:3
+                        (1024, 768),  // 4:3
+                        (1280, 720),  // 16:9
+                        (1280, 800),  // 16:10
+                        (1280, 960),  // 4:3
+                        (1280, 1024), // 5:4
+                        (1440, 900),  // 16:10
+                        (1600, 900),  // 16:9
+                        (1600, 1200), // 4:3
+                        (1680, 1050), // 16:10
+                        (1920, 1080), // 16:9
+                        (1920, 1200), // 16:10
+                        (2560, 1440), // 16:9
+                        (3840, 2160), // 16:9
+                    ];
                     let current = (self.draft.video.width, self.draft.video.height);
                     let next_idx = common_resolutions
                         .iter()
                         .position(|&r| r == current)
                         .map(|i| (i + 1) % common_resolutions.len())
-                        .unwrap_or(0);
+                        .unwrap_or_else(|| {
+                            common_resolutions
+                                .iter()
+                                .position(|&(w, h)| w * h > current.0 * current.1)
+                                .unwrap_or(0)
+                        });
                     let (w, h) = common_resolutions[next_idx];
                     self.draft.video.width = w;
                     self.draft.video.height = h;
@@ -600,7 +620,15 @@ impl OptionsState {
                 rectangle_lines(
                     canvas, res_box.x, res_box.y, res_box.w, res_box.h, 1.0, border_col,
                 );
-                let res_str = format!("{} x {}", self.draft.video.width, self.draft.video.height);
+                let aspect = aspect_ratio_str(self.draft.video.width, self.draft.video.height);
+                let res_str = if aspect.is_empty() {
+                    format!("{} x {}", self.draft.video.width, self.draft.video.height)
+                } else {
+                    format!(
+                        "{} x {} ({})",
+                        self.draft.video.width, self.draft.video.height, aspect
+                    )
+                };
                 if let Some(f) = font {
                     f.draw_baseline(
                         &res_str,
@@ -900,5 +928,25 @@ impl OptionsState {
                 );
             }
         }
+    }
+}
+
+pub fn aspect_ratio_str(w: u32, h: u32) -> &'static str {
+    if h == 0 {
+        return "";
+    }
+    let ratio = w as f32 / h as f32;
+    if (ratio - 4.0 / 3.0).abs() < 0.02 {
+        "4:3"
+    } else if (ratio - 16.0 / 9.0).abs() < 0.02 {
+        "16:9"
+    } else if (ratio - 16.0 / 10.0).abs() < 0.02 {
+        "16:10"
+    } else if (ratio - 5.0 / 4.0).abs() < 0.02 {
+        "5:4"
+    } else if (ratio - 21.0 / 9.0).abs() < 0.05 {
+        "21:9"
+    } else {
+        ""
     }
 }

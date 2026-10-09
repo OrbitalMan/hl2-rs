@@ -569,9 +569,11 @@ fn action_just_pressed(
     keys.just_pressed(key)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn controls(
     (keys, buttons, mouse, scroll, mut characters): InputDevices,
     (mut windows, monitors): DisplayDevices,
+    video_viewport: Option<Res<crate::video::VideoViewport>>,
     mut sim: ResMut<Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
@@ -625,9 +627,12 @@ fn controls(
             let effects = ui.source.input(&hl2_ui::console::Input {
                 text,
                 keys: crate::console::keys(&keys),
-                pointer: window
-                    .cursor_position()
-                    .map(|v| glam::Vec2::from_array(v.to_array())),
+                pointer: window.cursor_position().map(|v| {
+                    let offset = video_viewport
+                        .as_ref()
+                        .map_or(Vec2::ZERO, |vp| vp.logical_offset);
+                    glam::Vec2::new(v.x - offset.x, v.y - offset.y)
+                }),
                 click: buttons.just_pressed(MouseButton::Left),
             });
             let has_apply = effects

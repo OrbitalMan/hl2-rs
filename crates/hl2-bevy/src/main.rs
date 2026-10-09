@@ -336,7 +336,8 @@ fn main() -> Result<()> {
         .insert_resource(simulation)
         .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
-        .insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.1)))
+        .init_resource::<crate::video::VideoViewport>()
+        .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
@@ -374,6 +375,11 @@ fn main() -> Result<()> {
         .add_plugins(bloom::SourceBloomPlugin)
         .add_plugins(bevy::sprite_render::Material2dPlugin::<hud::HudMaterial>::default())
         .add_plugins(movement::MovementPlugin)
+        .add_systems(PreUpdate, crate::video::update_viewports)
+        .add_systems(
+            PostUpdate,
+            crate::video::update_viewports.before(rendering::present_entities),
+        )
         .add_systems(
             RunFixedMainLoop,
             campaign::poll

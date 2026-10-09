@@ -232,12 +232,14 @@ type HudResources<'w> = (
     Res<'w, crate::Status>,
     Option<Res<'w, crate::performance::Performance>>,
 );
+#[allow(clippy::too_many_arguments)]
 pub fn present(
     mut commands: Commands,
     mut hud: ResMut<Hud>,
     mut game: ResMut<crate::gameplay::Gameplay>,
     (ui, clock, sim, status, performance): HudResources,
     windows: Query<&Window, With<PrimaryWindow>>,
+    video_viewport: Option<Res<crate::video::VideoViewport>>,
     (mut images, mut materials, mut meshes): HudAssets,
     mut draws: DrawQuery,
 ) {
@@ -245,8 +247,10 @@ pub fn present(
     let Ok(window) = windows.single() else {
         return;
     };
-    let width = window.width();
-    let height = window.height();
+    let (width, height) = video_viewport
+        .as_ref()
+        .map(|vp| (vp.logical_size.x, vp.logical_size.y))
+        .unwrap_or_else(|| (window.width(), window.height()));
     hud.source.canvas.resize(width, height);
     hud.source.draw_status(
         &game.inventory,

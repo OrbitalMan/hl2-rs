@@ -1,6 +1,38 @@
 # MODLOG
 
-## 2026-10-09 Video Resolution Scaling and Display Metrics Architecture
+## 2026-10-09 Viewport Renderer Output Resolution and Letterboxing/Pillarboxing
+
+**Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session, Gemini 3.8 Flash).
+
+**Changed:**
+- `crates/hl2-bevy/src/video.rs`:
+  - Decoupled video resolution from OS window frame size: configured video resolution now acts strictly as the renderer output and camera viewport resolution.
+  - Implemented `VideoViewport` resource with automatic aspect-ratio calculation:
+    - Pillarbox (vertical black stripes on left & right) when window is wider than target aspect ratio (e.g. 4:3 target on 16:9 display).
+    - Letterbox (horizontal black stripes on top & bottom) when window is taller than target aspect ratio (e.g. 16:9 widescreen cinema target on 4:3 display).
+    - Full-frame fill when aspect ratios match.
+  - Added `update_viewports` system synchronizing camera viewports across all primary window rendering cameras (`FlyCamera`, viewmodel, skybox, HUD) on both `PreUpdate` and `PostUpdate`.
+  - Added comprehensive unit tests for pillarboxing, letterboxing, exact aspect filling, High-DPI scale factors, window size preservation, and camera synchronization.
+  - Kept default `ClearColor` as `Color::BLACK`. Swapchain clear pass in wgpu clears the full texture to black, while viewport and scissor constrain scene and 2D cameras to the letterbox bounds. (Fixed crash on launch: an initial separate `Camera2d` spawned for letterboxing defaulted to Bevy's MSAA sample count of 4, causing wgpu pass parameter validation error with the 1-sample swapchain/depth texture; removed the redundant camera).
+  - Initialized `VideoViewport` resource and registered `update_viewports` systems.
+- `crates/hl2-bevy/src/hud.rs`:
+  - Sized HUD canvas to `video_viewport.logical_size` instead of the full unconstrained window size, ensuring UI, health, ammo, crosshair, and menus render within the letterboxed viewport.
+- `crates/hl2-bevy/src/movement.rs`:
+  - Offset mouse pointer coordinates for `ui.source.input` by `video_viewport.logical_offset`, ensuring clicking in menus and options dialog aligns 1:1 with visual elements in letterboxed frames.
+- `crates/hl2-ui/src/options.rs`:
+  - Expanded `common_resolutions` in Video Options to include classic 4:3 (640x480, 800x600, 1024x768, 1280x960, 1600x1200), 16:10 (1280x800, 1440x900, 1680x1050, 1920x1200), 5:4 (1280x1024), and 16:9 (1280x720, 1600x900, 1920x1080, 2560x1440, 3840x2160) resolutions.
+  - Added aspect ratio formatting (`1024 x 768 (4:3)`, `1920 x 1080 (16:9)`, etc.) in the options dialog.
+
+**Why:** The user specified that video resolution in settings represents renderer output / viewport resolution, not OS window size, and must fit inside the window or fullscreen frame with letterboxing/pillarboxing black stripes on mismatched aspect ratios without distortion.
+
+**Tested how:**
+- `cargo test --workspace`: 88 source-assets + 33 hl2-ui + 46 hl2-bevy unit tests passing (167 passing tests).
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed with 0 warnings.
+- `cargo fmt --check`: passed cleanly.
+- `target/debug/hl2-bevy --map d1_trainstation_02 --frames 30 --capture artifacts/test_res.png --no-focus`: completed 30 frames and capture with 0 errors.
+
+**Result:** Clean letterboxed and pillarboxed viewport rendering with solid black stripes preserving aspect ratio without distortion.
+
 
 **Agent/model:** Antigravity agentic assistant (OrbitalMan pair-programming session).
 
