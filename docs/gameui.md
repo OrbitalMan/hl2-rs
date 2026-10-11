@@ -216,7 +216,7 @@ only).
 
 ## 7. Plan: host use of the stored settings (milestone 6)
 
-Evidence gathered before coding (private retail analysis, the SDK and the installed files):
+Evidence gathered before coding (the Source SDK, the installed files and the owned retail build):
 
 - Music volume: the retail engine scales a channel's gain by `snd_musicvolume` only when the wave
   name's leading sound characters contain `#` (`CHAR_DRYMIX`, `public/soundchars.h`) and the
