@@ -2,12 +2,19 @@
 //!
 //! UI event handling lives in `ui`; this module only turns an already captured
 //! keyboard/mouse frame into gameplay actions and a Source movement intent.
+//!
+//! Every gameplay action is read through its persisted binding (`Config::keys`): keyboard keys use
+//! Bevy's `KeyCode` names, mouse buttons `MOUSE1`..`MOUSE5` and the wheel `MWHEELUP`/`MWHEELDOWN`,
+//! exactly as the Options key capture writes them. An empty or unknown binding is unbound.
+
+use std::{collections::HashMap, sync::LazyLock};
 
 use bevy::{
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
+use hl2_ui::config::Config;
 use modkit_core::movement::Input;
 
 type InputDevices<'w> = (
@@ -17,136 +24,236 @@ type InputDevices<'w> = (
     Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>,
 );
 
-/// Adapts persisted UI binding names to Bevy's platform key enum.
-pub fn parse_keycode(name: &str) -> Option<KeyCode> {
-    match name {
-        "KeyA" => Some(KeyCode::KeyA),
-        "KeyB" => Some(KeyCode::KeyB),
-        "KeyC" => Some(KeyCode::KeyC),
-        "KeyD" => Some(KeyCode::KeyD),
-        "KeyE" => Some(KeyCode::KeyE),
-        "KeyF" => Some(KeyCode::KeyF),
-        "KeyG" => Some(KeyCode::KeyG),
-        "KeyH" => Some(KeyCode::KeyH),
-        "KeyI" => Some(KeyCode::KeyI),
-        "KeyJ" => Some(KeyCode::KeyJ),
-        "KeyK" => Some(KeyCode::KeyK),
-        "KeyL" => Some(KeyCode::KeyL),
-        "KeyM" => Some(KeyCode::KeyM),
-        "KeyN" => Some(KeyCode::KeyN),
-        "KeyO" => Some(KeyCode::KeyO),
-        "KeyP" => Some(KeyCode::KeyP),
-        "KeyQ" => Some(KeyCode::KeyQ),
-        "KeyR" => Some(KeyCode::KeyR),
-        "KeyS" => Some(KeyCode::KeyS),
-        "KeyT" => Some(KeyCode::KeyT),
-        "KeyU" => Some(KeyCode::KeyU),
-        "KeyV" => Some(KeyCode::KeyV),
-        "KeyW" => Some(KeyCode::KeyW),
-        "KeyX" => Some(KeyCode::KeyX),
-        "KeyY" => Some(KeyCode::KeyY),
-        "KeyZ" => Some(KeyCode::KeyZ),
-        "Digit0" => Some(KeyCode::Digit0),
-        "Digit1" => Some(KeyCode::Digit1),
-        "Digit2" => Some(KeyCode::Digit2),
-        "Digit3" => Some(KeyCode::Digit3),
-        "Digit4" => Some(KeyCode::Digit4),
-        "Digit5" => Some(KeyCode::Digit5),
-        "Digit6" => Some(KeyCode::Digit6),
-        "Digit7" => Some(KeyCode::Digit7),
-        "Digit8" => Some(KeyCode::Digit8),
-        "Digit9" => Some(KeyCode::Digit9),
-        "Space" => Some(KeyCode::Space),
-        "ControlLeft" | "Ctrl" => Some(KeyCode::ControlLeft),
-        "ControlRight" => Some(KeyCode::ControlRight),
-        "ShiftLeft" | "Shift" => Some(KeyCode::ShiftLeft),
-        "ShiftRight" => Some(KeyCode::ShiftRight),
-        "AltLeft" | "Alt" => Some(KeyCode::AltLeft),
-        "AltRight" => Some(KeyCode::AltRight),
-        "ArrowUp" | "Up" => Some(KeyCode::ArrowUp),
-        "ArrowDown" | "Down" => Some(KeyCode::ArrowDown),
-        "ArrowLeft" | "Left" => Some(KeyCode::ArrowLeft),
-        "ArrowRight" | "Right" => Some(KeyCode::ArrowRight),
-        "Enter" => Some(KeyCode::Enter),
-        "Backspace" => Some(KeyCode::Backspace),
-        "Delete" => Some(KeyCode::Delete),
-        "Home" => Some(KeyCode::Home),
-        "End" => Some(KeyCode::End),
-        "PageUp" => Some(KeyCode::PageUp),
-        "PageDown" => Some(KeyCode::PageDown),
-        "Tab" => Some(KeyCode::Tab),
-        "Escape" => Some(KeyCode::Escape),
-        "F1" => Some(KeyCode::F1),
-        "F2" => Some(KeyCode::F2),
-        "F3" => Some(KeyCode::F3),
-        "F4" => Some(KeyCode::F4),
-        "F5" => Some(KeyCode::F5),
-        "F6" => Some(KeyCode::F6),
-        "F7" => Some(KeyCode::F7),
-        "F8" => Some(KeyCode::F8),
-        "F9" => Some(KeyCode::F9),
-        "F10" => Some(KeyCode::F10),
-        "F11" => Some(KeyCode::F11),
-        "F12" => Some(KeyCode::F12),
+/// A physical input a binding name refers to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trigger {
+    Key(KeyCode),
+    Mouse(MouseButton),
+    WheelUp,
+    WheelDown,
+}
+
+/// Keys a binding may name. Binding names are the `Debug` spelling of `KeyCode`, which is what
+/// the Options key capture stores, so the lookup table is generated from that spelling.
+const BINDABLE_KEYS: &[KeyCode] = &[
+    KeyCode::KeyA,
+    KeyCode::KeyB,
+    KeyCode::KeyC,
+    KeyCode::KeyD,
+    KeyCode::KeyE,
+    KeyCode::KeyF,
+    KeyCode::KeyG,
+    KeyCode::KeyH,
+    KeyCode::KeyI,
+    KeyCode::KeyJ,
+    KeyCode::KeyK,
+    KeyCode::KeyL,
+    KeyCode::KeyM,
+    KeyCode::KeyN,
+    KeyCode::KeyO,
+    KeyCode::KeyP,
+    KeyCode::KeyQ,
+    KeyCode::KeyR,
+    KeyCode::KeyS,
+    KeyCode::KeyT,
+    KeyCode::KeyU,
+    KeyCode::KeyV,
+    KeyCode::KeyW,
+    KeyCode::KeyX,
+    KeyCode::KeyY,
+    KeyCode::KeyZ,
+    KeyCode::Digit0,
+    KeyCode::Digit1,
+    KeyCode::Digit2,
+    KeyCode::Digit3,
+    KeyCode::Digit4,
+    KeyCode::Digit5,
+    KeyCode::Digit6,
+    KeyCode::Digit7,
+    KeyCode::Digit8,
+    KeyCode::Digit9,
+    KeyCode::F1,
+    KeyCode::F2,
+    KeyCode::F3,
+    KeyCode::F4,
+    KeyCode::F5,
+    KeyCode::F6,
+    KeyCode::F7,
+    KeyCode::F8,
+    KeyCode::F9,
+    KeyCode::F10,
+    KeyCode::F11,
+    KeyCode::F12,
+    KeyCode::F13,
+    KeyCode::F14,
+    KeyCode::F15,
+    KeyCode::F16,
+    KeyCode::F17,
+    KeyCode::F18,
+    KeyCode::F19,
+    KeyCode::F20,
+    KeyCode::F21,
+    KeyCode::F22,
+    KeyCode::F23,
+    KeyCode::F24,
+    KeyCode::Space,
+    KeyCode::ControlLeft,
+    KeyCode::ControlRight,
+    KeyCode::ShiftLeft,
+    KeyCode::ShiftRight,
+    KeyCode::AltLeft,
+    KeyCode::AltRight,
+    KeyCode::SuperLeft,
+    KeyCode::SuperRight,
+    KeyCode::Enter,
+    KeyCode::Escape,
+    KeyCode::Tab,
+    KeyCode::Backspace,
+    KeyCode::CapsLock,
+    KeyCode::ArrowUp,
+    KeyCode::ArrowDown,
+    KeyCode::ArrowLeft,
+    KeyCode::ArrowRight,
+    KeyCode::Insert,
+    KeyCode::Delete,
+    KeyCode::Home,
+    KeyCode::End,
+    KeyCode::PageUp,
+    KeyCode::PageDown,
+    KeyCode::Pause,
+    KeyCode::NumLock,
+    KeyCode::ScrollLock,
+    KeyCode::PrintScreen,
+    KeyCode::ContextMenu,
+    KeyCode::Backquote,
+    KeyCode::Minus,
+    KeyCode::Equal,
+    KeyCode::BracketLeft,
+    KeyCode::BracketRight,
+    KeyCode::Backslash,
+    KeyCode::IntlBackslash,
+    KeyCode::Semicolon,
+    KeyCode::Quote,
+    KeyCode::Comma,
+    KeyCode::Period,
+    KeyCode::Slash,
+    KeyCode::Numpad0,
+    KeyCode::Numpad1,
+    KeyCode::Numpad2,
+    KeyCode::Numpad3,
+    KeyCode::Numpad4,
+    KeyCode::Numpad5,
+    KeyCode::Numpad6,
+    KeyCode::Numpad7,
+    KeyCode::Numpad8,
+    KeyCode::Numpad9,
+    KeyCode::NumpadEnter,
+    KeyCode::NumpadAdd,
+    KeyCode::NumpadSubtract,
+    KeyCode::NumpadMultiply,
+    KeyCode::NumpadDivide,
+    KeyCode::NumpadDecimal,
+    KeyCode::NumpadEqual,
+];
+
+static KEYS_BY_NAME: LazyLock<HashMap<String, KeyCode>> = LazyLock::new(|| {
+    BINDABLE_KEYS
+        .iter()
+        .map(|key| (format!("{key:?}"), *key))
+        .collect()
+});
+
+/// Defaults used when no UI configuration exists (headless or tool runs).
+static DEFAULTS: LazyLock<Config> = LazyLock::new(Config::default);
+
+/// Adapts a persisted binding name to a Bevy input. `""` (explicitly unbound) and names this
+/// host cannot press (joystick buttons, for example) return `None`.
+pub fn parse_binding(name: &str) -> Option<Trigger> {
+    let name = name.trim();
+    let mouse = match name {
+        "MOUSE1" => Some(MouseButton::Left),
+        "MOUSE2" => Some(MouseButton::Right),
+        "MOUSE3" => Some(MouseButton::Middle),
+        "MOUSE4" => Some(MouseButton::Back),
+        "MOUSE5" => Some(MouseButton::Forward),
         _ => None,
+    };
+    if let Some(button) = mouse {
+        return Some(Trigger::Mouse(button));
+    }
+    match name {
+        "" => None,
+        "MWHEELUP" => Some(Trigger::WheelUp),
+        "MWHEELDOWN" => Some(Trigger::WheelDown),
+        // Spellings written by older configuration files.
+        "Ctrl" => Some(Trigger::Key(KeyCode::ControlLeft)),
+        "Shift" => Some(Trigger::Key(KeyCode::ShiftLeft)),
+        "Alt" => Some(Trigger::Key(KeyCode::AltLeft)),
+        "Up" => Some(Trigger::Key(KeyCode::ArrowUp)),
+        "Down" => Some(Trigger::Key(KeyCode::ArrowDown)),
+        "Left" => Some(Trigger::Key(KeyCode::ArrowLeft)),
+        "Right" => Some(Trigger::Key(KeyCode::ArrowRight)),
+        _ => KEYS_BY_NAME.get(name).copied().map(Trigger::Key),
     }
 }
 
+/// The input bound to `action`: the configured binding, or the default binding when the
+/// configuration has no entry for it.
+fn trigger(action: &str, config: Option<&Config>) -> Option<Trigger> {
+    let default = DEFAULTS.keys.get(action).map_or("", String::as_str);
+    parse_binding(hl2_ui::input::binding(config, action, default))
+}
+
+/// One frame of keyboard, mouse-button and wheel state.
+struct Devices<'a> {
+    keys: &'a ButtonInput<KeyCode>,
+    buttons: &'a ButtonInput<MouseButton>,
+    /// Vertical wheel movement this frame; positive is away from the user (`MWHEELUP`).
+    wheel: f32,
+}
+
+impl Devices<'_> {
+    fn pressed(&self, action: &str, config: Option<&Config>) -> bool {
+        match trigger(action, config) {
+            Some(Trigger::Key(key)) => self.keys.pressed(key),
+            Some(Trigger::Mouse(button)) => self.buttons.pressed(button),
+            Some(trigger) => self.wheel_moved(trigger),
+            None => false,
+        }
+    }
+
+    fn just_pressed(&self, action: &str, config: Option<&Config>) -> bool {
+        match trigger(action, config) {
+            Some(Trigger::Key(key)) => self.keys.just_pressed(key),
+            Some(Trigger::Mouse(button)) => self.buttons.just_pressed(button),
+            Some(trigger) => self.wheel_moved(trigger),
+            None => false,
+        }
+    }
+
+    /// A wheel step is a single-frame press, like Source's `MWHEELUP`/`MWHEELDOWN` key events.
+    fn wheel_moved(&self, trigger: Trigger) -> bool {
+        match trigger {
+            Trigger::WheelUp => self.wheel > 0.,
+            Trigger::WheelDown => self.wheel < 0.,
+            _ => false,
+        }
+    }
+}
+
+/// Whether the input bound to a held action is down (keyboard and mouse buttons).
 pub(crate) fn action_pressed(
     action: &str,
-    default_key: KeyCode,
     keys: &ButtonInput<KeyCode>,
-    config: Option<&hl2_ui::config::Config>,
+    buttons: &ButtonInput<MouseButton>,
+    config: Option<&Config>,
 ) -> bool {
-    keys.pressed(
-        parse_keycode(hl2_ui::input::binding(
-            config,
-            action,
-            default_key_name(default_key),
-        ))
-        .unwrap_or(default_key),
-    )
-}
-
-fn action_just_pressed(
-    action: &str,
-    default_key: KeyCode,
-    keys: &ButtonInput<KeyCode>,
-    config: Option<&hl2_ui::config::Config>,
-) -> bool {
-    keys.just_pressed(
-        parse_keycode(hl2_ui::input::binding(
-            config,
-            action,
-            default_key_name(default_key),
-        ))
-        .unwrap_or(default_key),
-    )
-}
-
-fn default_key_name(key: KeyCode) -> &'static str {
-    match key {
-        KeyCode::Space => "Space",
-        KeyCode::ControlLeft => "ControlLeft",
-        KeyCode::ShiftLeft => "ShiftLeft",
-        KeyCode::AltLeft => "AltLeft",
-        KeyCode::KeyW => "KeyW",
-        KeyCode::KeyS => "KeyS",
-        KeyCode::KeyA => "KeyA",
-        KeyCode::KeyD => "KeyD",
-        KeyCode::KeyE => "KeyE",
-        KeyCode::KeyR => "KeyR",
-        KeyCode::KeyQ => "KeyQ",
-        KeyCode::KeyG => "KeyG",
-        KeyCode::F3 => "F3",
-        KeyCode::Digit1 => "Digit1",
-        KeyCode::Digit2 => "Digit2",
-        KeyCode::Digit3 => "Digit3",
-        KeyCode::Digit4 => "Digit4",
-        KeyCode::Digit5 => "Digit5",
-        KeyCode::Digit6 => "Digit6",
-        _ => "",
+    Devices {
+        keys,
+        buttons,
+        wheel: 0.,
     }
+    .pressed(action, config)
 }
 
 pub(crate) fn controls(
@@ -155,7 +262,12 @@ pub(crate) fn controls(
     mut sim: ResMut<crate::movement::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     ui: Option<Res<crate::console::Console>>,
+    mut mouse_filter: Local<hl2_ui::input::MouseFilter>,
 ) {
+    // CGameRules::Think reads `skill` every frame, so a changed setting applies at once.
+    if let (Some(game), Some(ui)) = (game.as_deref_mut(), ui.as_deref()) {
+        game.set_skill(ui.source.config.gameplay.skill);
+    }
     let Ok((window, cursor)) = windows.single() else {
         return;
     };
@@ -166,13 +278,18 @@ pub(crate) fn controls(
         return;
     }
     let cfg = ui.as_ref().map(|u| &u.source.config);
-    if !action_pressed("+jump", KeyCode::Space, &keys, cfg) {
+    let devices = Devices {
+        keys: &keys,
+        buttons: &buttons,
+        wheel: scroll.as_deref().map_or(0., |scroll| scroll.delta.y),
+    };
+    if !devices.pressed("+jump", cfg) {
         sim.jump_suppressed = false;
     }
     if let Some(game) = game.as_deref_mut() {
         game.buttons(
-            buttons.pressed(MouseButton::Left),
-            buttons.pressed(MouseButton::Right),
+            devices.pressed("+attack", cfg),
+            devices.pressed("+attack2", cfg),
         );
     }
     sim.input = Input::default();
@@ -184,58 +301,118 @@ pub(crate) fn controls(
     }
     if let Some(game) = game.as_deref_mut() {
         use crate::gameplay::Action;
-        for (name, key, action) in [
-            ("loadout", KeyCode::F3, Action::Loadout),
-            ("+use", KeyCode::KeyE, Action::Use),
-            ("+reload", KeyCode::KeyR, Action::Reload),
-            ("lastinv", KeyCode::KeyQ, Action::Previous),
-            ("impulse", KeyCode::KeyG, Action::Impulse),
+        for (name, action) in [
+            ("loadout", Action::Loadout),
+            ("+use", Action::Use),
+            ("+reload", Action::Reload),
+            ("lastinv", Action::Previous),
+            ("impulse", Action::Impulse),
+            ("invprev", Action::Wheel { delta: -1 }),
+            ("invnext", Action::Wheel { delta: 1 }),
         ] {
-            if action_just_pressed(name, key, &keys, cfg) {
+            if devices.just_pressed(name, cfg) {
                 game.actions.push(action);
             }
         }
-        for (slot, (name, key)) in [
-            ("slot1", KeyCode::Digit1),
-            ("slot2", KeyCode::Digit2),
-            ("slot3", KeyCode::Digit3),
-            ("slot4", KeyCode::Digit4),
-            ("slot5", KeyCode::Digit5),
-            ("slot6", KeyCode::Digit6),
-        ]
-        .into_iter()
-        .enumerate()
+        for (slot, name) in ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
+            .into_iter()
+            .enumerate()
         {
-            if action_just_pressed(name, key, &keys, cfg) {
+            if devices.just_pressed(name, cfg) {
                 game.actions.push(Action::Slot { slot });
             }
         }
-        if let Some(scroll) = scroll.as_deref().filter(|scroll| scroll.delta.y != 0.) {
-            game.actions.push(Action::Wheel {
-                delta: if scroll.delta.y > 0. { -1 } else { 1 },
-            });
-        }
     }
-    let (sensitivity, invert) = cfg
-        .map(|c| (c.mouse.sensitivity, c.mouse.invert))
-        .unwrap_or((3.0, false));
-    let scale = (sensitivity / 3.0).clamp(0.01, 10.0);
-    sim.yaw -= mouse.delta.x * 0.001152 * scale;
-    sim.pitch = (sim.pitch - mouse.delta.y * 0.001152 * scale * if invert { -1.0 } else { 1.0 })
-        .clamp(-1.55, 1.55);
+    let settings = cfg.map_or(&DEFAULTS.mouse, |c| &c.mouse);
+    let [dx, dy] = mouse_filter.apply([mouse.delta.x, mouse.delta.y], settings);
+    let radians = hl2_ui::input::MOUSE_DEGREES_PER_COUNT.to_radians();
+    sim.yaw -= dx * radians;
+    let pitch_sign = if settings.invert { -1.0 } else { 1.0 };
+    sim.pitch = (sim.pitch - dy * radians * pitch_sign).clamp(-1.55, 1.55);
     if keys.just_pressed(KeyCode::F2) {
         let fly = !sim.flying();
         sim.set_fly(fly);
     }
     sim.input = Input {
-        forward: f32::from(action_pressed("+forward", KeyCode::KeyW, &keys, cfg))
-            - f32::from(action_pressed("+back", KeyCode::KeyS, &keys, cfg)),
-        side: f32::from(action_pressed("+moveright", KeyCode::KeyD, &keys, cfg))
-            - f32::from(action_pressed("+moveleft", KeyCode::KeyA, &keys, cfg)),
+        forward: f32::from(devices.pressed("+forward", cfg))
+            - f32::from(devices.pressed("+back", cfg)),
+        side: f32::from(devices.pressed("+moveright", cfg))
+            - f32::from(devices.pressed("+moveleft", cfg)),
         yaw: sim.yaw,
-        jump: action_pressed("+jump", KeyCode::Space, &keys, cfg) && !sim.jump_suppressed,
-        crouch: action_pressed("+duck", KeyCode::ControlLeft, &keys, cfg),
-        sprint: action_pressed("+speed", KeyCode::ShiftLeft, &keys, cfg),
-        slow: action_pressed("+walk", KeyCode::AltLeft, &keys, cfg),
+        jump: devices.pressed("+jump", cfg) && !sim.jump_suppressed,
+        crouch: devices.pressed("+duck", cfg),
+        sprint: devices.pressed("+speed", cfg),
+        slow: devices.pressed("+walk", cfg),
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hl2_ui::gameui::keys::NAMED_KEYS;
+
+    #[test]
+    fn every_name_the_options_page_can_store_parses() {
+        for (name, _) in NAMED_KEYS {
+            assert!(
+                matches!(parse_binding(name), Some(Trigger::Key(_))),
+                "{name} should be a key"
+            );
+        }
+        for c in 'A'..='Z' {
+            assert!(parse_binding(&format!("Key{c}")).is_some());
+        }
+        for d in 0..=9 {
+            assert!(parse_binding(&format!("Digit{d}")).is_some());
+        }
+        for f in 1..=12 {
+            assert!(parse_binding(&format!("F{f}")).is_some());
+        }
+        assert_eq!(
+            parse_binding("MOUSE4"),
+            Some(Trigger::Mouse(MouseButton::Back))
+        );
+        assert_eq!(parse_binding("MWHEELDOWN"), Some(Trigger::WheelDown));
+        assert_eq!(
+            parse_binding("Ctrl"),
+            Some(Trigger::Key(KeyCode::ControlLeft))
+        );
+        assert_eq!(parse_binding(hl2_ui::gameui::keys::UNBOUND), None);
+        assert_eq!(parse_binding("JOY1"), None);
+    }
+
+    #[test]
+    fn every_default_binding_parses() {
+        for (action, name) in &DEFAULTS.keys {
+            assert!(parse_binding(name).is_some(), "{action} -> {name}");
+        }
+    }
+
+    #[test]
+    fn bindings_follow_the_configuration_including_mouse_and_unbound_actions() {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        let mut buttons = ButtonInput::<MouseButton>::default();
+        let mut config = Config::default();
+        config.keys.insert("+attack".into(), "KeyF".into());
+        config.keys.insert("+jump".into(), "MOUSE2".into());
+        config.keys.insert("+forward".into(), String::new());
+        keys.press(KeyCode::KeyF);
+        keys.press(KeyCode::KeyW);
+        buttons.press(MouseButton::Right);
+        let devices = Devices {
+            keys: &keys,
+            buttons: &buttons,
+            wheel: 1.,
+        };
+        let cfg = Some(&config);
+        assert!(devices.pressed("+attack", cfg));
+        assert!(devices.pressed("+jump", cfg));
+        assert!(!devices.pressed("+forward", cfg), "explicitly unbound");
+        assert!(devices.just_pressed("invprev", cfg), "wheel up");
+        assert!(!devices.just_pressed("invnext", cfg));
+        assert!(
+            devices.pressed("+forward", None),
+            "defaults without a config"
+        );
+    }
 }

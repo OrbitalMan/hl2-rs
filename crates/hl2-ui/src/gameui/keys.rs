@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 /// Persisted binding name <-> Source key name. Letters and digits are generated separately.
-const NAMED_KEYS: &[(&str, &str)] = &[
+pub const NAMED_KEYS: &[(&str, &str)] = &[
     ("Space", "SPACE"),
     ("ControlLeft", "CTRL"),
     ("ControlRight", "RCTRL"),
@@ -195,9 +195,18 @@ pub fn parse_default_binds(text: &str, mac: bool) -> BTreeMap<String, String> {
     commands
 }
 
-/// Binds `key` to `action`, removing it from any other action first (a key runs one command).
+/// Persisted value of an explicitly unbound action. A missing entry means "use the default", so
+/// older config files pick up actions added to the defaults later.
+pub const UNBOUND: &str = "";
+
+/// Binds `key` to `action`; any other action bound to `key` becomes [`UNBOUND`] (a key runs one
+/// command).
 pub fn assign(keys: &mut BTreeMap<String, String>, action: &str, key: &str) {
-    keys.retain(|other, bound| other == action || bound != key);
+    for (other, bound) in keys.iter_mut() {
+        if other != action && bound == key {
+            bound.clear();
+        }
+    }
     keys.insert(action.to_owned(), key.to_owned());
 }
 
@@ -297,6 +306,10 @@ mod tests {
         ]);
         assign(&mut keys, "+jump", "KeyW");
         assert_eq!(keys.get("+jump").map(String::as_str), Some("KeyW"));
-        assert!(!keys.contains_key("+forward"));
+        assert_eq!(
+            keys.get("+forward").map(String::as_str),
+            Some(UNBOUND),
+            "the previous owner stays present but unbound, so defaults are not reapplied"
+        );
     }
 }

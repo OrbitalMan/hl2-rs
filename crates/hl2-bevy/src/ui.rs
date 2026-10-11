@@ -158,8 +158,7 @@ pub fn update_ui(
                 CursorGrabMode::Locked
             };
             cursor.visible = sim.paused;
-            sim.jump_suppressed |=
-                crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+            sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
         } else if !sim.paused
             && buttons.just_pressed(MouseButton::Left)
             && cursor.grab_mode == CursorGrabMode::None
@@ -167,8 +166,7 @@ pub fn update_ui(
             sim.transition = true;
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
-            sim.jump_suppressed |=
-                crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+            sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
         }
         if ui.quit_requested {
             exit.write(AppExit::Success);
@@ -180,13 +178,11 @@ pub fn update_ui(
             sim.paused = true;
             cursor.grab_mode = CursorGrabMode::None;
             cursor.visible = true;
-            sim.jump_suppressed |=
-                crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+            sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
         } else if buttons.just_pressed(MouseButton::Left) {
             sim.transition = sim.paused || cursor.grab_mode == CursorGrabMode::None;
             if sim.transition {
-                sim.jump_suppressed |=
-                    crate::input::action_pressed("+jump", KeyCode::Space, &keys, cfg);
+                sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
             }
             sim.paused = false;
             cursor.grab_mode = CursorGrabMode::Locked;

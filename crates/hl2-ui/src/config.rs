@@ -326,12 +326,21 @@ impl Default for Config {
         keys.insert("+moveleft".into(), "KeyA".into());
         keys.insert("+moveright".into(), "KeyD".into());
         keys.insert("+jump".into(), "Space".into());
-        keys.insert("+duck".into(), "ControlLeft".into());
+        // config_default.cfg: `bind_mac "ALT" "+duck"`, `bind_mac "LWIN" "+walk"`,
+        // `unbind_mac "CTRL"`.
+        if cfg!(target_os = "macos") {
+            keys.insert("+duck".into(), "AltLeft".into());
+            keys.insert("+walk".into(), "SuperLeft".into());
+        } else {
+            keys.insert("+duck".into(), "ControlLeft".into());
+            keys.insert("+walk".into(), "AltLeft".into());
+        }
         keys.insert("+speed".into(), "ShiftLeft".into());
-        keys.insert("+walk".into(), "AltLeft".into());
         keys.insert("+use".into(), "KeyE".into());
         keys.insert("+reload".into(), "KeyR".into());
         keys.insert("lastinv".into(), "KeyQ".into());
+        keys.insert("invprev".into(), "MWHEELUP".into());
+        keys.insert("invnext".into(), "MWHEELDOWN".into());
         keys.insert("impulse".into(), "KeyG".into());
         keys.insert("loadout".into(), "F3".into());
         keys.insert("slot1".into(), "Digit1".into());
@@ -421,6 +430,13 @@ impl Config {
         if self.audio.language.trim().is_empty() {
             self.audio.language = defaults.audio.language;
         }
+        // Missing actions take their default unless that key already runs another command;
+        // explicitly unbound actions are stored as "" and stay unbound.
+        for (action, key) in defaults.keys {
+            if !self.keys.contains_key(&action) && !self.keys.values().any(|bound| *bound == key) {
+                self.keys.insert(action, key);
+            }
+        }
     }
 
     pub fn save(&self) -> std::io::Result<()> {
@@ -503,5 +519,19 @@ mod tests {
         assert!(Config::from_json(b"not json").is_none());
         assert_eq!(HdrMode::from_level(1), Some(HdrMode::Bloom));
         assert_eq!(HdrMode::from_level(3), None);
+    }
+
+    #[test]
+    fn migrate_fills_missing_default_bindings_but_keeps_unbinds_and_taken_keys() {
+        let config = Config::from_json(
+            br#"{ "keys": { "+attack": "", "+jump": "MOUSE2", "+forward": "KeyZ" } }"#,
+        )
+        .unwrap();
+        let key = |action: &str| config.keys.get(action).map(String::as_str);
+        assert_eq!(key("+attack"), Some(""), "explicit unbind kept");
+        assert_eq!(key("+attack2"), None, "MOUSE2 already runs +jump");
+        assert_eq!(key("+forward"), Some("KeyZ"));
+        assert_eq!(key("invnext"), Some("MWHEELDOWN"), "new default filled in");
+        assert_eq!(key("+back"), Some("KeyS"));
     }
 }

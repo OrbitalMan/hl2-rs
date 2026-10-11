@@ -100,14 +100,35 @@ pub struct Gameplay {
     pub sound_requests: Vec<hl2_simulation::sounds::SoundRequest>,
     weapon_sounds: hl2_simulation::sounds::WeaponAnimationSounds,
     pub footsteps: hl2_simulation::footsteps::Footsteps,
-    /// Local player damage intake (skill 2, the owner's native setting).
+    /// Local player damage intake at the current skill (see [`Gameplay::set_skill`]).
     pub player_damage: hl2_simulation::player_damage::PlayerDamage,
     /// Client "Damage" messages not yet shown by the HUD.
     pub damage_messages: Vec<hl2_simulation::player_damage::DamageMessage>,
     /// HEV suit voice queue.
     pub suit: hl2_simulation::suit::Suit,
+    /// `skill` (1 Easy, 2 Normal, 3 Hard); hosts update it through [`Gameplay::set_skill`].
+    skill: u32,
+    /// The installed `cfg/skill.cfg`, kept to re-evaluate skill-dependent values.
+    skill_config: Option<String>,
 }
 impl Gameplay {
+    /// Applies the `skill` setting. Like CGameRules::Think, which reads `skill` every frame,
+    /// a change takes effect immediately; values outside 1..=3 fall back to Normal.
+    pub fn set_skill(&mut self, skill: u8) {
+        let skill = if (1..=3).contains(&skill) {
+            u32::from(skill)
+        } else {
+            2
+        };
+        if skill != self.skill {
+            self.skill = skill;
+            self.player_damage.take_scale =
+                hl2_simulation::player_damage::PlayerDamage::take_scale_for(
+                    skill,
+                    self.skill_config.as_deref(),
+                );
+        }
+    }
     /// After the player move: this tick's damage (trigger_hurt, blasts, then the
     /// landing's fall damage) through the SDK player path, then death
     /// (Event_Killed/DeathSound). Returns true when the player died this tick.
@@ -268,6 +289,8 @@ impl Gameplay {
             player_damage: Default::default(),
             damage_messages: Vec::new(),
             suit: Default::default(),
+            skill: 2,
+            skill_config: None,
         }
     }
     pub fn load_with_campaign(
@@ -293,6 +316,8 @@ impl Gameplay {
             player_damage,
             damage_messages: Vec::new(),
             suit: Default::default(),
+            skill: 2,
+            skill_config: skill,
             impacts,
             world: Arc::new(world),
             scene,
@@ -659,5 +684,17 @@ mod tests {
         game.buttons(true, true);
         step(&mut game, &mut physics, &player);
         assert_eq!(game.inventory.shots, 1);
+    }
+    #[test]
+    fn skill_setting_rescales_damage_taken_immediately() {
+        let mut game = Gameplay::synthetic(World::default());
+        game.skill_config = Some("sk_dmg_take_scale3 \"2.0\"\n".into());
+        assert_eq!((game.skill, game.player_damage.take_scale), (2, 1.));
+        game.set_skill(1);
+        assert_eq!((game.skill, game.player_damage.take_scale), (1, 0.5));
+        game.set_skill(3);
+        assert_eq!(game.player_damage.take_scale, 2., "skill.cfg override");
+        game.set_skill(9);
+        assert_eq!((game.skill, game.player_damage.take_scale), (2, 1.));
     }
 }

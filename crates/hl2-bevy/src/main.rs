@@ -31,7 +31,7 @@ use bevy::{
         renderer::RenderAdapterInfo,
         view::screenshot::{Screenshot, ScreenshotCaptured},
     },
-    window::{MonitorSelection, WindowMode, WindowResolution},
+    window::WindowResolution,
 };
 use serde::Serialize;
 use std::{
@@ -66,7 +66,9 @@ struct Options {
     world_partition: bool,
     width: u32,
     height: u32,
-    borderless: bool,
+    /// Window mode at startup: the stored Video setting, or `--windowed` / `--fullscreen` /
+    /// `--borderless`. Unattended runs without a flag start windowed.
+    display_mode: hl2_ui::config::DisplayMode,
     fly: bool,
     movement_script: Option<PathBuf>,
     /// Master volume, like Source's `volume` convar (0..1).
@@ -89,6 +91,19 @@ fn require_map_for(map: Option<&str>, map_dependent: &[&str]) -> Result<()> {
         );
     }
     Ok(())
+}
+/// The window mode to start in: an explicit `--windowed`/`--fullscreen`/`--borderless` wins;
+/// otherwise unattended runs start windowed and interactive runs use the stored Video setting.
+fn startup_display_mode(
+    stored: hl2_ui::config::DisplayMode,
+    explicit: Option<hl2_ui::config::DisplayMode>,
+    unattended: bool,
+) -> hl2_ui::config::DisplayMode {
+    explicit.unwrap_or(if unattended {
+        hl2_ui::config::DisplayMode::Windowed
+    } else {
+        stored
+    })
 }
 impl Options {
     fn parse() -> Result<Self> {
@@ -118,8 +133,7 @@ impl Options {
             world_partition: false,
             width: config.video.width,
             height: config.video.height,
-            borderless: config.video.display_mode.effective()
-                == hl2_ui::config::DisplayMode::NoBorder,
+            display_mode: config.video.display_mode,
             fly: false,
             movement_script: None,
             volume: config.audio.volume,
@@ -128,6 +142,7 @@ impl Options {
             tonemap_scale: None,
             main_menu: false,
         };
+        let mut explicit_mode = None;
         while let Some(arg) = args.next() {
             let next = |args: &mut dyn Iterator<Item = String>| -> Result<String> {
                 args.next()
@@ -173,7 +188,9 @@ impl Options {
                 "--pitch" => options.pitch = next(&mut args)?.parse::<f32>()?.to_radians(),
                 "--width" => options.width = next(&mut args)?.parse()?,
                 "--height" => options.height = next(&mut args)?.parse()?,
-                "--borderless" => options.borderless = true,
+                "--borderless" => explicit_mode = Some(hl2_ui::config::DisplayMode::NoBorder),
+                "--windowed" => explicit_mode = Some(hl2_ui::config::DisplayMode::Windowed),
+                "--fullscreen" => explicit_mode = Some(hl2_ui::config::DisplayMode::Fullscreen),
                 "--fly" => options.fly = true,
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--volume" => options.volume = next(&mut args)?.parse()?,
@@ -192,7 +209,7 @@ impl Options {
                 "--main-menu" => options.main_menu = true,
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --borderless --width N --height N\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; Windowed (No Border) is not offered on macOS)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -232,6 +249,12 @@ impl Options {
         {
             options.frames = Some(120);
         }
+        let unattended = options.frames.is_some()
+            || options.capture.is_some()
+            || options.monitor_capture.is_some()
+            || options.movement_script.is_some();
+        options.display_mode =
+            startup_display_mode(options.display_mode, explicit_mode, unattended);
         options.game = match game {
             Some(path) => source_assets::install::validate(path)?,
             None => source_assets::install::discover()?,
@@ -426,11 +449,7 @@ fn main() -> Result<()> {
                         },
                         title: "HL2-RS | Bevy/wgpu migration | gameplay migration preview".into(),
                         resolution: WindowResolution::new(options.width, options.height),
-                        mode: if options.borderless {
-                            WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
-                        } else {
-                            WindowMode::Windowed
-                        },
+                        mode: video::mode::startup_mode(options.display_mode),
                         ..default()
                     }),
                     ..default()
@@ -1008,5 +1027,20 @@ mod tests {
                 "{error}"
             );
         }
+    }
+    #[test]
+    fn startup_uses_stored_mode_unless_unattended_or_overridden() {
+        use hl2_ui::config::DisplayMode::*;
+        assert_eq!(startup_display_mode(Fullscreen, None, false), Fullscreen);
+        assert_eq!(startup_display_mode(NoBorder, None, false), NoBorder);
+        assert_eq!(startup_display_mode(Fullscreen, None, true), Windowed);
+        assert_eq!(
+            startup_display_mode(Windowed, Some(NoBorder), true),
+            NoBorder
+        );
+        assert_eq!(
+            startup_display_mode(Fullscreen, Some(Windowed), false),
+            Windowed
+        );
     }
 }

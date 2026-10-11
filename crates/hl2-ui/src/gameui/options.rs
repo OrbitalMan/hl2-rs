@@ -743,7 +743,10 @@ impl OptionsDialog {
                 if let Some(KeyRow::Action { command, .. }) =
                     self.keys.selected.and_then(|i| self.res.key_rows.get(i))
                 {
-                    self.draft.config.keys.remove(command);
+                    self.draft
+                        .config
+                        .keys
+                        .insert(command.clone(), keys::UNBOUND.into());
                 }
             }
             Command::KeyAdvanced | Command::VideoAdvanced => {
@@ -760,22 +763,22 @@ impl OptionsDialog {
         }
     }
 
-    /// Resets the `kb_act.lst` actions to the installed defaults; other bindings are kept.
+    /// Resets the `kb_act.lst` actions to the installed defaults (actions without one become
+    /// unbound, as retail `unbindall` + default config does); other bindings are kept unless a
+    /// default takes their key.
     fn use_default_keys(&mut self) {
         let res = self.res.clone();
-        let actions: Vec<&str> = res
-            .key_rows
-            .iter()
-            .filter_map(|row| match row {
-                KeyRow::Action { command, .. } => Some(command.as_str()),
-                KeyRow::Section(_) => None,
-            })
-            .collect();
         let keys = &mut self.draft.config.keys;
-        keys.retain(|command, _| !actions.contains(&command.as_str()));
-        for action in actions {
-            if let Some(key) = res.default_bindings.get(action) {
-                keys::assign(keys, action, key);
+        for row in &res.key_rows {
+            if let KeyRow::Action { command, .. } = row {
+                keys.insert(command.clone(), keys::UNBOUND.into());
+            }
+        }
+        for row in &res.key_rows {
+            if let KeyRow::Action { command, .. } = row {
+                if let Some(key) = res.default_bindings.get(command) {
+                    keys::assign(keys, command, key);
+                }
             }
         }
     }
@@ -1496,12 +1499,13 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(h.dialog.draft().keys.get("+jump").unwrap(), "MOUSE1");
-        assert!(
-            !h.dialog.draft().keys.contains_key("+forward"),
+        assert_eq!(
+            h.dialog.draft().keys.get("+forward").unwrap(),
+            keys::UNBOUND,
             "a key runs one command"
         );
         h.click(page(390., 280.));
-        assert!(!h.dialog.draft().keys.contains_key("+jump"));
+        assert_eq!(h.dialog.draft().keys.get("+jump").unwrap(), keys::UNBOUND);
         h.click(page(20., 280.));
         assert!(h.dialog.confirm.is_some());
         h.key(Key::Enter);

@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-10-11 GameUI settings used by the game
+
+**Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).
+
+**Changed:**
+- `hl2-bevy::input`: all gameplay actions read through the stored bindings, including mouse buttons and wheel (`+attack`/`+attack2`, `invprev`/`invnext`); empty or unknown bindings are unbound; Source mouse filter/acceleration at 0.022 degrees per count; skill applied every frame.
+- `hl2-ui`: `""` marks an unbound action (Clear Key, reassignment, Use Defaults); `migrate` adds missing default actions when their key is free; `invprev`/`invnext` wheel defaults; macOS Duck/Walk defaults from the retail `bind_mac` lines; `MouseFilter`.
+- `hl2-simulation`: `Library::resolve_wave` reports the `#` (dry-mix) sound character; `is_music`; `PlayerDamage::take_scale_for`.
+- `hl2-bevy::audio`: per-frame sink volume includes the master volume, the music volume for music channels and mute when unfocused.
+- `hl2-bevy` startup: stored display mode, `--windowed`/`--fullscreen`/`--borderless`, unattended runs start windowed.
+
+**Why:** The Options dialog stored these settings but the game ignored most of them.
+
+**Tested how:** `cargo test --locked -p hl2-ui -p hl2-bevy -p hl2-simulation -p source-assets` (85 + 61 + 169 + 90 passed); `cargo test --locked -p hl2-ui -- --ignored` (3 passed); strict Clippy; `cargo fmt --all --check`; packaged macOS Keyboard-page capture and a direct-map run (docs/validation.md).
+
+**Result:** Bindings, mouse filter/acceleration/invert, skill, music volume, mute when unfocused and the stored display mode now affect the game.
+
+**Still broken or not tested:** gamma, HDR, speakers, sound quality, captions, language and aim assist are stored only; music ducking not modeled; live packaged keyboard/mouse play, audible checks, full-screen/No Border startup and Windows/Linux not tested.
+
+**Next:** owner review of the GameUI branch.
+
 ## 2026-10-11 GameUI Options dialog
 
 **Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).

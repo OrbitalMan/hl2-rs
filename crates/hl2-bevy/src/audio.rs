@@ -455,6 +455,23 @@ pub struct Audio {
     soundscape_time: Option<f64>,
     soundscape_plays: u64,
     vox: Vox,
+    /// Audio page music volume (`snd_musicvolume`) applied to music channels.
+    music_volume: f32,
+    /// `snd_mute_losefocus` with the window unfocused.
+    muted: bool,
+}
+impl Audio {
+    /// Settings factor for one channel, before the master volume: music channels (dry-mix `#`
+    /// waves at soundlevel 0) follow the music volume; everything is silent while muted.
+    fn mix(&self, music: bool) -> f32 {
+        if self.muted {
+            0.
+        } else if music {
+            self.music_volume
+        } else {
+            1.
+        }
+    }
 }
 /// `--audio-trace PATH`: one JSON line per sound request, sink start and sink removal,
 /// with the sink's last observed playback position, for diagnosing cut-off sounds.
@@ -492,6 +509,8 @@ pub struct SoundPlayer {
     ambient: Option<usize>,
     /// The soundscape loop handle this sound belongs to.
     soundscape: Option<u64>,
+    /// A music channel, scaled by the music volume (see [`hl2_simulation::sounds::is_music`]).
+    music: bool,
 }
 impl Audio {
     fn emit(
@@ -502,8 +521,8 @@ impl Audio {
         (volume, pitch, spatial): (f32, f32, Option<(glam::Vec3, f32)>),
         (paused, ambient, soundscape): (bool, Option<usize>, Option<u64>),
     ) -> Option<String> {
-        let path = match self.library.resolve(request) {
-            Ok(path) => path,
+        let wave = match self.library.resolve_wave(request) {
+            Ok(wave) => wave,
             Err(error) => {
                 self.library
                     .errors
@@ -512,6 +531,7 @@ impl Audio {
                 return None;
             }
         };
+        let path = wave.path;
         let Some(handle) = self.handles.get(&path) else {
             self.library.errors.entry(path).or_insert_with(|| {
                 "cue variant was not preloaded; no file reads are allowed in playback systems"
@@ -520,6 +540,10 @@ impl Audio {
             self.failed += 1;
             return None;
         };
+        // Positioned channels use their own soundlevel; others the script's.
+        let soundlevel =
+            spatial.map_or_else(|| self.library.params(&request.name).soundlevel, |s| s.1);
+        let music = hl2_simulation::sounds::is_music(wave.dry_mix, soundlevel);
         let settings = if looped {
             PlaybackSettings::LOOP
         } else {
@@ -535,6 +559,7 @@ impl Audio {
                 spatial,
                 ambient,
                 soundscape,
+                music,
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
@@ -542,7 +567,7 @@ impl Audio {
                 volume: bevy::audio::Volume::Linear(if spatial.is_some() {
                     0.
                 } else {
-                    volume.clamp(0., 1.)
+                    volume.clamp(0., 1.) * self.mix(music)
                 }),
                 speed: pitch / 100.,
                 paused,
@@ -586,10 +611,11 @@ impl Audio {
                 spatial: None,
                 ambient: None,
                 soundscape: None,
+                music: false,
             },
             AudioPlayer::new(sources.add(AudioSource { bytes: wav.into() })),
             PlaybackSettings {
-                volume: bevy::audio::Volume::Linear(volume.clamp(0., 1.)),
+                volume: bevy::audio::Volume::Linear(volume.clamp(0., 1.) * self.mix(false)),
                 paused,
                 ..PlaybackSettings::DESPAWN
             },
@@ -650,6 +676,8 @@ pub fn install(
         soundscape_time: None,
         soundscape_plays: 0,
         vox: prepared.vox,
+        music_volume: 1.,
+        muted: false,
     };
     let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
     let mut spawn: Vec<(usize, Ambient)> = audio
@@ -674,6 +702,12 @@ pub fn install(
     }
     commands.insert_resource(audio);
 }
+/// Master volume, Audio settings and the primary window (focus) used to mix every channel.
+type MixInputs<'w, 's> = (
+    Res<'w, GlobalVolume>,
+    Option<Res<'w, crate::console::Console>>,
+    Query<'w, 's, &'static Window, With<bevy::window::PrimaryWindow>>,
+);
 pub fn queue(
     mut commands: Commands,
     mut audio: ResMut<Audio>,
@@ -685,9 +719,15 @@ pub fn queue(
         &mut PlaybackSettings,
         Option<&mut AudioSink>,
     )>,
-    global: Res<GlobalVolume>,
     mut sources: ResMut<Assets<AudioSource>>,
+    (global, ui, windows): MixInputs,
 ) {
+    // Audio page settings: snd_musicvolume for music channels and snd_mute_losefocus.
+    if let Some(ui) = ui.as_deref() {
+        let settings = &ui.source.config.audio;
+        audio.music_volume = settings.music_volume.clamp(0., 1.);
+        audio.muted = settings.mute_losefocus && windows.single().is_ok_and(|w| !w.focused);
+    }
     let listener = glam::Vec3::from_array(simulation.eye().to_array());
     let paused = simulation.paused();
     if paused != audio.paused {
@@ -711,19 +751,14 @@ pub fn queue(
             .soundscape
             .and_then(|h| audio.soundscape_volumes.get(&h).copied())
             .unwrap_or(player.volume);
-        if let (None, Some(_), Some(sink)) =
-            (player.spatial, player.soundscape, sink.as_deref_mut())
-        {
-            sink.set_volume(bevy::audio::Volume::Linear(
-                base.clamp(0., 1.) * global.volume.to_linear(),
-            ));
+        let mix = audio.mix(player.music) * global.volume.to_linear();
+        if let (None, Some(sink)) = (player.spatial, sink.as_deref_mut()) {
+            sink.set_volume(bevy::audio::Volume::Linear(base.clamp(0., 1.) * mix));
         }
         if let (Some((origin, soundlevel)), Some(sink)) = (player.spatial, sink.as_deref_mut()) {
             let gain = hl2_simulation::sounds::dist_gain(soundlevel, listener.distance(origin));
             let volume = (base * gain).clamp(0., 1.);
-            sink.set_volume(bevy::audio::Volume::Linear(
-                volume * global.volume.to_linear(),
-            ));
+            sink.set_volume(bevy::audio::Volume::Linear(volume * mix));
             let distance = listener.distance(origin);
             audio.spatial.push((player.path.clone(), distance, volume));
         }

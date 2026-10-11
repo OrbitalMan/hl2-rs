@@ -181,7 +181,7 @@ Semantics:
 - Placeholders are shown disabled and log `"<label>: not implemented in HL2-RS yet."`: Gamepad tab
   (empty page), Keyboard Advanced..., Video Advanced....
 
-Limitations:
+Limitations (as of milestone 5; section 8 supersedes the first four items):
 
 - Stored but not yet used by the host: HDR mode, gamma, mouse filter/acceleration/invert, skill,
   music volume, speaker setup, sound quality, captions, spoken language and mute when unfocused.
@@ -213,3 +213,97 @@ Verified (2026-10-11, macOS Apple Silicon, release build from `scripts/build-bev
 Not tested: Windows and Linux (including the No Border choice and borderless switching), real
 monitor mode switching to fullscreen, gamepads, and key capture in the packaged build (unit tests
 only).
+
+## 7. Plan: host use of the stored settings (milestone 6)
+
+Evidence gathered before coding (private retail analysis, the SDK and the installed files):
+
+- Music volume: the retail engine scales a channel's gain by `snd_musicvolume` only when the wave
+  name's leading sound characters contain `#` (`CHAR_DRYMIX`, `public/soundchars.h`) and the
+  channel has no distance attenuation (soundlevel 0). The installed `level_sounds_music.txt`
+  scripts use `*#music/...` waves with `soundlevel 0`. The engine also applies a smoothed music
+  factor (ducking) that is not modeled here.
+- Mouse (SDK `game/client/in_mouse.cpp`): `m_filter` averages the current and previous raw delta;
+  acceleration mode 3 multiplies by `(dx² + dy²)^((exponent - 1) / 2) * sensitivity`. The retail
+  Options page writes `m_customaccel 3` when Mouse acceleration is checked and `0` otherwise, and
+  the exponent slider writes `m_customaccel_exponent`.
+- Skill (SDK `CGameRules::Think`): the skill level is re-read every frame, so a change takes effect
+  immediately. In HL2-RS only the player damage take scale (`sk_dmg_take_scale<n>`) depends on it.
+- Key bindings: retail Use Defaults is `unbindall` plus the default config, so actions without a
+  default are unbound; HL2-RS stores an unbound action as an empty string so that a missing entry
+  can still mean "use the default" (older config files gain new default actions on load).
+
+Steps (one commit):
+
+1. Bindings: `""` = unbound; Clear Key, key reassignment and Use Defaults write it; `migrate`
+   fills missing default actions whose key is free. The host parses every stored name (keyboard,
+   `MOUSE1`-`MOUSE5`, `MWHEELUP`/`MWHEELDOWN`) and drives `+attack`/`+attack2` and
+   `invprev`/`invnext` through bindings.
+2. Mouse filter and acceleration as pure, unit-tested functions; Bevy mouse motion is already raw,
+   so Raw input has no separate effect.
+3. Skill applied every gameplay tick.
+4. Audio: per-frame sink volume = base x distance gain x master volume x (music volume for music
+   channels) x (0 when unfocused and "mute when unfocused" is set).
+5. Window: startup uses the stored display mode and resolution; `--windowed`, `--fullscreen` and
+   `--borderless` override it; automated runs (capture, frames, movement script) default to
+   Windowed unless a mode flag is given.
+6. Gamma, HDR mode, speaker setup, sound quality, captions and spoken language stay stored only;
+   documented as limitations.
+
+## 8. Implemented: host use of the stored settings (2026-10-11)
+
+- Bindings (`hl2-bevy::input`): every gameplay action is read through `Config::keys`. Stored names
+  are Bevy `KeyCode` names (letters, digits, F1-F24, every name the Options page can store, the
+  older `Ctrl`/`Shift`/`Alt`/arrow spellings), `MOUSE1`-`MOUSE5` and `MWHEELUP`/`MWHEELDOWN`.
+  `+attack`/`+attack2` and `invprev`/`invnext` now go through bindings; `""` (Clear Key, or a key
+  taken by another action) is unbound and an unknown name is treated as unbound. Without a UI
+  configuration the defaults from `Config::default` apply. A wheel step is a single-frame press.
+- Default bindings: `invprev` = MWHEELUP and `invnext` = MWHEELDOWN. On macOS Duck = Alt and
+  Walk = Cmd (the retail `bind_mac` lines in `config_default.cfg`); elsewhere Ctrl and Alt.
+  `Config::migrate` adds default actions missing from older files when their key is free; stored
+  bindings, including unbound ones, are never rewritten.
+- Mouse: `hl2_ui::input::MouseFilter` applies `m_filter` averaging, then sensitivity or the
+  acceleration curve; the host rotates by 0.022 degrees per scaled count (`m_yaw`/`m_pitch`). This
+  matches the previous fixed scale at the default settings. Invert is unchanged.
+- Skill: `Gameplay::set_skill` is called from the host every frame and re-evaluates
+  `sk_dmg_take_scale<n>` from the installed `cfg/skill.cfg` (ConVar defaults 0.5 / 1 / 1.5).
+- Audio: `Library::resolve_wave` reports whether the selected wave has `#` among its leading sound
+  characters; a channel is music when it has `#` and soundlevel 0 (its own soundlevel when
+  positioned, the script soundlevel otherwise). Every frame each sink is set to base volume x
+  distance gain x master volume x (music volume for music channels) x (0 when "mute when
+  unfocused" is set and the window is unfocused). Master volume changes now also reach sounds that
+  were already playing.
+- Window: startup uses the stored display mode (`video::mode::startup_mode`, primary monitor) and
+  resolution. `--windowed`, `--fullscreen` and `--borderless` override it; runs with `--frames`,
+  `--capture`, `--capture-monitor` or `--movement-script` start windowed unless a mode flag is
+  given. On macOS a stored or requested No Border resolves to full screen, as on the Video page.
+  `launch-bevy-1080p.{cmd,sh}` pass `--windowed` so they still open a 1920x1080 window.
+
+Limitations:
+
+- Stored only, no effect yet: gamma, HDR mode, speaker setup, sound quality, captions, spoken
+  language, aim assist.
+- Raw input has no separate effect: Bevy's accumulated mouse motion is already the raw device delta.
+- The retail engine's smoothed music factor (ducking) is not modeled; only `snd_musicvolume`.
+- The game pauses all sounds while it is paused or unfocused, so mute-when-unfocused is mostly
+  inaudible today; it matters for sounds that keep playing (none at present).
+- Startup full screen keeps the desktop video mode and letterboxes the configured resolution, like
+  OK/Apply; real monitor mode switching is not implemented.
+- `--borderless` on macOS now gives full screen (previously a borderless full-screen window).
+
+Verified (2026-10-11, macOS Apple Silicon):
+
+- `cargo test --locked -p hl2-ui -p hl2-bevy -p hl2-simulation -p source-assets`: hl2-ui 85 passed /
+  3 ignored, hl2-bevy 61 passed / 2 ignored, hl2-simulation 169 passed / 14 ignored, source-assets
+  90 passed / 17 ignored. New tests: binding parsing for every storable name and every default,
+  configured/mouse/wheel/unbound bindings, the mouse filter and acceleration, migration of missing
+  defaults, skill rescaling, dry-mix music detection and the startup display mode.
+- `cargo test --locked -p hl2-ui -- --ignored`: 3 owned-install tests pass.
+- Strict Clippy for hl2-ui, hl2-bevy, source-assets and hl2-simulation; `cargo fmt --all --check`.
+- Packaged release (`scripts/build-bevy.sh`): the Keyboard page capture with a config saved before
+  the attack defaults now shows MOUSE1/MOUSE2 (filled by migration) while the stored Duck = CTRL is
+  kept; `--map d1_trainstation_01 --frames 120 --capture ...` starts windowed and runs.
+
+Not tested: live keyboard/mouse play in the packaged build (movement scripts bypass device input,
+so the binding path is covered by unit tests only), hearing the music volume and focus mute,
+startup in full screen or No Border, Windows and Linux.

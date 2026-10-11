@@ -668,8 +668,22 @@ impl Library {
     }
 
     pub fn resolve(&mut self, request: &SoundRequest) -> Result<String> {
+        Ok(self.resolve_wave(request)?.path)
+    }
+
+    /// Like [`Library::resolve`], also reporting the wave's leading sound characters.
+    pub fn resolve_wave(&mut self, request: &SoundRequest) -> Result<ResolvedWave> {
+        let raw = self.resolve_raw(request)?;
+        Ok(ResolvedWave {
+            path: playback_path(&raw),
+            dry_mix: dry_mix(&raw),
+        })
+    }
+
+    /// The selected wave as written (sound characters kept).
+    fn resolve_raw(&mut self, request: &SoundRequest) -> Result<String> {
         if raw_wave(&request.name) {
-            return Ok(playback_path(&request.name));
+            return Ok(request.name.clone());
         }
         let key = request.name.to_ascii_lowercase();
         if let Some(waves) = self.names.get(&key) {
@@ -695,11 +709,35 @@ impl Library {
             self.rng ^= self.rng << 17;
             let choice = eligible[self.rng as usize % eligible.len()];
             available[choice] = false;
-            Ok(playback_path(&waves[choice].path))
+            Ok(waves[choice].path.clone())
         } else {
-            Ok(self.alternatives(request)?.remove(0))
+            bail!("sound script absent: {}", request.name);
         }
     }
+}
+
+/// A selected wave: its playback path and whether it carries the `#` sound character.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedWave {
+    pub path: String,
+    /// `#` (SDK `CHAR_DRYMIX`) among the leading sound characters. The retail engine marks such
+    /// channels and scales those that also have soundlevel 0 (no distance attenuation) by
+    /// `snd_musicvolume`; see [`is_music`].
+    pub dry_mix: bool,
+}
+
+/// Whether `#` (`CHAR_DRYMIX`) appears among a wave name's leading sound characters, the
+/// characters Source skips before the file name (`*?!#@><^)}`).
+pub fn dry_mix(wave: &str) -> bool {
+    wave.chars()
+        .take_while(|c| ['*', '?', '!', '#', '>', '<', '^', '@', ')', '}'].contains(c))
+        .any(|c| c == '#')
+}
+
+/// Retail music detection: a dry-mix (`#`) wave played at soundlevel 0 is a music channel and
+/// is scaled by `snd_musicvolume` (the Audio page's music volume).
+pub fn is_music(dry_mix: bool, soundlevel: f32) -> bool {
+    dry_mix && soundlevel <= 0.
 }
 
 /// Source distance gain (retail engine `GetDistGainFromSoundLevel`, engine.dll 10216bd0 and
@@ -1156,6 +1194,24 @@ mod tests {
     #[test]
     fn encoded_audio_limit_is_enforced_before_probing() {
         assert!(playback_bytes("large.wav", vec![0; MAX_ENCODED_AUDIO + 1]).is_err());
+    }
+
+    #[test]
+    fn dry_mix_character_marks_music_only_at_soundlevel_zero() {
+        // The installed level_sounds_music.txt spells music waves "*#music/HL2_song0.mp3".
+        assert!(dry_mix("*#music/HL2_song0.mp3"));
+        assert!(dry_mix("#music/stingers/x.wav"));
+        assert!(!dry_mix("*music/HL2_song0.mp3"));
+        assert!(
+            !dry_mix("music/#odd.wav"),
+            "only leading sound characters count"
+        );
+        assert!(is_music(true, 0.));
+        assert!(
+            !is_music(true, 75.),
+            "attenuated dry-mix sounds are not music"
+        );
+        assert!(!is_music(false, 0.));
     }
 
     #[test]

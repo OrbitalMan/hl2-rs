@@ -68,12 +68,19 @@ pub mod mode {
     /// "Windowed (No Border)" is a borderless window covering the current monitor (Windows and
     /// Linux); macOS has no such choice and resolves a stored value to full screen.
     pub fn desired_mode(mode: DisplayMode) -> WindowMode {
+        on_monitor(mode, MonitorSelection::Current)
+    }
+
+    /// [`desired_mode`] for window creation, where no current monitor exists yet.
+    pub fn startup_mode(mode: DisplayMode) -> WindowMode {
+        on_monitor(mode, MonitorSelection::Primary)
+    }
+
+    fn on_monitor(mode: DisplayMode, monitor: MonitorSelection) -> WindowMode {
         match mode.effective() {
-            DisplayMode::Fullscreen => {
-                WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Current)
-            }
+            DisplayMode::Fullscreen => WindowMode::Fullscreen(monitor, VideoModeSelection::Current),
             DisplayMode::Windowed => WindowMode::Windowed,
-            DisplayMode::NoBorder => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+            DisplayMode::NoBorder => WindowMode::BorderlessFullscreen(monitor),
         }
     }
 }
