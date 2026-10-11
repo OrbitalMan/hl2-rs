@@ -11,6 +11,7 @@ use super::resources::{MenuItem, Visibility};
 use super::widgets::{ButtonState, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL};
 use crate::canvas::Rect;
 use glam::{vec2, Vec2};
+use source_assets::keyvalues::Entry;
 use std::collections::BTreeMap;
 
 /// A parsed `GameMenu.res` command.
@@ -392,6 +393,165 @@ impl MessageBox {
     }
 }
 
+/// Layout parameters for the GameMenu's title and items, loaded from schemes or defaulting to desktop coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuLayout {
+    pub title_x: f32,
+    pub title_y: f32,
+    pub menu_x: f32,
+    pub menu_y: f32,
+    pub title_tall: f32,
+    pub item_tall: f32,
+    pub font_ranges: Vec<(f32, f32, f32)>,
+    pub font_tall: f32,
+}
+
+impl Default for MenuLayout {
+    fn default() -> Self {
+        // Stock desktop defaults, overridden by the mounted schemes below.
+        Self {
+            title_x: 76.,
+            title_y: 145.,
+            menu_x: 76.,
+            menu_y: 240.,
+            title_tall: 32.,
+            item_tall: 26.,
+            font_ranges: vec![(1., 1080., 16.)],
+            font_tall: 11.,
+        }
+    }
+}
+
+/// Scaled screen coordinates and sizes for rendering and hit-testing the GameMenu.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MenuGeometry {
+    pub title: Vec2,
+    pub menu: Vec2,
+    pub title_tall: f32,
+    pub font_tall: f32,
+    pub item_tall: f32,
+}
+
+impl MenuGeometry {
+    /// Canvas hit rectangle for menu row `index`.
+    pub fn row_rect(&self, index: usize, canvas_height: f32) -> Rect {
+        Rect::new(
+            self.menu.x,
+            self.menu.y + index as f32 * self.item_tall,
+            250. * canvas_height / 480.,
+            self.item_tall,
+        )
+    }
+
+    /// Hit rectangles for all menu rows up to `count`.
+    pub fn row_rects(&self, count: usize, canvas_height: f32) -> Vec<Rect> {
+        (0..count)
+            .map(|i| self.row_rect(i, canvas_height))
+            .collect()
+    }
+
+    /// Canvas position for vertically centering the text inside row `index`.
+    pub fn row_text_pos(&self, index: usize) -> Vec2 {
+        self.menu
+            + vec2(
+                0.,
+                (index as f32 * self.item_tall + (self.item_tall - self.font_tall) * 0.5).floor(),
+            )
+    }
+}
+
+impl MenuLayout {
+    pub fn geometry(&self, height: f32) -> MenuGeometry {
+        let scale = height / 480.;
+        let font_tall = self
+            .font_ranges
+            .iter()
+            .find(|(low, high, _)| height >= *low && height <= *high)
+            .map_or_else(|| (self.font_tall * scale).round(), |(_, _, tall)| *tall);
+        // Vertical stack of buttons with static spacing so they do not squish on smaller screens.
+        let item_spacing = 10.;
+        let item_tall = self.item_tall.max(font_tall + item_spacing);
+        MenuGeometry {
+            title: vec2(
+                (self.title_x * scale).trunc(),
+                (self.title_y * scale).trunc(),
+            ),
+            menu: vec2((self.menu_x * scale).trunc(), (self.menu_y * scale).trunc()),
+            title_tall: (self.title_tall * scale).round(),
+            font_tall,
+            item_tall,
+        }
+    }
+
+    pub fn apply_source_scheme(&mut self, root: &Entry) {
+        if let Some(tall) = resource_number(root, "MainMenu.MenuItemHeight")
+            .filter(|value| *value > 0. && *value <= 128.)
+        {
+            self.item_tall = tall;
+        }
+        if let Some(fonts) =
+            resource_font(root, "MainMenuFont").or_else(|| resource_font(root, "MenuLarge"))
+        {
+            self.font_ranges.clear();
+            for (tall, range) in fonts {
+                if let Some((low, high)) = range {
+                    self.font_ranges.push((low, high, tall));
+                } else {
+                    self.font_tall = tall;
+                }
+            }
+        }
+    }
+
+    pub fn apply_client_scheme(&mut self, root: &Entry) {
+        for (key, target) in [
+            ("Main.Title1.X", &mut self.title_x),
+            ("Main.Title1.Y", &mut self.title_y),
+            ("Main.Menu.X", &mut self.menu_x),
+            ("Main.Menu.Y", &mut self.menu_y),
+        ] {
+            if let Some(value) = resource_number(root, key) {
+                *target = value;
+            }
+        }
+        if let Some(fonts) = resource_font(root, "ClientTitleFont") {
+            self.title_tall = fonts[0].0;
+        }
+    }
+}
+
+pub fn resource_number(root: &Entry, key: &str) -> Option<f32> {
+    root.get("BaseSettings")?
+        .get(key)?
+        .text()?
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
+}
+
+pub type FontRule = (f32, Option<(f32, f32)>);
+
+pub fn resource_font(root: &Entry, name: &str) -> Option<Vec<FontRule>> {
+    let entries = root.get("Fonts")?.get(name)?.children();
+    let values: Vec<_> = entries
+        .iter()
+        .filter_map(|entry| {
+            let tall = entry.get("tall")?.text()?.parse::<f32>().ok()?;
+            if !tall.is_finite() || tall <= 0. || tall > 256. {
+                return None;
+            }
+            let range = entry.get("yres").and_then(|y| y.text()).and_then(|text| {
+                let mut parts = text.split_whitespace();
+                let low = parts.next()?.parse::<f32>().ok()?;
+                let high = parts.next()?.parse::<f32>().ok()?;
+                (low.is_finite() && high.is_finite() && low <= high).then_some((low, high))
+            });
+            Some((tall, range))
+        })
+        .collect();
+    (!values.is_empty()).then_some(values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,5 +730,52 @@ mod tests {
             Some(true),
             "Enter accepts"
         );
+    }
+
+    #[test]
+    fn native_menu_uses_480_coordinate_scaling_with_static_spacing() {
+        let layout = MenuLayout::default();
+        let at_720 = layout.geometry(720.);
+        assert_eq!(at_720.title, vec2(114., 217.));
+        assert_eq!(at_720.menu, vec2(114., 360.));
+        assert_eq!(at_720.title_tall, 48.);
+        assert_eq!(at_720.item_tall, 26.);
+        assert_eq!(at_720.font_tall, 16.);
+        let at_480 = layout.geometry(480.);
+        assert_eq!(at_480.menu, vec2(76., 240.));
+        assert_eq!(at_480.font_tall, 16.);
+        assert_eq!(at_480.title_tall, 32.);
+        assert_eq!(at_480.item_tall, 26.);
+        assert_eq!(layout.geometry(1440.).font_tall, 33.);
+        assert_eq!(layout.geometry(1440.).item_tall, 43.);
+
+        // Verify row rects and text position helpers
+        let rects = at_480.row_rects(3, 480.);
+        assert_eq!(rects.len(), 3);
+        assert_eq!(rects[0], Rect::new(76., 240., 250., 26.));
+        assert_eq!(rects[1], Rect::new(76., 266., 250., 26.));
+        assert_eq!(at_480.row_text_pos(0), vec2(76., 245.));
+    }
+
+    #[test]
+    fn menu_resources_resolve_desktop_colors_ranges_and_reject_bad_heights() {
+        use crate::canvas::WHITE;
+        use crate::gameui::widgets::scheme_color;
+        let resource = source_assets::keyvalues::parse_resource(br#"Scheme {
+            Colors { White "255 255 255 255" } BaseSettings { MainMenu.TextColor White Main.Menu.X 76 }
+            Fonts { MenuLarge { 1 { tall 16 yres "1 1080" } [$WINDOWS]
+                1 { tall 24 yres "1 1080" } [$LINUX] 2 { tall 11 } 3 { tall NaN } } }
+        }"#).unwrap();
+        let root = &resource[0];
+        assert_eq!(scheme_color(root, "MainMenu.TextColor"), Some(WHITE));
+        assert_eq!(resource_number(root, "Main.Menu.X"), Some(76.));
+        let ranges = resource_font(root, "MenuLarge").unwrap();
+        #[cfg(target_os = "windows")]
+        assert_eq!(ranges, vec![(16., Some((1., 1080.))), (11., None)]);
+        #[cfg(target_os = "linux")]
+        assert_eq!(ranges, vec![(24., Some((1., 1080.))), (11., None)]);
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        assert_eq!(ranges, vec![(11., None)]);
+        assert!(resource_font(root, "Absent").is_none());
     }
 }

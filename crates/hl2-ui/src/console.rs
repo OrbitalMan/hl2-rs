@@ -1,7 +1,7 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
 use crate::gameui::{
     display::DisplayModes,
-    menu::{GameMenu, MenuOutcome, MessageBox, MessageBoxLayout},
+    menu::{GameMenu, MenuLayout, MenuOutcome, MessageBox, MessageBoxLayout},
     options::{OptionsDialog, OptionsOutcome},
     resources::{fallback_game_menu, GameUiResources},
     widgets::{scheme_color, Fonts, Painter, Theme},
@@ -176,90 +176,7 @@ impl CellMetrics {
         })
     }
 }
-struct MenuLayout {
-    title_x: f32,
-    title_y: f32,
-    menu_x: f32,
-    menu_y: f32,
-    title_tall: f32,
-    item_tall: f32,
-    font_ranges: Vec<(f32, f32, f32)>,
-    font_tall: f32,
-}
-impl Default for MenuLayout {
-    fn default() -> Self {
-        // Stock desktop defaults, overridden by the mounted schemes below.
-        Self {
-            title_x: 76.,
-            title_y: 145.,
-            menu_x: 76.,
-            menu_y: 240.,
-            title_tall: 32.,
-            item_tall: 14.,
-            font_ranges: vec![(1., 1080., 16.)],
-            font_tall: 11.,
-        }
-    }
-}
-#[derive(Debug)]
-struct MenuGeometry {
-    title: Vec2,
-    menu: Vec2,
-    title_tall: f32,
-    font_tall: f32,
-    item_tall: f32,
-}
-impl MenuLayout {
-    fn geometry(&self, height: f32) -> MenuGeometry {
-        let scale = height / 480.;
-        MenuGeometry {
-            title: vec2(
-                (self.title_x * scale).trunc(),
-                (self.title_y * scale).trunc(),
-            ),
-            menu: vec2((self.menu_x * scale).trunc(), (self.menu_y * scale).trunc()),
-            title_tall: (self.title_tall * scale).round(),
-            font_tall: self
-                .font_ranges
-                .iter()
-                .find(|(low, high, _)| height >= *low && height <= *high)
-                .map_or_else(|| (self.font_tall * scale).round(), |(_, _, tall)| *tall),
-            item_tall: (self.item_tall * scale).trunc().max(1.),
-        }
-    }
-}
-fn resource_number(root: &keyvalues::Entry, key: &str) -> Option<f32> {
-    root.get("BaseSettings")?
-        .get(key)?
-        .text()?
-        .parse::<f32>()
-        .ok()
-        .filter(|value| value.is_finite())
-}
-type FontRule = (f32, Option<(f32, f32)>);
-fn resource_font(root: &keyvalues::Entry, name: &str) -> Option<Vec<FontRule>> {
-    let entries = root.get("Fonts")?.get(name)?.children();
-    let values: Vec<_> = entries
-        .iter()
-        .filter_map(|entry| {
-            let tall = entry.get("tall")?.text()?.parse::<f32>().ok()?;
-            if !tall.is_finite() || tall <= 0. || tall > 256. {
-                return None;
-            }
-            let range = entry
-                .get("yres")
-                .and_then(|range| range.text())
-                .and_then(|range| {
-                    let mut parts = range
-                        .split_whitespace()
-                        .filter_map(|p| p.parse::<f32>().ok());
-                    Some((parts.next()?, parts.next()?))
-                });
-            Some((tall, range))
-        })
-        .collect();
-    (!values.is_empty()).then_some(values)
-}
+
 fn draw_cell_text(
     canvas: &Canvas,
     value: &str,
@@ -539,23 +456,7 @@ impl Console {
                 entry: scheme_color(&root, "RichText.BgColor").unwrap_or(console.style.entry),
                 text: scheme_color(&root, "Console.TextColor").unwrap_or(console.style.text),
             };
-            if let Some(tall) = resource_number(&root, "MainMenu.MenuItemHeight")
-                .filter(|value| *value > 0. && *value <= 128.)
-            {
-                console.menu_layout.item_tall = tall;
-            }
-            if let Some(fonts) =
-                resource_font(&root, "MainMenuFont").or_else(|| resource_font(&root, "MenuLarge"))
-            {
-                console.menu_layout.font_ranges.clear();
-                for (tall, range) in fonts {
-                    if let Some((low, high)) = range {
-                        console.menu_layout.font_ranges.push((low, high, tall));
-                    } else {
-                        console.menu_layout.font_tall = tall;
-                    }
-                }
-            }
+            console.menu_layout.apply_source_scheme(&root);
         }
         if let Some(root) = vfs
             .read("resource/ClientScheme.res")
@@ -564,19 +465,7 @@ impl Console {
             .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
             .and_then(|roots| roots.into_iter().next())
         {
-            for (key, target) in [
-                ("Main.Title1.X", &mut console.menu_layout.title_x),
-                ("Main.Title1.Y", &mut console.menu_layout.title_y),
-                ("Main.Menu.X", &mut console.menu_layout.menu_x),
-                ("Main.Menu.Y", &mut console.menu_layout.menu_y),
-            ] {
-                if let Some(value) = resource_number(&root, key) {
-                    *target = value;
-                }
-            }
-            if let Some(fonts) = resource_font(&root, "ClientTitleFont") {
-                console.menu_layout.title_tall = fonts[0].0;
-            }
+            console.menu_layout.apply_client_scheme(&root);
         }
         console
     }
@@ -1088,17 +977,9 @@ impl Console {
 
     /// One hit rectangle per menu row (spacers included), in canvas pixels.
     fn menu_rows(&self, count: usize) -> Vec<Rect> {
-        let geometry = self.menu_layout.geometry(self.canvas.height());
-        (0..count)
-            .map(|i| {
-                Rect::new(
-                    geometry.menu.x,
-                    geometry.menu.y + i as f32 * geometry.item_tall,
-                    250. * self.canvas.height() / 480.,
-                    geometry.item_tall,
-                )
-            })
-            .collect()
+        self.menu_layout
+            .geometry(self.canvas.height())
+            .row_rects(count, self.canvas.height())
     }
 
     fn painter(&self, origin: Vec2, scale: f32) -> Painter<'_> {
@@ -1319,12 +1200,7 @@ impl Console {
                 draw_cell_text(
                     &self.canvas,
                     &entry.label,
-                    geometry.menu
-                        + vec2(
-                            0.,
-                            i as f32 * geometry.item_tall
-                                + (geometry.item_tall - geometry.font_tall) * 0.5,
-                        ),
+                    geometry.row_text_pos(i),
                     geometry.font_tall,
                     self.menu_font.as_ref(),
                     self.menu_metrics,
@@ -1517,38 +1393,7 @@ fn tokenize(line: &str) -> Result<Vec<Vec<String>>, String> {
 mod tests {
     use super::*;
     #[test]
-    fn native_menu_uses_480_coordinate_scaling_but_keeps_yres_font_height() {
-        let layout = MenuLayout::default();
-        let at_720 = layout.geometry(720.);
-        assert_eq!(at_720.title, vec2(114., 217.));
-        assert_eq!(at_720.menu, vec2(114., 360.));
-        assert_eq!(at_720.title_tall, 48.);
-        assert_eq!(at_720.item_tall, 21.);
-        assert_eq!(at_720.font_tall, 16.);
-        let at_480 = layout.geometry(480.);
-        assert_eq!(at_480.menu, vec2(76., 240.));
-        assert_eq!(at_480.font_tall, 16.);
-        assert_eq!(at_480.title_tall, 32.);
-        assert_eq!(layout.geometry(1440.).font_tall, 33.);
-    }
-    #[test]
-    fn menu_resources_resolve_desktop_colors_ranges_and_reject_bad_heights() {
-        let resource = keyvalues::parse_resource(br#"Scheme {
-            Colors { White "255 255 255 255" } BaseSettings { MainMenu.TextColor White Main.Menu.X 76 }
-            Fonts { MenuLarge { 1 { tall 16 yres "1 1080" } [$WINDOWS]
-                1 { tall 24 yres "1 1080" } [$LINUX] 2 { tall 11 } 3 { tall NaN } } }
-        }"#).unwrap();
-        let root = &resource[0];
-        assert_eq!(scheme_color(root, "MainMenu.TextColor"), Some(WHITE));
-        assert_eq!(resource_number(root, "Main.Menu.X"), Some(76.));
-        let ranges = resource_font(root, "MenuLarge").unwrap();
-        #[cfg(target_os = "windows")]
-        assert_eq!(ranges, vec![(16., Some((1., 1080.))), (11., None)]);
-        #[cfg(target_os = "linux")]
-        assert_eq!(ranges, vec![(24., Some((1., 1080.))), (11., None)]);
-        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-        assert_eq!(ranges, vec![(11., None)]);
-        assert!(resource_font(root, "Absent").is_none());
+    fn cell_metrics_rejects_missing_font() {
         assert!(CellMetrics::from_bytes(b"missing font").is_none());
     }
     #[test]
