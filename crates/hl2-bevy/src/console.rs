@@ -6,6 +6,8 @@ use serde::Deserialize;
 pub struct Console {
     pub source: hl2_ui::console::Console,
     pub map_request: Option<String>,
+    /// The pending `map_request` loads a main-menu background level.
+    pub background_request: bool,
     pub quit_requested: bool,
 }
 impl Console {
@@ -13,11 +15,12 @@ impl Console {
         Self {
             source,
             map_request: None,
+            background_request: false,
             quit_requested: false,
         }
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"mode":self.source.mode,"sv_cheats":self.source.cheats,"input":self.source.input,"output":self.source.output,"pending_map":self.map_request})
+        serde_json::json!({"mode":self.source.mode,"background_level":self.source.background_level(),"sv_cheats":self.source.cheats,"input":self.source.input,"output":self.source.output,"pending_map":self.map_request})
     }
 }
 #[derive(Clone, Deserialize)]

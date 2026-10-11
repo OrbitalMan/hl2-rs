@@ -1,4 +1,9 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
+use crate::gameui::{
+    menu::{GameMenu, MenuOutcome, MessageBox, MessageBoxLayout},
+    resources::{fallback_game_menu, GameUiResources},
+    widgets::{scheme_color, Fonts, Painter, Theme},
+};
 use crate::{canvas::*, hud::FontFace};
 use glam::{vec2, Vec2};
 use serde::Serialize;
@@ -82,6 +87,8 @@ pub enum Effect {
     },
     Quit,
     ApplyConfig(Box<crate::config::Config>),
+    /// Load the main-menu background map and show the main menu over it ("Return to main menu").
+    MainMenuMap(String),
 }
 
 pub struct Console {
@@ -96,7 +103,6 @@ pub struct Console {
     history_draft: String,
     cursor: usize,
     scroll: usize,
-    menu_selection: usize,
     font: Option<FontFace>,
     menu_font: Option<FontFace>,
     menu_metrics: CellMetrics,
@@ -107,8 +113,17 @@ pub struct Console {
     menu_layout: MenuLayout,
     mono: Option<FontFace>,
     developer_font: Option<FontFace>,
-    menu_labels: Vec<String>,
-    main_menu_labels: Vec<String>,
+    /// Installed GameUI resources (localization, menu structure, dialog layouts, key actions).
+    gameui: Arc<GameUiResources>,
+    /// The out-of-game menu (main menu and its HL2/Episode categories).
+    main_menu: GameMenu,
+    /// The in-game (pause) menu.
+    pause_menu: GameMenu,
+    quit_box: Option<MessageBox>,
+    /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
+    background_level: bool,
+    theme: Theme,
+    widget_fonts: Fonts,
     style: Style,
     pub options: crate::options::OptionsState,
     pub config: crate::config::Config,
@@ -336,26 +351,6 @@ impl Default for Style {
         }
     }
 }
-fn scheme_color(root: &keyvalues::Entry, name: &str) -> Option<Color> {
-    let mut value = name;
-    for _ in 0..8 {
-        let values: Vec<u8> = value
-            .split_whitespace()
-            .map(str::parse)
-            .collect::<Result<_, _>>()
-            .unwrap_or_default();
-        if let [r, g, b, a] = values.as_slice() {
-            return Some(Color::from_rgba(*r, *g, *b, *a));
-        }
-        value = root
-            .get("BaseSettings")
-            .and_then(|e| e.get(value))
-            .or_else(|| root.get("Colors").and_then(|e| e.get(value)))?
-            .text()?;
-    }
-    None
-}
-
 impl Default for Console {
     fn default() -> Self {
         let config = crate::config::Config::default();
@@ -364,6 +359,12 @@ impl Default for Console {
             crate::options::OptionsLabels::default(),
             std::collections::BTreeMap::new(),
         );
+        let gameui = GameUiResources {
+            game_menu: fallback_game_menu(),
+            ..Default::default()
+        };
+        let main_menu = GameMenu::new(Vec::new(), Default::default(), &gameui.localization);
+        let pause_menu = GameMenu::new(Vec::new(), Default::default(), &gameui.localization);
         let mut console = Self {
             canvas: Canvas::default(),
             mode: Mode::Gameplay,
@@ -376,7 +377,6 @@ impl Default for Console {
             history_draft: String::new(),
             cursor: 0,
             scroll: 0,
-            menu_selection: 0,
             font: None,
             menu_font: None,
             menu_metrics: CellMetrics::default(),
@@ -387,22 +387,18 @@ impl Default for Console {
             menu_layout: MenuLayout::default(),
             mono: None,
             developer_font: None,
-            menu_labels: vec![
-                "RESUME GAME".into(),
-                "OPTIONS".into(),
-                "DEVELOPER CONSOLE".into(),
-                "QUIT".into(),
-            ],
-            main_menu_labels: vec![
-                "NEW GAME".into(),
-                "OPTIONS".into(),
-                "DEVELOPER CONSOLE".into(),
-                "QUIT".into(),
-            ],
+            gameui: Arc::default(),
+            main_menu,
+            pause_menu,
+            quit_box: None,
+            background_level: false,
+            theme: Theme::default(),
+            widget_fonts: Fonts::default(),
             style: Style::default(),
             options,
             config,
         };
+        console.set_resources(gameui);
         console.log("HL2-RS developer console. Type help for implemented commands.");
         console.log("Other Source commands are not implemented in this runtime.");
         console
@@ -447,11 +443,22 @@ impl Console {
             "resource/linux_fonts/DejaVuSansMono.ttf",
         )
         .or_else(|| developer_font.clone());
+        // The scheme's Default/DefaultBold dialog fonts are Tahoma and Tahoma Bold.
+        let bold_font = font(
+            "tahomabd.ttf",
+            "Tahoma Bold.ttf",
+            "resource/linux_fonts/liberationsans-bold.ttf",
+        )
+        .or_else(|| ui_font.clone());
         let config = crate::config::Config::load_or_default();
         let options = crate::options::OptionsState::load(vfs, config.clone());
         let mut console = Self {
             canvas: canvas.clone(),
             developer_font,
+            widget_fonts: Fonts {
+                text: ui_font.clone(),
+                bold: bold_font,
+            },
             font: ui_font,
             menu_font,
             mono,
@@ -459,6 +466,11 @@ impl Console {
             config,
             ..Default::default()
         };
+        let gameui = GameUiResources::load(vfs);
+        for file in &gameui.missing {
+            console.log(format!("GameUI resource unavailable: {file}"));
+        }
+        console.set_resources(gameui);
         let menu_bytes = std::fs::read(windows.join("Fonts/verdanab.ttf"))
             .or_else(|_| std::fs::read("/System/Library/Fonts/Supplemental/Verdana Bold.ttf"))
             .or_else(|_| std::fs::read("/Library/Fonts/Verdana Bold.ttf"))
@@ -511,6 +523,7 @@ impl Console {
             .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
             .and_then(|roots| roots.into_iter().next())
         {
+            console.theme = Theme::from_scheme(&root);
             console.style = Style {
                 menu: scheme_color(&root, "MainMenu.TextColor").unwrap_or(console.style.menu),
                 menu_armed: scheme_color(&root, "MainMenu.ArmedTextColor")
@@ -558,48 +571,83 @@ impl Console {
                 console.menu_layout.title_tall = fonts[0].0;
             }
         }
-        if let Some(root) = vfs
-            .read("resource/gameui_english.txt")
-            .ok()
-            .flatten()
-            .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
-            .and_then(|roots| roots.into_iter().next())
-        {
-            if let Some(tokens) = root.get("Tokens") {
-                let lookup = |k: &str| {
-                    tokens
-                        .get(k)
-                        .and_then(|entry| entry.text())
-                        .map(str::to_uppercase)
-                };
-                if let Some(l) = lookup("GameUI_GameMenu_ResumeGame") {
-                    console.menu_labels[0] = l;
-                }
-                if let Some(l) = lookup("GameUI_GameMenu_Options") {
-                    console.menu_labels[1] = l.clone();
-                    console.main_menu_labels[1] = l;
-                }
-                if let Some(l) = lookup("GameUI_GameMenu_Quit") {
-                    console.menu_labels[3] = l.clone();
-                    console.main_menu_labels[3] = l;
-                }
-                if let Some(l) = lookup("GameUI_GameMenu_NewGame") {
-                    console.main_menu_labels[0] = l;
-                }
-            }
-        }
         console
     }
+
+    /// Replaces the GameUI resources and rebuilds both game menus from them.
+    pub fn set_resources(&mut self, resources: GameUiResources) {
+        let loc = &resources.localization;
+        self.main_menu = GameMenu::new(
+            resources.game_menu.clone(),
+            resources.new_game_maps.clone(),
+            loc,
+        );
+        self.pause_menu = GameMenu::new(
+            resources.game_menu.clone(),
+            resources.new_game_maps.clone(),
+            loc,
+        );
+        self.pause_menu.set_in_game(true, loc);
+        self.gameui = Arc::new(resources);
+    }
+
+    pub fn resources(&self) -> &GameUiResources {
+        &self.gameui
+    }
+
+    /// Whether the loaded map only serves as the main-menu background.
+    pub fn background_level(&self) -> bool {
+        self.background_level
+    }
+
+    /// Called by the host after a map finished loading. A background level shows the main menu;
+    /// any other map starts gameplay.
+    pub fn level_loaded(&mut self, background: bool) {
+        self.background_level = background;
+        self.quit_box = None;
+        self.main_menu.back(&self.gameui.localization);
+        self.main_menu.selection = None;
+        self.pause_menu.selection = None;
+        self.mode = if background {
+            Mode::MainMenu
+        } else {
+            Mode::Gameplay
+        };
+        self.previous = self.mode;
+    }
+
     pub fn paused(&self) -> bool {
         self.mode != Mode::Gameplay
     }
+
+    /// Escape closes the quit box first, then leaves a menu category, then toggles the menus.
+    /// The main menu over a background level has nothing to return to.
     pub fn escape(&mut self) {
+        if self.quit_box.take().is_some() {
+            return;
+        }
+        let menu = if self.background_level {
+            Mode::MainMenu
+        } else {
+            Mode::Pause
+        };
         self.mode = match self.mode {
-            Mode::Gameplay => Mode::Pause,
-            Mode::Pause => Mode::Gameplay,
-            Mode::Console => self.previous,
-            Mode::Options => self.previous,
-            Mode::MainMenu => Mode::MainMenu,
+            Mode::Gameplay => menu,
+            Mode::Pause => {
+                if self.background_level {
+                    Mode::MainMenu
+                } else {
+                    Mode::Gameplay
+                }
+            }
+            Mode::Console | Mode::Options => self.previous,
+            Mode::MainMenu => {
+                if self.main_menu.back(&self.gameui.localization) || self.background_level {
+                    Mode::MainMenu
+                } else {
+                    Mode::Gameplay
+                }
+            }
         };
     }
     pub fn toggle(&mut self) {
@@ -919,40 +967,7 @@ impl Console {
             }
         }
         if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
-            let labels = if self.mode == Mode::MainMenu {
-                &self.main_menu_labels
-            } else {
-                &self.menu_labels
-            };
-            let count = labels.len();
-            if count > 0 {
-                if input.pressed(Key::Up) {
-                    self.menu_selection = (self.menu_selection + count - 1) % count;
-                }
-                if input.pressed(Key::Down) {
-                    self.menu_selection = (self.menu_selection + 1) % count;
-                }
-                let pointer = input.pointer;
-                let geometry = self.menu_layout.geometry(self.canvas.height());
-                for i in 0..count {
-                    let rect = Rect::new(
-                        geometry.menu.x,
-                        geometry.menu.y + i as f32 * geometry.item_tall,
-                        250. * self.canvas.height() / 480.,
-                        geometry.item_tall,
-                    );
-                    if pointer.is_some_and(|p| rect.contains(p)) {
-                        self.menu_selection = i;
-                        if input.click {
-                            return self.activate_menu();
-                        }
-                    }
-                }
-                if input.pressed(Key::Enter) {
-                    return self.activate_menu();
-                }
-            }
-            return Vec::new();
+            return self.menu_input(input);
         }
         if self.mode != Mode::Console {
             return Vec::new();
@@ -1022,23 +1037,122 @@ impl Console {
         }
         Vec::new()
     }
-    fn activate_menu(&mut self) -> Vec<Effect> {
-        let is_main = self.mode == Mode::MainMenu;
-        match self.menu_selection {
-            0 => {
-                if is_main {
-                    return vec![Effect::Map("d1_trainstation_02".into())];
-                } else {
+    /// The menu shown in the current mode, if any.
+    fn game_menu(&self) -> Option<&GameMenu> {
+        match self.mode {
+            Mode::MainMenu => Some(&self.main_menu),
+            Mode::Pause => Some(&self.pause_menu),
+            _ => None,
+        }
+    }
+
+    /// One hit rectangle per menu row (spacers included), in canvas pixels.
+    fn menu_rows(&self, count: usize) -> Vec<Rect> {
+        let geometry = self.menu_layout.geometry(self.canvas.height());
+        (0..count)
+            .map(|i| {
+                Rect::new(
+                    geometry.menu.x,
+                    geometry.menu.y + i as f32 * geometry.item_tall,
+                    250. * self.canvas.height() / 480.,
+                    geometry.item_tall,
+                )
+            })
+            .collect()
+    }
+
+    fn painter(&self, origin: Vec2, scale: f32) -> Painter<'_> {
+        Painter {
+            canvas: &self.canvas,
+            fonts: &self.widget_fonts,
+            theme: &self.theme,
+            origin,
+            scale,
+        }
+    }
+
+    /// Canvas origin, scale and layout of the open quit box (centered on the canvas).
+    fn quit_geometry(&self, quit: &MessageBox) -> (Vec2, f32, MessageBoxLayout) {
+        let scale = Painter::scale_for(self.canvas.height());
+        let measure = self.painter(Vec2::ZERO, 1.);
+        let layout = quit.layout(|text| measure.text_width(text, false));
+        let canvas = vec2(self.canvas.width(), self.canvas.height());
+        let origin = ((canvas - layout.size * scale) * 0.5).round();
+        (origin, scale, layout)
+    }
+
+    fn menu_input(&mut self, input: &Input) -> Vec<Effect> {
+        if let Some(mut quit) = self.quit_box.take() {
+            let (origin, scale, layout) = self.quit_geometry(&quit);
+            let pointer = input.pointer.map(|p| (p - origin) / scale);
+            match quit.input(&layout, pointer, input.click, input.pressed(Key::Enter)) {
+                Some(true) => return vec![Effect::Quit],
+                Some(false) => {}
+                None => self.quit_box = Some(quit),
+            }
+            return Vec::new();
+        }
+        let count = self.game_menu().map_or(0, |menu| menu.entries().len());
+        let rows = self.menu_rows(count);
+        let menu = match self.mode {
+            Mode::MainMenu => &mut self.main_menu,
+            _ => &mut self.pause_menu,
+        };
+        if input.pressed(Key::Up) {
+            menu.step(-1);
+        }
+        if input.pressed(Key::Down) {
+            menu.step(1);
+        }
+        let mut activate = None;
+        if let Some(index) = input
+            .pointer
+            .and_then(|p| rows.iter().position(|row| row.contains(p)))
+        {
+            if menu.entries()[index].enabled {
+                menu.selection = Some(index);
+            }
+            if input.click {
+                activate = Some(index);
+            }
+        }
+        if input.pressed(Key::Enter) {
+            activate = activate.or(menu.selection);
+        }
+        activate.map_or_else(Vec::new, |index| self.activate_menu(index))
+    }
+
+    fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
+        let loc = &self.gameui.localization;
+        let outcome = match self.mode {
+            Mode::MainMenu => self.main_menu.activate(index, loc),
+            Mode::Pause => self.pause_menu.activate(index, loc),
+            _ => MenuOutcome::None,
+        };
+        match outcome {
+            MenuOutcome::None => {}
+            MenuOutcome::Resume => {
+                if !self.background_level {
                     self.mode = Mode::Gameplay;
                 }
             }
-            1 => {
+            MenuOutcome::OpenOptions => {
                 self.previous = self.mode;
                 self.mode = Mode::Options;
                 self.options.reset(self.config.clone());
             }
-            2 => self.toggle(),
-            _ => return vec![Effect::Quit],
+            MenuOutcome::ConfirmQuit => self.quit_box = Some(MessageBox::quit(loc)),
+            MenuOutcome::NewGame(map) => return vec![Effect::Map(map)],
+            MenuOutcome::ReturnToMainMenu => match self.gameui.background_map.clone() {
+                Some(map) => return vec![Effect::MainMenuMap(map)],
+                None => {
+                    self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
+                    self.level_loaded(true);
+                }
+            },
+            MenuOutcome::Placeholder(label) => {
+                self.log(format!("{label}: not implemented in HL2-RS yet."));
+            }
         }
         Vec::new()
     }
@@ -1116,15 +1230,6 @@ impl Console {
             );
         };
         if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
-            if self.mode == Mode::MainMenu {
-                self.canvas.rectangle(
-                    0.,
-                    0.,
-                    self.canvas.width(),
-                    self.canvas.height(),
-                    Color::new(0.04, 0.05, 0.07, 0.95),
-                );
-            }
             let geometry = self.menu_layout.geometry(self.canvas.height());
             if let Some(face) = &self.title_face {
                 let em = geometry.title_tall * self.title_metrics.em_per_cell;
@@ -1153,15 +1258,21 @@ impl Console {
                     WHITE,
                 );
             }
-            let labels = if self.mode == Mode::MainMenu {
-                &self.main_menu_labels
-            } else {
-                &self.menu_labels
-            };
-            for (i, label) in labels.iter().enumerate() {
+            let menu = self.game_menu().expect("menu mode");
+            for (i, entry) in menu.entries().iter().enumerate() {
+                if entry.spacer {
+                    continue;
+                }
+                let color = if !entry.enabled {
+                    self.theme.text_disabled
+                } else if menu.selection == Some(i) {
+                    self.style.menu_armed
+                } else {
+                    self.style.menu
+                };
                 draw_cell_text(
                     &self.canvas,
-                    label,
+                    &entry.label,
                     geometry.menu
                         + vec2(
                             0.,
@@ -1171,12 +1282,12 @@ impl Console {
                     geometry.font_tall,
                     self.menu_font.as_ref(),
                     self.menu_metrics,
-                    if self.menu_selection == i {
-                        self.style.menu_armed
-                    } else {
-                        self.style.menu
-                    },
+                    color,
                 );
+            }
+            if let Some(quit) = &self.quit_box {
+                let (origin, scale, layout) = self.quit_geometry(quit);
+                quit.draw(&self.painter(origin, scale), &layout);
             }
         } else {
             let left = 32. * scale;
@@ -1546,64 +1657,123 @@ mod tests {
         assert!(console.input.is_empty());
         assert!(console.output.iter().any(|s| s.contains("sv_cheats")));
     }
-    #[test]
-    fn menu_pointer_hit_regions_and_keyboard_activate_the_same_choices() {
-        let mut console = Console::default();
-        console.escape();
+    /// Pointer position at the middle of menu row `index`.
+    fn row(console: &Console, index: usize) -> Option<Vec2> {
         let geometry = console.menu_layout.geometry(console.canvas.height());
+        Some(geometry.menu + vec2(5., geometry.item_tall * (index as f32 + 0.5)))
+    }
+    fn click_row(console: &mut Console, index: usize) -> Vec<Effect> {
+        let pointer = row(console, index);
         console.input(&Input {
-            pointer: Some(geometry.menu + vec2(5., geometry.item_tall * 1.5)),
+            pointer,
             click: true,
             ..Default::default()
-        });
-        assert_eq!(console.mode, Mode::Options);
-        console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        })
+    }
+    fn keys(console: &mut Console, keys: &[Key]) -> Vec<Effect> {
         console.input(&Input {
-            pointer: Some(geometry.menu + vec2(5., geometry.item_tall * 2.5)),
-            click: true,
+            keys: keys.iter().copied().collect(),
             ..Default::default()
-        });
-        assert_eq!(console.mode, Mode::Console);
-        console.escape();
-        assert_eq!(console.mode, Mode::Pause);
-        console.input(&Input {
-            keys: [Key::Down, Key::Down, Key::Down].into(),
+        })
+    }
+    /// A console with the built-in menu structure, a known first chapter and a background map.
+    fn installed_console() -> Console {
+        let mut resources = GameUiResources {
+            game_menu: fallback_game_menu(),
+            background_map: Some("background01".into()),
             ..Default::default()
-        });
-        assert_eq!(
-            console.input(&Input {
-                keys: [Key::Enter].into(),
-                ..Default::default()
-            }),
-            vec![Effect::Quit]
-        );
+        };
+        resources
+            .new_game_maps
+            .insert("hl2".into(), "d1_trainstation_01".into());
+        let mut console = Console::default();
+        console.set_resources(resources);
+        console
     }
 
     #[test]
-    fn main_menu_and_options_configuration_interaction() {
-        let mut console = Console {
-            mode: Mode::MainMenu,
-            ..Default::default()
-        };
-        let geometry = console.menu_layout.geometry(console.canvas.height());
-        // Click New Game
-        assert_eq!(
-            console.input(&Input {
-                pointer: Some(geometry.menu + vec2(5., geometry.item_tall * 0.5)),
-                click: true,
-                ..Default::default()
-            }),
-            vec![Effect::Map("d1_trainstation_02".into())]
+    fn pause_menu_entries_activate_by_pointer_and_keyboard() {
+        let mut console = installed_console();
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+        // Resume, Load, Save, Achievements, Options, Return to main menu, Quit.
+        assert_eq!(console.pause_menu.entries().len(), 7);
+        click_row(&mut console, 4);
+        assert_eq!(console.mode, Mode::Options);
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+        assert!(
+            click_row(&mut console, 1).is_empty(),
+            "Load Game is a placeholder"
         );
-        // Click Options
-        console.input(&Input {
-            pointer: Some(geometry.menu + vec2(5., geometry.item_tall * 1.5)),
+        assert_eq!(console.mode, Mode::Pause);
+        assert!(console.output.back().unwrap().contains("not implemented"));
+        assert_eq!(
+            click_row(&mut console, 5),
+            vec![Effect::MainMenuMap("background01".into())]
+        );
+        // The pointer left Return to main menu selected; Down moves to Quit, and Enter asks for
+        // confirmation instead of quitting.
+        assert!(keys(&mut console, &[Key::Down]).is_empty());
+        assert!(keys(&mut console, &[Key::Enter]).is_empty());
+        assert!(console.quit_box.is_some());
+        console.escape();
+        assert!(console.quit_box.is_none(), "Escape closes only the box");
+        assert_eq!(console.mode, Mode::Pause);
+        keys(&mut console, &[Key::Enter]);
+        assert_eq!(keys(&mut console, &[Key::Enter]), vec![Effect::Quit]);
+        console.quit_box = None;
+        click_row(&mut console, 0);
+        assert_eq!(console.mode, Mode::Gameplay, "Resume");
+    }
+
+    #[test]
+    fn background_level_main_menu_navigation_new_game_and_quit_box() {
+        let mut console = installed_console();
+        console.level_loaded(true);
+        assert_eq!(console.mode, Mode::MainMenu);
+        console.escape();
+        assert_eq!(console.mode, Mode::MainMenu, "nothing to resume");
+        click_row(&mut console, 0);
+        assert_eq!(console.main_menu.category(), "hl2");
+        console.escape();
+        assert_eq!(console.main_menu.category(), "main");
+        assert_eq!(console.mode, Mode::MainMenu);
+        click_row(&mut console, 0);
+        assert_eq!(
+            click_row(&mut console, 0),
+            vec![Effect::Map("d1_trainstation_01".into())]
+        );
+        console.level_loaded(false);
+        assert_eq!(console.mode, Mode::Gameplay);
+        assert_eq!(console.main_menu.category(), "main");
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+
+        console.level_loaded(true);
+        click_row(&mut console, 6);
+        let quit = console.quit_box.clone().expect("quit confirmation");
+        let (origin, scale, layout) = console.quit_geometry(&quit);
+        let press = |button: Rect| Input {
+            pointer: Some(origin + vec2(button.x + 3., button.y + 3.) * scale),
             click: true,
             ..Default::default()
-        });
+        };
+        assert!(console.input(&press(layout.buttons[1])).is_empty());
+        assert!(console.quit_box.is_none(), "Cancel closes the box");
+        assert_eq!(console.mode, Mode::MainMenu);
+        click_row(&mut console, 6);
+        assert_eq!(console.input(&press(layout.buttons[0])), vec![Effect::Quit]);
+    }
+
+    #[test]
+    fn options_open_from_the_main_menu_and_console_commands_update_config() {
+        let mut console = installed_console();
+        console.level_loaded(true);
+        click_row(&mut console, 5);
         assert_eq!(console.mode, Mode::Options);
-        // Console command changes setting
+        console.escape();
+        assert_eq!(console.mode, Mode::MainMenu);
         console.mode = Mode::Console;
         let effects = console.submit("volume 0.5; sensitivity 2.5; fov 90; mat_hdr_level 0");
         assert_eq!(console.config.audio.volume, 0.5);

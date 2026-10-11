@@ -316,20 +316,23 @@ pub fn present(
         );
     }
     hud.source.draw_fade(time);
-    hud.source.draw_status(
-        &game.inventory,
-        &game.weapons,
-        &game.selection,
-        game.scene.time,
-    );
-    hud.source.draw_selection(
-        &game.selection,
-        &game.inventory,
-        &game.weapons,
-        game.scene.time,
-    );
-    if !ui.source.paused() {
-        hud.source.draw_crosshair(&game.inventory);
+    // Background levels behind the main menu draw no HUD.
+    if !ui.source.background_level() {
+        hud.source.draw_status(
+            &game.inventory,
+            &game.weapons,
+            &game.selection,
+            game.scene.time,
+        );
+        hud.source.draw_selection(
+            &game.selection,
+            &game.inventory,
+            &game.weapons,
+            game.scene.time,
+        );
+        if !ui.source.paused() {
+            hud.source.draw_crosshair(&game.inventory);
+        }
     }
     hud.timing.observe(clock.elapsed_secs_f64());
     hud.debug_lines.clear();

@@ -65,7 +65,7 @@ Building creates `bin/hl2-bevy` and the `bin/bevy-assets` shader folder. The exe
 
 ## Play the current build
 
-Double-click `launch-bevy.cmd` in this folder. It launches `bin/hl2-bevy.exe`, the packaged release build. Rust is needed only for rebuilding. The default map is `d1_trainstation_02`.
+Double-click `launch-bevy.cmd` in this folder. It launches `bin/hl2-bevy.exe`, the packaged release build. Rust is needed only for rebuilding. Without `--map` (or when the requested map cannot be loaded) the game opens the main menu over the chapter-1 background map `background01`; a loadable `--map` starts gameplay directly. Options that need an immediately loaded map (`--position`, `--yaw`, `--pitch`, `--fly`, `--movement-script`, `--capture-live`, `--capture-burst`, `--capture-monitor`) make the launch fail with an error when no loadable `--map` is given. The main menu uses the installed `gamemenu.res` categories; Load Game, Achievements, Extras and Episode One/Two New Game are disabled placeholders (see [docs/gameui.md](docs/gameui.md)).
 
 ```powershell
 .\launch-bevy.cmd --map d1_trainstation_01

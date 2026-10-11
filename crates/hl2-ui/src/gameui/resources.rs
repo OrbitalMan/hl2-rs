@@ -32,6 +32,8 @@ pub struct MenuItem {
     pub category: Option<String>,
     pub order: i32,
     pub visibility: Visibility,
+    /// `Caps`: the label is drawn upper-case.
+    pub caps: bool,
 }
 
 impl MenuItem {
@@ -57,6 +59,7 @@ pub fn parse_game_menu(bytes: &[u8]) -> Option<Vec<MenuItem>> {
                 category: Some(text("MenuCategory").trim().to_ascii_lowercase())
                     .filter(|c| !c.is_empty()),
                 order: text("InGameOrder").trim().parse().unwrap_or(0),
+                caps: flag("Caps"),
                 visibility: if flag("OnlyInGame") {
                     Visibility::OnlyInGame
                 } else if flag("NotInGame") {
@@ -79,6 +82,7 @@ pub fn fallback_game_menu() -> Vec<MenuItem> {
         category: category.map(Into::into),
         order,
         visibility,
+        caps: true,
     };
     use Visibility::*;
     let mut items = vec![

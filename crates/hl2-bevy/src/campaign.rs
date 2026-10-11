@@ -12,6 +12,8 @@ struct Request {
     map: String,
     landmark: String,
     direct: bool,
+    /// Load as the main-menu background level (menu shown, HUD hidden).
+    background: bool,
 }
 type ResultSlot = Arc<Mutex<Option<Result<assets::LoadedMap, String>>>>;
 struct Job {
@@ -55,6 +57,7 @@ pub fn poll(
     status: Res<Status>,
 ) {
     if campaign.job.is_none() {
+        let background = std::mem::take(&mut ui.background_request);
         let request = ui
             .map_request
             .take()
@@ -62,12 +65,14 @@ pub fn poll(
                 map,
                 landmark: String::new(),
                 direct: true,
+                background,
             })
             .or_else(|| {
                 game.scene.transition.take().map(|(map, landmark)| Request {
                     map,
                     landmark,
                     direct: false,
+                    background: false,
                 })
             });
         let Some(request) = request else {
@@ -153,8 +158,10 @@ pub fn poll(
     }
     sim.change_map(&loaded.world, eye, job.request.direct);
     if job.request.direct {
-        ui.source.mode = hl2_ui::console::Mode::Gameplay;
-        if let Ok(mut cursor) = windows.single_mut() {
+        ui.source.level_loaded(job.request.background);
+        if !job.request.background
+            && let Ok(mut cursor) = windows.single_mut()
+        {
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
         }

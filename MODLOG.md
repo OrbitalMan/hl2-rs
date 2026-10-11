@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-11 GameUI resources, startup flow and main menu
+
+**Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed). One read-only research subagent surveyed UI patterns before planning.
+
+**Changed:**
+- `hl2-ui::gameui::{localize, layout, keys, display, resources}`: install-driven localization (UTF-8 and UTF-16 LE files, key-name fallback), VGUI `.res` layouts, `gamemenu.res` categories, key actions/default binds and display-mode helpers.
+- `hl2-ui::gameui::{widgets, menu}`: scheme theme, widget fonts and painter; `GameMenu` (categories, spacers, disabled placeholders, keyboard/pointer navigation) and the QUIT GAME `MessageBox`. The console host uses them for the main and pause menus.
+- `hl2-bevy`: startup without a loadable `--map` opens the main menu over the paused `background01`; map-dependent arguments without a loadable `--map` fail the launch; background levels keep the HUD hidden and the cursor free.
+
+**Why:** Owner-requested resource-driven GameUI (startup, main menu, options).
+
+**Tested how:** `cargo test --locked -p hl2-ui -p hl2-bevy` (69 + 54 passed, 2 + 2 owned-install ignored); strict Clippy; `cargo fmt --all --check`; packaged macOS captures (see docs/validation.md).
+
+**Result:** Main menu, categories and quit box render from installed resources; startup rules behave as specified.
+
+**Still broken or not tested:** background map frozen and seen from the spawn; Load Game, Achievements, Extras and Episode One/Two New Game are placeholders; Windows/Linux not tested.
+
+**Next:** options dialog framework and pages.
+
 ## 2026-10-09 UI/input and player-movement boundary
 
 **Agent/model:** Codex Desktop; exact model identifier not exposed in this session.

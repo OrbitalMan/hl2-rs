@@ -56,6 +56,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 ## Runtime invariants to preserve
 
 - Walking uses shared Player/Physics; F2/--fly enables flight. Escape cancels selection before pause; tilde opens console. Consume transition input and pause simulation/audio. Map workers freeze fixed/script clocks; replace map-owned resources only after success. Missing maps preserve the world; saved/global state transfer is unfinished.
+- Startup: a loadable `--map` starts gameplay; no `--map` or an unloadable one opens the main menu over the paused chapter-1 background map, except that map-dependent arguments (position/angles/fly/movement script/live, burst or monitor captures) without a loadable `--map` fail the launch with an error. Escape never turns a background level into gameplay.
 - HUD uses owned resources and an ordered CPU canvas. GDI font rasterization is setup-only.
 - Sky background layer3/order-2, miniature sky layer4/order-1, world layer0: independent depth/color clears and BSP 2D/3D eligibility. Current animation bounds and all active player/monitor views drive visibility; missing data fails open, script-hidden/killed entities remain hidden. Spatial splitting is opt-in.
 - Eyes use owned MDL records, animated eyes attachment origin/forward and iris projection before entity transform/scale. Preserve authored LOOKAT ramps, cancellation tails, pause refresh, cycler meshes and one target for both eyes. EyeRefract uses explicit Eyes_dx8 fallback; native head/facial/random/tactical attention is unfinished.

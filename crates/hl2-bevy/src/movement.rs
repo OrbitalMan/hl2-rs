@@ -245,6 +245,12 @@ impl Simulation {
                 }
                 Effect::Map(map) => {
                     ui.map_request = Some(map);
+                    ui.background_request = false;
+                    self.loading = true;
+                }
+                Effect::MainMenuMap(map) => {
+                    ui.map_request = Some(map);
+                    ui.background_request = true;
                     self.loading = true;
                 }
                 Effect::Fire {
@@ -622,6 +628,10 @@ mod tests {
             app.world().resource::<Simulation>().paused,
             "click outside Resume cannot close the menu"
         );
+        // No entry is armed until the keyboard or pointer selects one; Down arms Resume.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowDown);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);

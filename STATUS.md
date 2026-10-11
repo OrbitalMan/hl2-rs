@@ -2,6 +2,14 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
+## Current session: GameUI (2026-10-11, branch `orbitalman/main-menu`)
+
+Antigravity, Claude Opus model family (exact identifier not exposed). Plan and evidence: [docs/gameui.md](docs/gameui.md).
+
+- **Done:** GameUI resources from the install (localization with key-name fallback, VGUI `.res` layouts, `gamemenu.res`, `kb_act.lst`/`config_default.cfg`, display-mode helpers); startup flow (main menu over `background01` without a loadable `--map`, launch error for map-dependent arguments without one); resource-driven main menu with categories and the QUIT GAME box. Unit + headless tests, strict Clippy/fmt, packaged macOS captures in `artifacts/gameui/`.
+- **Limitations:** background map is frozen and viewed from the spawn; Load Game, Achievements, Extras and Episode One/Two New Game are disabled placeholders; Windows/Linux **not tested**.
+- **Next:** options dialog framework (tabs, OK/Cancel/Apply, draft vs applied config), then the Gameplay/Keyboard/Mouse/Gamepad/Audio/Video pages, brightness dialog and host wiring.
+
 ## Current session 10 (2026-10-09)
 
 Supersedes session 9's open items where they conflict. Claude Code desktop, model `claude-opus-5-5`. No subagents.

@@ -42,7 +42,11 @@ use std::{
 #[derive(Clone, Resource)]
 struct Options {
     game: PathBuf,
-    map: String,
+    /// Map to load directly. Without it (or when it cannot be loaded) the main menu opens over
+    /// the installed background map.
+    map: Option<String>,
+    /// Arguments that only make sense in a directly loaded `--map`, in command-line order.
+    map_dependent: Vec<&'static str>,
     frames: Option<u64>,
     capture: Option<PathBuf>,
     /// Also save this many consecutive frames after the capture (flicker checks).
@@ -73,17 +77,31 @@ struct Options {
     no_focus: bool,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
     tonemap_scale: Option<f32>,
-    /// Start in the Source-native main menu instead of unpausing directly into gameplay.
+    /// Show the main menu over the loaded map, treating it as a menu background.
     main_menu: bool,
+}
+/// Rejects map-dependent arguments when no `--map` was given.
+fn require_map_for(map: Option<&str>, map_dependent: &[&str]) -> Result<()> {
+    if map.is_none() && !map_dependent.is_empty() {
+        bail!(
+            "--map is required by {}: they apply to a directly loaded map, and without --map the main menu opens",
+            map_dependent.join(", ")
+        );
+    }
+    Ok(())
 }
 impl Options {
     fn parse() -> Result<Self> {
+        Self::parse_from(std::env::args().skip(1))
+    }
+    fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let config = hl2_ui::config::Config::load_or_default();
-        let mut args = std::env::args().skip(1);
+        let mut args = args.into_iter();
         let mut game = None;
         let mut options = Self {
             game: PathBuf::new(),
-            map: "d1_trainstation_02".into(),
+            map: None,
+            map_dependent: Vec::new(),
             frames: None,
             capture: None,
             capture_burst: 0,
@@ -110,13 +128,28 @@ impl Options {
             main_menu: false,
         };
         while let Some(arg) = args.next() {
-            let next = |args: &mut std::iter::Skip<std::env::Args>| -> Result<String> {
+            let next = |args: &mut dyn Iterator<Item = String>| -> Result<String> {
                 args.next()
                     .with_context(|| format!("missing value after {arg}"))
             };
+            if let Some(name) = [
+                "--position",
+                "--yaw",
+                "--pitch",
+                "--fly",
+                "--movement-script",
+                "--capture-live",
+                "--capture-burst",
+                "--capture-monitor",
+            ]
+            .into_iter()
+            .find(|name| *name == arg)
+            {
+                options.map_dependent.push(name);
+            }
             match arg.as_str() {
                 "--game" => game = Some(PathBuf::from(next(&mut args)?)),
-                "--map" => options.map = next(&mut args)?,
+                "--map" => options.map = Some(next(&mut args)?),
                 "--frames" => options.frames = Some(next(&mut args)?.parse()?),
                 "--capture" => options.capture = Some(next(&mut args)?.into()),
                 "--capture-burst" => options.capture_burst = next(&mut args)?.parse()?,
@@ -158,13 +191,14 @@ impl Options {
                 "--main-menu" => options.main_menu = true,
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --borderless --width N --height N\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
                 _ => bail!("unknown option {arg}; use --help"),
             }
         }
+        require_map_for(options.map.as_deref(), &options.map_dependent)?;
         if !(0. ..=1.).contains(&options.volume) {
             bail!("--volume must be between 0 and 1");
         }
@@ -217,7 +251,8 @@ impl Options {
     }
 }
 #[derive(Resource)]
-struct PreparedMap(Option<assets::LoadedMap>);
+/// The startup map and whether it is a main-menu background level.
+struct PreparedMap(Option<assets::LoadedMap>, bool);
 #[derive(Default, Serialize)]
 struct RunStatus {
     #[serde(skip)]
@@ -270,13 +305,40 @@ fn source_direction(yaw: f32, pitch: f32) -> Vec3 {
     )
 }
 
+/// Loads the startup map: a loadable `--map` starts gameplay; no `--map` or an unloadable one
+/// opens the main menu over the installed background map. Returns the map and whether it is a
+/// menu background level.
+fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
+    if let Some(map) = &options.map {
+        println!("Loading owned {map} for Bevy/wgpu migration host...");
+        match assets::load(&options.game, map) {
+            Ok(loaded) => return Ok((loaded, options.main_menu)),
+            Err(error) if !options.map_dependent.is_empty() => {
+                return Err(error.context(format!(
+                    "--map {map} could not be loaded, and it is required by {}",
+                    options.map_dependent.join(", ")
+                )));
+            }
+            Err(error) => {
+                eprintln!("--map {map} could not be loaded ({error:#}); opening the main menu.")
+            }
+        }
+    }
+    let vfs =
+        source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
+    let background = hl2_ui::gameui::resources::startup_background_map(&vfs).context(
+        "no main-menu background map in scripts/chapterbackgrounds.txt; pass a loadable --map",
+    )?;
+    println!("Loading owned main-menu background {background}...");
+    let loaded = assets::load(&options.game, &background)
+        .with_context(|| format!("load main-menu background map {background}"))?;
+    Ok((loaded, true))
+}
+
 fn main() -> Result<()> {
     let options = Options::parse()?;
-    println!(
-        "Loading owned {} for Bevy/wgpu migration host...",
-        options.map
-    );
-    let loaded = assets::load(&options.game, &options.map)?;
+    let (loaded, background_level) = load_startup_map(&options)?;
+    let map_name = loaded.world.name.clone();
     let revision = loaded.revision;
     let model_report = loaded.models.clone();
     let texture_errors = loaded.texture_errors.clone();
@@ -335,7 +397,7 @@ fn main() -> Result<()> {
     app.insert_resource(options.clone())
         .insert_resource(tonemap::Tonemap::new(options.tonemap_scale))
         .insert_resource(status.clone())
-        .insert_resource(PreparedMap(Some(loaded)))
+        .insert_resource(PreparedMap(Some(loaded), background_level))
         .insert_resource(simulation)
         .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
@@ -454,7 +516,7 @@ fn main() -> Result<()> {
     let monitor_capture_exists = options.monitor_capture.as_ref().is_none_or(|p| p.is_file());
     let capture_exists = options.capture.as_ref().is_none_or(|path| path.is_file());
     let mut report = serde_json::json!({
-        "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": options.map, "bsp_revision": revision,
+        "runtime": "Bevy 0.19.1 / wgpu gameplay migration preview", "map": map_name, "bsp_revision": revision,
         "render": &*status, "models": model_report, "textures": texture_summary, "texture_errors": texture_errors, "asset_warnings": warnings,
         "capture_file_exists": capture_exists, "capture_write_error": capture_write_error,
         "monitor_capture_file_exists":monitor_capture_exists,"monitor_capture_write_error":monitor_capture_write_error, "spawn_sky_visibility": spawn_sky_visibility,
@@ -540,9 +602,7 @@ fn setup(
         ),
     );
     let mut console_ui = console::Console::new(ui);
-    if options.main_menu {
-        console_ui.source.mode = hl2_ui::console::Mode::MainMenu;
-    }
+    console_ui.source.level_loaded(prepared.1);
     commands.insert_resource(console_ui);
     commands.spawn((
         Camera2d,
@@ -910,5 +970,42 @@ mod tests {
     fn source_camera_positive_pitch_looks_up() {
         assert!(source_to_bevy(source_direction(0., 0.5)).y > 0.);
         assert!(source_to_bevy(source_direction(std::f32::consts::FRAC_PI_2, 0.)).z < -0.99);
+    }
+    #[test]
+    fn map_dependent_arguments_require_a_map() {
+        assert!(
+            require_map_for(None, &[]).is_ok(),
+            "plain launch opens the main menu"
+        );
+        assert!(require_map_for(Some("d1_trainstation_01"), &["--fly"]).is_ok());
+        let error = require_map_for(None, &["--position", "--fly"]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("--map is required by --position, --fly")
+        );
+    }
+    #[test]
+    fn parsing_rejects_map_dependent_arguments_before_loading_anything() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for (list, flag) in [
+            (&["--position", "1", "2", "3"][..], "--position"),
+            (&["--yaw", "90"], "--yaw"),
+            (&["--pitch", "0"], "--pitch"),
+            (&["--fly"], "--fly"),
+            (&["--movement-script", "m.json"], "--movement-script"),
+            (&["--capture-live"], "--capture-live"),
+            (&["--capture-burst", "4"], "--capture-burst"),
+            (&["--capture-monitor", "m.png"], "--capture-monitor"),
+        ] {
+            let error = Options::parse_from(args(list))
+                .err()
+                .expect(flag)
+                .to_string();
+            assert!(
+                error.contains(flag) && error.contains("--map is required"),
+                "{error}"
+            );
+        }
     }
 }

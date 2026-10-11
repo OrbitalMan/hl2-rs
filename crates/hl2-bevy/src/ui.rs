@@ -372,4 +372,55 @@ mod tests {
         let ui = app.world().resource::<crate::console::Console>();
         assert_eq!(ui.source.mode, hl2_ui::console::Mode::Pause);
     }
+
+    #[test]
+    fn update_ui_keeps_the_background_level_main_menu_on_escape() {
+        let mut app = App::new();
+        let mut console = crate::console::Console::new(Default::default());
+        console.source.level_loaded(true);
+        app.insert_resource(crate::movement::Simulation::new(
+            &modkit_core::World::default(),
+            glam::Vec3::ZERO,
+            0.,
+            0.,
+            false,
+            vec![],
+        ))
+        .insert_resource(crate::gameplay::Gameplay::synthetic(
+            modkit_core::World::default(),
+        ))
+        .insert_resource(console)
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .add_message::<AppExit>()
+        .add_message::<bevy::input::keyboard::KeyboardInput>();
+        app.world_mut().spawn((
+            Window {
+                resolution: bevy::window::WindowResolution::new(800, 600),
+                focused: true,
+                ..default()
+            },
+            CursorOptions::default(),
+            PrimaryWindow,
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.world_mut().run_system_once(update_ui).unwrap();
+        let ui = app.world().resource::<crate::console::Console>();
+        assert_eq!(ui.source.mode, hl2_ui::console::Mode::MainMenu);
+        assert!(ui.source.background_level());
+        let sim = app.world().resource::<crate::movement::Simulation>();
+        assert!(
+            sim.paused(),
+            "the background level stays paused behind the menu"
+        );
+        let (window, cursor) = app
+            .world_mut()
+            .query::<(&Window, &CursorOptions)>()
+            .single(app.world())
+            .map(|(w, c)| (w.focused, c.visible))
+            .unwrap();
+        assert!(window && cursor, "menu cursor is visible");
+    }
 }

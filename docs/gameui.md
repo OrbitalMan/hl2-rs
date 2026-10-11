@@ -91,3 +91,49 @@ Correction (2026-10-11): `#GameUI_NoWindowBorder` is defined in the UTF-16 `game
    draft vs applied `Config`, persistence), widgets.
 4. Pages: Gameplay, Keyboard, Mouse, Gamepad (empty placeholder), Audio, Video + brightness dialog.
 5. Documentation and validation records.
+
+## 5. Implemented: startup flow and main menu (2026-10-11)
+
+What exists:
+
+- `hl2-ui::gameui::widgets`: scheme-derived `Theme` (`sourcescheme.res`/`clientscheme.res` colours),
+  Tahoma/Tahoma Bold widget fonts, a `Painter` over the ordered CPU canvas, button states and text
+  wrapping.
+- `hl2-ui::gameui::menu`: `GameMenu` built from `gamemenu.res` categories (main, hl2, episodic,
+  ep2), with spacers, keyboard/pointer navigation and no armed entry until hover or arrow keys;
+  `MessageBox` for the "QUIT GAME" confirmation.
+- Startup (`hl2-bevy::main::load_startup_map`):
+  - a loadable `--map` starts gameplay (`--main-menu` turns it into a menu background instead);
+  - no `--map`, or one that fails to load, loads the chapter-1 background map (`background01`)
+    paused behind the main menu;
+  - `--position`, `--yaw`, `--pitch`, `--fly`, `--movement-script`, `--capture-live`,
+    `--capture-burst` and `--capture-monitor` without a loadable `--map` exit with an error.
+- New Game in the HALF-LIFE 2 category loads chapter 1 as gameplay. Escape on a background level
+  closes the quit box or returns from a category, but never resumes the background into gameplay.
+
+Placeholders (shown disabled; activating logs to the console): Load Game, Achievements, Extras.
+Episode One/Two New Game are disabled because only the `hl2` chapter-1 map is mapped so far.
+
+Limitations:
+
+- The background map is frozen and viewed from the player spawn, not from its
+  `point_viewcontrol` camera.
+- There is no map-less host mode: if the background map itself fails to load, startup fails.
+- Menu positions follow the retail layout, but the canvas scale is the existing HUD scale rather
+  than a verified retail proportional scale.
+
+Verified (2026-10-11, macOS Apple Silicon, release build from `scripts/build-bevy.sh`):
+
+- `cargo test --locked -p hl2-ui -p hl2-bevy`: hl2-ui 69 passed / 2 ignored, hl2-bevy 54 passed /
+  2 ignored (ignored tests need the owned install).
+- `cargo clippy --locked -p hl2-ui -p hl2-bevy -p source-assets --all-targets -- -D warnings` and
+  `cargo fmt --all --check`: clean.
+- Packaged captures (ignored `artifacts/gameui/`): no `--map` shows background01 with the main menu
+  (mode MainMenu); `--map no_such_map` reports the failure and falls back to the menu;
+  `--map d1_trainstation_01` starts in gameplay; `--fly --position 0 0 0` and
+  `--map no_such_map --fly` exit with status 1; scripted input with
+  `--map background01 --main-menu --movement-script` captured the quit box and the HALF-LIFE 2
+  category.
+
+Not tested: Windows and Linux, mouse-only navigation in the packaged build (covered only by unit
+tests), and the Episode One/Two categories beyond the model tests.

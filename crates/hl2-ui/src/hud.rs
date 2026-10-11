@@ -181,6 +181,23 @@ impl FontFace {
             .map(|c| self.font.metrics(c, em).advance_width)
             .sum()
     }
+    /// Width of `value` for a font whose character cell is `cell` pixels tall.
+    pub(crate) fn width_cell(&self, value: &str, cell: f32) -> f32 {
+        self.width_em(value, cell / self.cell_height)
+    }
+    /// Draws `value` with its character cell's top-left corner at `top_left`. Glyphs are
+    /// rasterized at a whole-pixel EM and scaled, so the glyph cache stays bounded.
+    pub(crate) fn draw_cell(&self, value: &str, top_left: Vec2, cell: f32, color: Color) {
+        let em = (cell / self.cell_height).max(1.);
+        let raster = em.round().clamp(1., 1024.);
+        self.draw_baseline(
+            value,
+            top_left + Vec2::new(0., (self.ascent * em).round()),
+            raster,
+            em / raster,
+            color,
+        );
+    }
     pub(crate) fn draw_baseline(
         &self,
         value: &str,

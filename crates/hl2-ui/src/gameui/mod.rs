@@ -7,4 +7,6 @@ pub mod display;
 pub mod keys;
 pub mod layout;
 pub mod localize;
+pub mod menu;
 pub mod resources;
+pub mod widgets;
