@@ -1,6 +1,6 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
 use crate::gameui::{
-    display::Resolution,
+    display::DisplayModes,
     menu::{GameMenu, MenuOutcome, MessageBox, MessageBoxLayout},
     options::{OptionsDialog, OptionsOutcome},
     resources::{fallback_game_menu, GameUiResources},
@@ -600,7 +600,7 @@ impl Console {
     }
 
     /// Resolutions for the Video page, from the host's monitor query.
-    pub fn set_display_modes(&mut self, modes: Vec<Resolution>) {
+    pub fn set_display_modes(&mut self, modes: DisplayModes) {
         self.options.set_display_modes(modes);
     }
 

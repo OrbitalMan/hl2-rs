@@ -48,12 +48,6 @@ pub mod display {
             monitors.iter().next().map(Self::of)
         }
 
-        /// The monitor's size in logical points.
-        pub fn logical_size(&self) -> Vec2 {
-            Vec2::new(self.physical_width as f32, self.physical_height as f32)
-                / self.scale_factor.max(1.0)
-        }
-
         /// Detects if a window currently in `WindowMode::Windowed` is actually occupying the full
         /// display (such as macOS native workspace fullscreen via the green zoom button).
         pub fn is_workspace_fullscreen(&self, window: &Window) -> bool {
@@ -63,14 +57,15 @@ pub mod display {
         }
     }
 
-    /// Resolutions offered on the Video page: the primary monitor's reported video modes,
-    /// filtered and sorted by [`hl2_ui::gameui::display::usable_modes`]. Falls back to the
-    /// current window size when the platform reports none.
+    /// Resolutions offered on the Video page: the primary monitor's reported video modes plus
+    /// the standard list, filtered and sorted by [`hl2_ui::gameui::display::usable_modes`], and
+    /// the desktop size in pixels that windowed choices must fit (windowed mode shows one frame
+    /// pixel per display pixel). Falls back to the current window size when nothing is usable.
     pub fn modes(
         monitors: &Query<&Monitor, With<PrimaryMonitor>>,
         window: &Window,
-    ) -> Vec<hl2_ui::gameui::display::Resolution> {
-        use hl2_ui::gameui::display::{Resolution, usable_modes};
+    ) -> hl2_ui::gameui::display::DisplayModes {
+        use hl2_ui::gameui::display::{DisplayModes, Resolution, usable_modes};
         let monitor = monitors.iter().next();
         let reported = monitor
             .into_iter()
@@ -81,7 +76,10 @@ pub mod display {
             window.resolution.physical_width(),
             window.resolution.physical_height(),
         );
-        usable_modes(reported, size, current)
+        DisplayModes {
+            fullscreen: usable_modes(reported, size, current),
+            desktop: size,
+        }
     }
 }
 
@@ -136,7 +134,7 @@ const PRESENT_ORDER: isize = 100;
 /// mode transitions, such as leaving full screen, finish asynchronously).
 const WINDOW_RESIZE_FRAMES: u32 = 120;
 /// Room kept around a windowed window that would not fit the monitor (title bar, menu bar,
-/// task bar), in logical points.
+/// task bar), in logical points (scaled to pixels by the display's scale factor).
 const WINDOW_MARGIN: Vec2 = Vec2::new(32.0, 96.0);
 
 /// Frames during which game-frame rendering is suspended around a frame resize.
@@ -384,11 +382,12 @@ pub enum WindowResize {
     Wait,
     /// The window already has the requested size.
     Done,
-    /// Request this logical client size.
-    Resize(Vec2),
+    /// Request this physical (pixel) client size.
+    Resize(UVec2),
 }
 
-/// Decides a windowed-mode resize to the logical size of `resolution`, clamped to the monitor.
+/// Decides a windowed-mode resize to `resolution` in physical pixels (one frame pixel per display
+/// pixel, also on high-DPI displays), clamped to the monitor.
 pub fn window_resize(
     window: &Window,
     monitor: Option<&Monitor>,
@@ -401,7 +400,8 @@ pub fn window_resize(
     if metrics.is_some_and(|m| m.is_workspace_fullscreen(window)) {
         return WindowResize::Wait;
     }
-    let available = metrics.map(|m| m.logical_size());
+    let scale = window.scale_factor().max(1.0);
+    let available = metrics.map(|m| Vec2::new(m.physical_width as f32, m.physical_height as f32));
     let mut size = hl2_ui::viewport::windowed_size(
         glam::UVec2::new(resolution.x, resolution.y),
         available.map(|a| glam::Vec2::new(a.x, a.y)),
@@ -409,15 +409,20 @@ pub fn window_resize(
     if let Some(available) = available
         && (size.x >= available.x || size.y >= available.y)
     {
-        let room = (available - WINDOW_MARGIN).max(Vec2::ONE);
+        let room = (available - WINDOW_MARGIN * scale).max(Vec2::ONE);
         size = hl2_ui::viewport::windowed_size(
             glam::UVec2::new(resolution.x, resolution.y),
             Some(glam::Vec2::new(room.x, room.y)),
         );
     }
-    let size = Vec2::new(size.x, size.y);
-    let current = Vec2::new(window.resolution.width(), window.resolution.height());
-    if (current - size).abs().max_element() < 1.0 {
+    let size = UVec2::new(size.x as u32, size.y as u32).max(UVec2::ONE);
+    let current = UVec2::new(
+        window.resolution.physical_width(),
+        window.resolution.physical_height(),
+    );
+    // The OS sizes windows in points: allow the rounding of one point.
+    let tolerance = scale.ceil() as u32;
+    if current.x.abs_diff(size.x) <= tolerance && current.y.abs_diff(size.y) <= tolerance {
         WindowResize::Done
     } else {
         WindowResize::Resize(size)
@@ -448,16 +453,16 @@ pub(crate) fn resize_window(
     }
     let decision = window_resize(&window, monitor, frame.resolution);
     debug!(
-        "[video] resize_window frames={frames} mode={:?} window={}x{} -> {decision:?}",
+        "[video] resize_window frames={frames} mode={:?} window={}x{} px -> {decision:?}",
         window.mode,
-        window.resolution.width(),
-        window.resolution.height()
+        window.resolution.physical_width(),
+        window.resolution.physical_height()
     );
     match decision {
         WindowResize::Cancel | WindowResize::Done => frame.pending_window = None,
         WindowResize::Wait => {}
         WindowResize::Resize(size) => {
-            window.resolution.set(size.x, size.y);
+            window.resolution.set_physical_resolution(size.x, size.y);
             window.position = WindowPosition::Centered(MonitorSelection::Current);
             frame.pending_window = frames.checked_sub(1).filter(|left| *left > 0);
         }
@@ -702,31 +707,42 @@ mod tests {
         let monitor = monitor(2560, 1440, 1.0);
         assert_eq!(
             window_resize(&window, Some(&monitor), frame.resolution),
-            WindowResize::Resize(Vec2::new(1024.0, 768.0))
+            WindowResize::Resize(UVec2::new(1024, 768))
         );
     }
 
     #[test]
-    fn windowed_size_is_logical_on_high_dpi_displays() {
-        // Retina 3024x1964 at 2x: a 1280x720 window is 1280x720 points (2560x1440 pixels);
-        // the 1280x720 frame is upscaled 2x by the presentation pass.
+    fn windowed_size_is_one_frame_pixel_per_display_pixel() {
+        // Retina 3024x1964 at 2x: a 1280x720 window is 1280x720 pixels (640x360 points), so the
+        // frame is shown 1:1 without scaling.
         let window = window(1000, 600, 2.0, WindowMode::Windowed);
         let retina = monitor(3024, 1964, 2.0);
         assert_eq!(
             window_resize(&window, Some(&retina), UVec2::new(1280, 720)),
-            WindowResize::Resize(Vec2::new(1280.0, 720.0))
+            WindowResize::Resize(UVec2::new(1280, 720))
         );
-        let sized = self::window(2560, 1440, 2.0, WindowMode::Windowed);
+        let sized = self::window(1280, 720, 2.0, WindowMode::Windowed);
         assert_eq!(
             window_resize(&sized, Some(&retina), UVec2::new(1280, 720)),
             WindowResize::Done
+        );
+        let rounded = self::window(1282, 720, 2.0, WindowMode::Windowed);
+        assert_eq!(
+            window_resize(&rounded, Some(&retina), UVec2::new(1281, 720)),
+            WindowResize::Done,
+            "one point of OS rounding is accepted"
+        );
+        assert_eq!(
+            window_resize(&window, Some(&retina), UVec2::new(2560, 1600)),
+            WindowResize::Resize(UVec2::new(2560, 1600)),
+            "large Retina resolutions fit in windowed mode"
         );
     }
 
     #[test]
     fn oversized_windowed_resolution_is_clamped_to_the_monitor() {
-        // The panel's native 3024x1964 does not fit 1512x982 points with a title bar: the window
-        // shrinks uniformly inside the monitor, keeping the frame's aspect ratio.
+        // The panel's native 3024x1964 does not fit with a title bar: the window shrinks
+        // uniformly inside the monitor, keeping the frame's aspect ratio.
         let window = window(1000, 600, 2.0, WindowMode::Windowed);
         let retina = monitor(3024, 1964, 2.0);
         let WindowResize::Resize(size) =
@@ -734,8 +750,11 @@ mod tests {
         else {
             panic!("expected a resize");
         };
-        assert!(size.x <= 1512.0 - 32.0 && size.y <= 982.0 - 96.0, "{size}");
-        assert!((size.x / size.y - 3024.0 / 1964.0).abs() < 0.01, "{size}");
+        assert!(size.x <= 3024 - 64 && size.y <= 1964 - 192, "{size}");
+        assert!(
+            (size.x as f32 / size.y as f32 - 3024.0 / 1964.0).abs() < 0.01,
+            "{size}"
+        );
     }
 
     #[test]

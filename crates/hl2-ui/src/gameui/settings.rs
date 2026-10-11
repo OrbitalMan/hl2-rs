@@ -6,7 +6,7 @@
 //! `docs/gameui.md` section 3).
 
 use super::{
-    display::{self, AspectRatio, Resolution},
+    display::{self, AspectRatio, DisplayModes, Resolution},
     localize::Localization,
     widgets::SliderRange,
 };
@@ -33,7 +33,15 @@ impl Draft {
 pub struct Env<'a> {
     pub localization: &'a Localization,
     pub languages: &'a [String],
-    pub modes: &'a [Resolution],
+    pub modes: &'a DisplayModes,
+}
+
+impl Env<'_> {
+    /// Resolutions offered for the draft's display mode (windowed ones must fit the desktop).
+    pub fn resolutions(&self, draft: &Draft) -> Vec<Resolution> {
+        self.modes
+            .choices(draft.config.video.display_mode.effective() == DisplayMode::Windowed)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,7 +164,7 @@ impl Choice {
                 .iter()
                 .map(|l| loc.text(&language_token(l)))
                 .collect(),
-            Self::Resolution => display::resolution_choices(env.modes, draft.aspect)
+            Self::Resolution => display::resolution_choices(&env.resolutions(draft), draft.aspect)
                 .into_iter()
                 .map(Resolution::label)
                 .collect(),
@@ -183,7 +191,7 @@ impl Choice {
                 .languages
                 .iter()
                 .position(|l| l.eq_ignore_ascii_case(&c.audio.language)),
-            Self::Resolution => display::resolution_choices(env.modes, draft.aspect)
+            Self::Resolution => display::resolution_choices(&env.resolutions(draft), draft.aspect)
                 .iter()
                 .position(|r| *r == Resolution::new(c.video.width, c.video.height)),
         }
@@ -208,6 +216,7 @@ impl Choice {
     }
 
     pub fn select(self, env: &Env, draft: &mut Draft, index: usize) {
+        let resolutions = env.resolutions(draft);
         let c = &mut draft.config;
         match self {
             Self::AimAssist => {
@@ -234,6 +243,18 @@ impl Choice {
                 if let Some(v) = DisplayMode::choices().get(index) {
                     c.video.display_mode = *v;
                 }
+                // The resolution list depends on the display mode (windowed resolutions must
+                // fit the desktop); keep the resolution when it is still offered.
+                let current = Resolution::new(c.video.width, c.video.height);
+                let offered = env.resolutions(draft);
+                if !offered.contains(&current) {
+                    if let Some(r) =
+                        display::choose_after_aspect_change(&offered, draft.aspect, current)
+                    {
+                        draft.config.video.width = r.width;
+                        draft.config.video.height = r.height;
+                    }
+                }
             }
             Self::HudAspect => {
                 if let Some(v) = HudAspect::ALL.get(index) {
@@ -251,7 +272,8 @@ impl Choice {
                 }
             }
             Self::Resolution => {
-                if let Some(r) = display::resolution_choices(env.modes, draft.aspect).get(index) {
+                if let Some(r) = display::resolution_choices(&resolutions, draft.aspect).get(index)
+                {
                     c.video.width = r.width;
                     c.video.height = r.height;
                 }
@@ -265,7 +287,8 @@ impl Choice {
                 }
                 draft.aspect = aspect;
                 let current = Resolution::new(c.video.width, c.video.height);
-                if let Some(r) = display::choose_after_aspect_change(env.modes, aspect, current) {
+                if let Some(r) = display::choose_after_aspect_change(&resolutions, aspect, current)
+                {
                     c.video.width = r.width;
                     c.video.height = r.height;
                 }
@@ -453,7 +476,7 @@ pub fn enabled(
 mod tests {
     use super::*;
 
-    fn env<'a>(loc: &'a Localization, languages: &'a [String], modes: &'a [Resolution]) -> Env<'a> {
+    fn env<'a>(loc: &'a Localization, languages: &'a [String], modes: &'a DisplayModes) -> Env<'a> {
         Env {
             localization: loc,
             languages,
@@ -482,12 +505,12 @@ mod tests {
     #[test]
     fn aspect_change_resets_resolution_without_touching_applied_config() {
         let loc = Localization::default();
-        let modes = [
+        let modes = DisplayModes::new(vec![
             Resolution::new(1920, 1080),
             Resolution::new(1280, 720),
             Resolution::new(1024, 768),
             Resolution::new(1680, 1050),
-        ];
+        ]);
         let langs = ["english".to_owned()];
         let env = env(&loc, &langs, &modes);
         let applied = Config::default();
@@ -513,11 +536,64 @@ mod tests {
     }
 
     #[test]
+    fn windowed_choices_fit_the_desktop_and_switching_keeps_a_valid_resolution() {
+        let loc = Localization::default();
+        let langs = ["english".to_owned()];
+        let modes = DisplayModes {
+            fullscreen: vec![
+                Resolution::new(3456, 2234),
+                Resolution::new(1920, 1080),
+                Resolution::new(1600, 900),
+                Resolution::new(1280, 720),
+                Resolution::new(1024, 768),
+            ],
+            desktop: Some(Resolution::new(1728, 1117)),
+        };
+        let env = env(&loc, &langs, &modes);
+        let mut config = Config::default();
+        config.video.display_mode = DisplayMode::Fullscreen;
+        config.video.width = 1920;
+        config.video.height = 1080;
+        let mut draft = Draft::new(config);
+        assert_eq!(
+            Choice::Resolution.items(&env, &draft),
+            ["3456 x 2234", "1920 x 1080", "1600 x 900", "1280 x 720"]
+        );
+        let windowed = DisplayMode::choices()
+            .iter()
+            .position(|m| *m == DisplayMode::Windowed)
+            .unwrap();
+        Choice::DisplayMode.select(&env, &mut draft, windowed);
+        assert_eq!(
+            Choice::Resolution.items(&env, &draft),
+            ["1600 x 900", "1280 x 720"]
+        );
+        assert_eq!(
+            (draft.config.video.width, draft.config.video.height),
+            (1600, 900),
+            "a resolution larger than the desktop is replaced by the largest that fits"
+        );
+        draft.config.video.width = 1280;
+        draft.config.video.height = 720;
+        let fullscreen = DisplayMode::choices()
+            .iter()
+            .position(|m| *m == DisplayMode::Fullscreen)
+            .unwrap();
+        Choice::DisplayMode.select(&env, &mut draft, fullscreen);
+        assert_eq!(
+            (draft.config.video.width, draft.config.video.height),
+            (1280, 720),
+            "a still-offered resolution is kept"
+        );
+    }
+
+    #[test]
     fn choices_use_tokens_with_key_name_fallback_and_platform_display_modes() {
         let mut loc = Localization::default();
         loc.insert("GameUI_Language_English", "English");
         let langs = ["english".to_owned(), "schinese".to_owned()];
-        let env = env(&loc, &langs, &[]);
+        let no_modes = DisplayModes::default();
+        let env = env(&loc, &langs, &no_modes);
         let mut draft = Draft::new(Config::default());
         assert_eq!(
             Choice::Language.items(&env, &draft),

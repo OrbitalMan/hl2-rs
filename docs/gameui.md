@@ -341,15 +341,18 @@ Design (`crates/hl2-bevy/src/video.rs`):
   rect into frame pixels and rejects positions on the black bars.
 - **Windowed resize.** OK/Apply in windowed mode stores the resolution in `GameFrame` and starts a
   bounded resize (`resize_window`, up to 120 frames). The window's client area is set to the
-  resolution in logical points (`hl2_ui::viewport::windowed_size`), the way Source sizes a windowed
-  game to its mode; on a 2x display the frame is then upscaled 2x. A size that does not fit the
-  monitor's logical size is shrunk uniformly to fit, with room left for the title, menu and task
-  bars. The window is centred. The request is repeated while a mode transition (leaving full
-  screen) finishes, and dropped once the size matches or the window leaves windowed mode. While the
-  window fills the display in OS full screen it is left alone, and the resize resumes when it
-  returns to a normal window. Startup in windowed mode uses the same path, so a stored resolution
-  larger than the monitor is clamped. Manual resizes are never fought: they just change the
-  presented scale.
+  resolution in physical pixels (`hl2_ui::viewport::windowed_size` against the monitor's pixel
+  size), so the frame is shown 1:1 without scaling, also on high-DPI displays: on a 2x Retina panel
+  a 2560x1600 window is 1280x800 points. (Updated 2026-10-12 at the owner's request; it was first
+  sized in logical points, which upscaled the frame 2x and made every resolution above the
+  desktop's point size unusable in a window.) A size that does not fit the monitor is shrunk
+  uniformly to fit, with room left for the title, menu and task bars (scaled to pixels). The
+  window is centred. The request is repeated while a mode transition (leaving full screen)
+  finishes, and dropped once the size matches (within one point of OS rounding) or the window
+  leaves windowed mode. While the window fills the display in OS full screen it is left alone, and
+  the resize resumes when it returns to a normal window. Startup in windowed mode uses the same
+  path, so a stored resolution larger than the monitor is clamped. Manual resizes are never
+  fought: they just change the presented scale.
 - **Full screen.** On Windows and Linux full screen stays `WindowMode::Fullscreen(Current,
   VideoModeSelection::Current)`: the desktop mode, no mode switch. On macOS full screen is a
   full-screen window over the desktop mode (`BorderlessFullscreen`). An exclusive mode set there can
@@ -425,3 +428,36 @@ Verified (2026-10-11, macOS M1 Pro):
 Known limitation: on the first frame after resuming, sky cameras may use a stale activity value for
 one frame (a one-frame visual glitch at most). Not tested: changes made with the Options dialog's
 OK/Apply through real mouse input (it uses the same pending-settings path), Windows and Linux.
+
+### 10b. Standard resolution lists and pixel-scale windowed mode (2026-10-12)
+
+Problem:
+1. On Retina displays (macOS), the panel only reported high-resolution 16:10-like modes (1920x1200
+   and up), leaving the "Normal (4:3)" aspect ratio bucket empty and omitting common resolutions like
+   720p.
+2. In windowed mode, sizing the window in logical points caused high-DPI displays (2x scale) to double
+   the window dimensions, making even modest resolutions fill the entire screen and making native
+   resolutions (e.g. 2560x1600 or 3000+) impossible to use windowed.
+
+Design and changes:
+- **Standard resolution list (`STANDARD_MODES`):** Added 23 standard resolutions covering 4:3, 5:4,
+  16:9, and 16:10 (from 640x480 up to 3840x2160) to `hl2_ui::gameui::display`. In `usable_modes`,
+  these are merged with the monitor's reported modes, deduplicated, and sorted largest first. Since the
+  game renders to an offscreen frame and samples it, display hardware support is not required to offer
+  or render a mode.
+- **DisplayMode-aware choices (`DisplayModes`):** `DisplayModes` tracks both full-screen modes and the
+  desktop pixel bounds. Windowed choices filter out resolutions that exceed the desktop pixels, and
+  switching display mode or aspect cleanly selects the largest fitting candidate if the current choice
+  becomes invalid.
+- **Physical pixel windowed sizing:** Windowed mode sizes the window client area in physical pixels
+  (`set_physical_resolution`), giving 1:1 pixel parity with the game frame resolution on high-DPI
+  displays. This allows choosing crisp resolutions up to the display's native pixel limits.
+- **Input tracking:** Added `debug!` telemetry in `hl2-bevy::ui` to log cursor position, window
+  dimensions, scale factor, viewport bounds, and canvas pointer coordinates on click.
+
+Verified (2026-10-12, macOS M1 Pro Retina):
+- Unit tests in `hl2-ui` and `hl2-bevy`: Retina mode merging, 4:3 choices availability, windowed
+  desktop bounds clamping, and physical pixel window resize calculations.
+- Live packaged run with real mouse interaction: navigated Options -> Video, selected and applied
+  4:3 and wide resolutions (1600x1200, 2048x1536, 640x480, 1024x768, 1280x1024) in windowed mode,
+  confirming reliable click responsiveness and window sizing.

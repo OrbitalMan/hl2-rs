@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-12 Standard resolutions, 4:3 aspect ratio and pixel-scale windowed mode
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::display`: added `STANDARD_MODES` (23 standard resolutions covering 4:3, 5:4, 16:9, 16:10 from 640x480 up to 4K) merged with monitor-reported modes in `usable_modes`; introduced `DisplayModes` carrying full-screen modes and desktop pixel bounds.
+- `hl2-ui::gameui::settings`: resolution choices now filter by the draft display mode (`DisplayModes::choices`); switching display mode or aspect updates the available list and automatically falls back to the largest fitting candidate if the current resolution exceeds desktop bounds.
+- `hl2-bevy::video`: windowed mode resize now sizes the window client area in physical pixels (`set_physical_resolution`), giving 1:1 pixel rendering and allowing resolutions up to Retina native without 2x point ballooning; monitor query supplies desktop pixel bounds.
+- `hl2-bevy::ui`: added `debug!` telemetry logging cursor position, window dimensions, scale factor, viewport bounds, and canvas pointer coordinates on click.
+
+**Why:**
+- High-DPI/Retina monitors only reported a few high-res 16:10 modes, leaving the Normal (4:3) aspect bucket empty and omitting common smaller resolutions like 720p.
+- Windowed mode previously sized windows in logical points, which doubled window dimensions on 2x Retina displays and made resolutions above half the screen size fill or exceed the display.
+- Verified click responsiveness and coordinate mapping across windowed resolution changes.
+
+**Tested how:** `cargo test --locked -p hl2-ui -p hl2-bevy` (all pass: 64 + 89 passed); strict Clippy (`-D warnings`); `cargo fmt --all`. Live packaged run on macOS M1 Pro Retina (`./launch-bevy.sh --map background01 --main-menu --windowed --width 1280 --height 720`): verified live interactive navigation in Options -> Video, changing resolutions across 1600x1200, 2048x1536, 640x480, 1024x768, and 1280x1024 with click dispatch and window resizing confirmed operational. See docs/gameui.md section 10b.
+
+**Result:** 4:3 aspect ratio and standard resolutions are available on all displays; windowed mode runs at native 1:1 pixel scale up to display native resolution; click response verified.
+
+**Still broken or not tested:** Windows and Linux display mode queries not tested on physical hardware. Fullscreen monitor mode switching not tested.
+
+**Next:** Windows verification; owner check.
+
 ## 2026-10-11 Safe runtime resolution change
 
 **Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).

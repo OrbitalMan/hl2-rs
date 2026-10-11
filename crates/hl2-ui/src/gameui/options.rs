@@ -12,7 +12,7 @@
 //! innermost layer; on the dialog it acts as Cancel.
 
 use super::{
-    display::Resolution,
+    display::DisplayModes,
     keys::{self, KeyRow},
     layout::{Align as LayoutAlign, Control, ControlKind},
     menu::MessageBox,
@@ -224,7 +224,7 @@ impl Widget<'_> {
 
 pub struct OptionsDialog {
     res: Arc<GameUiResources>,
-    modes: Vec<Resolution>,
+    modes: DisplayModes,
     tab: Tab,
     applied: Config,
     draft: Draft,
@@ -246,7 +246,7 @@ impl Default for OptionsDialog {
         let config = Config::default();
         Self {
             res: Arc::default(),
-            modes: Vec::new(),
+            modes: DisplayModes::default(),
             tab: Tab::Gameplay,
             draft: Draft::new(config.clone()),
             applied: config,
@@ -353,7 +353,7 @@ impl OptionsDialog {
     }
 
     /// Resolutions offered on the Video page (from the host's monitor query).
-    pub fn set_display_modes(&mut self, modes: Vec<Resolution>) {
+    pub fn set_display_modes(&mut self, modes: DisplayModes) {
         self.modes = modes;
     }
 
@@ -1165,7 +1165,7 @@ mod tests {
     use crate::canvas::Canvas;
     use crate::config::{AimAssist, HdrMode};
     use crate::gameui::{
-        display::AspectRatio,
+        display::{AspectRatio, Resolution},
         layout::Layout,
         localize::Localization,
         widgets::{Fonts, Theme},
@@ -1271,11 +1271,11 @@ mod tests {
         fn new() -> Self {
             let mut dialog = OptionsDialog::default();
             dialog.set_resources(resources());
-            dialog.set_display_modes(vec![
+            dialog.set_display_modes(DisplayModes::new(vec![
                 Resolution::new(1920, 1080),
                 Resolution::new(1280, 720),
                 Resolution::new(1024, 768),
-            ]);
+            ]));
             dialog.open(Config::default());
             Self {
                 dialog,

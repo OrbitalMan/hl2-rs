@@ -117,14 +117,25 @@ pub fn update_ui(
         if ui.source.mode == before
             && let Some(game) = game.as_deref_mut()
         {
+            let pointer =
+                cursor_to_canvas(window.cursor_position(), video_viewport.as_deref(), &window);
+            if buttons.just_pressed(MouseButton::Left) {
+                debug!(
+                    "[ui] click cursor={:?} window={}x{} (scale {}) focused={} viewport={:?} -> canvas {:?} mode={:?}",
+                    window.cursor_position(),
+                    window.width(),
+                    window.height(),
+                    window.scale_factor(),
+                    window.focused,
+                    video_viewport.as_deref().map(|v| v.bounds()),
+                    pointer,
+                    ui.source.mode
+                );
+            }
             let effects = ui.source.input(&hl2_ui::console::Input {
                 text,
                 keys: crate::console::keys(&keys),
-                pointer: cursor_to_canvas(
-                    window.cursor_position(),
-                    video_viewport.as_deref(),
-                    &window,
-                ),
+                pointer,
                 click: buttons.just_pressed(MouseButton::Left),
                 held: buttons.pressed(MouseButton::Left),
                 wheel,

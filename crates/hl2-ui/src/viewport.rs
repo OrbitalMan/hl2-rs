@@ -124,15 +124,15 @@ impl ViewportBounds {
     }
 }
 
-/// Logical (point) size of a windowed-mode window for a configured resolution.
+/// Client size of a windowed-mode window for a configured resolution, in the unit of `bounds`.
 ///
-/// Source sizes a windowed game's client area to the selected video mode. One logical point
-/// carries one game-frame pixel, which the presentation pass upscales on high-DPI displays.
-/// When the request does not fit the monitor's logical size, it is scaled down uniformly so
-/// the window stays on screen and keeps the frame's aspect ratio.
-pub fn windowed_size(resolution: UVec2, monitor_logical: Option<Vec2>) -> Vec2 {
+/// Source sizes a windowed game's client area to the selected video mode. The host passes the
+/// monitor size in pixels, so one game-frame pixel maps to one display pixel (also on high-DPI
+/// displays). When the request does not fit `bounds`, it is scaled down uniformly so the window
+/// stays on screen and keeps the frame's aspect ratio.
+pub fn windowed_size(resolution: UVec2, bounds: Option<Vec2>) -> Vec2 {
     let requested = resolution.max(UVec2::ONE).as_vec2();
-    let Some(monitor) = monitor_logical.filter(|m| m.x >= 1.0 && m.y >= 1.0) else {
+    let Some(monitor) = bounds.filter(|m| m.x >= 1.0 && m.y >= 1.0) else {
         return requested;
     };
     let fit = (monitor.x / requested.x).min(monitor.y / requested.y);
