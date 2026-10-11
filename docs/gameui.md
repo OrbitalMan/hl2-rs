@@ -34,6 +34,31 @@ menu/options work; other documents link here instead of repeating it.
 - `Config` (JSON beside the executable) covered resolution, borderless, FOV, HDR, volume,
   sensitivity, invert and key names.
 
+## 2a. Architecture review and adaptation decisions (milestone 2)
+
+Deficiencies found in the baseline, each tied to a requirement:
+
+| Area | Baseline defect | Decision |
+|---|---|---|
+| Main menu | Four hard-coded entries; no HL2/Episode One/Episode Two categories, spacers, Extras or Quit confirmation; New Game hard-coded `d1_trainstation_02` | Model built from `GameMenu.res` (file order out of game, `InGameOrder` in game); New Game map from `cfg/chapter1.cfg`; Quit opens a confirmation dialog |
+| Pause menu | Separate hard-coded list (Resume/Options/Developer console/Quit) | Same `GameMenu.res` model with `OnlyInGame` entries; the console stays on tilde |
+| Localization | Ad-hoc lookups of a few tokens in `gameui_english.txt` per module, hard-coded English defaults otherwise | One merged `Localization` table (all GameUI files, first file wins) with the key-name fallback |
+| Options layout | Hand-placed rectangles in a 952-line module mixing state, input and drawing | Control rectangles/labels/enabled flags from `OptionsSub*.res`; dialog size 512x406 and title from retail `GameUI.dll`; widget state separated from drawing |
+| Options content | No Gameplay/Gamepad tabs; static resolution list; windowed/borderless toggle only; FOV control not on the retail page | Retail tab set and controls; FOV stays a console/config setting |
+| Keyboard page | Fixed 17-row table from a code constant; no Use Defaults, Clear or conflict handling | Rows from `scripts/kb_act.lst`, defaults from `cfg/config_default.cfg` (`bind_mac` on macOS); binding a key removes it from other actions |
+| Configuration | No skill, mouse filter/raw/acceleration, aim assist, music volume, speaker/quality, language, captions, mute-on-focus-loss, display mode, aspect/HUD aspect, gamma; HDR lacks Bloom and defaults to Full (retail default None) | Extend `Config` with `#[serde(default)]` fields so existing `hl2-config.json` files keep loading; legacy `borderless` migrates to the display mode |
+| Startup | A map was always loaded (default `d1_trainstation_02`); `--main-menu` only overlaid the menu; HUD drawn under the menu | No/unloadable `--map` -> main menu over the chapter background map with the HUD hidden; map-dependent arguments without a loadable map reject the launch |
+| UI input | `Input` carried only navigation keys, pointer and click | Add held button, wheel and pressed binding names (slider drag, list scrolling, key capture); serde defaults keep scripted inputs valid |
+| Display modes | Resolution not queried from the monitor; no exclusive full screen | Modes from Bevy `Monitor::video_modes`, filtered by aspect bucket; Full screen uses the matching video mode |
+
+Kept as they are (working and covered by tests): the `Console` mode/`Effect` pipeline and host
+effect application, the ordered CPU `Canvas`, font loading and cell metrics, `MenuLayout` geometry
+from `ClientScheme.res`, the renderer-viewport resolution design (letterbox, window frame not
+resized), the config file location, `input::binding` policy and the 15 ms system order.
+
+Only `source-assets` change: `Vfs::game_root()` so the UI reader can read the `hl2_complete/`
+overlay and list voice packs; the VFS search path itself is unchanged.
+
 ## 3. Installed resources (verified against the owned install)
 
 | Need | File (search order: `hl2_complete/` loose, then the mounted `hl2`/`platform` VFS) |
