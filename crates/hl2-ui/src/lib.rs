@@ -2,6 +2,7 @@
 pub mod canvas;
 pub mod config;
 pub mod console;
+pub mod fades;
 pub mod hud;
 pub mod input;
 #[cfg(windows)]
