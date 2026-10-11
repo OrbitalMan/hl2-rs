@@ -75,8 +75,9 @@ Retail slider ranges (installed `GameUI.dll` constants): `sensitivity` 0.1-6.0, 
 1.0-1.4, `m_autoaim_scale` 0.5-2.0, `mat_monitorgamma` 1.6-2.6, `volume`/`snd_musicvolume` 0-1; value
 entries show two decimals.
 
-Known gaps: `#GameUI_NoWindowBorder` (Windowed (No Borders)) is referenced by retail `GameUI.dll` but has
-no English string in the shipped files, so it renders as its key name per the fallback rule.
+Correction (2026-10-11): `#GameUI_NoWindowBorder` is defined in the UTF-16 `gameui_english.txt`
+("Windowed (No Border)"); an earlier byte-level search missed it. Verified by the owned-install test
+`gameui::resources::tests::owned_install_resources_load`.
 
 ## 4. Plan (milestones, each committed separately)
 

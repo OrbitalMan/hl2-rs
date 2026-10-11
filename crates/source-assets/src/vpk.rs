@@ -283,6 +283,10 @@ impl Vfs {
         }
         Ok(None)
     }
+    /// The installation root passed to [`Vfs::mount`] (parent of the mounted `hl2` folder).
+    pub fn game_root(&self) -> Option<&Path> {
+        self.roots.first().and_then(|root| root.parent())
+    }
     pub fn archive_counts(&self) -> Vec<(String, usize)> {
         self.archives
             .iter()

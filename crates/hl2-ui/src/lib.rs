@@ -3,6 +3,7 @@ pub mod canvas;
 pub mod config;
 pub mod console;
 pub mod fades;
+pub mod gameui;
 pub mod hud;
 pub mod input;
 #[cfg(windows)]
