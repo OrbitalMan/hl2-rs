@@ -53,8 +53,9 @@ Deficiencies found in the baseline, each tied to a requirement:
 
 Kept as they are (working and covered by tests): the `Console` mode/`Effect` pipeline and host
 effect application, the ordered CPU `Canvas`, font loading and cell metrics, `MenuLayout` geometry
-from `ClientScheme.res`, the renderer-viewport resolution design (letterbox, window frame not
-resized), the config file location, `input::binding` policy and the 15 ms system order.
+from `ClientScheme.res`, the config file location, `input::binding` policy and the 15 ms system
+order. (The earlier renderer-viewport resolution design, which letterboxed inside an unresized
+window, was replaced by the game frame in section 10.)
 
 Only `source-assets` change: `Vfs::game_root()` so the UI reader can read the `hl2_complete/`
 overlay and list voice packs; the VFS search path itself is unchanged.
@@ -287,9 +288,9 @@ Limitations:
 - The retail engine's smoothed music factor (ducking) is not modeled; only `snd_musicvolume`.
 - The game pauses all sounds while it is paused or unfocused, so mute-when-unfocused is mostly
   inaudible today; it matters for sounds that keep playing (none at present).
-- Startup full screen keeps the desktop video mode and letterboxes the configured resolution, like
-  OK/Apply; real monitor mode switching is not implemented.
-- `--borderless` on macOS now gives full screen (previously a borderless full-screen window).
+- Full screen keeps the desktop video mode; the game frame is rendered at the configured
+  resolution and scaled to it (section 10). Real monitor mode switching is not implemented.
+- `--borderless` on macOS gives full screen (a full-screen window over the desktop mode).
 
 Verified (2026-10-11, macOS Apple Silicon):
 
@@ -313,3 +314,67 @@ startup in full screen or No Border, Windows and Linux.
 The ordered list of remaining GameUI work (gamma, HDR modes, captions,
 audio setup/language, gamepad, placeholders, untested platforms) is kept in
 [STATUS.md](../STATUS.md) under "Current session: GameUI".
+
+## 10. Resolution, display mode and scaling (2026-10-11)
+
+Problem: the configured resolution only letterboxed a camera viewport. In windowed mode the window
+kept its size, and in full screen the 3D view rendered at the display's native resolution.
+
+Design (`crates/hl2-bevy/src/video.rs`):
+
+- **Game frame.** The configured resolution is the size of one offscreen render target
+  (`GameFrame`, `Rgba8UnormSrgb`, linear sampler). The sky background (layer 3 / order -2),
+  miniature sky (layer 4 / order -1), world (layer 0), viewmodel and HUD/menu cameras all render
+  into it. `present_frame` routes every camera except `MonitorCamera` (`_rt_Camera`) and
+  `PresentCamera` into the frame each frame, so map-owned cameras spawned on a level change are
+  covered too. It also clears camera viewports and recreates the image when the resolution
+  changes. Layer order, clears and per-camera post-processing are unchanged; only their target
+  changed.
+- **Presentation.** `PresentCamera` (a 2D camera, order 100, black clear, layer 31) draws one sprite
+  showing the frame. The sprite is scaled to fit the window and centred (letterbox or pillarbox when
+  the aspects differ), and the frame is sampled with linear filtering. Full screen at 1280x720 on a
+  3456x2234 Retina panel renders 1280x720 pixels and upscales them. A window put in macOS full
+  screen with the green title-bar button keeps rendering at the configured resolution and is scaled
+  the same way.
+- **HUD/menu and pointer.** The canvas is laid out in frame pixels (`ViewportBounds::resize_canvas`).
+  `ViewportBounds::cursor_to_canvas` maps a logical window cursor position through the presented
+  rect into frame pixels and rejects positions on the black bars.
+- **Windowed resize.** OK/Apply in windowed mode stores the resolution in `GameFrame` and starts a
+  bounded resize (`resize_window`, up to 120 frames). The window's client area is set to the
+  resolution in logical points (`hl2_ui::viewport::windowed_size`), the way Source sizes a windowed
+  game to its mode; on a 2x display the frame is then upscaled 2x. A size that does not fit the
+  monitor's logical size is shrunk uniformly to fit, with room left for the title, menu and task
+  bars. The window is centred. The request is repeated while a mode transition (leaving full
+  screen) finishes, and dropped once the size matches or the window leaves windowed mode. While the
+  window fills the display in OS full screen it is left alone, and the resize resumes when it
+  returns to a normal window. Startup in windowed mode uses the same path, so a stored resolution
+  larger than the monitor is clamped. Manual resizes are never fought: they just change the
+  presented scale.
+- **Full screen.** On Windows and Linux full screen stays `WindowMode::Fullscreen(Current,
+  VideoModeSelection::Current)`: the desktop mode, no mode switch. On macOS full screen is a
+  full-screen window over the desktop mode (`BorderlessFullscreen`). An exclusive mode set there can
+  select an unscaled (1x) panel mode, which shrinks the desktop scaling, and so the mouse cursor,
+  for the session. Stored settings are not rewritten.
+- A launch `--width/--height` sets the initial frame and window size for that session; the stored
+  setting takes over after the next OK/Apply.
+
+Verified (2026-10-11, macOS M1 Pro, 3456x2234 at 2x):
+
+- `cargo test --locked -p hl2-ui -p hl2-bevy`: all pass. New or changed tests cover cursor mapping
+  in frame pixels (including high-DPI full screen), canvas size, `windowed_size`, windowed resize
+  decisions (logical size on 2x displays, clamping the native resolution, OS full screen
+  wait/cancel), the macOS full-screen mapping, and camera routing into the frame at the configured
+  resolution with monitor and presentation cameras untouched.
+- Strict Clippy for hl2-ui and hl2-bevy; `cargo fmt --all`.
+- Packaged captures (`scripts/build-bevy.sh`, `--map background01 --main-menu`):
+  - `--windowed --width 1024 --height 768`: a 2048x1536 capture with the 1024x768 frame filling it,
+    upscaled 2x.
+  - `--fullscreen --width 1280 --height 720`: a 3456x2168 capture with the 1280x720 frame upscaled
+    to the full width and letterboxed. The Video page opened from scripted pointer input.
+  - `--windowed --width 3456 --height 2234`: the startup clamp resized the window to 1579x1021
+    points (a 3158x2042 capture), as computed.
+
+Not tested: resizing a window from the Video page's OK/Apply in a packaged run (the scripted attempt
+did not select a different resolution; the decision logic is unit-tested and the OS resize path is
+the one verified by the startup clamp), the green-button OS full screen, the cursor size in macOS
+full screen, real mouse input through the scaled frame, Windows and Linux.

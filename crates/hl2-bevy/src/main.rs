@@ -461,10 +461,11 @@ fn main() -> Result<()> {
         .add_plugins(bevy::sprite_render::Material2dPlugin::<hud::HudMaterial>::default())
         .add_plugins(ui::UiPlugin)
         .add_plugins(movement::MovementPlugin)
-        .add_systems(PreUpdate, crate::video::update_viewports)
+        .add_systems(PreUpdate, crate::video::present_frame)
+        .add_systems(Update, crate::video::resize_window)
         .add_systems(
             PostUpdate,
-            crate::video::update_viewports.before(rendering::present_entities),
+            crate::video::present_frame.before(rendering::present_entities),
         )
         .add_systems(
             RunFixedMainLoop,
@@ -624,6 +625,13 @@ fn setup(
     let mut console_ui = console::Console::new(ui);
     console_ui.source.level_loaded(prepared.1);
     commands.insert_resource(console_ui);
+    // Every game camera below renders into the game frame (see `video::present_frame`).
+    video::install_frame(
+        &mut commands,
+        &mut images,
+        UVec2::new(options.width, options.height),
+        options.display_mode.effective() == hl2_ui::config::DisplayMode::Windowed,
+    );
     commands.spawn((
         Camera2d,
         Camera {

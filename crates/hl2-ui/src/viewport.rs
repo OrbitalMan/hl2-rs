@@ -97,6 +97,8 @@ impl ViewportBounds {
 
     /// Maps a window cursor position in logical window coordinates to UI canvas coordinates.
     ///
+    /// The canvas is drawn into the game frame at `target_resolution` and scaled into the
+    /// presented area, so the position is scaled from presented points to frame pixels.
     /// Returns `None` if the cursor position falls outside the active viewport region
     /// (e.g. over letterbox/pillarbox black stripes).
     pub fn cursor_to_canvas(&self, cursor_pos: Vec2) -> Option<Vec2> {
@@ -108,15 +110,36 @@ impl ViewportBounds {
             && rel_y >= 0.0
             && rel_y <= self.logical_size.y
         {
-            Some(Vec2::new(rel_x, rel_y))
+            let size = self.logical_size.max(Vec2::ONE);
+            Some(Vec2::new(rel_x, rel_y) * self.target_resolution.as_vec2() / size)
         } else {
             None
         }
     }
 
-    /// Resizes the given canvas to match this viewport's logical size.
+    /// Resizes the given canvas to the game frame resolution it is drawn into.
     pub fn resize_canvas(&self, canvas: &Canvas) {
-        canvas.resize(self.logical_size.x, self.logical_size.y);
+        let target = self.target_resolution.as_vec2();
+        canvas.resize(target.x, target.y);
+    }
+}
+
+/// Logical (point) size of a windowed-mode window for a configured resolution.
+///
+/// Source sizes a windowed game's client area to the selected video mode. One logical point
+/// carries one game-frame pixel, which the presentation pass upscales on high-DPI displays.
+/// When the request does not fit the monitor's logical size, it is scaled down uniformly so
+/// the window stays on screen and keeps the frame's aspect ratio.
+pub fn windowed_size(resolution: UVec2, monitor_logical: Option<Vec2>) -> Vec2 {
+    let requested = resolution.max(UVec2::ONE).as_vec2();
+    let Some(monitor) = monitor_logical.filter(|m| m.x >= 1.0 && m.y >= 1.0) else {
+        return requested;
+    };
+    let fit = (monitor.x / requested.x).min(monitor.y / requested.y);
+    if fit >= 1.0 {
+        requested
+    } else {
+        (requested * fit).floor().max(Vec2::ONE)
     }
 }
 
@@ -210,21 +233,21 @@ mod tests {
     fn cursor_to_canvas_maps_inside_and_rejects_outside_pillarbox() {
         let vp = ViewportBounds::compute(UVec2::new(1024, 768), UVec2::new(1920, 1080), 1.0);
 
-        // Click at left edge of 4:3 area on screen (x=240, y=100) -> canvas (0, 100)
+        // Top-left of the 4:3 area on screen (x=240, y=0) -> frame pixel (0, 0)
         let p = cursor_to_canvas(
-            Some(Vec2::new(240.0, 100.0)),
+            Some(Vec2::new(240.0, 0.0)),
             Some(&vp),
             Vec2::new(1920.0, 1080.0),
         );
-        assert_eq!(p, Some(Vec2::new(0.0, 100.0)));
+        assert_eq!(p, Some(Vec2::new(0.0, 0.0)));
 
-        // Click in the center of 4:3 area on screen (x=960, y=540) -> canvas (720, 540)
+        // Centre of the 4:3 area (x=960, y=540) -> centre of the 1024x768 frame
         let p_center = cursor_to_canvas(
             Some(Vec2::new(960.0, 540.0)),
             Some(&vp),
             Vec2::new(1920.0, 1080.0),
         );
-        assert_eq!(p_center, Some(Vec2::new(720.0, 540.0)));
+        assert_eq!(p_center, Some(Vec2::new(512.0, 384.0)));
 
         // Click in black stripe on the left (x=100 < 240) -> None
         let p_left_stripe = cursor_to_canvas(
@@ -264,26 +287,57 @@ mod tests {
         );
         assert_eq!(p_bottom, None);
 
-        // Inside active area (x=512, y=324) -> canvas (512, 100)
+        // Inside active area (x=512, y=324) -> presented (512, 100) -> 1280x720 frame (640, 125)
         let p_inside = cursor_to_canvas(
             Some(Vec2::new(512.0, 324.0)),
             Some(&vp),
             Vec2::new(1024.0, 1024.0),
         );
-        assert_eq!(p_inside, Some(Vec2::new(512.0, 100.0)));
+        assert_eq!(p_inside, Some(Vec2::new(640.0, 125.0)));
     }
 
     #[test]
-    fn resize_canvas_resizes_to_viewport_size() {
+    fn cursor_maps_to_frame_pixels_on_high_dpi_full_screen() {
+        // 1280x720 frame upscaled on a 3024x1964 Retina panel (1512x982 points): full width,
+        // letterboxed. The frame's bottom-right corner maps to (1280, 720).
+        let vp = ViewportBounds::compute(UVec2::new(1280, 720), UVec2::new(3024, 1964), 2.0);
+        let corner = vp.logical_offset + vp.logical_size;
+        let p = vp.cursor_to_canvas(corner).unwrap();
+        assert!(
+            (p - Vec2::new(1280.0, 720.0)).abs().max_element() < 1e-3,
+            "{p}"
+        );
+    }
+
+    #[test]
+    fn resize_canvas_resizes_to_frame_resolution() {
         let canvas = Canvas::default();
         let vp = ViewportBounds::compute(UVec2::new(1024, 768), UVec2::new(1920, 1080), 1.0);
         resize_canvas(&canvas, Some(&vp), Vec2::new(1920.0, 1080.0));
-        assert_eq!(canvas.width(), 1440.0);
-        assert_eq!(canvas.height(), 1080.0);
+        assert_eq!(canvas.width(), 1024.0);
+        assert_eq!(canvas.height(), 768.0);
 
         // Without viewport, resizes to window size
         resize_canvas(&canvas, None, Vec2::new(800.0, 600.0));
         assert_eq!(canvas.width(), 800.0);
         assert_eq!(canvas.height(), 600.0);
+    }
+
+    #[test]
+    fn windowed_size_keeps_fitting_resolutions_and_shrinks_others() {
+        let monitor = Some(Vec2::new(1512.0, 982.0));
+        assert_eq!(
+            windowed_size(UVec2::new(1280, 720), monitor),
+            Vec2::new(1280.0, 720.0)
+        );
+        assert_eq!(
+            windowed_size(UVec2::new(1920, 1080), None),
+            Vec2::new(1920.0, 1080.0)
+        );
+        let shrunk = windowed_size(UVec2::new(3024, 1964), monitor);
+        assert_eq!(shrunk, Vec2::new(1512.0, 982.0));
+        let wide = windowed_size(UVec2::new(2560, 1080), monitor);
+        assert!(wide.x <= 1512.0 && wide.y <= 982.0);
+        assert!((wide.x / wide.y - 2560.0 / 1080.0).abs() < 0.01, "{wide}");
     }
 }

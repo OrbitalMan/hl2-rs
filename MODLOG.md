@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-11 Resolution, display mode and scaling
+
+**Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).
+
+**Changed:**
+- `hl2-bevy::video`: added the `GameFrame` offscreen target at the configured resolution. All scene, viewmodel and HUD cameras except `_rt_Camera` render into it, and a presentation camera draws it into the window with linear filtering, aspect fit and black bars.
+- Windowed OK/Apply and windowed startup now size the window to the resolution in logical points. The size is clamped to the monitor and re-requested through mode transitions. It is not applied while the window is in OS (green-button) full screen.
+- macOS full screen is now a full-screen window over the desktop mode, so the panel is never switched to an unscaled mode (tiny cursor).
+- `hl2-ui::viewport`: cursor mapping and canvas size now use frame pixels; added `windowed_size`.
+
+**Why:** Changing the resolution did not resize the window, and full screen rendered at the display's native resolution instead of the setting.
+
+**Tested how:** `cargo test --locked -p hl2-ui -p hl2-bevy` (all pass); strict Clippy; `cargo fmt --all`. Packaged macOS captures: windowed 1024x768 (2048x1536, 2x upscale), full screen 1280x720 (3456x2168, upscaled and letterboxed), windowed 3456x2234 startup clamp (1579x1021 points). See docs/gameui.md section 10.
+
+**Result:** The game frame resolution follows the setting in every mode; the window follows it in windowed mode.
+
+**Still broken or not tested:** not tested: menu-driven windowed resize in a packaged run, green-button full screen, macOS full-screen cursor size, live mouse input through the scaled frame, Windows and Linux. No real monitor mode switching.
+
+**Next:** owner check on macOS; Windows verification.
+
 ## 2026-10-11 GameUI settings used by the game
 
 **Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).

@@ -1,30 +1,57 @@
-//! Video mode, renderer viewport scaling, letterboxing/pillarboxing, and display management.
+//! Video modes, the game frame and its presentation in the window.
+//!
+//! The configured video resolution is the resolution of the *game frame*: the sky, world,
+//! viewmodel and HUD/menu cameras all render into one offscreen image of exactly that size.
+//! A presentation camera then draws the frame into the window with linear filtering, scaled
+//! to fit and centred (letterbox/pillarbox when the aspect ratios differ). The window size,
+//! the display's native resolution and its scale factor therefore never change the rendering
+//! resolution: full screen at 1280x720 renders 1280x720 pixels and upscales them to the
+//! display, and a macOS window put in full screen with the green title-bar button behaves
+//! the same way.
+//!
+//! In windowed mode, applying a resolution also sizes the window's client area to it (in
+//! logical points, clamped to the monitor), as Source sizes a windowed game to its mode.
 
-use bevy::camera::Viewport;
+use bevy::camera::{RenderTarget, Viewport, visibility::RenderLayers};
+use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
+use bevy::image::{ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
-use bevy::window::{Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, Window, WindowMode};
+use bevy::render::render_resource::TextureFormat;
+use bevy::window::{
+    Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, Window, WindowMode, WindowPosition,
+};
 
 pub mod display {
     use super::*;
 
     /// Metrics and bounds for the primary display.
     #[derive(Clone, Copy, Debug, PartialEq)]
-    #[allow(dead_code)]
     pub struct DisplayMetrics {
         pub physical_width: u32,
         pub physical_height: u32,
         pub scale_factor: f32,
     }
 
-    #[allow(dead_code)]
     impl DisplayMetrics {
+        /// Metrics of a monitor.
+        pub fn of(monitor: &Monitor) -> Self {
+            Self {
+                physical_width: monitor.physical_width,
+                physical_height: monitor.physical_height,
+                scale_factor: monitor.scale_factor as f32,
+            }
+        }
+
         /// Queries display metrics from the primary monitor, if available.
+        #[allow(dead_code)]
         pub fn from_monitors(monitors: &Query<&Monitor, With<PrimaryMonitor>>) -> Option<Self> {
-            monitors.iter().next().map(|m| Self {
-                physical_width: m.physical_width,
-                physical_height: m.physical_height,
-                scale_factor: m.scale_factor as f32,
-            })
+            monitors.iter().next().map(Self::of)
+        }
+
+        /// The monitor's size in logical points.
+        pub fn logical_size(&self) -> Vec2 {
+            Vec2::new(self.physical_width as f32, self.physical_height as f32)
+                / self.scale_factor.max(1.0)
         }
 
         /// Detects if a window currently in `WindowMode::Windowed` is actually occupying the full
@@ -60,13 +87,14 @@ pub mod display {
 
 pub mod mode {
     use super::*;
-    use bevy::window::VideoModeSelection;
     use hl2_ui::config::DisplayMode;
 
     /// The Bevy window mode for a configured display mode on this platform.
     ///
-    /// "Windowed (No Border)" is a borderless window covering the current monitor (Windows and
-    /// Linux); macOS has no such choice and resolves a stored value to full screen.
+    /// Full screen keeps the desktop's display mode: the game frame renders at the configured
+    /// resolution and is scaled to the display. "Windowed (No Border)" is a borderless window
+    /// covering the current monitor (Windows and Linux); macOS has no such choice and resolves a
+    /// stored value to full screen.
     pub fn desired_mode(mode: DisplayMode) -> WindowMode {
         on_monitor(mode, MonitorSelection::Current)
     }
@@ -78,28 +106,119 @@ pub mod mode {
 
     fn on_monitor(mode: DisplayMode, monitor: MonitorSelection) -> WindowMode {
         match mode.effective() {
-            DisplayMode::Fullscreen => WindowMode::Fullscreen(monitor, VideoModeSelection::Current),
+            DisplayMode::Fullscreen => fullscreen(monitor),
             DisplayMode::Windowed => WindowMode::Windowed,
             DisplayMode::NoBorder => WindowMode::BorderlessFullscreen(monitor),
         }
     }
+
+    /// macOS full screen is a full-screen window over the desktop's display mode. An exclusive
+    /// mode change there can pick a non-scaled (1x) mode of the panel, which shrinks the
+    /// desktop scaling for the whole session (a tiny mouse cursor); the game frame is scaled to
+    /// the display instead.
+    #[cfg(target_os = "macos")]
+    fn fullscreen(monitor: MonitorSelection) -> WindowMode {
+        WindowMode::BorderlessFullscreen(monitor)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn fullscreen(monitor: MonitorSelection) -> WindowMode {
+        use bevy::window::VideoModeSelection;
+        WindowMode::Fullscreen(monitor, VideoModeSelection::Current)
+    }
 }
 
-/// Renderer output and viewport configuration for the presentation window frame.
+/// Render layer of the presentation pass (only the frame quad and its camera).
+pub const PRESENT_LAYER: usize = 31;
+/// The presentation camera draws after every game-frame camera.
+const PRESENT_ORDER: isize = 100;
+/// Frames during which a windowed-mode resize is re-requested until the OS applies it (window
+/// mode transitions, such as leaving full screen, finish asynchronously).
+const WINDOW_RESIZE_FRAMES: u32 = 120;
+/// Room kept around a windowed window that would not fit the monitor (title bar, menu bar,
+/// task bar), in logical points.
+const WINDOW_MARGIN: Vec2 = Vec2::new(32.0, 96.0);
+
+/// The offscreen game frame: every scene, viewmodel and HUD camera renders into it.
+#[derive(Resource, Clone, Debug)]
+pub struct GameFrame {
+    pub image: Handle<Image>,
+    /// Configured video resolution, in frame pixels.
+    pub resolution: UVec2,
+    /// Remaining frames to size a windowed-mode window to `resolution`.
+    pub pending_window: Option<u32>,
+}
+
+/// The camera presenting the game frame in the window.
+#[derive(Component)]
+pub struct PresentCamera;
+
+/// The quad showing the game frame.
+#[derive(Component)]
+pub struct PresentQuad;
+
+/// A render-target image for the game frame, linearly filtered when scaled.
+pub fn frame_image(resolution: UVec2) -> Image {
+    let size = resolution.max(UVec2::ONE);
+    let mut image = Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None);
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor::linear());
+    image
+}
+
+/// Creates the game frame and its presentation. `windowed` sizes the window to the frame
+/// (clamped to the monitor) once the monitor is known.
+pub(crate) fn install_frame(
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    resolution: UVec2,
+    windowed: bool,
+) {
+    let resolution = resolution.max(UVec2::ONE);
+    let image = images.add(frame_image(resolution));
+    commands.insert_resource(GameFrame {
+        image: image.clone(),
+        resolution,
+        pending_window: windowed.then_some(WINDOW_RESIZE_FRAMES),
+    });
+    commands.spawn((
+        PresentCamera,
+        Camera2d,
+        Camera {
+            order: PRESENT_ORDER,
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
+        Tonemapping::None,
+        DebandDither::Disabled,
+        Msaa::Off,
+        RenderLayers::layer(PRESENT_LAYER),
+    ));
+    commands.spawn((
+        PresentQuad,
+        Sprite {
+            image,
+            custom_size: Some(resolution.as_vec2()),
+            ..default()
+        },
+        Transform::IDENTITY,
+        RenderLayers::layer(PRESENT_LAYER),
+    ));
+}
+
+/// Placement of the presented game frame in the window.
 ///
-/// The configured video resolution is the target renderer output resolution, not
-/// the window's OS frame size. When the aspect ratio of the viewport does not
-/// match the aspect ratio of the window frame, black stripes (letterbox or pillarbox)
-/// are placed on the sides to preserve the exact aspect ratio without distortion.
+/// `target_resolution` is the game-frame resolution (what the HUD/menu canvas is laid out in);
+/// the rects describe where the scaled frame appears inside the window, with black stripes
+/// (letterbox or pillarbox) when the aspect ratios differ.
 #[derive(Resource, Clone, Debug)]
 pub struct VideoViewport {
-    /// Target logical resolution configured in video settings (e.g. 1920x1080 or 1024x768).
+    /// Game-frame resolution configured in video settings (e.g. 1920x1080 or 1024x768).
     pub target_resolution: UVec2,
-    /// Physical viewport rect passed to Bevy camera viewports.
+    /// Presented frame rect in physical window pixels.
     pub physical_rect: Viewport,
-    /// Top-left offset of the viewport in logical window coordinates.
+    /// Top-left offset of the presented frame in logical window coordinates.
     pub logical_offset: Vec2,
-    /// Viewport size in logical window coordinates.
+    /// Presented frame size in logical window coordinates.
     pub logical_size: Vec2,
 }
 
@@ -129,7 +248,7 @@ impl Default for VideoViewport {
 }
 
 impl VideoViewport {
-    /// Computes the letterbox/pillarbox viewport to fit target resolution inside a window.
+    /// Computes where a frame of the target resolution is presented inside a window.
     pub fn compute(target_w: u32, target_h: u32, window: &Window) -> Self {
         let win_w = window.resolution.physical_width().max(1);
         let win_h = window.resolution.physical_height().max(1);
@@ -191,59 +310,154 @@ impl VideoViewport {
     }
 }
 
-/// Applies video configuration to a Bevy Window, honoring display mode.
-///
-/// Note: Window size is NOT modified here; video resolution is the renderer
-/// viewport output resolution, which is placed into the window/fullscreen frame
-/// with letterboxing/pillarboxing.
+/// Applies applied video settings: the window mode at once, the game-frame resolution, and in
+/// windowed mode a window resize carried out by [`resize_window`].
 pub(crate) fn apply_video_config_to_window(
     window: &mut Window,
     cfg: &hl2_ui::config::VideoSettings,
-    _monitors: &Query<&Monitor, With<PrimaryMonitor>>,
+    frame: Option<&mut GameFrame>,
 ) {
     let target_mode = mode::desired_mode(cfg.display_mode);
     if window.mode != target_mode {
         window.mode = target_mode;
     }
+    if let Some(frame) = frame {
+        frame.resolution = UVec2::new(cfg.width, cfg.height).max(UVec2::ONE);
+        frame.pending_window =
+            (target_mode == WindowMode::Windowed).then_some(WINDOW_RESIZE_FRAMES);
+    }
 }
 
-/// Updates the video viewport and synchronizes it across all window-rendering cameras.
-pub(crate) fn update_viewports(
-    mut video_viewport: ResMut<VideoViewport>,
-    console: Option<Res<crate::console::Console>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut cameras: Query<&mut Camera, Without<crate::monitors::MonitorCamera>>,
+/// What a pending windowed-mode resize should do this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowResize {
+    /// The window left windowed mode; drop the request.
+    Cancel,
+    /// The window fills the display in OS full screen (macOS green button); keep the request
+    /// for when it returns to a normal window, and leave it alone meanwhile.
+    Wait,
+    /// The window already has the requested size.
+    Done,
+    /// Request this logical client size.
+    Resize(Vec2),
+}
+
+/// Decides a windowed-mode resize to the logical size of `resolution`, clamped to the monitor.
+pub fn window_resize(
+    window: &Window,
+    monitor: Option<&Monitor>,
+    resolution: UVec2,
+) -> WindowResize {
+    if window.mode != WindowMode::Windowed {
+        return WindowResize::Cancel;
+    }
+    let metrics = monitor.map(display::DisplayMetrics::of);
+    if metrics.is_some_and(|m| m.is_workspace_fullscreen(window)) {
+        return WindowResize::Wait;
+    }
+    let available = metrics.map(|m| m.logical_size());
+    let mut size = hl2_ui::viewport::windowed_size(
+        glam::UVec2::new(resolution.x, resolution.y),
+        available.map(|a| glam::Vec2::new(a.x, a.y)),
+    );
+    if let Some(available) = available
+        && (size.x >= available.x || size.y >= available.y)
+    {
+        let room = (available - WINDOW_MARGIN).max(Vec2::ONE);
+        size = hl2_ui::viewport::windowed_size(
+            glam::UVec2::new(resolution.x, resolution.y),
+            Some(glam::Vec2::new(room.x, room.y)),
+        );
+    }
+    let size = Vec2::new(size.x, size.y);
+    let current = Vec2::new(window.resolution.width(), window.resolution.height());
+    if (current - size).abs().max_element() < 1.0 {
+        WindowResize::Done
+    } else {
+        WindowResize::Resize(size)
+    }
+}
+
+/// Carries out a pending windowed-mode resize, re-requesting it while the OS finishes a
+/// window-mode transition. A window in OS full screen is left alone.
+pub(crate) fn resize_window(
+    frame: Option<ResMut<GameFrame>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    monitors: Query<&Monitor, With<PrimaryMonitor>>,
 ) {
+    let Some(mut frame) = frame else {
+        return;
+    };
+    let Some(frames) = frame.pending_window else {
+        return;
+    };
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    let monitor = monitors.iter().next();
+    if monitor.is_none() && frames > 1 {
+        // The monitor appears a few frames after window creation; clamp against it.
+        frame.pending_window = Some(frames - 1);
+        return;
+    }
+    match window_resize(&window, monitor, frame.resolution) {
+        WindowResize::Cancel | WindowResize::Done => frame.pending_window = None,
+        WindowResize::Wait => {}
+        WindowResize::Resize(size) => {
+            window.resolution.set(size.x, size.y);
+            window.position = WindowPosition::Centered(MonitorSelection::Current);
+            frame.pending_window = frames.checked_sub(1).filter(|left| *left > 0);
+        }
+    }
+}
+
+type FrameCameras<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Camera, &'static mut RenderTarget),
+    (
+        Without<crate::monitors::MonitorCamera>,
+        Without<PresentCamera>,
+    ),
+>;
+
+/// Keeps the game frame at the configured resolution, routes every game camera into it and
+/// places the presented frame in the window.
+pub(crate) fn present_frame(
+    frame: Option<Res<GameFrame>>,
+    mut images: ResMut<Assets<Image>>,
+    mut video_viewport: ResMut<VideoViewport>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut cameras: FrameCameras,
+    mut quads: Query<&mut Sprite, With<PresentQuad>>,
+) {
+    let Some(frame) = frame else {
+        return;
+    };
     let Ok(window) = windows.single() else {
         return;
     };
-    let (target_w, target_h) = if let Some(console) = &console {
-        (
-            console.source.config.video.width,
-            console.source.config.video.height,
-        )
-    } else {
-        (
-            video_viewport.target_resolution.x,
-            video_viewport.target_resolution.y,
-        )
-    };
-
-    let computed = VideoViewport::compute(target_w, target_h, window);
+    if images.get(&frame.image).map(Image::size) != Some(frame.resolution)
+        && let Some(mut image) = images.get_mut(&frame.image)
+    {
+        *image = frame_image(frame.resolution);
+    }
+    for (mut camera, mut target) in &mut cameras {
+        let routed = matches!(&*target, RenderTarget::Image(t) if t.handle == frame.image);
+        if !routed {
+            *target = RenderTarget::Image(frame.image.clone().into());
+        }
+        if camera.viewport.is_some() {
+            camera.viewport = None;
+        }
+    }
+    let computed = VideoViewport::compute(frame.resolution.x, frame.resolution.y, window);
     if *video_viewport != computed {
         *video_viewport = computed;
     }
-
-    for mut camera in &mut cameras {
-        let needs_update = match &camera.viewport {
-            Some(existing) => {
-                existing.physical_position != video_viewport.physical_rect.physical_position
-                    || existing.physical_size != video_viewport.physical_rect.physical_size
-            }
-            None => true,
-        };
-        if needs_update {
-            camera.viewport = Some(video_viewport.physical_rect.clone());
+    for mut quad in &mut quads {
+        if quad.custom_size != Some(video_viewport.logical_size) {
+            quad.custom_size = Some(video_viewport.logical_size);
         }
     }
 }
@@ -259,57 +473,67 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::{PrimaryWindow, WindowMode, WindowResolution};
 
+    fn monitor(width: u32, height: u32, scale_factor: f64) -> Monitor {
+        Monitor {
+            name: Some("Test".into()),
+            video_modes: vec![],
+            physical_position: IVec2::ZERO,
+            physical_width: width,
+            physical_height: height,
+            refresh_rate_millihertz: Some(60000),
+            scale_factor,
+        }
+    }
+
+    fn window(width: u32, height: u32, scale: f32, mode: WindowMode) -> Window {
+        let mut resolution = WindowResolution::new(width, height);
+        resolution.set_scale_factor(scale);
+        Window {
+            resolution,
+            mode,
+            ..default()
+        }
+    }
+
+    fn frame(resolution: UVec2) -> GameFrame {
+        GameFrame {
+            image: Handle::default(),
+            resolution,
+            pending_window: None,
+        }
+    }
+
     #[test]
     fn applies_video_config_mode_safely() {
-        let mut app = App::new();
-        app.world_mut().spawn((
-            Monitor {
-                name: Some("Test".into()),
-                video_modes: vec![],
-                physical_position: IVec2::ZERO,
-                physical_width: 1920,
-                physical_height: 1080,
-                refresh_rate_millihertz: Some(60000),
-                scale_factor: 1.0,
-            },
-            PrimaryMonitor,
-        ));
-        app.world_mut().spawn((
-            Window {
-                resolution: WindowResolution::new(1920, 1080),
-                mode: WindowMode::Windowed,
-                ..default()
-            },
-            PrimaryWindow,
-        ));
-
+        let mut window = window(1920, 1080, 1.0, WindowMode::Windowed);
         let cfg = hl2_ui::config::VideoSettings {
             width: 1280,
             height: 720,
             display_mode: hl2_ui::config::DisplayMode::NoBorder,
             ..Default::default()
         };
-
-        app.world_mut()
-            .run_system_once(
-                move |mut windows: Query<&mut Window, With<PrimaryWindow>>,
-                      monitors: Query<&Monitor, With<PrimaryMonitor>>| {
-                    let mut window = windows.single_mut().unwrap();
-                    apply_video_config_to_window(&mut window, &cfg, &monitors);
-                },
-            )
-            .unwrap();
-
-        let window = app.world_mut().query::<&Window>().single(app.world());
-        let mode = window.unwrap().mode;
+        let mut frame = frame(UVec2::new(1920, 1080));
+        apply_video_config_to_window(&mut window, &cfg, Some(&mut frame));
         if cfg!(target_os = "macos") {
-            assert!(matches!(mode, WindowMode::Fullscreen(..)), "{mode:?}");
+            // No borderless choice on macOS: full screen, kept on the desktop's display mode.
+            assert_eq!(
+                window.mode,
+                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+            );
         } else {
             assert!(
-                matches!(mode, WindowMode::BorderlessFullscreen(_)),
-                "{mode:?}"
+                matches!(window.mode, WindowMode::BorderlessFullscreen(_)),
+                "{:?}",
+                window.mode
             );
         }
+        assert_eq!(frame.resolution, UVec2::new(1280, 720));
+        assert_eq!(
+            frame.pending_window, None,
+            "no window resize outside windowed"
+        );
+        // The OS window frame is not resized for full-screen modes.
+        assert_eq!(window.resolution.physical_width(), 1920);
     }
 
     #[test]
@@ -319,14 +543,19 @@ mod tests {
             mode::desired_mode(DisplayMode::Windowed),
             WindowMode::Windowed
         );
-        assert!(matches!(
-            mode::desired_mode(DisplayMode::Fullscreen),
-            WindowMode::Fullscreen(MonitorSelection::Current, _)
-        ));
+        let fullscreen = mode::desired_mode(DisplayMode::Fullscreen);
         let no_border = mode::desired_mode(DisplayMode::NoBorder);
         if cfg!(target_os = "macos") {
-            assert!(matches!(no_border, WindowMode::Fullscreen(..)));
+            assert_eq!(
+                fullscreen,
+                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+            );
+            assert_eq!(no_border, fullscreen);
         } else {
+            assert!(matches!(
+                fullscreen,
+                WindowMode::Fullscreen(MonitorSelection::Current, _)
+            ));
             assert_eq!(
                 no_border,
                 WindowMode::BorderlessFullscreen(MonitorSelection::Current)
@@ -335,52 +564,82 @@ mod tests {
     }
 
     #[test]
-    fn resolution_does_not_mutate_window_frame_size() {
-        let mut app = App::new();
-        app.world_mut().spawn((
-            Window {
-                resolution: WindowResolution::new(1920, 1080),
-                mode: WindowMode::Windowed,
-                ..default()
-            },
-            PrimaryWindow,
-        ));
-
+    fn windowed_resolution_requests_a_window_resize() {
+        let mut window = window(1920, 1080, 1.0, WindowMode::Windowed);
         let cfg = hl2_ui::config::VideoSettings {
             width: 1024,
             height: 768,
             display_mode: hl2_ui::config::DisplayMode::Windowed,
             ..Default::default()
         };
+        let mut frame = frame(UVec2::new(1920, 1080));
+        apply_video_config_to_window(&mut window, &cfg, Some(&mut frame));
+        assert_eq!(frame.resolution, UVec2::new(1024, 768));
+        assert!(frame.pending_window.is_some());
+        let monitor = monitor(2560, 1440, 1.0);
+        assert_eq!(
+            window_resize(&window, Some(&monitor), frame.resolution),
+            WindowResize::Resize(Vec2::new(1024.0, 768.0))
+        );
+    }
 
-        app.world_mut()
-            .run_system_once(
-                move |mut windows: Query<&mut Window, With<PrimaryWindow>>,
-                      monitors: Query<&Monitor, With<PrimaryMonitor>>| {
-                    let mut window = windows.single_mut().unwrap();
-                    apply_video_config_to_window(&mut window, &cfg, &monitors);
-                },
-            )
-            .unwrap();
+    #[test]
+    fn windowed_size_is_logical_on_high_dpi_displays() {
+        // Retina 3024x1964 at 2x: a 1280x720 window is 1280x720 points (2560x1440 pixels);
+        // the 1280x720 frame is upscaled 2x by the presentation pass.
+        let window = window(1000, 600, 2.0, WindowMode::Windowed);
+        let retina = monitor(3024, 1964, 2.0);
+        assert_eq!(
+            window_resize(&window, Some(&retina), UVec2::new(1280, 720)),
+            WindowResize::Resize(Vec2::new(1280.0, 720.0))
+        );
+        let sized = self::window(2560, 1440, 2.0, WindowMode::Windowed);
+        assert_eq!(
+            window_resize(&sized, Some(&retina), UVec2::new(1280, 720)),
+            WindowResize::Done
+        );
+    }
 
-        let window = app
-            .world_mut()
-            .query::<&Window>()
-            .single(app.world())
-            .unwrap();
-        assert_eq!(window.mode, WindowMode::Windowed);
-        // Window frame size preserved (not mutated into 1024x768)
-        assert_eq!(window.resolution.physical_width(), 1920);
-        assert_eq!(window.resolution.physical_height(), 1080);
+    #[test]
+    fn oversized_windowed_resolution_is_clamped_to_the_monitor() {
+        // The panel's native 3024x1964 does not fit 1512x982 points with a title bar: the window
+        // shrinks uniformly inside the monitor, keeping the frame's aspect ratio.
+        let window = window(1000, 600, 2.0, WindowMode::Windowed);
+        let retina = monitor(3024, 1964, 2.0);
+        let WindowResize::Resize(size) =
+            window_resize(&window, Some(&retina), UVec2::new(3024, 1964))
+        else {
+            panic!("expected a resize");
+        };
+        assert!(size.x <= 1512.0 - 32.0 && size.y <= 982.0 - 96.0, "{size}");
+        assert!((size.x / size.y - 3024.0 / 1964.0).abs() < 0.01, "{size}");
+    }
+
+    #[test]
+    fn os_full_screen_window_is_left_alone_until_it_returns() {
+        // macOS green-button full screen keeps WindowMode::Windowed but fills the display.
+        let retina = monitor(3024, 1964, 2.0);
+        let window = window(3024, 1964, 2.0, WindowMode::Windowed);
+        assert_eq!(
+            window_resize(&window, Some(&retina), UVec2::new(1280, 720)),
+            WindowResize::Wait
+        );
+        let full = self::window(
+            3024,
+            1964,
+            2.0,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+        );
+        assert_eq!(
+            window_resize(&full, Some(&retina), UVec2::new(1280, 720)),
+            WindowResize::Cancel
+        );
     }
 
     #[test]
     fn pillarbox_vertical_stripes_for_narrow_aspect_on_wide_window() {
-        let window = Window {
-            resolution: WindowResolution::new(1920, 1080),
-            ..default()
-        };
-        // 4:3 target on 16:9 window: 1024x768 target in 1920x1080 window
+        let window = window(1920, 1080, 1.0, WindowMode::Windowed);
+        // 4:3 frame presented in a 16:9 window.
         let vp = VideoViewport::compute(1024, 768, &window);
         assert!(vp.has_black_stripes());
         assert!(vp.is_vertical_stripes());
@@ -394,11 +653,8 @@ mod tests {
 
     #[test]
     fn letterbox_horizontal_stripes_for_wide_aspect_on_narrow_window() {
-        let window = Window {
-            resolution: WindowResolution::new(1024, 768),
-            ..default()
-        };
-        // 16:9 target on 4:3 window: 1920x1080 target in 1024x768 window
+        let window = window(1024, 768, 1.0, WindowMode::Windowed);
+        // 16:9 frame presented in a 4:3 window.
         let vp = VideoViewport::compute(1920, 1080, &window);
         assert!(vp.has_black_stripes());
         assert!(!vp.is_vertical_stripes());
@@ -412,15 +668,11 @@ mod tests {
 
     #[test]
     fn exact_aspect_ratio_fills_entire_frame() {
-        let window = Window {
-            resolution: WindowResolution::new(1920, 1080),
-            ..default()
-        };
-        // 16:9 target on 16:9 window: 1280x720 target in 1920x1080 window
+        let window = window(1920, 1080, 1.0, WindowMode::Windowed);
+        // A 1280x720 frame is upscaled to fill a 1920x1080 window.
         let vp = VideoViewport::compute(1280, 720, &window);
         assert!(!vp.has_black_stripes());
-        assert!(!vp.is_vertical_stripes());
-        assert!(!vp.is_horizontal_stripes());
+        assert_eq!(vp.target_resolution, UVec2::new(1280, 720));
         assert_eq!(vp.physical_rect.physical_size, UVec2::new(1920, 1080));
         assert_eq!(vp.physical_rect.physical_position, UVec2::ZERO);
         assert_eq!(vp.logical_size, Vec2::new(1920.0, 1080.0));
@@ -429,13 +681,8 @@ mod tests {
 
     #[test]
     fn viewport_with_scale_factor_calculates_correct_logical_offset() {
-        let mut res = WindowResolution::new(3840, 2160);
-        res.set_scale_factor(2.0);
-        let window = Window {
-            resolution: res,
-            ..default()
-        };
-        // 4:3 target on 16:9 4K Retina display
+        let window = window(3840, 2160, 2.0, WindowMode::Windowed);
+        // 4:3 frame on a 16:9 4K Retina display
         let vp = VideoViewport::compute(1024, 768, &window);
         // Physical: 2160 * (4/3) = 2880 width. Offset = (3840 - 2880) / 2 = 480.
         assert_eq!(vp.physical_rect.physical_size, UVec2::new(2880, 2160));
@@ -446,45 +693,87 @@ mod tests {
     }
 
     #[test]
-    fn update_viewports_system_synchronizes_cameras() {
+    fn game_cameras_render_into_the_frame_at_the_configured_resolution() {
         let mut app = App::new();
-        app.init_resource::<VideoViewport>();
+        app.init_resource::<VideoViewport>()
+            .init_resource::<Assets<Image>>();
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(frame_image(UVec2::new(640, 480)));
+        app.insert_resource(GameFrame {
+            image: image.clone(),
+            resolution: UVec2::new(1280, 720),
+            pending_window: None,
+        });
+        // Full screen on a Retina panel.
         app.world_mut().spawn((
-            Window {
-                resolution: WindowResolution::new(1920, 1080),
-                ..default()
-            },
+            window(
+                3024,
+                1964,
+                2.0,
+                WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+            ),
             PrimaryWindow,
         ));
         let scene_camera = app
             .world_mut()
-            .spawn(Camera {
-                order: 0,
-                ..default()
-            })
+            .spawn((
+                Camera {
+                    viewport: Some(Viewport::default()),
+                    ..default()
+                },
+                RenderTarget::default(),
+            ))
             .id();
         let monitor_camera = app
             .world_mut()
             .spawn((
                 crate::monitors::MonitorCamera,
-                Camera {
-                    order: -100,
-                    ..default()
-                },
+                Camera::default(),
+                RenderTarget::default(),
             ))
             .id();
+        let present_camera = app
+            .world_mut()
+            .spawn((PresentCamera, Camera::default(), RenderTarget::default()))
+            .id();
+        let quad = app.world_mut().spawn((PresentQuad, Sprite::default())).id();
 
-        app.world_mut().run_system_once(update_viewports).unwrap();
+        app.world_mut().run_system_once(present_frame).unwrap();
 
-        let camera = app.world().get::<Camera>(scene_camera).unwrap();
-        assert!(camera.viewport.is_some());
+        let size = app
+            .world()
+            .resource::<Assets<Image>>()
+            .get(&image)
+            .map(Image::size);
         assert_eq!(
-            camera.viewport.as_ref().unwrap().physical_size,
-            UVec2::new(1920, 1080)
+            size,
+            Some(UVec2::new(1280, 720)),
+            "frame follows the setting"
         );
-
-        let mon = app.world().get::<Camera>(monitor_camera).unwrap();
-        // Monitor camera renders off-screen to its own target, viewport untouched
-        assert!(mon.viewport.is_none());
+        let target = app.world().get::<RenderTarget>(scene_camera).unwrap();
+        assert!(matches!(target, RenderTarget::Image(t) if t.handle == image));
+        assert!(
+            app.world()
+                .get::<Camera>(scene_camera)
+                .unwrap()
+                .viewport
+                .is_none()
+        );
+        assert!(matches!(
+            app.world().get::<RenderTarget>(monitor_camera).unwrap(),
+            RenderTarget::Window(_)
+        ));
+        assert!(matches!(
+            app.world().get::<RenderTarget>(present_camera).unwrap(),
+            RenderTarget::Window(_)
+        ));
+        // 16:9 frame on a 3024x1964 panel: full width, letterboxed, in logical points.
+        let vp = app.world().resource::<VideoViewport>();
+        assert_eq!(vp.target_resolution, UVec2::new(1280, 720));
+        assert_eq!(vp.physical_rect.physical_size, UVec2::new(3024, 1701));
+        let sprite = app.world().get::<Sprite>(quad).unwrap();
+        assert_eq!(sprite.custom_size, Some(vp.logical_size));
     }
 }

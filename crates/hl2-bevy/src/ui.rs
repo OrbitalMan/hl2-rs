@@ -8,9 +8,9 @@ use bevy::{
     window::{CursorGrabMode, CursorOptions, PrimaryMonitor, PrimaryWindow, Window},
 };
 
-/// Maps a window cursor position in logical window coordinates to UI canvas coordinates,
-/// properly offsetting for letterbox/pillarbox black stripes and filtering out positions
-/// outside the active viewport.
+/// Maps a window cursor position in logical window coordinates to UI canvas coordinates
+/// (game-frame pixels), offsetting for letterbox/pillarbox black stripes, scaling from the
+/// presented size to the frame resolution and filtering out positions outside the frame.
 pub fn cursor_to_canvas(
     cursor_pos: Option<Vec2>,
     viewport: Option<&VideoViewport>,
@@ -23,7 +23,7 @@ pub fn cursor_to_canvas(
     )
 }
 
-/// Resizes the UI canvas to match the active viewport logical size.
+/// Resizes the UI canvas to the game-frame resolution it is drawn into.
 pub fn resize_canvas(
     canvas: &hl2_ui::canvas::Canvas,
     viewport: Option<&VideoViewport>,
@@ -68,7 +68,10 @@ type UiDisplayDevices<'w, 's> = (
 pub fn update_ui(
     (keys, buttons, mut characters, mut wheels): UiInputDevices,
     (mut windows, monitors): UiDisplayDevices,
-    video_viewport: Option<Res<VideoViewport>>,
+    (video_viewport, mut frame): (
+        Option<Res<VideoViewport>>,
+        Option<ResMut<crate::video::GameFrame>>,
+    ),
     mut sim: ResMut<crate::movement::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
@@ -146,7 +149,11 @@ pub fn update_ui(
             }
         }
         if let Some(video_cfg) = sim.pending_video_config.take() {
-            crate::video::apply_video_config_to_window(&mut window, &video_cfg, &monitors);
+            crate::video::apply_video_config_to_window(
+                &mut window,
+                &video_cfg,
+                frame.as_deref_mut(),
+            );
         }
         sim.transition = ui.source.mode != before;
         sim.paused = ui.source.paused();
@@ -213,13 +220,13 @@ mod tests {
             logical_size: Vec2::new(1440.0, 1080.0),
         };
 
-        // Click at left edge of 4:3 area on screen (x=240, y=100) -> canvas (0, 100)
-        let p = cursor_to_canvas(Some(Vec2::new(240.0, 100.0)), Some(&viewport), &window);
-        assert_eq!(p, Some(glam::Vec2::new(0.0, 100.0)));
+        // Click at top-left of the 4:3 area on screen (x=240, y=0) -> frame pixel (0, 0)
+        let p = cursor_to_canvas(Some(Vec2::new(240.0, 0.0)), Some(&viewport), &window);
+        assert_eq!(p, Some(glam::Vec2::new(0.0, 0.0)));
 
-        // Click in the center of 4:3 area on screen (x=960, y=540) -> canvas (720, 540)
+        // Click in the center of the 4:3 area (x=960, y=540) -> centre of the 1024x768 frame
         let p_center = cursor_to_canvas(Some(Vec2::new(960.0, 540.0)), Some(&viewport), &window);
-        assert_eq!(p_center, Some(glam::Vec2::new(720.0, 540.0)));
+        assert_eq!(p_center, Some(glam::Vec2::new(512.0, 384.0)));
 
         // Click in black stripe on the left (x=100 < 240) -> None
         let p_left_stripe =
@@ -251,8 +258,8 @@ mod tests {
         };
 
         resize_canvas(&canvas, Some(&viewport), &window);
-        assert_eq!(canvas.width(), 1440.0);
-        assert_eq!(canvas.height(), 1080.0);
+        assert_eq!(canvas.width(), 1024.0);
+        assert_eq!(canvas.height(), 768.0);
     }
 
     #[test]
@@ -303,8 +310,8 @@ mod tests {
         app.world_mut().run_system_once(update_ui).unwrap();
 
         let ui = app.world().resource::<crate::console::Console>();
-        assert_eq!(ui.source.canvas.width(), 1440.0);
-        assert_eq!(ui.source.canvas.height(), 1080.0);
+        assert_eq!(ui.source.canvas.width(), 1024.0);
+        assert_eq!(ui.source.canvas.height(), 768.0);
     }
 
     #[test]
@@ -333,9 +340,9 @@ mod tests {
         let p_bottom = cursor_to_canvas(Some(Vec2::new(512.0, 850.0)), Some(&viewport), &window);
         assert_eq!(p_bottom, None);
 
-        // Inside active area (x=512, y=224 + 100 = 324) -> canvas (512, 100)
+        // Inside active area (x=512, y=224 + 100 = 324) -> 1280x720 frame pixel (640, 125)
         let p_inside = cursor_to_canvas(Some(Vec2::new(512.0, 324.0)), Some(&viewport), &window);
-        assert_eq!(p_inside, Some(glam::Vec2::new(512.0, 100.0)));
+        assert_eq!(p_inside, Some(glam::Vec2::new(640.0, 125.0)));
     }
 
     #[test]

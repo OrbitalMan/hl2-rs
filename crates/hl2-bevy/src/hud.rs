@@ -291,9 +291,10 @@ pub fn present(
     let Ok(window) = windows.single() else {
         return;
     };
+    // The HUD draws into the game frame, so it is laid out in frame pixels.
     let (width, height) = video_viewport
         .as_ref()
-        .map(|vp| (vp.logical_size.x, vp.logical_size.y))
+        .map(|vp| (vp.target_resolution.x as f32, vp.target_resolution.y as f32))
         .unwrap_or_else(|| (window.width(), window.height()));
     hud.source.canvas.resize(width, height);
     // Client order: queued ScreenFade/Damage messages, the fade over the 3D view, HUD.
