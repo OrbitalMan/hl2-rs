@@ -307,3 +307,9 @@ Verified (2026-10-11, macOS Apple Silicon):
 Not tested: live keyboard/mouse play in the packaged build (movement scripts bypass device input,
 so the binding path is covered by unit tests only), hearing the music volume and focus mute,
 startup in full screen or No Border, Windows and Linux.
+
+## 9. Unfinished work (paused 2026-10-11)
+
+The ordered list of remaining GameUI work (gamma, HDR modes, captions,
+audio setup/language, gamepad, placeholders, untested platforms) is kept in
+[STATUS.md](../STATUS.md) under "Current session: GameUI".

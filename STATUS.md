@@ -8,7 +8,15 @@ Antigravity, Claude Opus model family (exact identifier not exposed). Plan and e
 
 - **Done:** GameUI resources from the install (localization with key-name fallback, VGUI `.res` layouts, `gamemenu.res`, `kb_act.lst`/`config_default.cfg`, display-mode helpers); startup flow (main menu over `background01` without a loadable `--map`, launch error for map-dependent arguments without one); resource-driven main menu with categories and the QUIT GAME box. Options dialog (Gameplay, Keyboard, Mouse, Gamepad placeholder, Audio, Video, brightness dialog) laid out from the installed `optionssub*.res` files with OK/Cancel/Apply over a draft config, persisted to `hl2-config.json`. The game uses the stored bindings (keyboard, mouse buttons, wheel; unbound actions), mouse filter/acceleration/invert, skill (every frame), music volume (retail rule: `#` wave at soundlevel 0), mute when unfocused, and the stored display mode at startup (`--windowed`/`--fullscreen`/`--borderless` override; unattended runs start windowed). Unit + headless tests, strict Clippy/fmt, packaged macOS captures in `artifacts/gameui/`.
 - **Limitations:** background map is frozen and viewed from the spawn; Load Game, Achievements, Extras, Episode One/Two New Game, Gamepad and the Advanced buttons are disabled placeholders; gamma, HDR, speakers, quality, captions, language and aim assist are stored only; music ducking not modeled; live packaged keyboard/mouse play, audible checks and full-screen/No Border startup **not tested**; Windows/Linux **not tested**.
-- **Next:** owner review; then gamma/HDR application or documented limits.
+- **Paused (owner, 2026-10-11):** work stops here until the owner asks for fixes. Branch state: commits `9072b12`..`ee5833e` on `orbitalman/main-menu`, not pushed; tests, strict Clippy and fmt pass at `ee5833e`.
+- **Unfinished, in suggested order (estimates are relative effort):**
+  1. Owned-file test that the installed `level_sounds_music.txt` songs are classified as music (small).
+  2. Gamma (`mat_monitorgamma`) in the renderer (medium): stored and edited by the brightness dialog, no visual effect yet.
+  3. HDR None/Bloom/Full switching the render pipeline (large; design note first).
+  4. Captions/subtitles (large: closed-caption parser, HUD drawing, timing); speaker setup, sound quality and spoken language (stored only; language needs a restart path).
+  5. Gamepad page and aim assist (large; new input path).
+  6. Placeholders still disabled: Load Game, Achievements, Extras, Episode One/Two New Game, Keyboard/Video Advanced; background map frozen and seen from the spawn; music ducking not modeled.
+  7. Not tested: Windows/Linux (including No Border), full-screen/No Border startup, real monitor mode switching, audible music volume/focus mute, packaged key capture.
 
 ## Current session 10 (2026-10-09)
 
