@@ -68,10 +68,7 @@ type UiDisplayDevices<'w, 's> = (
 pub fn update_ui(
     (keys, buttons, mut characters, mut wheels): UiInputDevices,
     (mut windows, monitors): UiDisplayDevices,
-    (video_viewport, mut frame): (
-        Option<Res<VideoViewport>>,
-        Option<ResMut<crate::video::GameFrame>>,
-    ),
+    video_viewport: Option<Res<VideoViewport>>,
     mut sim: ResMut<crate::movement::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
@@ -84,7 +81,7 @@ pub fn update_ui(
         }
         exit.write(AppExit::Success);
     }
-    let Ok((mut window, mut cursor)) = windows.single_mut() else {
+    let Ok((window, mut cursor)) = windows.single_mut() else {
         return;
     };
     let text: String = characters
@@ -148,13 +145,8 @@ pub fn update_ui(
                     .set_display_modes(crate::video::display::modes(&monitors, &window));
             }
         }
-        if let Some(video_cfg) = sim.pending_video_config.take() {
-            crate::video::apply_video_config_to_window(
-                &mut window,
-                &video_cfg,
-                frame.as_deref_mut(),
-            );
-        }
+        // Applied video settings (`sim.pending_video_config`) are carried out by
+        // `video::apply_video_settings`.
         sim.transition = ui.source.mode != before;
         sim.paused = ui.source.paused();
         let cfg = Some(&ui.source.config);

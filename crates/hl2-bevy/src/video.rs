@@ -139,6 +139,19 @@ const WINDOW_RESIZE_FRAMES: u32 = 120;
 /// task bar), in logical points.
 const WINDOW_MARGIN: Vec2 = Vec2::new(32.0, 96.0);
 
+/// Frames during which game-frame rendering is suspended around a frame resize.
+///
+/// Bevy recomputes a camera's render-target size when it reads the image's `AssetEvent`,
+/// which arrives a frame after the image changes, while the GPU texture is replaced at once.
+/// Rendering through that frame pairs the new color texture with depth textures of the old
+/// size (a wgpu validation error that quits the app). The frame cameras are therefore
+/// stopped first, the image is resized while nothing renders into it, and rendering resumes
+/// once the cameras have picked up the new size:
+/// - `SUSPEND_FRAMES`: cameras stopped;
+/// - `SUSPEND_FRAMES - 1`: the image is resized;
+/// - remaining frames: the size change reaches the cameras; then rendering resumes.
+const SUSPEND_FRAMES: u32 = 4;
+
 /// The offscreen game frame: every scene, viewmodel and HUD camera renders into it.
 #[derive(Resource, Clone, Debug)]
 pub struct GameFrame {
@@ -147,6 +160,8 @@ pub struct GameFrame {
     pub resolution: UVec2,
     /// Remaining frames to size a windowed-mode window to `resolution`.
     pub pending_window: Option<u32>,
+    /// Remaining frames of suspended rendering while the frame is resized.
+    pub suspended: u32,
 }
 
 /// The camera presenting the game frame in the window.
@@ -156,6 +171,10 @@ pub struct PresentCamera;
 /// The quad showing the game frame.
 #[derive(Component)]
 pub struct PresentQuad;
+
+/// A game-frame camera stopped during a frame resize, with its `is_active` before.
+#[derive(Component)]
+pub struct SuspendedCamera(bool);
 
 /// A render-target image for the game frame, linearly filtered when scaled.
 pub fn frame_image(resolution: UVec2) -> Image {
@@ -179,6 +198,7 @@ pub(crate) fn install_frame(
         image: image.clone(),
         resolution,
         pending_window: windowed.then_some(WINDOW_RESIZE_FRAMES),
+        suspended: 0,
     });
     commands.spawn((
         PresentCamera,
@@ -318,6 +338,17 @@ pub(crate) fn apply_video_config_to_window(
     frame: Option<&mut GameFrame>,
 ) {
     let target_mode = mode::desired_mode(cfg.display_mode);
+    debug!(
+        "[video] apply {}x{} {:?}: window mode {:?} -> {:?}, window {}x{} (scale {})",
+        cfg.width,
+        cfg.height,
+        cfg.display_mode,
+        window.mode,
+        target_mode,
+        window.resolution.width(),
+        window.resolution.height(),
+        window.scale_factor()
+    );
     if window.mode != target_mode {
         window.mode = target_mode;
     }
@@ -326,6 +357,21 @@ pub(crate) fn apply_video_config_to_window(
         frame.pending_window =
             (target_mode == WindowMode::Windowed).then_some(WINDOW_RESIZE_FRAMES);
     }
+}
+
+/// Carries out video settings applied from the Options dialog or the console.
+pub(crate) fn apply_video_settings(
+    mut sim: ResMut<crate::movement::Simulation>,
+    mut frame: Option<ResMut<GameFrame>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    let Some(cfg) = sim.pending_video_config.take() else {
+        return;
+    };
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    apply_video_config_to_window(&mut window, &cfg, frame.as_deref_mut());
 }
 
 /// What a pending windowed-mode resize should do this frame.
@@ -400,7 +446,14 @@ pub(crate) fn resize_window(
         frame.pending_window = Some(frames - 1);
         return;
     }
-    match window_resize(&window, monitor, frame.resolution) {
+    let decision = window_resize(&window, monitor, frame.resolution);
+    debug!(
+        "[video] resize_window frames={frames} mode={:?} window={}x{} -> {decision:?}",
+        window.mode,
+        window.resolution.width(),
+        window.resolution.height()
+    );
+    match decision {
         WindowResize::Cancel | WindowResize::Done => frame.pending_window = None,
         WindowResize::Wait => {}
         WindowResize::Resize(size) => {
@@ -421,15 +474,13 @@ type FrameCameras<'w, 's> = Query<
     ),
 >;
 
-/// Keeps the game frame at the configured resolution, routes every game camera into it and
-/// places the presented frame in the window.
+/// Routes every game camera into the game frame and places the presented frame in the window.
 pub(crate) fn present_frame(
     frame: Option<Res<GameFrame>>,
-    mut images: ResMut<Assets<Image>>,
     mut video_viewport: ResMut<VideoViewport>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: FrameCameras,
-    mut quads: Query<&mut Sprite, With<PresentQuad>>,
+    mut quads: Query<(&mut Sprite, &mut Visibility), With<PresentQuad>>,
 ) {
     let Some(frame) = frame else {
         return;
@@ -437,11 +488,6 @@ pub(crate) fn present_frame(
     let Ok(window) = windows.single() else {
         return;
     };
-    if images.get(&frame.image).map(Image::size) != Some(frame.resolution)
-        && let Some(mut image) = images.get_mut(&frame.image)
-    {
-        *image = frame_image(frame.resolution);
-    }
     for (mut camera, mut target) in &mut cameras {
         let routed = matches!(&*target, RenderTarget::Image(t) if t.handle == frame.image);
         if !routed {
@@ -455,10 +501,86 @@ pub(crate) fn present_frame(
     if *video_viewport != computed {
         *video_viewport = computed;
     }
-    for mut quad in &mut quads {
+    // The frame holds no complete picture while it is being resized: show black.
+    let visibility = if frame.suspended > 0 {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    for (mut quad, mut shown) in &mut quads {
         if quad.custom_size != Some(video_viewport.logical_size) {
             quad.custom_size = Some(video_viewport.logical_size);
         }
+        if *shown != visibility {
+            *shown = visibility;
+        }
+    }
+}
+
+type SuspendCameras<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Camera,
+        Option<&'static SuspendedCamera>,
+    ),
+    (
+        Without<crate::monitors::MonitorCamera>,
+        Without<PresentCamera>,
+    ),
+>;
+
+/// Resizes the game frame safely when the configured resolution changes (see
+/// [`SUSPEND_FRAMES`]). Runs after every system that sets camera activity this frame, so a
+/// stopped camera cannot be re-enabled before rendering.
+pub(crate) fn suspend_for_resize(
+    mut commands: Commands,
+    frame: Option<ResMut<GameFrame>>,
+    mut images: ResMut<Assets<Image>>,
+    mut cameras: SuspendCameras,
+) {
+    let Some(mut frame) = frame else {
+        return;
+    };
+    let image_size = images.get(&frame.image).map(Image::size);
+    if frame.suspended == 0 && image_size.is_some_and(|size| size != frame.resolution) {
+        debug!(
+            "[video] frame resize {image_size:?} -> {}: suspending rendering",
+            frame.resolution
+        );
+        frame.suspended = SUSPEND_FRAMES;
+    }
+    if frame.suspended == 0 {
+        for (entity, mut camera, suspended) in &mut cameras {
+            if let Some(SuspendedCamera(was_active)) = suspended {
+                camera.is_active = *was_active;
+                commands.entity(entity).remove::<SuspendedCamera>();
+            }
+        }
+        return;
+    }
+    for (entity, mut camera, suspended) in &mut cameras {
+        if suspended.is_none() {
+            commands
+                .entity(entity)
+                .insert(SuspendedCamera(camera.is_active));
+        }
+        camera.is_active = false;
+    }
+    if frame.suspended == SUSPEND_FRAMES - 1
+        && let Some(mut image) = images.get_mut(&frame.image)
+    {
+        debug!(
+            "[video] resizing frame image {:?} -> {}",
+            image.size(),
+            frame.resolution
+        );
+        *image = frame_image(frame.resolution);
+    }
+    frame.suspended -= 1;
+    if frame.suspended == 0 {
+        debug!("[video] frame resize done: resuming rendering");
     }
 }
 
@@ -500,6 +622,7 @@ mod tests {
             image: Handle::default(),
             resolution,
             pending_window: None,
+            suspended: 0,
         }
     }
 
@@ -705,6 +828,7 @@ mod tests {
             image: image.clone(),
             resolution: UVec2::new(1280, 720),
             pending_window: None,
+            suspended: 0,
         });
         // Full screen on a Retina panel.
         app.world_mut().spawn((
@@ -738,20 +862,13 @@ mod tests {
             .world_mut()
             .spawn((PresentCamera, Camera::default(), RenderTarget::default()))
             .id();
-        let quad = app.world_mut().spawn((PresentQuad, Sprite::default())).id();
+        let quad = app
+            .world_mut()
+            .spawn((PresentQuad, Sprite::default(), Visibility::default()))
+            .id();
 
         app.world_mut().run_system_once(present_frame).unwrap();
 
-        let size = app
-            .world()
-            .resource::<Assets<Image>>()
-            .get(&image)
-            .map(Image::size);
-        assert_eq!(
-            size,
-            Some(UVec2::new(1280, 720)),
-            "frame follows the setting"
-        );
         let target = app.world().get::<RenderTarget>(scene_camera).unwrap();
         assert!(matches!(target, RenderTarget::Image(t) if t.handle == image));
         assert!(
@@ -770,10 +887,49 @@ mod tests {
             RenderTarget::Window(_)
         ));
         // 16:9 frame on a 3024x1964 panel: full width, letterboxed, in logical points.
-        let vp = app.world().resource::<VideoViewport>();
+        let vp = app.world().resource::<VideoViewport>().clone();
         assert_eq!(vp.target_resolution, UVec2::new(1280, 720));
         assert_eq!(vp.physical_rect.physical_size, UVec2::new(3024, 1701));
         let sprite = app.world().get::<Sprite>(quad).unwrap();
         assert_eq!(sprite.custom_size, Some(vp.logical_size));
+
+        // The resize: cameras stop first, the image changes only while they are stopped, and
+        // they resume with their previous activity once the new size has had time to arrive.
+        let size = |app: &App| {
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&image)
+                .map(Image::size)
+        };
+        let active = |app: &App, camera| app.world().get::<Camera>(camera).unwrap().is_active;
+        app.world_mut().run_system_once(suspend_for_resize).unwrap();
+        assert!(!active(&app, scene_camera), "stopped before the resize");
+        assert!(active(&app, monitor_camera), "monitor camera untouched");
+        assert_eq!(size(&app), Some(UVec2::new(640, 480)), "not resized yet");
+        app.world_mut().run_system_once(suspend_for_resize).unwrap();
+        assert_eq!(
+            size(&app),
+            Some(UVec2::new(1280, 720)),
+            "resized while stopped"
+        );
+        assert!(!active(&app, scene_camera));
+        app.world_mut().run_system_once(present_frame).unwrap();
+        assert_eq!(
+            app.world().get::<Visibility>(quad),
+            Some(&Visibility::Hidden),
+            "black while resizing"
+        );
+        for _ in 0..SUSPEND_FRAMES - 2 {
+            app.world_mut().run_system_once(suspend_for_resize).unwrap();
+            assert!(!active(&app, scene_camera));
+        }
+        app.world_mut().run_system_once(suspend_for_resize).unwrap();
+        assert!(active(&app, scene_camera), "rendering resumed");
+        assert!(app.world().get::<SuspendedCamera>(scene_camera).is_none());
+        app.world_mut().run_system_once(present_frame).unwrap();
+        assert_eq!(
+            app.world().get::<Visibility>(quad),
+            Some(&Visibility::Inherited)
+        );
     }
 }

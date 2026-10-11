@@ -56,6 +56,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("sensitivity", "sensitivity [value]: query or set mouse sensitivity"),
     ("fov", "fov [degrees]: query or set camera field of view"),
     ("mat_hdr_level", "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)"),
+    ("mat_setvideomode", "mat_setvideomode <width> <height> <windowed 0|1>: set the video mode"),
     ("mainmenu", "mainmenu: show the main menu"),
 ];
 
@@ -927,6 +928,27 @@ impl Console {
                 } else {
                     return Err(usage());
                 }
+            }
+            "mat_setvideomode" => {
+                let [w, h, windowed] = args else {
+                    return Err(usage());
+                };
+                let width: u32 = w.parse().map_err(|_| usage())?;
+                let height: u32 = h.parse().map_err(|_| usage())?;
+                if !(320..=8192).contains(&width) || !(240..=8192).contains(&height) {
+                    return Err(usage());
+                }
+                let display_mode = match windowed.as_str() {
+                    "1" => crate::config::DisplayMode::Windowed,
+                    "0" => crate::config::DisplayMode::Fullscreen,
+                    _ => return Err(usage()),
+                };
+                self.config.video.width = width;
+                self.config.video.height = height;
+                self.config.video.display_mode = display_mode;
+                let _ = self.config.save();
+                self.log(format!("mat_setvideomode {width} {height} {windowed}"));
+                return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
             }
             _ => return Err(usage()),
         }

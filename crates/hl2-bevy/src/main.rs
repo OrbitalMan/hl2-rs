@@ -462,10 +462,21 @@ fn main() -> Result<()> {
         .add_plugins(ui::UiPlugin)
         .add_plugins(movement::MovementPlugin)
         .add_systems(PreUpdate, crate::video::present_frame)
-        .add_systems(Update, crate::video::resize_window)
+        .add_systems(
+            Update,
+            (
+                crate::video::apply_video_settings,
+                crate::video::resize_window,
+            )
+                .chain(),
+        )
         .add_systems(
             PostUpdate,
             crate::video::present_frame.before(rendering::present_entities),
+        )
+        .add_systems(
+            PostUpdate,
+            crate::video::suspend_for_resize.after(TransformSystems::Propagate),
         )
         .add_systems(
             RunFixedMainLoop,

@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-11 Safe runtime resolution change
+
+**Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).
+
+**Changed:**
+- `hl2-bevy::video`: new `suspend_for_resize` system. When the resolution changes, it deactivates every camera that renders into the game frame, resizes the frame image only while they are inactive, and resumes rendering `SUSPEND_FRAMES` (4) frames later with each camera's previous activity restored. The presentation sprite is hidden (black) meanwhile. `present_frame` no longer resizes the image.
+- `apply_video_settings` now applies pending video settings in `Update`, before `resize_window`. It used to run inside the menu update, which skips while a movement script runs.
+- `hl2-ui::console`: added `mat_setvideomode <width> <height> <windowed 0|1>`.
+- `debug!` tracing of resize requests, suspension, image resize, resume and window resize steps.
+
+**Why:** Changing the resolution crashed the game in windowed and full-screen modes. A wgpu validation error reported differing attachment sizes: the camera's cached target size, and so its depth texture, is refreshed one frame after the frame image is resized in place.
+
+**Tested how:** `cargo test --locked -p hl2-ui -p hl2-bevy` (all pass, including the updated stop/resize/resume test); strict Clippy; `cargo fmt --all`. Packaged macOS runs driven by `mat_setvideomode`, both exit 0 with no validation errors: windowed 1280x720 → 1024x768 → 1600x900 → 1280x720 (crashed before the fix), and windowed → full screen 1280x720 → full screen 1024x768 → windowed. See docs/gameui.md section 10a.
+
+**Result:** Runtime resolution changes no longer crash, and the window follows them.
+
+**Still broken or not tested:** sky cameras may show a stale activity for one frame after resuming. Not tested: green-button full screen, macOS full-screen cursor size, Windows and Linux.
+
+**Next:** owner check on macOS; Windows verification.
+
 ## 2026-10-11 Resolution, display mode and scaling
 
 **Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).

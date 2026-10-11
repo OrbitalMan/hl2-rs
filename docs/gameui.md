@@ -327,9 +327,9 @@ Design (`crates/hl2-bevy/src/video.rs`):
   miniature sky (layer 4 / order -1), world (layer 0), viewmodel and HUD/menu cameras all render
   into it. `present_frame` routes every camera except `MonitorCamera` (`_rt_Camera`) and
   `PresentCamera` into the frame each frame, so map-owned cameras spawned on a level change are
-  covered too. It also clears camera viewports and recreates the image when the resolution
-  changes. Layer order, clears and per-camera post-processing are unchanged; only their target
-  changed.
+  covered too. It also clears camera viewports. The image is resized by `suspend_for_resize`
+  while rendering is stopped (section 10a). Layer order, clears and per-camera post-processing are
+  unchanged; only their target changed.
 - **Presentation.** `PresentCamera` (a 2D camera, order 100, black clear, layer 31) draws one sprite
   showing the frame. The sprite is scaled to fit the window and centred (letterbox or pillarbox when
   the aspects differ), and the frame is sampled with linear filtering. Full screen at 1280x720 on a
@@ -374,7 +374,54 @@ Verified (2026-10-11, macOS M1 Pro, 3456x2234 at 2x):
   - `--windowed --width 3456 --height 2234`: the startup clamp resized the window to 1579x1021
     points (a 3158x2042 capture), as computed.
 
-Not tested: resizing a window from the Video page's OK/Apply in a packaged run (the scripted attempt
-did not select a different resolution; the decision logic is unit-tested and the OS resize path is
-the one verified by the startup clamp), the green-button OS full screen, the cursor size in macOS
-full screen, real mouse input through the scaled frame, Windows and Linux.
+Not tested: the green-button OS full screen, the cursor size in macOS full screen, real mouse input
+through the scaled frame, Windows and Linux. Resolution changes at runtime are covered in section 10a.
+
+### 10a. Safe resolution change (2026-10-11)
+
+Problem: changing the resolution at runtime crashed the game in windowed and full-screen modes. The
+log ended with a wgpu validation error ("Attachments have differing sizes: the depth attachment's
+texture view has extent (1024, 768, 1) but ... color attachment ... (1600, 900, 1)"), after which
+Bevy's render error handler exits.
+
+Cause: the frame image was resized in place while cameras were rendering into it. The GPU texture is
+replaced in the same frame, but a camera's cached target size (which sizes its depth and other view
+textures) is only refreshed when the image's `AssetEvent::Modified` is read, one frame later. For
+that frame the old-size depth texture is paired with the new-size color target. Swapping in a new
+image handle would not help: a `RenderTarget` change alone does not refresh the cached size either.
+
+Fix (`crates/hl2-bevy/src/video.rs`): stop rendering, resize, then resume.
+
+- `suspend_for_resize` (PostUpdate, after transform propagation so it overrides the sky/monitor
+  presenters' per-frame camera activity) notices that the frame image no longer matches the
+  configured resolution and suspends for `SUSPEND_FRAMES` (4) frames. Every camera that renders into
+  the frame is deactivated (its previous `is_active` is kept in `SuspendedCamera`). The image is
+  replaced only on a frame when those cameras are already inactive. Rendering resumes after the
+  remaining frames, once the camera target sizes have caught up, and each camera gets its previous
+  activity back.
+- While suspended the presentation sprite is hidden, so the window shows black for those few
+  frames instead of a stretched stale frame.
+- `apply_video_settings` (Update, chained before `resize_window`) applies pending video settings.
+  It used to run inside the menu update, which returns early while a movement script runs, so
+  scripted and console changes never reached the window.
+- Console command `mat_setvideomode <width> <height> <windowed 0|1>` (the retail command) sets the
+  resolution and display mode, saves the settings and applies them. Movement scripts use it to
+  change the resolution reliably (`{"action":"command","command":"mat_setvideomode 1600 900 1"}`).
+- `debug!` logs trace each request, suspension, image resize, resume and window resize step
+  (`RUST_LOG=hl2_bevy=debug`).
+
+Verified (2026-10-11, macOS M1 Pro):
+
+- Unit test: cameras are stopped before the image is resized, the image is resized only while they
+  are stopped, the presentation is hidden meanwhile, and activity and visibility are restored after
+  the suspension.
+- Packaged runs (`--map background01 --main-menu --windowed --width 1280 --height 720` with a
+  movement script of `mat_setvideomode` commands), exit code 0 and no validation errors:
+  - windowed 1280x720 → 1024x768 → 1600x900 → 1280x720; the window resized each time. Before the
+    fix this script crashed on the second change.
+  - windowed → full screen 1280x720 → full screen 1024x768 → windowed 1280x720; the window resize
+    waited for the full-screen exit and then completed. The final capture renders correctly.
+
+Known limitation: on the first frame after resuming, sky cameras may use a stale activity value for
+one frame (a one-frame visual glitch at most). Not tested: changes made with the Options dialog's
+OK/Apply through real mouse input (it uses the same pending-settings path), Windows and Linux.
