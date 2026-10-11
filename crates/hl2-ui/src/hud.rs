@@ -2269,10 +2269,10 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    #[ignore = "requires an owned HL2 installation in HL2_ROOT"]
+    #[ignore = "requires an owned Half-Life 2 installation"]
     fn owned_monochrome_crosshair_matches_native_pistol_and_smg_pixels() {
-        let root = std::env::var_os("HL2_ROOT").expect("set HL2_ROOT to the owned installation");
-        let vfs = Vfs::mount(std::path::Path::new(&root)).unwrap();
+        let root = source_assets::install::discover().expect("installed game");
+        let vfs = Vfs::mount(&root).unwrap();
         let canvas = Canvas::default();
         let hud = WeaponHud::load(&vfs, canvas.clone()).unwrap();
         let mut inventory = Inventory::default();
@@ -2309,10 +2309,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires an owned HL2 installation in HL2_ROOT"]
+    #[ignore = "requires an owned Half-Life 2 installation"]
     fn owned_canvas_crosshair_and_pending_selection_preserve_status() {
-        let root = std::env::var_os("HL2_ROOT").expect("set HL2_ROOT to the owned installation");
-        let vfs = Vfs::mount(std::path::Path::new(&root)).unwrap();
+        let root = source_assets::install::discover().expect("installed game");
+        let vfs = Vfs::mount(&root).unwrap();
         let canvas = Canvas::default();
         let hud = WeaponHud::load(&vfs, canvas.clone()).unwrap();
         let mut inventory = Inventory::default();

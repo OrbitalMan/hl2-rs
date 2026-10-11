@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-11 GameUI Options dialog
+
+**Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed).
+
+**Changed:**
+- `hl2-ui::config`: typed video/audio/mouse/gameplay settings, `DisplayMode` with platform choices (Windowed (No Border) hidden only on macOS, stored values kept), legacy `borderless` migration, clamps; retail `+attack`/`+attack2` default bindings.
+- `hl2-ui::gameui::{settings, options}`: draft settings model, control bindings, and `OptionsDialog` (tabs, pages from installed `optionssub*.res`, OK/Cancel/Apply, brightness/defaults/credits sub-dialogs, key capture, placeholder logging). Replaces the previous hand-laid `hl2-ui::options`.
+- `hl2-ui::gameui::widgets`: check box, radio, slider, text entry, combo, list with scroll bar, divider, URL, tab and image widgets.
+- `hl2-bevy`: mouse wheel and held-button input, Source key names for capture, display modes from `Monitor::video_modes`, window mode/resolution applied on OK/Apply.
+
+**Why:** Owner-requested resource-driven Options dialog.
+
+**Tested how:** `cargo test --locked -p hl2-ui -p hl2-bevy` (83 + 56 passed, 3 + 2 ignored); owned-install ignored tests pass; strict Clippy; `cargo fmt --all --check`; packaged macOS captures of every page and the open display-mode list (docs/validation.md).
+
+**Result:** All six tabs render from installed resources and localization; settings round-trip through `hl2-config.json`.
+
+**Still broken or not tested:** many stored settings are not consumed by the host yet (docs/gameui.md section 6); brightness dialog only unit-tested; Windows/Linux, fullscreen mode switching and packaged key capture not tested.
+
+**Next:** host wiring of the stored settings.
+
 ## 2026-10-11 GameUI resources, startup flow and main menu
 
 **Agent/model:** Antigravity agentic assistant; Claude Opus model family (exact identifier not exposed). One read-only research subagent surveyed UI patterns before planning.

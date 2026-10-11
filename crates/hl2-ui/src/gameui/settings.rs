@@ -1,0 +1,575 @@
+//! Binds options-page controls (by their `.res` field names) to typed [`Config`] fields.
+//!
+//! Everything here is pure: given a draft configuration it reads and writes values, lists combo
+//! choices and decides dynamic enabled states. The dialog in [`super::options`] only routes input
+//! and draws. Retail ranges come from the installed `GameUI.dll` slider constants (see
+//! `docs/gameui.md` section 3).
+
+use super::{
+    display::{self, AspectRatio, Resolution},
+    localize::Localization,
+    widgets::SliderRange,
+};
+use crate::config::{
+    AimAssist, Captions, Config, DisplayMode, HdrMode, HudAspect, SoundQuality, Speakers,
+};
+
+/// The options being edited: the draft configuration plus the Video page's aspect filter, which
+/// is page state rather than a stored setting (retail derives it from the resolution).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Draft {
+    pub config: Config,
+    pub aspect: AspectRatio,
+}
+
+impl Draft {
+    pub fn new(config: Config) -> Self {
+        let aspect = AspectRatio::of(config.video.width, config.video.height);
+        Self { config, aspect }
+    }
+}
+
+/// Read-only data the choice lists depend on.
+pub struct Env<'a> {
+    pub localization: &'a Localization,
+    pub languages: &'a [String],
+    pub modes: &'a [Resolution],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Toggle {
+    ReverseMouse,
+    MouseFilter,
+    RawInput,
+    Acceleration,
+    MuteLoseFocus,
+}
+
+impl Toggle {
+    pub fn get(self, c: &Config) -> bool {
+        match self {
+            Self::ReverseMouse => c.mouse.invert,
+            Self::MouseFilter => c.mouse.filter,
+            Self::RawInput => c.mouse.raw_input,
+            Self::Acceleration => c.mouse.acceleration,
+            Self::MuteLoseFocus => c.audio.mute_losefocus,
+        }
+    }
+
+    pub fn set(self, c: &mut Config, value: bool) {
+        *match self {
+            Self::ReverseMouse => &mut c.mouse.invert,
+            Self::MouseFilter => &mut c.mouse.filter,
+            Self::RawInput => &mut c.mouse.raw_input,
+            Self::Acceleration => &mut c.mouse.acceleration,
+            Self::MuteLoseFocus => &mut c.audio.mute_losefocus,
+        } = value;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Value {
+    Volume,
+    MusicVolume,
+    Sensitivity,
+    AccelExponent,
+    AimAssistScale,
+    Gamma,
+}
+
+impl Value {
+    /// Slider range (retail `GameUI.dll` constants).
+    pub fn range(self) -> SliderRange {
+        match self {
+            Self::Volume | Self::MusicVolume => SliderRange::new(0., 1.),
+            Self::Sensitivity => SliderRange::new(0.1, 6.),
+            Self::AccelExponent => SliderRange::new(1., 1.4),
+            Self::AimAssistScale => SliderRange::new(0.5, 2.),
+            Self::Gamma => SliderRange::new(1.6, 2.6),
+        }
+    }
+
+    pub fn get(self, c: &Config) -> f32 {
+        match self {
+            Self::Volume => c.audio.volume,
+            Self::MusicVolume => c.audio.music_volume,
+            Self::Sensitivity => c.mouse.sensitivity,
+            Self::AccelExponent => c.mouse.accel_exponent,
+            Self::AimAssistScale => c.mouse.aim_assist_scale,
+            Self::Gamma => c.video.gamma,
+        }
+    }
+
+    /// Stores a value clamped to the slider range. Typed sensitivity entries may exceed the
+    /// slider (like the `sensitivity` cvar), up to the console limit of 20.
+    pub fn set(self, c: &mut Config, value: f32) {
+        if !value.is_finite() {
+            return;
+        }
+        let value = match self {
+            Self::Sensitivity => value.clamp(0.1, 20.),
+            _ => self.range().clamp(value),
+        };
+        *match self {
+            Self::Volume => &mut c.audio.volume,
+            Self::MusicVolume => &mut c.audio.music_volume,
+            Self::Sensitivity => &mut c.mouse.sensitivity,
+            Self::AccelExponent => &mut c.mouse.accel_exponent,
+            Self::AimAssistScale => &mut c.mouse.aim_assist_scale,
+            Self::Gamma => &mut c.video.gamma,
+        } = value;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    AimAssist,
+    Speakers,
+    Quality,
+    Language,
+    Captions,
+    Resolution,
+    Aspect,
+    DisplayMode,
+    HudAspect,
+    Hdr,
+}
+
+impl Choice {
+    /// Localized item labels, in combo order.
+    pub fn items(self, env: &Env, draft: &Draft) -> Vec<String> {
+        let loc = env.localization;
+        let tokens = |tokens: &mut dyn Iterator<Item = &'static str>| -> Vec<String> {
+            tokens.map(|t| loc.text(t)).collect()
+        };
+        match self {
+            Self::AimAssist => tokens(&mut AimAssist::ALL.iter().map(|v| v.token())),
+            Self::Speakers => tokens(&mut Speakers::ALL.iter().map(|v| v.token())),
+            Self::Quality => tokens(&mut SoundQuality::ALL.iter().map(|v| v.token())),
+            Self::Captions => tokens(&mut Captions::ALL.iter().map(|v| v.token())),
+            Self::Aspect => tokens(&mut AspectRatio::ALL.iter().map(|v| v.token())),
+            Self::DisplayMode => tokens(&mut DisplayMode::choices().iter().map(|v| v.token())),
+            Self::HudAspect => tokens(&mut HudAspect::ALL.iter().map(|v| v.token())),
+            Self::Hdr => tokens(&mut HdrMode::ALL.iter().map(|v| v.token())),
+            Self::Language => env
+                .languages
+                .iter()
+                .map(|l| loc.text(&language_token(l)))
+                .collect(),
+            Self::Resolution => display::resolution_choices(env.modes, draft.aspect)
+                .into_iter()
+                .map(Resolution::label)
+                .collect(),
+        }
+    }
+
+    pub fn selected(self, env: &Env, draft: &Draft) -> Option<usize> {
+        let c = &draft.config;
+        fn find<T: PartialEq>(list: &[T], value: T) -> Option<usize> {
+            list.iter().position(|v| *v == value)
+        }
+        match self {
+            Self::AimAssist => find(&AimAssist::ALL, c.mouse.aim_assist),
+            Self::Speakers => find(&Speakers::ALL, c.audio.speakers),
+            Self::Quality => find(&SoundQuality::ALL, c.audio.quality),
+            Self::Captions => find(&Captions::ALL, c.audio.captions),
+            Self::Aspect => find(&AspectRatio::ALL, draft.aspect),
+            Self::DisplayMode => DisplayMode::choices()
+                .iter()
+                .position(|m| *m == c.video.display_mode.effective()),
+            Self::HudAspect => find(&HudAspect::ALL, c.video.hud_aspect),
+            Self::Hdr => find(&HdrMode::ALL, c.video.hdr),
+            Self::Language => env
+                .languages
+                .iter()
+                .position(|l| l.eq_ignore_ascii_case(&c.audio.language)),
+            Self::Resolution => display::resolution_choices(env.modes, draft.aspect)
+                .iter()
+                .position(|r| *r == Resolution::new(c.video.width, c.video.height)),
+        }
+    }
+
+    /// The text shown in the closed combo: the selected item, or the stored value when it is
+    /// not among the choices (an unlisted resolution or an uninstalled language).
+    pub fn text(self, env: &Env, draft: &Draft) -> String {
+        let items = self.items(env, draft);
+        match self.selected(env, draft) {
+            Some(i) => items[i].clone(),
+            None => match self {
+                Self::Resolution => {
+                    Resolution::new(draft.config.video.width, draft.config.video.height).label()
+                }
+                Self::Language => env
+                    .localization
+                    .text(&language_token(&draft.config.audio.language)),
+                _ => items.first().cloned().unwrap_or_default(),
+            },
+        }
+    }
+
+    pub fn select(self, env: &Env, draft: &mut Draft, index: usize) {
+        let c = &mut draft.config;
+        match self {
+            Self::AimAssist => {
+                if let Some(v) = AimAssist::ALL.get(index) {
+                    c.mouse.aim_assist = *v;
+                }
+            }
+            Self::Speakers => {
+                if let Some(v) = Speakers::ALL.get(index) {
+                    c.audio.speakers = *v;
+                }
+            }
+            Self::Quality => {
+                if let Some(v) = SoundQuality::ALL.get(index) {
+                    c.audio.quality = *v;
+                }
+            }
+            Self::Captions => {
+                if let Some(v) = Captions::ALL.get(index) {
+                    c.audio.captions = *v;
+                }
+            }
+            Self::DisplayMode => {
+                if let Some(v) = DisplayMode::choices().get(index) {
+                    c.video.display_mode = *v;
+                }
+            }
+            Self::HudAspect => {
+                if let Some(v) = HudAspect::ALL.get(index) {
+                    c.video.hud_aspect = *v;
+                }
+            }
+            Self::Hdr => {
+                if let Some(v) = HdrMode::ALL.get(index) {
+                    c.video.hdr = *v;
+                }
+            }
+            Self::Language => {
+                if let Some(v) = env.languages.get(index) {
+                    c.audio.language = v.clone();
+                }
+            }
+            Self::Resolution => {
+                if let Some(r) = display::resolution_choices(env.modes, draft.aspect).get(index) {
+                    c.video.width = r.width;
+                    c.video.height = r.height;
+                }
+            }
+            Self::Aspect => {
+                let Some(aspect) = AspectRatio::ALL.get(index).copied() else {
+                    return;
+                };
+                if aspect == draft.aspect {
+                    return;
+                }
+                draft.aspect = aspect;
+                let current = Resolution::new(c.video.width, c.video.height);
+                if let Some(r) = display::choose_after_aspect_change(env.modes, aspect, current) {
+                    c.video.width = r.width;
+                    c.video.height = r.height;
+                }
+            }
+        }
+    }
+}
+
+/// `#GameUI_Language_<Name>` for an installed voice-pack language (`schinese` ->
+/// `Simplified_Chinese`, `latam` -> `Latam_Spanish`, otherwise the capitalized name).
+pub fn language_token(language: &str) -> String {
+    let name = match language.to_ascii_lowercase().as_str() {
+        "schinese" => "Simplified_Chinese".to_owned(),
+        "tchinese" => "Traditional_Chinese".to_owned(),
+        "latam" => "Latam_Spanish".to_owned(),
+        other => {
+            let mut chars = other.chars();
+            chars
+                .next()
+                .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
+                .unwrap_or_default()
+        }
+    };
+    format!("#GameUI_Language_{name}")
+}
+
+/// Buttons and links with dialog-level behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Command {
+    GammaDialog,
+    AudioCredits,
+    VideoCredits,
+    KeyDefaults,
+    KeyEdit,
+    KeyClear,
+    /// "Advanced..." on the Keyboard page (placeholder).
+    KeyAdvanced,
+    /// "Advanced..." on the Video page (placeholder).
+    VideoAdvanced,
+    /// OK of a sub-dialog (gamma).
+    SubOk,
+    /// Cancel / Close of a sub-dialog.
+    SubCancel,
+}
+
+impl Command {
+    /// Placeholders are drawn disabled; activating one only logs.
+    pub fn placeholder(self) -> Option<&'static str> {
+        match self {
+            Self::KeyAdvanced => Some("Advanced keyboard options"),
+            Self::VideoAdvanced => Some("Advanced video options"),
+            _ => None,
+        }
+    }
+}
+
+/// What a control does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Binding {
+    Toggle(Toggle),
+    /// One radio button of the skill group.
+    Skill(u8),
+    Slider(Value),
+    /// The text entry showing (and accepting) a slider's value.
+    Entry(Value),
+    Choice(Choice),
+    Command(Command),
+    /// The keyboard page's binding list.
+    KeyList,
+}
+
+/// The panels whose controls come from `.res` layouts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Gameplay,
+    Keyboard,
+    Mouse,
+    Audio,
+    Video,
+    Gamma,
+    AudioCredits,
+    VideoCredits,
+}
+
+impl Panel {
+    /// Layout file stem in [`super::resources::LAYOUT_FILES`].
+    pub fn layout(self) -> &'static str {
+        match self {
+            Self::Gameplay => "optionssubdifficulty",
+            Self::Keyboard => "optionssubkeyboard",
+            Self::Mouse => "optionssubmouse",
+            Self::Audio => "optionssubaudio",
+            Self::Video => "optionssubvideo",
+            Self::Gamma => "optionssubvideogammadlg",
+            Self::AudioCredits => "optionssubaudiothirdpartydlg",
+            Self::VideoCredits => "optionssubvideothirdpartydlg",
+        }
+    }
+}
+
+/// The binding of a control, by panel and `.res` field name.
+pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
+    use Binding::*;
+    let name = name.to_ascii_lowercase();
+    Some(match (panel, name.as_str()) {
+        (Panel::Gameplay, "skill1radio") => Skill(1),
+        (Panel::Gameplay, "skill2radio") => Skill(2),
+        (Panel::Gameplay, "skill3radio") => Skill(3),
+        (Panel::Mouse, "reversemouse") => Toggle(self::Toggle::ReverseMouse),
+        (Panel::Mouse, "mousefilter") => Toggle(self::Toggle::MouseFilter),
+        (Panel::Mouse, "mouseraw") => Toggle(self::Toggle::RawInput),
+        (Panel::Mouse, "mouseaccelerationcheckbox") => Toggle(self::Toggle::Acceleration),
+        (Panel::Mouse, "slider") => Slider(Value::Sensitivity),
+        (Panel::Mouse, "sensitivitylabel") => Entry(Value::Sensitivity),
+        (Panel::Mouse, "mouseaccelerationslider") => Slider(Value::AccelExponent),
+        (Panel::Mouse, "mouseaccelerationlabel") => Entry(Value::AccelExponent),
+        (Panel::Mouse, "autoaim") => Choice(self::Choice::AimAssist),
+        (Panel::Mouse, "autoaimscale") => Slider(Value::AimAssistScale),
+        (Panel::Audio, "sfxslider") => Slider(Value::Volume),
+        (Panel::Audio, "musicslider") => Slider(Value::MusicVolume),
+        (Panel::Audio, "speakersetup") => Choice(self::Choice::Speakers),
+        (Panel::Audio, "soundquality") => Choice(self::Choice::Quality),
+        (Panel::Audio, "audiospokenlanguage") => Choice(self::Choice::Language),
+        (Panel::Audio, "closecaptioncheck") => Choice(self::Choice::Captions),
+        (Panel::Audio, "snd_mute_losefocus") => Toggle(self::Toggle::MuteLoseFocus),
+        (Panel::Audio, "thirdpartysoundcredits") => Command(self::Command::AudioCredits),
+        (Panel::Video, "resolution") => Choice(self::Choice::Resolution),
+        (Panel::Video, "aspectratio") => Choice(self::Choice::Aspect),
+        (Panel::Video, "displaymodecombo") => Choice(self::Choice::DisplayMode),
+        (Panel::Video, "hudaspectratio") => Choice(self::Choice::HudAspect),
+        (Panel::Video, "hdr") => Choice(self::Choice::Hdr),
+        (Panel::Video, "gammabutton") => Command(self::Command::GammaDialog),
+        (Panel::Video, "advancedbutton") => Command(self::Command::VideoAdvanced),
+        (Panel::Video, "thirdpartyvideocredits") => Command(self::Command::VideoCredits),
+        (Panel::Keyboard, "listpanel_keybindlist") => KeyList,
+        (Panel::Keyboard, "defaults") => Command(self::Command::KeyDefaults),
+        (Panel::Keyboard, "keyadvancedbutton") => Command(self::Command::KeyAdvanced),
+        (Panel::Keyboard, "changekeybutton") => Command(self::Command::KeyEdit),
+        (Panel::Keyboard, "clearkeybutton") => Command(self::Command::KeyClear),
+        (Panel::Gamma, "gamma") => Slider(Value::Gamma),
+        (Panel::Gamma, "gammaentry") => Entry(Value::Gamma),
+        (Panel::Gamma, "okbutton") => Command(self::Command::SubOk),
+        (Panel::Gamma, "button1") => Command(self::Command::SubCancel),
+        (Panel::AudioCredits | Panel::VideoCredits, "button2") => Command(self::Command::SubCancel),
+        _ => return None,
+    })
+}
+
+/// Controls the retail layout hides on macOS (`[$OSX]`) that this rewrite still shows, because
+/// the renderer supports the feature on every platform: the HDR label and combo.
+pub fn force_visible(panel: Panel, name: &str) -> bool {
+    panel == Panel::Video
+        && (name.eq_ignore_ascii_case("HDR") || name.eq_ignore_ascii_case("HDR Label"))
+}
+
+/// Dynamic enabled state on top of the layout's own `enabled` flag.
+///
+/// * acceleration amount follows its check box;
+/// * Aim-Assist Sensitivity is enabled only while aim assist is on (the layout disables it);
+/// * the brightness button is enabled in full screen only, judged by the applied mode (retail
+///   gamma ramps only work in full screen; the layout disables it);
+/// * placeholders are always disabled.
+pub fn enabled(
+    binding: Option<Binding>,
+    layout_enabled: bool,
+    draft: &Draft,
+    applied: &Config,
+) -> bool {
+    match binding {
+        Some(Binding::Slider(Value::AccelExponent) | Binding::Entry(Value::AccelExponent)) => {
+            layout_enabled && draft.config.mouse.acceleration
+        }
+        Some(Binding::Slider(Value::AimAssistScale)) => {
+            draft.config.mouse.aim_assist != AimAssist::Off
+        }
+        Some(Binding::Command(Command::GammaDialog)) => {
+            applied.video.display_mode.effective() == DisplayMode::Fullscreen
+        }
+        Some(Binding::Command(command)) if command.placeholder().is_some() => false,
+        _ => layout_enabled,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env<'a>(loc: &'a Localization, languages: &'a [String], modes: &'a [Resolution]) -> Env<'a> {
+        Env {
+            localization: loc,
+            languages,
+            modes,
+        }
+    }
+
+    #[test]
+    fn values_clamp_to_retail_ranges_and_reject_non_finite() {
+        let mut c = Config::default();
+        Value::AccelExponent.set(&mut c, 3.);
+        assert_eq!(c.mouse.accel_exponent, 1.4);
+        Value::Gamma.set(&mut c, 0.);
+        assert_eq!(c.video.gamma, 1.6);
+        Value::Sensitivity.set(&mut c, 12.);
+        assert_eq!(
+            c.mouse.sensitivity, 12.,
+            "typed sensitivity may exceed the slider"
+        );
+        Value::Volume.set(&mut c, f32::NAN);
+        assert_eq!(c.audio.volume, 1.);
+        Toggle::MuteLoseFocus.set(&mut c, false);
+        assert!(!Toggle::MuteLoseFocus.get(&c));
+    }
+
+    #[test]
+    fn aspect_change_resets_resolution_without_touching_applied_config() {
+        let loc = Localization::default();
+        let modes = [
+            Resolution::new(1920, 1080),
+            Resolution::new(1280, 720),
+            Resolution::new(1024, 768),
+            Resolution::new(1680, 1050),
+        ];
+        let langs = ["english".to_owned()];
+        let env = env(&loc, &langs, &modes);
+        let applied = Config::default();
+        let mut draft = Draft::new(applied.clone());
+        assert_eq!(draft.aspect, AspectRatio::Wide16x9);
+        assert_eq!(
+            Choice::Resolution.items(&env, &draft),
+            ["1920 x 1080", "1280 x 720"]
+        );
+        Choice::Aspect.select(&env, &mut draft, 0);
+        assert_eq!(draft.aspect, AspectRatio::Normal);
+        assert_eq!(
+            (draft.config.video.width, draft.config.video.height),
+            (1024, 768)
+        );
+        assert_eq!(Choice::Resolution.selected(&env, &draft), Some(0));
+        assert_eq!(applied.video.width, 1280, "nothing applied before OK/Apply");
+        Choice::Aspect.select(&env, &mut draft, 2);
+        assert_eq!(
+            (draft.config.video.width, draft.config.video.height),
+            (1680, 1050)
+        );
+    }
+
+    #[test]
+    fn choices_use_tokens_with_key_name_fallback_and_platform_display_modes() {
+        let mut loc = Localization::default();
+        loc.insert("GameUI_Language_English", "English");
+        let langs = ["english".to_owned(), "schinese".to_owned()];
+        let env = env(&loc, &langs, &[]);
+        let mut draft = Draft::new(Config::default());
+        assert_eq!(
+            Choice::Language.items(&env, &draft),
+            ["English", "GameUI_Language_Simplified_Chinese"]
+        );
+        assert_eq!(
+            Choice::Captions.items(&env, &draft)[0],
+            "GameUI_NoClosedCaptions"
+        );
+        let modes = Choice::DisplayMode.items(&env, &draft);
+        assert_eq!(modes.len(), DisplayMode::choices().len());
+        assert_eq!(
+            modes.contains(&"GameUI_NoWindowBorder".to_owned()),
+            !cfg!(target_os = "macos")
+        );
+        Choice::Hdr.select(&env, &mut draft, 1);
+        assert_eq!(draft.config.video.hdr, HdrMode::Bloom);
+        draft.config.audio.language = "french".into();
+        assert_eq!(Choice::Language.selected(&env, &draft), None);
+        assert_eq!(
+            Choice::Language.text(&env, &draft),
+            "GameUI_Language_French"
+        );
+    }
+
+    #[test]
+    fn dynamic_enabled_states() {
+        let applied = Config::default();
+        let mut draft = Draft::new(applied.clone());
+        let scale = Some(Binding::Slider(Value::AimAssistScale));
+        assert!(!enabled(scale, false, &draft, &applied));
+        draft.config.mouse.aim_assist = AimAssist::Basic;
+        assert!(enabled(scale, false, &draft, &applied));
+        let accel = Some(Binding::Slider(Value::AccelExponent));
+        assert!(!enabled(accel, true, &draft, &applied));
+        draft.config.mouse.acceleration = true;
+        assert!(enabled(accel, true, &draft, &applied));
+        assert!(
+            !enabled(accel, false, &draft, &applied),
+            "layout [$OSX] disable wins"
+        );
+        let gamma = Some(Binding::Command(Command::GammaDialog));
+        assert!(enabled(gamma, false, &draft, &applied));
+        let mut windowed = applied.clone();
+        windowed.video.display_mode = DisplayMode::Windowed;
+        assert!(!enabled(gamma, false, &draft, &windowed));
+        let advanced = Some(Binding::Command(Command::VideoAdvanced));
+        assert!(!enabled(advanced, true, &draft, &applied));
+        assert_eq!(
+            binding(Panel::Mouse, "ReverseMouse"),
+            Some(Binding::Toggle(Toggle::ReverseMouse))
+        );
+        assert!(force_visible(Panel::Video, "HDR Label"));
+    }
+}

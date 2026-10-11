@@ -56,6 +56,7 @@ type UiInputDevices<'w, 's> = (
     Res<'w, ButtonInput<KeyCode>>,
     Res<'w, ButtonInput<MouseButton>>,
     MessageReader<'w, 's, bevy::input::keyboard::KeyboardInput>,
+    MessageReader<'w, 's, bevy::input::mouse::MouseWheel>,
 );
 
 type UiDisplayDevices<'w, 's> = (
@@ -65,7 +66,7 @@ type UiDisplayDevices<'w, 's> = (
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_ui(
-    (keys, buttons, mut characters): UiInputDevices,
+    (keys, buttons, mut characters, mut wheels): UiInputDevices,
     (mut windows, monitors): UiDisplayDevices,
     video_viewport: Option<Res<VideoViewport>>,
     mut sim: ResMut<crate::movement::Simulation>,
@@ -89,6 +90,7 @@ pub fn update_ui(
         .filter_map(|e| e.text.as_ref())
         .map(|s| s.as_str())
         .collect();
+    let wheel = crate::console::wheel_steps(wheels.read());
     if !sim.commands.is_empty() {
         return;
     }
@@ -124,6 +126,9 @@ pub fn update_ui(
                     &window,
                 ),
                 click: buttons.just_pressed(MouseButton::Left),
+                held: buttons.pressed(MouseButton::Left),
+                wheel,
+                binding_keys: crate::console::binding_keys(&keys, &buttons, wheel),
             });
             let has_apply = effects
                 .iter()
@@ -133,6 +138,11 @@ pub fn update_ui(
                 *gv = bevy::audio::GlobalVolume::from(bevy::audio::Volume::Linear(
                     ui.source.config.audio.volume,
                 ));
+            }
+            let options = hl2_ui::console::Mode::Options;
+            if before != options && ui.source.mode == options {
+                ui.source
+                    .set_display_modes(crate::video::display::modes(&monitors, &window));
             }
         }
         if let Some(video_cfg) = sim.pending_video_config.take() {
@@ -277,7 +287,8 @@ mod tests {
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .add_message::<AppExit>()
-        .add_message::<bevy::input::keyboard::KeyboardInput>();
+        .add_message::<bevy::input::keyboard::KeyboardInput>()
+        .add_message::<bevy::input::mouse::MouseWheel>();
 
         app.world_mut().spawn((
             Window {
@@ -349,7 +360,8 @@ mod tests {
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .add_message::<AppExit>()
-        .add_message::<bevy::input::keyboard::KeyboardInput>();
+        .add_message::<bevy::input::keyboard::KeyboardInput>()
+        .add_message::<bevy::input::mouse::MouseWheel>();
 
         app.world_mut().spawn((
             Window {
@@ -393,7 +405,8 @@ mod tests {
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .add_message::<AppExit>()
-        .add_message::<bevy::input::keyboard::KeyboardInput>();
+        .add_message::<bevy::input::keyboard::KeyboardInput>()
+        .add_message::<bevy::input::mouse::MouseWheel>();
         app.world_mut().spawn((
             Window {
                 resolution: bevy::window::WindowResolution::new(800, 600),

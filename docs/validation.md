@@ -1,5 +1,9 @@
 # Local validation — 2026-10-05
 
+## GameUI Options dialog (2026-10-11, macOS Apple Silicon)
+
+`cargo test --locked -p hl2-ui -p hl2-bevy` (hl2-ui 83 passed / 3 ignored, hl2-bevy 56 passed / 2 ignored); `cargo test --locked -p hl2-ui -- --ignored` passes all 3 owned-install tests (the installation is discovered like the runtime does; the older HUD test no longer requires `HL2_ROOT`), including `gameui::options::tests::owned_install_pages_bind_every_expected_control`. Strict Clippy for hl2-ui, hl2-bevy and source-assets and `cargo fmt --all --check` clean. Packaged release with `--map background01 --main-menu --width 1280 --height 720 --no-focus --movement-script artifacts/gameui/options-<page>.json`: Gameplay, Keyboard (sections from `kb_act.lst`, MOUSE1/MOUSE2 on the attack rows with a fresh config), Mouse, Audio and Video (open display-mode list: Full screen / Windowed on macOS) captured and visually checked. Brightness dialog: unit tests only (its button is disabled in the windowed capture, as in retail). Windows/Linux, fullscreen switching and packaged key capture **not tested**. Details: [gameui.md](gameui.md) section 6.
+
 ## GameUI startup flow and main menu (2026-10-11, macOS Apple Silicon)
 
 `cargo test --locked -p hl2-ui -p hl2-bevy` (hl2-ui 69 passed / 2 ignored, hl2-bevy 54 passed / 2 ignored); strict Clippy for hl2-ui, hl2-bevy and source-assets and `cargo fmt --all --check` clean. Packaged release (`scripts/build-bevy.sh`): no `--map` -> background01 + main menu (report mode MainMenu, background_level true); `--map no_such_map` -> failure message then the menu; `--map d1_trainstation_01` -> gameplay; `--fly --position 0 0 0` and `--map no_such_map --fly` -> exit status 1 with an error; scripted input on `--map background01 --main-menu` captured the QUIT GAME box and the HALF-LIFE 2 category. Captures are in ignored `artifacts/gameui/`. Windows/Linux **not tested**. Details: [gameui.md](gameui.md) section 5.

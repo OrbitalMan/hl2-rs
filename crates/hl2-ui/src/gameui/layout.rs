@@ -121,6 +121,9 @@ pub struct Control {
     pub command: String,
     pub image: String,
     pub align: Align,
+    /// Slider end labels (`leftText` / `rightText`), usually tokens.
+    pub left_text: String,
+    pub right_text: String,
 }
 
 impl Control {
@@ -203,6 +206,8 @@ fn control(entry: &Entry) -> Option<Control> {
         command: text("command").unwrap_or_default().to_owned(),
         image: text("image").unwrap_or_default().to_owned(),
         align: text("textAlignment").map(Align::parse).unwrap_or_default(),
+        left_text: text("leftText").unwrap_or_default().to_owned(),
+        right_text: text("rightText").unwrap_or_default().to_owned(),
     })
 }
 

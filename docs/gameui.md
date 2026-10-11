@@ -137,3 +137,79 @@ Verified (2026-10-11, macOS Apple Silicon, release build from `scripts/build-bev
 
 Not tested: Windows and Linux, mouse-only navigation in the packaged build (covered only by unit
 tests), and the Episode One/Two categories beyond the model tests.
+
+## 6. Implemented: Options dialog (2026-10-11)
+
+Architecture:
+
+- `hl2-ui::config`: typed settings (`HdrMode`, `DisplayMode`, `HudAspect`, `Speakers`,
+  `SoundQuality`, `Captions`, `AimAssist`, `GameplaySettings`), `Config::migrate` (legacy
+  `borderless` -> `display_mode`, clamps to the retail ranges). Persisted as `hl2-config.json` next
+  to the executable.
+- `hl2-ui::gameui::settings`: a pure `Draft` (pending `Config` plus video-page state such as the
+  selected aspect bucket) and a binding table from each `.res` control name to a `Toggle`, `Value`,
+  `Choice` or `Command`, with per-binding enable rules.
+- `hl2-ui::gameui::options::OptionsDialog`: tabs, page layout from the installed
+  `optionssub*.res` files (`hl2/resource/`), OK/Cancel/Apply, sub-dialogs (brightness, key-defaults
+  confirmation, credits), key capture, and the placeholder log. Input is a plain `Input` snapshot,
+  so the dialog is unit-testable without Bevy.
+- `hl2-ui::gameui::widgets`: Painter widgets (check box, radio, slider, text entry, combo with drop
+  list, menu list with scroll bar, divider, URL label, tab, image) using the scheme colours.
+- Host (`hl2-bevy`): mouse wheel and held-button state, Source key names for capture
+  (`MOUSE1`-`MOUSE5`, `MWHEELUP`/`MWHEELDOWN`), display modes from `Monitor::video_modes`
+  (`video::display::modes`), and window mode/resolution applied on OK/Apply.
+
+Semantics:
+
+- OK applies and closes, Apply applies and stays open, Cancel/Escape discards the draft. Escape
+  closes the innermost layer first (open combo, key capture, sub-dialog, then the dialog).
+- Every label is resolved through the game localization; unresolved tokens show their key name.
+- Video: resolutions come from the platform display modes, grouped by aspect bucket; changing the
+  aspect ratio selects a valid resolution of that bucket. Nothing changes before OK/Apply.
+- Display mode offers Fullscreen / Windowed / Windowed (No Border). No Border is hidden only on
+  macOS (as in the retail macOS build); a stored No Border value is kept in the file and treated as
+  Fullscreen there (`DisplayMode::effective`). Windows and Linux keep borderless.
+- Brightness ("Adjust brightness levels...") is enabled only in Fullscreen, following retail. It
+  edits the draft and Cancel restores the previous value (retail applies immediately).
+- Keyboard: rows and sections come from `hl2/scripts/kb_act.lst`, defaults from
+  `hl2/cfg/config_default.cfg`. Edit Key (or Enter on a selected row) captures the next
+  key or mouse button (double-clicking a row is not implemented), Escape cancels capture, assigning a key removes it from any other action,
+  Clear Key unbinds, Use Defaults asks for confirmation and resets only the listed actions.
+- Mouse: on macOS Raw input and Acceleration are disabled, per the `[$OSX]` conditions in the
+  installed `.res` file.
+- High Dynamic Range is shown on macOS too, although the retail `.res` hides it there.
+- Placeholders are shown disabled and log `"<label>: not implemented in HL2-RS yet."`: Gamepad tab
+  (empty page), Keyboard Advanced..., Video Advanced....
+
+Limitations:
+
+- Stored but not yet used by the host: HDR mode, gamma, mouse filter/acceleration/invert, skill,
+  music volume, speaker setup, sound quality, captions, spoken language and mute when unfocused.
+- The host still reads attacks directly from the mouse buttons and only parses keyboard names for
+  other actions; `MOUSE*`/`MWHEEL*` bindings are stored but not consumed yet.
+- Display mode and resolution from the config are applied on OK/Apply; startup still uses the
+  command line.
+- Configs saved before `+attack`/`+attack2` were added to the defaults do not gain those entries
+  (cleared bindings are stored as missing keys, so they are not refilled); Use Defaults restores
+  them.
+- Dialog scale is `max(1, height / 720)`, not a verified retail proportional scale.
+
+Verified (2026-10-11, macOS Apple Silicon, release build from `scripts/build-bevy.sh`):
+
+- `cargo test --locked -p hl2-ui -p hl2-bevy`: hl2-ui 83 passed / 3 ignored, hl2-bevy 56 passed /
+  2 ignored.
+- `cargo test --locked -p hl2-ui -- --ignored` with the owned install (discovered as at runtime): the
+  resource test, the HUD crosshair test and
+  `gameui::options::tests::owned_install_pages_bind_every_expected_control` pass (every expected
+  control on each installed page is found and bound).
+- `cargo clippy --locked -p hl2-ui -p hl2-bevy -p source-assets --all-targets -- -D warnings` and
+  `cargo fmt --all --check`: clean.
+- Packaged captures with scripted input (`--map background01 --main-menu --movement-script ...`,
+  ignored `artifacts/gameui/options-*.png`): Gameplay, Keyboard (sections, MOUSE1/MOUSE2 attack
+  rows), Mouse, Audio and Video (open display-mode list showing Full screen / Windowed on macOS).
+  The brightness dialog was not captured because the windowed capture disables its button; it is
+  covered by unit tests only.
+
+Not tested: Windows and Linux (including the No Border choice and borderless switching), real
+monitor mode switching to fullscreen, gamepads, and key capture in the packaged build (unit tests
+only).

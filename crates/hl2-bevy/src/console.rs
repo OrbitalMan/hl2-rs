@@ -93,3 +93,65 @@ pub fn keys(native: &ButtonInput<KeyCode>) -> std::collections::BTreeSet<hl2_ui:
     .filter_map(|(n, k)| native.just_pressed(n).then_some(k))
     .collect()
 }
+
+/// Wheel steps of this frame; positive scrolls up. Pixel deltas (touchpads) count one step per
+/// 40 pixels.
+pub fn wheel_steps<'a>(events: impl Iterator<Item = &'a bevy::input::mouse::MouseWheel>) -> f32 {
+    use bevy::input::mouse::MouseScrollUnit;
+    events
+        .map(|e| match e.unit {
+            MouseScrollUnit::Line => e.y,
+            MouseScrollUnit::Pixel => e.y / 40.,
+        })
+        .sum()
+}
+
+/// Keys and buttons pressed this frame as persisted binding names: the `KeyCode` name for keys
+/// (`KeyW`, `SuperLeft`), the Source names `MOUSE1`..`MOUSE5` for buttons and
+/// `MWHEELUP`/`MWHEELDOWN` for the wheel. Unidentified native keys are skipped.
+pub fn binding_keys(
+    keys: &ButtonInput<KeyCode>,
+    buttons: &ButtonInput<MouseButton>,
+    wheel: f32,
+) -> Vec<String> {
+    let mut names: Vec<String> = keys
+        .get_just_pressed()
+        .map(|key| format!("{key:?}"))
+        .filter(|name| name.chars().all(|c| c.is_ascii_alphanumeric()))
+        .collect();
+    for (button, name) in [
+        (MouseButton::Left, "MOUSE1"),
+        (MouseButton::Right, "MOUSE2"),
+        (MouseButton::Middle, "MOUSE3"),
+        (MouseButton::Back, "MOUSE4"),
+        (MouseButton::Forward, "MOUSE5"),
+    ] {
+        if buttons.just_pressed(button) {
+            names.push(name.into());
+        }
+    }
+    if wheel > 0. {
+        names.push("MWHEELUP".into());
+    } else if wheel < 0. {
+        names.push("MWHEELDOWN".into());
+    }
+    names
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+
+    #[test]
+    fn pressed_inputs_become_binding_names() {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::SuperLeft);
+        keys.press(KeyCode::KeyW);
+        let mut buttons = ButtonInput::<MouseButton>::default();
+        buttons.press(MouseButton::Back);
+        let mut names = binding_keys(&keys, &buttons, -1.);
+        names.sort();
+        assert_eq!(names, ["KeyW", "MOUSE4", "MWHEELDOWN", "SuperLeft"]);
+        assert!(binding_keys(&ButtonInput::default(), &ButtonInput::default(), 0.).is_empty());
+    }
+}

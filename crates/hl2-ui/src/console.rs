@@ -1,6 +1,8 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
 use crate::gameui::{
+    display::Resolution,
     menu::{GameMenu, MenuOutcome, MessageBox, MessageBoxLayout},
+    options::{OptionsDialog, OptionsOutcome},
     resources::{fallback_game_menu, GameUiResources},
     widgets::{scheme_color, Fonts, Painter, Theme},
 };
@@ -53,7 +55,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("volume", "volume [0..1]: query or set master audio volume"),
     ("sensitivity", "sensitivity [value]: query or set mouse sensitivity"),
     ("fov", "fov [degrees]: query or set camera field of view"),
-    ("mat_hdr_level", "mat_hdr_level [0|2]: query or set HDR level (0=None, 2=Full)"),
+    ("mat_hdr_level", "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)"),
     ("mainmenu", "mainmenu: show the main menu"),
 ];
 
@@ -125,7 +127,9 @@ pub struct Console {
     theme: Theme,
     widget_fonts: Fonts,
     style: Style,
-    pub options: crate::options::OptionsState,
+    pub options: OptionsDialog,
+    /// The menu the options dialog was opened from (drawn behind it and restored on close).
+    options_return: Mode,
     pub config: crate::config::Config,
 }
 
@@ -325,7 +329,15 @@ pub struct Input {
     pub keys: std::collections::BTreeSet<Key>,
     pub text: String,
     pub pointer: Option<Vec2>,
+    /// Left button went down this frame.
     pub click: bool,
+    /// Left button is held (slider drags).
+    pub held: bool,
+    /// Mouse wheel steps this frame; positive scrolls up.
+    pub wheel: f32,
+    /// Keys and buttons pressed this frame as persisted binding names (`KeyW`, `SuperLeft`,
+    /// `MOUSE1`, `MWHEELUP`), used when the keyboard page captures a new key.
+    pub binding_keys: Vec<String>,
 }
 impl Input {
     pub(crate) fn pressed(&self, key: Key) -> bool {
@@ -354,11 +366,6 @@ impl Default for Style {
 impl Default for Console {
     fn default() -> Self {
         let config = crate::config::Config::default();
-        let options = crate::options::OptionsState::new(
-            config.clone(),
-            crate::options::OptionsLabels::default(),
-            std::collections::BTreeMap::new(),
-        );
         let gameui = GameUiResources {
             game_menu: fallback_game_menu(),
             ..Default::default()
@@ -395,7 +402,8 @@ impl Default for Console {
             theme: Theme::default(),
             widget_fonts: Fonts::default(),
             style: Style::default(),
-            options,
+            options: OptionsDialog::default(),
+            options_return: Mode::MainMenu,
             config,
         };
         console.set_resources(gameui);
@@ -451,7 +459,6 @@ impl Console {
         )
         .or_else(|| ui_font.clone());
         let config = crate::config::Config::load_or_default();
-        let options = crate::options::OptionsState::load(vfs, config.clone());
         let mut console = Self {
             canvas: canvas.clone(),
             developer_font,
@@ -462,7 +469,6 @@ impl Console {
             font: ui_font,
             menu_font,
             mono,
-            options,
             config,
             ..Default::default()
         };
@@ -589,6 +595,12 @@ impl Console {
         );
         self.pause_menu.set_in_game(true, loc);
         self.gameui = Arc::new(resources);
+        self.options.set_resources(self.gameui.clone());
+    }
+
+    /// Resolutions for the Video page, from the host's monitor query.
+    pub fn set_display_modes(&mut self, modes: Vec<Resolution>) {
+        self.options.set_display_modes(modes);
     }
 
     pub fn resources(&self) -> &GameUiResources {
@@ -624,6 +636,12 @@ impl Console {
     /// The main menu over a background level has nothing to return to.
     pub fn escape(&mut self) {
         if self.quit_box.take().is_some() {
+            return;
+        }
+        if self.mode == Mode::Options {
+            if !self.options.escape() {
+                self.mode = self.options_return;
+            }
             return;
         }
         let menu = if self.background_level {
@@ -895,18 +913,14 @@ impl Console {
             }
             "mat_hdr_level" => {
                 if args.is_empty() {
-                    let lvl = match self.config.video.hdr {
-                        crate::config::HdrMode::None => 0,
-                        crate::config::HdrMode::Full => 2,
-                    };
+                    let lvl = self.config.video.hdr.level();
                     self.log(format!("\"mat_hdr_level\" = \"{lvl}\""));
                 } else if args.len() == 1 {
                     let lvl: u8 = args[0].parse().map_err(|_| usage())?;
-                    self.config.video.hdr = match lvl {
-                        0 => crate::config::HdrMode::None,
-                        2 => crate::config::HdrMode::Full,
-                        _ => return Err("mat_hdr_level must be 0 (None) or 2 (Full)".into()),
-                    };
+                    self.config.video.hdr =
+                        crate::config::HdrMode::from_level(lvl).ok_or_else(|| {
+                            "mat_hdr_level must be 0 (None), 1 (Bloom) or 2 (Full)".to_owned()
+                        })?;
                     let _ = self.config.save();
                     self.log(format!("mat_hdr_level {lvl}"));
                     return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
@@ -942,29 +956,33 @@ impl Console {
     /// Called before gameplay input collection. Opening characters are drained by the host.
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
         if self.mode == Mode::Options {
-            let res = self
-                .options
-                .input(input, vec2(self.canvas.width(), self.canvas.height()));
-            match res {
-                crate::options::OptionsResult::Ok(cfg) => {
-                    self.config = cfg.clone();
-                    let _ = self.config.save();
-                    self.mode = self.previous;
-                    return vec![Effect::ApplyConfig(Box::new(cfg))];
-                }
-                crate::options::OptionsResult::Apply(cfg) => {
-                    self.config = cfg.clone();
-                    let _ = self.config.save();
-                    return vec![Effect::ApplyConfig(Box::new(cfg))];
-                }
-                crate::options::OptionsResult::Cancel => {
-                    self.mode = self.previous;
-                    return Vec::new();
-                }
-                crate::options::OptionsResult::None => {
-                    return Vec::new();
-                }
+            let measure = Painter {
+                canvas: &self.canvas,
+                fonts: &self.widget_fonts,
+                theme: &self.theme,
+                origin: Vec2::ZERO,
+                scale: 1.,
+            };
+            let outcome = self.options.input(input, &measure);
+            for line in self.options.take_log() {
+                self.log(line);
             }
+            let (config, close) = match outcome {
+                OptionsOutcome::None => return Vec::new(),
+                OptionsOutcome::Apply(config) => (Some(config), false),
+                OptionsOutcome::Close(config) => (config, true),
+            };
+            if close {
+                self.mode = self.options_return;
+            }
+            let Some(config) = config else {
+                return Vec::new();
+            };
+            if let Err(error) = config.save() {
+                self.log(format!("Could not save settings: {error}"));
+            }
+            self.config = config.clone();
+            return vec![Effect::ApplyConfig(Box::new(config))];
         }
         if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
             return self.menu_input(input);
@@ -1137,9 +1155,9 @@ impl Console {
                 }
             }
             MenuOutcome::OpenOptions => {
-                self.previous = self.mode;
+                self.options_return = self.mode;
                 self.mode = Mode::Options;
-                self.options.reset(self.config.clone());
+                self.options.open(self.config.clone());
             }
             MenuOutcome::ConfirmQuit => self.quit_box = Some(MessageBox::quit(loc)),
             MenuOutcome::NewGame(map) => return vec![Effect::Map(map)],
@@ -1206,11 +1224,13 @@ impl Console {
         if self.mode == Mode::Gameplay {
             return;
         }
-        if self.mode == Mode::Options {
-            self.options
-                .draw(&self.canvas, self.font.as_ref(), self.menu_font.as_ref());
-            return;
-        }
+        // The options dialog is drawn over the menu it was opened from.
+        let shown = if self.mode == Mode::Options {
+            self.options_return
+        } else {
+            self.mode
+        };
+        let menu_shown = shown == Mode::Pause || shown == Mode::MainMenu;
         let scale = self.canvas.height() / 720.;
         let text = |content: &str, x, y, size, color, mono: bool| {
             text(
@@ -1221,7 +1241,7 @@ impl Console {
                 1.,
                 if mono {
                     self.mono.as_ref()
-                } else if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
+                } else if menu_shown {
                     self.menu_font.as_ref()
                 } else {
                     self.font.as_ref()
@@ -1229,7 +1249,7 @@ impl Console {
                 color,
             );
         };
-        if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
+        if menu_shown {
             let geometry = self.menu_layout.geometry(self.canvas.height());
             if let Some(face) = &self.title_face {
                 let em = geometry.title_tall * self.title_metrics.em_per_cell;
@@ -1258,7 +1278,11 @@ impl Console {
                     WHITE,
                 );
             }
-            let menu = self.game_menu().expect("menu mode");
+            let menu = if shown == Mode::MainMenu {
+                &self.main_menu
+            } else {
+                &self.pause_menu
+            };
             for (i, entry) in menu.entries().iter().enumerate() {
                 if entry.spacer {
                     continue;
@@ -1288,6 +1312,9 @@ impl Console {
             if let Some(quit) = &self.quit_box {
                 let (origin, scale, layout) = self.quit_geometry(quit);
                 quit.draw(&self.painter(origin, scale), &layout);
+            }
+            if self.mode == Mode::Options {
+                self.options.draw(&self.painter(Vec2::ZERO, 1.));
             }
         } else {
             let left = 32. * scale;
@@ -1774,6 +1801,22 @@ mod tests {
         assert_eq!(console.mode, Mode::Options);
         console.escape();
         assert_eq!(console.mode, Mode::MainMenu);
+        click_row(&mut console, 5);
+        console.toggle();
+        console.toggle();
+        assert_eq!(
+            console.mode,
+            Mode::Options,
+            "console round trip keeps the dialog"
+        );
+        console.draw(0.);
+        console.canvas.drain();
+        console.escape();
+        assert_eq!(
+            console.mode,
+            Mode::MainMenu,
+            "Escape returns to the opening menu"
+        );
         console.mode = Mode::Console;
         let effects = console.submit("volume 0.5; sensitivity 2.5; fov 90; mat_hdr_level 0");
         assert_eq!(console.config.audio.volume, 0.5);

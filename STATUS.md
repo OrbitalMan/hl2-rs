@@ -6,9 +6,9 @@ Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main
 
 Antigravity, Claude Opus model family (exact identifier not exposed). Plan and evidence: [docs/gameui.md](docs/gameui.md).
 
-- **Done:** GameUI resources from the install (localization with key-name fallback, VGUI `.res` layouts, `gamemenu.res`, `kb_act.lst`/`config_default.cfg`, display-mode helpers); startup flow (main menu over `background01` without a loadable `--map`, launch error for map-dependent arguments without one); resource-driven main menu with categories and the QUIT GAME box. Unit + headless tests, strict Clippy/fmt, packaged macOS captures in `artifacts/gameui/`.
-- **Limitations:** background map is frozen and viewed from the spawn; Load Game, Achievements, Extras and Episode One/Two New Game are disabled placeholders; Windows/Linux **not tested**.
-- **Next:** options dialog framework (tabs, OK/Cancel/Apply, draft vs applied config), then the Gameplay/Keyboard/Mouse/Gamepad/Audio/Video pages, brightness dialog and host wiring.
+- **Done:** GameUI resources from the install (localization with key-name fallback, VGUI `.res` layouts, `gamemenu.res`, `kb_act.lst`/`config_default.cfg`, display-mode helpers); startup flow (main menu over `background01` without a loadable `--map`, launch error for map-dependent arguments without one); resource-driven main menu with categories and the QUIT GAME box. Options dialog (Gameplay, Keyboard, Mouse, Gamepad placeholder, Audio, Video, brightness dialog) laid out from the installed `optionssub*.res` files with OK/Cancel/Apply over a draft config, persisted to `hl2-config.json`. Unit + headless tests, strict Clippy/fmt, packaged macOS captures in `artifacts/gameui/`.
+- **Limitations:** background map is frozen and viewed from the spawn; Load Game, Achievements, Extras, Episode One/Two New Game, Gamepad and the Advanced buttons are disabled placeholders; HDR, gamma, mouse filter/acceleration/invert, skill, music volume, speakers, quality, captions, language and mute-when-unfocused are stored but not consumed by the host yet; mouse-button bindings are stored but attacks are still read directly; Windows/Linux **not tested**.
+- **Next:** host wiring of the stored settings (audio, mouse, skill, window mode/resolution at startup, mouse-button bindings), then gamma/HDR application or documented limits.
 
 ## Current session 10 (2026-10-09)
 

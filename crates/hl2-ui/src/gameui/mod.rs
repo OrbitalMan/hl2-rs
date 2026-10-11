@@ -8,5 +8,7 @@ pub mod keys;
 pub mod layout;
 pub mod localize;
 pub mod menu;
+pub mod options;
 pub mod resources;
+pub mod settings;
 pub mod widgets;

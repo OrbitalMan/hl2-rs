@@ -35,17 +35,45 @@ pub mod display {
                 && window.resolution.physical_height() >= self.physical_height.saturating_sub(100)
         }
     }
+
+    /// Resolutions offered on the Video page: the primary monitor's reported video modes,
+    /// filtered and sorted by [`hl2_ui::gameui::display::usable_modes`]. Falls back to the
+    /// current window size when the platform reports none.
+    pub fn modes(
+        monitors: &Query<&Monitor, With<PrimaryMonitor>>,
+        window: &Window,
+    ) -> Vec<hl2_ui::gameui::display::Resolution> {
+        use hl2_ui::gameui::display::{Resolution, usable_modes};
+        let monitor = monitors.iter().next();
+        let reported = monitor
+            .into_iter()
+            .flat_map(|m| m.video_modes.iter())
+            .map(|mode| Resolution::new(mode.physical_size.x, mode.physical_size.y));
+        let size = monitor.map(|m| Resolution::new(m.physical_width, m.physical_height));
+        let current = Resolution::new(
+            window.resolution.physical_width(),
+            window.resolution.physical_height(),
+        );
+        usable_modes(reported, size, current)
+    }
 }
 
 pub mod mode {
     use super::*;
+    use bevy::window::VideoModeSelection;
+    use hl2_ui::config::DisplayMode;
 
-    /// Determines the desired window mode for a video configuration.
-    pub fn desired_mode(borderless: bool) -> WindowMode {
-        if borderless {
-            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-        } else {
-            WindowMode::Windowed
+    /// The Bevy window mode for a configured display mode on this platform.
+    ///
+    /// "Windowed (No Border)" is a borderless window covering the current monitor (Windows and
+    /// Linux); macOS has no such choice and resolves a stored value to full screen.
+    pub fn desired_mode(mode: DisplayMode) -> WindowMode {
+        match mode.effective() {
+            DisplayMode::Fullscreen => {
+                WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Current)
+            }
+            DisplayMode::Windowed => WindowMode::Windowed,
+            DisplayMode::NoBorder => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
         }
     }
 }
@@ -166,7 +194,7 @@ pub(crate) fn apply_video_config_to_window(
     cfg: &hl2_ui::config::VideoSettings,
     _monitors: &Query<&Monitor, With<PrimaryMonitor>>,
 ) {
-    let target_mode = mode::desired_mode(cfg.borderless);
+    let target_mode = mode::desired_mode(cfg.display_mode);
     if window.mode != target_mode {
         window.mode = target_mode;
     }
@@ -251,9 +279,8 @@ mod tests {
         let cfg = hl2_ui::config::VideoSettings {
             width: 1280,
             height: 720,
-            borderless: true,
-            fov: 75.0,
-            hdr: hl2_ui::config::HdrMode::Full,
+            display_mode: hl2_ui::config::DisplayMode::NoBorder,
+            ..Default::default()
         };
 
         app.world_mut()
@@ -267,10 +294,37 @@ mod tests {
             .unwrap();
 
         let window = app.world_mut().query::<&Window>().single(app.world());
+        let mode = window.unwrap().mode;
+        if cfg!(target_os = "macos") {
+            assert!(matches!(mode, WindowMode::Fullscreen(..)), "{mode:?}");
+        } else {
+            assert!(
+                matches!(mode, WindowMode::BorderlessFullscreen(_)),
+                "{mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_modes_map_to_window_modes() {
+        use hl2_ui::config::DisplayMode;
+        assert_eq!(
+            mode::desired_mode(DisplayMode::Windowed),
+            WindowMode::Windowed
+        );
         assert!(matches!(
-            window.unwrap().mode,
-            WindowMode::BorderlessFullscreen(_)
+            mode::desired_mode(DisplayMode::Fullscreen),
+            WindowMode::Fullscreen(MonitorSelection::Current, _)
         ));
+        let no_border = mode::desired_mode(DisplayMode::NoBorder);
+        if cfg!(target_os = "macos") {
+            assert!(matches!(no_border, WindowMode::Fullscreen(..)));
+        } else {
+            assert_eq!(
+                no_border,
+                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+            );
+        }
     }
 
     #[test]
@@ -288,9 +342,8 @@ mod tests {
         let cfg = hl2_ui::config::VideoSettings {
             width: 1024,
             height: 768,
-            borderless: false,
-            fov: 75.0,
-            hdr: hl2_ui::config::HdrMode::Full,
+            display_mode: hl2_ui::config::DisplayMode::Windowed,
+            ..Default::default()
         };
 
         app.world_mut()

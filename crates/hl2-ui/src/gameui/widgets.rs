@@ -7,7 +7,7 @@
 //! 1:1 screen pixels, which becomes unreadably small on high-resolution canvases (documented
 //! deviation).
 
-use crate::canvas::{Canvas, Color, Rect};
+use crate::canvas::{draw_texture_ex, Canvas, Color, DrawTextureParams, Rect, Texture2D, WHITE};
 use crate::hud::FontFace;
 use glam::{vec2, Vec2};
 use source_assets::keyvalues::Entry;
@@ -351,6 +351,251 @@ impl Painter<'_> {
             self.label(label, text_rect, Align::Left, false);
         }
     }
+
+    /// `CheckButton`: a sunken box with a check mark, then the label.
+    pub fn check_box(&self, rect: Rect, label: &str, checked: bool, enabled: bool) {
+        let cy = rect.y + rect.h * 0.5;
+        let bx = Rect::new(
+            rect.x + 2.,
+            (cy - CHECK_SIZE * 0.5).round(),
+            CHECK_SIZE,
+            CHECK_SIZE,
+        );
+        self.fill(bx, self.theme.entry_bg);
+        self.sunken(bx);
+        if checked {
+            let color = if enabled {
+                self.theme.check
+            } else {
+                self.theme.text_disabled
+            };
+            self.fill(Rect::new(bx.x + 3., bx.y + 3., bx.w - 6., bx.h - 6.), color);
+        }
+        let text = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
+        self.label(label, text, Align::Left, enabled);
+    }
+
+    /// `RadioButton`: a sunken disc with a dot when selected, then the label.
+    pub fn radio(&self, rect: Rect, label: &str, selected: bool, enabled: bool) {
+        let center = vec2(rect.x + 2. + CHECK_SIZE * 0.5, rect.y + rect.h * 0.5);
+        self.disc(center, CHECK_SIZE * 0.5, self.theme.border_dark);
+        self.disc(center, CHECK_SIZE * 0.5 - 1., self.theme.entry_bg);
+        if selected {
+            let color = if enabled {
+                self.theme.check
+            } else {
+                self.theme.text_disabled
+            };
+            self.disc(center, 2.5, color);
+        }
+        let text = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
+        self.label(label, text, Align::Left, enabled);
+    }
+
+    /// `Slider` with tick marks and its left/right captions below the track.
+    pub fn slider(&self, rect: Rect, fraction: f32, left: &str, right: &str, enabled: bool) {
+        let (start, end) = slider_track(rect);
+        let track_y = rect.y + SLIDER_TRACK_Y;
+        let track = Rect::new(start, track_y - 2., end - start, 4.);
+        self.fill(track, self.theme.slider_track);
+        self.sunken(track);
+        for i in 0..=SLIDER_TICKS {
+            let x = start + (end - start) * i as f32 / SLIDER_TICKS as f32;
+            self.fill(
+                Rect::new(x.round(), track_y + 8., 1., 4.),
+                self.theme.slider_text,
+            );
+        }
+        let nob_x = start + (end - start) * fraction.clamp(0., 1.) - NOB_WIDTH * 0.5;
+        let nob = Rect::new(nob_x, track_y - 8., NOB_WIDTH, 16.);
+        self.fill(nob, self.theme.slider_nob);
+        self.raised(nob);
+        if rect.h >= 32. {
+            let caption = Rect::new(rect.x, track_y + 12., rect.w, FONT_TALL);
+            let color = if enabled {
+                self.theme.slider_text
+            } else {
+                self.theme.text_disabled
+            };
+            self.text_in(left, caption, Align::Left, color, false);
+            self.text_in(right, caption, Align::Right, color, false);
+        }
+    }
+
+    /// `TextEntry`: sunken field; `caret` draws the insertion bar after the text.
+    pub fn text_entry(&self, rect: Rect, text: &str, enabled: bool, caret: bool) {
+        self.fill(rect, self.theme.entry_bg);
+        self.sunken(rect);
+        let inner = Rect::new(rect.x + 3., rect.y, rect.w - 6., rect.h);
+        let color = if enabled {
+            self.theme.text
+        } else {
+            self.theme.text_disabled
+        };
+        self.text_in(text, inner, Align::Left, color, false);
+        if caret {
+            let x = inner.x + self.text_width(text, false) + 1.;
+            self.fill(Rect::new(x, rect.y + 4., 1., rect.h - 8.), self.theme.text);
+        }
+    }
+
+    /// `ComboBox`: a text entry with a drop-down arrow button on its right edge.
+    pub fn combo(&self, rect: Rect, text: &str, enabled: bool, armed: bool) {
+        self.text_entry(rect, text, enabled, false);
+        let button = Rect::new(
+            rect.x + rect.w - rect.h,
+            rect.y + 1.,
+            rect.h - 1.,
+            rect.h - 2.,
+        );
+        let color = if !enabled {
+            self.theme.text_disabled
+        } else if armed {
+            self.theme.arrow_armed
+        } else {
+            self.theme.arrow
+        };
+        self.arrow_down(
+            vec2(button.x + button.w * 0.5, button.y + button.h * 0.5),
+            4.,
+            color,
+        );
+    }
+
+    /// The open drop-down list of a combo box (`rows` visible items starting at `first`).
+    pub fn menu_list(&self, rect: Rect, items: &[String], first: usize, highlight: Option<usize>) {
+        self.fill(rect, self.theme.frame_bg);
+        self.fill(rect, self.theme.menu_bg);
+        self.raised(rect);
+        let rows = (rect.h / MENU_ROW).floor() as usize;
+        for (row, (index, item)) in items.iter().enumerate().skip(first).take(rows).enumerate() {
+            let line = Rect::new(
+                rect.x + 1.,
+                rect.y + row as f32 * MENU_ROW,
+                rect.w - 2.,
+                MENU_ROW,
+            );
+            let color = if highlight == Some(index) {
+                self.fill(line, self.theme.selection_bg);
+                self.theme.selection_text
+            } else {
+                self.theme.text
+            };
+            let text = Rect::new(line.x + 6., line.y, line.w - 12., line.h);
+            self.text_in(item, text, Align::Left, color, false);
+        }
+        if items.len() > rows {
+            self.scroll_bar(
+                Rect::new(
+                    rect.x + rect.w - SCROLLBAR_WIDTH,
+                    rect.y,
+                    SCROLLBAR_WIDTH,
+                    rect.h,
+                ),
+                first,
+                rows,
+                items.len(),
+            );
+        }
+    }
+
+    /// A vertical scroll bar showing `visible` of `total` rows starting at `first`.
+    pub fn scroll_bar(&self, rect: Rect, first: usize, visible: usize, total: usize) {
+        self.fill(rect, self.theme.scrollbar_bg);
+        if total == 0 {
+            return;
+        }
+        let tall = (rect.h * visible as f32 / total as f32).clamp(8., rect.h);
+        let top =
+            rect.y + (rect.h - tall) * first as f32 / (total - visible.min(total)).max(1) as f32;
+        let thumb = Rect::new(rect.x + 1., top, rect.w - 2., tall);
+        self.fill(thumb, self.theme.slider_nob);
+        self.raised(thumb);
+    }
+
+    /// `Divider`: a sunken two-pixel line.
+    pub fn divider(&self, rect: Rect) {
+        self.sunken(Rect::new(rect.x, rect.y, rect.w, rect.h.max(2.)));
+    }
+
+    /// `URLButton`: link-colored, underlined text.
+    pub fn url(&self, rect: Rect, label: &str, enabled: bool) {
+        if !enabled {
+            self.label(label, rect, Align::Left, false);
+            return;
+        }
+        self.text_in(label, rect, Align::Left, self.theme.url_text, false);
+        let width = self.text_width(label, false);
+        let y = rect.y + (rect.h + FONT_TALL) * 0.5 - 1.;
+        self.fill(Rect::new(rect.x, y.round(), width, 1.), self.theme.url_text);
+    }
+
+    /// A property-sheet tab; the active tab is taller and open towards its page.
+    pub fn tab(&self, rect: Rect, label: &str, active: bool) {
+        let color = if active {
+            self.theme.text
+        } else {
+            self.theme.text_dull
+        };
+        self.fill(rect, self.theme.frame_bg);
+        let r = self.map(rect);
+        let t = self.scale.round().max(1.);
+        self.canvas
+            .rectangle(r.x, r.y, r.w, t, self.theme.border_bright);
+        self.canvas
+            .rectangle(r.x, r.y, t, r.h, self.theme.border_bright);
+        self.canvas
+            .rectangle(r.x + r.w - t, r.y, t, r.h, self.theme.border_dark);
+        if !active {
+            self.canvas
+                .rectangle(r.x, r.y + r.h - t, r.w, t, self.theme.border_bright);
+        }
+        self.text_in(label, rect, Align::Center, color, false);
+    }
+
+    /// Draws a texture stretched over a layout rectangle.
+    pub fn image(&self, rect: Rect, texture: &Texture2D) {
+        let r = self.map(rect);
+        draw_texture_ex(
+            self.canvas,
+            texture,
+            r.x,
+            r.y,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(r.w, r.h)),
+                ..Default::default()
+            },
+        );
+    }
+}
+
+/// Check box / radio indicator size and the label indent after it.
+pub const CHECK_SIZE: f32 = 12.;
+pub const LABEL_INDENT: f32 = 20.;
+/// Track centre line inside a slider control and its tick count.
+pub const SLIDER_TRACK_Y: f32 = 10.;
+pub const SLIDER_TICKS: usize = 10;
+/// Height of a slider's interactive band (track and nob).
+pub const SLIDER_HIT_TALL: f32 = 22.;
+/// Drop-down menu row height and the maximum rows shown before scrolling.
+pub const MENU_ROW: f32 = 20.;
+pub const MENU_MAX_ROWS: usize = 12;
+pub const SCROLLBAR_WIDTH: f32 = 14.;
+
+/// Rectangle of a combo box's open list below the combo.
+pub fn menu_list_rect(combo: Rect, items: usize) -> Rect {
+    let rows = items.clamp(1, MENU_MAX_ROWS);
+    Rect::new(combo.x, combo.y + combo.h, combo.w, rows as f32 * MENU_ROW)
+}
+
+/// Item index under a point in an open list, if any.
+pub fn menu_list_hit(list: Rect, first: usize, items: usize, point: Vec2) -> Option<usize> {
+    if !list.contains(point) {
+        return None;
+    }
+    let index = first + ((point.y - list.y) / MENU_ROW).floor() as usize;
+    (index < items).then_some(index)
 }
 
 /// Greedy word wrap by measured width; long words stay on their own line.

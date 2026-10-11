@@ -118,7 +118,8 @@ impl Options {
             world_partition: false,
             width: config.video.width,
             height: config.video.height,
-            borderless: config.video.borderless,
+            borderless: config.video.display_mode.effective()
+                == hl2_ui::config::DisplayMode::NoBorder,
             fly: false,
             movement_script: None,
             volume: config.audio.volume,
