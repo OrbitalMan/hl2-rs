@@ -12,7 +12,9 @@
 
 **Result:** owned tests pass; gravity gun glow matches native; rigid-body frag worse than the swept box on lob/trainstation landings (kept opt-in); batch weapons 17/17, attention 26/26, movement 25/26 (new doll01 collision warning, explained in STATUS).
 
-**Still broken or not tested:** native trajectories of bolt/missile/bait/launched props (two rejected attempts each for bolt and launch); weapon audio vs native; DoEffectLaunch beam, bolt motion-blur trail, ragdoll pinning; 11f gamma sprites; doll01 root-rotated .phy; the AI branch is not validated yet.
+**Later in the session:** crossbow skin-1 glowing bolt + CrossbowLoad sparks, viewmodel FOV follows the zoom, RPG laser dot in glow mode, gravity gun DoEffectLaunch, physics impact damage to NPCs (SDK/retail NPC table; owner reports and requests). Native RPG missile path matches within ~3 units (T194927Z).
+
+**Still broken or not tested:** native trajectories of bolt/bait/launched props (two rejected attempts each for bolt and launch); weapon audio vs native; DoEffectLaunch beam, bolt motion-blur trail, ragdoll pinning; 11f gamma sprites; doll01 root-rotated .phy; the AI branch is not validated yet.
 
 **Next:** remaining 13b native checks, then fold into wip/arsenal-20261009 and the single 13b merge; then validate `wip/cloud-npc-ai-20261010` (step 14).
 
