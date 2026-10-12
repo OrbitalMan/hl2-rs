@@ -166,27 +166,11 @@ impl AiRuntime {
         let mut actors = BTreeMap::new();
         let mut goals = BTreeMap::new();
         for (id, e) in world.entities.iter().enumerate() {
+            if let Some(actor) = Self::actor_for(id, e) {
+                actors.insert(id, actor);
+                continue;
+            }
             match e.class() {
-                "npc_metropolice" => {
-                    let flags = e
-                        .get("spawnflags")
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
-                    let baton = e
-                        .get("additionalequipment")
-                        .is_some_and(|w| w.eq_ignore_ascii_case("weapon_stunstick"));
-                    actors.insert(
-                        id,
-                        AiActor {
-                            npc: AiNpc::new(id),
-                            class: AiClass::Metropolice(Box::new(Metropolice::new(flags, baton))),
-                            next_think: 0.,
-                            last_think: 0.,
-                            goal: None,
-                            events_until: 0.,
-                        },
-                    );
-                }
                 "ai_goal_police" => {
                     let angles = e
                         .get("angles")
@@ -296,6 +280,38 @@ impl AiRuntime {
                 && !scene.states[id].killed)
                 .then(|| (id, scene.states[id].origin + Vec3::Z * 36.))
         })
+    }
+    /// The AI actor of an entity whose class has a behavior (npc_metropolice).
+    fn actor_for(id: usize, e: &modkit_core::Entity) -> Option<AiActor> {
+        if e.class() != "npc_metropolice" {
+            return None;
+        }
+        let flags = e
+            .get("spawnflags")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let baton = e
+            .get("additionalequipment")
+            .is_some_and(|w| w.eq_ignore_ascii_case("weapon_stunstick"));
+        Some(AiActor {
+            npc: AiNpc::new(id),
+            class: AiClass::Metropolice(Box::new(Metropolice::new(flags, baton))),
+            next_think: 0.,
+            last_think: 0.,
+            goal: None,
+            events_until: 0.,
+        })
+    }
+    /// A runtime-spawned entity (DESIGN 14r step 3): give it an AI actor when its
+    /// class has a behavior. True when one was added.
+    pub fn add_actor(&mut self, id: usize, e: &modkit_core::Entity) -> bool {
+        match Self::actor_for(id, e) {
+            Some(actor) => {
+                self.actors.insert(id, actor);
+                true
+            }
+            None => false,
+        }
     }
     /// One fixed tick of the NPC stage (before the movement controller tick).
     #[allow(clippy::too_many_arguments)]
@@ -1021,6 +1037,29 @@ mod tests {
             r.ai.cycle_player_disposition();
         }
         assert_eq!(r.ai.player_disposition, None);
+    }
+
+    #[test]
+    fn a_runtime_spawned_cop_gets_an_actor_and_thinks() {
+        let mut r = rig();
+        r.ai.enabled = true;
+        let cop = modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "npc_metropolice".into()),
+                ("origin".into(), "0 60 0".into()),
+                ("additionalequipment".into(), "weapon_stunstick".into()),
+            ],
+        };
+        let id = r.scene.spawn_entity(&r.world, cop.clone());
+        assert!(r.ai.add_actor(id, &cop));
+        let citizen = modkit_core::Entity {
+            properties: vec![("classname".into(), "npc_citizen".into())],
+        };
+        assert!(!r.ai.add_actor(id + 1, &citizen));
+        run(&mut r, 20, player_at(30.));
+        let AiClass::Metropolice(spawned) = &r.ai.actors[&id].class;
+        assert!(spawned.has_baton);
+        assert!(r.ai.actors[&id].last_think > 0.);
     }
 
     #[test]
