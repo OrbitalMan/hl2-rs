@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-12 cloud session: runtime entity creation plan (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** AGENTS.md asset-read rule clarified (no blocking reads in frame systems; runtime loads via asynchronous workers; entities may be created at runtime); DESIGN "14r" plan for runtime entity creation with late precache.
+
+**Why:** owner: spawning should work like HL2/Garry's Mod (Source's CC_NPC_Create creates entities and late-precaches at runtime).
+
+**Tested how:** documentation only (no code change).
+
+**Result:** plan recorded; the F4 pool stays until 14r steps land.
+
+**Still broken or not tested:** everything in 14r.
+
+**Next:** 14r step 1.
+
 ## 2026-10-12 cloud session: F4 roster, scrolling list and AI debug switches (`wip/cloud-npc-ai-20261010`)
 
 **Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
