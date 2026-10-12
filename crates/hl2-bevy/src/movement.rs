@@ -315,6 +315,7 @@ impl Simulation {
                 sprint: c.sprint,
                 slow: c.slow,
                 max_speed: None,
+                surface: Default::default(),
             };
             if let Some(game) = game.as_deref_mut() {
                 game.buttons(c.primary, c.secondary);
@@ -380,6 +381,11 @@ impl Simulation {
                 self.input.max_speed = game
                     .as_deref()
                     .and_then(|game| game.inventory.player_max_speed());
+                self.input.surface = game
+                    .as_deref()
+                    .filter(|_| self.player.grounded)
+                    .map(|game| game.ground_surface(&self.physics, feet))
+                    .unwrap_or_default();
                 self.player.step(self.input, &self.physics, TICK);
                 self.eye = self.player.eye();
                 if let Some(game) = game.as_deref_mut() {
@@ -629,6 +635,7 @@ fn controls(
         sprint: keys.pressed(KeyCode::ShiftLeft),
         slow: keys.pressed(KeyCode::AltLeft),
         max_speed: None,
+        surface: Default::default(),
     };
 }
 fn fixed_step(

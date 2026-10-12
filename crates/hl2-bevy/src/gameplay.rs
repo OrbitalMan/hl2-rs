@@ -212,6 +212,24 @@ impl Gameplay {
         }
         died
     }
+    /// CategorizeGroundSurface for the next movement step: the surfaceprop of the
+    /// face under the feet (the same lookup as the footsteps), or the defaults when
+    /// nothing is found or the surface table is not loaded.
+    pub fn ground_surface(
+        &self,
+        physics: &Physics,
+        feet: Vec3,
+    ) -> modkit_core::movement::GroundSurface {
+        self.impacts
+            .ground_property(&self.world, physics, &self.scene, feet, 4.)
+            .and_then(|prop| self.world.surface_materials.get(&prop.to_lowercase()))
+            .map(|m| modkit_core::movement::GroundSurface {
+                friction: m.friction,
+                max_speed_factor: m.max_speed_factor,
+                jump_factor: m.jump_factor,
+            })
+            .unwrap_or_default()
+    }
     /// SDK step sounds for one movement tick: UpdateStepSound with the state before the move,
     /// then the jump or landing step the move produced.
     pub fn step_sounds(

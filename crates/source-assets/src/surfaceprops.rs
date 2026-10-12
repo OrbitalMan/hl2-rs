@@ -98,6 +98,12 @@ fn resolve_one(
             "scraperough" => material.scrape_rough = text,
             "break" => material.break_sound = text,
             "gamematerial" => material.game_material = value.trim().chars().next(),
+            "jumpfactor" => material.jump_factor = number.unwrap_or(material.jump_factor),
+            "maxspeedfactor" => {
+                material.max_speed_factor = number.unwrap_or(material.max_speed_factor)
+            }
+            "thickness" => material.thickness = number.unwrap_or(material.thickness),
+            "dampening" => material.dampening = number.unwrap_or(material.dampening),
             _ => {}
         }
     }
@@ -138,6 +144,11 @@ mod tests {
   "impacthard" "Synthetic.CrateHard" "impactsoft" "Synthetic.CrateSoft"
   "audiohardminvelocity" "300" }
 "crate_child" { "base" "crate" "elasticity" "0.1" }
+// Quirks seen in the shipped scripts: mixed-case keys/base names, no whitespace
+// between tokens, trailing comments, a base defined later.
+"Slick" { "base" "LATER" "jumpFactor" "0.7" "friction""0.1" // trailing comment
+  "Thickness" "0.5" "dampening" "6.0" }
+"later" { "maxspeedfactor" "0.5" }
 "sky" { "gamematerial" "X" }
 "#;
 
@@ -150,6 +161,14 @@ mod tests {
         assert_eq!(child.density, 500.);
         assert_eq!(table["sky"].friction, 0.8, "no base inherits default");
         assert_eq!(table["sky"].game_material, Some('X'));
+        assert_eq!(table["sky"].jump_factor, 1.);
+        let slick = &table["slick"];
+        assert_eq!(
+            (slick.friction, slick.jump_factor, slick.max_speed_factor),
+            (0.1, 0.7, 0.5)
+        );
+        assert_eq!((slick.thickness, slick.dampening), (0.5, 6.0));
+        assert_eq!(slick.density, 2000., "later's base is default");
         let concrete = &table["default"];
         // Fast impact on a hard surface: hard. Slow (below 300): soft.
         assert_eq!(

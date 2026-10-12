@@ -149,7 +149,7 @@ impl Default for PhysicsSolid {
 }
 /// surfacedata_t fields that gameplay uses (vphysics_interface.h), values from
 /// scripts/surfaceproperties*.txt after "base" inheritance.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceMaterial {
     pub friction: f32,
     pub elasticity: f32,
@@ -167,6 +167,45 @@ pub struct SurfaceMaterial {
     pub break_sound: Option<String>,
     /// Game material character ('X' marks no-sound surfaces such as sky/nodraw).
     pub game_material: Option<char>,
+    /// surfacegameprops_t jumpFactor / maxSpeedFactor (player movement on this
+    /// ground; 1 unless a script lowers them, e.g. slipperyslime's jumpfactor).
+    #[serde(default = "one")]
+    pub jump_factor: f32,
+    #[serde(default = "one")]
+    pub max_speed_factor: f32,
+    /// surfacephysicsparams_t thickness (inches; sheet materials) and dampening
+    /// (contact drag). Parsed for reference: vphysics' use of them is not in the SDK.
+    #[serde(default)]
+    pub thickness: f32,
+    #[serde(default)]
+    pub dampening: f32,
+}
+fn one() -> f32 {
+    1.
+}
+impl Default for SurfaceMaterial {
+    fn default() -> Self {
+        Self {
+            friction: 0.,
+            elasticity: 0.,
+            density: 0.,
+            hardness_factor: 0.,
+            hard_threshold: 0.,
+            hard_velocity_threshold: 0.,
+            roughness_factor: 0.,
+            rough_threshold: 0.,
+            impact_hard: None,
+            impact_soft: None,
+            scrape_smooth: None,
+            scrape_rough: None,
+            break_sound: None,
+            game_material: None,
+            jump_factor: 1.,
+            max_speed_factor: 1.,
+            thickness: 0.,
+            dampening: 0.,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConvexPiece {

@@ -150,12 +150,18 @@ fn surface_material<'a>(world: &'a World, name: &str) -> Option<&'a modkit_core:
         .get(name)
         .or_else(|| world.surface_materials.get("default"))
 }
+/// Rapier restitution from a surfaceprop's elasticity, clamped to 0..1: the shipped
+/// scripts carry out-of-range values (metal_bouncy 1000, quicksand 2) whose IVP
+/// meaning is not in the SDK, and Rapier restitution above 1 adds energy per bounce.
+fn restitution(m: &modkit_core::SurfaceMaterial) -> f32 {
+    m.elasticity.clamp(0., 1.)
+}
 fn world_material(world: &World) -> impl Fn(ColliderBuilder) -> ColliderBuilder + '_ {
     let material = world.surface_materials.get("default");
     move |builder| match material {
         Some(m) => builder
             .friction(m.friction)
-            .restitution(m.elasticity)
+            .restitution(restitution(m))
             .friction_combine_rule(CoefficientCombineRule::Multiply)
             .restitution_combine_rule(CoefficientCombineRule::Multiply),
         None => builder.friction(0.8),
@@ -473,7 +479,7 @@ impl Physics {
                     // not IVP elasticity: "native fit needed".
                     Some(m) => ColliderBuilder::new(shape.clone())
                         .friction(m.friction)
-                        .restitution(m.elasticity)
+                        .restitution(restitution(m))
                         .friction_combine_rule(CoefficientCombineRule::Multiply)
                         .restitution_combine_rule(CoefficientCombineRule::Multiply),
                     None => ColliderBuilder::new(shape.clone())
@@ -771,7 +777,7 @@ impl Physics {
             let builder = match material {
                 Some(m) => builder
                     .friction(m.friction)
-                    .restitution(m.elasticity)
+                    .restitution(restitution(m))
                     .friction_combine_rule(CoefficientCombineRule::Multiply)
                     .restitution_combine_rule(CoefficientCombineRule::Multiply),
                 None => builder,

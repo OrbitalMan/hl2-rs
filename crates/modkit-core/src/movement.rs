@@ -11,6 +11,31 @@ impl CollisionWorld for World {
         self.trace(start, end, mins, maxs)
     }
 }
+/// The ground surface's movement data (CGameMovement::CategorizeGroundSurface): the
+/// surfaceprop friction and its game.maxSpeedFactor / game.jumpFactor.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct GroundSurface {
+    /// The surfaceprop's physics friction (vphysics scale; 0.8 is normal).
+    pub friction: f32,
+    pub max_speed_factor: f32,
+    pub jump_factor: f32,
+}
+impl Default for GroundSurface {
+    fn default() -> Self {
+        Self {
+            friction: 0.8,
+            max_speed_factor: 1.,
+            jump_factor: 1.,
+        }
+    }
+}
+impl GroundSurface {
+    /// m_surfaceFriction: friction x 1.25 ("0.8 feels normal for vphysics, 1.0 for
+    /// players"), capped at 1.
+    pub fn player_friction(&self) -> f32 {
+        (self.friction * 1.25).min(1.)
+    }
+}
 #[derive(Clone, Copy, Default)]
 pub struct Input {
     pub forward: f32,
@@ -23,6 +48,9 @@ pub struct Input {
     /// CBasePlayer::SetMaxSpeed from gameplay (e.g. the gravity gun's load); it also
     /// disables sprint (EnableSprint(false)). None keeps the normal speeds.
     pub max_speed: Option<f32>,
+    /// The surface under the feet, categorized at the end of the previous tick (the
+    /// host's lookup at the current feet). Default: friction 0.8, factors 1.
+    pub surface: GroundSurface,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct Player {
@@ -155,7 +183,7 @@ impl Player {
             150.
         } else {
             190.
-        };
+        } * input.surface.max_speed_factor;
         // HandleDuckingSpeedCrop scales command components only while already
         // ducked on ground. It does not scale m_flMaxSpeed, and air ducking has
         // the full command speed for AirAccelerate (including strafe input).
@@ -171,10 +199,12 @@ impl Player {
         if jumping {
             self.jumped = true;
             self.grounded = false;
+            // CheckJumpButton scales the jump by the ground's game.jumpFactor.
+            let jump = 160. * input.surface.jump_factor;
             if self.crouched {
-                self.velocity.z = 160.;
+                self.velocity.z = jump;
             } else {
-                self.velocity.z += 160.;
+                self.velocity.z += jump;
             }
             let boost = if input.sprint || self.crouched {
                 0.1
@@ -198,7 +228,9 @@ impl Player {
             let planar = Vec3::new(self.velocity.x, self.velocity.y, 0.);
             let magnitude = planar.length();
             if magnitude > 0. {
-                let retained = (magnitude - magnitude.max(100.) * 4. * dt).max(0.) / magnitude;
+                // Friction: sv_friction 4 x m_surfaceFriction of the categorized ground.
+                let drop = magnitude.max(100.) * 4. * input.surface.player_friction() * dt;
+                let retained = (magnitude - drop).max(0.) / magnitude;
                 self.velocity.x *= retained;
                 self.velocity.y *= retained;
             }
@@ -211,7 +243,7 @@ impl Player {
         let add = cap - self.velocity.dot(wishdir);
         if add > 0. {
             let friction = if self.grounded {
-                1.
+                input.surface.player_friction()
             } else {
                 self.surface_friction
             };
@@ -779,6 +811,73 @@ mod tests {
             p.step(Input::default(), &w, TICK);
         }
         assert!(p.velocity.length() < 0.01);
+    }
+    #[test]
+    fn ground_surface_scales_friction_speed_and_jump() {
+        // Synthetic surfaces: gravel-like friction 0.4 (player 0.5), slower and lower.
+        let w = floor();
+        let run = |surface: GroundSurface| {
+            let mut p = Player::new(Vec3::Z * 64.05);
+            for _ in 0..100 {
+                p.step(
+                    Input {
+                        forward: 1.,
+                        surface,
+                        ..Default::default()
+                    },
+                    &w,
+                    TICK,
+                );
+            }
+            let top = p.velocity.x;
+            p.step(
+                Input {
+                    surface,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            let coasting = p.velocity.x;
+            p.step(
+                Input {
+                    jump: true,
+                    surface,
+                    ..Default::default()
+                },
+                &w,
+                TICK,
+            );
+            (top, coasting, p.velocity.z)
+        };
+        let normal = run(GroundSurface::default());
+        let gravel = run(GroundSurface {
+            friction: 0.4,
+            ..Default::default()
+        });
+        let slow = run(GroundSurface {
+            max_speed_factor: 0.5,
+            // 0.9: 144 u/s leaves the 2-unit ground test (above NON_JUMP_VELOCITY).
+            jump_factor: 0.9,
+            ..Default::default()
+        });
+        assert!((normal.0 - 190.).abs() < 0.01 && (gravel.0 - 190.).abs() < 0.01);
+        // One friction tick from 190: 190 x 4 x f x 0.015.
+        assert!((normal.1 - (190. - 11.4)).abs() < 0.01, "{normal:?}");
+        assert!((gravel.1 - (190. - 5.7)).abs() < 0.01, "{gravel:?}");
+        assert!((slow.0 - 95.).abs() < 0.01, "{slow:?}");
+        assert!(
+            (normal.2 - slow.2 - 160. * 0.1).abs() < 0.01,
+            "{normal:?} {slow:?}"
+        );
+        assert_eq!(
+            GroundSurface {
+                friction: 2.,
+                ..Default::default()
+            }
+            .player_friction(),
+            1.
+        );
     }
     #[test]
     fn jump_boost_crops_diagonal_forward_command() {
