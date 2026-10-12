@@ -40,11 +40,41 @@ pub const SPAWN_CLASSES: &[(&str, &[&str])] = &[
     ),
     ("npc_alyx", &["weapon_alyxgun", "weapon_shotgun", ""]),
     ("npc_vortigaunt", &[""]),
+    ("npc_dog", &[""]),
+    ("npc_kleiner", &[""]),
+    ("npc_eli", &[""]),
+    ("npc_mossman", &[""]),
+    ("npc_breen", &[""]),
+    ("npc_gman", &[""]),
+    ("npc_monk", &["weapon_annabelle", ""]),
     ("npc_zombie", &[""]),
+    ("npc_zombie_torso", &[""]),
+    ("npc_fastzombie", &[""]),
+    ("npc_poisonzombie", &[""]),
     ("npc_headcrab", &[""]),
+    ("npc_headcrab_fast", &[""]),
+    ("npc_headcrab_black", &[""]),
+    ("npc_headcrab_poison", &[""]),
+    ("npc_barnacle", &[""]),
     ("npc_antlion", &[""]),
+    ("npc_antlionguard", &[""]),
+    ("npc_ichthyosaur", &[""]),
+    ("npc_crow", &[""]),
+    ("npc_pigeon", &[""]),
+    ("npc_seagull", &[""]),
+    ("npc_stalker", &[""]),
     ("npc_manhack", &[""]),
     ("npc_cscanner", &[""]),
+    ("npc_clawscanner", &[""]),
+    ("npc_rollermine", &[""]),
+    ("npc_turret_floor", &[""]),
+    ("npc_turret_ceiling", &[""]),
+    ("npc_combine_camera", &[""]),
+    ("npc_sniper", &[""]),
+    ("npc_strider", &[""]),
+    ("npc_combinegunship", &[""]),
+    ("npc_helicopter", &[""]),
+    ("npc_combinedropship", &[""]),
 ];
 /// Hidden pooled entities per overlay class (appended at map load).
 pub const POOL_PER_CLASS: usize = 3;
@@ -52,22 +82,63 @@ pub const POOL_PER_CLASS: usize = 3;
 pub const POOL_KEY: &str = "hl2rs_spawn_pool";
 /// Where pooled entities wait (far below any HL2 map).
 pub const POOL_ORIGIN: Vec3 = Vec3::new(0., 0., -15000.);
-/// The model each class's Spawn/Precache sets when the map gives none (SDK 2013).
+/// The model each class's Spawn/Precache sets when the map gives none (SDK 2013
+/// hl2/npc_*.cpp; citizens pick from groups at random in the SDK, one is used here).
 pub fn default_model(class: &str) -> Option<&'static str> {
     Some(match class {
         "npc_metropolice" => "models/police.mdl",
-        "npc_combine_s" => "models/combine_soldier.mdl",
+        "npc_combine_s" | "npc_sniper" => "models/combine_soldier.mdl",
         "npc_citizen" => "models/humans/group01/male_07.mdl",
         "npc_barney" => "models/barney.mdl",
         "npc_alyx" => "models/alyx.mdl",
         "npc_vortigaunt" => "models/vortigaunt.mdl",
+        "npc_dog" => "models/dog.mdl",
+        "npc_kleiner" => "models/kleiner.mdl",
+        "npc_eli" => "models/eli.mdl",
+        "npc_mossman" => "models/mossman.mdl",
+        "npc_breen" => "models/breen.mdl",
+        "npc_gman" => "models/gman.mdl",
+        "npc_monk" => "models/monk.mdl",
         "npc_zombie" => "models/zombie/classic.mdl",
+        "npc_zombie_torso" => "models/zombie/classic_torso.mdl",
+        "npc_fastzombie" => "models/zombie/fast.mdl",
+        "npc_poisonzombie" => "models/zombie/poison.mdl",
         "npc_headcrab" => "models/headcrabclassic.mdl",
+        "npc_headcrab_fast" => "models/headcrab.mdl",
+        "npc_headcrab_black" | "npc_headcrab_poison" => "models/headcrabblack.mdl",
+        "npc_barnacle" => "models/barnacle.mdl",
         "npc_antlion" => "models/antlion.mdl",
+        "npc_antlionguard" => "models/antlion_guard.mdl",
+        "npc_ichthyosaur" => "models/ichthyosaur.mdl",
+        "npc_crow" => "models/crow.mdl",
+        "npc_pigeon" => "models/pigeon.mdl",
+        "npc_seagull" => "models/seagull.mdl",
+        "npc_stalker" => "models/stalker.mdl",
         "npc_manhack" => "models/manhack.mdl",
-        "npc_cscanner" => "models/combine_scanner.mdl",
+        "npc_cscanner" | "npc_clawscanner" => "models/combine_scanner.mdl",
+        "npc_rollermine" => "models/roller.mdl",
+        "npc_turret_floor" => "models/combine_turrets/floor_turret.mdl",
+        "npc_turret_ceiling" => "models/combine_turrets/ceiling_turret.mdl",
+        "npc_combine_camera" => "models/combine_camera/combine_camera.mdl",
+        "npc_strider" => "models/combine_strider.mdl",
+        "npc_combinegunship" => "models/gunship.mdl",
+        "npc_helicopter" => "models/combine_helicopter.mdl",
+        "npc_combinedropship" => "models/combine_dropship.mdl",
         _ => return None,
     })
+}
+/// Pooled slots per class: one for the very large models (load time), else
+/// POOL_PER_CLASS.
+pub fn pool_count(class: &str) -> usize {
+    match class {
+        "npc_strider"
+        | "npc_combinegunship"
+        | "npc_helicopter"
+        | "npc_combinedropship"
+        | "npc_antlionguard"
+        | "npc_ichthyosaur" => 1,
+        _ => POOL_PER_CLASS,
+    }
 }
 /// Append the hidden spawn pool to a freshly loaded map's entities (before models
 /// load). Existing entity ids are unchanged; the pool goes at the end.
@@ -76,7 +147,7 @@ pub fn append_pool(world: &mut modkit_core::World) {
         let Some(model) = default_model(class) else {
             continue;
         };
-        for _ in 0..POOL_PER_CLASS {
+        for _ in 0..pool_count(class) {
             let mut properties: Vec<(String, String)> = vec![
                 ("classname".into(), (*class).into()),
                 ("model".into(), model.into()),
@@ -105,7 +176,15 @@ pub fn free_slot(
 }
 /// Flying classes (bits_CAP_MOVE_FLY) are placed 36 units back along the aim.
 fn flies(class: &str) -> bool {
-    matches!(class, "npc_manhack" | "npc_cscanner" | "npc_clawscanner")
+    matches!(
+        class,
+        "npc_manhack"
+            | "npc_cscanner"
+            | "npc_clawscanner"
+            | "npc_combinegunship"
+            | "npc_helicopter"
+            | "npc_combinedropship"
+    )
 }
 /// MAX_TRACE_LENGTH.
 pub const MAX_TRACE_LENGTH: f32 = 56755.84;
@@ -251,21 +330,48 @@ impl Overlay {
             aimed: true,
         }
     }
-    /// Lines for the host to draw.
+    /// Lines for the host to draw: a scrolling class list (VISIBLE_CLASSES rows
+    /// around the selection, ">" marks it) and the selected class's weapons.
     pub fn lines(&self) -> Vec<String> {
-        let (class, equipment) = SPAWN_CLASSES[self.class];
-        vec![
-            "F4 NPC spawn (left/right class, up/down weapon, Enter spawn at crosshair)".into(),
-            format!("class: {class}"),
-            format!(
-                "weapon: {}",
-                if equipment[self.equipment].is_empty() {
-                    "none"
-                } else {
-                    equipment[self.equipment]
-                }
-            ),
-        ]
+        const VISIBLE_CLASSES: usize = 9;
+        let total = SPAWN_CLASSES.len();
+        let first = self
+            .class
+            .saturating_sub(VISIBLE_CLASSES / 2)
+            .min(total.saturating_sub(VISIBLE_CLASSES));
+        let last = (first + VISIBLE_CLASSES).min(total);
+        let mut lines = vec![format!(
+            "F4 NPC spawn: Left/Right weapon, Up/Down class, Enter spawn at crosshair  ({}/{total})",
+            self.class + 1
+        )];
+        if first > 0 {
+            lines.push(format!("   ... {first} more above"));
+        }
+        for (index, (class, _)) in SPAWN_CLASSES.iter().enumerate().take(last).skip(first) {
+            let marker = if index == self.class { ">" } else { " " };
+            lines.push(format!(" {marker} {class}"));
+        }
+        if last < total {
+            lines.push(format!("   ... {} more below", total - last));
+        }
+        let weapons = SPAWN_CLASSES[self.class].1;
+        lines.push(format!(
+            "weapon: {}",
+            weapons
+                .iter()
+                .enumerate()
+                .map(|(i, w)| {
+                    let name = if w.is_empty() { "none" } else { w };
+                    if i == self.equipment {
+                        format!("[{name}]")
+                    } else {
+                        name.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("  ")
+        ));
+        lines
     }
 }
 
@@ -276,7 +382,32 @@ mod tests {
     fn the_pool_has_slots_for_every_overlay_class() {
         let mut world = modkit_core::World::default();
         append_pool(&mut world);
-        assert_eq!(world.entities.len(), SPAWN_CLASSES.len() * POOL_PER_CLASS);
+        assert_eq!(
+            world.entities.len(),
+            SPAWN_CLASSES
+                .iter()
+                .map(|(c, _)| pool_count(c))
+                .sum::<usize>()
+        );
+        assert!(SPAWN_CLASSES
+            .iter()
+            .all(|(c, _)| default_model(c).is_some()));
+        // The overlay list scrolls: at most 9 class rows plus header/more/weapon lines.
+        let mut overlay = Overlay::default();
+        overlay.next_class(-1);
+        let lines = overlay.lines();
+        assert!(lines.len() <= 13, "{lines:?}");
+        assert!(lines
+            .iter()
+            .any(|l| l.starts_with(" > npc_combinedropship")));
+        assert!(lines.iter().any(|l| l.contains("more above")));
+        overlay.next_class(1);
+        assert!(overlay.lines()[1].starts_with(" > npc_metropolice"));
+        assert!(overlay
+            .lines()
+            .last()
+            .unwrap()
+            .contains("[weapon_stunstick]"));
         let mut used = std::collections::BTreeSet::new();
         for _ in 0..POOL_PER_CLASS {
             used.insert(free_slot(&world, "npc_combine_s", &used).unwrap());
@@ -383,11 +514,11 @@ mod tests {
         o.next_equipment(1);
         assert_eq!(o.request().equipment, "weapon_pistol");
         o.next_class(-1);
-        assert_eq!(o.request().classname, "npc_cscanner");
+        assert_eq!(o.request().classname, "npc_combinedropship");
         assert_eq!(o.equipment, 0);
         o.next_class(1);
         o.next_class(1);
         assert_eq!(o.request().classname, "npc_combine_s");
-        assert!(o.lines()[1].contains("npc_combine_s"));
+        assert!(o.lines().iter().any(|l| l == " > npc_combine_s"));
     }
 }

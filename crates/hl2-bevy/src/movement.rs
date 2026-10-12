@@ -635,16 +635,17 @@ fn controls(
                 game.actions.push(Action::Slot { slot });
             }
         }
-        // F4 NPC spawn overlay (ours; not a native binding): arrows select, Enter places.
+        // F4 NPC spawn overlay (ours; not a native binding): Up/Down scroll the class
+        // list, Left/Right pick the weapon, Enter places.
         if keys.just_pressed(KeyCode::F4) {
             game.spawn_overlay.toggle();
         }
         if game.spawn_overlay.open {
             for (key, class, equipment) in [
-                (KeyCode::ArrowLeft, -1, 0),
-                (KeyCode::ArrowRight, 1, 0),
-                (KeyCode::ArrowUp, 0, -1),
-                (KeyCode::ArrowDown, 0, 1),
+                (KeyCode::ArrowUp, -1, 0),
+                (KeyCode::ArrowDown, 1, 0),
+                (KeyCode::ArrowLeft, 0, -1),
+                (KeyCode::ArrowRight, 0, 1),
             ] {
                 if keys.just_pressed(key) {
                     if class != 0 {

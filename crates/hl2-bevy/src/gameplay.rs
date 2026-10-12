@@ -391,7 +391,7 @@ impl Gameplay {
                 None => format!(
                     "Can't create {}: all {} pooled slots are in use",
                     request.classname,
-                    spawn::POOL_PER_CLASS
+                    spawn::pool_count(&request.classname)
                 ),
             },
             Err(e) => e.clone(),
