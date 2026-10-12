@@ -119,6 +119,8 @@ pub struct Gameplay {
     /// Spawn requests and their CC_NPC_Create placement; runtime entity creation is not
     /// implemented (DESIGN step 14 note), so nothing is created yet.
     pub spawn_log: Vec<serde_json::Value>,
+    /// Pooled spawn entities already placed.
+    pub spawn_used: std::collections::BTreeSet<usize>,
 }
 impl Gameplay {
     /// After the player move: this tick's damage (trigger_hurt, blasts, then the
@@ -286,6 +288,7 @@ impl Gameplay {
             spawn_overlay: Default::default(),
             spawn_console: Default::default(),
             spawn_log: Vec::new(),
+            spawn_used: Default::default(),
         }
     }
     pub fn load_with_campaign(
@@ -315,6 +318,7 @@ impl Gameplay {
             spawn_overlay: Default::default(),
             spawn_console: Default::default(),
             spawn_log: Vec::new(),
+            spawn_used: Default::default(),
             player_damage,
             damage_messages: Vec::new(),
             suit: Default::default(),
@@ -341,7 +345,9 @@ impl Gameplay {
         })
     }
     /// An npc_create request (F4 Enter or the console): CC_NPC_Create placement from
-    /// the eye along the aim. Logged only: runtime NPC creation is not implemented.
+    /// the eye along the aim, then the next hidden pooled entity of the class is
+    /// moved there and shown (runtime entity creation is not available; the pool is
+    /// appended at map load).
     pub fn request_spawn(
         &mut self,
         request: hl2_simulation::ai::spawn::SpawnRequest,
@@ -349,31 +355,48 @@ impl Gameplay {
         eye: Vec3,
         forward: Vec3,
     ) -> String {
-        let placement = hl2_simulation::ai::spawn::place(
+        use hl2_simulation::ai::spawn;
+        let placement = spawn::place(
             &request,
             eye,
             forward,
             &hl2_simulation::ai::host::PhysicsPlacement { physics },
         );
+        let mut entity = None;
         let message = match &placement {
-            Ok(p) => format!(
-                "{} ({}) at {:.0} {:.0} {:.0} yaw {:.0}: placement only, runtime NPC creation is not implemented",
-                request.classname,
-                if request.equipment.is_empty() {
-                    "no weapon"
-                } else {
-                    &request.equipment
-                },
-                p.origin.x,
-                p.origin.y,
-                p.origin.z,
-                p.yaw
-            ),
+            Ok(p) => match spawn::free_slot(&self.world, &request.classname, &self.spawn_used) {
+                Some(id) => {
+                    self.spawn_used.insert(id);
+                    let state = &mut self.scene.states[id];
+                    state.origin = p.origin;
+                    state.visible = true;
+                    state.enabled = true;
+                    self.scene.ai_set_yaw(id, p.yaw);
+                    self.ai.set_equipment(id, &request.equipment);
+                    entity = Some(id);
+                    format!(
+                        "Created {} ({}) at {:.0} {:.0} {:.0} yaw {:.0} (entity {id})",
+                        request.classname,
+                        if request.equipment.is_empty() {
+                            "no weapon"
+                        } else {
+                            &request.equipment
+                        },
+                        p.origin.x,
+                        p.origin.y,
+                        p.origin.z,
+                        p.yaw
+                    )
+                }
+                None => format!(
+                    "Can't create {}: all {} pooled slots are in use",
+                    request.classname,
+                    spawn::POOL_PER_CLASS
+                ),
+            },
             Err(e) => e.clone(),
         };
-        self.spawn_log.push(
-            serde_json::json!({"request":request,"placement":placement.ok(),"message":message}),
-        );
+        self.spawn_log.push(serde_json::json!({"request":request,"placement":placement.ok(),"entity":entity,"message":message}));
         message
     }
     fn ai_player_state(

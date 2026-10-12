@@ -770,6 +770,14 @@ impl AiRuntime {
         }
         true
     }
+    /// A spawned NPC's additionalequipment (F4 / npc_create_equipment): the cop's
+    /// baton exists only with weapon_stunstick.
+    pub fn set_equipment(&mut self, id: usize, equipment: &str) {
+        if let Some(actor) = self.actors.get_mut(&id) {
+            let AiClass::Metropolice(cop) = &mut actor.class;
+            cop.has_baton = equipment.eq_ignore_ascii_case("weapon_stunstick");
+        }
+    }
     /// CSoundEnt::InsertSound from gameplay (gunfire, impacts, explosions, footsteps).
     pub fn insert_sound(&mut self, kind: u32, origin: Vec3, volume: f32, duration: f64, now: f64) {
         self.sounds
@@ -901,6 +909,39 @@ mod tests {
             .sounds
             .iter()
             .any(|s| s.name.starts_with("#METROPOLICE_BACK_UP")));
+    }
+
+    #[test]
+    fn a_pooled_cop_is_hidden_until_placed_then_thinks() {
+        let mut world = World {
+            entities: vec![entity(&[
+                ("classname", "env_global"),
+                ("globalstate", "gordon_precriminal"),
+                ("initialstate", "1"),
+                ("spawnflags", "1"),
+            ])],
+            ..Default::default()
+        };
+        crate::ai::spawn::append_pool(&mut world);
+        let id =
+            crate::ai::spawn::free_slot(&world, "npc_metropolice", &Default::default()).unwrap();
+        let mut r = Rig {
+            scene: Scene::new(&world),
+            physics: Physics::new(&world),
+            ai: AiRuntime::new(&world, None),
+            controller: Controller::new(None, Default::default()),
+            world,
+        };
+        r.ai.enabled = true;
+        assert!(!r.scene.states[id].visible);
+        run(&mut r, 20, player_at(30.));
+        assert_eq!(r.ai.diagnostics.thinks, 0, "hidden slots do not think");
+        r.scene.states[id].origin = Vec3::ZERO;
+        r.scene.states[id].visible = true;
+        r.ai.set_equipment(id, "weapon_stunstick");
+        run(&mut r, 20, player_at(30.));
+        let AiClass::Metropolice(cop) = &r.ai.actors[&id].class;
+        assert!(cop.has_baton && cop.warnings >= 1);
     }
 
     #[test]

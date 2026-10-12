@@ -1,8 +1,10 @@
 //! Developer NPC spawning: the F4 overlay's data model (class and weapon choice, spawn
 //! at the crosshair) and the Source console commands npc_create / npc_create_aimed /
 //! npc_create_equipment (ai_concommands.cpp CC_NPC_Create, CC_NPC_Create_Aimed). The
-//! class/weapon lists are developer choices, not SDK data. Placement follows the SDK;
-//! creating the entity in the running world is host work (not implemented yet).
+//! class/weapon lists are developer choices, not SDK data. Placement follows the SDK.
+//! The running world's entity tables are fixed at map load, so spawning activates a
+//! hidden pooled entity appended at load (`append_pool`): every load-time system
+//! (models, animation, physics, AI) builds it like a map NPC.
 use glam::Vec3;
 use serde::Serialize;
 
@@ -44,6 +46,63 @@ pub const SPAWN_CLASSES: &[(&str, &[&str])] = &[
     ("npc_manhack", &[""]),
     ("npc_cscanner", &[""]),
 ];
+/// Hidden pooled entities per overlay class (appended at map load).
+pub const POOL_PER_CLASS: usize = 3;
+/// Keyvalue marking a pooled spawn entity (not a Source key).
+pub const POOL_KEY: &str = "hl2rs_spawn_pool";
+/// Where pooled entities wait (far below any HL2 map).
+pub const POOL_ORIGIN: Vec3 = Vec3::new(0., 0., -15000.);
+/// The model each class's Spawn/Precache sets when the map gives none (SDK 2013).
+pub fn default_model(class: &str) -> Option<&'static str> {
+    Some(match class {
+        "npc_metropolice" => "models/police.mdl",
+        "npc_combine_s" => "models/combine_soldier.mdl",
+        "npc_citizen" => "models/humans/group01/male_07.mdl",
+        "npc_barney" => "models/barney.mdl",
+        "npc_alyx" => "models/alyx.mdl",
+        "npc_vortigaunt" => "models/vortigaunt.mdl",
+        "npc_zombie" => "models/zombie/classic.mdl",
+        "npc_headcrab" => "models/headcrabclassic.mdl",
+        "npc_antlion" => "models/antlion.mdl",
+        "npc_manhack" => "models/manhack.mdl",
+        "npc_cscanner" => "models/combine_scanner.mdl",
+        _ => return None,
+    })
+}
+/// Append the hidden spawn pool to a freshly loaded map's entities (before models
+/// load). Existing entity ids are unchanged; the pool goes at the end.
+pub fn append_pool(world: &mut modkit_core::World) {
+    for (class, _) in SPAWN_CLASSES {
+        let Some(model) = default_model(class) else {
+            continue;
+        };
+        for _ in 0..POOL_PER_CLASS {
+            let mut properties: Vec<(String, String)> = vec![
+                ("classname".into(), (*class).into()),
+                ("model".into(), model.into()),
+                (
+                    "origin".into(),
+                    format!("{} {} {}", POOL_ORIGIN.x, POOL_ORIGIN.y, POOL_ORIGIN.z),
+                ),
+                (POOL_KEY.into(), "1".into()),
+            ];
+            if *class == "npc_metropolice" {
+                properties.push(("additionalequipment".into(), "weapon_stunstick".into()));
+            }
+            world.entities.push(modkit_core::Entity { properties });
+        }
+    }
+}
+/// The first unused pooled entity of `class`.
+pub fn free_slot(
+    world: &modkit_core::World,
+    class: &str,
+    used: &std::collections::BTreeSet<usize>,
+) -> Option<usize> {
+    world.entities.iter().enumerate().find_map(|(id, e)| {
+        (e.get(POOL_KEY).is_some() && e.class() == class && !used.contains(&id)).then_some(id)
+    })
+}
 /// Flying classes (bits_CAP_MOVE_FLY) are placed 36 units back along the aim.
 fn flies(class: &str) -> bool {
     matches!(class, "npc_manhack" | "npc_cscanner" | "npc_clawscanner")
@@ -213,6 +272,19 @@ impl Overlay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_pool_has_slots_for_every_overlay_class() {
+        let mut world = modkit_core::World::default();
+        append_pool(&mut world);
+        assert_eq!(world.entities.len(), SPAWN_CLASSES.len() * POOL_PER_CLASS);
+        let mut used = std::collections::BTreeSet::new();
+        for _ in 0..POOL_PER_CLASS {
+            used.insert(free_slot(&world, "npc_combine_s", &used).unwrap());
+        }
+        assert!(free_slot(&world, "npc_combine_s", &used).is_none());
+        let cop = free_slot(&world, "npc_metropolice", &used).unwrap();
+        assert_eq!(world.entities[cop].get("model"), Some("models/police.mdl"));
+    }
     struct Floor;
     impl PlacementWorld for Floor {
         fn trace_line(&self, start: Vec3, end: Vec3) -> Option<Vec3> {

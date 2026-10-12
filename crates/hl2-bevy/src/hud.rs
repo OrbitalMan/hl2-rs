@@ -345,6 +345,13 @@ pub fn present(
     }
     if game.spawn_overlay.open {
         hud.debug_lines.extend(game.spawn_overlay.lines());
+        if let Some(message) = game
+            .spawn_log
+            .last()
+            .and_then(|entry| entry["message"].as_str())
+        {
+            hud.debug_lines.push(format!("last: {message}"));
+        }
     }
     if !hud.debug_lines.is_empty() {
         ui.source.draw_debug(&hud.debug_lines);

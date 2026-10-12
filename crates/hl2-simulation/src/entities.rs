@@ -404,6 +404,7 @@ impl Scene {
                 rotation: base_rotation,
                 // CDynamicProp::Spawn adds EF_NODRAW for StartDisabled.
                 visible: e.get("rendermode") != Some("10")
+                    && e.get(crate::ai::spawn::POOL_KEY).is_none()
                     && (!matches!(
                         e.class(),
                         "func_brush" | "func_monitor" | "prop_dynamic" | "prop_dynamic_override"
