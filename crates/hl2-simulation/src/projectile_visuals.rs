@@ -211,6 +211,34 @@ impl ProjectileVisuals {
     /// sparks (1-2 s, 64-300 u/s up-biased, gravity 800, dampen 0.3, width 2-5, length
     /// 0.02-0.05), RandomInt(16, 32) little ones (0.1-0.2 s, 128-256 u/s, gravity 400,
     /// width 2-4, length 0.02-0.03) and two 0.2 s yellowflare_noz caps.
+    /// FX_GaussExplosion (PC, c_impact_effects.cpp; DoEffectLaunch's te GaussExplosion):
+    /// RandomInt(16, 32) sparks along `direction` +/- 0.6 per axis (1-4 wide, length
+    /// 0.01-0.1, 0.25-1 s, 128-512 u/s, gravity 800, dampened), then FX_ElectricSpark.
+    /// Collision of the sparks is not modeled.
+    pub fn spawn_gauss_sparks(&mut self, position: Vec3, direction: Vec3, time: f64) {
+        let count = 16 + (self.random() * 17.) as usize;
+        for _ in 0..count.min(32) {
+            let jitter = Vec3::new(
+                self.range(-0.6, 0.6),
+                self.range(-0.6, 0.6),
+                self.range(-0.6, 0.6),
+            );
+            let dir = (jitter + direction).normalize_or_zero();
+            let speed = self.range(128., 512.);
+            let spark = Spark {
+                position,
+                velocity: dir * speed,
+                life: 0.,
+                die: self.range(0.25, 1.),
+                width: self.range(1., 4.),
+                length: self.range(0.01, 0.1),
+                gravity: 800.,
+                dampen: 0.3,
+            };
+            self.sparks.push(spark);
+        }
+        self.spawn_sparks(position, time);
+    }
     pub fn spawn_sparks(&mut self, position: Vec3, time: f64) {
         let big = self.range(2., 4.) as usize;
         for _ in 0..big {

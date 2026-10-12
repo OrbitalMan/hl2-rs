@@ -203,6 +203,8 @@ pub struct Effects {
     rng: u64,
     /// The newest crossbow load effect already given its CrossbowLoad sparks.
     load_sparks: f64,
+    /// The newest gravity gun EFFECT_LAUNCH already given its GaussExplosion.
+    launch_sparks: f64,
     model_errors: Vec<String>,
     draws: usize,
     grenade_draws: usize,
@@ -330,6 +332,7 @@ pub fn install(
         viewmodel_draws: 0,
         rng: 0x2545_f491_4f6c_dd1d,
         load_sparks: f64::NEG_INFINITY,
+        launch_sparks: f64::NEG_INFINITY,
         model_errors: loaded.effects.model_errors.clone(),
         draws: 0,
         grenade_draws: 0,
@@ -441,7 +444,7 @@ fn viewmodel_quads(
     sim: &Simulation,
 ) -> Vec<hl2_simulation::projectile_visuals::Quad> {
     use hl2_simulation::viewmodel_effects as vm;
-    let described = game.inventory.viewmodel_effects(game.scene.time);
+    let mut described = game.inventory.viewmodel_effects(game.scene.time);
     let new_load = (game.inventory.active == "weapon_crossbow")
         .then(|| {
             game.inventory
@@ -479,19 +482,59 @@ fn viewmodel_quads(
     // DoLoadEffect -> "CrossbowLoad" (client c_weapon_crossbow.cpp): FX_ElectricSpark at
     // viewmodel attachment 1, a world position from FormatViewModelAttachment (right/up
     // offsets scaled by tan(fov / 2) / tan(viewmodel fov / 2), depth kept).
+    let forward = glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
+    let right = forward.cross(glam::Vec3::Z).normalize_or(glam::Vec3::Y);
+    let up = right.cross(forward);
+    let factor = (fov.to_radians() * 0.5).tan() / (viewmodel_fov.to_radians() * 0.5).tan();
+    let eye = glam::Vec3::from_array(sim.eye().to_array());
     if let Some(at) = new_load {
         effects.load_sparks = at;
         if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
             && viewmodel_fov > 0.
         {
-            let forward =
-                glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
-            let right = forward.cross(glam::Vec3::Z).normalize_or(glam::Vec3::Y);
-            let up = right.cross(forward);
-            let factor = (fov.to_radians() * 0.5).tan() / (viewmodel_fov.to_radians() * 0.5).tan();
-            let eye = glam::Vec3::from_array(sim.eye().to_array());
             let world = eye + forward * local.x - right * local.y * factor + up * local.z * factor;
             effects.source.spawn_sparks(world, game.scene.time);
+        }
+    }
+    // DoEffectLaunch: te GaussExplosion 4 units before the end point (random direction)
+    // once, and for 0.1 s a CBeam orangelight1 from the end point to attachment 1 (width
+    // 6.4 -> 12.8, brightness 255, noise 2). The world end point is moved into viewmodel
+    // space by the inverse of FormatViewModelAttachment so it projects where it is.
+    if game.inventory.active == "weapon_physcannon"
+        && let Some((at, end)) = game.inventory.physcannon.last_launch
+    {
+        let shot = (end - eye).normalize_or(forward);
+        if at > effects.launch_sparks {
+            effects.launch_sparks = at;
+            let r = &mut effects.rng;
+            let mut unit = || {
+                *r ^= *r << 13;
+                *r ^= *r >> 7;
+                *r ^= *r << 17;
+                (*r >> 40) as f32 / (1u32 << 24) as f32 * 2. - 1.
+            };
+            let direction = glam::Vec3::new(unit(), unit(), unit());
+            effects
+                .source
+                .spawn_gauss_sparks(end - shot * 4., direction, game.scene.time);
+        }
+        if game.scene.time - at < 0.1 && viewmodel_fov > 0. {
+            let d = end - eye;
+            described.beams.push(vm::ViewmodelBeam {
+                start: vm::Anchor::Local(glam::Vec3::new(
+                    d.dot(forward),
+                    -d.dot(right) / factor,
+                    d.dot(up) / factor,
+                )),
+                end: vm::Anchor::Index(1),
+                material: "sprites/orangelight1",
+                width: 6.4,
+                end_width: (12.8, 12.8),
+                brightness: 255.,
+                color: [255, 255, 255],
+                noise: (2., 2.),
+                shade_in: false,
+            });
         }
     }
     let sprites = &effects.source.sprites;

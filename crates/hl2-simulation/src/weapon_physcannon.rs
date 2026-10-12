@@ -73,6 +73,8 @@ pub struct PhyscannonState {
     grab: Option<GrabController>,
     /// Launch/punt effect positions this frame (EFFECT_LAUNCH), host-drawn.
     pub launches: Vec<Vec3>,
+    /// The newest EFFECT_LAUNCH (time, end position) for the beam, sparks and flash.
+    pub last_launch: Option<(f64, Vec3)>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 enum ElementChange {
@@ -491,6 +493,7 @@ impl Inventory {
             self.physcannon.next_primary = time + 0.5;
             self.physcannon.next_secondary = time + 0.5;
             self.physcannon.launches.push(held_center);
+            self.physcannon.last_launch = Some((time, held_center));
             self.physcannon.change_state = ElementChange::Closed;
             self.physcannon.element_debounce = time + 0.1;
             self.physcannon.check_suppress = time + 0.25;
@@ -541,6 +544,7 @@ impl Inventory {
             });
         }
         self.physcannon.launches.push(hit.position);
+        self.physcannon.last_launch = Some((time, hit.position));
         self.primary_fire_effect(scene, weapon, world);
         self.cannon_send(world, weapon, "ACT_VM_SECONDARYATTACK", time);
         self.physcannon.change_state = ElementChange::Closed;

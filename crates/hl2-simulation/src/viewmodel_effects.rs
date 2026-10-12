@@ -14,6 +14,9 @@ use modkit_core::animation::Rig;
 pub enum Anchor {
     Index(usize),
     Name(&'static str),
+    /// A point already in viewmodel space (a world point moved by the inverse of
+    /// FormatViewModelAttachment, e.g. the launch beam's far end).
+    Local(Vec3),
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewmodelSprite {
@@ -160,6 +163,18 @@ impl Inventory {
                     out.sprites.push(core("sprites/orangecore1", 0.15, 128.));
                     out.sprites.push(core("sprites/orangecore2", 0.1, 255.));
                 }
+                // DoEffectLaunch: the blast sprite on, scale to 2.0 and brightness to 0
+                // over 0.1 s (from the ready values).
+                if let Some((at, _)) = self.physcannon.last_launch {
+                    let t = ((time - at) / 0.1) as f32;
+                    if (0. ..1.).contains(&t) {
+                        out.sprites.push(core(
+                            "sprites/orangecore2",
+                            0.1 + (2. - 0.1) * t,
+                            255. * (1. - t),
+                        ));
+                    }
+                }
             }
             _ => {}
         }
@@ -215,6 +230,7 @@ pub fn anchor_position(rig: &Rig, matrices: &[Mat4], anchor: &Anchor) -> Option<
     let attachment = match anchor {
         Anchor::Index(i) => rig.attachments.get(i.checked_sub(1)?)?,
         Anchor::Name(name) => rig.attachment(name)?,
+        Anchor::Local(point) => return Some(*point),
     };
     Some(
         rig.attachment_matrix(matrices, attachment)?
@@ -400,6 +416,7 @@ mod tests {
         let resolve = |anchor: &Anchor| match anchor {
             Anchor::Name(_) => Some(Vec3::new(20., 0., -5.)),
             Anchor::Index(_) => Some(Vec3::new(40., 0., -5.)),
+            Anchor::Local(point) => Some(*point),
         };
         let mut rng = || 0.5;
         let quads = viewmodel_quads(&effects, &resolve, &|_| Some(32.), &mut rng, 1.);
