@@ -3072,6 +3072,17 @@ mod tests {
         assert_eq!(scene.entity(&world, id).unwrap().class(), "npc_metropolice");
         assert_eq!(scene.entity(&world, 0).unwrap().class(), "info_target");
         assert!(scene.entity(&world, 2).is_none());
+        // Runtime loops (I/O queue, heads, look targets, physics poses) tolerate the
+        // spawned id: tick a while with the player nearby and an input sent to it.
+        let mut physics = crate::physics::Physics::new(&world);
+        scene.send(id, "Kill", "");
+        for _ in 0..40 {
+            scene.tick(&world, Vec3::new(40., 20., 30.), 0.015);
+            for (index, state) in scene.states.iter().enumerate() {
+                physics.set_entity(index, state.origin, state.rotation, state.collides());
+            }
+        }
+        assert!(scene.states[id].killed);
     }
     fn entity(class: &str, name: &str, values: &[(&str, &str)]) -> Entity {
         Entity {

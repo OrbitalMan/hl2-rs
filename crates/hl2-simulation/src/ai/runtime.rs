@@ -668,7 +668,11 @@ impl AiRuntime {
                     scene.sounds.push(crate::sounds::SoundRequest {
                         origin: Some(origin + Vec3::Z * 64.),
                         actor: Some(crate::sounds::SoundActor {
-                            name: world.entities[id].get("targetname").unwrap_or("").into(),
+                            name: scene
+                                .entity(world, id)
+                                .and_then(|e| e.get("targetname"))
+                                .unwrap_or("")
+                                .into(),
                             model: String::new(),
                             entity: Some(id),
                         }),
