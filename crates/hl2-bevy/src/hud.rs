@@ -345,6 +345,18 @@ pub fn present(
     }
     if game.spawn_overlay.open {
         hud.debug_lines.extend(game.spawn_overlay.lines());
+        let stance = match game.ai.player_disposition {
+            None => "default",
+            Some(hl2_simulation::ai::relationships::Disposition::HT) => "hate",
+            Some(hl2_simulation::ai::relationships::Disposition::LI) => "like",
+            Some(hl2_simulation::ai::relationships::Disposition::FR) => "fear",
+            Some(_) => "neutral",
+        };
+        hud.debug_lines.push(format!(
+            "I: AI {}   O: ignore player {}   P: stance toward player: {stance}",
+            if game.ai.enabled { "ON" } else { "OFF (idle)" },
+            if game.ai.ignore_player { "ON" } else { "off" },
+        ));
         if let Some(message) = game
             .spawn_log
             .last()

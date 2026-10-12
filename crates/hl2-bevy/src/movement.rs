@@ -655,6 +655,19 @@ fn controls(
                     }
                 }
             }
+            // Debug switches while the overlay is open: I AI on/off, O ignore the
+            // player, P stance toward the player.
+            if keys.just_pressed(KeyCode::KeyI) {
+                let on = !game.ai.enabled;
+                game.ai.enabled = on;
+                crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+            }
+            if keys.just_pressed(KeyCode::KeyO) {
+                game.ai.ignore_player = !game.ai.ignore_player;
+            }
+            if keys.just_pressed(KeyCode::KeyP) {
+                game.ai.cycle_player_disposition();
+            }
             if keys.just_pressed(KeyCode::Enter) {
                 let request = game.spawn_overlay.request();
                 let message = sim.spawn_npc(game, request);

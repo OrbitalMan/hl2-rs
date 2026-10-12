@@ -121,6 +121,14 @@ pub struct AiRuntime {
     pub player_hits: Vec<PlayerHit>,
     pub diagnostics: Diagnostics,
     random: u64,
+    /// Debug (F4): the AI does not sense the player (ai_ignoreplayers / notarget).
+    pub ignore_player: bool,
+    /// Debug (F4): every AI NPC's disposition toward the player (None: the
+    /// relationship table and class rules).
+    pub player_disposition: Option<Disposition>,
+    /// The AI ran last tick (switching it off returns NPCs to idle once).
+    #[serde(skip)]
+    was_enabled: bool,
 }
 impl AiRuntime {
     /// The AI for the map's NPCs (metrocops) and ai_goal_police entities. `vfs` reads
@@ -208,6 +216,9 @@ impl AiRuntime {
         }
         Self {
             enabled: false,
+            ignore_player: false,
+            player_disposition: None,
+            was_enabled: false,
             schedules,
             relationships: Relationships::default(),
             sounds: SoundEnt::default(),
@@ -299,8 +310,21 @@ impl AiRuntime {
     ) {
         self.inputs(world, scene);
         if !self.enabled {
+            if self.was_enabled {
+                self.was_enabled = false;
+                self.stop_all(world, scene, controller);
+            }
             return;
         }
+        self.was_enabled = true;
+        let player = if self.ignore_player {
+            PlayerState {
+                noclip: true,
+                ..player
+            }
+        } else {
+            player
+        };
         let now = scene.time;
         self.sounds.purge(now);
         let precriminal = scene.globals.is_on("gordon_precriminal");
@@ -491,7 +515,10 @@ impl AiRuntime {
         if player_visible {
             actor.npc.conditions.set(COND_SEE_PLAYER);
         }
-        let hates = cop.hates_player(precriminal_hate || !precriminal, now);
+        let hates = match self.player_disposition {
+            Some(disposition) => disposition == Disposition::HT,
+            None => cop.hates_player(precriminal_hate || !precriminal, now),
+        };
         let previous_enemy = actor.npc.enemy;
         if hates && player_visible {
             actor.npc.conditions.set(COND_SEE_HATE);
@@ -778,6 +805,31 @@ impl AiRuntime {
             cop.has_baton = equipment.eq_ignore_ascii_case("weapon_stunstick");
         }
     }
+    /// Switching the AI off (debug): every AI NPC drops its schedule, enemy and
+    /// movement goal and returns to its idle activity.
+    fn stop_all(&mut self, world: &World, scene: &mut Scene, controller: &mut Controller) {
+        for (&id, actor) in self.actors.iter_mut() {
+            if let Some(key) = actor.goal.take() {
+                controller.cancel(key);
+                controller.forget(key);
+                scene.ai_forget_move(key);
+            }
+            actor.npc.schedule = None;
+            actor.npc.enemy = None;
+            if !scene.ai_scripted(id) {
+                scene.ai_set_activity(world, id, "ACT_IDLE");
+            }
+        }
+    }
+    /// The F4 debug stance toward the player: default -> hate -> neutral -> like.
+    pub fn cycle_player_disposition(&mut self) {
+        self.player_disposition = match self.player_disposition {
+            None => Some(Disposition::HT),
+            Some(Disposition::HT) => Some(Disposition::NU),
+            Some(Disposition::NU) => Some(Disposition::LI),
+            _ => None,
+        };
+    }
     /// CSoundEnt::InsertSound from gameplay (gunfire, impacts, explosions, footsteps).
     pub fn insert_sound(&mut self, kind: u32, origin: Vec3, volume: f32, duration: f64, now: f64) {
         self.sounds
@@ -942,6 +994,29 @@ mod tests {
         run(&mut r, 20, player_at(30.));
         let AiClass::Metropolice(cop) = &r.ai.actors[&id].class;
         assert!(cop.has_baton && cop.warnings >= 1);
+    }
+
+    #[test]
+    fn debug_switches_ignore_the_player_and_stop_the_ai() {
+        let mut r = rig();
+        r.ai.enabled = true;
+        r.ai.ignore_player = true;
+        run(&mut r, 20, player_at(30.));
+        let AiClass::Metropolice(cop) = &r.ai.actors[&0].class;
+        assert_eq!(cop.warnings, 0, "an ignored player is not shoved");
+        r.ai.ignore_player = false;
+        r.ai.cycle_player_disposition();
+        assert_eq!(r.ai.player_disposition, Some(Disposition::HT));
+        run(&mut r, 20, player_at(30.));
+        assert_eq!(r.ai.actors[&0].npc.enemy, Some(PLAYER), "forced hate");
+        r.ai.enabled = false;
+        run(&mut r, 1, player_at(30.));
+        assert!(r.ai.actors[&0].npc.schedule.is_none());
+        assert!(r.ai.actors[&0].npc.enemy.is_none());
+        for _ in 0..3 {
+            r.ai.cycle_player_disposition();
+        }
+        assert_eq!(r.ai.player_disposition, None);
     }
 
     #[test]

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-12 cloud session: F4 roster, scrolling list and AI debug switches (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** 41 HL2 NPC classes with SDK default models in the F4 pool; scrolling class list with weapon choices; F4 debug keys I (AI on/off, stopping NPCs to idle), O (ignore the player), P (stance toward the player).
+
+**Why:** owner: missing NPCs, a scrolling list, and debug switches to watch NPCs without the player or the AI interfering.
+
+**Tested how:** unit tests (pool covers every class, list scrolls, ignored player is not shoved, forced hate makes the player the enemy, AI off clears schedules); strict Clippy; fmt; workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** visuals, load time of ~30 extra models, AI only for metrocops, no console equivalents.
+
+**Next:** STATUS AI checklist item 6.
+
 ## 2026-10-12 cloud session: F4 spawns real NPCs (`wip/cloud-npc-ai-20261010`)
 
 **Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
