@@ -39,6 +39,9 @@ pub struct Sprite {
     pub image: std::sync::Arc<vtf::Image>,
     pub kind: usize,
 }
+/// Material-name suffix of kRenderGlow draws: "No Z buffer checks" (const.h); the host
+/// draws them without depth testing.
+pub const GLOW_SUFFIX: &str = "#glow";
 #[derive(Clone, Debug, PartialEq)]
 pub struct Quad {
     pub material: String,
@@ -601,12 +604,26 @@ impl ProjectileVisuals {
             );
         }
         self.rocket_trails(projectiles, axes, time, paused);
-        // CLaserDot: redglow1, kRenderGlow 255, LaserThink scale.
-        if let Some(dot) = projectiles.laser_dot.filter(|d| d.on) {
+        // CLaserDot: redglow1, kRenderGlow 255 with kRenderFxNoDissipation, LaserThink
+        // scale. Glow sprites ignore the depth buffer; the client's pixel-visibility
+        // query hides an occluded dot (approximated by a line of sight to 2 units short).
+        let dot_visible = |position: Vec3| {
+            let to = position - eye;
+            let length = to.length();
+            length <= 2.
+                || physics
+                    .projectile_ray(eye, eye + to * ((length - 2.) / length), &[])
+                    .is_none()
+        };
+        if let Some(dot) = projectiles
+            .laser_dot
+            .filter(|d| d.on && dot_visible(d.position))
+        {
             let size = self
                 .sprites
                 .get(crate::weapon_rpg::DOT_SPRITE)
                 .map_or(0., |s| s.image.width as f32 * 0.5 * dot.scale);
+            let before = self.quads.len();
             self.quad(
                 crate::weapon_rpg::DOT_SPRITE,
                 dot.position,
@@ -615,6 +632,9 @@ impl ProjectileVisuals {
                 0.,
                 1.,
             );
+            if let Some(quad) = self.quads.get_mut(before) {
+                quad.material.push_str(GLOW_SUFFIX);
+            }
         }
         for effect in &projectiles.effects {
             let age = (time - effect.at).max(0.) as f32;

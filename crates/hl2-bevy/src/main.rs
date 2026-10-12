@@ -546,6 +546,7 @@ fn setup(
             ..default()
         },
         bevy::camera::visibility::RenderLayers::layer(1),
+        movement::ViewmodelCamera,
         Tonemapping::None,
         bevy::camera::Exposure::default(),
         tonemap::ToneMapped,

@@ -655,11 +655,33 @@ fn fixed_step(
 pub(crate) fn vertical_fov(degrees: f32) -> f32 {
     2. * ((degrees.to_radians() / 2.).tan() / (4. / 3.)).atan()
 }
+/// The camera that draws the viewmodel layer (its FOV follows the view's FOV offset).
+#[derive(Component)]
+pub struct ViewmodelCamera;
 pub(crate) fn present(
     sim: Res<Simulation>,
     game: Option<Res<crate::gameplay::Gameplay>>,
     mut cameras: Query<(&mut Transform, &mut Projection), With<FlyCamera>>,
+    mut viewmodel: Query<&mut Projection, (With<ViewmodelCamera>, Without<FlyCamera>)>,
 ) {
+    // CViewRender::SetUpView: viewmodel_fov - (default_fov - fov). At or below zero the
+    // view has moved past the viewmodel: draw nothing (near plane beyond any viewmodel).
+    if let (Some(game), Ok(mut projection)) = (game.as_deref(), viewmodel.single_mut()) {
+        let fov = game.inventory.view_fov(game.scene.time);
+        let degrees =
+            hl2_simulation::viewmodel_effects::viewmodel_fov(game.inventory.fov.default_fov, fov);
+        if let Projection::Perspective(p) = &mut *projection {
+            let (vertical, near) = if degrees > 0. {
+                (vertical_fov(degrees), 0.1)
+            } else {
+                (vertical_fov(1.), p.far * 0.5)
+            };
+            if p.fov != vertical || p.near != near {
+                p.fov = vertical;
+                p.near = near;
+            }
+        }
+    }
     if let Ok((mut camera, mut projection)) = cameras.single_mut() {
         // CBasePlayer::CalcView adds the punch angle (Source pitch is down-positive,
         // ours up-positive). Aim and the viewmodel do not include it yet.

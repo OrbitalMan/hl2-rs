@@ -221,6 +221,12 @@ pub fn anchor_position(rig: &Rig, matrices: &[Mat4], anchor: &Anchor) -> Option<
 /// tan(viewmodel FOV / 2) / tan(world FOV / 2) (Source 4:3 horizontal degrees).
 /// viewmodel_fov (the host's viewmodel camera, Source 4:3 horizontal degrees).
 pub const VIEWMODEL_FOV: f32 = 54.;
+/// CViewRender::SetUpView: the viewmodel FOV follows any FOV offset of the view
+/// (`viewmodel_fov - (default_fov - fov)`), so the crossbow zoom (FOV 20) drives it to
+/// -1 and the view moves past the viewmodel; at or below 0 it is not drawn.
+pub fn viewmodel_fov(default_fov: f32, fov: f32) -> f32 {
+    VIEWMODEL_FOV - (default_fov - fov)
+}
 pub fn attachment_size_factor(viewmodel_fov: f32, world_fov: f32) -> f32 {
     let world = (world_fov.to_radians() * 0.5).tan();
     if world > 0. {
@@ -330,6 +336,8 @@ mod tests {
         let f = super::attachment_size_factor(54., 75.);
         assert!((f - 0.664).abs() < 0.001, "{f}");
         assert!(super::attachment_size_factor(54., 20.) > 2.8);
+        assert_eq!(super::viewmodel_fov(75., 75.), 54.);
+        assert_eq!(super::viewmodel_fov(75., 20.), -1.);
     }
     use super::*;
 

@@ -7,8 +7,8 @@ use bevy::{
     pbr::{MaterialPipeline, MaterialPipelineKey},
     prelude::*,
     render::render_resource::{
-        AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, PrimitiveTopology,
-        RenderPipelineDescriptor, SpecializedMeshPipelineError,
+        AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, CompareFunction,
+        PrimitiveTopology, RenderPipelineDescriptor, SpecializedMeshPipelineError,
     },
     shader::ShaderRef,
 };
@@ -93,14 +93,20 @@ pub struct EffectMaterial {
     #[uniform(2)]
     parameters: Vec4,
     kind: usize,
+    /// kRenderGlow: no depth test or write.
+    ignore_z: bool,
 }
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct EffectKey {
     kind: usize,
+    ignore_z: bool,
 }
 impl From<&EffectMaterial> for EffectKey {
     fn from(m: &EffectMaterial) -> Self {
-        Self { kind: m.kind }
+        Self {
+            kind: m.kind,
+            ignore_z: m.ignore_z,
+        }
     }
 }
 impl Material for EffectMaterial {
@@ -121,6 +127,12 @@ impl Material for EffectMaterial {
         key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = None;
+        if key.bind_group_data.ignore_z
+            && let Some(depth) = descriptor.depth_stencil.as_mut()
+        {
+            depth.depth_compare = Some(CompareFunction::Always);
+            depth.depth_write_enabled = Some(false);
+        }
         if let Some(blend) = effect_blend(key.bind_group_data.kind) {
             for target in descriptor
                 .fragment
@@ -235,8 +247,23 @@ pub fn install(
                     0.,
                 ),
                 kind: sprite.kind,
+                ignore_z: false,
             }),
         );
+        // The RPG laser dot draws in kRenderGlow mode (no depth test).
+        if name == hl2_simulation::weapon_rpg::DOT_SPRITE {
+            let glow = EffectMaterial {
+                ignore_z: true,
+                ..effects
+                    .get(&handles[name])
+                    .cloned()
+                    .expect("material just added")
+            };
+            handles.insert(
+                format!("{name}{}", hl2_simulation::projectile_visuals::GLOW_SUFFIX),
+                effects.add(glow),
+            );
+        }
     }
     for (name, decal) in &loaded.gameplay.impacts.textures {
         let texture = images.add(rendering::image(
@@ -251,6 +278,7 @@ pub fn install(
                 texture,
                 parameters: Vec4::new(0.001, 1., 2., 0.),
                 kind: 4,
+                ignore_z: false,
             }),
         );
     }
@@ -445,7 +473,10 @@ fn viewmodel_quads(
         &|anchor| vm::anchor_position(rig, &matrices, anchor),
         &|material| sprites.get(material).map(|s| f32::from(s.image.width)),
         &mut random,
-        vm::attachment_size_factor(vm::VIEWMODEL_FOV, game.inventory.view_fov(game.scene.time)),
+        {
+            let fov = game.inventory.view_fov(game.scene.time);
+            vm::attachment_size_factor(vm::viewmodel_fov(game.inventory.fov.default_fov, fov), fov)
+        },
     )
 }
 pub fn present(
