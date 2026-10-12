@@ -243,8 +243,10 @@ pub struct SceneAnimationState {
 pub struct Scene {
     pub states: Vec<State>,
     /// Entities created at runtime (DESIGN 14r): id = world.entities.len() + index,
-    /// so map entity ids never change; states[id] covers both.
-    pub spawned: Vec<Entity>,
+    /// so map entity ids never change; states[id] covers both. Leaked so lookups can
+    /// return references tied to `world` only (spawns are rare and small; a map
+    /// change drops the Scene but not these few hundred bytes each).
+    pub spawned: Vec<&'static Entity>,
     pub time: f64,
     sequence: u64,
     random: u64,
@@ -442,15 +444,20 @@ impl Scene {
         let id = self.states.len();
         debug_assert_eq!(id, world.entities.len() + self.spawned.len());
         self.states.push(state);
-        self.spawned.push(entity);
+        self.spawned.push(Box::leak(Box::new(entity)));
         id
     }
     /// A map or runtime entity by id.
-    pub fn entity<'a>(&'a self, world: &'a World, id: usize) -> Option<&'a Entity> {
-        world
-            .entities
-            .get(id)
-            .or_else(|| self.spawned.get(id.checked_sub(world.entities.len())?))
+    pub fn entity<'a>(&self, world: &'a World, id: usize) -> Option<&'a Entity> {
+        world.entities.get(id).or_else(|| {
+            self.spawned
+                .get(id.checked_sub(world.entities.len())?)
+                .copied()
+        })
+    }
+    /// A map or runtime entity by a known-valid id (state indices).
+    fn ent<'a>(&self, world: &'a World, id: usize) -> &'a Entity {
+        self.entity(world, id).expect("entity id within states")
     }
     pub fn new(world: &World) -> Self {
         Self::with_campaign(world, true)
@@ -746,7 +753,7 @@ impl Scene {
             .and_then(|s| s.to_lowercase().strip_prefix("target").map(str::to_owned))
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|slot| (1..=8).contains(slot))
-            .and_then(|slot| world.entities[scene].get(&format!("target{slot}")))
+            .and_then(|slot| self.ent(world, scene).get(&format!("target{slot}")))
             .unwrap_or(name);
         if name.eq_ignore_ascii_case("!player") || name.eq_ignore_ascii_case("player") {
             return Some(Target::Player);
@@ -785,13 +792,17 @@ impl Scene {
             origin: None,
             name: cue.into(),
             actor: Some(crate::sounds::SoundActor {
-                name: world.entities[actor].get("targetname").unwrap_or("").into(),
+                name: self
+                    .ent(world, actor)
+                    .get("targetname")
+                    .unwrap_or("")
+                    .into(),
                 model: world
                     .model_instances
                     .iter()
                     .find(|i| i.entity == Some(actor))
                     .map(|i| i.model.as_str())
-                    .unwrap_or(world.entities[actor].get("model").unwrap_or(""))
+                    .unwrap_or(self.ent(world, actor).get("model").unwrap_or(""))
                     .into(),
                 entity: Some(actor),
             }),
@@ -915,7 +926,7 @@ impl Scene {
         keep_offset: bool,
     ) {
         let Some(frame) = self.parent_frame(world, parent, attachment.as_deref()) else {
-            self.unsupported_input(world.entities[id].class(), "SetParent:missing-attachment");
+            self.unsupported_input(self.ent(world, id).class(), "SetParent:missing-attachment");
             return;
         };
         let (origin, rotation) = if keep_offset {
@@ -1053,7 +1064,7 @@ impl Scene {
         actors.extend(self.heads.keys().copied());
         for actor in actors {
             let state = &self.states[actor];
-            if state.killed || !world.entities[actor].class().starts_with("npc_") {
+            if state.killed || !self.ent(world, actor).class().starts_with("npc_") {
                 self.heads.remove(&actor);
                 continue;
             }
@@ -1219,8 +1230,8 @@ impl Scene {
                 });
                 ChoreographyState {
                     entity: *id,
-                    targetname: world.entities[*id].get("targetname").unwrap_or("").into(),
-                    file: world.entities[*id].get("SceneFile").unwrap_or("").into(),
+                    targetname: self.ent(world, *id).get("targetname").unwrap_or("").into(),
+                    file: self.ent(world, *id).get("SceneFile").unwrap_or("").into(),
                     elapsed: play.map(|p| p.elapsed),
                     pause: pause_reason.is_some(),
                     pause_reason,
@@ -1664,7 +1675,7 @@ impl Scene {
                                 EventType::Face => {
                                     // StartFacingSceneEvent needs a target; NPCs turn in process_faces.
                                     if let Some(actor) = actor
-                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                        .filter(|a| self.ent(world, *a).class().starts_with("npc_"))
                                     {
                                         if let Some(target) = self.scene_look_target(
                                             world,
@@ -1684,7 +1695,7 @@ impl Scene {
                                 EventType::LookAt => {
                                     // CBaseFlex LOOKAT refreshes NPC interests; non-NPC flex actors are a no-op.
                                     if let Some(actor) = actor
-                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                        .filter(|a| self.ent(world, *a).class().starts_with("npc_"))
                                     {
                                         if let Some(target) = self.scene_look_target(
                                             world,
@@ -1946,7 +1957,7 @@ impl Scene {
     /// anyone (damagemodel 1 doubles up to damagecap and forgives after 3 s without a
     /// hit); EndTouch deals damage x 0.5 to a toucher the last think did not hurt.
     fn trigger_hurt(&mut self, world: &World, id: usize, touching: Vec<usize>) {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let base = number(e, "damage", 0.);
         let cap = number(e, "damagecap", 20.);
         let doubling = number(e, "damagemodel", 0.) as u32 == 1;
@@ -1997,7 +2008,7 @@ impl Scene {
     /// CTriggerHurt::HurtEntity: filters and m_takedamage, then TakeDamage (negative
     /// damage heals); the damage comes from the trigger's origin. OnHurtPlayer/OnHurt.
     fn hurt_entity(&mut self, world: &World, id: usize, target: usize, amount: f32) -> bool {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let flags = number(e, "spawnflags", 0.) as u32;
         let kind = number(e, "damagetype", 0.) as u32;
         let player = target == PLAYER;
@@ -2118,7 +2129,7 @@ impl Scene {
         if state.killed || state.locked || state.target != 0. {
             return;
         }
-        match world.entities[id].class() {
+        match self.ent(world, id).class() {
             "prop_door_rotating" => self.use_with_opener(world, id, Some(opener)),
             "func_door" | "func_door_rotating" => self.send(id, "Open", ""),
             _ => {}
@@ -2177,7 +2188,7 @@ impl Scene {
             return;
         }
         self.diagnostics.inputs_delivered += 1;
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let class = e.class();
         let input = p.input.to_lowercase();
         let value = p.parameter.parse::<f32>().unwrap_or(0.);
@@ -2591,7 +2602,7 @@ impl Scene {
         });
         let clip = rig.zip(resolved).and_then(|(r, label)| r.clips.get(label));
         let Some((clip, resolved)) = clip.zip(resolved) else {
-            self.unsupported_input(world.entities[id].class(), &format!("animation:{name}"));
+            self.unsupported_input(self.ent(world, id).class(), &format!("animation:{name}"));
             return false;
         };
         self.states[id].animation = resolved.to_owned();
@@ -2615,7 +2626,7 @@ impl Scene {
         }
     }
     fn begin_sequence(&mut self, world: &World, id: usize) {
-        let script = &world.entities[id];
+        let script = self.ent(world, id);
         let name = script.get("m_iszEntity").unwrap_or("");
         let actor = world
             .entities
@@ -2723,12 +2734,13 @@ impl Scene {
         self.states[id].post_idle_done = None;
         if let Some(actor) = actor {
             self.states[actor].scripted_by = None;
-            let name = world.entities[id]
+            let name = self
+                .ent(world, id)
                 .get("m_iszPostIdle")
                 .filter(|s| !s.is_empty())
-                .or(world.entities[actor].get("DefaultAnim"))
+                .or(self.ent(world, actor).get("DefaultAnim"))
                 .unwrap_or_else(|| {
-                    let preferred = if world.entities[actor].class() == "npc_metropolice" {
+                    let preferred = if self.ent(world, actor).class() == "npc_metropolice" {
                         "idle_baton"
                     } else {
                         "idle_subtle"
@@ -2761,7 +2773,8 @@ impl Scene {
             );
             if !cancel {
                 let duration = if animated
-                    && world.entities[id]
+                    && self
+                        .ent(world, id)
                         .get("m_iszPostIdle")
                         .is_some_and(|n| !n.is_empty())
                 {
@@ -2822,7 +2835,7 @@ impl Scene {
             !values.is_empty()
         });
         for id in 0..world.entities.len() {
-            let e = &world.entities[id];
+            let e = self.ent(world, id);
             if self.states[id].killed {
                 continue;
             }
@@ -2897,7 +2910,7 @@ impl Scene {
                 let player = clients && self.player_inside(world, id, player_feet);
                 let npc = if npcs && !player {
                     (0..self.states.len()).find(|&n| {
-                        world.entities[n].class().starts_with("npc_")
+                        self.ent(world, n).class().starts_with("npc_")
                             && !self.states[n].killed
                             && self.states[n].visible
                             && self.player_inside(world, id, self.states[n].origin)
@@ -2930,7 +2943,7 @@ impl Scene {
                     // Every touching player/NPC, before the trigger filters (Touch).
                     let mut touching: Vec<usize> = (0..self.states.len())
                         .filter(|&n| {
-                            world.entities[n].class().starts_with("npc_")
+                            self.ent(world, n).class().starts_with("npc_")
                                 && !self.states[n].killed
                                 && self.player_inside(world, id, self.states[n].origin)
                         })
@@ -2986,7 +2999,7 @@ impl Scene {
         self.diagnostics.budget_exhaustions += 1;
     }
     fn player_inside(&self, world: &World, id: usize, feet: Vec3) -> bool {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let Some(model) = e
             .get("model")
             .and_then(|s| s.strip_prefix('*'))
