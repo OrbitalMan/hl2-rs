@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-12 cloud session: ground surface movement and per-side world materials (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** player ground friction/acceleration/max speed/jump from the ground surfaceprop (CategorizeGroundSurface); surfaceprops parses jumpfactor/maxspeedfactor/thickness/dampening; restitution clamped to 0..1; BSP brush-side materials -> $surfaceprop -> per-contact friction/restitution for world brush colliders through a Rapier contact-modification hook.
+
+**Why:** owner: physics should use Source's materials (friction, bounciness) everywhere; the owner supplied the installed surfaceproperties scripts.
+
+**Tested how:** unit tests with synthetic data (surface factors on a floor, icy side vs default slide distance, parser quirks); temporary uncommitted parser check against the owner's uploaded scripts (91 entries); strict Clippy, fmt, workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** native stopping distances and prop slides; brush entities/displacements keep "default"; slipperyslime jump question (STATUS).
+
+**Next:** STATUS physics checklist items 7-9.
+
 ## 2026-10-10 second cloud session: VPhysics props, frag rigid body, +USE carry (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
