@@ -201,6 +201,8 @@ pub struct Effects {
     viewmodel_quads: Vec<QuadDraw>,
     viewmodel_draws: usize,
     rng: u64,
+    /// The newest crossbow load effect already given its CrossbowLoad sparks.
+    load_sparks: f64,
     model_errors: Vec<String>,
     draws: usize,
     grenade_draws: usize,
@@ -327,6 +329,7 @@ pub fn install(
         viewmodel_quads: Vec::new(),
         viewmodel_draws: 0,
         rng: 0x2545_f491_4f6c_dd1d,
+        load_sparks: f64::NEG_INFINITY,
         model_errors: loaded.effects.model_errors.clone(),
         draws: 0,
         grenade_draws: 0,
@@ -435,10 +438,21 @@ fn draw_pool(
 fn viewmodel_quads(
     game: &Gameplay,
     effects: &mut Effects,
+    sim: &Simulation,
 ) -> Vec<hl2_simulation::projectile_visuals::Quad> {
     use hl2_simulation::viewmodel_effects as vm;
     let described = game.inventory.viewmodel_effects(game.scene.time);
-    if described.sprites.is_empty() && described.beams.is_empty() {
+    let new_load = (game.inventory.active == "weapon_crossbow")
+        .then(|| {
+            game.inventory
+                .crossbow
+                .load_effects
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
+        })
+        .filter(|at| *at > effects.load_sparks);
+    if described.sprites.is_empty() && described.beams.is_empty() && new_load.is_none() {
         return Vec::new();
     }
     let Some(rig) = game.weapons.get(&game.inventory.active).and_then(|w| {
@@ -460,6 +474,26 @@ fn viewmodel_quads(
     };
     let matrices =
         vm::viewmodel_matrices(rig, clip, time, &game.inventory.viewmodel_pose_values(rig));
+    let fov = game.inventory.view_fov(game.scene.time);
+    let viewmodel_fov = vm::viewmodel_fov(game.inventory.fov.default_fov, fov);
+    // DoLoadEffect -> "CrossbowLoad" (client c_weapon_crossbow.cpp): FX_ElectricSpark at
+    // viewmodel attachment 1, a world position from FormatViewModelAttachment (right/up
+    // offsets scaled by tan(fov / 2) / tan(viewmodel fov / 2), depth kept).
+    if let Some(at) = new_load {
+        effects.load_sparks = at;
+        if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
+            && viewmodel_fov > 0.
+        {
+            let forward =
+                glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
+            let right = forward.cross(glam::Vec3::Z).normalize_or(glam::Vec3::Y);
+            let up = right.cross(forward);
+            let factor = (fov.to_radians() * 0.5).tan() / (viewmodel_fov.to_radians() * 0.5).tan();
+            let eye = glam::Vec3::from_array(sim.eye().to_array());
+            let world = eye + forward * local.x - right * local.y * factor + up * local.z * factor;
+            effects.source.spawn_sparks(world, game.scene.time);
+        }
+    }
     let sprites = &effects.source.sprites;
     let rng = &mut effects.rng;
     let mut random = || {
@@ -473,10 +507,7 @@ fn viewmodel_quads(
         &|anchor| vm::anchor_position(rig, &matrices, anchor),
         &|material| sprites.get(material).map(|s| f32::from(s.image.width)),
         &mut random,
-        {
-            let fov = game.inventory.view_fov(game.scene.time);
-            vm::attachment_size_factor(vm::viewmodel_fov(game.inventory.fov.default_fov, fov), fov)
-        },
+        vm::attachment_size_factor(viewmodel_fov, fov),
     )
 }
 pub fn present(
@@ -506,7 +537,7 @@ pub fn present(
     draw_pool(&mut commands, &mut meshes, pool, &quads, materials, None);
     effects.source.quads = quads;
     // Sprites and beams on the viewmodel (CSprite/CBeam viewmodel attachments).
-    let viewmodel = viewmodel_quads(&game, &mut effects);
+    let viewmodel = viewmodel_quads(&game, &mut effects, &sim);
     effects.viewmodel_draws = viewmodel.len();
     let Effects {
         materials,

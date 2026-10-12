@@ -167,6 +167,14 @@ impl Inventory {
     }
     /// Normalized viewmodel pose parameters: the gravity gun's "active" follows the
     /// element position (C_WeaponPhysCannon sets it on the viewmodel).
+    /// The active viewmodel's skin (CWeaponCrossbow::SetSkin: 1 while a bolt glows).
+    pub fn viewmodel_skin(&self) -> u8 {
+        if self.active == "weapon_crossbow" {
+            self.crossbow.skin
+        } else {
+            0
+        }
+    }
     pub fn viewmodel_pose_values(&self, rig: &Rig) -> Vec<f32> {
         let mut params = rig.default_pose_values();
         if self.active == "weapon_physcannon" {

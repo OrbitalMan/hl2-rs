@@ -211,7 +211,7 @@ impl ProjectileVisuals {
     /// sparks (1-2 s, 64-300 u/s up-biased, gravity 800, dampen 0.3, width 2-5, length
     /// 0.02-0.05), RandomInt(16, 32) little ones (0.1-0.2 s, 128-256 u/s, gravity 400,
     /// width 2-4, length 0.02-0.03) and two 0.2 s yellowflare_noz caps.
-    fn spawn_sparks(&mut self, position: Vec3, time: f64) {
+    pub fn spawn_sparks(&mut self, position: Vec3, time: f64) {
         let big = self.range(2., 4.) as usize;
         for _ in 0..big {
             let direction = Vec3::new(

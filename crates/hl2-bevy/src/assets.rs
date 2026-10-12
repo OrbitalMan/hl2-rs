@@ -216,11 +216,13 @@ pub fn load_with_canvas(
             .map(|s| s.material.clone()),
     );
     for weapon in gameplay.weapons.values() {
-        if let Some(surfaces) = world
-            .model_assets
-            .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
-        {
-            names.extend(surfaces.iter().map(|s| s.material.clone()));
+        for skin in 0..2 {
+            if let Some(surfaces) = world
+                .model_assets
+                .get(&format!("{}#{skin}", weapon.viewmodel.to_lowercase()))
+            {
+                names.extend(surfaces.iter().map(|s| s.material.clone()));
+            }
         }
     }
     if names.len() > MAX_MATERIALS {

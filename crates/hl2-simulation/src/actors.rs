@@ -277,10 +277,21 @@ pub fn prepare_weapons(
             wanted.extend(activities.iter().map(|a| (*a).to_owned()));
         }
         let key = format!("{}#0", w.viewmodel.to_lowercase());
-        world.model_assets.insert(
-            key.clone(),
-            source_assets::models::read_model(vfs, &w.viewmodel, 0)?,
-        );
+        let base = source_assets::models::read_model(vfs, &w.viewmodel, 0)?;
+        // Skin 1 (the crossbow's glowing bolt, CWeaponCrossbow::SetSkin): kept when any
+        // surface material differs; the host draws only the differing surfaces.
+        let alternate = source_assets::models::read_model(vfs, &w.viewmodel, 1)?;
+        if alternate.len() == base.len()
+            && alternate
+                .iter()
+                .zip(&base)
+                .any(|(a, b)| a.material != b.material)
+        {
+            world
+                .model_assets
+                .insert(format!("{}#1", w.viewmodel.to_lowercase()), alternate);
+        }
+        world.model_assets.insert(key.clone(), base);
         world.rigs.insert(
             key,
             source_assets::animation::load(vfs, &w.viewmodel, &wanted)?,

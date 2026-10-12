@@ -20,7 +20,7 @@ use bevy::{
     shader::ShaderRef,
 };
 use modkit_core::Surface;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(MaterialKey)]
@@ -762,13 +762,21 @@ fn skin_normal(
 }
 #[derive(Component)]
 pub struct WeaponMesh(String);
+/// A viewmodel draw that belongs to one skin only (surfaces whose material differs
+/// between skins 0 and 1).
+#[derive(Component)]
+pub struct WeaponSkin(u8);
 pub fn present_weapons(
     game: Res<crate::gameplay::Gameplay>,
-    mut draws: Query<(&WeaponMesh, &mut Visibility)>,
+    mut draws: Query<(&WeaponMesh, Option<&WeaponSkin>, &mut Visibility)>,
 ) {
-    for (weapon, mut visibility) in &mut draws {
+    let skin = game.inventory.viewmodel_skin();
+    for (weapon, variant, mut visibility) in &mut draws {
         // The +USE carry holsters the weapon (CPlayerPickupController::Init).
-        *visibility = if weapon.0 == game.inventory.active && !game.inventory.carrying() {
+        *visibility = if weapon.0 == game.inventory.active
+            && !game.inventory.carrying()
+            && variant.is_none_or(|v| v.0 == skin)
+        {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -1009,13 +1017,23 @@ pub fn spawn_map(
             }
         }
     }
+    // Skin-only materials per weapon: (skin 0 set, skin 1 set).
+    let mut weapon_skins: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
     for (name, weapon) in &loaded.gameplay.weapons {
-        if let Some(surfaces) = world
-            .model_assets
-            .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
-        {
+        let model = weapon.viewmodel.to_lowercase();
+        if let Some(surfaces) = world.model_assets.get(&format!("{model}#0")) {
             for surface in surfaces {
                 append(surface, Mat4::IDENTITY, Owner::Weapon(name.clone()));
+            }
+            if let Some(alternate) = world.model_assets.get(&format!("{model}#1")) {
+                for (a, b) in surfaces.iter().zip(alternate) {
+                    if a.material != b.material {
+                        let sets = weapon_skins.entry(name.clone()).or_default();
+                        sets.0.insert(a.material.clone());
+                        sets.1.insert(b.material.clone());
+                        append(b, Mat4::IDENTITY, Owner::Weapon(name.clone()));
+                    }
+                }
             }
         }
     }
@@ -1261,12 +1279,19 @@ pub fn spawn_map(
                 draw.insert(Visibility::Hidden);
             }
         }
-        if let Owner::Weapon(name) = &owner {
+        if let Owner::Weapon(weapon) = &owner {
             draw.insert((
-                WeaponMesh(name.clone()),
+                WeaponMesh(weapon.clone()),
                 bevy::camera::visibility::RenderLayers::layer(1),
                 Visibility::Hidden,
             ));
+            if let Some((skin0, skin1)) = weapon_skins.get(weapon) {
+                if skin1.contains(&name) {
+                    draw.insert(WeaponSkin(1));
+                } else if skin0.contains(&name) {
+                    draw.insert(WeaponSkin(0));
+                }
+            }
         }
         if lit {
             let (entity, key, scale) = match &owner {
