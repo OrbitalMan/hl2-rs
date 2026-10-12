@@ -237,6 +237,12 @@ pub struct PhysicsCollision {
     pub speed: f32,
     /// deltaCollisionTime: seconds since this pair last started touching.
     pub delta_time: f32,
+    /// Each side's body velocity before and after the step (units/s; zero for fixed or
+    /// kinematic colliders) and mass (0 when not dynamic): gamevcollisionevent_t
+    /// preVelocity/postVelocity and GetMass for impact damage.
+    pub pre_velocities: [Vec3; 2],
+    pub post_velocities: [Vec3; 2],
+    pub masses: [f32; 2],
 }
 #[derive(Clone, Copy, Debug)]
 pub struct BodyState {
@@ -319,6 +325,9 @@ pub struct Physics {
     collider_materials: HashMap<ColliderHandle, String>,
     /// This step's new contacts (see collect_collisions).
     pub collisions: Vec<PhysicsCollision>,
+    /// Last step's new contacts with post velocities taken after this step, when the
+    /// contact has been resolved (gamevcollisionevent_t postVelocity), for impact damage.
+    pub resolved_collisions: Vec<PhysicsCollision>,
     touching: std::collections::HashSet<(ColliderHandle, ColliderHandle)>,
     pair_times: HashMap<(ColliderHandle, ColliderHandle), f64>,
     /// Simulated seconds (sum of tick dt).
@@ -782,6 +791,24 @@ impl Physics {
             &(),
         );
         self.time += f64::from(dt);
+        // Rapier finds a new contact at the end of a step and resolves it in the next:
+        // last step's events get their post-impact velocities now.
+        let mut resolved = std::mem::take(&mut self.collisions);
+        for event in &mut resolved {
+            for side in 0..2 {
+                if let Some(body) = self
+                    .colliders
+                    .get(event.colliders[side])
+                    .and_then(|c| c.parent())
+                    .and_then(|b| self.bodies.get(b))
+                    .filter(|b| b.is_dynamic())
+                {
+                    let v = body.linvel();
+                    event.post_velocities[side] = Vec3::new(v.x, v.y, v.z) / SCALE;
+                }
+            }
+        }
+        self.resolved_collisions = resolved;
         self.collect_collisions(&before);
         self.changed_entity_colliders.clear();
     }
@@ -844,7 +871,28 @@ impl Physics {
                         Vec3::new(t.x, t.y, t.z) / SCALE
                     })
             };
+            let dynamic = |c: &Collider| {
+                c.parent()
+                    .and_then(|b| self.bodies.get(b))
+                    .filter(|b| b.is_dynamic())
+            };
+            let pre = |c: &Collider| {
+                c.parent()
+                    .and_then(|b| before.get(&b))
+                    .filter(|_| dynamic(c).is_some())
+                    .map_or(Vec3::ZERO, |(v, _, _)| Vec3::new(v.x, v.y, v.z) / SCALE)
+            };
+            let post = |c: &Collider| {
+                dynamic(c).map_or(Vec3::ZERO, |b| {
+                    let v = b.linvel();
+                    Vec3::new(v.x, v.y, v.z) / SCALE
+                })
+            };
+            let mass = |c: &Collider| dynamic(c).map_or(0., |b| b.mass());
             self.collisions.push(PhysicsCollision {
+                pre_velocities: [pre(c1), pre(c2)],
+                post_velocities: [post(c1), post(c2)],
+                masses: [mass(c1), mass(c2)],
                 colliders: [pair.collider1, pair.collider2],
                 entities: [entity(c1), entity(c2)],
                 surfaceprops: [

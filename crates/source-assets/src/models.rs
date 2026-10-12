@@ -679,6 +679,23 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 )),
             }
         }
+        // CAI_BaseNPC::SetupVPhysicsHull sets the shadow's mass from the studio header.
+        if instance.entity.is_some_and(|id| {
+            world
+                .entities
+                .get(id)
+                .is_some_and(|e| e.class().starts_with("npc_"))
+        }) && !world.model_mass.contains_key(&instance.asset_key())
+        {
+            if let Some(mass) = vfs
+                .read(&instance.model)
+                .ok()
+                .flatten()
+                .and_then(|mdl| studio_mass(&mdl).ok())
+            {
+                world.model_mass.insert(instance.asset_key(), mass);
+            }
+        }
         // VPhysics props (CPhysicsProp::CreateVPhysics): authored solid parameters and,
         // when the identity-root adapter applies, the authored convex pieces.
         if instance.kind.starts_with("prop_physics")
@@ -849,6 +866,18 @@ pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result
     world.model_physics.insert(key.clone(), solid);
     world.model_collision.insert(key, pieces?);
     Ok(())
+}
+/// studiohdr_t::mass (offset 328 in MDL 44-49; owned police.mdl 90, combine_soldier
+/// 100, wood_crate001a 30).
+pub fn studio_mass(mdl: &[u8]) -> Result<f32> {
+    if bytes(mdl, 0, 4)? != b"IDST" {
+        bail!("model magic mismatch");
+    }
+    let mass = f32le(mdl, 328)?;
+    if !mass.is_finite() || mass < 0. {
+        bail!("invalid studio mass");
+    }
+    Ok(mass)
 }
 /// The first .phy solid's parameters, plus its convex pieces when the single-solid
 /// identity-root reader supports the file (the error otherwise).

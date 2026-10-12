@@ -13,6 +13,7 @@ pub mod footsteps;
 pub mod gameplay;
 pub mod globals;
 pub mod grab;
+pub mod impact_damage;
 pub mod npc;
 pub mod player_damage;
 pub mod player_pickup;

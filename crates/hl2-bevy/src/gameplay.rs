@@ -636,6 +636,21 @@ impl Gameplay {
         self.inventory
             .apply_projectile_damage(damage, &self.world, &mut self.scene, physics);
         physics.tick(TICK);
+        // VPhysicsShadowCollision impact damage to NPCs (queued for the next tick).
+        let held = |id: usize| {
+            self.inventory.physcannon.held == Some(id)
+                || self
+                    .inventory
+                    .carry
+                    .as_ref()
+                    .is_some_and(|c| c.entity == id)
+        };
+        hl2_simulation::impact_damage::queue_npc_damage(
+            &physics.resolved_collisions,
+            &self.world,
+            &mut self.scene,
+            &held,
+        );
         // VPhysics impact sounds of props and thrown frags (PhysCollisionSound).
         self.impacts
             .physics_collision_sounds(physics, &self.world, &mut self.scene);

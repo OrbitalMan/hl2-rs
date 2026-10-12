@@ -123,6 +123,10 @@ pub struct World {
     /// Authored VPhysics solid parameters (.phy "solid" block) per model asset key.
     #[serde(default)]
     pub model_physics: std::collections::BTreeMap<String, PhysicsSolid>,
+    /// Studio header mass (Studio_GetMass, the NPC physics shadow's mass) per NPC model
+    /// asset key.
+    #[serde(default)]
+    pub model_mass: std::collections::BTreeMap<String, f32>,
     /// Resolved surfaceproperties entries (lowercase name, "base" inheritance applied).
     #[serde(default)]
     pub surface_materials: std::collections::BTreeMap<String, SurfaceMaterial>,
