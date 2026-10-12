@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-12 cloud session: F4 spawns real NPCs (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** load-time hidden spawn pool (3 per F4 class, SDK default models); F4 Enter / npc_create activate the next slot at the CC_NPC_Create placement; cop baton from the equipment; overlay shows the last result.
+
+**Why:** owner: F4 placed nothing ("why does F4 still not work").
+
+**Tested how:** unit tests (pool slots, hidden pooled cop does not think, placed cop thinks and warns); strict Clippy; fmt; workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** visual placement, weapon models in hands, AI for non-cop classes, names, load-time cost of the extra models.
+
+**Next:** STATUS AI checklist item 6.
+
 ## 2026-10-10 cloud session: AI host wiring, npc_metropolice, F4 overlay (`wip/cloud-npc-ai-20261010`)
 
 **Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
