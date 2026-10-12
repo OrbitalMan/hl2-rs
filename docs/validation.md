@@ -6,6 +6,8 @@ Frag rigid body (`--frag-rigid-body`, Rapier body from w_grenade.phy) vs the ses
 
 Drag: retail law (drag.rs) with native `air_density` 2.00 gives the frag hull a tumbling-average 5-7e-4/unit vs the native fit 6.4e-4 (unit test). Gravity gun: native hold view T191304Z (eye -3490,-2110,128, setang 35 236): after the world-FOV size factor our holding glow matches the native size and colour (artifacts/cloud-validate/hold-compare2.png); claws open while holding in both. Launch: native draws a beam and sparks (ours none). Rejected twice each: native launch trajectory (ent_text overlays) and native bolt trajectory (command buffer overflow at host_timescale 0.1; no overlay at 0.25).
 
+RPG: native T194927Z (timescale 0.25) rpg_missile at (-2291.0,-1846.2,261.4) ~0.80 s after +attack; ours at that x after 0.78 s: y -1847, z 264 (packaged bevy-rpg.json report).
+
 Regression batch artifacts/cloud-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 "unsupported PHY root rotation" warning: new reporting from the physics branch's wider .phy reading; the prop keeps its render hull as before).
 
 ## Frag grenade vs native (session 11, 2026-10-10)
