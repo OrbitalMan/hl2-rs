@@ -4,6 +4,8 @@ Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main
 
 ## Cloud session handoff (2026-10-10, `wip/cloud-npc-ai-20261010`)
 
+**Merge order of the three cloud branches (2026-10-10/12):** `wip/cloud-arsenal-20261010` first, then `wip/cloud-physics-20261010` (stacked on arsenal, already contains its merge), then this AI branch (independent of both; expected conflict in hl2-bevy gameplay.rs Action::Use: try the physics carry pickup for props first, then `ai.player_used` for AI actors, then the scene use). Each branch's STATUS handoff and LOCAL VALIDATION CHECKLIST apply.
+
 Claude Code cloud session (Linux sandbox, no game files, no native HL2), model `claude-opus-5-5` per the session environment. No subagents. Branch from `origin/main` (31e9134), independent of the arsenal branch (see `wip/cloud-arsenal-20261010` for 13b). **SDK 2013 (b8cfb12) behavior, unit-tested only; retail not compared, nothing packaged was run.**
 
 Implemented in `hl2-simulation/src/ai/` (plan: DESIGN step 14 "14 plan"):
