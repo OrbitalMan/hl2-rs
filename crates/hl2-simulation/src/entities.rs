@@ -242,6 +242,9 @@ pub struct SceneAnimationState {
 }
 pub struct Scene {
     pub states: Vec<State>,
+    /// Entities created at runtime (DESIGN 14r): id = world.entities.len() + index,
+    /// so map entity ids never change; states[id] covers both.
+    pub spawned: Vec<Entity>,
     pub time: f64,
     sequence: u64,
     random: u64,
@@ -431,12 +434,31 @@ impl Scene {
         s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
         s
     }
+    /// CreateEntityByName + DispatchSpawn's state part: append a runtime entity and
+    /// its spawn state; returns its id (never reused; removal marks it killed).
+    /// Physics, actors, AI and the host register it separately (14r steps 3-5).
+    pub fn spawn_entity(&mut self, world: &World, entity: Entity) -> usize {
+        let state = Self::initial_state(world, &entity, &mut self.diagnostics);
+        let id = self.states.len();
+        debug_assert_eq!(id, world.entities.len() + self.spawned.len());
+        self.states.push(state);
+        self.spawned.push(entity);
+        id
+    }
+    /// A map or runtime entity by id.
+    pub fn entity<'a>(&'a self, world: &'a World, id: usize) -> Option<&'a Entity> {
+        world
+            .entities
+            .get(id)
+            .or_else(|| self.spawned.get(id.checked_sub(world.entities.len())?))
+    }
     pub fn new(world: &World) -> Self {
         Self::with_campaign(world, true)
     }
     pub fn with_campaign(world: &World, new_game: bool) -> Self {
         let mut scene = Self {
             states: Vec::new(),
+            spawned: Vec::new(),
             time: 0.,
             sequence: 0,
             random: 1,
@@ -3010,6 +3032,34 @@ fn glob(pattern: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn runtime_entities_append_after_map_entities() {
+        // Synthetic: one map entity, then a spawned cop.
+        let world = World {
+            entities: vec![Entity {
+                properties: vec![("classname".into(), "info_target".into())],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let id = scene.spawn_entity(
+            &world,
+            Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("origin".into(), "10 20 30".into()),
+                ],
+            },
+        );
+        assert_eq!(id, 1);
+        assert_eq!(scene.states.len(), 2);
+        assert_eq!(scene.states[id].origin, Vec3::new(10., 20., 30.));
+        assert!(scene.states[id].visible);
+        assert_eq!(scene.states[id].animation, "idle_baton");
+        assert_eq!(scene.entity(&world, id).unwrap().class(), "npc_metropolice");
+        assert_eq!(scene.entity(&world, 0).unwrap().class(), "info_target");
+        assert!(scene.entity(&world, 2).is_none());
+    }
     fn entity(class: &str, name: &str, values: &[(&str, &str)]) -> Entity {
         Entity {
             properties: [("classname", class), ("targetname", name)]
