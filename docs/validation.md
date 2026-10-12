@@ -1,5 +1,13 @@
 # Local validation — 2026-10-05
 
+## Cloud arsenal/physics validation (session 12, 2026-10-12)
+
+Frag rigid body (`--frag-rigid-body`, Rapier body from w_grenade.phy) vs the session-11 native samples, packaged, compared by time since spawn: overhand flight RMS 3.4 (max 5.4); roll RMS 14.0 (swept box 22.4); lob RMS 106.6, end 169.8 (stops on landing, body upright, native rolls on); trainstation throw RMS 42.6, end 56.7 (swept box rest within 4). Default stays the swept box.
+
+Drag: retail law (drag.rs) with native `air_density` 2.00 gives the frag hull a tumbling-average 5-7e-4/unit vs the native fit 6.4e-4 (unit test). Gravity gun: native hold view T191304Z (eye -3490,-2110,128, setang 35 236): after the world-FOV size factor our holding glow matches the native size and colour (artifacts/cloud-validate/hold-compare2.png); claws open while holding in both. Launch: native draws a beam and sparks (ours none). Rejected twice each: native launch trajectory (ent_text overlays) and native bolt trajectory (command buffer overflow at host_timescale 0.1; no overlay at 0.25).
+
+Regression batch artifacts/cloud-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 "unsupported PHY root rotation" warning: new reporting from the physics branch's wider .phy reading; the prop keeps its render hull as before).
+
 ## Frag grenade vs native (session 11, 2026-10-10)
 
 Native (oracle, HDR Full, skill 2, `ORACLE_GIVE=weapon_frag`, d1_trainstation_02 eye (-3104,-2018,128)): positions from `ent_text npc_grenade_frag` with `developer 1` (SDK DrawAllDebugOverlays draws entity overlays only with developer), times from the oracle command log at host_timescale 0.25/0.1 (latency uncertainty ~0.05 s game time). Throw A (setang -30 -20): 8 in-flight samples 0.20-1.34 s after release, e.g. (-2954.4,-2080.9,231.4) at 0.199 s and (-2210.7,-2351.5,373.4) at 1.335 s. Throw B (setang -10 12): (-2287.2,-1852.6,143.0) at 0.96 s, bounce off the monument, rest (-2098.9,-1747.5,18.1), gone (exploded) between 2.9 and 3.4 s.

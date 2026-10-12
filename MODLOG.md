@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-12 session 12: local validation of the cloud arsenal + physics branches (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Validates work written by the cloud sessions (Claude Code cloud, `claude-opus-5-5`, SDK-only: crossbow, RPG, bug bait, gravity gun, viewmodel effects, sound stop/patch path, view punch, authored VPhysics props, surfaceprops, impact sounds, frag rigid body, +USE carry, ground surfaces, per-side world materials).
+
+**Changed (this session, local):** VFS searches VPKs before loose folders (gameinfo order); Weapon_Equip clip rule; retail facts in owned tests (no RPG reload sound, no crossbow unloaded activities); projectile models posed by sequence 0; viewmodel-attached sprites at world-FOV size; viewmodel FOV follows the zoom; RPG laser dot in glow mode (no depth test); crossbow skin-1 glowing bolt and CrossbowLoad sparks; per-object retail VPhysics drag (drag.rs) with native air density 2.00; held-object mass reduction and drag toggle; frag rigid body opt-in (`--frag-rigid-body`); fixtures bevy-physcannon-props.json and bevy-use-carry.json.
+
+**Why:** owner: validate the cloud branches locally and fix what the installation, private research and native HL2 show; owner reports during the session (zoom past the viewmodel, laser dot clipping, plain vs incandescent bolt).
+
+**Tested how:** Windows build, workspace unit tests, strict Clippy, fmt; owned tests with HL2_ROOT; packaged fixtures (frag x4, crossbow, RPG, bug bait, gravity gun at a prop spot, +USE carry; captures in artifacts/cloud-validate); native oracle (gravity gun hold/launch and air_density T191304Z, crossbow T192857Z); frag positions vs session-11 native samples; regression batch artifacts/cloud-regression(2).
+
+**Result:** owned tests pass; gravity gun glow matches native; rigid-body frag worse than the swept box on lob/trainstation landings (kept opt-in); batch weapons 17/17, attention 26/26, movement 25/26 (new doll01 collision warning, explained in STATUS).
+
+**Still broken or not tested:** native trajectories of bolt/missile/bait/launched props (two rejected attempts each for bolt and launch); weapon audio vs native; DoEffectLaunch beam, bolt motion-blur trail, ragdoll pinning; 11f gamma sprites; doll01 root-rotated .phy; the AI branch is not validated yet.
+
+**Next:** remaining 13b native checks, then fold into wip/arsenal-20261009 and the single 13b merge; then validate `wip/cloud-npc-ai-20261010` (step 14).
+
 ## 2026-10-12 cloud session: ground surface movement and per-side world materials (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
