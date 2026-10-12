@@ -77,7 +77,7 @@ pub fn ev100(scale: f32) -> f32 {
 pub fn update(
     mut commands: Commands,
     mut state: ResMut<Tonemap>,
-    (game, sim): (Res<Gameplay>, Res<crate::movement::Simulation>),
+    (game, sim): (Res<Gameplay>, Res<crate::simulation::Simulation>),
     time: Res<Time<Real>>,
     mut images: ResMut<Assets<Image>>,
     mut cameras: Query<&mut Exposure, With<ToneMapped>>,

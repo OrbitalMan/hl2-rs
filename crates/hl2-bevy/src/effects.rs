@@ -1,5 +1,5 @@
 //! Depth-tested host adapter for shared owned projectile sprites and impact marks.
-use crate::{assets::LoadedMap, gameplay::Gameplay, movement::Simulation, rendering};
+use crate::{assets::LoadedMap, gameplay::Gameplay, rendering, simulation::Simulation};
 use bevy::{
     asset::RenderAssetUsages,
     camera::primitives::MeshAabb,

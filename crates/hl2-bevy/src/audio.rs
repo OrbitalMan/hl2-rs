@@ -705,14 +705,14 @@ pub fn install(
 /// Master volume, Audio settings and the primary window (focus) used to mix every channel.
 type MixInputs<'w, 's> = (
     Res<'w, GlobalVolume>,
-    Option<Res<'w, crate::console::Console>>,
+    Option<Res<'w, crate::ui_host::Console>>,
     Query<'w, 's, &'static Window, With<bevy::window::PrimaryWindow>>,
 );
 pub fn queue(
     mut commands: Commands,
     mut audio: ResMut<Audio>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    (simulation, mut trace): (Res<crate::movement::Simulation>, Option<ResMut<AudioTrace>>),
+    (simulation, mut trace): (Res<crate::simulation::Simulation>, Option<ResMut<AudioTrace>>),
     mut players: Query<(
         Entity,
         &SoundPlayer,

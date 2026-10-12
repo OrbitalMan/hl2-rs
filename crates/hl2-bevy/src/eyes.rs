@@ -70,7 +70,7 @@ fn bone_pose(
 pub fn present(
     mut eyes: ResMut<Eyes>,
     game: Res<crate::gameplay::Gameplay>,
-    sim: Res<crate::movement::Simulation>,
+    sim: Res<crate::simulation::Simulation>,
     camera: Query<&Transform, With<FlyCamera>>,
     draws: Query<(
         &SourceEntity,

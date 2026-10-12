@@ -456,7 +456,7 @@ pub(crate) fn entity_transform(origin: glam::Vec3, rotation: glam::Quat) -> Tran
 #[allow(clippy::too_many_arguments)]
 pub fn present_entities(
     game: Res<crate::gameplay::Gameplay>,
-    sim: Res<crate::movement::Simulation>,
+    sim: Res<crate::simulation::Simulation>,
     mut entities: Query<
         (&SourceEntity, &mut Transform, &mut Visibility),
         Without<crate::gpu_skinning::Joint>,
@@ -653,7 +653,7 @@ pub fn present_entities(
 /// (retail light cache at origin + rotation * illumposition * scale).
 pub fn present_lighting(
     game: Res<crate::gameplay::Gameplay>,
-    sim: Res<crate::movement::Simulation>,
+    sim: Res<crate::simulation::Simulation>,
     mut draws: Query<(
         &mut ModelLit,
         &MeshMaterial3d<SourceMaterial>,
@@ -1588,7 +1588,7 @@ mod tests {
         };
         let mut game = crate::gameplay::Gameplay::synthetic(world);
         game.scene.time = 0.5;
-        let sim = crate::movement::Simulation::new(
+        let sim = crate::simulation::Simulation::new(
             &game.world,
             glam::Vec3::Z * 128.,
             0.,

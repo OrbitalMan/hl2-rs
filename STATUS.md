@@ -2,14 +2,11 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: GameUI (2026-10-11, branch `orbitalman/main-menu`)
+## Current session: GameUI follow-up pass (2026-10-13, branch `orbitalman/main-menu`)
 
-Antigravity, Claude Opus model family (exact identifier not exposed). Plan and evidence: [docs/gameui.md](docs/gameui.md).
-
-- **Done:** GameUI resources from the install (localization with key-name fallback, VGUI `.res` layouts, `gamemenu.res`, `kb_act.lst`/`config_default.cfg`, display-mode helpers); startup flow (main menu over `background01` without a loadable `--map`, launch error for map-dependent arguments without one); resource-driven main menu with categories and the QUIT GAME box. Options dialog (Gameplay, Keyboard, Mouse, Gamepad placeholder, Audio, Video, brightness dialog) laid out from the installed `optionssub*.res` files with OK/Cancel/Apply over a draft config, persisted to `hl2-config.json`. The game uses the stored bindings (keyboard, mouse buttons, wheel; unbound actions), mouse filter/acceleration/invert, skill (every frame), music volume (retail rule: `#` wave at soundlevel 0), mute when unfocused, and the stored display mode at startup (`--windowed`/`--fullscreen`/`--borderless` override; unattended runs start windowed). Unit + headless tests, strict Clippy/fmt, packaged macOS captures in `artifacts/gameui/`.
-- **Limitations:** background map is frozen and viewed from the spawn; Load Game, Achievements, Extras, Episode One/Two New Game, Gamepad and the Advanced buttons are disabled placeholders; gamma, HDR, speakers, quality, captions, language and aim assist are stored only; music ducking not modeled; live packaged keyboard/mouse play, audible checks and full-screen/No Border startup **not tested**; Windows/Linux **not tested**.
-- **Paused (owner, 2026-10-11):** work stops here until the owner asks for fixes. Branch state: commits `9072b12`..`ee5833e` on `orbitalman/main-menu`, not pushed; tests, strict Clippy and fmt pass at `ee5833e`.
-- **Unfinished, in suggested order (estimates are relative effort):**
+Antigravity, Gemini 3.8 Flash model family. 10-task follow-up pass underway:
+- **Task 1 (Crate restructuring and renames): Complete.** Renamed `movement.rs` -> `simulation.rs`, `hud.rs` -> `canvas_renderer.rs`, `console.rs` -> `ui_host.rs`, and `ui.rs` -> `ui_system.rs` in `hl2-bevy`. Verified `hl2-ui` / `hl2-bevy` crate boundaries and dependencies (all UI logic, layouts, models and viewport geometry in `hl2-ui`, Bevy host systems and renderers in `hl2-bevy`). Verified by 90 unit tests in `hl2-ui`, 64 unit tests in `hl2-bevy`, strict clippy (`-D warnings`), and 30-frame headless Bevy runtime test. No functional regressions.
+- **Next:** Task 2 (Quick visual fixes: credits dialog opacity and button typography/spacing).
   1. Owned-file test that the installed `level_sounds_music.txt` songs are classified as music (small).
   2. Gamma (`mat_monitorgamma`) in the renderer (medium): stored and edited by the brightness dialog, no visual effect yet.
   3. HDR None/Bloom/Full switching the render pipeline (large; design note first).

@@ -47,7 +47,7 @@ impl Plugin for UiPlugin {
             update_ui
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
                 .in_set(UiInputSet)
-                .before(crate::movement::MovementControlsSet),
+                .before(crate::simulation::MovementControlsSet),
         );
     }
 }
@@ -69,10 +69,10 @@ pub fn update_ui(
     (keys, buttons, mut characters, mut wheels): UiInputDevices,
     (mut windows, monitors): UiDisplayDevices,
     video_viewport: Option<Res<VideoViewport>>,
-    mut sim: ResMut<crate::movement::Simulation>,
+    mut sim: ResMut<crate::simulation::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
-    mut ui: Option<ResMut<crate::console::Console>>,
+    mut ui: Option<ResMut<crate::ui_host::Console>>,
     global_volume: Option<ResMut<bevy::audio::GlobalVolume>>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
@@ -90,7 +90,7 @@ pub fn update_ui(
         .filter_map(|e| e.text.as_ref())
         .map(|s| s.as_str())
         .collect();
-    let wheel = crate::console::wheel_steps(wheels.read());
+    let wheel = crate::ui_host::wheel_steps(wheels.read());
     if !sim.commands.is_empty() {
         return;
     }
@@ -134,12 +134,12 @@ pub fn update_ui(
             }
             let effects = ui.source.input(&hl2_ui::console::Input {
                 text,
-                keys: crate::console::keys(&keys),
+                keys: crate::ui_host::keys(&keys),
                 pointer,
                 click: buttons.just_pressed(MouseButton::Left),
                 held: buttons.pressed(MouseButton::Left),
                 wheel,
-                binding_keys: crate::console::binding_keys(&keys, &buttons, wheel),
+                binding_keys: crate::ui_host::binding_keys(&keys, &buttons, wheel),
             });
             let has_apply = effects
                 .iter()
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn update_ui_system_resizes_canvas_and_syncs_mode() {
         let mut app = App::new();
-        app.insert_resource(crate::movement::Simulation::new(
+        app.insert_resource(crate::simulation::Simulation::new(
             &modkit_core::World::default(),
             glam::Vec3::ZERO,
             0.,
@@ -279,7 +279,7 @@ mod tests {
         .insert_resource(crate::gameplay::Gameplay::synthetic(
             modkit_core::World::default(),
         ))
-        .insert_resource(crate::console::Console::new(Default::default()))
+        .insert_resource(crate::ui_host::Console::new(Default::default()))
         .insert_resource(VideoViewport {
             target_resolution: UVec2::new(1024, 768),
             physical_rect: bevy::camera::Viewport {
@@ -312,7 +312,7 @@ mod tests {
 
         app.world_mut().run_system_once(update_ui).unwrap();
 
-        let ui = app.world().resource::<crate::console::Console>();
+        let ui = app.world().resource::<crate::ui_host::Console>();
         assert_eq!(ui.source.canvas.width(), 1024.0);
         assert_eq!(ui.source.canvas.height(), 768.0);
     }
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn update_ui_escape_key_toggles_menu() {
         let mut app = App::new();
-        app.insert_resource(crate::movement::Simulation::new(
+        app.insert_resource(crate::simulation::Simulation::new(
             &modkit_core::World::default(),
             glam::Vec3::ZERO,
             0.,
@@ -362,7 +362,7 @@ mod tests {
         .insert_resource(crate::gameplay::Gameplay::synthetic(
             modkit_core::World::default(),
         ))
-        .insert_resource(crate::console::Console::new(Default::default()))
+        .insert_resource(crate::ui_host::Console::new(Default::default()))
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .add_message::<AppExit>()
@@ -387,16 +387,16 @@ mod tests {
         app.world_mut().run_system_once(update_ui).unwrap();
 
         // UI state should now be in Pause menu
-        let ui = app.world().resource::<crate::console::Console>();
+        let ui = app.world().resource::<crate::ui_host::Console>();
         assert_eq!(ui.source.mode, hl2_ui::console::Mode::Pause);
     }
 
     #[test]
     fn update_ui_keeps_the_background_level_main_menu_on_escape() {
         let mut app = App::new();
-        let mut console = crate::console::Console::new(Default::default());
+        let mut console = crate::ui_host::Console::new(Default::default());
         console.source.level_loaded(true);
-        app.insert_resource(crate::movement::Simulation::new(
+        app.insert_resource(crate::simulation::Simulation::new(
             &modkit_core::World::default(),
             glam::Vec3::ZERO,
             0.,
@@ -426,10 +426,10 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Escape);
         app.world_mut().run_system_once(update_ui).unwrap();
-        let ui = app.world().resource::<crate::console::Console>();
+        let ui = app.world().resource::<crate::ui_host::Console>();
         assert_eq!(ui.source.mode, hl2_ui::console::Mode::MainMenu);
         assert!(ui.source.background_level());
-        let sim = app.world().resource::<crate::movement::Simulation>();
+        let sim = app.world().resource::<crate::simulation::Simulation>();
         assert!(
             sim.paused(),
             "the background level stays paused behind the menu"

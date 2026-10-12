@@ -1,5 +1,5 @@
 //! Asynchronous owned-map loading. Keep the current world intact until decoding succeeds.
-use crate::{Options, StartupAssets, Status, assets, console, gameplay, movement};
+use crate::{Options, StartupAssets, Status, assets, gameplay, simulation, ui_host};
 use bevy::{
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
@@ -44,9 +44,9 @@ impl Campaign {
 type Host<'w> = (
     Res<'w, Options>,
     ResMut<'w, Campaign>,
-    ResMut<'w, console::Console>,
+    ResMut<'w, ui_host::Console>,
     ResMut<'w, gameplay::Gameplay>,
-    ResMut<'w, movement::Simulation>,
+    ResMut<'w, simulation::Simulation>,
 );
 pub fn poll(
     mut commands: Commands,

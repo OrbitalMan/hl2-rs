@@ -3,9 +3,9 @@
 use bevy::prelude::*;
 
 /// Publishes the character's current eye position and field of view after the
-/// fixed simulation loop. Character motion itself remains in `movement`.
+/// fixed simulation loop. Character motion itself remains in `simulation`.
 pub(crate) fn present_player_view(
-    sim: Res<crate::movement::Simulation>,
+    sim: Res<crate::simulation::Simulation>,
     mut cameras: Query<(&mut Transform, &mut Projection), With<crate::FlyCamera>>,
 ) {
     if let Ok((mut camera, mut projection)) = cameras.single_mut() {

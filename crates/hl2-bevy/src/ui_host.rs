@@ -1,7 +1,11 @@
-//! Bevy host state for the portable Source-resource pause/console UI.
+//! Bevy host resource and input adapter for the portable Source GameUI/console.
 use bevy::prelude::*;
 use hl2_ui::console::Mode;
 use serde::Deserialize;
+
+#[allow(dead_code)]
+pub type UiHost = Console;
+
 #[derive(Resource)]
 pub struct Console {
     pub source: hl2_ui::console::Console,
@@ -43,7 +47,7 @@ impl Action {
         }
     }
 }
-impl crate::movement::Simulation {
+impl crate::simulation::Simulation {
     pub fn ui_action(
         &mut self,
         ui: &mut Console,

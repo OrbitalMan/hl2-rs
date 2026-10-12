@@ -1,6 +1,6 @@
 //! One shared procedural _rt_Camera texture, rendered from map-authored point cameras.
 use crate::{
-    assets::LoadedMap, campaign::MapOwned, gameplay::Gameplay, movement::Simulation, sky::Sky,
+    assets::LoadedMap, campaign::MapOwned, gameplay::Gameplay, simulation::Simulation, sky::Sky,
     source_to_bevy,
 };
 use bevy::{

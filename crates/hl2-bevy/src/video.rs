@@ -359,7 +359,7 @@ pub(crate) fn apply_video_config_to_window(
 
 /// Carries out video settings applied from the Options dialog or the console.
 pub(crate) fn apply_video_settings(
-    mut sim: ResMut<crate::movement::Simulation>,
+    mut sim: ResMut<crate::simulation::Simulation>,
     mut frame: Option<ResMut<GameFrame>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {

@@ -1,4 +1,4 @@
-//! Bevy presentation of the shared ordered Source HUD canvas.
+//! Bevy presentation and WGPU 2D batch rendering for the shared Source UI Canvas.
 use bevy::{
     asset::RenderAssetUsages,
     camera::{
@@ -270,9 +270,9 @@ type HudAssets<'w> = (
     ResMut<'w, Assets<Mesh>>,
 );
 type HudResources<'w> = (
-    Res<'w, crate::console::Console>,
+    Res<'w, crate::ui_host::Console>,
     Res<'w, Time<Real>>,
-    Res<'w, crate::movement::Simulation>,
+    Res<'w, crate::simulation::Simulation>,
     Res<'w, crate::Status>,
     Option<Res<'w, crate::performance::Performance>>,
 );

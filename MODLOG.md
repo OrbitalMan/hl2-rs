@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-13 Crate restructuring and module renames
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-bevy`: renamed 4 misnamed modules to describe their actual content:
+  - `movement.rs` -> `simulation.rs`: represents the full Bevy host simulation runner (`Simulation` resource, tick loop, character physics, command script playback, cheats/effects, respawn).
+  - `hud.rs` -> `canvas_renderer.rs`: represents the WGPU 2D rendering pipeline (`HudMaterial`, quad mesh pool) that renders the shared UI canvas (HUD, menus, options, console, dialogs) to the GPU.
+  - `console.rs` -> `ui_host.rs`: represents the Bevy host UI resource (`Console`, alias `UiHost`) and input event translation (`keys`, `wheel_steps`, `binding_keys`).
+  - `ui.rs` -> `ui_system.rs`: represents the Bevy ECS system plugin (`UiPlugin`, `update_ui`) for UI input dispatch, canvas resize synchronization, and window cursor management.
+- Verified crate boundaries between `hl2-ui` and `hl2-bevy`: all portable UI domain logic, layout calculation, models, and viewport coordinate math reside in `hl2-ui`; `hl2-bevy` contains only Bevy host adapter, ECS systems, and GPU rendering pipelines with no circular dependencies.
+
+**Why:**
+- Previous module names in `hl2-bevy` were historical artifacts from the early prototype, obscuring the actual roles of the simulation runner, 2D canvas renderer, UI host adapter, and UI ECS systems.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui -p hl2-bevy`: all 90 tests in `hl2-ui` and 64 tests in `hl2-bevy` passed (0 failures).
+- `cargo clippy --locked -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` ran cleanly and exited code 0.
+
+**Result:** Crate ownership boundaries and module naming cleanly separated without functional or behavioral regressions.
+
+**Still broken or not tested:** Non-macOS physical display checks not tested.
+
+**Next:** Task 2 (Quick visual fixes: credits dialog opacity and button typography/spacing).
+
 ## 2026-10-12 Standard resolutions, 4:3 aspect ratio and pixel-scale windowed mode
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

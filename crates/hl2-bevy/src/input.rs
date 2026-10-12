@@ -259,9 +259,9 @@ pub(crate) fn action_pressed(
 pub(crate) fn controls(
     (keys, buttons, mouse, scroll): InputDevices,
     windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>,
-    mut sim: ResMut<crate::movement::Simulation>,
+    mut sim: ResMut<crate::simulation::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
-    ui: Option<Res<crate::console::Console>>,
+    ui: Option<Res<crate::ui_host::Console>>,
     mut mouse_filter: Local<hl2_ui::input::MouseFilter>,
 ) {
     // CGameRules::Think reads `skill` every frame, so a changed setting applies at once.

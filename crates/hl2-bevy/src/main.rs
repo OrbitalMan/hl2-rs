@@ -4,21 +4,21 @@ mod audio;
 mod bloom;
 mod camera;
 mod campaign;
-mod console;
+mod canvas_renderer;
 mod effects;
 mod eyes;
 mod gameplay;
 mod gpu_skinning;
-mod hud;
 mod input;
 mod material_proxies;
 mod monitors;
-mod movement;
 mod performance;
 mod rendering;
+mod simulation;
 mod sky;
 mod tonemap;
-mod ui;
+mod ui_host;
+mod ui_system;
 mod video;
 mod visibility;
 use anyhow::{Context, Result, bail};
@@ -388,10 +388,10 @@ fn main() -> Result<()> {
     let movement_commands = options
         .movement_script
         .as_ref()
-        .map(|p| movement::read_script(p))
+        .map(|p| simulation::read_script(p))
         .transpose()?
         .unwrap_or_default();
-    let mut simulation = movement::Simulation::new(
+    let mut simulation = simulation::Simulation::new(
         &loaded.world,
         options
             .position
@@ -458,9 +458,9 @@ fn main() -> Result<()> {
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
         .add_plugins(bloom::SourceBloomPlugin)
-        .add_plugins(bevy::sprite_render::Material2dPlugin::<hud::HudMaterial>::default())
-        .add_plugins(ui::UiPlugin)
-        .add_plugins(movement::MovementPlugin)
+        .add_plugins(bevy::sprite_render::Material2dPlugin::<canvas_renderer::HudMaterial>::default())
+        .add_plugins(ui_system::UiPlugin)
+        .add_plugins(simulation::MovementPlugin)
         .add_systems(PreUpdate, crate::video::present_frame)
         .add_systems(
             Update,
@@ -494,7 +494,7 @@ fn main() -> Result<()> {
                 monitors::present,
                 monitors::present_materials,
                 material_proxies::present,
-                hud::present,
+                canvas_renderer::present,
             )
                 .before(TransformSystems::Propagate),
         )
@@ -524,7 +524,7 @@ fn main() -> Result<()> {
         .add_systems(
             PostUpdate,
             audio::queue
-                .after(hud::present)
+                .after(canvas_renderer::present)
                 .before(TransformSystems::Propagate),
         )
         .add_systems(Last, effects::observe.before(monitor))
@@ -633,7 +633,7 @@ fn setup(
             options.world_partition,
         ),
     );
-    let mut console_ui = console::Console::new(ui);
+    let mut console_ui = ui_host::Console::new(ui);
     console_ui.source.level_loaded(prepared.1);
     commands.insert_resource(console_ui);
     // Every game camera below renders into the game frame (see `video::present_frame`).
@@ -757,7 +757,7 @@ pub(crate) fn install_map(
     ));
     effects::adopt(loaded.effects.sprites, commands);
     commands.insert_resource(loaded.gameplay);
-    commands.insert_resource(hud::Hud::new(loaded.hud));
+    commands.insert_resource(canvas_renderer::Hud::new(loaded.hud));
     audio::install(commands, sounds, loaded.audio);
     loaded.console
 }
@@ -774,15 +774,15 @@ type EntityDrawQuery<'w, 's> = Query<
 >;
 type HostResources<'w> = (
     Res<'w, Options>,
-    Res<'w, movement::Simulation>,
+    Res<'w, simulation::Simulation>,
     Res<'w, gameplay::Gameplay>,
-    Res<'w, hud::Hud>,
+    Res<'w, canvas_renderer::Hud>,
     Res<'w, audio::Audio>,
     Res<'w, sky::Sky>,
     Res<'w, monitors::Monitors>,
     Res<'w, eyes::Eyes>,
     Res<'w, effects::Effects>,
-    Res<'w, console::Console>,
+    Res<'w, ui_host::Console>,
     Res<'w, campaign::Campaign>,
 );
 type DiagnosticQueries<'w, 's> = (

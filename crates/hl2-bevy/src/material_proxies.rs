@@ -1,5 +1,5 @@
 //! Prepared brush material resources; frame updates perform no asset I/O.
-use crate::{gameplay::Gameplay, movement::Simulation, rendering::SourceMaterial};
+use crate::{gameplay::Gameplay, rendering::SourceMaterial, simulation::Simulation};
 use bevy::prelude::*;
 
 #[derive(Component)]

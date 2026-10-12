@@ -1,4 +1,4 @@
-//! Host adapter for the retained Source-coordinate player and collision code.
+//! Host simulation loop, player physics integration, command scripting, and console cheat execution.
 use crate::source_direction;
 use anyhow::{Result, bail};
 use bevy::{app::RunFixedMainLoopSystems, prelude::*};
@@ -17,7 +17,7 @@ pub struct Command {
     #[serde(default)]
     actions: Vec<crate::gameplay::Action>,
     #[serde(default)]
-    ui: Vec<crate::console::Action>,
+    ui: Vec<crate::ui_host::Action>,
     #[serde(default)]
     primary: bool,
     #[serde(default)]
@@ -196,7 +196,7 @@ impl Simulation {
     }
     pub fn console_effects(
         &mut self,
-        ui: &mut crate::console::Console,
+        ui: &mut crate::ui_host::Console,
         game: &mut crate::gameplay::Gameplay,
         effects: Vec<hl2_ui::console::Effect>,
     ) {
@@ -276,7 +276,7 @@ impl Simulation {
     fn step(
         &mut self,
         mut game: Option<&mut crate::gameplay::Gameplay>,
-        mut ui: Option<&mut crate::console::Console>,
+        mut ui: Option<&mut crate::ui_host::Console>,
     ) {
         if (self.finished && !self.run_after_script) || self.loading {
             return;
@@ -467,7 +467,7 @@ impl Plugin for MovementPlugin {
 fn fixed_step(
     mut sim: ResMut<Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
-    mut ui: Option<ResMut<crate::console::Console>>,
+    mut ui: Option<ResMut<crate::ui_host::Console>>,
     mut exit: MessageWriter<AppExit>,
     performance: Option<Res<crate::performance::Performance>>,
 ) {
@@ -488,7 +488,7 @@ mod tests {
 
     fn step_input(app: &mut App) {
         app.world_mut()
-            .run_system_once(crate::ui::update_ui)
+            .run_system_once(crate::ui_system::update_ui)
             .unwrap();
         app.world_mut()
             .run_system_once(crate::input::controls)
@@ -561,7 +561,7 @@ mod tests {
             vec![],
         ))
         .insert_resource(crate::gameplay::Gameplay::synthetic(World::default()))
-        .insert_resource(crate::console::Console::new(Default::default()))
+        .insert_resource(crate::ui_host::Console::new(Default::default()))
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .insert_resource(AccumulatedMouseMotion {
@@ -584,7 +584,7 @@ mod tests {
         step_input(&mut app);
         assert_eq!(
             app.world()
-                .resource::<crate::console::Console>()
+                .resource::<crate::ui_host::Console>()
                 .source
                 .mode,
             Mode::Console
@@ -614,7 +614,7 @@ mod tests {
             .resource_mut::<ButtonInput<MouseButton>>()
             .clear();
         app.world_mut()
-            .resource_mut::<crate::console::Console>()
+            .resource_mut::<crate::ui_host::Console>()
             .source
             .mode = Mode::Pause;
         step_input(&mut app);
@@ -652,12 +652,12 @@ mod tests {
             vec![],
         );
         let mut game = crate::gameplay::Gameplay::synthetic(World::default());
-        let mut ui = crate::console::Console::new(Default::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
         sim.player.velocity = glam::Vec3::new(1., 2., 3.);
         sim.ui_action(
             &mut ui,
             &mut game,
-            &crate::console::Action::Command {
+            &crate::ui_host::Action::Command {
                 command:
                     "sv_cheats 1; setpos 10 20 30; setang 15 90; getpos; ent_fire missing Open"
                         .into(),
@@ -732,7 +732,7 @@ mod tests {
         custom_config.keys.insert("+forward".into(), "KeyI".into());
         custom_config.keys.insert("+jump".into(), "KeyJ".into());
 
-        let mut ui = crate::console::Console::new(Default::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
         ui.source.config = custom_config;
 
         app.insert_resource(sim)
@@ -791,7 +791,7 @@ mod tests {
             vec![],
         );
         let mut game = crate::gameplay::Gameplay::synthetic(World::default());
-        let mut ui = crate::console::Console::new(Default::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
         assert_eq!(sim.fov, 75.0);
 
         let mut new_config = ui.source.config.clone();
