@@ -312,6 +312,23 @@ pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
     }
     Ok(rig)
 }
+/// The model's own sequence names in index order (not included models).
+pub fn sequence_names(vfs: &Vfs, path: &str) -> Result<Vec<String>> {
+    let data = vfs.read(path)?.context("MDL missing for animation")?;
+    let count = offset(&data, 188)?;
+    if count > 4096 {
+        bail!("sequence table too large");
+    }
+    let base = offset(&data, 192)?;
+    bytes(&data, base, count * 212)?;
+    (0..count)
+        .map(|i| Ok(sequence_metadata(&data, base + i * 212)?.name))
+        .collect()
+}
+/// The model's own sequence 0 (what an entity without a set sequence plays), if any.
+pub fn first_sequence_name(vfs: &Vfs, path: &str) -> Result<Option<String>> {
+    Ok(sequence_names(vfs, path)?.into_iter().next())
+}
 fn sequence_events(
     data: &[u8],
     sequence: usize,

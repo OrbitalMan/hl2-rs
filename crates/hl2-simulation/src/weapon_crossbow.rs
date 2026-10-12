@@ -863,9 +863,12 @@ mod tests {
         let mut world = World::default();
         crate::actors::prepare_weapons(&mut world, &vfs, &weapons).unwrap();
         let rig = &world.rigs[&format!("{}#0", w.viewmodel.to_lowercase())];
+        // The installed viewmodel has no ACT_CROSSBOW_*_UNLOADED sequences (SDK-only).
+        assert!(rig
+            .lookup_sequence("ACT_CROSSBOW_DRAW_UNLOADED", None, |_| 0)
+            .is_none());
         for activity in [
             "ACT_VM_DRAW",
-            "ACT_CROSSBOW_DRAW_UNLOADED",
             "ACT_VM_IDLE",
             "ACT_VM_FIDGET",
             "ACT_VM_PRIMARYATTACK",

@@ -17,6 +17,8 @@ pub(crate) const PLAYER_RADIUS: f32 = 22.627417;
 const NORM_SPEED: f32 = 190.;
 /// AttachEntity's rotational damping while held.
 const HELD_ROT_DAMPING: f32 = 10.;
+/// REDUCED_CARRY_MASS: the controlled body's mass while held (retail attach 0x10415e20).
+const REDUCED_CARRY_MASS: f32 = 1.;
 /// Inches to Rapier metres (physics.rs SCALE).
 pub(crate) const SCALE: f32 = 1. / 39.37;
 /// DOT_30DEGREE (player.h): the carry's angle alignment.
@@ -104,6 +106,9 @@ pub struct GrabController {
     pub saved_mass: f32,
     saved_gravity: f32,
     saved_rot_damping: f32,
+    /// The body's mass properties before the carry-mass reduction (authored bodies).
+    #[serde(skip)]
+    saved_props: Option<MassProperties>,
     /// m_bIgnoreRelativePitch (the +USE carry).
     ignore_pitch: bool,
     pub error: f32,
@@ -113,8 +118,10 @@ pub struct GrabController {
 }
 impl GrabController {
     /// AttachEntity: no gravity (shadow control), rotational damping 10, the player-space
-    /// rotation kept (aligned within `alignment` when set), error after 1 s. The mass
-    /// reduction to REDUCED_CARRY_MASS is not modeled (legacy props carry collider mass).
+    /// rotation kept (aligned within `alignment` when set), error after 1 s. Retail
+    /// (0x10415e20) also sets the controlled body's mass to REDUCED_CARRY_MASS and
+    /// disables its drag; the mass reduction applies to authored bodies (mass from
+    /// additional mass properties), not to legacy density-mass hulls.
     pub fn attach(
         physics: &mut Physics,
         id: usize,
@@ -125,7 +132,24 @@ impl GrabController {
         let handle = physics.dynamic.get(&id).copied()?;
         let current = rotation(physics, id).unwrap_or_default();
         let target = center(physics, id)?;
+        let authored = physics.bodies.get(handle)?.colliders().iter().all(|c| {
+            physics
+                .colliders
+                .get(*c)
+                .is_none_or(|collider| collider.density() == 0.)
+        });
+        physics.drag_disabled.insert(handle);
         let body = physics.bodies.get_mut(handle)?;
+        let saved_mass = body.mass();
+        let saved_props = authored.then(|| body.mass_properties().local_mprops);
+        if let Some(props) = saved_props.filter(|p| p.inv_mass > 0.) {
+            // Scale mass and inertia together so the shape's inertia stays consistent.
+            let ratio = (1. / props.inv_mass) / REDUCED_CARRY_MASS;
+            let mut reduced = props;
+            reduced.inv_mass = 1. / REDUCED_CARRY_MASS;
+            reduced.inv_principal_inertia_sqrt *= ratio.sqrt();
+            body.set_additional_mass_properties(reduced, true);
+        }
         let mut relative = eye_rotation(forward, ignore_pitch).inverse() * current;
         if let Some(cosine) = alignment {
             relative = align(relative, cosine);
@@ -133,9 +157,10 @@ impl GrabController {
         let grab = Self {
             entity: id,
             relative,
-            saved_mass: body.mass(),
+            saved_mass,
             saved_gravity: body.gravity_scale(),
             saved_rot_damping: body.angular_damping(),
+            saved_props,
             ignore_pitch,
             error: 0.,
             // m_errorTime = -1: one second before error accumulates.
@@ -148,16 +173,20 @@ impl GrabController {
         body.wake_up(true);
         Some(grab)
     }
-    /// DetachEntity: restore gravity and damping; clear the velocity (`clear`) or clamp
-    /// it to 1.5 x hl2_normspeed and 720 deg/s.
+    /// DetachEntity: restore gravity, mass and damping, enable drag (retail 0x104172d0
+    /// forces it on rather than restoring it); clear the velocity (`clear`) or clamp it
+    /// to 1.5 x hl2_normspeed and 720 deg/s.
     pub fn detach(&self, physics: &mut Physics, clear: bool) {
-        let Some(body) = physics
-            .dynamic
-            .get(&self.entity)
-            .and_then(|h| physics.bodies.get_mut(*h))
-        else {
+        let Some(&handle) = physics.dynamic.get(&self.entity) else {
             return;
         };
+        physics.drag_disabled.remove(&handle);
+        let Some(body) = physics.bodies.get_mut(handle) else {
+            return;
+        };
+        if let Some(props) = self.saved_props {
+            body.set_additional_mass_properties(props, true);
+        }
         body.set_gravity_scale(self.saved_gravity, true);
         body.set_angular_damping(self.saved_rot_damping);
         if clear {

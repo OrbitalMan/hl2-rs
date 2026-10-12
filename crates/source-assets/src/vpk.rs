@@ -161,6 +161,16 @@ impl Vpk {
     }
 }
 
+/// Base VPKs in hl2/gameinfo.txt SearchPaths order.
+const GAMEINFO_ARCHIVES: [&str; 6] = [
+    "hl2_sound_vo_english_dir.vpk",
+    "hl2_pak_dir.vpk",
+    "hl2_textures_dir.vpk",
+    "hl2_sound_misc_dir.vpk",
+    "hl2_misc_dir.vpk",
+    "platform_misc_dir.vpk",
+];
+
 pub struct Vfs {
     roots: Vec<PathBuf>,
     archives: Vec<Vpk>,
@@ -208,11 +218,25 @@ impl Vfs {
             let mut paths = std::fs::read_dir(root)?
                 .filter_map(|e| e.ok().map(|e| e.path()))
                 .filter(|p| {
-                    p.file_name()
-                        .is_some_and(|n| n.to_string_lossy().ends_with("_dir.vpk"))
+                    p.file_name().is_some_and(|n| {
+                        let n = n.to_string_lossy().to_ascii_lowercase();
+                        n.ends_with("_dir.vpk") && n != "hl2_lv_dir.vpk"
+                    })
                 })
                 .collect::<Vec<_>>();
-            paths.sort();
+            // hl2/gameinfo.txt SearchPaths order (hl2_lv.vpk is low-violence only);
+            // archives it does not name follow alphabetically.
+            paths.sort_by_key(|p| {
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                    .unwrap_or_default();
+                let rank = GAMEINFO_ARCHIVES
+                    .iter()
+                    .position(|a| *a == name)
+                    .unwrap_or(GAMEINFO_ARCHIVES.len());
+                (rank, name)
+            });
             for p in paths {
                 match Vpk::open(&p) {
                     Ok(v) => archives.push(v),
@@ -270,15 +294,18 @@ impl Vfs {
                 return Ok(Some(d));
             }
         }
+        // gameinfo.txt searches the VPKs before loose folders; the installation ships
+        // zero-byte loose placeholders (models/weapons/v_crossbow.mdl, v_bugbait.mdl, ...)
+        // that must not shadow the archived files.
+        for archive in &self.archives {
+            if let Some(d) = archive.read(&name)? {
+                return Ok(Some(d));
+            }
+        }
         for root in &self.roots {
             let p = root.join(&name);
             if p.is_file() {
                 return Ok(Some(std::fs::read(p)?));
-            }
-        }
-        for archive in &self.archives {
-            if let Some(d) = archive.read(&name)? {
-                return Ok(Some(d));
             }
         }
         Ok(None)

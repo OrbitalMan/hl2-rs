@@ -153,6 +153,9 @@ impl Default for MaterialData {
     }
 }
 
+/// `--frag-rigid-body`: build the thrown frag's Rapier body from w_grenade.phy.
+pub static FRAG_RIGID_BODY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
     load_with_canvas(game, map, hl2_ui::canvas::Canvas::default(), true)
 }
@@ -187,10 +190,13 @@ pub fn load_with_canvas(
     let mut decal_errors = Vec::new();
     add_static_decals(&mut world, &vfs, &mut decal_errors);
     let model_report = models::append_models(&mut world, &vfs);
-    // The thrown frag is a VPhysics object built from its .phy (CGrenadeFrag::
-    // CreateVPhysics); without it the frag keeps the fitted swept-box motion.
-    if let Err(error) =
-        models::append_model_physics(&mut world, &vfs, hl2_simulation::projectiles::FRAG_MODEL)
+    // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics). The Rapier body
+    // from its .phy is opt-in: against native samples (session 12) it stops dead after the
+    // lob and trainstation landings (107/43 units RMS) where the fitted swept box stays
+    // within 5 units, so the swept box remains the default.
+    if FRAG_RIGID_BODY.load(std::sync::atomic::Ordering::Relaxed)
+        && let Err(error) =
+            models::append_model_physics(&mut world, &vfs, hl2_simulation::projectiles::FRAG_MODEL)
     {
         world.warnings.push(format!(
             "{}: {error:#}",

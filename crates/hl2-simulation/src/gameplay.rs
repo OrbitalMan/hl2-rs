@@ -492,7 +492,18 @@ impl Inventory {
                 let ammo = w.ammo_type.clone();
                 self.give_ammo(&ammo, w.default_clip.max(0), weapons);
             }
-            self.owned.entry(class.into()).or_insert(w.default_clip);
+            if !self.owned.contains_key(class) {
+                // CBaseCombatCharacter::Weapon_Equip: a default clip larger than the clip
+                // fills the clip and gives the rest as reserve (crossbow 5 = 1 + 4).
+                let clip = if w.magazine > 0 && w.default_clip > w.magazine {
+                    let ammo = w.ammo_type.clone();
+                    self.give_ammo(&ammo, w.default_clip - w.magazine, weapons);
+                    w.magazine
+                } else {
+                    w.default_clip
+                };
+                self.owned.insert(class.into(), clip);
+            }
             if self.active == class {
                 return;
             }
@@ -1470,7 +1481,18 @@ impl Inventory {
         let Some(weapon) = weapons.get(&self.active) else {
             return;
         };
-        let activity = std::mem::take(&mut self.animation);
+        let mut activity = std::mem::take(&mut self.animation);
+        // The installed v_crossbow.mdl has no ACT_CROSSBOW_*_UNLOADED sequences (the SDK's
+        // SetIdealActivity would then leave the previous sequence); use the plain draw.
+        // Retail behavior of an unloaded deploy is not tested.
+        if activity == "ACT_CROSSBOW_DRAW_UNLOADED"
+            && world
+                .rigs
+                .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
+                .is_some_and(|rig| rig.lookup_sequence(&activity, None, |_| 0).is_none())
+        {
+            activity = "ACT_VM_DRAW".into();
+        }
         self.animation = activity_sequence(world, weapon, &activity);
         if activity.contains("DRAW") {
             let end = self.animation_at + duration(world, weapon, &self.animation);

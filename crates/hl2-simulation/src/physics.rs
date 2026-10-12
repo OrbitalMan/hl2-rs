@@ -247,8 +247,6 @@ pub struct BodyState {
 }
 /// Linear velocity, angular velocity and center of mass before a step.
 type PreStep = (Vector<Real>, Vector<Real>, Point<Real>);
-/// Frag fit of the VPhysics air drag (projectiles.rs FRAG_AIR_DRAG), per unit.
-pub const AIR_DRAG: f32 = 6.4e-4;
 /// One world brush side's material: outward plane normal, friction, restitution.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SideMaterial {
@@ -325,17 +323,94 @@ pub struct Physics {
     pair_times: HashMap<(ColliderHandle, ColliderHandle), f64>,
     /// Simulated seconds (sum of tick dt).
     pub time: f64,
-    /// dv/dt = -air_drag |v| v for awake dynamic bodies (0 disables).
-    pub air_drag: f32,
+    /// VPhysics air density for the drag controller (drag.rs; 0 disables drag).
+    pub air_density: f32,
+    /// Drag geometry per dynamic body, computed once from its colliders.
+    drag_geometry: HashMap<RigidBodyHandle, Option<crate::drag::DragGeometry>>,
+    /// Bodies with drag disabled (EnableDrag(false): a held object's controlled body).
+    pub drag_disabled: std::collections::HashSet<RigidBodyHandle>,
     pub native_shape_count: usize,
     pub native_shape_fallbacks: usize,
     pub skipped: usize,
+}
+/// Body-local hull points (metres) of a body's colliders for its drag geometry.
+fn drag_geometry(body: &RigidBody, colliders: &ColliderSet) -> Option<crate::drag::DragGeometry> {
+    let mut points = Vec::new();
+    for handle in body.colliders() {
+        let Some(collider) = colliders.get(*handle) else {
+            continue;
+        };
+        let local = collider
+            .position_wrt_parent()
+            .copied()
+            .unwrap_or_else(Isometry::identity);
+        let shape = collider.shape();
+        let mut add = |p: Point<Real>| {
+            let q = local * p;
+            points.push(Vec3::new(q.x, q.y, q.z));
+        };
+        if let Some(hull) = shape.as_convex_polyhedron() {
+            hull.points().iter().copied().for_each(&mut add);
+        } else {
+            let aabb = shape.compute_local_aabb();
+            for i in 0..8 {
+                add(point![
+                    if i & 1 == 0 { aabb.mins.x } else { aabb.maxs.x },
+                    if i & 2 == 0 { aabb.mins.y } else { aabb.maxs.y },
+                    if i & 4 == 0 { aabb.mins.z } else { aabb.maxs.z }
+                ]);
+            }
+        }
+    }
+    crate::drag::DragGeometry::from_points(&points)
+}
+/// One drag-controller step on a body (retail 10012ec0 order: linear, then angular).
+fn apply_drag(body: &mut RigidBody, geometry: &crate::drag::DragGeometry, density: f32, dt: f32) {
+    use crate::drag::*;
+    let props = body.mass_properties().local_mprops;
+    let inertia = props.inv_principal_inertia_sqrt;
+    let inv_inertia = Vec3::new(
+        inertia.x * inertia.x,
+        inertia.y * inertia.y,
+        inertia.z * inertia.z,
+    );
+    let rotation = *body.rotation();
+    let v = *body.linvel();
+    let local = rotation.inverse_transform_vector(&v);
+    let factor = step_factor(
+        linear_query(
+            geometry.linear_basis(props.inv_mass),
+            Vec3::new(local.x, local.y, local.z),
+            DEFAULT_COEFFICIENT,
+        ),
+        -0.5,
+        density,
+        dt,
+    );
+    if factor < 0. {
+        body.set_linvel(v + v * factor, false);
+    }
+    let w = *body.angvel();
+    let local = rotation.inverse_transform_vector(&w);
+    let factor = step_factor(
+        angular_query(
+            geometry.angular_basis(inv_inertia),
+            Vec3::new(local.x, local.y, local.z),
+            DEFAULT_COEFFICIENT,
+        ),
+        -1.,
+        density,
+        dt,
+    );
+    if factor < 0. {
+        body.set_angvel(w + w * factor, false);
+    }
 }
 impl Physics {
     pub fn new(world: &World) -> Self {
         let mut p = Self {
             player_world_brushes: world.brushes.clone(),
-            air_drag: AIR_DRAG,
+            air_density: crate::drag::AIR_DENSITY,
             ..Self::default()
         };
         // World brushes use the "default" surfaceprop (friction/elasticity) when the
@@ -667,18 +742,21 @@ impl Physics {
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .retain(&self.colliders);
-        // VPhysics air drag on moving objects, dv/dt = -c |v| v (units). The drag
-        // model is in vphysics.dll; c is the frag fit and applies to every body until
-        // per-object fits exist ("native fit needed").
+        // VPhysics drag controller (drag.rs: retail per-object bases, native air density).
         let mut before = HashMap::new();
         for (handle, body) in self.bodies.iter_mut() {
             if !body.is_dynamic() || body.is_sleeping() || !body.is_enabled() {
                 continue;
             }
-            let v = *body.linvel();
-            let speed = v.norm() / SCALE;
-            if self.air_drag > 0. && speed > 0. {
-                body.set_linvel(v * (1. - self.air_drag * speed * dt).max(0.), false);
+            if self.air_density > 0. && !self.drag_disabled.contains(&handle) {
+                let colliders = &self.colliders;
+                if let Some(geometry) = *self
+                    .drag_geometry
+                    .entry(handle)
+                    .or_insert_with(|| drag_geometry(body, colliders))
+                {
+                    apply_drag(body, &geometry, self.air_density, dt);
+                }
             }
             before.insert(
                 handle,
@@ -1885,7 +1963,7 @@ mod tests {
                 },
             );
             let mut physics = Physics::new(&world);
-            physics.air_drag = 0.;
+            physics.air_density = 0.;
             let hooked = physics.world_sides.sides.len();
             let body = physics.add_projectile_body(
                 &world,
@@ -1927,7 +2005,7 @@ mod tests {
             },
         );
         let mut physics = Physics::new(&world);
-        assert_eq!(physics.air_drag, AIR_DRAG);
+        assert_eq!(physics.air_density, crate::drag::AIR_DENSITY);
         let body = physics.add_projectile_body(
             &world,
             "synthetic#0",
@@ -1939,11 +2017,15 @@ mod tests {
         );
         physics.tick(0.015);
         let v = physics.body_state(body).unwrap().velocity;
-        // dv/dt = -c |v| v over one tick (gravity is vertical; |v| ~ 1000).
-        let expected = 1000. * (1. - AIR_DRAG * 1000. * 0.015);
+        // Retail drag on the 8-unit box (5 kg) moving along x: face 8 x 8 units, full
+        // orthographic fraction, factor -0.5 x basis x |v| x density x dt (m/s).
+        let face = (8. * 0.0254f32).powi(2);
+        let speed = 1000. * SCALE;
+        let factor = -0.5 * face / 5. * speed * crate::drag::AIR_DENSITY * 0.015;
+        let expected = 1000. * (1. + factor);
         assert!((v.x - expected).abs() < 0.5, "{v} vs {expected}");
         // Drop onto the floor: one event at the fall speed, then resting is silent.
-        physics.air_drag = 0.;
+        physics.air_density = 0.;
         physics.set_body_velocity(body, Vec3::ZERO, Vec3::ZERO);
         if let Some(b) = physics.bodies.get_mut(body) {
             b.set_translation(vector(Vec3::new(0., 0., 40.)), true);

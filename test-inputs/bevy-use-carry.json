@@ -1,0 +1,16 @@
+[
+  {"tick":1,"label":"aim","eye":[-3490,-2110,128],"yaw":236,"pitch":-40,"actions":[{"action":"loadout"},{"action":"slot","slot":2}]},
+  {"tick":2,"actions":[{"action":"confirm"}]},
+  {"tick":3},
+  {"tick":100,"label":"use","actions":[{"action":"use"}]},
+  {"tick":101},
+  {"tick":130,"label":"carry"},
+  {"tick":140,"label":"walk","forward":1},
+  {"tick":200,"label":"walked"},
+  {"tick":220,"label":"look-up","pitch":30},
+  {"tick":250,"label":"held-up","pitch":30},
+  {"tick":260,"label":"throw","pitch":0,"primary":true},
+  {"tick":262,"label":"t030","pitch":0},
+  {"tick":300,"label":"redeploy","pitch":0},
+  {"tick":340,"label":"end","pitch":0}
+]

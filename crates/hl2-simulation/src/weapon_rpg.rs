@@ -810,9 +810,12 @@ mod tests {
         );
         assert!(w.ammo_type.eq_ignore_ascii_case("RPG_Round"));
         assert!(w.ammo_max > 0);
-        for key in ["single_shot", "special1", "reload"] {
+        for key in ["single_shot", "special1", "special2"] {
             assert!(w.sounds.contains_key(key), "{key}");
         }
+        // The installed script has no "reload" sound: NotifyRocketDied's
+        // WeaponSound(RELOAD) is silent in retail.
+        assert!(!w.sounds.contains_key("reload"));
         let mut world = World::default();
         crate::actors::prepare_weapons(&mut world, &vfs, &weapons).unwrap();
         let rig = &world.rigs[&format!("{}#0", w.viewmodel.to_lowercase())];

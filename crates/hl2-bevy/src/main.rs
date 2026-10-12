@@ -139,6 +139,9 @@ impl Options {
                 "--mute-ambient" => {
                     audio::MUTE_AMBIENT.store(true, std::sync::atomic::Ordering::Relaxed)
                 }
+                "--frag-rigid-body" => {
+                    assets::FRAG_RIGID_BODY.store(true, std::sync::atomic::Ordering::Relaxed)
+                }
                 "--no-focus" => options.no_focus = true,
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
@@ -149,7 +152,7 @@ impl Options {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --frag-rigid-body (experimental Rapier frag) --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -553,7 +556,10 @@ fn setup(
         },
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
-            fov: 2. * ((54f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
+            fov: 2.
+                * ((hl2_simulation::viewmodel_effects::VIEWMODEL_FOV.to_radians() / 2.).tan()
+                    / (4. / 3.))
+                    .atan(),
             near: 0.1,
             far: 1000.,
             ..default()

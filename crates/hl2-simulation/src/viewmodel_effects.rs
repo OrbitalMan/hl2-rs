@@ -214,14 +214,31 @@ pub fn anchor_position(rig: &Rig, matrices: &[Mat4], anchor: &Anchor) -> Option<
     )
 }
 
+/// The sprites and beams are world entities attached to the viewmodel: the client's
+/// FormatViewModelAttachment moves the attachment so it projects at the same screen point
+/// with the world FOV, keeping its depth, and the world pass draws them at their world
+/// size. Drawn in the viewmodel camera instead, sizes and widths scale by
+/// tan(viewmodel FOV / 2) / tan(world FOV / 2) (Source 4:3 horizontal degrees).
+/// viewmodel_fov (the host's viewmodel camera, Source 4:3 horizontal degrees).
+pub const VIEWMODEL_FOV: f32 = 54.;
+pub fn attachment_size_factor(viewmodel_fov: f32, world_fov: f32) -> f32 {
+    let world = (world_fov.to_radians() * 0.5).tan();
+    if world > 0. {
+        (viewmodel_fov.to_radians() * 0.5).tan() / world
+    } else {
+        1.
+    }
+}
 /// Viewmodel-space quads: billboards facing the viewmodel camera (+X) and camera-facing
 /// beam strips (8 segments with noise). `random` returns [0, 1); `sprite_width` the
-/// texture width of a material (None skips it).
+/// texture width of a material (None skips it); `size_factor` from
+/// `attachment_size_factor`.
 pub fn viewmodel_quads(
     effects: &ViewmodelEffects,
     resolve: &dyn Fn(&Anchor) -> Option<Vec3>,
     sprite_width: &dyn Fn(&str) -> Option<f32>,
     random: &mut dyn FnMut() -> f32,
+    size_factor: f32,
 ) -> Vec<Quad> {
     let mut quads = Vec::new();
     let (right, up) = (-Vec3::Y, Vec3::Z);
@@ -233,7 +250,7 @@ pub fn viewmodel_quads(
         else {
             continue;
         };
-        let size = width * 0.5 * pick(sprite.scale, random);
+        let size = width * 0.5 * pick(sprite.scale, random) * size_factor;
         let brightness = pick(sprite.brightness, random).clamp(0., 255.) / 255.;
         if size <= 0. || brightness <= 0. {
             continue;
@@ -284,8 +301,8 @@ pub fn viewmodel_quads(
             let (p, q) = (points[i], points[i + 1]);
             let t0 = i as f32 / SEGMENTS as f32;
             let t1 = (i + 1) as f32 / SEGMENTS as f32;
-            let w0 = beam.width + (end_width - beam.width) * t0;
-            let w1 = beam.width + (end_width - beam.width) * t1;
+            let w0 = (beam.width + (end_width - beam.width) * t0) * size_factor;
+            let w1 = (beam.width + (end_width - beam.width) * t1) * size_factor;
             let side = (q - p).cross((p + q) * 0.5).normalize_or_zero();
             let shade = |t: f32| if beam.shade_in { t } else { 1. };
             let level = beam.brightness / 255. * (shade(t0) + shade(t1)) * 0.5;
@@ -308,6 +325,12 @@ pub fn viewmodel_quads(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn attached_sprites_shrink_to_world_fov_size() {
+        let f = super::attachment_size_factor(54., 75.);
+        assert!((f - 0.664).abs() < 0.001, "{f}");
+        assert!(super::attachment_size_factor(54., 20.) > 2.8);
+    }
     use super::*;
 
     #[test]
@@ -363,7 +386,7 @@ mod tests {
             Anchor::Index(_) => Some(Vec3::new(40., 0., -5.)),
         };
         let mut rng = || 0.5;
-        let quads = viewmodel_quads(&effects, &resolve, &|_| Some(32.), &mut rng);
+        let quads = viewmodel_quads(&effects, &resolve, &|_| Some(32.), &mut rng, 1.);
         assert_eq!(quads.len(), 1 + 8);
         // 32 / 2 x 0.5 = 8 units half size in the camera plane (x constant).
         let sprite = &quads[0];

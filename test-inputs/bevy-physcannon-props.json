@@ -1,0 +1,19 @@
+[
+  {"tick":1,"label":"aim","eye":[-3490,-2110,128],"yaw":236,"pitch":-35,"actions":[{"action":"loadout"},{"action":"slot","slot":0}]},
+  {"tick":2,"actions":[{"action":"slot","slot":0}]},
+  {"tick":3,"actions":[{"action":"confirm"}]},
+  {"tick":4},
+  {"tick":100,"label":"pick","secondary":true},
+  {"tick":110,"label":"p010"},
+  {"tick":140,"label":"holding"},
+  {"tick":160,"label":"look-up","pitch":20},
+  {"tick":200,"label":"held-up","pitch":20},
+  {"tick":220,"label":"look-level","pitch":0},
+  {"tick":260,"label":"launch","pitch":0,"primary":true},
+  {"tick":262,"label":"l030","pitch":0},
+  {"tick":280,"label":"l300","pitch":0},
+  {"tick":300,"label":"punt-aim","pitch":-35,"yaw":216},
+  {"tick":340,"label":"punt","pitch":-35,"yaw":216,"primary":true},
+  {"tick":342,"label":"pu030","pitch":-35,"yaw":216},
+  {"tick":380,"label":"end","pitch":-35,"yaw":216}
+]
