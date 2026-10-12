@@ -80,6 +80,14 @@ pub struct Brush {
 pub struct World {
     #[serde(default)]
     pub background_camera: Option<BackgroundCamera>,
+    /// Material (lower-case, "" for none) of each side of `brushes[i]`, side order as
+    /// in the brush's planes; empty when the loader did not record them.
+    #[serde(default)]
+    pub brush_side_materials: Vec<Vec<String>>,
+    /// Material -> $surfaceprop (lower-case) for brush-side materials, resolved at
+    /// load from the owned VMTs.
+    #[serde(default)]
+    pub material_surfaceprops: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub background_entities: Vec<usize>,
     pub name: String,

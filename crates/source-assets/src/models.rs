@@ -520,6 +520,22 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             .1
             .push(format!("surfaceproperties: {error:#}")),
     }
+    // VBSP gives each world collision triangle its brush side's $surfaceprop
+    // (ivp.cpp ConvertWorldBrushesToPhysCollide); resolve each side material once.
+    let side_materials: std::collections::BTreeSet<String> = world
+        .brush_side_materials
+        .iter()
+        .flatten()
+        .filter(|m| !m.is_empty())
+        .cloned()
+        .collect();
+    for material in side_materials {
+        if let Ok(Some(prop)) = vfs.material_value(&material, "$surfaceprop") {
+            world
+                .material_surfaceprops
+                .insert(material, prop.trim().to_lowercase());
+        }
+    }
     for (entity_id, entity) in world.entities.iter().enumerate() {
         if !entity.class().starts_with("npc_")
             && !entity.class().starts_with("weapon_")

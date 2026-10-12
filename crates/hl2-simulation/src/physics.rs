@@ -156,6 +156,32 @@ fn surface_material<'a>(world: &'a World, name: &str) -> Option<&'a modkit_core:
 fn restitution(m: &modkit_core::SurfaceMaterial) -> f32 {
     m.elasticity.clamp(0., 1.)
 }
+/// Side materials of world brush `index`, or None when every side resolves to the
+/// "default" surfaceprop (or nothing is recorded).
+fn brush_sides(world: &World, index: usize, brush: &Brush) -> Option<Vec<SideMaterial>> {
+    let names = world.brush_side_materials.get(index)?;
+    let default = world.surface_materials.get("default")?;
+    let mut any = false;
+    let sides = brush
+        .planes
+        .iter()
+        .zip(names)
+        .map(|(plane, material)| {
+            let m = world
+                .material_surfaceprops
+                .get(material)
+                .and_then(|prop| world.surface_materials.get(prop))
+                .unwrap_or(default);
+            any |= m.friction != default.friction || m.elasticity != default.elasticity;
+            SideMaterial {
+                normal: plane.normal,
+                friction: m.friction,
+                restitution: restitution(m),
+            }
+        })
+        .collect();
+    any.then_some(sides)
+}
 fn world_material(world: &World) -> impl Fn(ColliderBuilder) -> ColliderBuilder + '_ {
     let material = world.surface_materials.get("default");
     move |builder| match material {
@@ -223,6 +249,52 @@ pub struct BodyState {
 type PreStep = (Vector<Real>, Vector<Real>, Point<Real>);
 /// Frag fit of the VPhysics air drag (projectiles.rs FRAG_AIR_DRAG), per unit.
 pub const AIR_DRAG: f32 = 6.4e-4;
+/// One world brush side's material: outward plane normal, friction, restitution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SideMaterial {
+    pub normal: Vec3,
+    pub friction: f32,
+    pub restitution: f32,
+}
+/// Per-side world materials (VBSP sets each world collision triangle's material from
+/// its brush side; Rapier has one material per collider, so the solver contacts of a
+/// brush collider take the side facing the other body).
+#[derive(Default)]
+pub struct WorldSideMaterials {
+    pub sides: HashMap<ColliderHandle, Vec<SideMaterial>>,
+}
+impl WorldSideMaterials {
+    /// The side whose outward normal best matches `outward` (from the brush toward
+    /// the other body).
+    pub fn side(&self, collider: ColliderHandle, outward: Vec3) -> Option<SideMaterial> {
+        self.sides
+            .get(&collider)?
+            .iter()
+            .copied()
+            .max_by(|a, b| a.normal.dot(outward).total_cmp(&b.normal.dot(outward)))
+    }
+}
+impl PhysicsHooks for WorldSideMaterials {
+    fn modify_solver_contacts(&self, context: &mut ContactModificationContext) {
+        let n = Vec3::new(context.normal.x, context.normal.y, context.normal.z);
+        let (side, other) = if let Some(side) = self.side(context.collider1, n) {
+            (side, context.collider2)
+        } else if let Some(side) = self.side(context.collider2, -n) {
+            (side, context.collider1)
+        } else {
+            return;
+        };
+        // Multiply combine, as for every other surfaceprop pair.
+        let (friction, restitution) = context
+            .colliders
+            .get(other)
+            .map_or((1., 0.), |c| (c.friction(), c.restitution()));
+        for contact in context.solver_contacts.iter_mut() {
+            contact.friction = side.friction * friction;
+            contact.restitution = side.restitution * restitution;
+        }
+    }
+}
 #[derive(Default)]
 pub struct Physics {
     pub bodies: RigidBodySet,
@@ -238,6 +310,7 @@ pub struct Physics {
     ccd: CCDSolver,
     entity_colliders: BTreeMap<usize, Vec<ColliderHandle>>,
     world_brush_contents: HashMap<ColliderHandle, u32>,
+    pub world_sides: WorldSideMaterials,
     npc_collider_contents: HashMap<ColliderHandle, u32>,
     player_world_brushes: Vec<Brush>,
     player_convex_cache: Mutex<player_convex::ConvexCache>,
@@ -265,14 +338,23 @@ impl Physics {
             air_drag: AIR_DRAG,
             ..Self::default()
         };
-        // World brushes carry no per-side material here, so they use the
-        // "default" surfaceprop (friction/elasticity) when the table is loaded.
+        // World brushes use the "default" surfaceprop (friction/elasticity) when the
+        // table is loaded; brushes with other side materials also get per-contact
+        // side materials through WorldSideMaterials.
         let world_material = world_material(world);
-        for brush in &world.brushes {
+        for (index, brush) in world.brushes.iter().enumerate() {
             if let Some(shape) = brush_shape(brush) {
-                let collider = p
-                    .colliders
-                    .insert(world_material(ColliderBuilder::new(shape)));
+                let sides = brush_sides(world, index, brush);
+                let builder = world_material(ColliderBuilder::new(shape));
+                let builder = if sides.is_some() {
+                    builder.active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS)
+                } else {
+                    builder
+                };
+                let collider = p.colliders.insert(builder);
+                if let Some(sides) = sides {
+                    p.world_sides.sides.insert(collider, sides);
+                }
                 p.world_brush_contents.insert(collider, brush.contents);
                 p.npc_collider_contents.insert(collider, brush.contents);
             } else {
@@ -618,7 +700,7 @@ impl Physics {
             &mut self.multibody,
             &mut self.ccd,
             Some(&mut self.query),
-            &(),
+            &self.world_sides,
             &(),
         );
         self.time += f64::from(dt);
@@ -1765,6 +1847,64 @@ mod tests {
         let scaled_inertia = body.mass_properties().local_mprops.principal_inertia();
         // 2x mass and a 0.5 / 2 inertia multiplier: half the tensor.
         assert!((scaled_inertia - inertia * 0.5).norm() < inertia.norm() * 1e-3);
+    }
+    #[test]
+    fn world_brush_sides_use_their_own_surfaceprop() {
+        // Synthetic: one floor brush whose top side is "synthetic/ice" (friction 0.1)
+        // or the default material; a 5 kg box slides across it from 300 u/s.
+        let slide = |top: &str| {
+            let mut world = World {
+                brushes: vec![bounds_brush(
+                    Vec3::new(-4000., -4000., -16.),
+                    Vec3::new(4000., 4000., 0.),
+                )],
+                brush_side_materials: vec![["", "", "", "", top, ""].map(String::from).to_vec()],
+                ..Default::default()
+            };
+            for (name, friction) in [("default", 0.8), ("synthetic_ice", 0.1)] {
+                world.surface_materials.insert(
+                    name.into(),
+                    modkit_core::SurfaceMaterial {
+                        friction,
+                        elasticity: 0.1,
+                        ..Default::default()
+                    },
+                );
+            }
+            world
+                .material_surfaceprops
+                .insert("synthetic/ice".into(), "synthetic_ice".into());
+            world.model_physics.insert(
+                "synthetic#0".into(),
+                modkit_core::PhysicsSolid {
+                    mass: 5.,
+                    damping: 0.,
+                    rotdamping: 0.,
+                    surfaceprop: "default".into(),
+                    ..Default::default()
+                },
+            );
+            let mut physics = Physics::new(&world);
+            physics.air_drag = 0.;
+            let hooked = physics.world_sides.sides.len();
+            let body = physics.add_projectile_body(
+                &world,
+                "synthetic#0",
+                Vec3::splat(4.),
+                Vec3::new(0., 0., 4.05),
+                Quat::IDENTITY,
+                Vec3::new(300., 0., 0.),
+                Vec3::ZERO,
+            );
+            for _ in 0..60 {
+                physics.tick(0.015);
+            }
+            (hooked, physics.body_state(body).unwrap().position.x)
+        };
+        let (plain_hooks, plain) = slide("");
+        let (ice_hooks, ice) = slide("synthetic/ice");
+        assert_eq!((plain_hooks, ice_hooks), (0, 1));
+        assert!(ice > plain + 20., "ice {ice} vs default {plain}");
     }
     #[test]
     fn free_bodies_report_new_contacts_once_and_feel_air_drag() {
