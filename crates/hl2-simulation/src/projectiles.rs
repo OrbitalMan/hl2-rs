@@ -100,6 +100,8 @@ pub struct Projectile {
     /// The thrown frag's VPhysics body (w_grenade.phy) once the solid is loaded.
     #[serde(skip)]
     pub body: Option<rapier3d::prelude::RigidBodyHandle>,
+    /// The swept frag lies on a floor and rolls about its long axis.
+    pub grounded: bool,
 }
 impl Projectile {
     pub fn model(&self) -> &'static str {
@@ -320,6 +322,7 @@ impl Projectiles {
                 launch.at
             },
             body: None,
+            grounded: false,
         });
     }
     /// Advance only on simulation ticks. Returns damage to be applied through
@@ -847,8 +850,46 @@ fn frag_motion(
         let speed = projectile.velocity.length();
         projectile.velocity *= (1. - FRAG_ROLL_DECELERATION * dt / speed.max(1e-6)).max(0.);
     }
-    projectile.angles += projectile.angular_velocity * dt;
+    if rolling || (impact > 0. && projectile.grounded) {
+        projectile.grounded = true;
+    } else if projectile.velocity.z.abs() > 60. {
+        projectile.grounded = false;
+    }
+    if projectile.grounded {
+        frag_roll(projectile, dt);
+    } else {
+        projectile.angles += projectile.angular_velocity * dt;
+    }
     impact
+}
+/// w_grenade.phy's radius about its long (model z) axis, units.
+const FRAG_ROLL_RADIUS: f32 = 1.8;
+/// On a floor the swept frag lies on its side, long axis horizontal and across its
+/// motion, and rolls about that axis by distance / radius (native frags roll along their
+/// own axis after landing; the swept box has no rotational dynamics, so the free spin
+/// is dropped here instead of turning the model about its origin into the floor).
+fn frag_roll(projectile: &mut Projectile, dt: f32) {
+    use glam::Quat;
+    let current = crate::physics::angles(projectile.angles);
+    let horizontal = Vec3::new(projectile.velocity.x, projectile.velocity.y, 0.);
+    let speed = horizontal.length();
+    // The roll axis: across the motion, else the current long axis laid flat.
+    let mut axis = if speed > 1. {
+        Vec3::new(-horizontal.y, horizontal.x, 0.) / speed
+    } else {
+        let long = current * Vec3::Z;
+        Vec3::new(long.x, long.y, 0.).normalize_or(Vec3::Y)
+    };
+    let long = current * Vec3::Z;
+    if long.dot(axis) < 0. {
+        axis = -axis;
+    }
+    // Swing the long axis onto the roll axis by the shortest rotation, keeping the
+    // grenade's own roll, then roll about it.
+    let lay = Quat::from_rotation_arc(long.normalize_or(Vec3::Z), axis);
+    let roll = Quat::from_axis_angle(axis, speed * dt / FRAG_ROLL_RADIUS);
+    projectile.angles = crate::projectiles::quat_angles((roll * lay * current).normalize());
+    projectile.angular_velocity = Vec3::ZERO;
 }
 /// World::model_physics key of the frag model (skin 0).
 pub fn frag_key() -> String {
@@ -1066,6 +1107,7 @@ mod tests {
             ignited: false,
             solid_at: 0.,
             body: None,
+            grounded: false,
         };
         let physics = Physics::new(&World::default());
         let mut t = 0.045;

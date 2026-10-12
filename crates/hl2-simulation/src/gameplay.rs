@@ -30,6 +30,11 @@ pub struct Weapon {
     pub pellets: usize,
     pub damage: f32,
     pub sounds: BTreeMap<String, String>,
+    /// Script "weight" (GetNextBestWeapon prefers the highest).
+    pub weight: i32,
+    /// Script "autoswitchto" / "autoswitchfrom" set to 0.
+    pub no_autoswitch_to: bool,
+    pub no_autoswitch_from: bool,
 }
 const IMPLEMENTED: [&str; 11] = [
     "weapon_crowbar",
@@ -130,6 +135,9 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
                     .unwrap_or_default()
                     .into(),
                 viewmodel: value("viewmodel").context("viewmodel absent")?.into(),
+                weight: value("weight").and_then(|s| s.parse().ok()).unwrap_or(0),
+                no_autoswitch_to: value("autoswitchto").is_some_and(|s| s.trim() == "0"),
+                no_autoswitch_from: value("autoswitchfrom").is_some_and(|s| s.trim() == "0"),
                 magazine,
                 default_clip: value("default_clip")
                     .and_then(|s| s.parse().ok())
@@ -483,6 +491,54 @@ impl Inventory {
             _ => "idle01",
         }
     }
+    /// CBaseCombatWeapon::HasAnyAmmo for an owned weapon.
+    pub fn has_any_ammo(&self, weapon: &Weapon) -> bool {
+        let uses_primary = !weapon.ammo_type.is_empty() && weapon.ammo_type != "None";
+        let uses_secondary =
+            !weapon.secondary_ammo_type.is_empty() && weapon.secondary_ammo_type != "None";
+        if !uses_primary && !uses_secondary {
+            return true;
+        }
+        let clip = self.owned.get(&weapon.class).copied().unwrap_or(0);
+        (uses_primary && (clip > 0 || self.ammo(&weapon.ammo_type) > 0))
+            || (uses_secondary && self.ammo(&weapon.secondary_ammo_type) > 0)
+    }
+    /// CSingleplayRules::GetNextBestWeapon: the highest weight among owned weapons that
+    /// allow auto-switching to them and have ammo.
+    pub fn next_best_weapon(&self, weapons: &BTreeMap<String, Weapon>) -> Option<String> {
+        if weapons
+            .get(&self.active)
+            .is_some_and(|w| w.no_autoswitch_from)
+        {
+            return None;
+        }
+        let mut best: Option<(&Weapon, i32)> = None;
+        for class in self.owned.keys() {
+            let Some(w) = weapons.get(class) else {
+                continue;
+            };
+            if *class == self.active
+                || w.no_autoswitch_to
+                || !self.has_any_ammo(w)
+                || best.is_some_and(|(_, weight)| w.weight <= weight)
+            {
+                continue;
+            }
+            best = Some((w, w.weight));
+        }
+        best.map(|(w, _)| w.class.clone())
+    }
+    fn switch_if_empty(&mut self, weapons: &BTreeMap<String, Weapon>, time: f64) {
+        let Some(weapon) = weapons.get(&self.active) else {
+            return;
+        };
+        if self.has_any_ammo(weapon) {
+            return;
+        }
+        if let Some(next) = self.next_best_weapon(weapons) {
+            self.give(&next, weapons, time);
+        }
+    }
     pub fn give(&mut self, class: &str, weapons: &BTreeMap<String, Weapon>, time: f64) {
         if let Some(w) = weapons.get(class) {
             if w.magazine < 0 && !self.owned.contains_key(class) && w.ammo_max > 0 {
@@ -637,6 +693,12 @@ impl Inventory {
         }
         if self.active == "weapon_frag" && self.health > 0. {
             self.frag_tick(world, scene, weapons, primary, secondary);
+        }
+        // CBaseCombatWeapon::ItemPostFrame -> ReloadOrSwitchWeapons with no attack held:
+        // an empty weapon switches to the next best one once its attack delays pass
+        // (the last frag thrown leaves the grenade slot).
+        if !primary && !secondary && self.health > 0. && scene.time > self.next_attack {
+            self.switch_if_empty(weapons, scene.time);
         }
 
         for (id, e) in world.entities.iter().enumerate() {
@@ -1777,6 +1839,52 @@ fn ammo_pickup(class: &str) -> Option<(&'static str, i32)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_empty_frag_switches_to_the_heaviest_weapon_with_ammo() {
+        let mk = |class: &str, ammo: &str, magazine: i32, weight: i32, no_to: bool| Weapon {
+            class: class.into(),
+            ammo_type: ammo.into(),
+            magazine,
+            ammo_max: 10,
+            weight,
+            no_autoswitch_to: no_to,
+            ..Default::default()
+        };
+        let weapons: BTreeMap<String, Weapon> = [
+            mk("weapon_frag", "grenade", -1, 1, false),
+            mk("weapon_pistol", "Pistol", 18, 2, false),
+            mk("weapon_smg1", "SMG1", 45, 3, false),
+            mk("weapon_rpg", "RPG_Round", -1, 0, true),
+            mk("weapon_crowbar", "None", -1, 0, false),
+        ]
+        .into_iter()
+        .map(|w| (w.class.clone(), w))
+        .collect();
+        let mut inv = Inventory::default();
+        for (class, clip) in [
+            ("weapon_frag", -1),
+            ("weapon_pistol", 0),
+            ("weapon_smg1", 0),
+            ("weapon_rpg", -1),
+            ("weapon_crowbar", -1),
+        ] {
+            inv.owned.insert(class.into(), clip);
+        }
+        inv.active = "weapon_frag".into();
+        inv.set_ammo("Pistol", 5);
+        inv.set_ammo("RPG_Round", 3);
+        // SMG1 has neither clip nor reserve; the RPG never takes auto-switches.
+        assert!(!inv.has_any_ammo(&weapons["weapon_frag"]));
+        assert_eq!(
+            inv.next_best_weapon(&weapons).as_deref(),
+            Some("weapon_pistol")
+        );
+        inv.set_ammo("Pistol", 0);
+        assert_eq!(
+            inv.next_best_weapon(&weapons).as_deref(),
+            Some("weapon_crowbar")
+        );
+    }
     #[test]
     fn frag_launches_follow_weapon_frag_math() {
         use super::*;
