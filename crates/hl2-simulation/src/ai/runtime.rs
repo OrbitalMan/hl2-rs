@@ -170,8 +170,8 @@ impl AiRuntime {
                 actors.insert(id, actor);
                 continue;
             }
-            match e.class() {
-                "ai_goal_police" => {
+            if e.class() == "ai_goal_police" {
+                {
                     let angles = e
                         .get("angles")
                         .and_then(modkit_core::parse_vec3)
@@ -195,7 +195,6 @@ impl AiRuntime {
                         },
                     );
                 }
-                _ => {}
             }
         }
         Self {

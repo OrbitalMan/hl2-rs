@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-12 cloud session: runtime entity creation steps 1-3 started (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `Scene::initial_state` factored out of Scene::new; `Scene::spawned` / `spawn_entity` / `entity` / `ent` (spawned entities leaked `&'static`); 23 runtime lookups in entities.rs plus AI speech and eye tracking safe for spawned ids; `AiRuntime::add_actor`.
+
+**Why:** owner decision: spawn like Source (DESIGN 14r) instead of the load-time pool.
+
+**Tested how:** unit tests (spawned entity state/lookup, 40 scene+physics ticks with a spawned cop and a Kill input, runtime-spawned cop gets an AI actor and thinks); workspace tests; strict Clippy (ca1a40b failed it: the command chain did not gate on Clippy; fixed next commit); fmt.
+
+**Result:** passes on Linux; the host does not call spawn_entity yet (F4 still uses the pool).
+
+**Still broken or not tested:** steps 3 (controller, colliders), 4 (async late precache), 5 (Bevy instancing), 6 (remove pool).
+
+**Next:** DESIGN 14r step 3 remainder.
+
 ## 2026-10-12 cloud session: runtime entity creation plan (`wip/cloud-npc-ai-20261010`)
 
 **Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
