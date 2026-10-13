@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-13 session 13 (continued): bug bait splat, player shadow, physdamagescale (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** bug bait BeerSplash decal (retail subrect of decals/decals_lit, lightmap-lit translucent decals through `Impacts::add_decal`) and the SporeExplosion emitter; the player's 85 kg VPhysics shadow (pushes movable props <= 350 kg, weighs down movable ground, skips the held object; `Player::wish_velocity`); NPC impact damage scaled by the entity's `physdamagescale`. Fixtures `test-inputs/bevy-bugbait-wall.json`, `test-inputs/bevy-player-push.json`. Private oracle gained `!keep` (no setpos), `!forward/!unforward`, `!name` (targetname the prop under the crosshair), `!spawn` (prop_physics_create, ORACLE_SPAWN) and `!second` (ent_text on ORACLE_TEXT2).
+
+**Why:** owner playtest reports (bug bait leaves no stain or particles; walking into props does not push them; a launched pallet barely hurt a cop).
+
+**Tested how:** unit tests (spore schedule/direction/decal request, shadow push light vs heavy, held object, weight; physdamagescale), owned tests (decal textures incl. the translucent subrect), packaged captures vs native oracle: bug bait at the spawn-room wall (T012846Z), cardboard box push (T012535Z), crate/oil drum/pallet vs plaza cop (T015556Z, T015900Z, T020048Z). Workspace tests, strict Clippy, fmt.
+
+**Result:** stain and push match native closely; the plaza cop's immunity is the map's physdamagescale 0, now honoured.
+
+**Still broken or not tested:** spores dimmer/sparser than native (11f); our pallet launch flight vs native not compared (needs a spawn command, 14r); NPC studio decals; breakables; push speed limit and the shadow pushing the player.
+
+**Next:** breakable props (propdata), NPC decals, a debug prop spawn for open-space launch tests, then the rest of 13b and the merge.
+
 ## 2026-10-13 session 13: frag as a real w_grenade.phy rigid body (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

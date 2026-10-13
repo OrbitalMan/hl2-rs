@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Bug bait, player shadow and plaza cop vs native (session 13, 2026-10-13)
+
+Bug bait (eye (-4200,-224,1) setang 0 180 in the d1_trainstation_02 spawn room; native T012846Z, ours `test-inputs/bevy-bugbait-wall.json`): native leaves a dark reddish stain right of the crosshair; ours with the retail subrect decal lit by the wall lightmap gives a similar stain (artifacts/frag-s13/bait-wall-crop.png). The standalone decals/beersplash texture (10% mean alpha) was nearly invisible: rejected. Earlier floor/outdoor comparisons were invalid (the "splash" was a floor texture stain in both).
+Player push (eye (-3356,-2520,128) yaw 270 into cardboard_box001a #710, 5 kg): native 0.5 s y -2605.7, rest (-3358.3,-2607.4) (T012535Z); ours 0.45 s -2603.2, rest (-3359.0,-2608.7).
+Plaza cop #427 (physdamagescale 0): native wood_crate001a launch shatters the crate, cop health stays 40 (ACT_FLINCH_PHYSICS); with `ent_fire metropolice_plaza addoutput "physdamagescale 1"` a 30 kg oildrum001 brings him to -60. Native spawned pallet launched from (-2330,-2272,60) setang 4 0 rests ~845 units away near (-1485,-2223) (T020048Z; no cop in that run: the plaza cops spawn randomly, so the pallet kill is unconfirmed).
+
 ## Frag rigid body (session 13, 2026-10-13)
 
 Owned replay (`cargo test --release -p hl2-bevy owned_frag -- --ignored --nocapture`, HL2 installed): SDK launch math from the native eye/angles, seven spins per case, compared by time since the release command minus the native spawn delay. Best/mean RMS: lob 27.6/77.9, roll 16.4/16.5, overhand (setang -30 -20) 3.8/7.8, plaza (-10 12) 12.8/40.4, wall 44.1/81.5. Swept box: 92.1/22.3/13.1/44.7/105.8 (best). Bounds asserted: 35/30/8/25/55.
