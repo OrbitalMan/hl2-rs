@@ -504,8 +504,15 @@ impl Console {
 
     /// Returns the main menu title for the given category.
     pub fn category_title(&self, category: &str) -> &str {
+        let canonical = match category {
+            "hl2ep1" => "episodic",
+            "hl2ep2" => "ep2",
+            "hl2lc" => "lostcoast",
+            other => other,
+        };
         self.category_titles
-            .get(category)
+            .get(canonical)
+            .or_else(|| self.category_titles.get(category))
             .map(String::as_str)
             .unwrap_or(&self.title)
     }
@@ -1536,18 +1543,34 @@ impl Console {
                                 )
                         }
                     };
-                    for character in line.chars() {
+                    if line_idx == 0 {
+                        for character in line.chars() {
+                            draw_cell_text(
+                                &self.canvas,
+                                &character.to_string(),
+                                pen,
+                                geometry.title_tall,
+                                self.title_font.as_ref(),
+                                self.title_metrics,
+                                WHITE,
+                            );
+                            // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
+                            pen.x += face.metrics(character, em).advance_width.round();
+                        }
+                    } else {
+                        // Subtitle line (e.g. episode subtitle). The HALFLIFE2.ttf logo font only maps
+                        // HALF-LIFE' glyphs and maps lowercase letters to symbol icons.
+                        // Subtitle text is drawn with the menu font so Latin letters and punctuation render cleanly.
+                        let sub_tall = (geometry.title_tall * 0.55).round().max(14.);
                         draw_cell_text(
                             &self.canvas,
-                            &character.to_string(),
+                            line,
                             pen,
-                            geometry.title_tall,
-                            self.title_font.as_ref(),
-                            self.title_metrics,
-                            WHITE,
+                            sub_tall,
+                            self.menu_font.as_ref(),
+                            self.menu_metrics,
+                            Color::from_rgba(255, 255, 255, 200),
                         );
-                        // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
-                        pen.x += face.metrics(character, em).advance_width.round();
                     }
                 }
             } else {
@@ -1564,14 +1587,23 @@ impl Console {
                                 )
                         }
                     };
+                    let tall = if line_idx == 0 {
+                        geometry.title_tall
+                    } else {
+                        (geometry.title_tall * 0.55).round().max(14.)
+                    };
                     draw_cell_text(
                         &self.canvas,
                         line,
                         pen,
-                        geometry.title_tall,
-                        self.title_font.as_ref(),
-                        self.title_metrics,
-                        WHITE,
+                        tall,
+                        self.menu_font.as_ref(),
+                        self.menu_metrics,
+                        if line_idx == 0 {
+                            WHITE
+                        } else {
+                            Color::from_rgba(255, 255, 255, 200)
+                        },
                     );
                 }
             }
@@ -2857,5 +2889,40 @@ mod tests {
         console.escape();
         assert!(console.loading_dialog.is_none());
         assert_eq!(console.mode, Mode::MainMenu);
+    }
+
+    #[test]
+    fn submenu_titles_resolve_for_expansion_aliases() {
+        let mut console = Console::default();
+        let mut res = GameUiResources::default();
+        res.category_titles
+            .insert("episodic".into(), "HALF-LIFE'\n== episode one==".into());
+        res.category_titles
+            .insert("ep2".into(), "HALF-LIFE'\n== episode two ==".into());
+        res.category_titles
+            .insert("lostcoast".into(), "HALF-LIFE'\nlost coasT".into());
+        console.set_resources(res);
+
+        assert_eq!(
+            console.category_title("episodic"),
+            "HALF-LIFE'\n== episode one=="
+        );
+        assert_eq!(
+            console.category_title("hl2ep1"),
+            "HALF-LIFE'\n== episode one=="
+        );
+        assert_eq!(
+            console.category_title("ep2"),
+            "HALF-LIFE'\n== episode two =="
+        );
+        assert_eq!(
+            console.category_title("hl2ep2"),
+            "HALF-LIFE'\n== episode two =="
+        );
+        assert_eq!(
+            console.category_title("lostcoast"),
+            "HALF-LIFE'\nlost coasT"
+        );
+        assert_eq!(console.category_title("hl2lc"), "HALF-LIFE'\nlost coasT");
     }
 }

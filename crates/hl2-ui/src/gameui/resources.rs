@@ -368,8 +368,15 @@ pub struct GameUiResources {
 impl GameUiResources {
     /// Returns the background map configured for the given category, if any.
     pub fn background_map_for(&self, category: &str) -> Option<&str> {
+        let canonical = match category {
+            "hl2ep1" => "episodic",
+            "hl2ep2" => "ep2",
+            "hl2lc" => "lostcoast",
+            other => other,
+        };
         self.background_maps
-            .get(category)
+            .get(canonical)
+            .or_else(|| self.background_maps.get(category))
             .map(String::as_str)
             .or(self.background_map.as_deref())
     }
@@ -492,6 +499,15 @@ impl GameUiResources {
                 title.unwrap_or_else(|| category_title_fallback(category, &res.localization));
             res.category_titles.insert(category.to_owned(), title);
         }
+        for (alias, canonical) in [
+            ("hl2ep1", "episodic"),
+            ("hl2ep2", "ep2"),
+            ("hl2lc", "lostcoast"),
+        ] {
+            if let Some(title) = res.category_titles.get(canonical).cloned() {
+                res.category_titles.insert(alias.to_owned(), title);
+            }
+        }
         res
     }
 
@@ -524,7 +540,7 @@ impl<'a> Reader<'a> {
 
     pub fn read_text(&self, path: &str) -> Option<String> {
         self.read(path)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .and_then(|bytes| keyvalues::decode_text(&bytes).ok())
     }
 }
 
@@ -655,8 +671,14 @@ pub fn parse_gameinfo_title(bytes: &[u8]) -> Option<String> {
 
 /// Fallback titles for each menu category, resolving localized tokens if present with clean fallback strings.
 pub fn category_title_fallback(category: &str, loc: &Localization) -> String {
+    let canonical = match category {
+        "hl2ep1" => "episodic",
+        "hl2ep2" => "ep2",
+        "hl2lc" => "lostcoast",
+        other => other,
+    };
     let hl2 = loc.lookup("GameUI_HalfLife2").unwrap_or("Half-Life 2");
-    match category {
+    match canonical {
         "episodic" => {
             let ep1 = loc.lookup("GameUI_EpisodeOne").unwrap_or("Episode One");
             format!("{hl2}\n--- {ep1} ---")
@@ -676,7 +698,16 @@ pub fn category_title_fallback(category: &str, loc: &Localization) -> String {
 /// Returns fallback titles for all recognized categories.
 pub fn fallback_category_titles(loc: &Localization) -> BTreeMap<String, String> {
     let mut titles = BTreeMap::new();
-    for category in ["main", "hl2", "episodic", "ep2", "lostcoast"] {
+    for category in [
+        "main",
+        "hl2",
+        "episodic",
+        "ep2",
+        "lostcoast",
+        "hl2ep1",
+        "hl2ep2",
+        "hl2lc",
+    ] {
         titles.insert(category.to_owned(), category_title_fallback(category, loc));
     }
     titles
@@ -843,6 +874,44 @@ mod tests {
             parse_gameinfo_title(episode2),
             Some("HALF-LIFE'\n== episode two ==".into())
         );
+
+        // UTF-8 with BOM
+        let utf8_bom = b"\xef\xbb\xbf\"GameInfo\" { \"game\" \"HALF-LIFE 2\" \"title\" \"HALF-LIFE'\" \"title2\" \"== episode one==\" }";
+        assert_eq!(
+            parse_gameinfo_title(utf8_bom),
+            Some("HALF-LIFE'\n== episode one==".into())
+        );
+
+        // UTF-16 LE with BOM
+        let utf16_bom = [
+            0xff, 0xfe, b'"', 0, b'G', 0, b'a', 0, b'm', 0, b'e', 0, b'I', 0, b'n', 0, b'f', 0,
+            b'o', 0, b'"', 0, b' ', 0, b'{', 0, b' ', 0, b'"', 0, b't', 0, b'i', 0, b't', 0, b'l',
+            0, b'e', 0, b'"', 0, b' ', 0, b'"', 0, b'H', 0, b'A', 0, b'L', 0, b'F', 0, b'-', 0,
+            b'L', 0, b'I', 0, b'F', 0, b'E', 0, b'\'', 0, b'"', 0, b' ', 0, b'}', 0,
+        ];
+        assert_eq!(parse_gameinfo_title(&utf16_bom), Some("HALF-LIFE'".into()));
+
+        // UTF-16 LE without BOM
+        let utf16_nobom = [
+            b'"', 0, b'G', 0, b'a', 0, b'm', 0, b'e', 0, b'I', 0, b'n', 0, b'f', 0, b'o', 0, b'"',
+            0, b' ', 0, b'{', 0, b' ', 0, b'"', 0, b't', 0, b'i', 0, b't', 0, b'l', 0, b'e', 0,
+            b'"', 0, b' ', 0, b'"', 0, b'H', 0, b'A', 0, b'L', 0, b'F', 0, b'-', 0, b'L', 0, b'I',
+            0, b'F', 0, b'E', 0, b'\'', 0, b'"', 0, b' ', 0, b'"', 0, b't', 0, b'i', 0, b't', 0,
+            b'l', 0, b'e', 0, b'2', 0, b'"', 0, b' ', 0, b'"', 0, b'l', 0, b'o', 0, b's', 0, b't',
+            0, b' ', 0, b'c', 0, b'o', 0, b'a', 0, b's', 0, b'T', 0, b'"', 0, b' ', 0, b'}', 0,
+        ];
+        assert_eq!(
+            parse_gameinfo_title(&utf16_nobom),
+            Some("HALF-LIFE'\nlost coasT".into())
+        );
+
+        // Windows-1252 en-dash byte pattern (\x96)
+        let win1252 =
+            b"\"GameInfo\" { \"title\" \"HALF-LIFE'\" \"title2\" \"\x96 episode one \x96\" }";
+        assert_eq!(
+            parse_gameinfo_title(win1252),
+            Some("HALF-LIFE'\n– episode one –".into())
+        );
     }
 
     #[test]
@@ -868,6 +937,19 @@ mod tests {
             titles.get("lostcoast").map(String::as_str),
             Some("Half-Life 2\n--- Lost Coast ---")
         );
+        // Expansion aliases
+        assert_eq!(
+            titles.get("hl2ep1").map(String::as_str),
+            Some("Half-Life 2\n--- Episode One ---")
+        );
+        assert_eq!(
+            titles.get("hl2ep2").map(String::as_str),
+            Some("Half-Life 2\n--- Episode Two ---")
+        );
+        assert_eq!(
+            titles.get("hl2lc").map(String::as_str),
+            Some("Half-Life 2\n--- Lost Coast ---")
+        );
 
         let empty_loc = Localization::default();
         let fallback_empty = fallback_category_titles(&empty_loc);
@@ -878,6 +960,18 @@ mod tests {
         assert_eq!(
             fallback_empty.get("ep2").map(String::as_str),
             Some("Half-Life 2\n--- Episode Two ---")
+        );
+        assert_eq!(
+            fallback_empty.get("hl2ep1").map(String::as_str),
+            Some("Half-Life 2\n--- Episode One ---")
+        );
+        assert_eq!(
+            fallback_empty.get("hl2ep2").map(String::as_str),
+            Some("Half-Life 2\n--- Episode Two ---")
+        );
+        assert_eq!(
+            fallback_empty.get("hl2lc").map(String::as_str),
+            Some("Half-Life 2\n--- Lost Coast ---")
         );
     }
 

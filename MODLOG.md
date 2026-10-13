@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-13 Submenu title encoding
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `source-assets::keyvalues`: updated `decode_text` to robustly handle byte patterns for UTF-8 with BOM (`[0xef, 0xbb, 0xbf]`), UTF-16 with BOM (`[0xff, 0xfe]` / `[0xfe, 0xff]`), UTF-16 LE without BOM heuristic (`data.len() >= 4 && data.len() % 2 == 0 && data[1] == 0 && data[3] == 0`), and tolerant Windows-1252 / ISO-8859-1 fallback for 8-bit text (`\x80..=\xFF`, e.g. en-dash `\x96`, copyright `\xa9`). In `lexical_tokens`, stripped leading BOM and treated `\u{feff}` as whitespace/ignored so zero-width no-break spaces never pollute token names.
+- `hl2-ui::gameui::resources`: updated `Reader::read_text` to decode via `keyvalues::decode_text` rather than raw `String::from_utf8_lossy`, preventing null bytes and replacement character corruption when reading UTF-16 resources.
+- `hl2-ui::gameui::resources`: normalized expansion category aliases (`hl2ep1` -> `episodic`, `hl2ep2` -> `ep2`, `hl2lc` -> `lostcoast`) in `category_title_fallback`, populated both canonical and alias entries in `GameUiResources::load`, and added alias resolution in `GameUiResources::background_map_for` and `fallback_category_titles`.
+- `hl2-ui::console`: normalized expansion category aliases in `Console::category_title`. In `Console::draw`, rendered line 0 (`HALF-LIFE'`) with `self.title_font` while rendering subtitle line 1 (`title2`) with `self.menu_font` and `self.menu_metrics`, ensuring Latin letters, numbers, and dashes render as authentic text instead of Half-Life symbol icons (since `HALFLIFE2.ttf` only maps logo glyphs for `HALF-LIFE'` and maps lowercase letters to symbol art icons). Fallback rendering when title font is absent now correctly uses `menu_font`.
+- Tests: added regression tests in `source-assets` (`decode_text_and_parse_resource_handle_bom_utf16_and_windows1252_patterns`) and `hl2-ui` (`parse_gameinfo_title_handles_single_and_two_line_titles` testing UTF-8 BOM, UTF-16 LE with BOM, UTF-16 LE without BOM, and Windows-1252 en-dash `\x96`, and `submenu_titles_resolve_for_expansion_aliases` in `console.rs`).
+
+**Why:**
+- In the original GameUI, expansion submenus (`hl2ep1`, `hl2ep2`, `hl2lc`) map to `episodic`, `ep2`, and `lostcoast`. Previously, querying titles by expansion alias fell back to the base title `Half-Life 2`, and decoding resources via `Reader::read_text` corrupted UTF-16 text. Furthermore, `Console::draw` rendered subtitle line 2 using `self.title_font` (`HALFLIFE2.ttf`), which turned lowercase characters into symbol icons rather than Latin text. Fixing this at the shared decoding and resolution boundaries ensures all encodings (UTF-8 with BOM, UTF-16 LE with/without BOM, Windows-1252) and category aliases resolve cleanly across the entire UI.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all 300+ workspace tests pass.
+- `cargo test --locked -p hl2-ui -- --ignored`: 3 owned install tests pass.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+- Headless runtime: `hl2-bevy --frames 30` ran 30 frames cleanly on Metal.
+
+**Result:** Submenu titles resolve cleanly for `hl2ep1`, `hl2ep2`, `hl2lc` across all supported text encodings without decoding corruption or symbol glyph mismatch.
+
+**Still broken or not tested:** Visual appearance of subtitle typography on physical display needs manual check.
+
+**Next:** Task 4 (Hardcoded UI strings audit).
+
 ## 2026-10-13 Credits dialog sizing
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
