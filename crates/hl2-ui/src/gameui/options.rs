@@ -147,6 +147,7 @@ pub(crate) enum Target {
     Ok,
     Cancel,
     Apply,
+    Close,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -678,6 +679,7 @@ impl OptionsDialog {
             (Target::Ok, ok),
             (Target::Cancel, cancel),
             (Target::Apply, apply),
+            (Target::Close, widgets::close_button_rect(DIALOG_SIZE)),
         ]);
         let was_editing = self.editing.is_some();
         if self.tab == Tab::Keyboard {
@@ -693,7 +695,7 @@ impl OptionsDialog {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 return self.ok();
             }
-            Some(Target::Cancel) => {
+            Some(Target::Cancel) | Some(Target::Close) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 return OptionsOutcome::Close(None);
             }
@@ -935,7 +937,13 @@ impl OptionsDialog {
         let area = Rect::new(0., 0., size.x, size.y);
         let list = layout_widgets(&res, sub.panel(), area, &self.draft, &self.applied);
         let was_editing = self.editing.is_some();
-        match self.track(&list, &[], pointer, input) {
+        let close_rect = widgets::close_button_rect(size);
+        let extra = [(Target::Close, close_rect)];
+        match self.track(&list, &extra, pointer, input) {
+            Some(Target::Close) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                self.command(Command::SubCancel);
+            }
             Some(Target::Control(i)) => {
                 if let (Some(widget), Some(p)) = (list.get(i), pointer) {
                     if !matches!(widget.binding, Some(Binding::Slider(_))) {
@@ -972,7 +980,23 @@ impl OptionsDialog {
             modes: &self.modes,
         };
         let modal = self.sub.is_some() || self.confirm.is_some();
-        p.frame(DIALOG_SIZE, &loc.text("#GameUI_Options"));
+        let state = |target: Target| {
+            (
+                !modal && self.armed == Some(target),
+                !modal && self.pressed == Some(target),
+            )
+        };
+        let (close_armed, close_pressed) = state(Target::Close);
+        p.frame_with_close(
+            DIALOG_SIZE,
+            &loc.text("#GameUI_Options"),
+            Some(ButtonState {
+                armed: close_armed,
+                pressed: close_pressed,
+                enabled: !modal,
+                default: false,
+            }),
+        );
         let tabs = self.tab_rects(&|t| p.text_width(t, false));
         let page = page_rect();
         p.raised(page);
@@ -983,12 +1007,6 @@ impl OptionsDialog {
             }
         }
         p.tab(tabs[active], &self.tab_label(self.tab), true);
-        let state = |target: Target| {
-            (
-                !modal && self.armed == Some(target),
-                !modal && self.pressed == Some(target),
-            )
-        };
         if let Some(panel) = self.tab.panel() {
             let list = layout_widgets(&self.res, panel, page, &self.draft, &self.applied);
             for (i, widget) in list.iter().enumerate() {
@@ -1027,10 +1045,21 @@ impl OptionsDialog {
                 origin: centered(canvas, size, scale),
                 scale,
             };
-            sp.frame(size, &loc.text(sub.title()));
+            let sub_modal = self.confirm.is_some();
+            let sub_close_armed = !sub_modal && self.armed == Some(Target::Close);
+            let sub_close_pressed = !sub_modal && self.pressed == Some(Target::Close);
+            sp.frame_with_close(
+                size,
+                &loc.text(sub.title()),
+                Some(ButtonState {
+                    armed: sub_close_armed,
+                    pressed: sub_close_pressed,
+                    enabled: !sub_modal,
+                    default: false,
+                }),
+            );
             let area = Rect::new(0., 0., size.x, size.y);
             let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
-            let sub_modal = self.confirm.is_some();
             for (i, widget) in list.iter().enumerate() {
                 let target = Some(Target::Control(i));
                 let armed = !sub_modal && self.armed == target;
@@ -1956,5 +1985,87 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+    }
+
+    #[test]
+    fn options_dialog_close_button_behaves_like_cancel() {
+        let mut h = Harness::new();
+        h.dialog.open(Config::default());
+        h.tab(Tab::Mouse);
+
+        // Modify draft setting (invert mouse)
+        let chk_pos = page(30., 20.);
+        h.frame(Input {
+            pointer: Some(chk_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        h.frame(Input {
+            pointer: Some(chk_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert!(h.dialog.draft().mouse.invert);
+
+        let close_rect = widgets::close_button_rect(DIALOG_SIZE);
+        let close_pos = DIALOG + vec2(close_rect.x + close_rect.w / 2., close_rect.y + close_rect.h / 2.);
+
+        // Hover over close button: emits rollover sound and arms Close
+        h.frame(Input {
+            pointer: Some(close_pos),
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.armed, Some(Target::Close));
+        let _ = h.dialog.take_sounds();
+
+        // Click and release close button: activates Cancel outcome (Close(None))
+        h.frame(Input {
+            pointer: Some(close_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.pressed, Some(Target::Close));
+
+        let outcome = h.frame(Input {
+            pointer: Some(close_pos),
+            released: true,
+            ..Default::default()
+        });
+        // Crucial: Close(None) discards draft changes, exactly like Cancel!
+        assert_eq!(outcome, OptionsOutcome::Close(None));
+        assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+    }
+
+    #[test]
+    fn options_subdialog_close_button_cancels_and_restores() {
+        let mut h = Harness::new();
+        h.dialog.open(Config::default());
+        h.dialog.sub = Some(Sub::Gamma { saved: 2.2 });
+        h.dialog.draft.config.video.gamma = 1.6;
+
+        let canvas = vec2(1280., 720.);
+        let size = GAMMA_SIZE;
+        let gamma_origin = centered(canvas, size, 1.);
+        let close_rect = widgets::close_button_rect(size);
+        let close_pos = gamma_origin + vec2(close_rect.x + close_rect.w / 2., close_rect.y + close_rect.h / 2.);
+
+        // Click and release on subdialog close button
+        h.frame(Input {
+            pointer: Some(close_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        h.frame(Input {
+            pointer: Some(close_pos),
+            released: true,
+            ..Default::default()
+        });
+
+        // Subdialog is closed and gamma is restored to saved value
+        assert_eq!(h.dialog.sub, None);
+        assert_eq!(h.dialog.draft().video.gamma, 2.2);
     }
 }

@@ -308,6 +308,48 @@ pub const CLIENT_INSET_X: f32 = 8.;
 pub const CLIENT_TOP: f32 = 30.;
 /// `Frame.TitleTextInsetX`.
 pub const TITLE_INSET_X: f32 = 16.;
+/// Close button dimensions at 1:1 scale (Source VGUI FrameButton: 18x16 unscaled).
+pub const CLOSE_BUTTON_SIZE: Vec2 = vec2(18., 16.);
+/// Inset of the close button from the top-right corner of the frame.
+pub const CLOSE_BUTTON_INSET: Vec2 = vec2(24., 6.);
+
+/// Calculates the layout rectangle of the close button for a frame of the given `size`.
+pub fn close_button_rect(frame_size: Vec2) -> Rect {
+    Rect::new(
+        frame_size.x - CLOSE_BUTTON_INSET.x,
+        CLOSE_BUTTON_INSET.y,
+        CLOSE_BUTTON_SIZE.x,
+        CLOSE_BUTTON_SIZE.y,
+    )
+}
+
+/// Declarative specification for a VGUI frame window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameSpec<'a> {
+    pub size: Vec2,
+    pub title: &'a str,
+    /// Whether the frame displays a close (X) button in the top-right corner.
+    pub has_close: bool,
+}
+
+impl<'a> FrameSpec<'a> {
+    pub const fn new(size: Vec2, title: &'a str) -> Self {
+        Self {
+            size,
+            title,
+            has_close: true,
+        }
+    }
+
+    pub const fn without_close(mut self) -> Self {
+        self.has_close = false;
+        self
+    }
+
+    pub fn close_rect(&self) -> Option<Rect> {
+        self.has_close.then(|| close_button_rect(self.size))
+    }
+}
 
 /// Button interaction state for drawing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -420,10 +462,35 @@ impl<T: Copy + PartialEq> ButtonTracker<T> {
 impl Painter<'_> {
     /// A titled VGUI frame of `size` at the painter origin.
     pub fn frame(&self, size: Vec2, title: &str) {
+        self.frame_with_close(size, title, None);
+    }
+
+    /// A titled VGUI frame of `size` with an optional close (X) button.
+    pub fn frame_with_close(&self, size: Vec2, title: &str, close: Option<ButtonState>) {
         let rect = Rect::new(0., 0., size.x, size.y);
         self.fill(rect, self.theme.frame_bg);
         self.raised(rect);
         self.text(title, vec2(TITLE_INSET_X, 8.), self.theme.title_text, true);
+        if let Some(state) = close {
+            self.close_button(close_button_rect(size), state);
+        }
+    }
+
+    /// The close (X) button in a frame title bar.
+    pub fn close_button(&self, rect: Rect, state: ButtonState) {
+        if state.pressed && state.enabled {
+            self.sunken(rect);
+        } else {
+            self.raised(rect);
+        }
+        let offset = if state.pressed && state.enabled { 1. } else { 0. };
+        let text_rect = Rect::new(rect.x + offset, rect.y - 1. + offset, rect.w, rect.h);
+        let color = if state.enabled {
+            self.theme.title_text
+        } else {
+            self.theme.text_disabled
+        };
+        self.text_in("×", text_rect, Align::Center, color, false);
     }
 
     /// A push button: raised border, sunken while pressed, selection border when default.
@@ -982,5 +1049,50 @@ mod tests {
         painter.url(rect, "Link", ButtonState::active(true, true, true));
         let quads_url_pressed = canvas.drain();
         assert!(!quads_url_pressed.is_empty());
+    }
+
+    #[test]
+    fn frame_spec_and_close_button_drawing() {
+        let size = vec2(300., 200.);
+        let spec_with_close = FrameSpec::new(size, "Test Frame");
+        assert!(spec_with_close.has_close);
+        assert_eq!(
+            spec_with_close.close_rect(),
+            Some(Rect::new(size.x - 24., 6., 18., 16.))
+        );
+
+        let spec_no_close = spec_with_close.without_close();
+        assert!(!spec_no_close.has_close);
+        assert_eq!(spec_no_close.close_rect(), None);
+
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        // Frame without close button
+        painter.frame_with_close(size, "No Close", None);
+        let quads_no_close = canvas.drain();
+        assert!(!quads_no_close.is_empty());
+
+        // Frame with close button
+        painter.frame_with_close(size, "With Close", Some(ButtonState::new(true)));
+        let quads_with_close = canvas.drain();
+        assert!(quads_with_close.len() > quads_no_close.len());
+
+        // Frame with close button pressed
+        painter.frame_with_close(
+            size,
+            "With Close Pressed",
+            Some(ButtonState::active(true, true, true)),
+        );
+        let quads_pressed = canvas.drain();
+        assert_eq!(quads_pressed.len(), quads_with_close.len());
     }
 }

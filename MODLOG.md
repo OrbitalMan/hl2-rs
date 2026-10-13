@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-13 Close button on dialogs and frames
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`: added standard Source VGUI title bar close button geometry `CLOSE_BUTTON_SIZE = vec2(18., 16.)`, `CLOSE_BUTTON_INSET = vec2(24., 6.)`, and `close_button_rect(frame_size)`. Added declarative `FrameSpec` struct with `has_close: bool` (defaulting to true) and `close_rect()`. Added `Painter::frame_with_close` and `Painter::close_button` rendering bevel frames with centered title button glyph and +1px pressed state. Added unit test `frame_spec_and_close_button_drawing`.
+- `hl2-ui::gameui::options`: added `Target::Close` to `Target` enum. Wired close button hit testing and hover/release tracking into `page_input` (`DIALOG_SIZE`) and `sub_input` (subdialog size). Activating close on the main options dialog emits `OptionsOutcome::Close(None)` (discarding unapplied draft modifications, identically to Cancel). Activating close on subdialogs (Gamma, Tech Credits) triggers `Command::SubCancel`, restoring draft values to their pre-opened state (e.g. restoring saved gamma). Updated `draw` to render close buttons with active ButtonState on both main dialog and subdialogs. Added unit tests `options_dialog_close_button_behaves_like_cancel` and `options_subdialog_close_button_cancels_and_restores`.
+- `hl2-ui::gameui::menu`: added `pub has_close: bool` to `MessageBox` and `MessageBoxLayout`, defaulting to `false` per original Source SDK `vgui::MessageBox` architecture (`SetCloseButtonVisible(false)`). Added `with_close(bool)` builder method, allowing data-driven per-dialog enablement. Wired close button hit testing to return `Some(false)` (Cancel). Added unit test `message_box_close_button_data_driven_cancel`.
+
+**Why:**
+- Source VGUI `Frame` and `PropertyDialog` display a close (X) button in the top-right corner of their title bar, functioning identically to Cancel.
+- Confirmation message boxes (`vgui::MessageBox`) explicitly disable the close button, relying solely on explicit action buttons. The shared frame component supports data-driven enablement across dialog types.
+
+**Tested how:**
+- `cargo test --locked`: all 100 unit tests in `hl2-ui`, 64 in `hl2-bevy`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and exited code 0.
+
+**Result:** Authentic VGUI close (X) buttons on Options dialog and subdialogs, data-driven configuration on message boxes, with exact Cancel semantics and hover/click audio.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 6 ("Return to main menu" confirmation dialog).
+
 ## 2026-10-13 UI sounds: hover rollover, click release and GameUI audio routing
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

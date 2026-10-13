@@ -8,7 +8,9 @@
 
 use super::localize::Localization;
 use super::resources::{MenuItem, Visibility};
-use super::widgets::{ButtonState, ButtonTracker, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL};
+use super::widgets::{
+    close_button_rect, ButtonState, ButtonTracker, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL,
+};
 use crate::canvas::Rect;
 use glam::{vec2, Vec2};
 use source_assets::keyvalues::Entry;
@@ -271,6 +273,7 @@ pub struct MessageBox {
     pub cancel: Option<String>,
     pub armed: Option<usize>,
     pub pressed: Option<usize>,
+    pub has_close: bool,
     last_armed: Option<usize>,
     sounds: Vec<String>,
     tracker: ButtonTracker<usize>,
@@ -282,6 +285,7 @@ pub struct MessageBoxLayout {
     pub size: Vec2,
     pub text_at: Vec2,
     pub buttons: Vec<Rect>,
+    pub close: Option<Rect>,
 }
 
 impl MessageBox {
@@ -293,10 +297,17 @@ impl MessageBox {
             cancel,
             armed: None,
             pressed: None,
+            has_close: false,
             last_armed: None,
             sounds: Vec::new(),
             tracker: ButtonTracker::new(),
         }
+    }
+
+    /// Configures whether the message box displays a close (X) button in the title bar.
+    pub fn with_close(mut self, has_close: bool) -> Self {
+        self.has_close = has_close;
+        self
     }
 
     /// Drains any queued UI sound cues (e.g. rollover or release activation).
@@ -358,10 +369,12 @@ impl MessageBox {
                 ),
             ],
         };
+        let close = self.has_close.then(|| close_button_rect(size));
         MessageBoxLayout {
             size,
             text_at,
             buttons,
+            close,
         }
     }
 
@@ -375,7 +388,13 @@ impl MessageBox {
         released: bool,
         enter: bool,
     ) -> Option<bool> {
-        let hovered = pointer.and_then(|p| layout.buttons.iter().position(|b| b.contains(p)));
+        let hovered = pointer.and_then(|p| {
+            layout.buttons.iter().position(|b| b.contains(p)).or_else(|| {
+                layout
+                    .close
+                    .and_then(|c| c.contains(p).then_some(layout.buttons.len()))
+            })
+        });
         self.armed = hovered;
         if hovered.is_some() && hovered != self.last_armed {
             self.sounds.push("ui/buttonrollover.wav".to_string());
@@ -396,7 +415,16 @@ impl MessageBox {
     }
 
     pub fn draw(&self, painter: &Painter, layout: &MessageBoxLayout) {
-        painter.frame(layout.size, &self.title);
+        let close_state = layout.close.map(|_| {
+            let close_index = layout.buttons.len();
+            ButtonState {
+                armed: self.armed == Some(close_index),
+                pressed: self.pressed == Some(close_index),
+                enabled: true,
+                default: false,
+            }
+        });
+        painter.frame_with_close(layout.size, &self.title, close_state);
         painter.text(&self.text, layout.text_at, painter.theme.text, false);
         let labels = std::iter::once(&self.ok).chain(self.cancel.as_ref());
         for (index, (rect, label)) in layout.buttons.iter().zip(labels).enumerate() {
@@ -893,5 +921,38 @@ mod tests {
         quit.input(&layout, None, true, false, false, false);
         quit.input(&layout, None, false, false, true, false);
         assert!(quit.take_sounds().is_empty());
+    }
+
+    #[test]
+    fn message_box_close_button_data_driven_cancel() {
+        let mut msg_box = MessageBox::new(
+            "Title".into(),
+            "Text".into(),
+            "OK".into(),
+            Some("Cancel".into()),
+        );
+        // By default, MessageBox has no close button (matches Source SDK SetCloseButtonVisible(false))
+        assert!(!msg_box.has_close);
+        let layout_no_close = msg_box.layout(|_| 100.);
+        assert_eq!(layout_no_close.close, None);
+
+        // Data-driven close button enabled
+        msg_box = msg_box.with_close(true);
+        assert!(msg_box.has_close);
+        let layout_with_close = msg_box.layout(|_| 100.);
+        let close_rect = layout_with_close.close.expect("close button rect");
+        assert_eq!(close_rect, close_button_rect(layout_with_close.size));
+
+        let center = |r: Rect| Some(vec2(r.x + r.w / 2., r.y + r.h / 2.));
+
+        // Hover over close button: emits rollover sound
+        msg_box.input(&layout_with_close, center(close_rect), false, false, false, false);
+        assert_eq!(msg_box.take_sounds(), vec!["ui/buttonrollover.wav"]);
+
+        // Click and release on close button: activates Cancel outcome (Some(false))
+        msg_box.input(&layout_with_close, center(close_rect), true, true, false, false);
+        let outcome = msg_box.input(&layout_with_close, center(close_rect), false, false, true, false);
+        assert_eq!(outcome, Some(false), "Close button behaves like Cancel");
+        assert_eq!(msg_box.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
     }
 }
