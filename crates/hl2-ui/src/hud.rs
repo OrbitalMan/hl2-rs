@@ -13,7 +13,6 @@ use source_assets::{
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    path::PathBuf,
     sync::Arc,
 };
 
@@ -1489,13 +1488,11 @@ impl WeaponHud {
             .read("resource/HALFLIFE2.ttf")?
             .context("HalfLife2 HUD font missing")?;
         let face = FontFace::load(&icon_font, canvas.clone())?;
-        let windows = std::env::var_os("WINDIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("C:/Windows"));
-        let bold = std::fs::read(windows.join("Fonts/verdanab.ttf"))
-            .ok()
+        let bold = vfs
+            .read("resource/linux_fonts/liberationsans-bold.ttf")?
             .or(vfs.read("resource/linux_fonts/DejaVuSans-Bold.ttf")?)
-            .context("Verdana or bundled HUD fallback font missing")?;
+            .or(vfs.read("resource/gordin-bold.ttf")?)
+            .context("Owned game installation font missing")?;
         let bold = FontFace::load(&bold, canvas.clone())?;
         let animation_source = keyvalues::decode_text(
             &vfs.read("scripts/HudAnimations.txt")?

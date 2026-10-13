@@ -6,7 +6,8 @@ Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main
 
 Antigravity, Gemini 3.8 Flash model family. 10-task follow-up pass underway:
 - **Task 1 (Crate restructuring and renames): Complete.** Renamed `movement.rs` -> `simulation.rs`, `hud.rs` -> `canvas_renderer.rs`, `console.rs` -> `ui_host.rs`, and `ui.rs` -> `ui_system.rs` in `hl2-bevy`. Verified `hl2-ui` / `hl2-bevy` crate boundaries and dependencies (all UI logic, layouts, models and viewport geometry in `hl2-ui`, Bevy host systems and renderers in `hl2-bevy`). Verified by 90 unit tests in `hl2-ui`, 64 unit tests in `hl2-bevy`, strict clippy (`-D warnings`), and 30-frame headless Bevy runtime test. No functional regressions.
-- **Next:** Task 2 (Quick visual fixes: credits dialog opacity and button typography/spacing).
+- **Task 2 (Quick visual fixes): Complete.** 3rd party credits sub-dialogs set to 100% opacity (`frame_bg.a = 1.0`). Main menu / submenu button spacing doubled (`MENU_BUTTON_SPACING = 20.`) and magic numbers replaced with named constants (`BASE_SCREEN_HEIGHT`, `DEFAULT_TITLE_X`, etc.). Menu button font weight lightened and all host OS font file probing removed in favor of pure owned installation VFS loading (`resource/linux_fonts/*.ttf`, `resource/HALFLIFE2.ttf`, `resource/gordin-*.ttf`). Hard font legal safety rule installed in AGENTS.md. Unit tests added and updated. Verified by 91 unit tests in `hl2-ui`, 64 unit tests in `hl2-bevy`, clippy clean, and 30-frame headless Bevy runtime test.
+- **Next:** Task 3 (Button interaction model: pressed state, pointer release/cancel semantics).
   1. Owned-file test that the installed `level_sounds_music.txt` songs are classified as music (small).
   2. Gamma (`mat_monitorgamma`) in the renderer (medium): stored and edited by the brightness dialog, no visual effect yet.
   3. HDR None/Bloom/Full switching the render pipeline (large; design note first).

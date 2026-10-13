@@ -393,6 +393,27 @@ impl MessageBox {
     }
 }
 
+/// Reference design vertical resolution for Source UI coordinates (480p).
+pub const BASE_SCREEN_HEIGHT: f32 = 480.;
+/// Default X offset for the main menu title in 480p units (`Main.Title1.X`).
+pub const DEFAULT_TITLE_X: f32 = 76.;
+/// Default Y offset for the main menu title in 480p units (`Main.Title1.Y`).
+pub const DEFAULT_TITLE_Y: f32 = 145.;
+/// Default X offset for the menu buttons in 480p units (`Main.Menu.X`).
+pub const DEFAULT_MENU_X: f32 = 76.;
+/// Default Y offset for the menu buttons in 480p units (`Main.Menu.Y`).
+pub const DEFAULT_MENU_Y: f32 = 240.;
+/// Default title text height in 480p units.
+pub const DEFAULT_TITLE_TALL: f32 = 32.;
+/// Default item height from scheme (`MainMenu.MenuItemHeight`).
+pub const DEFAULT_ITEM_TALL: f32 = 26.;
+/// Default menu font cell height.
+pub const DEFAULT_FONT_TALL: f32 = 11.;
+/// Vertical spacing between menu buttons, doubled to match original Source GameUI proportions.
+pub const MENU_BUTTON_SPACING: f32 = 20.;
+/// Base hit area width for menu items in 480p units.
+pub const MENU_ROW_BASE_WIDTH: f32 = 250.;
+
 /// Layout parameters for the GameMenu's title and items, loaded from schemes or defaulting to desktop coordinates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MenuLayout {
@@ -410,14 +431,14 @@ impl Default for MenuLayout {
     fn default() -> Self {
         // Stock desktop defaults, overridden by the mounted schemes below.
         Self {
-            title_x: 76.,
-            title_y: 145.,
-            menu_x: 76.,
-            menu_y: 240.,
-            title_tall: 32.,
-            item_tall: 26.,
+            title_x: DEFAULT_TITLE_X,
+            title_y: DEFAULT_TITLE_Y,
+            menu_x: DEFAULT_MENU_X,
+            menu_y: DEFAULT_MENU_Y,
+            title_tall: DEFAULT_TITLE_TALL,
+            item_tall: DEFAULT_ITEM_TALL,
             font_ranges: vec![(1., 1080., 16.)],
-            font_tall: 11.,
+            font_tall: DEFAULT_FONT_TALL,
         }
     }
 }
@@ -438,7 +459,7 @@ impl MenuGeometry {
         Rect::new(
             self.menu.x,
             self.menu.y + index as f32 * self.item_tall,
-            250. * canvas_height / 480.,
+            MENU_ROW_BASE_WIDTH * canvas_height / BASE_SCREEN_HEIGHT,
             self.item_tall,
         )
     }
@@ -462,15 +483,14 @@ impl MenuGeometry {
 
 impl MenuLayout {
     pub fn geometry(&self, height: f32) -> MenuGeometry {
-        let scale = height / 480.;
+        let scale = height / BASE_SCREEN_HEIGHT;
         let font_tall = self
             .font_ranges
             .iter()
             .find(|(low, high, _)| height >= *low && height <= *high)
             .map_or_else(|| (self.font_tall * scale).round(), |(_, _, tall)| *tall);
         // Vertical stack of buttons with static spacing so they do not squish on smaller screens.
-        let item_spacing = 10.;
-        let item_tall = self.item_tall.max(font_tall + item_spacing);
+        let item_tall = self.item_tall.max(font_tall + MENU_BUTTON_SPACING);
         MenuGeometry {
             title: vec2(
                 (self.title_x * scale).trunc(),
@@ -739,22 +759,22 @@ mod tests {
         assert_eq!(at_720.title, vec2(114., 217.));
         assert_eq!(at_720.menu, vec2(114., 360.));
         assert_eq!(at_720.title_tall, 48.);
-        assert_eq!(at_720.item_tall, 26.);
+        assert_eq!(at_720.item_tall, 36.);
         assert_eq!(at_720.font_tall, 16.);
         let at_480 = layout.geometry(480.);
         assert_eq!(at_480.menu, vec2(76., 240.));
         assert_eq!(at_480.font_tall, 16.);
         assert_eq!(at_480.title_tall, 32.);
-        assert_eq!(at_480.item_tall, 26.);
+        assert_eq!(at_480.item_tall, 36.);
         assert_eq!(layout.geometry(1440.).font_tall, 33.);
-        assert_eq!(layout.geometry(1440.).item_tall, 43.);
+        assert_eq!(layout.geometry(1440.).item_tall, 53.);
 
         // Verify row rects and text position helpers
         let rects = at_480.row_rects(3, 480.);
         assert_eq!(rects.len(), 3);
-        assert_eq!(rects[0], Rect::new(76., 240., 250., 26.));
-        assert_eq!(rects[1], Rect::new(76., 266., 250., 26.));
-        assert_eq!(at_480.row_text_pos(0), vec2(76., 245.));
+        assert_eq!(rects[0], Rect::new(76., 240., 250., 36.));
+        assert_eq!(rects[1], Rect::new(76., 276., 250., 36.));
+        assert_eq!(at_480.row_text_pos(0), vec2(76., 250.));
     }
 
     #[test]

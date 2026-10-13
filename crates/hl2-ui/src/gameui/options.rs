@@ -112,6 +112,10 @@ enum Sub {
 }
 
 impl Sub {
+    fn is_credits(self) -> bool {
+        matches!(self, Self::AudioCredits | Self::VideoCredits)
+    }
+
     fn panel(self) -> Panel {
         match self {
             Self::Gamma { .. } => Panel::Gamma,
@@ -938,7 +942,17 @@ impl OptionsDialog {
         }
         if let Some(sub) = self.sub {
             let size = frame_size(&self.res, sub);
-            let sp = painter_at(centered(canvas, size, scale));
+            let mut theme = base.theme.clone();
+            if sub.is_credits() {
+                theme.frame_bg.a = 1.0;
+            }
+            let sp = Painter {
+                canvas: base.canvas,
+                fonts: base.fonts,
+                theme: &theme,
+                origin: centered(canvas, size, scale),
+                scale,
+            };
             sp.frame(size, &loc.text(sub.title()));
             let area = Rect::new(0., 0., size.x, size.y);
             let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
@@ -1670,5 +1684,35 @@ mod tests {
         assert!(h.dialog.escape());
         assert!(h.dialog.combo.is_none());
         assert!(!h.dialog.escape(), "Escape on the dialog closes it");
+    }
+
+    #[test]
+    fn credits_dialogs_have_100_percent_opacity() {
+        let mut h = Harness::new();
+        let painter = Painter {
+            canvas: &h.canvas,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        h.dialog.sub = Some(Sub::AudioCredits);
+        h.dialog.draw(&painter);
+        let quads = h.canvas.drain();
+        let credits_frame = quads
+            .iter()
+            .find(|q| q.destination.w == CREDITS_SIZE.x && q.destination.h == CREDITS_SIZE.y)
+            .expect("audio credits frame quad");
+        assert_eq!(credits_frame.color.a, 1.0);
+
+        h.dialog.sub = Some(Sub::VideoCredits);
+        h.dialog.draw(&painter);
+        let quads = h.canvas.drain();
+        let video_credits_frame = quads
+            .iter()
+            .find(|q| q.destination.w == CREDITS_SIZE.x && q.destination.h == CREDITS_SIZE.y)
+            .expect("video credits frame quad");
+        assert_eq!(video_credits_frame.color.a, 1.0);
     }
 }

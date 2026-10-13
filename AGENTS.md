@@ -12,6 +12,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 4. Keep the installed game read-only. Approved private working directories are workspace work/hl2-decompiled, work/references and work/publishing. Other unrelated files remain outside scope unless named by the owner.
 5. Do not put credentials, tokens or passwords in project files, logs or commits.
 6. No FAL, replacement assets, crossovers or unsolicited Discord messages. This phase reconstructs HL2. Mods and crossovers with other Rust game rewrites are the long-term goal after 1:1 fidelity (owner, 2026-10-07); keep `modkit-core::ModPlugin` and shared crates mod-friendly. There is no single-player/offline-only project restriction; multiplayer/netcode fidelity is not implemented or tested.
+7. Fonts and UI typography must come strictly from the owned game installation VFS (in-place reading of installed `resource/*.ttf`, `platform/resource/linux_fonts/*.ttf`) or permissively licensed project assets (MIT `ProggyClean.ttf`). Never probe, read, bundle, or depend on proprietary host OS font files (`C:/Windows/Fonts`, `/System/Library/Fonts`, `/Library/Fonts`). Everything must be 100% legally clean and safe.
 
 ## How to work
 

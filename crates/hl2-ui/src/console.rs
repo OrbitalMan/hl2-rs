@@ -333,17 +333,10 @@ impl Default for Console {
 
 impl Console {
     pub fn load(vfs: &Vfs, canvas: Canvas) -> Self {
-        let windows = std::env::var_os("WINDIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| "C:/Windows".into());
-        let font = |file: &str, mac_file: &str, linux_vfs: &str| {
-            std::fs::read(windows.join("Fonts").join(file))
-                .or_else(|_| {
-                    std::fs::read(format!("/System/Library/Fonts/Supplemental/{mac_file}"))
-                })
-                .or_else(|_| std::fs::read(format!("/Library/Fonts/{mac_file}")))
+        let font = |path: &str| {
+            vfs.read(path)
                 .ok()
-                .or_else(|| vfs.read(linux_vfs).ok().flatten())
+                .flatten()
                 .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
         };
         let developer_font = FontFace::load(
@@ -351,31 +344,19 @@ impl Console {
             canvas.clone(),
         )
         .ok();
-        let menu_font = font(
-            "verdanab.ttf",
-            "Verdana Bold.ttf",
-            "resource/linux_fonts/liberationsans-bold.ttf",
-        )
-        .or_else(|| developer_font.clone());
-        let ui_font = font(
-            "tahoma.ttf",
-            "Tahoma.ttf",
-            "resource/linux_fonts/liberationsans-regular.ttf",
-        )
-        .or_else(|| developer_font.clone());
-        let mono = font(
-            "lucon.ttf",
-            "Courier New.ttf",
-            "resource/linux_fonts/DejaVuSansMono.ttf",
-        )
-        .or_else(|| developer_font.clone());
-        // The scheme's Default/DefaultBold dialog fonts are Tahoma and Tahoma Bold.
-        let bold_font = font(
-            "tahomabd.ttf",
-            "Tahoma Bold.ttf",
-            "resource/linux_fonts/liberationsans-bold.ttf",
-        )
-        .or_else(|| ui_font.clone());
+        let menu_font = font("resource/linux_fonts/liberationsans-regular.ttf")
+            .or_else(|| font("resource/gordin-regular.ttf"))
+            .or_else(|| developer_font.clone());
+        let ui_font = font("resource/linux_fonts/liberationsans-regular.ttf")
+            .or_else(|| font("resource/gordin-regular.ttf"))
+            .or_else(|| developer_font.clone());
+        let mono = font("resource/linux_fonts/liberationmono-regular.ttf")
+            .or_else(|| font("resource/linux_fonts/DejaVuSansMono.ttf"))
+            .or_else(|| developer_font.clone());
+        // The scheme's Default/DefaultBold dialog fonts:
+        let bold_font = font("resource/linux_fonts/liberationsans-bold.ttf")
+            .or_else(|| font("resource/gordin-bold.ttf"))
+            .or_else(|| ui_font.clone());
         let config = crate::config::Config::load_or_default();
         let mut console = Self {
             canvas: canvas.clone(),
@@ -395,15 +376,11 @@ impl Console {
             console.log(format!("GameUI resource unavailable: {file}"));
         }
         console.set_resources(gameui);
-        let menu_bytes = std::fs::read(windows.join("Fonts/verdanab.ttf"))
-            .or_else(|_| std::fs::read("/System/Library/Fonts/Supplemental/Verdana Bold.ttf"))
-            .or_else(|_| std::fs::read("/Library/Fonts/Verdana Bold.ttf"))
+        let menu_bytes = vfs
+            .read("resource/linux_fonts/liberationsans-regular.ttf")
             .ok()
-            .or_else(|| {
-                vfs.read("resource/linux_fonts/liberationsans-bold.ttf")
-                    .ok()
-                    .flatten()
-            });
+            .flatten()
+            .or_else(|| vfs.read("resource/gordin-regular.ttf").ok().flatten());
         if let Some(bytes) = menu_bytes {
             console.menu_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
         }

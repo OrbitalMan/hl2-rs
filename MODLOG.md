@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-13 Quick visual fixes: credits opacity, button typography and vertical spacing
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::options`: 3rd party technology credits dialogs (`Sub::AudioCredits` and `Sub::VideoCredits`) now render with 100% opacity (`frame_bg.a = 1.0`). Added unit test `credits_dialogs_have_100_percent_opacity` verifying that the credits frame background quad alpha is 1.0.
+- `hl2-ui::gameui::menu`: doubled vertical spacing between menu buttons (`MENU_BUTTON_SPACING = 20.`) and replaced layout magic numbers with named constants (`BASE_SCREEN_HEIGHT`, `DEFAULT_TITLE_X`, `DEFAULT_TITLE_Y`, `DEFAULT_MENU_X`, `DEFAULT_MENU_Y`, `DEFAULT_TITLE_TALL`, `DEFAULT_ITEM_TALL`, `DEFAULT_FONT_TALL`, `MENU_ROW_BASE_WIDTH`). Updated `native_menu_uses_480_coordinate_scaling_with_static_spacing` unit test.
+- `hl2-ui::console` & `hl2-ui::hud`: completely removed host OS font probing (`C:/Windows/Fonts`, `/System/Library/Fonts`, `/Library/Fonts`). All fonts now load strictly and exclusively from the owned game installation VFS (`resource/linux_fonts/liberationsans-regular.ttf`, `resource/linux_fonts/liberationsans-bold.ttf`, `resource/linux_fonts/DejaVuSans-Bold.ttf`, `resource/gordin-regular.ttf`, `resource/HALFLIFE2.ttf`), falling back only to the bundled MIT developer font (`ProggyClean.ttf`).
+- `AGENTS.md` (root & HL2RS): installed hard legal safety rule mandating that all UI font loading must strictly read from the owned game installation VFS or permissively licensed project assets, never probing or depending on proprietary host OS font files.
+
+**Why:**
+- 3rd party technology credits dialogs were partially transparent (~83% alpha) when opened over the options dialog.
+- Main menu and category submenu buttons used heavy bold typography and cramped vertical spacing.
+- Probing proprietary host OS font files introduced legal ambiguity and platform inconsistencies; the owned Half-Life 2 installation already ships open (SIL OFL) and authored Source fonts directly in `platform/resource/linux_fonts/` and `resource/`.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui -p hl2-bevy`: all 91 tests in `hl2-ui` and 64 tests in `hl2-bevy` passed (0 failures).
+- `cargo clippy --locked -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and exited code 0.
+
+**Result:** Credits dialogs render fully opaque, menu buttons render with lighter authentic font weight, and button rows have doubled spacing with named constants.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 3 (Button interaction model: pressed state, pointer release/cancel semantics).
+
 ## 2026-10-13 Crate restructuring and module renames
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
