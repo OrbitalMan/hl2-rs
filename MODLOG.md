@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 15 (continued): breakable prop gibs (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** DESIGN 13e steps 2-3. `hl2_simulation::gibs`: a broken prop (CBreakableProp::Break) records its pose and motion in `Scene::prop_breaks`; `Gibs::spawn` (PropBreakableCreateAll / BreakModelCreateSingle / BreakModelCreate_Prop) creates each non-ragdoll .phy break block as a runtime prop body (`Physics::add_prop_body`, new; the frag keeps `add_projectile_body`) at the parent's pose and offset with the parent's velocity at that point, its angular velocity and the default 100 u/s outward burst (`burst` key parsed); gibs get projectile-range entity ids (holdable). `Gibs::tick` follows SUB_StartFadeOut/SUB_FadeOut/SUB_AllowedToFade: after `fadetime`, 3 alpha per 15 ms tick while outside the player's 2D view cone (0.766) and not held, removed at 0; PerformanceMode 1 spawns none. Host: gib meshes preloaded with the projectile models (`PreparedEffects::load` takes the world), `effects::present_gibs` draws them with a per-gib material lit from the map light state and alpha-blended while fading; report `gameplay.gibs`, `gib_draws`. Fixture bevy-pallet-gibs-fade.
+
+**Why:** owner item 0a: breakable props must break into pieces like native. Owner question during the work: should gibs be newly spawned entities? Native: yes (BreakModelCreate_Prop CreateNoSpawn("prop_physics") at the break; models precached by PrecacheGibsForModel). Ours are created at the break too, as runtime bodies; full entities wait for DESIGN 14r.
+
+**Tested how:** unit tests (offset in parent model space, inherited velocity + burst, ragdoll gibs skipped and reported, entity binding; fade postponed while seen or held, 85-tick fade, removal, no-fadetime gib stays), workspace and owned tests, strict Clippy, fmt. Packaged (artifacts/s15): pallet #327 launched into the hall wall breaks into its 7 chunks (gibs1/gibcap.png), lit like the intact pallet at that spot (intact.png); after looking away all 7 fade and are removed by 20 s (two at 2 s, the rest at their 10 s fadetime). Owned check (scratch test, removed): cardboard_box001a/002a break into `ragdoll` gibs (6 solids); pallet chunk .phy hulls match their render bounds in model space.
+
+**Result:** wooden props break into physical pieces that fade like native.
+
+**Still broken or not tested:** native comparison of the pieces (counts/spread/fade timing) not done; cardboard boxes produce no pieces (ragdoll gibs need constraints, owner item c); parent skin, placementOrigin attachments, propdata chunk sets, gib health/DAMAGE_EVENTS_ONLY, gib visibility culling; gibs are runtime bodies, not map entities (DESIGN 14r).
+
+**Next:** NPC studio decals (owner item 0b), then constraints (0c, also unlocks ragdoll gibs).
 ## 2026-10-13 session 15: stacked-prop margin, prop CCD frame drop (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

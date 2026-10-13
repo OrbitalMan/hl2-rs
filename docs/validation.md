@@ -2,6 +2,8 @@
 
 ## Stacked props and prop CCD cost (session 15, 2026-10-13)
 
+Gibs: pallet #327 launched into the hall wall (`bevy-pallet-launched-into-wall.json`) spawns 7 wood_pallet001a chunks (gibcap.png mid-break; the intact pallet at the same spot, intact.png, has the same cool lighting); `bevy-pallet-gibs-fade.json` (look away at tick 100): alpha falls after each chunk's fadetime (2 s / 10 s) and all 7 are removed by 20.4 s. Native not compared.
+
 Packaged d1_trainstation_02, `--volume 0.01 --no-focus`, artifacts/s15; `step_ms` = whole fixed host step.
 - **Pallet off-center onto plaza cop #427** (`bevy-pallet-tips-off-plaza-cop.json`, eye (-1978.8,-2267.4,64) yaw 180, pallet #882 posed at (-2048,-2272,130) roll 10): before, physics 20-40 ms per step for ~0.7 s while it tipped off (the 15 ms tick falls behind: owner 46 -> 17 fps) and 3-7 ms idle; a temporary Rapier `profiler` build attributed it to the CCD time-of-impact search (17-26 ms; broad+narrow+solver ~2 ms) with 38 awake bodies at idle. After CCD gating: worst 2.5 ms, idle 1.1-2 ms. The posed terminal cop (`bevy-pallet-tips-off-npc-hull.json`) was already cheap (the pallet fell off flat).
 - **Crate on box** (`bevy-crate-on-box-stack.json`, crate #715 dropped onto box #710): crate-box origin offset 20.404 with summed skins, 19.904 now (box z 76.392 both). Native not measured numerically.
