@@ -70,6 +70,55 @@ pub struct Player {
     pub dead: bool,
     /// This step's wish velocity (wishdir x wishspeed; SDK m_outWishVel).
     pub wish_velocity: Vec3,
+    /// CGameMovement::CheckStuck blocked this step: the hull starts inside a solid.
+    pub stuck: bool,
+    /// m_outStepHeight: how far StepMove raised the feet this step.
+    pub step_height: f32,
+    /// m_StuckLast: the next stuck-table index (0 when not stuck).
+    stuck_last: usize,
+    /// m_flStuckCheckTime (server slot), in simulated seconds.
+    stuck_check_time: f64,
+}
+/// CreateStuckTable: 0.125-unit single and multi-axis nudges, then 2-unit moves at
+/// heights 0, 1 and 6.
+fn stuck_offset(index: usize) -> Vec3 {
+    let mut table = Vec::with_capacity(54);
+    for z in [-0.125, 0., 0.125] {
+        table.push(Vec3::new(0., 0., z));
+    }
+    for y in [-0.125, 0., 0.125] {
+        table.push(Vec3::new(0., y, 0.));
+    }
+    for x in [-0.125, 0., 0.125] {
+        table.push(Vec3::new(x, 0., 0.));
+    }
+    for x in [-0.125, 0.125] {
+        for y in [-0.125, 0.125] {
+            for z in [-0.125, 0.125] {
+                table.push(Vec3::new(x, y, z));
+            }
+        }
+    }
+    let heights = [0., 1., 6.];
+    for z in heights {
+        table.push(Vec3::new(0., 0., z));
+    }
+    for y in [-2., 0., 2.] {
+        table.push(Vec3::new(0., y, 0.));
+    }
+    for x in [-2., 0., 2.] {
+        table.push(Vec3::new(x, 0., 0.));
+    }
+    for z in heights {
+        for x in [-2., 0., 2.] {
+            for y in [-2., 0., 2.] {
+                table.push(Vec3::new(x, y, z));
+            }
+        }
+    }
+    // 53 entries; GetRandomStuckOffsets indexes % 54, so the memset slot 53 is zero.
+    table.push(Vec3::ZERO);
+    table[index % 54]
 }
 impl Player {
     pub fn new(eye: Vec3) -> Self {
@@ -86,7 +135,52 @@ impl Player {
             landed: None,
             dead: false,
             wish_velocity: Vec3::ZERO,
+            stuck: false,
+            step_height: 0.,
+            stuck_last: 0,
+            stuck_check_time: f64::NEG_INFINITY,
         }
+    }
+    /// CGameMovement::CheckStuck (server side), run from PlayerMove every 0.2 s in
+    /// single player (CHECK_STUCK_INTERVAL_SP; every tick while m_StuckLast != 0).
+    /// A hull starting inside a solid tries the next stuck-table offset at most every
+    /// CHECKSTUCK_MINTIME (0.05 s); the move is skipped until one is clear.
+    fn check_stuck(
+        &mut self,
+        world: &impl CollisionWorld,
+        mins: Vec3,
+        maxs: Vec3,
+        dt: f32,
+    ) -> bool {
+        // CheckInterval(STUCK): (command number + entindex 1) % 13 == 0.
+        let interval = if self.stuck_last != 0 {
+            1
+        } else {
+            (0.2 / TICK) as u64
+        };
+        if !(self.ticks + 1).is_multiple_of(interval) {
+            return false;
+        }
+        if !world
+            .trace_hull(self.feet, self.feet, mins, maxs)
+            .start_solid
+        {
+            self.stuck_last = 0;
+            return false;
+        }
+        let now = self.ticks as f64 * f64::from(dt);
+        if self.stuck_check_time >= now - 0.05 {
+            return true;
+        }
+        self.stuck_check_time = now;
+        let test = self.feet + stuck_offset(self.stuck_last);
+        self.stuck_last += 1;
+        if !world.trace_hull(test, test, mins, maxs).start_solid {
+            self.stuck_last = 0;
+            self.feet = test;
+            return false;
+        }
+        true
     }
     pub fn eye(&self) -> Vec3 {
         self.feet + Vec3::Z * self.eye_height
@@ -103,9 +197,17 @@ impl Player {
         let fall_speed = if self.grounded { 0. } else { -self.velocity.z };
         self.jumped = false;
         self.landed = None;
+        self.step_height = 0.;
         let mins = Vec3::new(-16., -16., 0.);
         let standing = Vec3::new(16., 16., 72.);
         let ducked = Vec3::new(16., 16., 36.);
+        let current = if self.crouched { ducked } else { standing };
+        self.stuck = !self.dead && self.check_stuck(world, mins, current, dt);
+        if self.stuck {
+            // "Can't move, we're stuck."
+            self.wish_velocity = Vec3::ZERO;
+            return;
+        }
         // Classify the existing hull before changing it. New players and hosts
         // which reposition the player cannot rely on the previous ground flag.
         let old_maxs = if self.crouched { ducked } else { standing };
@@ -280,6 +382,7 @@ impl Player {
                     if (stepped - before).truncate().length_squared()
                         > (flat - before).truncate().length_squared()
                     {
+                        self.step_height = stepped.z - before.z;
                         self.feet = stepped;
                         self.velocity = old_velocity;
                         self.velocity.z = flat_velocity.z;
@@ -579,6 +682,33 @@ mod tests {
         let (trapped, velocity) = slide(&w, start, Vec3::X, 1., Vec3::ZERO, Vec3::ZERO, false);
         assert_eq!(trapped, start);
         assert_eq!(velocity, Vec3::ZERO);
+    }
+    #[test]
+    fn check_stuck_nudges_a_hull_out_of_a_shallow_overlap_through_the_table() {
+        // A box overlapping the standing hull's +X face by 0.1 units, on a floor.
+        let mut w = floor();
+        w.brushes.push(solid_box(
+            Vec3::new(15.9, -40., 0.),
+            Vec3::new(40., 40., 40.),
+        ));
+        let mut player = Player::new(Vec3::Z * 64.);
+        let input = Input {
+            side: 1.,
+            ..Input::default()
+        };
+        let mut stuck_ticks = 0;
+        for _ in 0..60 {
+            player.step(input, &w, TICK);
+            stuck_ticks += usize::from(player.stuck);
+        }
+        // First checked on the 13th command; then one table entry per 0.05 s (every
+        // 4th tick): the z and y nudges stay inside, the -0.125 X entry (index 6) frees it.
+        assert!(stuck_ticks > 0, "{stuck_ticks}");
+        assert!(stuck_ticks < 27, "{stuck_ticks}");
+        assert!(!player.stuck);
+        assert!(player.feet.x <= -0.1 + 1e-4, "{}", player.feet);
+        // Free again: strafing moves the player.
+        assert!(player.feet.y.abs() > 1., "{}", player.feet);
     }
     #[test]
     fn airborne_duck_tucks_once_and_preserves_view_and_momentum() {

@@ -6,7 +6,7 @@ use crate::{
     entities::Scene,
     gameplay::{Inventory, Weapon},
     grab::{self, GrabController, DOT_30DEGREE, HOLD_MAX_ERROR, SCALE},
-    physics::Physics,
+    physics::{is_projectile_entity, Physics},
 };
 use glam::Vec3;
 use modkit_core::World;
@@ -40,10 +40,13 @@ const TANGENTS: [f32; 7] = [
 /// every axis (world AABB here; the SDK uses the OBB size). Hinges and
 /// FVPHYSICS_NO_PLAYER_PICKUP are not modeled.
 pub fn can_pickup(world: &World, physics: &Physics, id: usize) -> bool {
-    if !world
-        .entities
-        .get(id)
-        .is_some_and(|e| e.class().starts_with("prop_physics"))
+    // A thrown frag (CBaseGrenade::Use -> PickupObject) or a prop_physics.
+    let grenade = is_projectile_entity(id) && physics.dynamic.contains_key(&id);
+    if !grenade
+        && !world
+            .entities
+            .get(id)
+            .is_some_and(|e| e.class().starts_with("prop_physics"))
     {
         return false;
     }
@@ -51,9 +54,19 @@ pub fn can_pickup(world: &World, physics: &Physics, id: usize) -> bool {
     grab::body_mass(physics, id).is_some_and(|m| m <= MAX_MASS) && size.max_element() <= MAX_SIZE
 }
 
-/// FindUseEntity for physics props: the 1024-unit eye line, then 16-unit hulls over 72
-/// units at the down tangents; the first hit usable prop within PLAYER_USE_RADIUS of
-/// the player (vertical distance measured to the hull's height interval) wins.
+/// Distance from `point` to the infinite line through `start` along `direction`
+/// (CalcDistanceToLine).
+fn distance_to_line(point: Vec3, start: Vec3, direction: Vec3) -> f32 {
+    let along = (point - start).dot(direction);
+    (point - (start + direction * along)).length()
+}
+
+/// FindUseEntity for physics props: the 1024-unit eye line (returned at once), then
+/// 16-unit hulls over 72 units at the down tangents (the last usable hit within
+/// PLAYER_USE_RADIUS of the player, vertical distance measured to the hull's height
+/// interval). Then the PLAYER_USE_RADIUS sphere for FCAP_USE_IN_RADIUS entities (thrown
+/// grenades): within the 0.8 view cone, closer to the view line than the trace pick,
+/// and not occluded. Traces use COLLISION_GROUP_NONE, so they hit grenades too.
 pub fn find_use_prop(
     world: &World,
     physics: &Physics,
@@ -63,21 +76,63 @@ pub fn find_use_prop(
     feet: Vec3,
     height: f32,
 ) -> Option<usize> {
-    let mut traces = vec![physics.impact_ray(eye, forward, 1024.)];
-    for tangent in TANGENTS {
-        let down = (forward - up * tangent).normalize_or_zero();
-        traces.push(physics.impact_hull(eye, down, 72., Vec3::splat(16.)));
-    }
-    traces.into_iter().flatten().find_map(|hit| {
-        if !can_pickup(world, physics, hit.entity) {
-            return None;
-        }
+    let mut nearest = None;
+    for i in 0..=TANGENTS.len() {
+        let hit = if i == 0 {
+            physics.pick_ray(eye, forward, 1024.)
+        } else {
+            let down = (forward - up * TANGENTS[i - 1]).normalize_or_zero();
+            physics.pick_hull(eye, down, 72., Vec3::splat(16.))
+        };
+        let Some(hit) = hit.filter(|hit| can_pickup(world, physics, hit.entity)) else {
+            continue;
+        };
         let mut delta = hit.position - eye;
         let below = feet.z - hit.position.z;
         let above = hit.position.z - (feet.z + height);
         delta.z = below.max(above).max(0.);
-        (delta.length() < USE_RADIUS).then_some(hit.entity)
-    })
+        if delta.length() < USE_RADIUS {
+            if i == 0 {
+                return Some(hit.entity);
+            }
+            nearest = Some(hit.entity);
+        }
+    }
+    let closest = |id: usize| {
+        physics
+            .entity_closest_point(id, eye)
+            .or(grab::center(physics, id))
+    };
+    let mut nearest_distance = nearest
+        .and_then(closest)
+        .map_or(f32::MAX, |point| distance_to_line(point, eye, forward));
+    for &id in physics.dynamic.keys() {
+        if !is_projectile_entity(id) || !can_pickup(world, physics, id) {
+            continue;
+        }
+        let Some(point) = closest(id) else {
+            continue;
+        };
+        if point.distance(eye) > USE_RADIUS || (point - eye).normalize_or_zero().dot(forward) < 0.8
+        {
+            continue;
+        }
+        let distance = distance_to_line(point, eye, forward);
+        if distance >= nearest_distance {
+            continue;
+        }
+        let to = point - eye;
+        let length = to.length();
+        if length < 1e-3
+            || physics
+                .pick_ray(eye, to / length, length)
+                .is_none_or(|hit| hit.entity == id || hit.position.distance(point) < 0.1)
+        {
+            nearest = Some(id);
+            nearest_distance = distance;
+        }
+    }
+    nearest
 }
 
 impl Inventory {
@@ -391,5 +446,126 @@ mod tests {
         ));
         assert!(!inv.carrying());
         assert_eq!(light.bodies[light.dynamic[&0]].gravity_scale(), 0.);
+    }
+
+    #[test]
+    fn use_picks_up_a_resting_thrown_frag_until_it_detonates() {
+        use crate::projectiles::{frag_key, ProjectileKind, ProjectileSpawn, Projectiles};
+        // Synthetic solid written for this test (not game data).
+        let mut world = World::default();
+        world.model_physics.insert(
+            frag_key(),
+            modkit_core::PhysicsSolid {
+                mass: 1.,
+                ..Default::default()
+            },
+        );
+        let weapons = pistol();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(2000. * SCALE, 2000. * SCALE, 8. * SCALE).translation(vector![
+                0.,
+                0.,
+                -8. * SCALE
+            ]),
+        );
+        physics.tick(0.015);
+        let mut projectiles = Projectiles::default();
+        projectiles.spawn(
+            ProjectileSpawn {
+                angles: None,
+                kind: ProjectileKind::FragGrenade,
+                position: Vec3::new(40., 0., 6.),
+                velocity: Vec3::ZERO,
+                angular_velocity: Vec3::ZERO,
+                at: 0.,
+                damage: 125.,
+                radius: 250.,
+                mass: 0.,
+                lifetime: 3.,
+            },
+            &mut scene,
+        );
+        let step = |scene: &mut Scene, physics: &mut Physics, p: &mut Projectiles, t: u32| {
+            scene.time = f64::from(t) * 0.015;
+            p.tick(&world, scene, physics, Vec3::splat(9999.), false, 0.015);
+            physics.tick(0.015);
+        };
+        for t in 0..40 {
+            step(&mut scene, &mut physics, &mut projectiles, t);
+        }
+        let frag = crate::physics::projectile_entity(projectiles.active[0].id);
+        assert!(can_pickup(&world, &physics, frag));
+        // Ordinary traces (bullets, player movement) still skip the grenade.
+        assert!(physics
+            .impact_ray(Vec3::new(40., 0., 40.), -Vec3::Z, 60.)
+            .is_none_or(|hit| hit.entity != frag));
+        let mut inv = Inventory::default();
+        inv.give("weapon_pistol", &weapons, 0.);
+        // Looking down at the grenade from standing height (FindUseEntity's eye line).
+        let eye = Vec3::Z * 64.;
+        let forward = (Vec3::new(40., 0., 4.) - eye).normalize();
+        assert!(inv.player_use(
+            &weapons,
+            &world,
+            &mut scene,
+            &mut physics,
+            eye,
+            forward,
+            Vec3::ZERO,
+            false
+        ));
+        assert!(inv.carrying());
+        assert_eq!(inv.carry.as_ref().unwrap().entity, frag);
+        // Held: lifted off the floor in front of the eye; the fuse keeps running and
+        // the detonation ends the carry (the entity is gone).
+        for t in 40..120 {
+            inv.carry_tick(
+                &weapons,
+                &mut scene,
+                &mut physics,
+                eye,
+                forward,
+                Vec3::ZERO,
+                false,
+                false,
+                false,
+            );
+            step(&mut scene, &mut physics, &mut projectiles, t);
+        }
+        assert!(
+            projectiles.active[0].position.z > 20.,
+            "{}",
+            projectiles.active[0].position
+        );
+        for t in 120..230 {
+            inv.carry_tick(
+                &weapons,
+                &mut scene,
+                &mut physics,
+                eye,
+                forward,
+                Vec3::ZERO,
+                false,
+                false,
+                false,
+            );
+            step(&mut scene, &mut physics, &mut projectiles, t);
+        }
+        assert!(projectiles.active.is_empty());
+        inv.carry_tick(
+            &weapons,
+            &mut scene,
+            &mut physics,
+            eye,
+            forward,
+            Vec3::ZERO,
+            false,
+            false,
+            false,
+        );
+        assert!(!inv.carrying());
+        assert!(!physics.dynamic.contains_key(&frag));
     }
 }

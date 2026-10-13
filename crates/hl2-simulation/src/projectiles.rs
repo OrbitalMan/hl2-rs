@@ -445,7 +445,7 @@ impl Projectiles {
                             // VPhysics body: contacts, sounds (physics collision events)
                             // and rotation come from the rigid-body step.
                             let body = *projectile.body.get_or_insert_with(|| {
-                                physics.add_projectile_body(
+                                let body = physics.add_projectile_body(
                                     world,
                                     &frag_key(),
                                     Vec3::splat(4.),
@@ -453,7 +453,14 @@ impl Projectiles {
                                     crate::physics::angles(projectile.angles),
                                     projectile.velocity,
                                     projectile.angular_velocity,
-                                )
+                                );
+                                // CBaseGrenade: FCAP_IMPULSE_USE | FCAP_USE_IN_RADIUS, and
+                                // Use(USE_TOGGLE) -> PickupObject; gravity guns hold it too.
+                                physics.bind_projectile_entity(
+                                    body,
+                                    crate::physics::projectile_entity(projectile.id),
+                                );
+                                body
                             });
                             frag_vphysics_update(&mut projectile, body, physics, dt, &npc);
                             projectile.fuse = Some(fuse);

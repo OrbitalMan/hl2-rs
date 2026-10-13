@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 14: thrown frag +USE pickup; player stuck on/against props (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Thrown frags get a projectile entity id (`physics::projectile_entity`) bound to their VPhysics body, so the +USE carry and the gravity gun can hold them (SDK CBaseGrenade: FCAP_IMPULSE_USE | FCAP_USE_IN_RADIUS, Use -> PickupObject; HL2 OnPhysGunPickup leaves the fuse running). FindUseEntity and the gravity gun's FindObject/punt traces use COLLISION_GROUP_NONE (`pick_ray`/`pick_hull` also hit weapon-group bodies); FindUseEntity now follows the SDK order (eye line returns at once, the last usable hull trace wins) and adds the PLAYER_USE_RADIUS sphere search (0.8 cone, nearest to the view line, occlusion trace). (2) Player stuck on props: `Player` ports CGameMovement::CheckStuck (stuck table, 0.2 s single-player interval, one offset per 0.05 s, move skipped while stuck) and exports `step_height` (m_outStepHeight). The VPhysics shadow: the explicit 85 kg weight impulse on movable ground is removed (not SDK/retail: the retail shadow has no gravity and light supports are not rideable; it sank a 5 kg box ~1.5 units into the floor and its rebound filled the player's hull); a step teleports the shadow (SetPosition/StepUp) instead of driving it through the prop; retail contact-plane limits (50 u/s into a pushable object, 0 into a heavy or blocked one), also applied ahead of contact by a sweep; the collider extends 0.25 past the hull's sides/top with its bottom raised 0.25. Report gains `hull_contacts`, `shadow` and `carrying`.
+
+**Why:** owner playtest: a thrown grenade cannot be picked up with E (native can); the player often gets stuck walking into or standing on physics props. Owner corrections this session: test by standing on top of a prop; a box pinned at a wall should not move.
+
+**Tested how:** unit tests (frag pickup until detonation; CheckStuck nudge; shadow pushes light not heavy, held object, no sinking of the prop stood on), owned tests with HL2_ROOT (44 pass), workspace tests (430), strict Clippy, fmt. Packaged d1_trainstation_02 runs (artifacts/s14): teleport onto cardboard box #710 and walk around (before: stuck on landing; after: 0/28 samples stuck, box unmoved); diagonal walk into boxes #710/#711 (before: stuck 230 ticks on #711; after 0/42); native-compared push into the wall (box rests (-3360.0,-2607.9), native (-3358.3,-2607.4), stays at the wall; momentary <0.01-unit contacts while pushing a pinned box); frag thrown at the feet then +USE: carried in front of the view until the fuse (capture fraguse-held.png).
+
+**Result:** frag pickup works with +USE (and the gravity gun path is enabled, not separately tested); the stuck-on-top and walk-into-box cases no longer stick.
+
+**Still broken or not tested:** native comparison of frag pickup (hold distance, timing) not done; gravity gun frag grab not tested; light props are no longer weighed down by the player (retail lead: controller support contacts, normal Z < -0.7); retail two/multi-normal controller constraints, bounded per-axis corrections and VPhysicsShadowUpdate (shadow pushing the player) not ported; props sinking into floors under load or when shoved with a held object (owner report: red crate, bottles) is Rapier contact softness, not fixed; NPC movement colliders are model-shaped where the SDK uses a HULL_HUMAN box (owner report, next).
+
+**Next:** NPC hull boxes (SOLID_BBOX HULL_HUMAN for player movement and physics), then the pallet-on-cop frame drop, prop floor penetration, then the queued owner items.
 ## 2026-10-13 session 13 (continued): bug bait splat, player shadow, physdamagescale (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

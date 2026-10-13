@@ -1,7 +1,14 @@
 # STATUS
 
-Checkpoint: 2026-10-13 session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+Checkpoint: 2026-10-13 session 14 (frag pickup, stuck-on-props fix); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
 
+## Current session 14 (2026-10-13)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged. Owner playtest reports first:
+- **Thrown frag +USE pickup (owner: native allows E on a thrown grenade): done.** Frag bodies carry a projectile entity id; +USE (incl. the SDK FCAP_USE_IN_RADIUS sphere search) and the gravity gun can hold them; the fuse keeps running (HL2 OnPhysGunPickup). Packaged: thrown at the feet, picked up, carried until the fuse (artifacts/s14/fraguse-held.png). Native hold comparison not done; gravity gun grab not tested.
+- **Player stuck on/against props (owner): fixed for standing on top and walking into props.** Root cause measured with the new `hull_contacts` report: our explicit 85 kg weight impulse sank a 5 kg box ~1.5 units into the floor and its rebound filled the player's hull; also the shadow was driven through stepped-on props. Now: CheckStuck (SDK), no weight impulse (retail shadow has no gravity; light supports are not rideable), step teleport, retail contact-plane push limits (50 / 0) with a predictive sweep, shadow 0.25 larger than the hull at sides/top. Rejected on the way (recorded): a 0.25 inset shadow (box rebounded into the gap), velocity clip alone (2 attempts at the wall jam), a kinematic shadow (not retail; kept squeezing). Evidence artifacts/s14/final2-*.json.
+- **Owner questions answered:** SDK NPCs (metropolice, citizens via CNPC_PlayerCompanion) are SOLID_BBOX HULL_HUMAN (-13,-13,0)-(13,13,72) boxes for movement, with a box VPhysics hull; ours use model-shaped colliders (.phy pieces or the render mesh), so the player slips off shoulders and physics props touching a cop collide with a complex shape (likely the pallet-on-cop frame drop). Next: NPC hull boxes. Props sinking into floors under load or when shoved with a held object is Rapier contact softness (open).
+- Lost by the fix: the player no longer weighs light props down (retail lead: controller support contacts, normal Z < -0.7).
 ## Current session 13 (2026-10-13)
 
 Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged. Owner playtest reports first, all compared with native (oracle sessions in private arsenal-20261009/README.md, session 13):

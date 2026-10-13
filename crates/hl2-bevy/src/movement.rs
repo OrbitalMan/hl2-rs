@@ -91,6 +91,10 @@ struct Sample {
     player: Player,
     gameplay: Option<serde_json::Value>,
     ray_entity: Option<usize>,
+    /// Colliders overlapping the player hull (entity, dynamic).
+    hull_contacts: Vec<(Option<usize>, bool, f32, glam::Vec3)>,
+    /// The player VPhysics shadow's center.
+    shadow: Option<glam::Vec3>,
     console: Option<serde_json::Value>,
 }
 #[derive(Resource)]
@@ -401,6 +405,7 @@ impl Simulation {
                     self.player.feet,
                     self.player.crouched,
                     self.player.grounded && !self.player.dead,
+                    self.player.step_height,
                     self.player.wish_velocity,
                     held,
                     TICK,
@@ -448,6 +453,11 @@ impl Simulation {
                 player: self.player.clone(),
                 gameplay: game.as_deref().map(|g| g.report(&self.physics)),
                 console: ui.as_deref().map(|u| u.report()),
+                hull_contacts: self.physics.hull_contacts(
+                    self.player.feet,
+                    if self.player.crouched { 36. } else { 72. },
+                ),
+                shadow: self.physics.player_shadow_center(),
                 ray_entity: self
                     .physics
                     .ray(

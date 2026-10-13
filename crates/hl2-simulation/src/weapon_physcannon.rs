@@ -240,11 +240,11 @@ impl Inventory {
     /// entity. Returns (entity or world, fraction of the 1000 units, end).
     fn find_trace(physics: &Physics, eye: Vec3, forward: Vec3) -> Option<(usize, f32, Vec3)> {
         let length = TRACE_LENGTH * 4.;
-        let line = physics.impact_ray(eye, forward, length);
+        let line = physics.pick_ray(eye, forward, length);
         let hit = match line {
             Some(hit) if hit.entity != usize::MAX => Some(hit),
             _ => physics
-                .impact_hull(eye, forward, length, Vec3::splat(4.))
+                .pick_hull(eye, forward, length, Vec3::splat(4.))
                 .or(line),
         }?;
         Some((
@@ -287,7 +287,7 @@ impl Inventory {
                 continue;
             }
             if physics
-                .impact_ray(eye, los / distance.max(1e-6), distance + 1.)
+                .pick_ray(eye, los / distance.max(1e-6), distance + 1.)
                 .is_some_and(|hit| hit.entity == id)
             {
                 nearest = distance;
@@ -503,9 +503,9 @@ impl Inventory {
         }
         self.physcannon.next_primary = time + 0.5;
         let hit = physics
-            .impact_hull(eye, forward, TRACE_LENGTH, Vec3::splat(8.))
+            .pick_hull(eye, forward, TRACE_LENGTH, Vec3::splat(8.))
             .filter(|h| h.entity != usize::MAX && physics.dynamic.contains_key(&h.entity))
-            .or_else(|| physics.impact_ray(eye, forward, TRACE_LENGTH))
+            .or_else(|| physics.pick_ray(eye, forward, TRACE_LENGTH))
             .filter(|h| h.entity != usize::MAX);
         let Some(hit) = hit else {
             self.dry_fire(scene, weapon, world, time);
