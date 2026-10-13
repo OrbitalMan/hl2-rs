@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 14 (late): VPhysics contact margin, prop impact damage (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Dynamic prop colliders get a 0.5-unit Rapier contact skin (`VPHYSICS_CONTACT_MARGIN`): the maps' authored rest poses put .phy hull bottoms 0.497 (PlasticCrate01a) and 0.500 (a lying glass bottle) units above the floor, i.e. IVP's collision margin; without it props sat half a unit into floors (owner screenshot). The player shadow is now the hull at its sides/top with the bottom raised by the margin (replaces the +0.25 oversize). (2) Prop impact damage (DESIGN 13e step 0): CPhysicsProp::VPhysicsCollision -> CalculatePhysicsImpactDamage with allowStaticDamage (both bodies' lost speed, the other weighted by its mass, per kg of the prop), prop m_impactEnergyScale (0/absent -> 0.1, AddOutput override), x10 on the first collision after a gravity-gun launch (`Physics::launched`, set by the launch, cleared by any collision); prop_physics without health stay unbreakable (events only). (3) `prop_pose` gains `launched`. Fixtures bevy-pallet-launched-into-wall, bevy-crate-drop-rest.
+
+**Why:** owner: red plastic crate and bottles clip into the floor; crates/pallets must break like native (native, owner-verified: they break when launched into a close wall, not when launched far).
+
+**Tested how:** unit tests (launch bonus/energy scale/small-mass cap; a prop launched into a wall queues >= 50), owned tests (all pass, frag replay unchanged), packaged: crate #715 dropped on the hall floor rests at z 71.921 vs the native authored 71.957 (71.421 before); box push rest (-3359.4,-2607.4) vs native (-3358.3,-2607.4), stuck only 2/16 samples while pushing the pinned box; standing on a box and walking into boxes 0 stuck; pallet #327 (physdamagescale 0.1) fired at 1500 u/s into the hall wall with the launch flag breaks on impact, without it survives (3 hits); the native-compared street launch of pallet #882 does not break (its map physdamagescale is 0.0001), rest y -3495 vs native -3572 (-3521 before the margin). Regression batch artifacts/s14b-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 only); finals vs s14-regression mean 0.00-0.48, Breen feeds identical.
+
+**Result:** props rest on floors like native; launched props break against close walls.
+
+**Still broken or not tested:** native comparison of the wall break (which pallet the owner broke: #882 has physdamagescale 0.0001 and cannot break by impacts per the SDK; #327/#349 have 0.1); a clean far-launch test of a breakable pallet (the hall run hit an obstacle); gibs, break sounds and propdata damage tables/modifiers (13e steps 1-4); bottle shoved into the floor with +USE not re-measured with a bottle; props near z -4 keep jittering (never sleep; possibly water) - not investigated; the margin is not applied to the thrown frag or prop-prop pairs are doubled (0.5 + 0.5, not verified vs native).
+
+**Next:** 13e gibs/break sounds, then the remaining owner items and 13b, then the merge.
 ## 2026-10-13 session 14 (continued): NPC hull boxes, prop drag fractions, AddOutput keyvalues (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research input: Codex REA pass physics-research-20261013b/drag-axes (read-only).

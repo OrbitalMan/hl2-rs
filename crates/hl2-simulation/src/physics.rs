@@ -105,11 +105,14 @@ pub fn is_projectile_entity(id: usize) -> bool {
 /// SetupVPhysicsShadow: mass 85, no rotation, no drag; SetPushMassLimit(350).
 pub const PLAYER_SHADOW_MASS: f32 = 85.;
 pub const PLAYER_PUSH_MASS_LIMIT: f32 = 350.;
+/// VPhysics keeps objects apart by IVP's collision margin: the maps' authored rest
+/// poses put .phy hull bottoms 0.497 (PlasticCrate01a) and 0.500 (a lying
+/// garbage_glassbottle003a) units above the floor, while the stored hulls fit the render
+/// meshes, so without it props sank half a unit into floors (owner report). Applied as
+/// a Rapier contact skin on dynamic prop colliders (contacts only; traces unchanged).
+pub const VPHYSICS_CONTACT_MARGIN: f32 = 0.5;
 /// SetPushSpeedLimit(50): the shadow's speed into a pushable object's contact normal.
 pub const PLAYER_PUSH_SPEED_LIMIT: f32 = 50.;
-/// Margin of the shadow collider beyond the player hull's sides and top; its bottom is
-/// raised by the same amount (units).
-pub const PLAYER_SHADOW_SKIN: f32 = 0.25;
 fn groups_filter(groups: InteractionGroups) -> QueryFilter<'static> {
     static ENABLED: fn(ColliderHandle, &Collider) -> bool = |_, c| c.is_enabled();
     QueryFilter::default()
@@ -480,6 +483,9 @@ pub struct Physics {
     npc_hitboxes: std::collections::HashSet<ColliderHandle>,
     /// Diagnostics: wall-clock milliseconds of the last tick.
     pub last_step_ms: f64,
+    /// Props launched by the gravity gun whose first collision has not happened yet
+    /// (CPhysicsProp m_bFirstCollisionAfterLaunch).
+    pub launched: std::collections::HashSet<usize>,
 }
 /// Body-local hull points (metres) of a body's colliders for its drag geometry.
 fn drag_geometry(body: &RigidBody, colliders: &ColliderSet) -> Option<crate::drag::DragGeometry> {
@@ -803,7 +809,8 @@ impl Physics {
                         let collider = match &masses {
                             Some(_) => collider.density(0.),
                             None => collider.mass(10.),
-                        };
+                        }
+                        .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE);
                         p.colliders
                             .insert_with_parent(collider, body, &mut p.bodies)
                     }
@@ -1412,19 +1419,13 @@ impl Physics {
         }
         // VEC_HULL / VEC_DUCK_HULL; the body origin sits at the hull center.
         let half = Vec3::new(16., 16., if crouched { 18. } else { 36. });
-        // The collider extends PLAYER_SHADOW_SKIN past the hull's sides and top and is
-        // raised by it at the bottom: props resting against or rebounding onto the
-        // shadow stay outside the player's movement hull (an exact-hull shadow left
-        // them Rapier's ~0.04-unit contact tolerance inside it, an inset one let a box
-        // rebound off a wall into the gap; either made player traces start solid), and
-        // the bottom never presses a supporting prop into the floor. Stands in for
-        // VPhysics' collision margin; the retail value is not measured.
-        let skin = Vec3::new(
-            half.x + PLAYER_SHADOW_SKIN,
-            half.y + PLAYER_SHADOW_SKIN,
-            half.z,
-        );
-        let skin_offset = Vec3::Z * PLAYER_SHADOW_SKIN;
+        // The collider is the hull at its sides and top; props keep their
+        // VPHYSICS_CONTACT_MARGIN skin off it, so props resting against the shadow stay
+        // outside the player's movement hull (without a margin they sat inside Rapier's
+        // contact tolerance and player traces started solid). Its bottom is raised by
+        // that margin so it never presses a supporting prop into the floor.
+        let skin = Vec3::new(half.x, half.y, half.z - VPHYSICS_CONTACT_MARGIN * 0.5);
+        let skin_offset = Vec3::Z * (VPHYSICS_CONTACT_MARGIN * 0.5);
         let center = |feet: Vec3| feet + Vec3::Z * half.z;
         let (handle, current) = match self.player_shadow {
             Some((handle, hull)) if self.bodies.contains(handle) => (handle, hull),

@@ -191,6 +191,7 @@ pub fn load_with_canvas(
     let mut decal_errors = Vec::new();
     add_static_decals(&mut world, &vfs, &mut decal_errors);
     let model_report = models::append_models(&mut world, &vfs);
+    let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
     // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body
     // from w_grenade.phy (12-sided prism as a round cylinder, the .phy's IVP inertia) and
     // SDK spawn orientation. Session 13 replay against five native throws (lob, roll,

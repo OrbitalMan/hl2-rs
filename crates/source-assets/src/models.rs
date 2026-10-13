@@ -714,6 +714,21 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 .and_then(|text| prop_data_health(&prop_data, &text))
             {
                 world.model_prop_health.insert(instance.asset_key(), health);
+                // PropBreakableCreateAll's gib list (BuildGibList: the .phy break
+                // blocks); `append_break_physics` preloads the gibs' physics.
+                if health > 0. {
+                    let phy = format!("{}.phy", instance.model.trim_end_matches(".mdl"));
+                    let gibs = vfs
+                        .read(&phy)
+                        .ok()
+                        .flatten()
+                        .and_then(|data| crate::phy::read_keyvalues(&data).ok())
+                        .map(|entries| crate::phy::break_models(&entries))
+                        .unwrap_or_default();
+                    if !gibs.is_empty() {
+                        world.model_breaks.insert(instance.asset_key(), gibs);
+                    }
+                }
             }
         }
         // VPhysics props (CPhysicsProp::CreateVPhysics): authored solid parameters and,
@@ -877,6 +892,28 @@ pub fn read_illumination(
         position: crate::vec3(&mdl, 92)?,
         flags: u32le(&mdl, 152)?,
     })
+}
+/// Preloads every listed gib model's .phy (skin-0 key) so breaking a prop reads nothing.
+/// Gibs the PHY adapter cannot read (e.g. the cardboard_box00*_gib01 non-identity roots)
+/// are left out without a load warning: they are only needed when a prop breaks, where
+/// the spawn falls back to the render hull. Returns the models left out.
+pub fn append_break_physics(world: &mut World, vfs: &Vfs) -> Vec<String> {
+    let mut skipped = Vec::new();
+    let models: std::collections::BTreeSet<String> = world
+        .model_breaks
+        .values()
+        .flatten()
+        .map(|gib| gib.model.clone())
+        .collect();
+    for model in models {
+        if world.model_physics.contains_key(&format!("{model}#0")) {
+            continue;
+        }
+        if append_model_physics(world, vfs, &model).is_err() {
+            skipped.push(model);
+        }
+    }
+    skipped
 }
 /// Adds a non-map model's .phy solid (and supported pieces) to the world under its
 /// skin-0 asset key, e.g. a thrown frag's w_grenade.phy. Returns the reason on failure.
@@ -1328,6 +1365,24 @@ mod owned_phy_inertia {
         // Long (Source z) axis 0.000711 m^2/kg, cross axes 0.00428.
         assert!((inertia.z - 0.000711).abs() < 1e-5, "{inertia}");
         assert!((inertia.x - 0.004283).abs() < 1e-5 && (inertia.y - 0.004283).abs() < 1e-5);
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_crate_phy_lists_its_gibs() {
+        let root = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&root).unwrap();
+        let phy = vfs
+            .read("models/props_junk/wood_crate001a.phy")
+            .unwrap()
+            .unwrap();
+        let gibs = crate::phy::break_models(&crate::phy::read_keyvalues(&phy).unwrap());
+        assert!(!gibs.is_empty());
+        assert!(gibs
+            .iter()
+            .all(|g| g.model.starts_with("models/") && g.model.ends_with(".mdl")));
+        for gib in &gibs {
+            assert!(vfs.read(&gib.model).unwrap().is_some(), "{}", gib.model);
+        }
     }
     #[test]
     #[ignore = "requires an owned installed Half-Life 2 copy"]

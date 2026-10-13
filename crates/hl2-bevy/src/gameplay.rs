@@ -57,6 +57,9 @@ pub enum Action {
         angles: [f32; 3],
         #[serde(default)]
         velocity: [f32; 3],
+        /// As if just launched by the gravity gun (m_bFirstCollisionAfterLaunch).
+        #[serde(default)]
+        launched: bool,
     },
 }
 impl Action {
@@ -481,7 +484,11 @@ impl Gameplay {
                     origin,
                     angles,
                     velocity,
+                    launched,
                 } => {
+                    if launched {
+                        physics.launched.insert(entity);
+                    }
                     if !physics.place_body(
                         entity,
                         Vec3::from_array(origin),
@@ -691,6 +698,13 @@ impl Gameplay {
             &physics.resolved_collisions,
             &self.world,
             &mut self.scene,
+            &held,
+        );
+        hl2_simulation::impact_damage::queue_prop_damage(
+            &physics.resolved_collisions,
+            &self.world,
+            &mut self.scene,
+            &mut physics.launched,
             &held,
         );
         // VPhysics impact sounds of props and thrown frags (PhysCollisionSound).

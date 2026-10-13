@@ -480,6 +480,7 @@ impl Inventory {
                 .get(&id)
                 .and_then(|h| physics.bodies.get_mut(*h))
             {
+                // OnPhysGunDrop(LAUNCHED_BY_CANNON): m_bFirstCollisionAfterLaunch.
                 // ApplyVelocityBasedForce(LAUNCHED): AddVelocity(forward x force,
                 // Pickup_PhysGunLaunchAngularImpulse = RandomAngularImpulse(-600, 600)
                 // in the object's local axes, deg/s).
@@ -490,6 +491,7 @@ impl Inventory {
                 let w = rotation * (spin * (std::f32::consts::PI / 180.));
                 body.set_angvel(*body.angvel() + vector![w.x, w.y, w.z], true);
             }
+            physics.launched.insert(id);
             self.physcannon.next_primary = time + 0.5;
             self.physcannon.next_secondary = time + 0.5;
             self.physcannon.launches.push(held_center);

@@ -258,6 +258,66 @@ pub fn solids(entries: &[keyvalues::Entry]) -> Vec<modkit_core::PhysicsSolid> {
         .collect()
 }
 
+/// CBreakParser (props_shared.cpp): the `break` blocks of the PHY KeyValues, in file
+/// order. Unknown keys (burst, placement, multiplayer_break, velocity) are ignored.
+pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel> {
+    entries
+        .iter()
+        .filter(|e| e.key.eq_ignore_ascii_case("break"))
+        .filter_map(|block| {
+            let mut gib = modkit_core::BreakModel {
+                model: String::new(),
+                ragdoll: false,
+                offset: Vec3::ZERO,
+                health: 1.,
+                fade_time: 20.,
+                debris: None,
+                motion_disabled: false,
+            };
+            for child in block.children() {
+                let Some(value) = child.text().map(str::trim) else {
+                    continue;
+                };
+                let number = value.parse::<f32>().ok().filter(|v| v.is_finite());
+                match child.key.to_lowercase().as_str() {
+                    "model" => gib.model = fixup_model_name(value),
+                    "ragdoll" => {
+                        gib.model = fixup_model_name(value);
+                        gib.ragdoll = true;
+                    }
+                    "motiondisabled" => gib.motion_disabled = true,
+                    "offset" => {
+                        let v: Vec<f32> = value
+                            .split_whitespace()
+                            .filter_map(|s| s.parse().ok())
+                            .collect();
+                        if let [x, y, z] = v[..] {
+                            gib.offset = Vec3::new(x, y, z);
+                        }
+                    }
+                    "health" => gib.health = number.unwrap_or(gib.health),
+                    "fadetime" => gib.fade_time = number.unwrap_or(gib.fade_time),
+                    "debris" => gib.debris = number.map(|v| v > 0.),
+                    _ => {}
+                }
+            }
+            (!gib.model.is_empty()).then_some(gib)
+        })
+        .collect()
+}
+
+/// FixupModelName: lowercase forward-slash path with a "models/" prefix and ".mdl".
+fn fixup_model_name(name: &str) -> String {
+    let mut name = name.replace('\\', "/").to_lowercase();
+    if !name.starts_with("models/") {
+        name = format!("models/{name}");
+    }
+    if !name.ends_with(".mdl") {
+        name.push_str(".mdl");
+    }
+    name
+}
+
 /// PhysModelParseSolid with solidIndex -1 (physics_shared.cpp): the first solid block.
 pub fn first_solid(entries: &[keyvalues::Entry]) -> Option<modkit_core::PhysicsSolid> {
     solids(entries).into_iter().next()

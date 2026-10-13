@@ -1319,7 +1319,12 @@ impl Inventory {
                     let health = prop_data
                         .or_else(|| entity.get("health").and_then(|s| s.parse::<f32>().ok()))
                         .filter(|v| *v > 0.);
-                    if !npc && prop_data == Some(0.) {
+                    // Health 0 / none: DAMAGE_EVENTS_ONLY, never breaks (prop_data 0, or a
+                    // prop_physics without prop_data health or a health keyvalue).
+                    if !npc
+                        && (prop_data == Some(0.)
+                            || (health.is_none() && entity.class().starts_with("prop_physics")))
+                    {
                         continue;
                     }
                     if !npc
