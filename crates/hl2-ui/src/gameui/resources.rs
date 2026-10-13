@@ -529,10 +529,19 @@ mod tests {
     #[test]
     fn initial_episode_maps_table_and_fallbacks() {
         let maps = fallback_new_game_maps();
-        assert_eq!(maps.get("hl2").map(String::as_str), Some("d1_trainstation_01"));
-        assert_eq!(maps.get("episodic").map(String::as_str), Some("ep1_citadel_00"));
+        assert_eq!(
+            maps.get("hl2").map(String::as_str),
+            Some("d1_trainstation_01")
+        );
+        assert_eq!(
+            maps.get("episodic").map(String::as_str),
+            Some("ep1_citadel_00")
+        );
         assert_eq!(maps.get("ep2").map(String::as_str), Some("ep2_outland_01"));
-        assert_eq!(maps.get("lostcoast").map(String::as_str), Some("d2_lostcoast"));
+        assert_eq!(
+            maps.get("lostcoast").map(String::as_str),
+            Some("d2_lostcoast")
+        );
     }
 
     #[test]

@@ -817,14 +817,7 @@ mod tests {
 
     #[test]
     fn console_effects_routes_play_sound_to_ui_sound_requests() {
-        let mut sim = Simulation::new(
-            &World::default(),
-            glam::Vec3::ZERO,
-            0.,
-            0.,
-            false,
-            vec![],
-        );
+        let mut sim = Simulation::new(&World::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
         let mut game = crate::gameplay::Gameplay::synthetic(World::default());
         let mut ui = crate::ui_host::Console::new(Default::default());
 

@@ -491,7 +491,11 @@ impl Painter<'_> {
         } else {
             self.raised(rect);
         }
-        let offset = if state.pressed && state.enabled { 1. } else { 0. };
+        let offset = if state.pressed && state.enabled {
+            1.
+        } else {
+            0.
+        };
         let text_rect = Rect::new(rect.x + offset, rect.y - 1. + offset, rect.w, rect.h);
         let color = if state.enabled {
             self.theme.title_text
@@ -516,7 +520,11 @@ impl Painter<'_> {
                 self.theme.border_selection,
             );
         }
-        let offset = if state.pressed && state.enabled { 1. } else { 0. };
+        let offset = if state.pressed && state.enabled {
+            1.
+        } else {
+            0.
+        };
         let text_rect = Rect::new(rect.x + 6. + offset, rect.y + offset, rect.w - 12., rect.h);
         if state.enabled {
             // Button.TextColor and Button.ArmedTextColor are both White in the scheme.
@@ -548,7 +556,11 @@ impl Painter<'_> {
             } else {
                 self.theme.text_disabled
             };
-            let offset = if state.pressed && state.enabled { 1. } else { 0. };
+            let offset = if state.pressed && state.enabled {
+                1.
+            } else {
+                0.
+            };
             self.fill(
                 Rect::new(bx.x + 3. + offset, bx.y + 3. + offset, bx.w - 6., bx.h - 6.),
                 color,
@@ -816,7 +828,12 @@ impl Painter<'_> {
         self.border(rect, self.theme.tooltip_border, self.theme.tooltip_border);
         for (i, line) in lines.iter().enumerate() {
             let line_y = rect.y + pad_y + i as f32 * FONT_TALL;
-            self.text(line, vec2(rect.x + pad_x, line_y), self.theme.tooltip_text, false);
+            self.text(
+                line,
+                vec2(rect.x + pad_x, line_y),
+                self.theme.tooltip_text,
+                false,
+            );
         }
     }
 
@@ -1245,6 +1262,9 @@ mod tests {
         // 3. 100% fraction draws all segments
         painter.progress_bar(rect, 1.0, fg, bg);
         let quads_full = canvas.drain();
-        assert!(quads_full.len() > quads_half.len(), "100% draws all segment blocks");
+        assert!(
+            quads_full.len() > quads_half.len(),
+            "100% draws all segment blocks"
+        );
     }
 }

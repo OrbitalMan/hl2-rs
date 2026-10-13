@@ -298,11 +298,17 @@ impl Default for MouseSettings {
 pub struct GameplaySettings {
     /// `skill`: 1 Easy, 2 Normal, 3 Hard.
     pub skill: u8,
+    /// Overridden or unlocked main-menu background map (falls back to `scripts/chapterbackgrounds.txt`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_map: Option<String>,
 }
 
 impl Default for GameplaySettings {
     fn default() -> Self {
-        Self { skill: 2 }
+        Self {
+            skill: 2,
+            background_map: None,
+        }
     }
 }
 
@@ -427,6 +433,23 @@ impl Config {
         clamp(&mut self.video.gamma, 1.6, 2.6, defaults.video.gamma);
         clamp(&mut self.video.fov, 50., 120., defaults.video.fov);
         self.gameplay.skill = self.gameplay.skill.clamp(1, 3);
+        if let Some(map) = self.gameplay.background_map.take() {
+            let clean = map
+                .trim()
+                .strip_suffix(".bsp")
+                .unwrap_or(map.trim())
+                .to_owned();
+            if !clean.is_empty()
+                && clean.len() <= 128
+                && clean
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                self.gameplay.background_map = Some(clean);
+            } else {
+                self.gameplay.background_map = None;
+            }
+        }
         if self.audio.language.trim().is_empty() {
             self.audio.language = defaults.audio.language;
         }
@@ -533,5 +556,38 @@ mod tests {
         assert_eq!(key("+forward"), Some("KeyZ"));
         assert_eq!(key("invnext"), Some("MWHEELDOWN"), "new default filled in");
         assert_eq!(key("+back"), Some("KeyS"));
+    }
+
+    #[test]
+    fn background_map_persistence_roundtrip_and_migration() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.gameplay.background_map, None);
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        assert!(!serialized.contains("background_map"));
+
+        cfg.gameplay.background_map = Some("background02".into());
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        assert!(serialized.contains("\"background_map\":\"background02\""));
+        let deserialized = Config::from_json(serialized.as_bytes()).unwrap();
+        assert_eq!(
+            deserialized.gameplay.background_map.as_deref(),
+            Some("background02")
+        );
+
+        // Migration strips .bsp extensions
+        let with_bsp =
+            Config::from_json(br#"{"gameplay":{"background_map":"background03.bsp"}}"#).unwrap();
+        assert_eq!(
+            with_bsp.gameplay.background_map.as_deref(),
+            Some("background03")
+        );
+
+        // Migration discards invalid or blank map names
+        let blank = Config::from_json(br#"{"gameplay":{"background_map":"   "}}"#).unwrap();
+        assert_eq!(blank.gameplay.background_map, None);
+
+        let invalid =
+            Config::from_json(br#"{"gameplay":{"background_map":"bad map/name"}}"#).unwrap();
+        assert_eq!(invalid.gameplay.background_map, None);
     }
 }

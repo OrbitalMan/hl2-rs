@@ -124,7 +124,8 @@ pub fn poll(
             ui.source.loading_failed(&error);
             campaign.failures.push(error.clone());
             sim.loading_failed();
-            if !options.map_dependent.is_empty() && options.map.as_deref() == Some(&job.request.map) {
+            if !options.map_dependent.is_empty() && options.map.as_deref() == Some(&job.request.map)
+            {
                 eprintln!("{error}");
                 std::process::exit(1);
             }

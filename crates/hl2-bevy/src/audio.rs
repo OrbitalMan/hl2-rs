@@ -721,7 +721,10 @@ pub fn queue(
     mut commands: Commands,
     mut audio: ResMut<Audio>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    (simulation, mut trace): (Res<crate::simulation::Simulation>, Option<ResMut<AudioTrace>>),
+    (simulation, mut trace): (
+        Res<crate::simulation::Simulation>,
+        Option<ResMut<AudioTrace>>,
+    ),
     mut players: Query<(
         Entity,
         &SoundPlayer,

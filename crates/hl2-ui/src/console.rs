@@ -58,6 +58,14 @@ const COMMANDS: &[(&str, &str)] = &[
     ("mat_hdr_level", "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)"),
     ("mat_setvideomode", "mat_setvideomode <width> <height> <windowed 0|1>: set the video mode"),
     ("mainmenu", "mainmenu: show the main menu"),
+    (
+        "background_map",
+        "background_map [name|default]: query or set the persistent main-menu background map",
+    ),
+    (
+        "map_background",
+        "map_background <name>: load an installed map as the main-menu background and persist it",
+    ),
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -496,6 +504,21 @@ impl Console {
         self.background_level
     }
 
+    /// The effective main-menu background map, prioritizing the persisted config override
+    /// before falling back to the installed `scripts/chapterbackgrounds.txt`.
+    pub fn background_map(&self) -> Option<&str> {
+        self.config
+            .gameplay
+            .background_map
+            .as_deref()
+            .or(self.gameui.background_map.as_deref())
+    }
+
+    /// Overrides the persistent main-menu background map setting.
+    pub fn set_background_map(&mut self, map: Option<String>) {
+        self.config.gameplay.background_map = map;
+    }
+
     /// Called by the host after a map finished loading. A background level shows the main menu;
     /// any other map starts gameplay.
     pub fn level_loaded(&mut self, background: bool) {
@@ -875,6 +898,56 @@ impl Console {
                 self.log(format!("mat_setvideomode {width} {height} {windowed}"));
                 return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
             }
+            "background_map" => {
+                if args.is_empty() {
+                    match self.background_map() {
+                        Some(map) => self.log(format!("\"background_map\" = \"{map}\"")),
+                        None => self.log("\"background_map\" is not set"),
+                    }
+                } else if args.len() == 1 {
+                    let map = args[0].strip_suffix(".bsp").unwrap_or(&args[0]);
+                    if map.eq_ignore_ascii_case("default")
+                        || map == "0"
+                        || map.eq_ignore_ascii_case("none")
+                        || map.is_empty()
+                    {
+                        self.config.gameplay.background_map = None;
+                        let _ = self.config.save();
+                        self.log(format!(
+                            "background_map reset to default ({})",
+                            self.gameui.background_map.as_deref().unwrap_or("none")
+                        ));
+                    } else {
+                        if map.len() > 128
+                            || !map.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                        {
+                            return Err("background_map: use a simple installed map name".into());
+                        }
+                        self.config.gameplay.background_map = Some(map.to_owned());
+                        let _ = self.config.save();
+                        self.log(format!("background_map {map}"));
+                    }
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "map_background" => {
+                if args.len() != 1 {
+                    return Err(usage());
+                }
+                let map = args[0].strip_suffix(".bsp").unwrap_or(&args[0]);
+                if map.is_empty()
+                    || map.len() > 128
+                    || !map.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                {
+                    return Err("map_background: use a simple installed map name".into());
+                }
+                self.config.gameplay.background_map = Some(map.to_owned());
+                let _ = self.config.save();
+                self.start_loading(map);
+                return Ok(Some(Effect::MainMenuMap(map.to_owned())));
+            }
             _ => return Err(usage()),
         }
         Ok(None)
@@ -1071,25 +1144,23 @@ impl Console {
                 effects.push(Effect::PlaySound(sound));
             }
             match outcome {
-                Some(true) => {
-                    match kind {
-                        ConfirmKind::Quit => {
-                            effects.push(Effect::Quit);
-                            return effects;
-                        }
-                        ConfirmKind::ReturnToMainMenu => {
-                            self.mode = Mode::MainMenu;
-                            match self.gameui.background_map.clone() {
-                                Some(map) => effects.push(Effect::MainMenuMap(map)),
-                                None => {
-                                    self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
-                                    self.level_loaded(true);
-                                }
-                            }
-                            return effects;
-                        }
+                Some(true) => match kind {
+                    ConfirmKind::Quit => {
+                        effects.push(Effect::Quit);
+                        return effects;
                     }
-                }
+                    ConfirmKind::ReturnToMainMenu => {
+                        self.mode = Mode::MainMenu;
+                        match self.background_map().map(str::to_owned) {
+                            Some(map) => effects.push(Effect::MainMenuMap(map)),
+                            None => {
+                                self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
+                                self.level_loaded(true);
+                            }
+                        }
+                        return effects;
+                    }
+                },
                 Some(false) => {}
                 None => self.confirm_box = Some((confirm, kind)),
             }
@@ -1815,7 +1886,8 @@ mod tests {
         assert_eq!(kind, ConfirmKind::ReturnToMainMenu);
         assert_eq!(confirm.title, "RETURN TO MAIN MENU");
         let (origin, scale, layout) = console.quit_geometry(&confirm);
-        let pointer = Some(origin + vec2(layout.buttons[0].x + 3., layout.buttons[0].y + 3.) * scale);
+        let pointer =
+            Some(origin + vec2(layout.buttons[0].x + 3., layout.buttons[0].y + 3.) * scale);
         let _ = console.input(&Input {
             pointer,
             click: true,
@@ -1950,10 +2022,7 @@ mod tests {
         // Update progress via global reporting
         crate::gameui::loading::report_progress(0.5, "LoadingProgress_SignonDataLocal");
         console.update_loading();
-        assert_eq!(
-            console.loading_dialog.as_ref().unwrap().fraction,
-            0.5
-        );
+        assert_eq!(console.loading_dialog.as_ref().unwrap().fraction, 0.5);
         assert_eq!(
             console.loading_dialog.as_ref().unwrap().stage,
             Some("LoadingProgress_SignonDataLocal")
@@ -2078,5 +2147,86 @@ mod tests {
         console.input(&enter);
         assert!(console.loading_dialog.is_none());
         assert_eq!(console.mode, Mode::MainMenu);
+    }
+
+    #[test]
+    fn background_map_single_source_of_truth_and_return_to_main_menu() {
+        let mut console = installed_console();
+        // Default: falls back to GameUI resources background_map
+        assert_eq!(console.background_map(), Some("background01"));
+        assert_eq!(console.config.gameplay.background_map, None);
+
+        // When overridden in config, background_map() prioritizes config
+        console.set_background_map(Some("background02".into()));
+        assert_eq!(console.background_map(), Some("background02"));
+
+        // Trigger Return to Main Menu confirmation and click OK
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+        click_row(&mut console, 5); // Return to main menu
+        let (confirm, _) = console.confirm_box.clone().expect("confirmation box");
+        let (origin, scale, layout) = console.quit_geometry(&confirm);
+        let pointer =
+            Some(origin + vec2(layout.buttons[0].x + 3., layout.buttons[0].y + 3.) * scale);
+        let _ = console.input(&Input {
+            pointer,
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        let effects = console.input(&Input {
+            pointer,
+            released: true,
+            ..Default::default()
+        });
+        // Verifies the overridden background map was emitted
+        assert_eq!(
+            effects,
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::MainMenuMap("background02".into()),
+            ]
+        );
+        assert_eq!(console.mode, Mode::MainMenu);
+    }
+
+    #[test]
+    fn background_map_and_map_background_console_commands() {
+        let mut console = installed_console();
+        // Query default background map
+        let effects = console.submit("background_map");
+        assert!(effects.is_empty());
+        assert!(console
+            .output
+            .iter()
+            .any(|line| line.contains("\"background_map\" = \"background01\"")));
+
+        // Set persistent background map
+        let effects = console.submit("background_map background03");
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::ApplyConfig(_)));
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("background03")
+        );
+        assert_eq!(console.background_map(), Some("background03"));
+
+        // Reset to default
+        let effects = console.submit("background_map default");
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::ApplyConfig(_)));
+        assert_eq!(console.config.gameplay.background_map, None);
+        assert_eq!(console.background_map(), Some("background01"));
+
+        // map_background loads as background map and persists to config
+        let effects = console.submit("map_background background04");
+        assert_eq!(effects, vec![Effect::MainMenuMap("background04".into())]);
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("background04")
+        );
+        assert_eq!(console.background_map(), Some("background04"));
+        assert!(console.is_loading());
+        assert_eq!(console.loading_dialog.as_ref().unwrap().map, "background04");
     }
 }

@@ -399,11 +399,15 @@ impl MessageBox {
         enter: bool,
     ) -> Option<bool> {
         let hovered = pointer.and_then(|p| {
-            layout.buttons.iter().position(|b| b.contains(p)).or_else(|| {
-                layout
-                    .close
-                    .and_then(|c| c.contains(p).then_some(layout.buttons.len()))
-            })
+            layout
+                .buttons
+                .iter()
+                .position(|b| b.contains(p))
+                .or_else(|| {
+                    layout
+                        .close
+                        .and_then(|c| c.contains(p).then_some(layout.buttons.len()))
+                })
         });
         self.armed = hovered;
         if hovered.is_some() && hovered != self.last_armed {
@@ -802,7 +806,14 @@ mod tests {
 
         // Release over Cancel button -> activates and returns Some(false)
         assert_eq!(
-            quit.input(&layout, center(layout.buttons[1]), false, false, true, false),
+            quit.input(
+                &layout,
+                center(layout.buttons[1]),
+                false,
+                false,
+                true,
+                false
+            ),
             Some(false)
         );
         assert_eq!(quit.pressed, None);
@@ -814,7 +825,14 @@ mod tests {
         );
         assert_eq!(quit.pressed, Some(0));
         assert_eq!(
-            quit.input(&layout, center(layout.buttons[0]), false, false, true, false),
+            quit.input(
+                &layout,
+                center(layout.buttons[0]),
+                false,
+                false,
+                true,
+                false
+            ),
             Some(true)
         );
         assert_eq!(quit.pressed, None);
@@ -826,16 +844,10 @@ mod tests {
         );
         assert_eq!(quit.pressed, Some(0));
         // Move pointer away while button is held
-        assert_eq!(
-            quit.input(&layout, None, true, false, false, false),
-            None
-        );
+        assert_eq!(quit.input(&layout, None, true, false, false, false), None);
         assert_eq!(quit.pressed, None, "moving away cancels pressed state");
         // Release after move away does not trigger
-        assert_eq!(
-            quit.input(&layout, None, false, false, true, false),
-            None
-        );
+        assert_eq!(quit.input(&layout, None, false, false, true, false), None);
 
         // 4. Enter accepts immediately
         assert_eq!(
@@ -904,15 +916,36 @@ mod tests {
         let center = |r: Rect| Some(vec2(r.x + r.w / 2., r.y + r.h / 2.));
 
         // 1. Moving from outside to over button 0 emits rollover sound
-        quit.input(&layout, center(layout.buttons[0]), false, false, false, false);
+        quit.input(
+            &layout,
+            center(layout.buttons[0]),
+            false,
+            false,
+            false,
+            false,
+        );
         assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
 
         // 2. Staying over button 0 on next frame does not re-emit rollover
-        quit.input(&layout, center(layout.buttons[0]), false, false, false, false);
+        quit.input(
+            &layout,
+            center(layout.buttons[0]),
+            false,
+            false,
+            false,
+            false,
+        );
         assert!(quit.take_sounds().is_empty());
 
         // 3. Moving to button 1 emits rollover sound
-        quit.input(&layout, center(layout.buttons[1]), false, false, false, false);
+        quit.input(
+            &layout,
+            center(layout.buttons[1]),
+            false,
+            false,
+            false,
+            false,
+        );
         assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
 
         // 4. Moving outside emits nothing
@@ -922,7 +955,14 @@ mod tests {
         // 5. Press and release on button 0 emits rollover (on entry), then release sound on activation
         quit.input(&layout, center(layout.buttons[0]), true, true, false, false);
         assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
-        quit.input(&layout, center(layout.buttons[0]), false, false, true, false);
+        quit.input(
+            &layout,
+            center(layout.buttons[0]),
+            false,
+            false,
+            true,
+            false,
+        );
         assert_eq!(quit.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
 
         // 6. Press, move away, and release emits no release sound
@@ -956,12 +996,33 @@ mod tests {
         let center = |r: Rect| Some(vec2(r.x + r.w / 2., r.y + r.h / 2.));
 
         // Hover over close button: emits rollover sound
-        msg_box.input(&layout_with_close, center(close_rect), false, false, false, false);
+        msg_box.input(
+            &layout_with_close,
+            center(close_rect),
+            false,
+            false,
+            false,
+            false,
+        );
         assert_eq!(msg_box.take_sounds(), vec!["ui/buttonrollover.wav"]);
 
         // Click and release on close button: activates Cancel outcome (Some(false))
-        msg_box.input(&layout_with_close, center(close_rect), true, true, false, false);
-        let outcome = msg_box.input(&layout_with_close, center(close_rect), false, false, true, false);
+        msg_box.input(
+            &layout_with_close,
+            center(close_rect),
+            true,
+            true,
+            false,
+            false,
+        );
+        let outcome = msg_box.input(
+            &layout_with_close,
+            center(close_rect),
+            false,
+            false,
+            true,
+            false,
+        );
         assert_eq!(outcome, Some(false), "Close button behaves like Cancel");
         assert_eq!(msg_box.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
     }

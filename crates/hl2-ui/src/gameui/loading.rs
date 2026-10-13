@@ -8,10 +8,7 @@
 
 use crate::{
     canvas::{Color, Rect},
-    gameui::{
-        localize::Localization,
-        widgets::Painter,
-    },
+    gameui::{localize::Localization, widgets::Painter},
 };
 use glam::Vec2;
 use std::sync::Mutex;

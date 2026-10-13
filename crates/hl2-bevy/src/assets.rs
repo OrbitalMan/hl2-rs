@@ -173,8 +173,7 @@ pub fn load_with_canvas(
     }
     hl2_ui::gameui::loading::report_progress(0.05, "LoadingProgress_SpawningServer");
     let expansion = source_assets::vpk::expansion_for_map(map);
-    let mut vfs =
-        Vfs::mount_expansion(game, expansion).context("mount installed owned content")?;
+    let mut vfs = Vfs::mount_expansion(game, expansion).context("mount installed owned content")?;
     hl2_ui::gameui::loading::report_progress(0.15, "LoadingProgress_LoadMap");
     let bytes = vfs
         .read(&format!("maps/{map}.bsp"))?

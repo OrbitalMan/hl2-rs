@@ -464,7 +464,10 @@ impl OptionsDialog {
             return None;
         }
         let widgets = layout_widgets(&self.res, panel, page, &self.draft, &self.applied);
-        let hovered = widgets.iter().rev().find(|w| w.rect.contains(dialog_pointer))?;
+        let hovered = widgets
+            .iter()
+            .rev()
+            .find(|w| w.rect.contains(dialog_pointer))?;
         self.tip_for_control(panel, &hovered.control.name)
     }
 
@@ -702,7 +705,9 @@ impl OptionsDialog {
             }
             return None;
         }
-        let activated = self.tracker.update(hit, input.held, input.click, input.released);
+        let activated = self
+            .tracker
+            .update(hit, input.held, input.click, input.released);
         self.pressed = self.tracker.pressed();
         activated
     }
@@ -1238,9 +1243,11 @@ impl OptionsDialog {
                     default: binding == Some(Binding::Command(Command::SubOk)),
                 },
             ),
-            (ControlKind::UrlButton, _) => {
-                p.url(w.rect, &label, ButtonState::active(w.enabled, armed, pressed))
-            }
+            (ControlKind::UrlButton, _) => p.url(
+                w.rect,
+                &label,
+                ButtonState::active(w.enabled, armed, pressed),
+            ),
             (ControlKind::Divider, _) => p.divider(w.rect),
             (ControlKind::ImagePanel, _) => {
                 let image = c.image.to_ascii_lowercase();
@@ -1434,10 +1441,7 @@ mod tests {
         let mut localization = Localization::default();
         localization.insert("GameUI_Gamepad", "Gamepad");
         localization.insert("GameUI_AdvancedEllipsis", "Advanced...");
-        localization.insert(
-            "GameUI_ReverseMouseLabel",
-            "Reverse mouse up-down axis",
-        );
+        localization.insert("GameUI_ReverseMouseLabel", "Reverse mouse up-down axis");
         let mut layouts = BTreeMap::new();
         for (name, text) in [
             ("optionssubmouse", MOUSE),
@@ -2092,7 +2096,11 @@ mod tests {
         assert!(h.dialog.draft().mouse.invert);
 
         let close_rect = widgets::close_button_rect(DIALOG_SIZE);
-        let close_pos = DIALOG + vec2(close_rect.x + close_rect.w / 2., close_rect.y + close_rect.h / 2.);
+        let close_pos = DIALOG
+            + vec2(
+                close_rect.x + close_rect.w / 2.,
+                close_rect.y + close_rect.h / 2.,
+            );
 
         // Hover over close button: emits rollover sound and arms Close
         h.frame(Input {
@@ -2132,7 +2140,11 @@ mod tests {
         let size = GAMMA_SIZE;
         let gamma_origin = centered(canvas, size, 1.);
         let close_rect = widgets::close_button_rect(size);
-        let close_pos = gamma_origin + vec2(close_rect.x + close_rect.w / 2., close_rect.y + close_rect.h / 2.);
+        let close_pos = gamma_origin
+            + vec2(
+                close_rect.x + close_rect.w / 2.,
+                close_rect.y + close_rect.h / 2.,
+            );
 
         // Click and release on subdialog close button
         h.frame(Input {

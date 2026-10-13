@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-13 Background map handling
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::config`: added `pub background_map: Option<String>` to `GameplaySettings` with `#[serde(skip_serializing_if = "Option::is_none")]` and default `None`. In `Config::migrate`, sanitized map name (stripping `.bsp` extensions, validating alphanumeric and underscore characters up to 128 chars, reverting blank/invalid values to `None`). Added unit test `background_map_persistence_roundtrip_and_migration` verifying default `None` JSON omission, persistence roundtrip, `.bsp` stripping, and invalid name rejection.
+- `hl2-ui::console`: added `Console::background_map(&self) -> Option<&str>` establishing the single source of truth (prioritizing `config.gameplay.background_map` before falling back to `gameui.background_map`). Added `Console::set_background_map(&mut self, Option<String>)`. Added console commands `background_map [name|default]` (querying or setting persistent background map) and `map_background <name>` (setting config, starting modal loading dialog, and emitting `Effect::MainMenuMap`). Updated `ConfirmKind::ReturnToMainMenu` to route through `self.background_map()`. Added unit tests `background_map_single_source_of_truth_and_return_to_main_menu` and `background_map_and_map_background_console_commands`.
+- `hl2-bevy::main`: added `pub background_map: Option<String>` to `Options` and `--background-map NAME` CLI option. In `load_startup_map`, resolved startup background map via `options.background_map` -> `config.gameplay.background_map` -> `startup_background_map(&vfs)` fallback chain. Added unit test `startup_parses_background_map_override`.
+
+**Why:**
+- Provides a unified single source of truth for the main-menu background map, persisted cleanly in user settings without touching read-only game installation files.
+- Supports runtime customization via console commands (`background_map`, `map_background`) and launch arguments (`--background-map`) matching Source engine conventions.
+
+**Tested how:**
+- `cargo test --locked`: all 115 unit tests in `hl2-ui`, 66 in `hl2-bevy`, 91 in `source-assets`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed.
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- `cargo fmt --all --check`: clean formatting verified across all workspace crates.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and loaded default background map `background01`.
+- Headless Bevy runtime background override: `cargo run --locked -p hl2-bevy -- --background-map background02 --frames 30 --no-focus` passed and loaded overridden background map `background02`.
+
+**Result:** Single source of truth for background map handling across persistent config, console commands, Return to Main Menu confirmation, CLI arguments, and runtime map loader. All 10 tasks in the GameUI follow-up pass complete.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Follow-up milestones in owner's order (arsenal step 13b, NPC AI step 14, detail sprites, etc.).
+
 ## 2026-10-13 Episode One & Two New Game maps
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

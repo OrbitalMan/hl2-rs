@@ -81,6 +81,8 @@ struct Options {
     tonemap_scale: Option<f32>,
     /// Show the main menu over the loaded map, treating it as a menu background.
     main_menu: bool,
+    /// Override the startup main-menu background map.
+    background_map: Option<String>,
 }
 /// Rejects map-dependent arguments when no `--map` was given.
 fn require_map_for(map: Option<&str>, map_dependent: &[&str]) -> Result<()> {
@@ -141,6 +143,7 @@ impl Options {
             no_focus: false,
             tonemap_scale: None,
             main_menu: false,
+            background_map: None,
         };
         let mut explicit_mode = None;
         while let Some(arg) = args.next() {
@@ -207,9 +210,10 @@ impl Options {
                     options.tonemap_scale = Some(scale);
                 }
                 "--main-menu" => options.main_menu = true,
+                "--background-map" => options.background_map = Some(next(&mut args)?),
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; Windowed (No Border) is not offered on macOS)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --background-map NAME --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; Windowed (No Border) is not offered on macOS)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead; --background-map overrides the background map.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -334,9 +338,15 @@ fn source_direction(yaw: f32, pitch: f32) -> Vec3 {
 fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
     let vfs =
         source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
-    let background = hl2_ui::gameui::resources::startup_background_map(&vfs).context(
-        "no main-menu background map in scripts/chapterbackgrounds.txt; pass a loadable --map",
-    )?;
+    let config = hl2_ui::config::Config::load_or_default();
+    let background = options
+        .background_map
+        .clone()
+        .or(config.gameplay.background_map)
+        .or_else(|| hl2_ui::gameui::resources::startup_background_map(&vfs))
+        .context(
+            "no main-menu background map in scripts/chapterbackgrounds.txt or config; pass a loadable --map",
+        )?;
     println!("Loading owned main-menu background {background}...");
     let loaded = assets::load(&options.game, &background)
         .with_context(|| format!("load main-menu background map {background}"))?;
@@ -445,7 +455,9 @@ fn main() -> Result<()> {
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
         .add_plugins(bloom::SourceBloomPlugin)
-        .add_plugins(bevy::sprite_render::Material2dPlugin::<canvas_renderer::HudMaterial>::default())
+        .add_plugins(bevy::sprite_render::Material2dPlugin::<
+            canvas_renderer::HudMaterial,
+        >::default())
         .add_plugins(ui_system::UiPlugin)
         .add_plugins(simulation::MovementPlugin)
         .add_systems(PreUpdate, crate::video::present_frame)
@@ -1056,5 +1068,11 @@ mod tests {
             startup_display_mode(Fullscreen, Some(Windowed), false),
             Windowed
         );
+    }
+    #[test]
+    fn startup_parses_background_map_override() {
+        let args = ["--background-map".to_owned(), "background02".to_owned()];
+        let parsed = Options::parse_from(args).expect("parse options with background map");
+        assert_eq!(parsed.background_map.as_deref(), Some("background02"));
     }
 }
