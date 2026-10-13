@@ -1,6 +1,6 @@
 # STATUS
 
-Checkpoint: 2026-10-13 session 14 (frag pickup, stuck-on-props fix); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+Checkpoint: 2026-10-13 session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
 
 ## Current session 14 (2026-10-13)
 
