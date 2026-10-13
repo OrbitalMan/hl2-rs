@@ -46,6 +46,20 @@ const SHADOW_GROUP: Group = Group::GROUP_4;
 /// HULL_HUMAN): player movement and physics props collide with them; traces use the
 /// model-shaped colliders instead.
 const HULL_GROUP: Group = Group::GROUP_5;
+/// prop_physics with SF_PHYSPROP_DEBRIS (4): COLLISION_GROUP_DEBRIS collides only with
+/// COLLISION_GROUP_NONE (CGameRules::ShouldCollide): the world and ordinary props, not
+/// the player (movement or shadow), NPCs, thrown frags or other debris. Traces (bullets,
+/// +USE, the gravity gun) still hit it.
+const DEBRIS_GROUP: Group = Group::GROUP_6;
+const DEBRIS_GROUPS: InteractionGroups = InteractionGroups::new(
+    DEBRIS_GROUP,
+    Group::ALL
+        .difference(DEBRIS_GROUP)
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP)
+        .difference(NPC_GROUP)
+        .difference(PROJECTILE_GROUP),
+);
 const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
     Group::ALL
@@ -53,12 +67,14 @@ const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(SHADOW_GROUP)
         .difference(HULL_GROUP),
 );
-/// Player movement: everything solid to the player, NPC hull boxes included.
+/// Player movement: everything solid to the player, NPC hull boxes included (not
+/// debris props).
 const PLAYER_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
     Group::ALL
         .difference(PROJECTILE_GROUP)
-        .difference(SHADOW_GROUP),
+        .difference(SHADOW_GROUP)
+        .difference(DEBRIS_GROUP),
 );
 /// The SDK hull (mins, maxs) of npc_* classes (SetHullType), for those done so far.
 pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
@@ -886,6 +902,8 @@ impl Physics {
                 if instance.kind.starts_with("npc_") {
                     p.colliders[c]
                         .set_collision_groups(InteractionGroups::new(NPC_GROUP, Group::ALL));
+                } else if body.is_some() && prop_flags & 4 != 0 {
+                    p.colliders[c].set_collision_groups(DEBRIS_GROUPS);
                 }
                 p.npc_collider_contents.insert(
                     c,
@@ -2515,7 +2533,7 @@ impl CollisionWorld for Physics {
                     && !collider.is_sensor()
                     && !matches!(
                         collider.collision_groups().memberships,
-                        PROJECTILE_GROUP | SHADOW_GROUP
+                        PROJECTILE_GROUP | SHADOW_GROUP | DEBRIS_GROUP
                     )
                     && !self.world_brush_contents.contains_key(handle)
                     && !self.npc_hitboxes.contains(handle)
@@ -3048,6 +3066,35 @@ mod tests {
         let physics = Physics::new(&world);
         let body = physics.dynamic[&0];
         (physics, body)
+    }
+    #[test]
+    fn debris_props_let_the_player_through_but_stop_picks() {
+        // The synthetic prop (body x 80..120, y 180..220, z 20..60) with and without
+        // SF_PHYSPROP_DEBRIS; the player hull sweeps across it.
+        for (flags, blocks) in [("4", false), ("0", true)] {
+            let mut world = native_prop_world();
+            world.model_instances[0].kind = "prop_physics".into();
+            world.model_instances[0].entity = Some(0);
+            world.entities.push(modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "prop_physics".into()),
+                    ("spawnflags".into(), flags.into()),
+                ],
+            });
+            let mut physics = Physics::new(&world);
+            physics.refresh_queries();
+            let (mins, maxs) = (Vec3::new(-16., -16., 0.), Vec3::new(16., 16., 72.));
+            let sweep = physics.trace_hull(
+                Vec3::new(0., 200., 10.),
+                Vec3::new(200., 200., 10.),
+                mins,
+                maxs,
+            );
+            assert_eq!(sweep.fraction < 1., blocks, "flags {flags}");
+            // +USE / the gravity gun (COLLISION_GROUP_NONE traces) still find it.
+            let pick = physics.pick_ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
+            assert_eq!(pick.map(|h| h.entity), Some(0), "flags {flags}");
+        }
     }
     #[test]
     fn hinged_prop_keeps_its_pivot_while_ropes_stay_off() {

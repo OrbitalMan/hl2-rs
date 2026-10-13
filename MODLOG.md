@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 15 (end): debris props (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** prop_physics with SF_PHYSPROP_DEBRIS (4) use a DEBRIS collision group (SDK CGameRules::ShouldCollide: COLLISION_GROUP_DEBRIS collides only with COLLISION_GROUP_NONE): world and ordinary props yes; player movement (incl. the exact convex path), the player shadow, NPC hulls/models, thrown frags and other debris no; traces (bullets, +USE, gravity gun) still hit them. 18 of 66 prop_physics on d1_trainstation_02 carry the flag (e.g. bottle #701, box #700). Fixture bevy-carry-bottle-shove now starts at (-3356,-2520,128) (the old spot put the walking hull inside world geometry: stuck, so no crouch).
+
+**Why:** owner item 0d (carried bottle shoved into the floor, crouch while carrying): crouch works while carrying; the carried debris bottle overlapping the crouched hull froze the player via CheckStuck, which native avoids because debris never collides with the player.
+
+**Tested how:** unit test (a debris prop lets the player hull through and still stops a pick ray; a non-debris prop blocks), workspace tests, strict Clippy, fmt; packaged: crouched carry looking down: no stuck samples, no hull contacts (before: stuck from d186 with a 0.6-unit overlap), bottle minimum z 66.5 (floor rest 66.6). Regression batch artifacts/s15b-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 only); finals vs s15-regression mean <= 0.59, feeds identical.
+
+**Result:** debris props behave like native toward the player; the carried-bottle freeze is gone.
+
+**Still broken or not tested:** interactive-debris return to debris at rest (irrelevant until non-debris props are converted); native comparison of walking through debris; owned tests not rerun for this change (no asset path changed).
+
+**Next:** see STATUS session 15 and work/publishing/next-session-prompt-20261013c.txt.
 ## 2026-10-13 session 15 (continued): studio decals along the shot (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
