@@ -309,6 +309,13 @@ impl PreparedAudio {
                 .into_iter()
                 .map(|r| r.name),
         );
+        // PhysBreakSound: every surfaceprop's break cue (a prop can break on any map).
+        cues.extend(
+            game.world
+                .surface_materials
+                .values()
+                .filter_map(|m| m.break_sound.clone()),
+        );
         for weapon in game.weapons.values() {
             cues.extend(weapon.sounds.values().cloned());
         }

@@ -1350,6 +1350,22 @@ impl Inventory {
                     if dead {
                         self.kills += 1;
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
+                        // CBreakableProp::Break -> PhysBreakSound: the surfaceprop's break
+                        // cue from the world at the prop (it is about to be removed).
+                        if let Some(name) = (!npc)
+                            .then(|| physics.prop_materials.get(&id))
+                            .flatten()
+                            .and_then(|prop| world.surface_materials.get(prop))
+                            .and_then(|m| m.break_sound.clone())
+                        {
+                            let origin = physics
+                                .entity_pose(id)
+                                .map_or(scene.states[id].origin, |(p, _)| p);
+                            scene.sounds.push(crate::sounds::SoundRequest {
+                                origin: Some(origin),
+                                ..name.as_str().into()
+                            });
+                        }
                         scene.states[id].killed = true;
                         scene.states[id].visible = false;
                         physics.set_entity(
