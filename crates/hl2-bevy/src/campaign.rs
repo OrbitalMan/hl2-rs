@@ -254,3 +254,361 @@ pub fn poll(
         ),
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::window::WindowResolution;
+
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn headless_bevy_app_submenu_entry_switches_background_map_and_scene() {
+        let game = source_assets::install::discover().expect("owned install");
+        let mut app = App::new();
+        let options =
+            crate::Options::parse_from(["--game".to_owned(), game.to_string_lossy().to_string()])
+                .expect("valid options");
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<crate::rendering::SourceMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<bevy::audio::AudioSource>>()
+            .init_resource::<Assets<crate::effects::EffectMaterial>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+            .init_resource::<crate::Status>()
+            .insert_resource(options)
+            .insert_resource(Campaign {
+                loaded_map: Some("background01".into()),
+                last_event: Some(MapLoaded {
+                    map: "background01".into(),
+                    background: true,
+                }),
+                ..default()
+            });
+
+        let vfs = source_assets::vpk::Vfs::mount(&game).expect("mount game");
+        let canvas = hl2_ui::canvas::Canvas::default();
+        let mut console = hl2_ui::console::Console::load(&vfs, canvas);
+        console.loaded_map = Some("background01".into());
+        console.level_loaded(true);
+
+        let sim = simulation::Simulation::new(
+            &modkit_core::World::default(),
+            glam::Vec3::ZERO,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let gameplay = crate::gameplay::Gameplay::synthetic(modkit_core::World::default());
+        let ui = ui_host::Console::new(console);
+
+        app.insert_resource(sim)
+            .insert_resource(gameplay)
+            .insert_resource(ui);
+
+        app.world_mut().spawn((
+            Window {
+                resolution: WindowResolution::new(1024, 768),
+                ..default()
+            },
+            CursorOptions::default(),
+            PrimaryWindow,
+        ));
+
+        let initial_scene_entity = app.world_mut().spawn(MapOwned).id();
+
+        app.add_systems(Update, poll);
+
+        // 1. Initial state assertion
+        {
+            let ui = app.world().resource::<ui_host::Console>();
+            assert_eq!(ui.source.menu_category(), "main");
+            assert_eq!(ui.source.loaded_map.as_deref(), Some("background01"));
+            let campaign = app.world().resource::<Campaign>();
+            assert_eq!(campaign.loaded_map.as_deref(), Some("background01"));
+        }
+
+        // 2. Enter Episode One submenu (row 1: SwitchExpansion episodic)
+        let effects = {
+            let mut ui = app.world_mut().resource_mut::<ui_host::Console>();
+            ui.source.activate_menu(1)
+        };
+        assert!(
+            effects.contains(&hl2_ui::console::Effect::MainMenuMap(
+                "ep1_background01".into()
+            )),
+            "Effect::MainMenuMap emitted for ep1_background01"
+        );
+
+        // Route effects to simulation
+        let mut pending_effects = Some(effects);
+        app.world_mut()
+            .run_system_once(
+                move |mut sim: ResMut<simulation::Simulation>,
+                      mut ui: ResMut<ui_host::Console>,
+                      mut game: ResMut<crate::gameplay::Gameplay>| {
+                    if let Some(effects) = pending_effects.take() {
+                        sim.console_effects(&mut ui, &mut game, effects);
+                    }
+                },
+            )
+            .unwrap();
+
+        // 3. Assert background state changes before tick
+        {
+            let ui = app.world().resource::<ui_host::Console>();
+            let sim = app.world().resource::<simulation::Simulation>();
+            assert_eq!(ui.source.menu_category(), "episodic");
+            assert_eq!(
+                ui.source.config.gameplay.background_map.as_deref(),
+                Some("ep1_background01"),
+                "persisted background map setting updated to ep1_background01"
+            );
+            assert!(ui.background_request);
+            assert_eq!(ui.map_request.as_deref(), Some("ep1_background01"));
+            assert!(sim.loading());
+        }
+
+        // 4. Update the Bevy app in a loop until the background map loader thread finishes
+        let mut completed = false;
+        for _ in 0..100 {
+            app.update();
+            let campaign = app.world().resource::<Campaign>();
+            if campaign.job.is_none() && campaign.loaded_map.as_deref() == Some("ep1_background01")
+            {
+                completed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            completed,
+            "background map load completed asynchronously in headless app"
+        );
+
+        // 5. Assert completion and that scene swapped
+        {
+            let campaign = app.world().resource::<Campaign>();
+            assert_eq!(campaign.loaded_map.as_deref(), Some("ep1_background01"));
+            assert_eq!(
+                campaign.last_event,
+                Some(MapLoaded {
+                    map: "ep1_background01".into(),
+                    background: true,
+                })
+            );
+
+            let ui = app.world().resource::<ui_host::Console>();
+            assert_eq!(ui.source.loaded_map.as_deref(), Some("ep1_background01"));
+            assert_eq!(ui.source.menu_category(), "episodic");
+            assert!(!ui.source.is_loading());
+
+            let sim = app.world().resource::<simulation::Simulation>();
+            assert!(!sim.loading());
+
+            // Assert active background scene entities swapped
+            assert!(
+                app.world().get_entity(initial_scene_entity).is_err(),
+                "old background scene entity despawned"
+            );
+
+            let mut query = app.world_mut().query_filtered::<Entity, With<MapOwned>>();
+            let current_scene_entities: Vec<Entity> = query.iter(app.world()).collect();
+            assert!(
+                !current_scene_entities.is_empty(),
+                "new background scene entities spawned with MapOwned"
+            );
+            assert!(
+                !current_scene_entities.contains(&initial_scene_entity),
+                "new background scene replaced the initial scene"
+            );
+        }
+
+        // 6. From Episode One, switch to Lost Coast
+        let ep1_scene_entity = {
+            let mut query = app.world_mut().query_filtered::<Entity, With<MapOwned>>();
+            query.iter(app.world()).next().expect("ep1 scene entity")
+        };
+        // In episodic submenu, row 5 is Back to main
+        let back_effects = {
+            let mut ui = app.world_mut().resource_mut::<ui_host::Console>();
+            ui.source.activate_menu(5)
+        };
+        assert!(
+            !back_effects
+                .iter()
+                .any(|e| matches!(e, hl2_ui::console::Effect::MainMenuMap(_))),
+            "Back button does not trigger redundant map reload"
+        );
+
+        // In main menu: row 4 is EXTRAS
+        let _ = {
+            let mut ui = app.world_mut().resource_mut::<ui_host::Console>();
+            ui.source.activate_menu(4)
+        };
+        // In extras: row 0 is LOST COAST (SwitchExpansion lostcoast)
+        let lc_effects = {
+            let mut ui = app.world_mut().resource_mut::<ui_host::Console>();
+            ui.source.activate_menu(0)
+        };
+        assert!(
+            lc_effects.contains(&hl2_ui::console::Effect::MainMenuMap(
+                "lostcoast_background01".into()
+            )),
+            "Effect::MainMenuMap emitted for lostcoast_background01"
+        );
+        let mut pending_effects = Some(lc_effects);
+        app.world_mut()
+            .run_system_once(
+                move |mut sim: ResMut<simulation::Simulation>,
+                      mut ui: ResMut<ui_host::Console>,
+                      mut game: ResMut<crate::gameplay::Gameplay>| {
+                    if let Some(effects) = pending_effects.take() {
+                        sim.console_effects(&mut ui, &mut game, effects);
+                    }
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<ui_host::Console>()
+                .source
+                .config
+                .gameplay
+                .background_map
+                .as_deref(),
+            Some("lostcoast_background01"),
+            "persisted background map updated to lostcoast_background01"
+        );
+
+        let mut completed = false;
+        for _ in 0..100 {
+            app.update();
+            let campaign = app.world().resource::<Campaign>();
+            if campaign.job.is_none()
+                && campaign.loaded_map.as_deref() == Some("lostcoast_background01")
+            {
+                completed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            completed,
+            "lostcoast background map load completed asynchronously in headless app"
+        );
+
+        {
+            let campaign = app.world().resource::<Campaign>();
+            assert_eq!(
+                campaign.loaded_map.as_deref(),
+                Some("lostcoast_background01")
+            );
+            assert_eq!(
+                campaign.last_event,
+                Some(MapLoaded {
+                    map: "lostcoast_background01".into(),
+                    background: true,
+                })
+            );
+
+            // Assert active background scene entities swapped again
+            assert!(
+                app.world().get_entity(ep1_scene_entity).is_err(),
+                "ep1 scene entity despawned on lost coast load"
+            );
+        }
+    }
+
+    #[test]
+    fn headless_bevy_app_background_map_failure_logs_warning_and_does_not_crash() {
+        let mut app = App::new();
+        let temp = std::env::temp_dir().join(format!("hl2_mock_install_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(temp.join("hl2"));
+        let _ = std::fs::write(
+            temp.join("hl2/gameinfo.txt"),
+            b"\"GameInfo\" { \"game\" \"Half-Life 2\" }",
+        );
+        let options =
+            crate::Options::parse_from(["--game".to_owned(), temp.to_string_lossy().to_string()])
+                .expect("valid options");
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<crate::rendering::SourceMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<bevy::audio::AudioSource>>()
+            .init_resource::<Assets<crate::effects::EffectMaterial>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+            .init_resource::<crate::Status>()
+            .insert_resource(options)
+            .insert_resource(Campaign {
+                loaded_map: Some("background01".into()),
+                ..default()
+            });
+
+        let mut console = hl2_ui::console::Console::default();
+        console.loaded_map = Some("background01".into());
+        console.level_loaded(true);
+
+        let sim = simulation::Simulation::new(
+            &modkit_core::World::default(),
+            glam::Vec3::ZERO,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let gameplay = crate::gameplay::Gameplay::synthetic(modkit_core::World::default());
+        let mut ui = ui_host::Console::new(console);
+        ui.map_request = Some("invalid_nonexistent_background_map".into());
+        ui.background_request = true;
+
+        app.insert_resource(sim)
+            .insert_resource(gameplay)
+            .insert_resource(ui);
+
+        app.world_mut().spawn((
+            Window {
+                resolution: WindowResolution::new(1024, 768),
+                ..default()
+            },
+            CursorOptions::default(),
+            PrimaryWindow,
+        ));
+
+        app.add_systems(Update, poll);
+
+        // Run updates until worker fails
+        let mut failed = false;
+        for _ in 0..50 {
+            app.update();
+            let campaign = app.world().resource::<Campaign>();
+            if campaign.job.is_none() && !campaign.failures.is_empty() {
+                failed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(failed, "background failure detected");
+
+        let campaign = app.world().resource::<Campaign>();
+        assert!(
+            campaign
+                .failures
+                .iter()
+                .any(|f| f
+                    .contains("Warning: background map invalid_nonexistent_background_map failed")),
+            "warning recorded in campaign.failures"
+        );
+
+        let ui = app.world().resource::<ui_host::Console>();
+        assert!(
+            ui.source.output.iter().any(|line| line
+                .contains("Warning: background map invalid_nonexistent_background_map failed")),
+            "warning logged to console"
+        );
+        assert!(!ui.source.is_loading());
+        assert_eq!(ui.source.mode, hl2_ui::console::Mode::MainMenu);
+    }
+}

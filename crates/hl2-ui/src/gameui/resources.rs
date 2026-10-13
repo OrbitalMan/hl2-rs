@@ -378,7 +378,6 @@ impl GameUiResources {
             .get(canonical)
             .or_else(|| self.background_maps.get(category))
             .map(String::as_str)
-            .or(self.background_map.as_deref())
     }
 }
 
@@ -460,7 +459,12 @@ impl GameUiResources {
                         Reader::new(&exp_vfs).read_text("scripts/chapterbackgrounds.txt")
                     })
                     .and_then(|text| background_map(&text));
-                exp_map.unwrap_or_else(|| default_map.to_owned())
+                let resolved = exp_map.unwrap_or_else(|| default_map.to_owned());
+                if game == "lostcoast" && resolved == "background01" {
+                    "lostcoast_background01".to_owned()
+                } else {
+                    resolved
+                }
             };
             res.background_maps.insert(game.to_owned(), map);
         }
@@ -608,7 +612,7 @@ pub const INITIAL_BACKGROUND_MAPS: &[(&str, &str, &str)] = &[
     (
         "lostcoast",
         "lostcoast/scripts/chapterbackgrounds.txt",
-        "background01",
+        "lostcoast_background01",
     ),
 ];
 
@@ -844,7 +848,7 @@ mod tests {
         );
         assert_eq!(
             maps.get("lostcoast").map(String::as_str),
-            Some("background01")
+            Some("lostcoast_background01")
         );
 
         let res = GameUiResources {
@@ -853,6 +857,10 @@ mod tests {
         };
         assert_eq!(res.background_map_for("episodic"), Some("ep1_background01"));
         assert_eq!(res.background_map_for("ep2"), Some("ep2_background01"));
+        assert_eq!(
+            res.background_map_for("lostcoast"),
+            Some("lostcoast_background01")
+        );
         assert_eq!(res.background_map_for("hl2"), Some("background01"));
         assert_eq!(res.background_map_for("unknown"), None);
     }
@@ -1028,6 +1036,22 @@ mod tests {
             Some("english")
         );
         assert_eq!(res.background_map.as_deref(), Some("background01"));
+        assert_eq!(
+            res.background_maps.get("hl2").map(String::as_str),
+            Some("background01")
+        );
+        assert_eq!(
+            res.background_maps.get("episodic").map(String::as_str),
+            Some("ep1_background01")
+        );
+        assert_eq!(
+            res.background_maps.get("ep2").map(String::as_str),
+            Some("ep2_background01")
+        );
+        assert_eq!(
+            res.background_maps.get("lostcoast").map(String::as_str),
+            Some("lostcoast_background01")
+        );
         assert_eq!(
             res.new_game_maps.get("hl2").map(String::as_str),
             Some("d1_trainstation_01")

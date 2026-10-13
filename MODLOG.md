@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-13 Background map on submenu entry
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `source-assets::vpk`: refactored `Vfs` from separate flat `roots` and `vpks` lists into structured `SearchPath { root: PathBuf, archives: Vec<VpkArchive> }` layers. `Vfs::read` and `resolve_material_name` now evaluate each search path's loose directory and its associated VPK archives before falling through to subsequent search paths, ensuring expansion mounts (`episodic`, `ep2`, `lostcoast`) accurately override base `hl2` loose files.
+- `hl2-ui::gameui::resources`: canonicalized Lost Coast default/resolved background map to `"lostcoast_background01"` to prevent collision with base Half-Life 2's `hl2/maps/background01.bsp`.
+- `source-assets::vpk`: updated `expansion_for_map` to map `"lostcoast_background01"` to `Some("lostcoast")`.
+- `hl2-bevy::assets`: updated `assets::load_with_canvas` to map canonical `"lostcoast_background01"` to on-disk map `"background01"` while preserving world name as `"lostcoast_background01"`.
+- `hl2-ui::console`: updated `Console::activate_menu` to handle `MenuOutcome::SwitchExpansion(game)` via `self.gameui.background_map_for(&game)`, emitting `Effect::MainMenuMap` and updating/persisting `config.gameplay.background_map`. Preserved current background map when navigating Back or pressing Escape. Made `Console::activate_menu` public and exposed `menu_category(&self) -> &str`.
+- Tests: added headless Bevy end-to-end tests in `hl2-bevy::campaign`:
+  - `campaign::tests::headless_bevy_app_submenu_entry_switches_background_map_and_scene` (`#[ignore = "requires owned HL2 installation"]`): verifies entering Episode One submenu triggers background state change and `MainMenuMap("ep1_background01")`, drives async loader until `campaign.loaded_map == Some("ep1_background01")` and asserts old scene entities despawned and new scene entities spawned with `MapOwned`. Then switches to Lost Coast submenu and verifies second asynchronous scene swap to `lostcoast_background01`.
+  - `campaign::tests::headless_bevy_app_background_map_failure_logs_warning_and_does_not_crash`: headless Bevy app test with mock installation verifying that background map load failure logs a warning to `campaign.failures` and console output, clears loading state, and never interrupts the menu or crashes.
+
+**Why:**
+- In the original GameUI, entering an expansion's submenu switches the background map to that expansion's initial chapter background. Previously, two defects broke this chain: (1) `Vfs::read` evaluated all loose filesystem directories across all mounts before checking any VPK archives; because base `hl2/scripts/chapterbackgrounds.txt` exists as a loose file, it shadowed `ep1_pak_dir.vpk`'s chapterbackgrounds file and caused expansion background map lookups to fall back to `background01`. (2) In retail Lost Coast, the chapter 1 background map is `lostcoast/maps/background01.bsp`, which shares its filename with `hl2/maps/background01.bsp`, causing `expansion_for_map` to treat it as base `hl2` and the console to ignore the change because `background01` was already loaded. Refactoring search path layering and canonicalizing the Lost Coast background map resolves both root causes.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all 300+ workspace tests pass.
+- `cargo test --locked -p hl2-bevy -- --ignored headless_bevy_app_submenu_entry_switches_background_map_and_scene`: passed (headless Bevy app with live owned installation verifying submenu entry, background state change, async load, and scene swap for ep1 and lost coast).
+- `cargo test --locked -p hl2-bevy campaign::tests::headless_bevy_app_background_map_failure_logs_warning_and_does_not_crash`: passed.
+- `cargo test --locked -p hl2-ui -- --ignored owned_install_resources_load`: passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+
+**Result:** Entering Half-Life 2, Episode One, Episode Two, or Lost Coast submenu updates the background map and swaps the active 3D background scene cleanly. Failures log a warning without crashing.
+
+**Still broken or not tested:** Visual transition on physical display needs manual check.
+
+**Next:** Bug-fix pass complete (all 5 tasks verified and committed).
+
 ## 2026-10-13 Hardcoded UI strings audit
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

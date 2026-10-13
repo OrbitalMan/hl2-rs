@@ -119,7 +119,8 @@ Limitations:
 
 - The background map is frozen and viewed from the player spawn, not from its
   `point_viewcontrol` camera.
-- There is no map-less host mode: if the background map itself fails to load, startup fails.
+- If a background map fails to load, the runtime logs a warning to the console, preserves the menu,
+  and does not crash or interrupt menu navigation.
 - Menu positions follow the retail layout, but the canvas scale is the existing HUD scale rather
   than a verified retail proportional scale.
 

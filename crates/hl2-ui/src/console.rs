@@ -532,6 +532,20 @@ impl Console {
         self.category_title(category)
     }
 
+    /// The active menu category for the current mode.
+    pub fn menu_category(&self) -> &str {
+        let shown = if self.mode == Mode::Options {
+            self.options_return
+        } else {
+            self.mode
+        };
+        if shown == Mode::Pause {
+            self.pause_menu.category()
+        } else {
+            self.main_menu.category()
+        }
+    }
+
     /// Resolutions for the Video page, from the host's monitor query.
     pub fn set_display_modes(&mut self, modes: DisplayModes) {
         self.options.set_display_modes(modes);
@@ -1372,7 +1386,7 @@ impl Console {
         effects
     }
 
-    fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
+    pub fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
         let gameui = self.gameui.clone();
         let loc = &gameui.localization;
         let outcome = match self.mode {
@@ -1410,16 +1424,13 @@ impl Console {
                 ));
             }
             MenuOutcome::SwitchExpansion(game) => {
-                let target_map = self
-                    .gameui
-                    .background_map_for(&game)
-                    .unwrap_or("background01")
-                    .to_owned();
-                self.config.gameplay.background_map = Some(target_map.clone());
-                let _ = self.config.save();
-                if !self.background_level || self.loaded_map.as_deref() != Some(&target_map) {
-                    self.start_loading(&target_map);
-                    return vec![Effect::MainMenuMap(target_map)];
+                if let Some(target_map) = self.gameui.background_map_for(&game).map(str::to_owned) {
+                    self.config.gameplay.background_map = Some(target_map.clone());
+                    let _ = self.config.save();
+                    if !self.background_level || self.loaded_map.as_deref() != Some(&target_map) {
+                        self.start_loading(&target_map);
+                        return vec![Effect::MainMenuMap(target_map)];
+                    }
                 }
             }
             MenuOutcome::SwitchCategory(category) => {
@@ -2833,17 +2844,17 @@ mod tests {
         // In extras: row 0 is HALF-LIFE 2: LOST COAST
         let lc_effects = click_row(&mut console, 0);
         assert_eq!(console.main_menu.category(), "lostcoast");
-        // Target background map for lostcoast is background01, which is already active
         assert!(
-            !lc_effects
+            lc_effects
                 .iter()
-                .any(|e| matches!(e, Effect::MainMenuMap(_))),
-            "no redundant reload when target background map is already active"
+                .any(|e| matches!(e, Effect::MainMenuMap(map) if map == "lostcoast_background01")),
+            "entering lostcoast submenu reloads background map to lostcoast_background01"
         );
         assert_eq!(
             console.config.gameplay.background_map.as_deref(),
-            Some("background01")
+            Some("lostcoast_background01")
         );
+        console.level_loaded(true);
 
         // In lostcoast: row 0 is NEW GAME
         let new_game_effects = click_row(&mut console, 0);

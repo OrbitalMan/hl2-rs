@@ -161,9 +161,13 @@ impl Vpk {
     }
 }
 
-pub struct Vfs {
-    roots: Vec<PathBuf>,
+struct SearchPath {
+    root: PathBuf,
     archives: Vec<Vpk>,
+}
+
+pub struct Vfs {
+    search_paths: Vec<SearchPath>,
     embedded: BTreeMap<String, Vec<u8>>,
     pub warnings: Vec<String>,
     custom_roots: Vec<PathBuf>,
@@ -232,7 +236,6 @@ impl Vfs {
         }
         roots.push(game.join("hl2"));
         roots.push(game.join("platform"));
-        let mut archives = Vec::new();
         let mut warnings = Vec::new();
         let mut custom_roots = Vec::new();
         let mut custom_archives = Vec::new();
@@ -271,11 +274,12 @@ impl Vfs {
                 }
             }
         }
-        for root in &roots {
+        let mut search_paths = Vec::new();
+        for root in roots {
             if !root.is_dir() {
                 continue;
             }
-            let mut paths = std::fs::read_dir(root)?
+            let mut paths = std::fs::read_dir(&root)?
                 .filter_map(|e| e.ok().map(|e| e.path()))
                 .filter(|p| {
                     p.file_name()
@@ -283,18 +287,19 @@ impl Vfs {
                 })
                 .collect::<Vec<_>>();
             paths.sort();
+            let mut archives = Vec::new();
             for p in paths {
                 match Vpk::open(&p) {
                     Ok(v) => archives.push(v),
                     Err(e) => warnings.push(format!("{}: {e}", p.display())),
                 }
             }
+            search_paths.push(SearchPath { root, archives });
         }
         Ok(Self {
             custom_roots,
             custom_archives,
-            roots,
-            archives,
+            search_paths,
             embedded: BTreeMap::new(),
             warnings,
         })
@@ -340,26 +345,27 @@ impl Vfs {
                 return Ok(Some(d));
             }
         }
-        for root in &self.roots {
-            let p = root.join(&name);
+        for layer in &self.search_paths {
+            let p = layer.root.join(&name);
             if p.is_file() {
                 return Ok(Some(std::fs::read(p)?));
             }
-        }
-        for archive in &self.archives {
-            if let Some(d) = archive.read(&name)? {
-                return Ok(Some(d));
+            for archive in &layer.archives {
+                if let Some(d) = archive.read(&name)? {
+                    return Ok(Some(d));
+                }
             }
         }
         Ok(None)
     }
     /// The installation root passed to [`Vfs::mount`] (parent of the mounted `hl2` folder).
     pub fn game_root(&self) -> Option<&Path> {
-        self.roots.first().and_then(|root| root.parent())
+        self.search_paths.first().and_then(|s| s.root.parent())
     }
     pub fn archive_counts(&self) -> Vec<(String, usize)> {
-        self.archives
+        self.search_paths
             .iter()
+            .flat_map(|s| &s.archives)
             .map(|v| {
                 (
                     v.path.file_name().unwrap().to_string_lossy().to_string(),
@@ -401,7 +407,7 @@ impl Vfs {
         let mut found = self
             .custom_archives
             .iter()
-            .chain(&self.archives)
+            .chain(self.search_paths.iter().flat_map(|s| &s.archives))
             .flat_map(|a| a.entries.keys())
             .filter(|p| p.starts_with("materials/") && p.ends_with(&suffix));
         let first = found.next()?;
@@ -466,5 +472,9 @@ mod tests {
         assert_eq!(expansion_for_map("ep2_outland_01.bsp"), Some("ep2"));
         assert_eq!(expansion_for_map("d2_lostcoast"), Some("lostcoast"));
         assert_eq!(expansion_for_map("lostcoast"), Some("lostcoast"));
+        assert_eq!(
+            expansion_for_map("lostcoast_background01"),
+            Some("lostcoast")
+        );
     }
 }

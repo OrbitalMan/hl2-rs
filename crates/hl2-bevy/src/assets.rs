@@ -175,13 +175,18 @@ pub fn load_with_canvas(
     let expansion = source_assets::vpk::expansion_for_map(map);
     let mut vfs = Vfs::mount_expansion(game, expansion).context("mount installed owned content")?;
     hl2_ui::gameui::loading::report_progress(0.15, "LoadingProgress_LoadMap");
+    let disk_map = if map == "lostcoast_background01" || map == "lostcoast" {
+        "background01"
+    } else {
+        map
+    };
     let bytes = vfs
-        .read(&format!("maps/{map}.bsp"))?
-        .with_context(|| format!("owned map {map}.bsp not found"))?;
+        .read(&format!("maps/{disk_map}.bsp"))?
+        .with_context(|| format!("owned map {disk_map}.bsp not found"))?;
     if bytes.len() > 512 * 1024 * 1024 {
         bail!("owned map exceeds 512 MiB read limit");
     }
-    let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {map}.bsp"))?;
+    let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {disk_map}.bsp"))?;
     vfs.mount_pak(bsp.lump(40)).context("mount map pak")?;
     hl2_ui::gameui::loading::report_progress(0.35, "LoadingProgress_PrecacheWorld");
     let mut world = bsp.world(map).context("decode Source world")?;
