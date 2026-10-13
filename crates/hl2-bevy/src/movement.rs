@@ -388,6 +388,23 @@ impl Simulation {
                     .unwrap_or_default();
                 self.player.step(self.input, &self.physics, TICK);
                 self.eye = self.player.eye();
+                // The player's VPhysics shadow pushes and weighs down movable props.
+                let held = game.as_deref().and_then(|game| {
+                    game.inventory.physcannon.held.or(game
+                        .inventory
+                        .carry
+                        .as_ref()
+                        .map(|carry| carry.entity))
+                });
+                self.physics.update_player_shadow(
+                    feet,
+                    self.player.feet,
+                    self.player.crouched,
+                    self.player.grounded && !self.player.dead,
+                    self.player.wish_velocity,
+                    held,
+                    TICK,
+                );
                 if let Some(game) = game.as_deref_mut() {
                     game.step_sounds(&self.physics, before, feet, &self.player);
                     if game.player_outcome(&mut self.player) {

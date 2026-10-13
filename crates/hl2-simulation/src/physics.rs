@@ -39,8 +39,18 @@ const PLAYER_BRUSH_MASK: u32 = 0x1400b;
 const PROJECTILE_GROUP: Group = Group::GROUP_2;
 /// Colliders of npc_* model instances.
 const NPC_GROUP: Group = Group::GROUP_3;
-const QUERY_GROUPS: InteractionGroups =
-    InteractionGroups::new(Group::ALL, Group::ALL.difference(PROJECTILE_GROUP));
+/// The player's VPhysics shadow (CBasePlayer::SetupVPhysicsShadow): it only pushes and
+/// rests on movable props; traces and player movement ignore it.
+const SHADOW_GROUP: Group = Group::GROUP_4;
+const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
+    Group::ALL,
+    Group::ALL
+        .difference(PROJECTILE_GROUP)
+        .difference(SHADOW_GROUP),
+);
+/// SetupVPhysicsShadow: mass 85, no rotation, no drag; SetPushMassLimit(350).
+pub const PLAYER_SHADOW_MASS: f32 = 85.;
+pub const PLAYER_PUSH_MASS_LIMIT: f32 = 350.;
 fn enabled_filter() -> QueryFilter<'static> {
     static ENABLED: fn(ColliderHandle, &Collider) -> bool = |_, c| c.is_enabled();
     QueryFilter::default()
@@ -304,6 +314,10 @@ pub struct SideMaterial {
 #[derive(Default)]
 pub struct WorldSideMaterials {
     pub sides: HashMap<ColliderHandle, Vec<SideMaterial>>,
+    /// The player shadow's colliders and the bodies it must not touch this step (the
+    /// held object).
+    pub shadow: Vec<ColliderHandle>,
+    pub shadow_excluded: Vec<RigidBodyHandle>,
 }
 impl WorldSideMaterials {
     /// The side whose outward normal best matches `outward` (from the brush toward
@@ -317,6 +331,23 @@ impl WorldSideMaterials {
     }
 }
 impl PhysicsHooks for WorldSideMaterials {
+    /// The player controller's contact filter: the shadow touches only movable
+    /// (dynamic) bodies within the push mass limit, never world geometry, doors or
+    /// the object the player holds.
+    fn filter_contact_pair(&self, context: &PairFilterContext) -> Option<SolverFlags> {
+        let other = if self.shadow.contains(&context.collider1) {
+            context.rigid_body2
+        } else if self.shadow.contains(&context.collider2) {
+            context.rigid_body1
+        } else {
+            return Some(SolverFlags::COMPUTE_IMPULSES);
+        };
+        let (handle, body) = other.and_then(|h| context.bodies.get(h).map(|b| (h, b)))?;
+        (body.is_dynamic()
+            && body.mass() <= PLAYER_PUSH_MASS_LIMIT
+            && !self.shadow_excluded.contains(&handle))
+        .then_some(SolverFlags::COMPUTE_IMPULSES)
+    }
     fn modify_solver_contacts(&self, context: &mut ContactModificationContext) {
         let n = Vec3::new(context.normal.x, context.normal.y, context.normal.z);
         let (side, other) = if let Some(side) = self.side(context.collider1, n) {
@@ -379,6 +410,8 @@ pub struct Physics {
     pub native_shape_count: usize,
     pub native_shape_fallbacks: usize,
     pub skipped: usize,
+    /// The player's VPhysics shadow body and whether it uses the crouch hull.
+    pub player_shadow: Option<(RigidBodyHandle, bool)>,
 }
 /// Body-local hull points (metres) of a body's colliders for its drag geometry.
 fn drag_geometry(body: &RigidBody, colliders: &ColliderSet) -> Option<crate::drag::DragGeometry> {
@@ -1096,6 +1129,135 @@ impl Physics {
         );
     }
     /// Position, rotation, velocity (units/s) and local angular velocity (deg/s).
+    /// CBasePlayer::PostThinkVPhysics / UpdateVPhysicsPosition for one tick: the 85 kg
+    /// shadow box follows the player's hull. When a grounded player is blocked by a
+    /// physics object they do not stand on, its target moves halfway toward where they
+    /// wanted to go (old feet + wish velocity x dt), so the shadow shoves the object
+    /// (the contact filter keeps it to movable bodies <= 350 kg). Standing on a movable
+    /// body presses it with the player's weight (85 kg under sv_gravity). Not done:
+    /// the retail controller's speed push limit (50) and contact-plane corrections,
+    /// the shadow pushing the player back (VPhysicsShadowUpdate), StepUp/Jump.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_player_shadow(
+        &mut self,
+        old_feet: Vec3,
+        feet: Vec3,
+        crouched: bool,
+        grounded: bool,
+        wish_velocity: Vec3,
+        held: Option<usize>,
+        dt: f32,
+    ) {
+        if !feet.is_finite() || !old_feet.is_finite() || !wish_velocity.is_finite() || dt <= 0. {
+            return;
+        }
+        // VEC_HULL / VEC_DUCK_HULL; the body origin sits at the hull center.
+        let half = Vec3::new(16., 16., if crouched { 18. } else { 36. });
+        let center = |feet: Vec3| feet + Vec3::Z * half.z;
+        let (handle, current) = match self.player_shadow {
+            Some((handle, hull)) if self.bodies.contains(handle) => (handle, hull),
+            _ => {
+                let body = self.bodies.insert(
+                    RigidBodyBuilder::dynamic()
+                        .position(pose(center(feet), Quat::IDENTITY))
+                        .lock_rotations()
+                        .gravity_scale(0.)
+                        .additional_mass(PLAYER_SHADOW_MASS)
+                        .ccd_enabled(true),
+                );
+                let collider = self.colliders.insert_with_parent(
+                    ColliderBuilder::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
+                        .density(0.)
+                        .friction(0.8)
+                        .active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS)
+                        .collision_groups(InteractionGroups::new(
+                            SHADOW_GROUP,
+                            Group::ALL
+                                .difference(PROJECTILE_GROUP)
+                                .difference(NPC_GROUP)
+                                .difference(SHADOW_GROUP),
+                        )),
+                    body,
+                    &mut self.bodies,
+                );
+                self.world_sides.shadow = vec![collider];
+                self.drag_disabled.insert(body);
+                self.player_shadow = Some((body, crouched));
+                (body, crouched)
+            }
+        };
+        if current != crouched {
+            for collider in &self.world_sides.shadow {
+                if let Some(c) = self.colliders.get_mut(*collider) {
+                    c.set_shape(SharedShape::cuboid(
+                        half.x * SCALE,
+                        half.y * SCALE,
+                        half.z * SCALE,
+                    ));
+                }
+            }
+            self.player_shadow = Some((handle, crouched));
+        }
+        let excluded = held.and_then(|id| self.dynamic.get(&id).copied());
+        // Bodies under the feet (GetGroundVPhysics) and in the way of the wish move
+        // (m_touchedPhysObject), from short hull sweeps against movable bodies.
+        let movable = |physics: &Self, from: Vec3, to: Vec3| -> Option<RigidBodyHandle> {
+            let shape = Cuboid::new(vector![half.x * SCALE, half.y * SCALE, half.z * SCALE]);
+            let filter = QueryFilter::default()
+                .groups(QUERY_GROUPS)
+                .exclude_sensors();
+            let (collider, _) = physics.query.cast_shape(
+                &physics.bodies,
+                &physics.colliders,
+                &pose(center(from), Quat::IDENTITY),
+                &vector(to - from),
+                &shape,
+                ShapeCastOptions::with_max_time_of_impact(1.),
+                filter,
+            )?;
+            let body = physics.colliders.get(collider)?.parent()?;
+            physics
+                .bodies
+                .get(body)
+                .filter(|b| b.is_dynamic() && Some(body) != excluded && body != handle)
+                .map(|_| body)
+        };
+        let ground = if grounded {
+            movable(self, feet + Vec3::Z * 0.5, feet - Vec3::Z * 2.)
+        } else {
+            None
+        };
+        let planar = Vec3::new(wish_velocity.x, wish_velocity.y, 0.);
+        let touched = grounded
+            && ground.is_none()
+            && planar.length_squared() > 1.
+            && movable(
+                self,
+                feet + Vec3::Z,
+                feet + Vec3::Z + planar.normalize() * (planar.length() * dt + 1.),
+            )
+            .is_some();
+        let mut target = center(feet);
+        if touched {
+            target = center(feet) * 0.5 + center(old_feet + planar * dt) * 0.5;
+        }
+        self.world_sides.shadow_excluded = excluded.into_iter().collect();
+        if let Some(body) = self.bodies.get_mut(handle) {
+            let t = *body.translation() / SCALE;
+            let position = Vec3::new(t.x, t.y, t.z);
+            if position.distance(target) > 64. {
+                body.set_translation(vector(target), true);
+                body.set_linvel(vector![0., 0., 0.], true);
+            } else {
+                body.set_linvel(vector((target - position) / dt), true);
+            }
+        }
+        // The player's weight on a movable ground body, applied at the feet.
+        if let Some(body) = ground.and_then(|ground| self.bodies.get_mut(ground)) {
+            let weight = PLAYER_SHADOW_MASS * 600. * SCALE * dt;
+            body.apply_impulse_at_point(vector![0., 0., -weight], Point::from(vector(feet)), true);
+        }
+    }
     pub fn body_state(&self, handle: RigidBodyHandle) -> Option<BodyState> {
         let b = self.bodies.get(handle)?;
         let p = b.position();
@@ -1344,7 +1506,7 @@ impl NpcCollisionWorld for Physics {
             let entity = entity_of(collider);
             collider.is_enabled()
                 && !collider.is_sensor()
-                && collider.collision_groups().memberships != PROJECTILE_GROUP
+                && !matches!(collider.collision_groups().memberships, PROJECTILE_GROUP | SHADOW_GROUP)
                 && entity.is_none_or(|id| !query.excluded_entities.contains(&id))
                 // Explicit actor bounds supersede an NPC's render-mesh collider.
                 && !entity.is_some_and(|id| {
@@ -1587,7 +1749,10 @@ impl CollisionWorld for Physics {
                 let collider = &self.colliders[*handle];
                 if collider.is_enabled()
                     && !collider.is_sensor()
-                    && collider.collision_groups().memberships != PROJECTILE_GROUP
+                    && !matches!(
+                        collider.collision_groups().memberships,
+                        PROJECTILE_GROUP | SHADOW_GROUP
+                    )
                     && !self.world_brush_contents.contains_key(handle)
                 {
                     if let Some(brush) = cache.brush(*handle, collider) {
@@ -2886,5 +3051,85 @@ mod tests {
             assert_eq!(movement.reason, Some(reason));
             assert_eq!(movement.end, start);
         }
+    }
+    /// A free box resting on a floor plate (synthetic values, not game data).
+    fn shadow_scene(mass: f32, gravity: bool, z: f32) -> (Physics, RigidBodyHandle) {
+        let mut physics = Physics::new(&World::default());
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(2000. / 39.37, 2000. / 39.37, 8. / 39.37)
+                .translation(vector![0., 0., -8. / 39.37])
+                .friction(0.8),
+        );
+        let body = physics.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(vector![40. / 39.37, 0., z / 39.37])
+                .gravity_scale(if gravity { 1. } else { 0. })
+                .additional_mass(mass),
+        );
+        physics.colliders.insert_with_parent(
+            ColliderBuilder::cuboid(8. / 39.37, 8. / 39.37, 8. / 39.37)
+                .density(0.)
+                .friction(0.8),
+            body,
+            &mut physics.bodies,
+        );
+        physics.refresh_queries();
+        (physics, body)
+    }
+    #[test]
+    fn player_shadow_shoves_light_props_but_not_heavy_ones() {
+        for (mass, moves) in [(20., true), (500., false)] {
+            let (mut physics, body) = shadow_scene(mass, true, 8.);
+            // The player stands against the box (hull edge x 16, box edge x 32) and
+            // keeps walking into it; movement leaves the feet where they are.
+            let feet = Vec3::new(15.9, 0., 0.);
+            for _ in 0..40 {
+                physics.update_player_shadow(
+                    feet,
+                    feet,
+                    false,
+                    true,
+                    Vec3::new(190., 0., 0.),
+                    None,
+                    TICK,
+                );
+                physics.tick(TICK);
+            }
+            let x = physics.bodies[body].translation().x * 39.37;
+            assert_eq!(x > 41., moves, "{mass} kg box at x {x}");
+            // The shadow follows the player and never wanders into the world.
+            let (shadow, _) = physics.player_shadow.unwrap();
+            let s = *physics.bodies[shadow].translation() * 39.37;
+            assert!((s.z - 36.).abs() < 1. && s.x < 20., "{s:?}");
+        }
+    }
+    #[test]
+    fn player_shadow_does_not_push_the_held_object_and_weighs_down_its_ground() {
+        let (mut physics, body) = shadow_scene(20., true, 8.);
+        physics.dynamic.insert(7, body);
+        let feet = Vec3::new(15.9, 0., 0.);
+        for _ in 0..40 {
+            physics.update_player_shadow(
+                feet,
+                feet,
+                false,
+                true,
+                Vec3::new(190., 0., 0.),
+                Some(7),
+                TICK,
+            );
+            physics.tick(TICK);
+        }
+        assert!(physics.bodies[body].translation().x * 39.37 < 40.5);
+        // Standing on a weightless box held up in the air: the player's weight pushes
+        // it down.
+        let (mut physics, body) = shadow_scene(20., false, 100.);
+        let feet = Vec3::new(40., 0., 108.);
+        for _ in 0..10 {
+            physics.update_player_shadow(feet, feet, false, true, Vec3::ZERO, None, TICK);
+            physics.tick(TICK);
+        }
+        let v = physics.bodies[body].linvel().z * 39.37;
+        assert!(v < -10., "{v}");
     }
 }

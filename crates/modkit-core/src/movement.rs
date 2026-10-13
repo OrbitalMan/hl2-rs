@@ -68,6 +68,8 @@ pub struct Player {
     pub landed: Option<f32>,
     /// Dead players take no input and view from VEC_DEAD_VIEWHEIGHT (14 units).
     pub dead: bool,
+    /// This step's wish velocity (wishdir x wishspeed; SDK m_outWishVel).
+    pub wish_velocity: Vec3,
 }
 impl Player {
     pub fn new(eye: Vec3) -> Self {
@@ -83,6 +85,7 @@ impl Player {
             jumped: false,
             landed: None,
             dead: false,
+            wish_velocity: Vec3::ZERO,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -240,6 +243,7 @@ impl Player {
         } else {
             wishspeed.min(30.)
         };
+        self.wish_velocity = wishdir * wishspeed;
         let add = cap - self.velocity.dot(wishdir);
         if add > 0. {
             let friction = if self.grounded {
