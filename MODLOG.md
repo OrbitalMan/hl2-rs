@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 15 (continued): VPhysics constraints (hinges), spawn-embedded CCD (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) `Physics::add_constraints` (SDK physconstraint.cpp ActivateConstraint/CreateConstraint): phys_hinge (revolute about hingeaxis - origin; hingefriction x 1000 kg in^2/s^2 as a capped zero-velocity motor), phys_ballsocket, phys_ragdollconstraint (spherical with x/y/z limits in the constraint angles), phys_constraint (fixed) as Rapier impulse joints between the attach1/attach2 bodies (missing or non-physics = a fixed world body); SF_CONSTRAINT_DISABLE_COLLISION. Reported, not built (`constraint_errors`): phys_lengthconstraint (rope joints rejected: the swing seats first dropped ~19 units then were flung to z 245, also with CCD off for jointed bodies), constraints with SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY (native BecomeHinged; the impulse teeter-totter hinge inside its static base drifted 115 units; multibody joints panicked in Rapier: "Matrix slicing out of bounds"), unknown attachments. (2) CCD gating fix: props authored interpenetrating a static entity (found once after the first step, contact deeper than 1 unit; world geometry and NPC hulls excluded) keep permanent CCD: with this morning's gating the teeter-totter seat was ejected from its base (to -4756 / -4406). A per-tick variant was rejected (kept CCD on for props pressed into hulls/terrain: plaza tip mean 7.7 ms). (3) The owned impacts test now expects the 11 studio-decal textures (32; it failed after the studio decal commit, which was pushed without rerunning owned tests).
+
+**Why:** owner item 0c: the playground tic-tac-toe blocks fall and jitter; native holds them on hinges.
+
+**Tested how:** unit test (hinged prop pushed off-axis keeps its pivot within 0.5 and does not fall; ropes reported; unknown attachment reported), workspace tests, owned tests (all pass; frag replay bests unchanged 27.6/16.4/3.8/12.8/44.1), strict Clippy, fmt. Packaged (`bevy-playground-constraints.json`, artifacts/s15/play*.json/png): the 8 tic-tac-toe blocks stay at their hinge heights z 63/46/29 (play1.png); teeter-totter seat stays at (-4848,-3488,19) (authored -4851,-3492,20); swing seats fall to z -10 as before; carousel rests at z -10 as before; plaza cop tip-off worst physics step 6.5 ms, mean 3.0 (before the CCD work 20-40 ms).
+
+**Result:** the tic-tac-toe board works as in native; nothing else on the playground regressed.
+
+**Still broken or not tested:** native comparison of the spinning blocks (only SDK + visual); swings (ropes), teeter-totter and carousel hinges (assume-world-geometry), constraint systems, breaking, TurnOn/TurnOff, phys_thruster, env_physexplosion (the playground ghost-swing pushes), func_physbox as dynamic bodies; props authored inside static entities keep permanent CCD (cost as before today).
+
+**Next:** regression batch, then the owner's carried-bottle crouch question.
 ## 2026-10-13 session 15 (continued): studio decals on NPCs (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

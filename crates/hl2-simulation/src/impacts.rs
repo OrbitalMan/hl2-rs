@@ -881,7 +881,11 @@ mod tests {
             .unwrap();
         let mut impacts = Impacts::new(&vfs, &world);
         // 20 bullet decals (no sand set) and the translucent bug bait splash.
-        assert_eq!(impacts.textures.len(), 21, "{:?}", impacts.errors);
+        // 21 world decals + Impact.Flesh's 5 subrects and their 5 $modelmaterials +
+        // decals/beersplashmodel (studio decals).
+        assert_eq!(impacts.textures.len(), 32, "{:?}", impacts.errors);
+        assert!(impacts.textures.contains_key("decals/flesh/blood1"));
+        assert!(impacts.textures.contains_key("decals/beersplashmodel"));
         assert!(impacts.textures[crate::weapon_bugbait::SPLAT_DECAL].translucent);
         assert!(!impacts.textures["decals/concrete/shot1"].translucent);
         assert_eq!(impacts.errors.len(), 5);

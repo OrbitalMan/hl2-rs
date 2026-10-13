@@ -111,6 +111,10 @@ pub const PLAYER_PUSH_MASS_LIMIT: f32 = 350.;
 /// meshes, so without it props sank half a unit into floors (owner report). Applied as
 /// a Rapier contact skin on dynamic prop colliders (contacts only; traces unchanged).
 pub const VPHYSICS_CONTACT_MARGIN: f32 = 0.5;
+/// Contact depth (units) past which a CCD-gated prop keeps continuous collision.
+const EMBEDDED_DEPTH: f32 = 1.;
+/// phys_lengthconstraint as Rapier rope joints (off: see `add_constraints`).
+const ROPE_CONSTRAINTS: bool = false;
 /// SetPushSpeedLimit(50): the shadow's speed into a pushable object's contact normal.
 pub const PLAYER_PUSH_SPEED_LIMIT: f32 = 50.;
 /// The smallest extent of a body's pieces together, in its own frame (meters).
@@ -502,6 +506,9 @@ pub struct Physics {
     drag_geometry: HashMap<RigidBodyHandle, Option<crate::drag::DragGeometry>>,
     /// Bodies with drag disabled (EnableDrag(false): a held object's controlled body).
     pub drag_disabled: std::collections::HashSet<RigidBodyHandle>,
+    /// VPhysics constraints created at load, and those that could not be.
+    pub constraints: usize,
+    pub constraint_errors: Vec<String>,
     /// Prop bodies whose continuous collision runs only while their linear travel per
     /// step exceeds the body's own thickness (cached, 0 = not computed yet), so a body
     /// never skips past anything thicker than itself. Rapier's own test uses the
@@ -509,6 +516,7 @@ pub struct Physics {
     /// search against the world cost 17-40 ms per step while a pallet rocked on and
     /// tipped off a cop (owner report: 46 -> 17 fps) and 2-4 ms with props at rest.
     ccd_gated: HashMap<RigidBodyHandle, f32>,
+    spawn_embedded_checked: bool,
     /// Stored drag fractions of bodies from a read collision file (PhysicsSolid).
     drag_fractions: HashMap<RigidBodyHandle, Vec3>,
     pub native_shape_count: usize,
@@ -925,8 +933,169 @@ impl Physics {
                 body.recompute_mass_properties_from_colliders(&p.colliders);
             }
         }
+        p.add_constraints(world);
         p.query.update(&p.colliders);
         p
+    }
+    /// VPhysics constraint entities (SDK physconstraint.cpp CPhysConstraint::
+    /// ActivateConstraint) as Rapier impulse joints between the attached bodies; a
+    /// missing or non-physics attachment is the world. phys_hinge: revolute about
+    /// `hingeaxis - origin`, with SetAxisFriction(hingefriction x 1000, kg in^2/s^2) as a
+    /// capped zero-velocity motor; phys_ballsocket: spherical at the origin;
+    /// phys_ragdollconstraint: spherical with the x/y/z min/max limits (degrees) in the
+    /// constraint's angles; phys_lengthconstraint: rope from the origin (attach1 side) to
+    /// `attachpoint` (attach2 side), length + addlength; phys_constraint: fixed.
+    /// SF_CONSTRAINT_DISABLE_COLLISION (1) turns contacts off between the pair.
+    /// Not modeled: breaking (force/torque limits), constraint systems' solver
+    /// grouping, StartInactive/TurnOn/TurnOff, sounds, sliders, pulleys, phys_thruster.
+    fn add_constraints(&mut self, world: &World) {
+        let named = |name: &str| {
+            world.entities.iter().position(|e| {
+                e.get("targetname")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name.trim()))
+            })
+        };
+        let mut fixed = None;
+        for (id, e) in world.entities.iter().enumerate() {
+            let class = e.class();
+            if !matches!(
+                class,
+                "phys_hinge"
+                    | "phys_ballsocket"
+                    | "phys_ragdollconstraint"
+                    | "phys_lengthconstraint"
+                    | "phys_constraint"
+            ) {
+                continue;
+            }
+            let body = |key: &str| {
+                e.get(key)
+                    .filter(|n| !n.trim().is_empty())
+                    .and_then(named)
+                    .and_then(|target| self.dynamic.get(&target).copied())
+            };
+            let (a, b) = (body("attach1"), body("attach2"));
+            if a.is_none() && b.is_none() {
+                self.constraint_errors
+                    .push(format!("{class} #{id}: no physics attachment"));
+                continue;
+            }
+            let world_body =
+                *fixed.get_or_insert_with(|| self.bodies.insert(RigidBodyBuilder::fixed()));
+            // The world side first (a multibody's fixed root is its parent).
+            let (a, b) = match (a, b) {
+                (Some(a), Some(b)) => (a, b),
+                (Some(body), None) | (None, Some(body)) => (world_body, body),
+                (None, None) => unreachable!("checked above"),
+            };
+            let flags = e
+                .get("spawnflags")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+                .unwrap_or(0);
+            // SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY: native world hinges become IVP
+            // BecomeHinged objects. As impulse joints the teeter-totter seat (hinge
+            // inside its static base) drifted 115 units off its pivot, and multibody
+            // joints panicked in Rapier (session 15): left unconstrained as before.
+            if flags & 8 != 0 {
+                self.constraint_errors
+                    .push(format!("{class} #{id}: assume-world-geometry not modeled"));
+                continue;
+            }
+            let origin = e.origin();
+            let point = |key: &str| e.get(key).and_then(modkit_core::parse_vec3);
+            let number = |key: &str| {
+                e.get(key)
+                    .and_then(|v| v.trim().parse::<f32>().ok())
+                    .unwrap_or(0.)
+            };
+            let frame_rotation = if class == "phys_hinge" {
+                let Some(axis) = point("hingeaxis")
+                    .map(|p| (p - origin).normalize_or_zero())
+                    .filter(|a| a.length_squared() > 0.5)
+                else {
+                    self.constraint_errors
+                        .push(format!("{class} #{id}: bad hinge axis"));
+                    continue;
+                };
+                Quat::from_rotation_arc(Vec3::X, axis)
+            } else {
+                angles(point("angles").unwrap_or(Vec3::ZERO))
+            };
+            let frame = pose(origin, frame_rotation);
+            let local = |handle: RigidBodyHandle| {
+                self.bodies
+                    .get(handle)
+                    .map_or(frame, |body| body.position().inv_mul(&frame))
+            };
+            let contacts = flags & 1 == 0;
+            let joint: GenericJoint = match class {
+                "phys_hinge" => {
+                    // kg in^2/s^2 -> N m.
+                    let friction = number("hingefriction") * 1000. * SCALE * SCALE;
+                    let mut joint = GenericJointBuilder::new(JointAxesMask::LOCKED_REVOLUTE_AXES)
+                        .local_frame1(local(a))
+                        .local_frame2(local(b))
+                        .contacts_enabled(contacts);
+                    if friction > 0. {
+                        joint = joint
+                            .motor_velocity(JointAxis::AngX, 0., 1e3)
+                            .motor_max_force(JointAxis::AngX, friction);
+                    }
+                    joint.build()
+                }
+                "phys_ballsocket" => GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
+                    .local_frame1(local(a))
+                    .local_frame2(local(b))
+                    .contacts_enabled(contacts)
+                    .build(),
+                "phys_ragdollconstraint" => {
+                    let limit =
+                        |min: &str, max: &str| [number(min).to_radians(), number(max).to_radians()];
+                    GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
+                        .local_frame1(local(a))
+                        .local_frame2(local(b))
+                        .contacts_enabled(contacts)
+                        .limits(JointAxis::AngX, limit("xmin", "xmax"))
+                        .limits(JointAxis::AngY, limit("ymin", "ymax"))
+                        .limits(JointAxis::AngZ, limit("zmin", "zmax"))
+                        .build()
+                }
+                // Rejected for now (session 15, two attempts): the d1_trainstation_02
+                // swing seats hung from two ropes each first dropped ~19 units, then
+                // were flung to z 245 (also with CCD off for jointed bodies). Ropes stay
+                // off until a different approach is validated; seats fall as before.
+                "phys_lengthconstraint" if !ROPE_CONSTRAINTS => {
+                    self.constraint_errors
+                        .push(format!("{class} #{id}: rope constraints disabled"));
+                    continue;
+                }
+                "phys_lengthconstraint" => {
+                    let Some(attach) = point("attachpoint") else {
+                        continue;
+                    };
+                    let length = origin.distance(attach) + number("addlength");
+                    let anchor = |handle: RigidBodyHandle, at: Vec3| {
+                        let p = Point::from(vector(at));
+                        self.bodies
+                            .get(handle)
+                            .map_or(p, |body| body.position().inverse_transform_point(&p))
+                    };
+                    RopeJointBuilder::new(length * SCALE)
+                        .local_anchor1(anchor(a, origin))
+                        .local_anchor2(anchor(b, attach))
+                        .contacts_enabled(contacts)
+                        .build()
+                        .data
+                }
+                _ => GenericJointBuilder::new(JointAxesMask::LOCKED_FIXED_AXES)
+                    .local_frame1(local(a))
+                    .local_frame2(local(b))
+                    .contacts_enabled(contacts)
+                    .build(),
+            };
+            self.impulses.insert(a, b, joint, true);
+            self.constraints += 1;
+        }
     }
     pub fn set_entity(&mut self, id: usize, origin: Vec3, rotation: Quat, enabled: bool) {
         let dynamic = self.dynamic.get(&id);
@@ -1000,6 +1169,43 @@ impl Physics {
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .retain(&self.colliders);
+        // Props authored interpenetrating a static entity (the teeter-totter seat in its
+        // prop_dynamic base) keep continuous collision: Rapier's penetration recovery
+        // ejects them hundreds of units once CCD is off. Found once, after the first
+        // step's contacts; props pressed into geometry later (a pallet on a cop hull,
+        // props sunk into terrain) stay gated.
+        if !self.spawn_embedded_checked && self.time > 0. {
+            self.spawn_embedded_checked = true;
+            let static_entity = |c: &Collider| {
+                c.parent().is_none()
+                    && c.user_data != 0
+                    && c.collision_groups().memberships != HULL_GROUP
+            };
+            for pair in self.narrow.contact_pairs() {
+                if !pair.has_any_active_contact
+                    || !pair
+                        .manifolds
+                        .iter()
+                        .any(|m| m.points.iter().any(|p| p.dist < -EMBEDDED_DEPTH * SCALE))
+                {
+                    continue;
+                }
+                let (Some(c1), Some(c2)) = (
+                    self.colliders.get(pair.collider1),
+                    self.colliders.get(pair.collider2),
+                ) else {
+                    continue;
+                };
+                for (body, other) in [(c1, c2), (c2, c1)] {
+                    if let (Some(parent), true) = (body.parent(), static_entity(other)) {
+                        self.ccd_gated.remove(&parent);
+                        if let Some(b) = self.bodies.get_mut(parent) {
+                            b.enable_ccd(true);
+                        }
+                    }
+                }
+            }
+        }
         // VPhysics drag controller (drag.rs: retail per-object bases, native air density).
         let mut before = HashMap::new();
         for (handle, body) in self.bodies.iter_mut() {
@@ -2820,6 +3026,77 @@ mod tests {
         assert_eq!(dynamic.bodies.len(), 1);
         assert_eq!(dynamic.native_shape_count, 0);
         assert_eq!(dynamic.native_shape_fallbacks, 0);
+    }
+    /// The synthetic prop (body z 20..60 around (100, 200)) as a named prop_physics
+    /// plus one constraint entity (synthetic keyvalues, not game data).
+    fn constrained_prop(constraint: &[(&str, &str)]) -> (Physics, RigidBodyHandle) {
+        let mut world = native_prop_world();
+        world.model_instances[0].kind = "prop_physics".into();
+        world.model_instances[0].entity = Some(0);
+        world.entities.push(modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "prop_physics".into()),
+                ("targetname".into(), "block".into()),
+            ],
+        });
+        world.entities.push(modkit_core::Entity {
+            properties: constraint
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
+        let physics = Physics::new(&world);
+        let body = physics.dynamic[&0];
+        (physics, body)
+    }
+    #[test]
+    fn hinged_prop_keeps_its_pivot_while_ropes_stay_off() {
+        let (mut physics, body) = constrained_prop(&[
+            ("classname", "phys_hinge"),
+            ("attach1", "block"),
+            ("origin", "100 200 60"),
+            ("hingeaxis", "100 210 60"),
+            ("hingefriction", "0.05"),
+            ("spawnflags", "1"),
+        ]);
+        assert_eq!(
+            (physics.constraints, physics.constraint_errors.len()),
+            (1, 0)
+        );
+        let pivot = physics.bodies[body]
+            .position()
+            .inverse_transform_point(&Point::from(vector(Vec3::new(100., 200., 60.))));
+        // A push off the hinge axis: it swings about it instead of falling.
+        physics.bodies[body].set_linvel(vector![2., 0., 0.], true);
+        for _ in 0..200 {
+            physics.tick(TICK);
+        }
+        let held = physics.bodies[body].position() * pivot;
+        let held = Vec3::new(held.x, held.y, held.z) / SCALE;
+        assert!(held.distance(Vec3::new(100., 200., 60.)) < 0.5, "{held}");
+        let state = physics.body_state(body).unwrap();
+        assert!(state.position.z > 10., "fell: {}", state.position);
+        // Ropes are disabled (rejected in session 15): reported, not joined.
+        let (physics, _) = constrained_prop(&[
+            ("classname", "phys_lengthconstraint"),
+            ("attach2", "block"),
+            ("origin", "100 200 200"),
+            ("attachpoint", "100 200 60"),
+        ]);
+        assert_eq!(
+            (physics.constraints, physics.constraint_errors.len()),
+            (0, 1)
+        );
+        // Unknown attachments are reported, not joined.
+        let (physics, _) = constrained_prop(&[
+            ("classname", "phys_ballsocket"),
+            ("attach1", "nothing"),
+            ("origin", "0 0 0"),
+        ]);
+        assert_eq!(
+            (physics.constraints, physics.constraint_errors.len()),
+            (0, 1)
+        );
     }
     #[test]
     fn authored_vphysics_props_use_phy_mass_pieces_damping_and_surface_material() {
