@@ -171,7 +171,9 @@ pub fn load_with_canvas(
     {
         bail!("map must be a bare Source map name");
     }
+    hl2_ui::gameui::loading::report_progress(0.05, "LoadingProgress_SpawningServer");
     let mut vfs = Vfs::mount(game).context("mount installed owned content")?;
+    hl2_ui::gameui::loading::report_progress(0.15, "LoadingProgress_LoadMap");
     let bytes = vfs
         .read(&format!("maps/{map}.bsp"))?
         .with_context(|| format!("owned map {map}.bsp not found"))?;
@@ -180,6 +182,7 @@ pub fn load_with_canvas(
     }
     let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {map}.bsp"))?;
     vfs.mount_pak(bsp.lump(40)).context("mount map pak")?;
+    hl2_ui::gameui::loading::report_progress(0.35, "LoadingProgress_PrecacheWorld");
     let mut world = bsp.world(map).context("decode Source world")?;
     world.warnings.extend(vfs.warnings.iter().cloned());
     normalize_bsp_render_winding(&mut world);
@@ -187,6 +190,7 @@ pub fn load_with_canvas(
     let mut decal_errors = Vec::new();
     add_static_decals(&mut world, &vfs, &mut decal_errors);
     let model_report = models::append_models(&mut world, &vfs);
+    hl2_ui::gameui::loading::report_progress(0.50, "LoadingProgress_SignonDataLocal");
     let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
@@ -209,7 +213,12 @@ pub fn load_with_canvas(
     let mut decoded_bytes = 0usize;
     let mut texture_cache = BTreeMap::new();
     let mut frame_cache = BTreeMap::new();
-    for name in names {
+    let total_materials = names.len().max(1);
+    for (i, name) in names.into_iter().enumerate() {
+        if i % 10 == 0 || i + 1 == total_materials {
+            let frac = 0.55 + 0.30 * (i as f32 / total_materials as f32);
+            hl2_ui::gameui::loading::report_progress(frac, "LoadingProgress_LoadResources");
+        }
         let material = load_material(
             &vfs,
             &name,
@@ -220,6 +229,7 @@ pub fn load_with_canvas(
         );
         materials.insert(name, material);
     }
+    hl2_ui::gameui::loading::report_progress(0.90, "LoadingProgress_SignonLocal");
     let mut eyes = BTreeMap::new();
     let mut gaze = BTreeMap::new();
     let mut flexes = BTreeMap::new();
@@ -287,6 +297,7 @@ pub fn load_with_canvas(
             None
         }
     };
+    hl2_ui::gameui::loading::report_progress(1.0, "LoadingProgress_SignonLocal");
     Ok(LoadedMap {
         console,
         effects,

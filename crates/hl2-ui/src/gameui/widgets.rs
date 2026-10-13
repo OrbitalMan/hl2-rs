@@ -819,6 +819,31 @@ impl Painter<'_> {
             self.text(line, vec2(rect.x + pad_x, line_y), self.theme.tooltip_text, false);
         }
     }
+
+    /// A Source VGUI segmented progress bar: sunken cavity border, transparent background,
+    /// and segmented fill blocks (segment wide 8, gap 4, inset 4 per Source SDK `ProgressBar.cpp`).
+    pub fn progress_bar(&self, rect: Rect, fraction: f32, fg: Color, bg: Color) {
+        self.fill(rect, bg);
+        self.sunken(rect);
+
+        let inset = 4.;
+        let seg_w = 8.;
+        let seg_gap = 4.;
+        let inner_x = rect.x + inset;
+        let inner_y = rect.y + inset;
+        let inner_w = (rect.w - 2. * inset).max(0.);
+        let inner_h = (rect.h - 2. * inset).max(0.);
+        if inner_w <= 0. || inner_h <= 0. {
+            return;
+        }
+
+        let total_segs = ((inner_w + seg_gap) / (seg_w + seg_gap)).floor() as usize;
+        let drawn_segs = ((total_segs as f32) * fraction.clamp(0.0, 1.0)).floor() as usize;
+        for i in 0..drawn_segs {
+            let seg_x = inner_x + (i as f32) * (seg_w + seg_gap);
+            self.fill(Rect::new(seg_x, inner_y, seg_w, inner_h), fg);
+        }
+    }
 }
 
 /// Calculates the placed tooltip rectangle per Source SDK positioning and screen clamping rules.
@@ -1189,5 +1214,37 @@ mod tests {
         painter.tooltip("Hover tip text", vec2(100., 100.), bounds);
         let quads = canvas.drain();
         assert!(!quads.is_empty(), "Tooltip draws background and border");
+    }
+
+    #[test]
+    fn progress_bar_drawing_and_segments() {
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        // 1. Zero fraction draws background and sunken border but no segments
+        let rect = Rect::new(20., 64., 340., 24.);
+        let fg = Color::new(1., 1., 1., 1.);
+        let bg = Color::new(0., 0., 0., 1.);
+        painter.progress_bar(rect, 0.0, fg, bg);
+        let quads_0 = canvas.drain();
+        assert!(!quads_0.is_empty(), "Draws cavity and border");
+
+        // 2. 50% fraction draws about half the segments
+        painter.progress_bar(rect, 0.5, fg, bg);
+        let quads_half = canvas.drain();
+        assert!(quads_half.len() > quads_0.len(), "50% draws segment blocks");
+
+        // 3. 100% fraction draws all segments
+        painter.progress_bar(rect, 1.0, fg, bg);
+        let quads_full = canvas.drain();
+        assert!(quads_full.len() > quads_half.len(), "100% draws all segment blocks");
     }
 }

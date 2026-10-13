@@ -329,25 +329,9 @@ fn source_direction(yaw: f32, pitch: f32) -> Vec3 {
     )
 }
 
-/// Loads the startup map: a loadable `--map` starts gameplay; no `--map` or an unloadable one
-/// opens the main menu over the installed background map. Returns the map and whether it is a
-/// menu background level.
+/// Loads the startup background map. If `--map` was given, it will be loaded asynchronously
+/// by the campaign loader with a loading dialog and progress bar.
 fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
-    if let Some(map) = &options.map {
-        println!("Loading owned {map} for Bevy/wgpu migration host...");
-        match assets::load(&options.game, map) {
-            Ok(loaded) => return Ok((loaded, options.main_menu)),
-            Err(error) if !options.map_dependent.is_empty() => {
-                return Err(error.context(format!(
-                    "--map {map} could not be loaded, and it is required by {}",
-                    options.map_dependent.join(", ")
-                )));
-            }
-            Err(error) => {
-                eprintln!("--map {map} could not be loaded ({error:#}); opening the main menu.")
-            }
-        }
-    }
     let vfs =
         source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
     let background = hl2_ui::gameui::resources::startup_background_map(&vfs).context(
@@ -404,6 +388,9 @@ fn main() -> Result<()> {
     );
     simulation.fov = loaded.console.config.video.fov;
     simulation.run_after_script = options.capture_live;
+    if options.map.is_some() {
+        simulation.loading = true;
+    }
     let status = Status::default();
     let packaged_assets = std::env::current_exe()?
         .parent()
@@ -635,6 +622,11 @@ fn setup(
     );
     let mut console_ui = ui_host::Console::new(ui);
     console_ui.source.level_loaded(prepared.1);
+    if let Some(map) = &options.map {
+        console_ui.map_request = Some(map.clone());
+        console_ui.background_request = options.main_menu;
+        console_ui.source.start_loading(map);
+    }
     commands.insert_resource(console_ui);
     // Every game camera below renders into the game frame (see `video::present_frame`).
     video::install_frame(
@@ -823,6 +815,9 @@ fn monitor(
     ),
 ) {
     let _timing = performance::scope(performance.as_deref(), "diagnostics");
+    if simulation.loading() {
+        return;
+    }
     control.frames += 1;
     let mut report = status.0.lock().expect("status lock");
     report.frames = control.frames;

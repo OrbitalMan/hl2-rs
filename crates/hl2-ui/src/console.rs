@@ -132,6 +132,7 @@ pub struct Console {
     /// The in-game (pause) menu.
     pause_menu: GameMenu,
     pub(crate) confirm_box: Option<(MessageBox, ConfirmKind)>,
+    pub loading_dialog: Option<crate::gameui::loading::LoadingDialog>,
     /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
     background_level: bool,
     theme: Theme,
@@ -329,6 +330,7 @@ impl Default for Console {
             main_menu,
             pause_menu,
             confirm_box: None,
+            loading_dialog: None,
             background_level: false,
             theme: Theme::default(),
             widget_fonts: Fonts::default(),
@@ -497,6 +499,8 @@ impl Console {
     /// Called by the host after a map finished loading. A background level shows the main menu;
     /// any other map starts gameplay.
     pub fn level_loaded(&mut self, background: bool) {
+        self.loading_dialog = None;
+        crate::gameui::loading::reset_progress();
         self.background_level = background;
         self.confirm_box = None;
         self.main_menu.back(&self.gameui.localization);
@@ -510,6 +514,37 @@ impl Console {
         self.previous = self.mode;
     }
 
+    /// Displays the modal loading dialog for the given map.
+    pub fn start_loading(&mut self, map: &str) {
+        self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new(map));
+        crate::gameui::loading::reset_progress();
+    }
+
+    /// Updates loading progress from the latest background loader report.
+    pub fn update_loading(&mut self) {
+        if let Some(loading) = &mut self.loading_dialog {
+            loading.update(crate::gameui::loading::current_progress());
+        }
+    }
+
+    /// Marks the active loading dialog as failed with the given error message.
+    pub fn loading_failed(&mut self, error: &str) {
+        if let Some(loading) = &mut self.loading_dialog {
+            loading.set_error(error);
+        }
+    }
+
+    /// Clears the loading dialog once the level has completely loaded.
+    pub fn loading_complete(&mut self) {
+        self.loading_dialog = None;
+        crate::gameui::loading::reset_progress();
+    }
+
+    /// Whether a map load is currently in progress.
+    pub fn is_loading(&self) -> bool {
+        self.loading_dialog.as_ref().is_some_and(|l| !l.is_failed())
+    }
+
     pub fn paused(&self) -> bool {
         self.mode != Mode::Gameplay
     }
@@ -517,6 +552,13 @@ impl Console {
     /// Escape closes the quit box first, then leaves a menu category, then toggles the menus.
     /// The main menu over a background level has nothing to return to.
     pub fn escape(&mut self) {
+        if let Some(loading) = &self.loading_dialog {
+            if loading.is_failed() {
+                self.loading_dialog = None;
+                self.mode = Mode::MainMenu;
+            }
+            return;
+        }
         if self.confirm_box.take().is_some() {
             return;
         }
@@ -672,6 +714,7 @@ impl Console {
                 {
                     return Err("map: use a simple installed map name".into());
                 }
+                self.start_loading(map);
                 return Ok(Some(Effect::Map(map.to_owned())));
             }
             "ent_fire" => {
@@ -858,6 +901,13 @@ impl Console {
     }
     /// Called before gameplay input collection. Opening characters are drained by the host.
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
+        if let Some(loading) = &self.loading_dialog {
+            if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {
+                self.loading_dialog = None;
+                self.mode = Mode::MainMenu;
+            }
+            return Vec::new();
+        }
         if self.mode == Mode::Options {
             let measure = Painter {
                 canvas: &self.canvas,
@@ -1110,7 +1160,10 @@ impl Console {
             MenuOutcome::ConfirmQuit => {
                 self.confirm_box = Some((MessageBox::quit(loc), ConfirmKind::Quit));
             }
-            MenuOutcome::NewGame(map) => return vec![Effect::Map(map)],
+            MenuOutcome::NewGame(map) => {
+                self.start_loading(&map);
+                return vec![Effect::Map(map)];
+            }
             MenuOutcome::ReturnToMainMenu => {
                 self.confirm_box = Some((
                     MessageBox::return_to_main_menu(loc),
@@ -1170,7 +1223,13 @@ impl Console {
     }
 
     pub fn draw(&self, time: f64) {
+        if self.mode == Mode::Gameplay && self.loading_dialog.is_none() {
+            return;
+        }
         if self.mode == Mode::Gameplay {
+            if let Some(loading) = &self.loading_dialog {
+                loading.draw(&self.painter(Vec2::ZERO, 1.), &self.gameui.localization);
+            }
             return;
         }
         // The options dialog is drawn over the menu it was opened from.
@@ -1366,6 +1425,9 @@ impl Console {
                     WHITE,
                 );
             }
+        }
+        if let Some(loading) = &self.loading_dialog {
+            loading.draw(&self.painter(Vec2::ZERO, 1.), &self.gameui.localization);
         }
     }
 }
@@ -1868,5 +1930,77 @@ mod tests {
         assert_eq!(console.config.video.fov, 90.0);
         assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
         assert_eq!(effects.len(), 4);
+    }
+
+    #[test]
+    fn loading_dialog_state_transitions_and_dismissal() {
+        let mut console = installed_console();
+        console.level_loaded(true);
+        assert!(!console.is_loading());
+
+        // Start loading
+        console.start_loading("d1_trainstation_01");
+        assert!(console.is_loading());
+        assert!(console.loading_dialog.is_some());
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().map,
+            "d1_trainstation_01"
+        );
+
+        // Update progress via global reporting
+        crate::gameui::loading::report_progress(0.5, "LoadingProgress_SignonDataLocal");
+        console.update_loading();
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().fraction,
+            0.5
+        );
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().stage,
+            Some("LoadingProgress_SignonDataLocal")
+        );
+
+        // While actively loading, input is consumed without dismissing
+        let input = Input {
+            click: true,
+            ..Default::default()
+        };
+        assert!(console.input(&input).is_empty());
+        assert!(console.loading_dialog.is_some());
+
+        // Completing loading clears the dialog
+        console.loading_complete();
+        assert!(!console.is_loading());
+        assert!(console.loading_dialog.is_none());
+
+        // Test failure path and dismissal via escape
+        console.start_loading("invalid_map");
+        console.loading_failed("Map invalid_map not found");
+        assert!(!console.is_loading());
+        assert!(console.loading_dialog.as_ref().unwrap().is_failed());
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().error.as_deref(),
+            Some("Map invalid_map not found")
+        );
+
+        console.escape();
+        assert!(console.loading_dialog.is_none());
+        assert_eq!(console.mode, Mode::MainMenu);
+
+        // Test failure path and dismissal via Enter or click
+        console.start_loading("invalid_map");
+        console.loading_failed("Map invalid_map not found");
+        let enter_input = Input {
+            keys: [Key::Enter].into_iter().collect(),
+            ..Default::default()
+        };
+        console.input(&enter_input);
+        assert!(console.loading_dialog.is_none());
+        assert_eq!(console.mode, Mode::MainMenu);
+
+        // Test level_loaded also clears loading dialog
+        console.start_loading("d1_trainstation_02");
+        console.level_loaded(false);
+        assert!(console.loading_dialog.is_none());
+        assert_eq!(console.mode, Mode::Gameplay);
     }
 }

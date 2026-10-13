@@ -97,13 +97,17 @@ pub fn poll(
         if let Err(error) = worker {
             let error = format!("Cannot start map loader: {error}");
             ui.source.log(&error);
+            ui.source.loading_failed(&error);
             campaign.failures.push(error);
             sim.loading_failed();
             return;
         }
+        ui.source.start_loading(&request.map);
+        sim.loading = true;
         campaign.job = Some(Job { request, result });
     }
     campaign.loading_frames += 1;
+    ui.source.update_loading();
     let result = campaign
         .job
         .as_ref()
@@ -117,14 +121,22 @@ pub fn poll(
         Err(error) => {
             let error = format!("Map transition failed for {}: {error}", job.request.map);
             ui.source.log(&error);
-            campaign.failures.push(error);
+            ui.source.loading_failed(&error);
+            campaign.failures.push(error.clone());
             sim.loading_failed();
+            if !options.map_dependent.is_empty() && options.map.as_deref() == Some(&job.request.map) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
             return;
         }
     };
     let previous_eye = glam::Vec3::from_array(sim.eye().to_array());
     let eye = if job.request.direct {
-        loaded.world.spawn().0
+        options
+            .position
+            .map(|p| glam::Vec3::from_array(p.to_array()))
+            .unwrap_or(loaded.world.spawn().0)
     } else {
         hl2_simulation::campaign::arrival(
             &game.world,
@@ -158,6 +170,12 @@ pub fn poll(
     }
     sim.change_map(&loaded.world, eye, job.request.direct);
     if job.request.direct {
+        if let Some(yaw) = options.yaw {
+            sim.yaw = yaw;
+        }
+        if options.fly {
+            sim.fly = true;
+        }
         ui.source.level_loaded(job.request.background);
         if !job.request.background
             && let Ok(mut cursor) = windows.single_mut()

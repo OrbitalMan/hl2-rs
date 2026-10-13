@@ -98,7 +98,7 @@ pub struct Simulation {
     /// Scripted horizontal 4:3 field of view in degrees (default 75).
     pub fov: f32,
     pub(crate) input: Input,
-    fly: bool,
+    pub fly: bool,
     pub paused: bool,
     pub loading: bool,
     pub focused: bool,

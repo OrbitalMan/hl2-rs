@@ -6,6 +6,7 @@
 pub mod display;
 pub mod keys;
 pub mod layout;
+pub mod loading;
 pub mod localize;
 pub mod menu;
 pub mod options;

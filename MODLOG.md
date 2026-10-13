@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-13 Map loading dialog
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::loading`: created module with `LoadingDialog`, `LoadProgress`, thread-safe `report_progress`, `current_progress`, and `reset_progress`. Modeled after retail Source `LoadingDialogNoBanner.res` (380x112 centered frame, `#GameUI_Loading` title, info status label at (20, 34, 340, 24), progress bar at (20, 64, 340, 24)). Supports localized stage status strings (`LoadingProgress_SpawningServer`, `LoadingProgress_LoadMap`, `LoadingProgress_PrecacheWorld`, `LoadingProgress_SignonDataLocal`, `LoadingProgress_LoadResources`, `LoadingProgress_SignonLocal`), unlocalized English fallbacks, `status_override`, and failure error messages. Added unit tests for initial state, progress reporting, localized fallbacks, failure latches, and completion.
+- `hl2-ui::gameui::widgets`: added `Painter::progress_bar` implementing Source SDK `ProgressBar.cpp` geometry (segmented chunks: width 8px, gap 4px, inset 4px, depressed sunken border, dark cavity background, white chunk fills). Added unit test `progress_bar_drawing_and_segments`.
+- `hl2-ui::console`: added `pub loading_dialog: Option<LoadingDialog>` to `Console`. Added helpers `start_loading`, `update_loading`, `loading_failed`, `loading_complete`, and `is_loading`. Updated `level_loaded` to dismiss loading dialog and reset progress. Updated `Console::draw` to render loading dialog centered over menus or blank screen during gameplay. Made `Console::input` modal while loading is active, consuming inputs and allowing Enter / mouse click / Escape to dismiss failed dialogs and return to main menu. Added unit test `loading_dialog_state_transitions_and_dismissal`.
+- `hl2-bevy::assets`: wired authentic stage progress reports into `assets::load_with_canvas`: 0.05 (`LoadingProgress_SpawningServer`), 0.15 (`LoadingProgress_LoadMap`), 0.35 (`LoadingProgress_PrecacheWorld`), 0.50 (`LoadingProgress_SignonDataLocal`), 0.55..0.85 (`LoadingProgress_LoadResources` fine-grained across texture decoding), 0.90..1.0 (`LoadingProgress_SignonLocal`).
+- `hl2-bevy::campaign`: wired `start_loading`, `update_loading`, and `loading_failed` around asynchronous map loading tasks, preserving spawn positions/angles across transitions.
+- `hl2-bevy::main`: on startup with `--map`, queues `options.map` into `console_ui.map_request` with `start_loading`, loads background map, and pauses `--frames` budget consumption while loading is active.
+
+**Why:**
+- Half-Life 2 displays an authentic modal VGUI loading dialog with stage progress when loading a map from the main menu, in-game console `map` command, or startup arguments.
+- Segmented chunk rendering and real stage tokens match retail Source engine behavior.
+
+**Tested how:**
+- `cargo test --locked`: all 109 unit tests in `hl2-ui`, 64 in `hl2-bevy`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed.
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and exited code 0.
+- Headless Bevy runtime map load: `cargo run --locked -p hl2-bevy -- --frames 30 --map d1_trainstation_01 --no-focus` passed and exited code 0.
+
+**Result:** Authentic modal loading dialog matching Source SDK `ProgressBar` chunk rendering and retail `LoadingDialogNoBanner.res` layout, with real loader stages and modal failure recovery.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 9 ("New Game" for HL2: Episode One and Episode Two).
+
 ## 2026-10-13 Options tooltips
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
