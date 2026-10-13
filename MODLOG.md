@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-13 Credits dialog sizing
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::options`: removed the credits scroll view entirely (eliminated `credits_scroll`, `needs_scroll`, `max_scroll`, scrollbar rendering, wheel scrolling, and scrollbar drag handling).
+- `hl2-ui::gameui::options`: implemented dynamic, flexible height sizing for 3rd-party technology credits dialogs (`OptionsSubAudioThirdPartyDlg` and `OptionsSubVideoThirdPartyDlg`) via `sub_frame_size(&self, sub: Sub, measure_w) -> Vec2`. Sized dialog height strictly to its content: derived from the wrapped label layout plus standard title bar (`34.`) and bottom Close button margins (`46.`).
+- Content and Close button layout: guaranteed that all text lines, images, and the bottom-right Close button remain strictly within dialog bounds without overlapping or exceeding frame borders.
+- Window bounds reporting: added `credits_fits_window(&self, sub: Sub, canvas: Vec2, measure_w) -> bool` and window fit check in `OptionsDialog::input`. When dialog content cannot fit the window at small display resolutions (e.g. 400x200), logs a non-spamming report message to console history (`self.log`) instead of reintroducing scrolling.
+- Tests: added `credits_subdialog_sizing_and_no_scrolling` verifying flexible content sizing between audio and video credits, absence of scrollbars, and strict containment within dialog bounds. Added `credits_dialog_reports_when_exceeding_window_at_small_resolutions` asserting window fit detection and console reporting at small resolutions. Updated `credits_dialogs_have_100_percent_opacity`.
+
+**Why:**
+- In the original GameUI, 3rd-party technology credits dialogs size their frames to fit their contained content rather than maintaining a scroll view. Previously, credits dialogs were constrained to a fixed 210px height and utilized a scrollbar. Sizing the dialog dynamically to its wrapped content eliminates unnecessary scrollbars and ensures all text and graphics are visible cleanly. Small resolutions that cannot contain the frame are diagnosed and reported via the console without degrading into scrolling views.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all 300+ workspace tests pass.
+- `cargo test --locked -p hl2-ui credits_subdialog_sizing_and_no_scrolling`: passed.
+- `cargo test --locked -p hl2-ui credits_dialog_reports_when_exceeding_window_at_small_resolutions`: passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+- Headless runtime: `hl2-bevy --frames 30` ran 30 frames cleanly on Metal.
+
+**Result:** 3rd party credits subdialogs size height flexibly to wrapped content without scrolling, with all elements strictly inside dialog bounds and no overlaps. Small resolutions exceeding bounds are reported to the console log.
+
+**Still broken or not tested:** Visual appearance on physical display across varying DPI scale factors needs manual check.
+
+**Next:** Task 3 (Submenu title encoding).
+
 ## 2026-10-13 Rollover sound only for menu buttons
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

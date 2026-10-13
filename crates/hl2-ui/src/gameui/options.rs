@@ -102,7 +102,7 @@ pub enum OptionsOutcome {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Sub {
+pub(crate) enum Sub {
     /// Brightness dialog; `saved` is restored on Cancel.
     Gamma {
         saved: f32,
@@ -278,7 +278,6 @@ pub struct OptionsDialog {
     bink_texture: Option<Texture2D>,
     log: Vec<String>,
     pub(crate) active_tooltip: Option<ActiveTooltip>,
-    pub credits_scroll: f32,
 }
 
 impl Default for OptionsDialog {
@@ -305,7 +304,6 @@ impl Default for OptionsDialog {
             bink_texture: None,
             log: Vec::new(),
             active_tooltip: None,
-            credits_scroll: 0.0,
         }
     }
 }
@@ -416,7 +414,6 @@ impl OptionsDialog {
         self.confirm = None;
         self.sub = None;
         self.active_tooltip = None;
-        self.credits_scroll = 0.0;
     }
 
     pub fn tab(&self) -> Tab {
@@ -456,7 +453,6 @@ impl OptionsDialog {
             return true;
         }
         if let Some(sub) = self.sub.take() {
-            self.credits_scroll = 0.0;
             if let Sub::Gamma { saved } = sub {
                 self.draft.config.video.gamma = saved;
             }
@@ -581,9 +577,24 @@ impl OptionsDialog {
         }
         if let Some(sub) = self.sub {
             self.active_tooltip = None;
-            let size = frame_size(&self.res, sub);
+            let size = self.sub_frame_size(sub, |s| measure.text_width(s, false));
+            if sub.is_credits()
+                && !self.credits_fits_window(sub, canvas, |s| measure.text_width(s, false))
+            {
+                let scaled_size = size * scale;
+                let msg = format!(
+                    "Credits dialog content ({}x{}px) cannot fit window bounds ({}x{}px) at current resolution",
+                    scaled_size.x.round(),
+                    scaled_size.y.round(),
+                    canvas.x.round(),
+                    canvas.y.round(),
+                );
+                if !self.log.iter().any(|l| l == &msg) {
+                    self.log.push(msg);
+                }
+            }
             let pointer = local(centered(canvas, size, scale));
-            self.sub_input(sub, size, input, pointer, measure);
+            self.sub_input(sub, size, input, pointer);
             return OptionsOutcome::None;
         }
         let pointer = local(centered(canvas, DIALOG_SIZE, scale));
@@ -898,11 +909,9 @@ impl OptionsDialog {
                 })
             }
             Command::AudioCredits => {
-                self.credits_scroll = 0.0;
                 self.sub = Some(Sub::AudioCredits);
             }
             Command::VideoCredits => {
-                self.credits_scroll = 0.0;
                 self.sub = Some(Sub::VideoCredits);
             }
             Command::KeyDefaults => {
@@ -929,11 +938,9 @@ impl OptionsDialog {
                 self.placeholder(label);
             }
             Command::SubOk => {
-                self.credits_scroll = 0.0;
                 self.sub = None;
             }
             Command::SubCancel => {
-                self.credits_scroll = 0.0;
                 if let Some(Sub::Gamma { saved }) = self.sub {
                     self.draft.config.video.gamma = saved;
                 }
@@ -1037,16 +1044,9 @@ impl OptionsDialog {
         }
     }
 
-    fn sub_input(
-        &mut self,
-        sub: Sub,
-        size: Vec2,
-        input: &Input,
-        pointer: Option<Vec2>,
-        measure: &Painter,
-    ) {
+    fn sub_input(&mut self, sub: Sub, size: Vec2, input: &Input, pointer: Option<Vec2>) {
         if sub.is_credits() {
-            self.credits_input(sub, size, input, pointer, measure);
+            self.credits_input(size, input, pointer);
             return;
         }
         let res = self.res.clone();
@@ -1158,25 +1158,37 @@ impl OptionsDialog {
         total_h
     }
 
+    /// Frame size of a sub-dialog: sized flexibly to wrapped content for credits dialogs,
+    /// or layout / fallback size for other sub-dialogs.
+    pub(crate) fn sub_frame_size(&self, sub: Sub, measure_w: impl Fn(&str) -> f32) -> Vec2 {
+        if sub.is_credits() {
+            let items = self.credits_items(sub);
+            let content_w = CREDITS_SIZE.x - 32.;
+            let content_h = self.measure_credits_height(&items, content_w, measure_w);
+            // 34. top inset (title bar) + content_h + 12. gap + 24. close button + 10. bottom margin = 46. bottom inset
+            vec2(CREDITS_SIZE.x, 34. + content_h + 46.)
+        } else {
+            frame_size(&self.res, sub)
+        }
+    }
+
+    /// Returns whether the credits subdialog content fits completely within the window at `canvas` resolution.
+    pub(crate) fn credits_fits_window(
+        &self,
+        sub: Sub,
+        canvas: Vec2,
+        measure_w: impl Fn(&str) -> f32,
+    ) -> bool {
+        let scale = Painter::scale_for(canvas.y);
+        let size = self.sub_frame_size(sub, measure_w);
+        size.x * scale <= canvas.x && size.y * scale <= canvas.y
+    }
+
     fn draw_credits_subdialog(&self, sp: &Painter, sub: Sub, size: Vec2, modal: bool) {
         let loc = &self.res.localization;
         let items = self.credits_items(sub);
-        let view_rect = Rect::new(16., 34., size.x - 32., size.y - 34. - 42.);
-        let sb_w = widgets::SCROLLBAR_WIDTH;
-
-        let total_h_full =
-            self.measure_credits_height(&items, view_rect.w, |s| sp.text_width(s, false));
-        let needs_scroll = total_h_full > view_rect.h;
-        let (content_w, total_h, max_scroll) = if needs_scroll {
-            let cw = view_rect.w - sb_w - 6.0;
-            let th = self.measure_credits_height(&items, cw, |s| sp.text_width(s, false));
-            (cw, th, (th - view_rect.h).max(0.0))
-        } else {
-            (view_rect.w, total_h_full, 0.0)
-        };
-
-        let scroll = self.credits_scroll.clamp(0.0, max_scroll);
-        let mut y_cursor = view_rect.y - scroll;
+        let content_w = size.x - 32.;
+        let mut y_cursor = 34.;
 
         for (i, item) in items.iter().enumerate() {
             if i > 0 {
@@ -1187,12 +1199,7 @@ impl OptionsDialog {
                     let text = loc.localize(token);
                     let lines = widgets::wrap(&text, content_w, |s| sp.text_width(s, false));
                     for line in lines {
-                        let line_y = y_cursor;
-                        if line_y >= view_rect.y
-                            && line_y + widgets::FONT_TALL <= view_rect.y + view_rect.h + 2.0
-                        {
-                            sp.text(&line, Vec2::new(view_rect.x, line_y), sp.theme.text, false);
-                        }
+                        sp.text(&line, Vec2::new(16., y_cursor), sp.theme.text, false);
                         y_cursor += widgets::FONT_TALL;
                     }
                 }
@@ -1200,36 +1207,17 @@ impl OptionsDialog {
                     path,
                     size: img_size,
                 } => {
-                    let img_y = y_cursor;
-                    if img_y >= view_rect.y && img_y + img_size.y <= view_rect.y + view_rect.h + 2.0
-                    {
-                        let texture = if path.to_ascii_lowercase().contains("bink") {
-                            self.bink_texture.as_ref()
-                        } else {
-                            None
-                        };
-                        if let Some(tex) = texture {
-                            sp.image(Rect::new(view_rect.x, img_y, img_size.x, img_size.y), tex);
-                        }
+                    let texture = if path.to_ascii_lowercase().contains("bink") {
+                        self.bink_texture.as_ref()
+                    } else {
+                        None
+                    };
+                    if let Some(tex) = texture {
+                        sp.image(Rect::new(16., y_cursor, img_size.x, img_size.y), tex);
                     }
                     y_cursor += img_size.y;
                 }
             }
-        }
-
-        if needs_scroll && max_scroll > 0.0 {
-            let sb_rect = Rect::new(
-                view_rect.x + view_rect.w - sb_w,
-                view_rect.y,
-                sb_w,
-                view_rect.h,
-            );
-            sp.scroll_bar(
-                sb_rect,
-                scroll.round() as usize,
-                view_rect.h.round() as usize,
-                total_h.round() as usize,
-            );
         }
 
         let close_rect = Rect::new(size.x - 96., size.y - 34., 80., 24.);
@@ -1247,46 +1235,7 @@ impl OptionsDialog {
         );
     }
 
-    fn credits_input(
-        &mut self,
-        sub: Sub,
-        size: Vec2,
-        input: &Input,
-        pointer: Option<Vec2>,
-        measure: &Painter,
-    ) {
-        let items = self.credits_items(sub);
-        let view_rect = Rect::new(16., 34., size.x - 32., size.y - 34. - 42.);
-        let sb_w = widgets::SCROLLBAR_WIDTH;
-
-        let total_h_full =
-            self.measure_credits_height(&items, view_rect.w, |s| measure.text_width(s, false));
-        let max_scroll = if total_h_full > view_rect.h {
-            let cw = view_rect.w - sb_w - 6.0;
-            let th = self.measure_credits_height(&items, cw, |s| measure.text_width(s, false));
-            (th - view_rect.h).max(0.0)
-        } else {
-            0.0
-        };
-
-        if input.wheel != 0. && max_scroll > 0.0 {
-            let step = input.wheel * 24.0;
-            self.credits_scroll = (self.credits_scroll - step).clamp(0.0, max_scroll);
-        }
-
-        let sb_rect = Rect::new(
-            view_rect.x + view_rect.w - sb_w,
-            view_rect.y,
-            sb_w,
-            view_rect.h,
-        );
-        if let Some(p) = pointer {
-            if (input.click || input.held) && max_scroll > 0.0 && sb_rect.contains(p) {
-                let fraction = ((p.y - sb_rect.y) / sb_rect.h).clamp(0.0, 1.0);
-                self.credits_scroll = (fraction * max_scroll).clamp(0.0, max_scroll);
-            }
-        }
-
+    fn credits_input(&mut self, size: Vec2, input: &Input, pointer: Option<Vec2>) {
         let close_rect = Rect::new(size.x - 96., size.y - 34., 80., 24.);
         let title_close_rect = widgets::close_button_rect(size);
         let extra = [
@@ -1380,7 +1329,7 @@ impl OptionsDialog {
             p.menu_list(combo.list, &combo.items, combo.first, combo.highlight);
         }
         if let Some(sub) = self.sub {
-            let size = frame_size(&self.res, sub);
+            let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
             let mut theme = base.theme.clone();
             if sub.is_credits() {
                 theme.frame_bg.a = 1.0;
@@ -2183,21 +2132,27 @@ mod tests {
             scale: 1.,
         };
 
+        let audio_size = h
+            .dialog
+            .sub_frame_size(Sub::AudioCredits, |s| painter.text_width(s, false));
         h.dialog.sub = Some(Sub::AudioCredits);
         h.dialog.draw(&painter);
         let quads = h.canvas.drain();
         let credits_frame = quads
             .iter()
-            .find(|q| q.destination.w == CREDITS_SIZE.x && q.destination.h == CREDITS_SIZE.y)
+            .find(|q| q.destination.w == audio_size.x && q.destination.h == audio_size.y)
             .expect("audio credits frame quad");
         assert_eq!(credits_frame.color.a, 1.0);
 
+        let video_size = h
+            .dialog
+            .sub_frame_size(Sub::VideoCredits, |s| painter.text_width(s, false));
         h.dialog.sub = Some(Sub::VideoCredits);
         h.dialog.draw(&painter);
         let quads = h.canvas.drain();
         let video_credits_frame = quads
             .iter()
-            .find(|q| q.destination.w == CREDITS_SIZE.x && q.destination.h == CREDITS_SIZE.y)
+            .find(|q| q.destination.w == video_size.x && q.destination.h == video_size.y)
             .expect("video credits frame quad");
         assert_eq!(video_credits_frame.color.a, 1.0);
     }
@@ -2523,7 +2478,7 @@ mod tests {
     }
 
     #[test]
-    fn credits_subdialog_layout_prevents_overlap_and_scrolls() {
+    fn credits_subdialog_sizing_and_no_scrolling() {
         let mut h = Harness::new();
         let mut loc = Localization::default();
         loc.insert(
@@ -2553,96 +2508,104 @@ mod tests {
             scale: 1.,
         };
 
-        // 1. Initial draw with scroll = 0
+        // 1. Sizing is derived dynamically from content (Audio vs Video credits)
+        let audio_items = h.dialog.credits_items(Sub::AudioCredits);
+        let audio_content_h =
+            h.dialog
+                .measure_credits_height(&audio_items, CREDITS_SIZE.x - 32., |s| {
+                    s.len() as f32 * 7.
+                });
+        let audio_size = h
+            .dialog
+            .sub_frame_size(Sub::AudioCredits, |s| s.len() as f32 * 7.);
+        assert_eq!(audio_size.x, CREDITS_SIZE.x);
+        assert_eq!(audio_size.y, 34. + audio_content_h + 46.);
+
+        let video_items = h.dialog.credits_items(Sub::VideoCredits);
+        let video_content_h =
+            h.dialog
+                .measure_credits_height(&video_items, CREDITS_SIZE.x - 32., |s| {
+                    s.len() as f32 * 7.
+                });
+        let video_size = h
+            .dialog
+            .sub_frame_size(Sub::VideoCredits, |s| s.len() as f32 * 7.);
+        assert_eq!(video_size.x, CREDITS_SIZE.x);
+        assert_eq!(video_size.y, 34. + video_content_h + 46.);
+        assert!(
+            audio_size.y > video_size.y,
+            "Audio credits with more items should be taller than video credits"
+        );
+
+        // 2. Draw audio credits and verify no scrollbar exists, nothing exceeds bounds, and nothing overlaps
         h.dialog.draw(&painter);
         let quads = h.canvas.drain();
 
-        let origin = centered(vec2(1280., 720.), CREDITS_SIZE, 1.);
-        let view_rect = Rect::new(
-            origin.x + 16.,
-            origin.y + 34.,
-            CREDITS_SIZE.x - 32.,
-            CREDITS_SIZE.y - 76.,
-        );
+        let real_audio_size = h
+            .dialog
+            .sub_frame_size(Sub::AudioCredits, |s| painter.text_width(s, false));
+        let origin = centered(vec2(1280., 720.), real_audio_size, 1.);
+        let dialog_bounds = Rect::new(origin.x, origin.y, real_audio_size.x, real_audio_size.y);
         let close_rect = Rect::new(
-            origin.x + CREDITS_SIZE.x - 96.,
-            origin.y + CREDITS_SIZE.y - 34.,
+            origin.x + real_audio_size.x - 96.,
+            origin.y + real_audio_size.y - 34.,
             80.,
             24.,
         );
 
-        // Verify sequential measurements: audio credits exceed view_rect.h (needs scrollbar),
-        // while video credits fit within view_rect.h.
-        let audio_items = h.dialog.credits_items(Sub::AudioCredits);
-        let audio_h = h
-            .dialog
-            .measure_credits_height(&audio_items, view_rect.w - 22., |s| s.len() as f32 * 7.);
-        assert!(
-            audio_h > view_rect.h,
-            "Audio credits height ({}) must exceed view height ({})",
-            audio_h,
-            view_rect.h
-        );
-
-        let video_items = h.dialog.credits_items(Sub::VideoCredits);
-        let video_h = h
-            .dialog
-            .measure_credits_height(&video_items, view_rect.w, |s| s.len() as f32 * 7.);
-        assert!(
-            video_h <= view_rect.h,
-            "Video credits height ({}) must fit in view height ({})",
-            video_h,
-            view_rect.h
-        );
-
-        // Verify scrollbar exists because audio credits exceed 134px height
+        // Assert no scrollbar quad was rendered anywhere
         let sb_w = widgets::SCROLLBAR_WIDTH;
-        let sb_rect = Rect::new(
-            view_rect.x + view_rect.w - sb_w,
-            view_rect.y,
-            sb_w,
-            view_rect.h,
-        );
         let has_scrollbar = quads.iter().any(|q| {
             let r = q.destination;
-            r.x >= sb_rect.x - 1. && r.x + r.w <= sb_rect.x + sb_rect.w + 1. && r.h > 10.
+            r.w == sb_w && r.h > 20.
         });
         assert!(
-            has_scrollbar,
-            "Expected vertical scrollbar when content exceeds view height"
+            !has_scrollbar,
+            "Scrollbar must NOT be rendered; credits dialog is sized to content instead of scrolling"
         );
 
-        // Close button quad must be present and positioned strictly outside view_rect
+        // Assert Close button quad exists and is fully inside dialog bounds
         let has_close_button = quads.iter().any(|q| {
             let r = q.destination;
             r.x >= close_rect.x - 1.
                 && r.x + r.w <= close_rect.x + close_rect.w + 1.
                 && r.y >= close_rect.y - 1.
+                && r.y + r.h <= close_rect.y + close_rect.h + 1.
         });
         assert!(
             has_close_button,
-            "Expected Close button quad at bottom right"
-        );
-        assert!(
-            close_rect.y >= view_rect.y + view_rect.h,
-            "Close button must stay outside view_rect"
+            "Expected Close button quad at bottom right inside dialog bounds"
         );
 
-        // 2. Wheel scrolling updates credits_scroll
-        let prev_scroll = h.dialog.credits_scroll;
-        h.dialog.input(
-            &Input {
-                wheel: -2.0,
-                ..Default::default()
-            },
-            &painter,
-        );
-        assert!(
-            h.dialog.credits_scroll > prev_scroll,
-            "Mouse wheel should scroll down"
-        );
+        // Assert every rendered subdialog quad is strictly within the dialog bounds (nothing exceeds bounds)
+        let credits_frame_idx = quads
+            .iter()
+            .position(|q| {
+                q.destination.w == real_audio_size.x && q.destination.h == real_audio_size.y
+            })
+            .expect("audio credits frame quad");
+        let subdialog_quads = &quads[credits_frame_idx..];
+        for q in subdialog_quads {
+            let r = q.destination;
+            assert!(
+                r.x >= dialog_bounds.x - 1. && r.x + r.w <= dialog_bounds.x + dialog_bounds.w + 1.,
+                "Quad at ({}, {}) exceeds dialog horizontal bounds [{}, {}]",
+                r.x,
+                r.y,
+                dialog_bounds.x,
+                dialog_bounds.x + dialog_bounds.w
+            );
+            assert!(
+                r.y >= dialog_bounds.y - 1. && r.y + r.h <= dialog_bounds.y + dialog_bounds.h + 1.,
+                "Quad at ({}, {}) exceeds dialog vertical bounds [{}, {}]",
+                r.x,
+                r.y,
+                dialog_bounds.y,
+                dialog_bounds.y + dialog_bounds.h
+            );
+        }
 
-        // 3. Close button dismisses credits
+        // 3. Close button dismisses credits subdialog
         let close_click_pos = vec2(close_rect.x + 10., close_rect.y + 10.);
         h.dialog.input(
             &Input {
@@ -2664,6 +2627,63 @@ mod tests {
         assert!(
             h.dialog.sub.is_none(),
             "Close button should dismiss credits subdialog"
+        );
+    }
+
+    #[test]
+    fn credits_dialog_reports_when_exceeding_window_at_small_resolutions() {
+        let mut h = Harness::new();
+        h.dialog.sub = Some(Sub::AudioCredits);
+
+        let painter = Painter {
+            canvas: &h.canvas,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        // Standard resolution fits cleanly
+        assert!(
+            h.dialog
+                .credits_fits_window(Sub::AudioCredits, vec2(1280., 720.), |s| painter
+                    .text_width(s, false)),
+            "Should fit window at 1280x720"
+        );
+        assert!(
+            h.dialog
+                .credits_fits_window(Sub::AudioCredits, vec2(1024., 768.), |s| painter
+                    .text_width(s, false)),
+            "Should fit window at 1024x768"
+        );
+
+        // Very small resolution cannot fit window
+        let small_canvas = vec2(400., 200.);
+        assert!(
+            !h.dialog
+                .credits_fits_window(Sub::AudioCredits, small_canvas, |s| painter
+                    .text_width(s, false)),
+            "Cannot fit window at 400x200"
+        );
+
+        // Running input on small canvas logs report message to console log
+        let small_canvas_obj = Canvas::default();
+        small_canvas_obj.resize(400., 200.);
+        let small_painter = Painter {
+            canvas: &small_canvas_obj,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        h.dialog.input(&Input::default(), &small_painter);
+
+        let log = h.dialog.take_log();
+        assert!(
+            log.iter().any(|msg| msg.contains("Credits dialog content")
+                && msg.contains("cannot fit window bounds")),
+            "Expected report in log when content cannot fit window at small resolution, got: {:?}",
+            log
         );
     }
 }
