@@ -96,6 +96,13 @@ pub enum Effect {
     PlaySound(String),
 }
 
+/// Action to perform upon confirming a message box dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmKind {
+    Quit,
+    ReturnToMainMenu,
+}
+
 pub struct Console {
     pub canvas: Canvas,
     pub mode: Mode,
@@ -124,7 +131,7 @@ pub struct Console {
     main_menu: GameMenu,
     /// The in-game (pause) menu.
     pause_menu: GameMenu,
-    quit_box: Option<MessageBox>,
+    pub(crate) confirm_box: Option<(MessageBox, ConfirmKind)>,
     /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
     background_level: bool,
     theme: Theme,
@@ -321,7 +328,7 @@ impl Default for Console {
             gameui: Arc::default(),
             main_menu,
             pause_menu,
-            quit_box: None,
+            confirm_box: None,
             background_level: false,
             theme: Theme::default(),
             widget_fonts: Fonts::default(),
@@ -491,7 +498,7 @@ impl Console {
     /// any other map starts gameplay.
     pub fn level_loaded(&mut self, background: bool) {
         self.background_level = background;
-        self.quit_box = None;
+        self.confirm_box = None;
         self.main_menu.back(&self.gameui.localization);
         self.main_menu.selection = None;
         self.pause_menu.selection = None;
@@ -510,7 +517,7 @@ impl Console {
     /// Escape closes the quit box first, then leaves a menu category, then toggles the menus.
     /// The main menu over a background level has nothing to return to.
     pub fn escape(&mut self) {
-        if self.quit_box.take().is_some() {
+        if self.confirm_box.take().is_some() {
             return;
         }
         if self.mode == Mode::Options {
@@ -996,11 +1003,11 @@ impl Console {
 
     fn menu_input(&mut self, input: &Input) -> Vec<Effect> {
         let mut effects = Vec::new();
-        if let Some(mut quit) = self.quit_box.take() {
-            let (origin, scale, layout) = self.quit_geometry(&quit);
+        if let Some((mut confirm, kind)) = self.confirm_box.take() {
+            let (origin, scale, layout) = self.quit_geometry(&confirm);
             let pointer = input.pointer.map(|p| (p - origin) / scale);
             let down = input.click || input.held;
-            let outcome = quit.input(
+            let outcome = confirm.input(
                 &layout,
                 pointer,
                 down,
@@ -1008,16 +1015,31 @@ impl Console {
                 input.released,
                 input.pressed(Key::Enter),
             );
-            for sound in quit.take_sounds() {
+            for sound in confirm.take_sounds() {
                 effects.push(Effect::PlaySound(sound));
             }
             match outcome {
                 Some(true) => {
-                    effects.push(Effect::Quit);
-                    return effects;
+                    match kind {
+                        ConfirmKind::Quit => {
+                            effects.push(Effect::Quit);
+                            return effects;
+                        }
+                        ConfirmKind::ReturnToMainMenu => {
+                            self.mode = Mode::MainMenu;
+                            match self.gameui.background_map.clone() {
+                                Some(map) => effects.push(Effect::MainMenuMap(map)),
+                                None => {
+                                    self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
+                                    self.level_loaded(true);
+                                }
+                            }
+                            return effects;
+                        }
+                    }
                 }
                 Some(false) => {}
-                None => self.quit_box = Some(quit),
+                None => self.confirm_box = Some((confirm, kind)),
             }
             return effects;
         }
@@ -1085,15 +1107,16 @@ impl Console {
                 self.mode = Mode::Options;
                 self.options.open(self.config.clone());
             }
-            MenuOutcome::ConfirmQuit => self.quit_box = Some(MessageBox::quit(loc)),
+            MenuOutcome::ConfirmQuit => {
+                self.confirm_box = Some((MessageBox::quit(loc), ConfirmKind::Quit));
+            }
             MenuOutcome::NewGame(map) => return vec![Effect::Map(map)],
-            MenuOutcome::ReturnToMainMenu => match self.gameui.background_map.clone() {
-                Some(map) => return vec![Effect::MainMenuMap(map)],
-                None => {
-                    self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
-                    self.level_loaded(true);
-                }
-            },
+            MenuOutcome::ReturnToMainMenu => {
+                self.confirm_box = Some((
+                    MessageBox::return_to_main_menu(loc),
+                    ConfirmKind::ReturnToMainMenu,
+                ));
+            }
             MenuOutcome::Placeholder(label) => {
                 self.log(format!("{label}: not implemented in HL2-RS yet."));
             }
@@ -1232,9 +1255,9 @@ impl Console {
                     color,
                 );
             }
-            if let Some(quit) = &self.quit_box {
-                let (origin, scale, layout) = self.quit_geometry(quit);
-                quit.draw(&self.painter(origin, scale), &layout);
+            if let Some((confirm, _)) = &self.confirm_box {
+                let (origin, scale, layout) = self.quit_geometry(confirm);
+                confirm.draw(&self.painter(origin, scale), &layout);
             }
             if self.mode == Mode::Options {
                 self.options.draw(&self.painter(Vec2::ZERO, 1.));
@@ -1417,6 +1440,7 @@ fn tokenize(line: &str) -> Result<Vec<Vec<String>>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gameui::localize::Localization;
     #[test]
     fn cell_metrics_rejects_missing_font() {
         assert!(CellMetrics::from_bytes(b"missing font").is_none());
@@ -1603,7 +1627,26 @@ mod tests {
     }
     /// A console with the built-in menu structure, a known first chapter and a background map.
     fn installed_console() -> Console {
+        let mut loc = Localization::default();
+        for (token, text) in [
+            ("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU"),
+            (
+                "GameUI_MainMenuWarning",
+                "Are you sure?\nAll unsaved progress will be lost.",
+            ),
+            ("GameUI_OK", "OK"),
+            ("GameUI_Cancel", "Cancel"),
+            ("GameUI_QuitConfirmationTitle", "QUIT"),
+            (
+                "GameUI_QuitConfirmationText",
+                "Are you sure you want to quit?",
+            ),
+            ("GameUI_Quit", "Quit"),
+        ] {
+            loc.insert(token, text);
+        }
         let mut resources = GameUiResources {
+            localization: loc,
             game_menu: fallback_game_menu(),
             background_map: Some("background01".into()),
             ..Default::default()
@@ -1635,11 +1678,37 @@ mod tests {
         assert!(console.output.back().unwrap().contains("not implemented"));
         assert_eq!(
             click_row(&mut console, 5),
-            vec![
-                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-                Effect::MainMenuMap("background01".into()),
-            ]
+            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
         );
+        let (confirm, kind) = console
+            .confirm_box
+            .clone()
+            .expect("return to main menu confirmation");
+        assert_eq!(kind, ConfirmKind::ReturnToMainMenu);
+        assert_eq!(confirm.title, "RETURN TO MAIN MENU");
+        let (origin, scale, layout) = console.quit_geometry(&confirm);
+        let click_btn = |console: &mut Console, button: Rect| {
+            let pointer = Some(origin + vec2(button.x + 3., button.y + 3.) * scale);
+            let _ = console.input(&Input {
+                pointer,
+                click: true,
+                held: true,
+                ..Default::default()
+            });
+            console.input(&Input {
+                pointer,
+                released: true,
+                ..Default::default()
+            })
+        };
+        // Cancel dismisses the dialog and remains in pause menu
+        assert_eq!(
+            click_btn(&mut console, layout.buttons[1]),
+            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        );
+        assert!(console.confirm_box.is_none());
+        assert_eq!(console.mode, Mode::Pause);
+
         // The pointer left Return to main menu selected; Down moves to Quit, and Enter asks for
         // confirmation instead of quitting.
         assert_eq!(
@@ -1650,9 +1719,9 @@ mod tests {
             keys(&mut console, &[Key::Enter]),
             vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
         );
-        assert!(console.quit_box.is_some());
+        assert!(console.confirm_box.is_some());
         console.escape();
-        assert!(console.quit_box.is_none(), "Escape closes only the box");
+        assert!(console.confirm_box.is_none(), "Escape closes only the box");
         assert_eq!(console.mode, Mode::Pause);
         keys(&mut console, &[Key::Enter]);
         assert_eq!(
@@ -1662,9 +1731,49 @@ mod tests {
                 Effect::Quit,
             ]
         );
-        console.quit_box = None;
+        console.confirm_box = None;
         click_row(&mut console, 0);
         assert_eq!(console.mode, Mode::Gameplay, "Resume");
+    }
+
+    #[test]
+    fn return_to_main_menu_confirmation_dialog_ok_unloads_to_background() {
+        let mut console = installed_console();
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+        // Click row 5: "Return to main menu"
+        assert_eq!(
+            click_row(&mut console, 5),
+            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        );
+        let (confirm, kind) = console
+            .confirm_box
+            .clone()
+            .expect("return to main menu confirmation");
+        assert_eq!(kind, ConfirmKind::ReturnToMainMenu);
+        assert_eq!(confirm.title, "RETURN TO MAIN MENU");
+        let (origin, scale, layout) = console.quit_geometry(&confirm);
+        let pointer = Some(origin + vec2(layout.buttons[0].x + 3., layout.buttons[0].y + 3.) * scale);
+        let _ = console.input(&Input {
+            pointer,
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        let effects = console.input(&Input {
+            pointer,
+            released: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            effects,
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::MainMenuMap("background01".into()),
+            ]
+        );
+        assert!(console.confirm_box.is_none());
+        assert_eq!(console.mode, Mode::MainMenu);
     }
 
     #[test]
@@ -1695,7 +1804,8 @@ mod tests {
 
         console.level_loaded(true);
         click_row(&mut console, 6);
-        let quit = console.quit_box.clone().expect("quit confirmation");
+        let (quit, kind) = console.confirm_box.clone().expect("quit confirmation");
+        assert_eq!(kind, ConfirmKind::Quit);
         let (origin, scale, layout) = console.quit_geometry(&quit);
         let click_btn = |console: &mut Console, button: Rect| {
             let pointer = Some(origin + vec2(button.x + 3., button.y + 3.) * scale);
@@ -1715,7 +1825,7 @@ mod tests {
             click_btn(&mut console, layout.buttons[1]),
             vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
         );
-        assert!(console.quit_box.is_none(), "Cancel closes the box");
+        assert!(console.confirm_box.is_none(), "Cancel closes the box");
         assert_eq!(console.mode, Mode::MainMenu);
         click_row(&mut console, 6);
         assert_eq!(

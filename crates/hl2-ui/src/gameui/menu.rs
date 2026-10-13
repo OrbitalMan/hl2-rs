@@ -325,6 +325,16 @@ impl MessageBox {
         )
     }
 
+    /// The Return to Main Menu confirmation dialog (`#GameUI_ConfirmMainMenu_Title`, `#GameUI_MainMenuWarning`, `#GameUI_OK`, `#GameUI_Cancel`).
+    pub fn return_to_main_menu(loc: &Localization) -> Self {
+        Self::new(
+            loc.text("#GameUI_ConfirmMainMenu_Title"),
+            loc.text("#GameUI_MainMenuWarning"),
+            loc.text("#GameUI_OK"),
+            Some(loc.text("#GameUI_Cancel")),
+        )
+    }
+
     /// Box size from the message width plus 100 in both directions, at least wide enough for twice
     /// the buttons plus 30; buttons sit at the quarter points, 15 above the client bottom (the SDK
     /// `vgui::MessageBox::PerformLayout` rules).

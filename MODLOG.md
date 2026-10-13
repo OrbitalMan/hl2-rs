@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-13 "Return to main menu" confirmation dialog
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::menu`: added `MessageBox::return_to_main_menu(loc)` resolving retail localized tokens `#GameUI_ConfirmMainMenu_Title` («RETURN TO MAIN MENU»), `#GameUI_MainMenuWarning` («Are you sure?\nAll unsaved progress will be lost.»), `#GameUI_OK` («OK»), and `#GameUI_Cancel` («Cancel») with key-name fallback.
+- `hl2-ui::console`: generalized message box tracking from `quit_box: Option<MessageBox>` to `confirm_box: Option<(MessageBox, ConfirmKind)>`, supporting `ConfirmKind::Quit` and `ConfirmKind::ReturnToMainMenu`. Replaced direct menu-item map unloading with the shared confirmation dialog when selecting "Return to main menu" (row 5 in pause menu, command `OpenMainMenuDialog`). Confirming OK switches mode to `Mode::MainMenu` and triggers map unload via `Effect::MainMenuMap` (or keeps map frozen if no background map is installed). Confirming Cancel closes the confirmation dialog and stays in the pause menu. Escape closes the confirmation dialog before leaving the menu. Added unit tests `return_to_main_menu_confirmation_dialog_ok_unloads_to_background` and updated `pause_menu_entries_activate_by_pointer_and_keyboard`.
+
+**Why:**
+- Half-Life 2 GameUI presents an explicit confirmation dialog when selecting "Return to main menu" from the in-game pause menu, warning the player that unsaved progress will be lost.
+- Reusing the shared `MessageBox` component preserves Source SDK `vgui::MessageBox` layout rules, button styling, hover/click audio, and keyboard Enter activation.
+
+**Tested how:**
+- `cargo test --locked`: all 101 unit tests in `hl2-ui`, 64 in `hl2-bevy`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and exited code 0.
+
+**Result:** Authentic Return to Main Menu confirmation dialog resolving retail tokens, with Cancel keeping gameplay paused and OK unloading to the main menu background.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 7 (Options tooltips).
+
 ## 2026-10-13 Close button on dialogs and frames
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
