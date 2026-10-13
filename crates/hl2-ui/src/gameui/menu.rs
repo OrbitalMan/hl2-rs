@@ -8,7 +8,7 @@
 
 use super::localize::Localization;
 use super::resources::{MenuItem, Visibility};
-use super::widgets::{ButtonState, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL};
+use super::widgets::{ButtonState, ButtonTracker, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL};
 use crate::canvas::Rect;
 use glam::{vec2, Vec2};
 use source_assets::keyvalues::Entry;
@@ -269,8 +269,9 @@ pub struct MessageBox {
     pub text: String,
     pub ok: String,
     pub cancel: Option<String>,
-    armed: Option<usize>,
-    pressed: Option<usize>,
+    pub armed: Option<usize>,
+    pub pressed: Option<usize>,
+    tracker: ButtonTracker<usize>,
 }
 
 /// Message box geometry in layout units relative to the box.
@@ -290,6 +291,7 @@ impl MessageBox {
             cancel,
             armed: None,
             pressed: None,
+            tracker: ButtonTracker::new(),
         }
     }
 
@@ -359,15 +361,19 @@ impl MessageBox {
         &mut self,
         layout: &MessageBoxLayout,
         pointer: Option<Vec2>,
+        down: bool,
         click: bool,
+        released: bool,
         enter: bool,
     ) -> Option<bool> {
-        self.armed = pointer.and_then(|p| layout.buttons.iter().position(|b| b.contains(p)));
-        self.pressed = self.armed.filter(|_| click);
+        let hovered = pointer.and_then(|p| layout.buttons.iter().position(|b| b.contains(p)));
+        self.armed = hovered;
+        let activated = self.tracker.update(hovered, down, click, released);
+        self.pressed = self.tracker.pressed();
         if enter {
             return Some(true);
         }
-        match self.pressed {
+        match activated {
             Some(0) => Some(true),
             Some(_) => Some(false),
             None => None,
@@ -733,20 +739,54 @@ mod tests {
             "message centered"
         );
         let center = |r: Rect| Some(vec2(r.x + 2., r.y + 2.));
+
+        // 1. Cancel button: press down -> pressed state active, no activation yet
         assert_eq!(
-            quit.input(&layout, center(layout.buttons[1]), true, false),
-            Some(false)
-        );
-        assert_eq!(
-            quit.input(&layout, center(layout.buttons[0]), true, false),
-            Some(true)
-        );
-        assert_eq!(
-            quit.input(&layout, center(layout.buttons[0]), false, false),
+            quit.input(&layout, center(layout.buttons[1]), true, true, false, false),
             None
         );
+        assert_eq!(quit.pressed, Some(1));
+
+        // Release over Cancel button -> activates and returns Some(false)
         assert_eq!(
-            quit.input(&layout, None, false, true),
+            quit.input(&layout, center(layout.buttons[1]), false, false, true, false),
+            Some(false)
+        );
+        assert_eq!(quit.pressed, None);
+
+        // 2. OK button: press down and release
+        assert_eq!(
+            quit.input(&layout, center(layout.buttons[0]), true, true, false, false),
+            None
+        );
+        assert_eq!(quit.pressed, Some(0));
+        assert_eq!(
+            quit.input(&layout, center(layout.buttons[0]), false, false, true, false),
+            Some(true)
+        );
+        assert_eq!(quit.pressed, None);
+
+        // 3. Cancel on move away:
+        assert_eq!(
+            quit.input(&layout, center(layout.buttons[0]), true, true, false, false),
+            None
+        );
+        assert_eq!(quit.pressed, Some(0));
+        // Move pointer away while button is held
+        assert_eq!(
+            quit.input(&layout, None, true, false, false, false),
+            None
+        );
+        assert_eq!(quit.pressed, None, "moving away cancels pressed state");
+        // Release after move away does not trigger
+        assert_eq!(
+            quit.input(&layout, None, false, false, true, false),
+            None
+        );
+
+        // 4. Enter accepts immediately
+        assert_eq!(
+            quit.input(&layout, None, false, false, false, true),
             Some(true),
             "Enter accepts"
         );

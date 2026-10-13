@@ -138,6 +138,7 @@ pub fn update_ui(
                 pointer,
                 click: buttons.just_pressed(MouseButton::Left),
                 held: buttons.pressed(MouseButton::Left),
+                released: buttons.just_released(MouseButton::Left),
                 wheel,
                 binding_keys: crate::ui_host::binding_keys(&keys, &buttons, wheel),
             });

@@ -4,7 +4,7 @@ use crate::gameui::{
     menu::{GameMenu, MenuLayout, MenuOutcome, MessageBox, MessageBoxLayout},
     options::{OptionsDialog, OptionsOutcome},
     resources::{fallback_game_menu, GameUiResources},
-    widgets::{scheme_color, Fonts, Painter, Theme},
+    widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
 };
 use crate::{canvas::*, hud::FontFace};
 use glam::{vec2, Vec2};
@@ -128,6 +128,7 @@ pub struct Console {
     theme: Theme,
     widget_fonts: Fonts,
     style: Style,
+    pub menu_tracker: ButtonTracker<usize>,
     pub options: OptionsDialog,
     /// The menu the options dialog was opened from (drawn behind it and restored on close).
     options_return: Mode,
@@ -251,6 +252,8 @@ pub struct Input {
     pub click: bool,
     /// Left button is held (slider drags).
     pub held: bool,
+    /// Left button was released this frame.
+    pub released: bool,
     /// Mouse wheel steps this frame; positive scrolls up.
     pub wheel: f32,
     /// Keys and buttons pressed this frame as persisted binding names (`KeyW`, `SuperLeft`,
@@ -320,6 +323,7 @@ impl Default for Console {
             theme: Theme::default(),
             widget_fonts: Fonts::default(),
             style: Style::default(),
+            menu_tracker: ButtonTracker::new(),
             options: OptionsDialog::default(),
             options_return: Mode::MainMenu,
             config,
@@ -983,7 +987,15 @@ impl Console {
         if let Some(mut quit) = self.quit_box.take() {
             let (origin, scale, layout) = self.quit_geometry(&quit);
             let pointer = input.pointer.map(|p| (p - origin) / scale);
-            match quit.input(&layout, pointer, input.click, input.pressed(Key::Enter)) {
+            let down = input.click || input.held;
+            match quit.input(
+                &layout,
+                pointer,
+                down,
+                input.click,
+                input.released,
+                input.pressed(Key::Enter),
+            ) {
                 Some(true) => return vec![Effect::Quit],
                 Some(false) => {}
                 None => self.quit_box = Some(quit),
@@ -1002,18 +1014,17 @@ impl Console {
         if input.pressed(Key::Down) {
             menu.step(1);
         }
-        let mut activate = None;
-        if let Some(index) = input
+        let hovered = input
             .pointer
             .and_then(|p| rows.iter().position(|row| row.contains(p)))
-        {
-            if menu.entries()[index].enabled {
-                menu.selection = Some(index);
-            }
-            if input.click {
-                activate = Some(index);
-            }
+            .filter(|&i| menu.entries().get(i).is_some_and(|e| e.enabled));
+        if let Some(index) = hovered {
+            menu.selection = Some(index);
         }
+        let down = input.click || input.held;
+        let mut activate = self
+            .menu_tracker
+            .update(hovered, down, input.click, input.released);
         if input.pressed(Key::Enter) {
             activate = activate.or(menu.selection);
         }
@@ -1167,17 +1178,19 @@ impl Console {
                 if entry.spacer {
                     continue;
                 }
+                let is_pressed = self.menu_tracker.is_pressed(i);
                 let color = if !entry.enabled {
                     self.theme.text_disabled
-                } else if menu.selection == Some(i) {
+                } else if is_pressed || menu.selection == Some(i) {
                     self.style.menu_armed
                 } else {
                     self.style.menu
                 };
+                let offset = if is_pressed { vec2(1., 1.) } else { Vec2::ZERO };
                 draw_cell_text(
                     &self.canvas,
                     &entry.label,
-                    geometry.row_text_pos(i),
+                    geometry.row_text_pos(i) + offset,
                     geometry.font_tall,
                     self.menu_font.as_ref(),
                     self.menu_metrics,
@@ -1535,9 +1548,15 @@ mod tests {
     }
     fn click_row(console: &mut Console, index: usize) -> Vec<Effect> {
         let pointer = row(console, index);
-        console.input(&Input {
+        let _ = console.input(&Input {
             pointer,
             click: true,
+            held: true,
+            ..Default::default()
+        });
+        console.input(&Input {
+            pointer,
+            released: true,
             ..Default::default()
         })
     }
@@ -1625,16 +1644,25 @@ mod tests {
         click_row(&mut console, 6);
         let quit = console.quit_box.clone().expect("quit confirmation");
         let (origin, scale, layout) = console.quit_geometry(&quit);
-        let press = |button: Rect| Input {
-            pointer: Some(origin + vec2(button.x + 3., button.y + 3.) * scale),
-            click: true,
-            ..Default::default()
+        let click_btn = |console: &mut Console, button: Rect| {
+            let pointer = Some(origin + vec2(button.x + 3., button.y + 3.) * scale);
+            let _ = console.input(&Input {
+                pointer,
+                click: true,
+                held: true,
+                ..Default::default()
+            });
+            console.input(&Input {
+                pointer,
+                released: true,
+                ..Default::default()
+            })
         };
-        assert!(console.input(&press(layout.buttons[1])).is_empty());
+        assert!(click_btn(&mut console, layout.buttons[1]).is_empty());
         assert!(console.quit_box.is_none(), "Cancel closes the box");
         assert_eq!(console.mode, Mode::MainMenu);
         click_row(&mut console, 6);
-        assert_eq!(console.input(&press(layout.buttons[0])), vec![Effect::Quit]);
+        assert_eq!(click_btn(&mut console, layout.buttons[0]), vec![Effect::Quit]);
     }
 
     #[test]

@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-13 Button interaction model: pressed state, pointer release and cancellation semantics
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`: implemented reusable `ButtonTracker<T>` state machine managing press-down, hold, move-away cancellation, and release activation. Added `ButtonState { armed, pressed, enabled, default }`.
+- `hl2-ui::gameui::widgets` drawing: styled pressed states for all interactive controls matching the Source scheme:
+  - Push buttons (`Painter::button`): sunken bevel border and +1px,+1px text shift while pressed.
+  - Checkboxes (`Painter::check_box`): `border_dark` cavity fill, +1px,+1px check offset, and armed/pressed highlight text color.
+  - Radio buttons (`Painter::radio`): `border_dark` cavity fill, dot offset, and highlight text color.
+  - URL link buttons (`Painter::url`): text highlight and +1px,+1px text/underline offset.
+  - Unit tests: added `button_tracker_press_cancel_activate_state_machine` and `widget_pressed_states_drawing`.
+- `hl2-ui::gameui::options`: wired `ButtonTracker<Target>` into `OptionsDialog`. Buttons, checkboxes, radio buttons, link buttons, and tabs activate on mouse release only when the cursor remains over the control; moving away while held cancels the pressed state and avoids triggering actions. Sliders retain immediate click-and-drag behavior. Added unit test `options_dialog_buttons_follow_press_cancel_and_release_activation`.
+- `hl2-ui::gameui::menu` & `hl2-ui::console`: integrated `ButtonTracker` into `MessageBox` (Quit / Key Defaults confirmation) and console menus, routing mouse down, hold, and release transitions.
+- `hl2-bevy::ui_system`: routed `buttons.just_released(MouseButton::Left)` through `hl2_ui::console::Input.released`.
+
+**Why:**
+- Source/VGUI buttons, checkboxes, radio buttons, and tabs activate on release rather than press-down, allowing users to cancel an accidental press by dragging away before releasing.
+- Push buttons and interactive controls were missing the authentic sunken/depressed visual states during active mouse clicks.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui -p hl2-bevy`: all 94 unit tests in `hl2-ui` and 64 unit tests in `hl2-bevy` passed (0 failures).
+- `cargo clippy --locked -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` ran cleanly and exited code 0.
+
+**Result:** Authentic Source GameUI button interaction model across all widgets and dialogs, with full press/hold/cancel/release lifecycle and sunken/offset visual states.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 4 (UI sounds: hover, click, and GameUI audio events wired through existing audio infrastructure).
+
 ## 2026-10-13 Quick visual fixes: credits opacity, button typography and vertical spacing
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

@@ -319,6 +319,104 @@ pub struct ButtonState {
     pub default: bool,
 }
 
+impl ButtonState {
+    pub const fn new(enabled: bool) -> Self {
+        Self {
+            armed: false,
+            pressed: false,
+            enabled,
+            default: false,
+        }
+    }
+
+    pub const fn active(enabled: bool, armed: bool, pressed: bool) -> Self {
+        Self {
+            armed,
+            pressed,
+            enabled,
+            default: false,
+        }
+    }
+}
+
+/// Tracks pointer button press, hold, cancellation and release activation for interactive controls.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ButtonTracker<T: Copy + PartialEq> {
+    pressed: Option<T>,
+    was_down: bool,
+}
+
+impl<T: Copy + PartialEq> ButtonTracker<T> {
+    pub const fn new() -> Self {
+        Self {
+            pressed: None,
+            was_down: false,
+        }
+    }
+
+    /// Current pressed control, if any.
+    pub fn pressed(&self) -> Option<T> {
+        self.pressed
+    }
+
+    /// Whether the given control is currently pressed.
+    pub fn is_pressed(&self, target: T) -> bool {
+        self.pressed == Some(target)
+    }
+
+    /// Resets the tracker.
+    pub fn reset(&mut self) {
+        self.pressed = None;
+        self.was_down = false;
+    }
+
+    /// Updates the state machine for the current frame.
+    ///
+    /// - `hovered`: The interactive control under the cursor, if any.
+    /// - `down`: Whether the mouse button is down (`click` or `held`).
+    /// - `click`: Whether the mouse button went down this frame.
+    /// - `released`: Whether the mouse button was released this frame.
+    ///
+    /// Returns `Some(T)` only on release while the cursor is still over the control.
+    /// If the cursor moves away while the mouse button is held, the pressed state is
+    /// cancelled and subsequent release does not trigger the action.
+    pub fn update(
+        &mut self,
+        hovered: Option<T>,
+        down: bool,
+        click: bool,
+        released: bool,
+    ) -> Option<T> {
+        let is_release = released || (self.was_down && !down);
+        let mut activated = None;
+
+        if is_release {
+            if let Some(target) = self.pressed {
+                if hovered == Some(target) {
+                    activated = Some(target);
+                }
+            }
+            self.pressed = None;
+        } else if click || (down && !self.was_down) {
+            // Mouse button went down this frame.
+            self.pressed = hovered;
+        } else if down {
+            // Mouse button is being held down.
+            if let Some(target) = self.pressed {
+                if hovered != Some(target) {
+                    // Cursor moved away while mouse button is held -> cancel pressed state.
+                    self.pressed = None;
+                }
+            }
+        } else {
+            self.pressed = None;
+        }
+
+        self.was_down = down;
+        activated
+    }
+}
+
 impl Painter<'_> {
     /// A titled VGUI frame of `size` at the painter origin.
     pub fn frame(&self, size: Vec2, title: &str) {
@@ -343,7 +441,8 @@ impl Painter<'_> {
                 self.theme.border_selection,
             );
         }
-        let text_rect = Rect::new(rect.x + 6., rect.y, rect.w - 12., rect.h);
+        let offset = if state.pressed && state.enabled { 1. } else { 0. };
+        let text_rect = Rect::new(rect.x + 6. + offset, rect.y + offset, rect.w - 12., rect.h);
         if state.enabled {
             // Button.TextColor and Button.ArmedTextColor are both White in the scheme.
             self.text_in(label, text_rect, Align::Left, self.theme.text, false);
@@ -353,7 +452,7 @@ impl Painter<'_> {
     }
 
     /// `CheckButton`: a sunken box with a check mark, then the label.
-    pub fn check_box(&self, rect: Rect, label: &str, checked: bool, enabled: bool) {
+    pub fn check_box(&self, rect: Rect, label: &str, checked: bool, state: ButtonState) {
         let cy = rect.y + rect.h * 0.5;
         let bx = Rect::new(
             rect.x + 2.,
@@ -361,35 +460,76 @@ impl Painter<'_> {
             CHECK_SIZE,
             CHECK_SIZE,
         );
-        self.fill(bx, self.theme.entry_bg);
+        let bg_color = if state.pressed && state.enabled {
+            self.theme.border_dark
+        } else {
+            self.theme.entry_bg
+        };
+        self.fill(bx, bg_color);
         self.sunken(bx);
         if checked {
-            let color = if enabled {
+            let color = if state.enabled {
                 self.theme.check
             } else {
                 self.theme.text_disabled
             };
-            self.fill(Rect::new(bx.x + 3., bx.y + 3., bx.w - 6., bx.h - 6.), color);
+            let offset = if state.pressed && state.enabled { 1. } else { 0. };
+            self.fill(
+                Rect::new(bx.x + 3. + offset, bx.y + 3. + offset, bx.w - 6., bx.h - 6.),
+                color,
+            );
         }
-        let text = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
-        self.label(label, text, Align::Left, enabled);
+        let text_rect = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
+        let text_color = if !state.enabled {
+            self.theme.text_disabled
+        } else if state.armed || state.pressed {
+            self.theme.text
+        } else {
+            self.theme.text_dull
+        };
+        if state.enabled {
+            self.text_in(label, text_rect, Align::Left, text_color, false);
+        } else {
+            self.label(label, text_rect, Align::Left, false);
+        }
     }
 
     /// `RadioButton`: a sunken disc with a dot when selected, then the label.
-    pub fn radio(&self, rect: Rect, label: &str, selected: bool, enabled: bool) {
+    pub fn radio(&self, rect: Rect, label: &str, selected: bool, state: ButtonState) {
         let center = vec2(rect.x + 2. + CHECK_SIZE * 0.5, rect.y + rect.h * 0.5);
         self.disc(center, CHECK_SIZE * 0.5, self.theme.border_dark);
-        self.disc(center, CHECK_SIZE * 0.5 - 1., self.theme.entry_bg);
+        let bg_color = if state.pressed && state.enabled {
+            self.theme.border_dark
+        } else {
+            self.theme.entry_bg
+        };
+        self.disc(center, CHECK_SIZE * 0.5 - 1., bg_color);
         if selected {
-            let color = if enabled {
+            let color = if state.enabled {
                 self.theme.check
             } else {
                 self.theme.text_disabled
             };
-            self.disc(center, 2.5, color);
+            let offset = if state.pressed && state.enabled {
+                vec2(0.5, 0.5)
+            } else {
+                Vec2::ZERO
+            };
+            self.disc(center + offset, 2.5, color);
         }
-        let text = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
-        self.label(label, text, Align::Left, enabled);
+        let text_rect = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
+        let text_color = if !state.enabled {
+            self.theme.text_disabled
+        } else if state.armed || state.pressed {
+            self.theme.text
+        } else {
+            self.theme.text_dull
+        };
+        if state.enabled {
+            self.text_in(label, text_rect, Align::Left, text_color, false);
+        } else {
+            self.label(label, text_rect, Align::Left, false);
+        }
     }
 
     /// `Slider` with tick marks and its left/right captions below the track.
@@ -518,16 +658,24 @@ impl Painter<'_> {
         self.sunken(Rect::new(rect.x, rect.y, rect.w, rect.h.max(2.)));
     }
 
-    /// `URLButton`: link-colored, underlined text.
-    pub fn url(&self, rect: Rect, label: &str, enabled: bool) {
-        if !enabled {
+    /// `URLButton`: link-colored, underlined text with armed and pressed states.
+    pub fn url(&self, rect: Rect, label: &str, state: ButtonState) {
+        if !state.enabled {
             self.label(label, rect, Align::Left, false);
             return;
         }
-        self.text_in(label, rect, Align::Left, self.theme.url_text, false);
+        let (color, offset) = if state.pressed {
+            (self.theme.text, vec2(1., 1.))
+        } else if state.armed {
+            (self.theme.text, vec2(0., 0.))
+        } else {
+            (self.theme.url_text, vec2(0., 0.))
+        };
+        let target_rect = Rect::new(rect.x + offset.x, rect.y + offset.y, rect.w, rect.h);
+        self.text_in(label, target_rect, Align::Left, color, false);
         let width = self.text_width(label, false);
-        let y = rect.y + (rect.h + FONT_TALL) * 0.5 - 1.;
-        self.fill(Rect::new(rect.x, y.round(), width, 1.), self.theme.url_text);
+        let y = target_rect.y + (target_rect.h + FONT_TALL) * 0.5 - 1.;
+        self.fill(Rect::new(target_rect.x, y.round(), width, 1.), color);
     }
 
     /// A property-sheet tab; the active tab is taller and open towards its page.
@@ -719,5 +867,120 @@ mod tests {
         assert_eq!(theme.frame_bg, Color::from_rgba(1, 2, 3, 4));
         assert_eq!(theme.selection_bg, Color::from_rgba(255, 155, 0, 255));
         assert_eq!(theme.slider_nob, Theme::default().slider_nob);
+    }
+
+    #[test]
+    fn button_tracker_press_cancel_activate_state_machine() {
+        let mut tracker = ButtonTracker::<usize>::new();
+        assert_eq!(tracker.pressed(), None);
+        assert!(!tracker.is_pressed(0));
+
+        // 1. Mouse down on control 0 -> pressed state active, no activation yet
+        let act = tracker.update(Some(0), true, true, false);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), Some(0));
+        assert!(tracker.is_pressed(0));
+
+        // 2. Mouse held while still over control 0 -> stays pressed, no activation
+        let act = tracker.update(Some(0), true, false, false);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), Some(0));
+
+        // 3. Mouse released over control 0 -> triggers activation!
+        let act = tracker.update(Some(0), false, false, true);
+        assert_eq!(act, Some(0));
+        assert_eq!(tracker.pressed(), None);
+        assert!(!tracker.is_pressed(0));
+
+        // 4. Test cancel on move away:
+        // Mouse down on control 1
+        tracker.update(Some(1), true, true, false);
+        assert_eq!(tracker.pressed(), Some(1));
+
+        // Cursor moves away while mouse is held (hovered = None) -> pressed cancelled!
+        let act = tracker.update(None, true, false, false);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), None);
+        assert!(!tracker.is_pressed(1));
+
+        // Cursor moves back over control 1 while mouse is still held -> stays cancelled!
+        let act = tracker.update(Some(1), true, false, false);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), None);
+
+        // Mouse released over control 1 after being cancelled -> does NOT trigger activation!
+        let act = tracker.update(Some(1), false, false, true);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), None);
+
+        // 5. Test release outside:
+        tracker.update(Some(2), true, true, false);
+        assert_eq!(tracker.pressed(), Some(2));
+        // Cursor moves away and releases outside
+        let act = tracker.update(None, false, false, true);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), None);
+
+        // 6. Click started outside control, moving into control while held
+        let act = tracker.update(None, true, true, false);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), None);
+        let act = tracker.update(Some(3), true, false, false);
+        assert_eq!(act, None);
+        assert_eq!(tracker.pressed(), None);
+        let act = tracker.update(Some(3), false, false, true);
+        assert_eq!(act, None);
+    }
+
+    #[test]
+    fn widget_pressed_states_drawing() {
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        let rect = Rect::new(10., 10., 80., 24.);
+
+        // Button normal vs pressed
+        painter.button(rect, "Test", ButtonState::new(true));
+        let quads_normal = canvas.drain();
+        assert!(!quads_normal.is_empty());
+
+        painter.button(rect, "Test", ButtonState::active(true, true, true));
+        let quads_pressed = canvas.drain();
+        assert!(!quads_pressed.is_empty());
+
+        // CheckBox normal vs pressed
+        painter.check_box(rect, "Check", false, ButtonState::new(true));
+        let quads_chk_normal = canvas.drain();
+        assert!(!quads_chk_normal.is_empty());
+
+        painter.check_box(rect, "Check", true, ButtonState::active(true, true, true));
+        let quads_chk_pressed = canvas.drain();
+        assert!(!quads_chk_pressed.is_empty());
+
+        // Radio normal vs pressed
+        painter.radio(rect, "Radio", false, ButtonState::new(true));
+        let quads_radio_normal = canvas.drain();
+        assert!(!quads_radio_normal.is_empty());
+
+        painter.radio(rect, "Radio", true, ButtonState::active(true, true, true));
+        let quads_radio_pressed = canvas.drain();
+        assert!(!quads_radio_pressed.is_empty());
+
+        // URLButton normal vs pressed
+        painter.url(rect, "Link", ButtonState::new(true));
+        let quads_url_normal = canvas.drain();
+        assert!(!quads_url_normal.is_empty());
+
+        painter.url(rect, "Link", ButtonState::active(true, true, true));
+        let quads_url_pressed = canvas.drain();
+        assert!(!quads_url_pressed.is_empty());
     }
 }

@@ -141,7 +141,7 @@ impl Sub {
 
 /// Something under the pointer that reacts to clicks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     Control(usize),
     Tab(usize),
     Ok,
@@ -232,8 +232,9 @@ pub struct OptionsDialog {
     tab: Tab,
     applied: Config,
     draft: Draft,
-    armed: Option<Target>,
-    pressed: Option<Target>,
+    pub(crate) armed: Option<Target>,
+    pub(crate) pressed: Option<Target>,
+    tracker: widgets::ButtonTracker<Target>,
     drag: Option<(Value, Rect)>,
     combo: Option<OpenCombo>,
     editing: Option<Editing>,
@@ -256,6 +257,7 @@ impl Default for OptionsDialog {
             applied: config,
             armed: None,
             pressed: None,
+            tracker: widgets::ButtonTracker::new(),
             drag: None,
             combo: None,
             editing: None,
@@ -444,6 +446,7 @@ impl OptionsDialog {
     fn select_tab(&mut self, tab: Tab) {
         self.commit_entry();
         self.combo = None;
+        self.tracker.reset();
         if self.tab != tab {
             self.tab = tab;
             if tab == Tab::Gamepad {
@@ -469,7 +472,15 @@ impl OptionsDialog {
         if let Some(mut confirm) = self.confirm.take() {
             let layout = confirm.layout(|t| measure.text_width(t, false));
             let pointer = local(centered(canvas, layout.size, scale));
-            match confirm.input(&layout, pointer, input.click, input.pressed(Key::Enter)) {
+            let down = input.click || input.held;
+            match confirm.input(
+                &layout,
+                pointer,
+                down,
+                input.click,
+                input.released,
+                input.pressed(Key::Enter),
+            ) {
                 Some(true) => self.use_default_keys(),
                 Some(false) => {}
                 None => self.confirm = Some(confirm),
@@ -590,18 +601,30 @@ impl OptionsDialog {
                 })
         });
         self.armed = hit;
-        self.pressed = hit.filter(|_| input.held || input.click);
-        if !input.click {
+        if input.click {
+            let keep_editing = matches!(
+                (&self.editing, pointer),
+                (Some(editing), Some(p)) if editing.rect.contains(p)
+            );
+            if !keep_editing {
+                self.commit_entry();
+            }
+        }
+        let is_slider = matches!(
+            hit,
+            Some(Target::Control(i)) if matches!(widgets.get(i), Some(w) if matches!(w.binding, Some(Binding::Slider(_))))
+        );
+        if is_slider {
+            self.tracker.reset();
+            self.pressed = hit.filter(|_| input.held || input.click);
+            if input.click {
+                return hit;
+            }
             return None;
         }
-        let keep_editing = matches!(
-            (&self.editing, pointer),
-            (Some(editing), Some(p)) if editing.rect.contains(p)
-        );
-        if !keep_editing {
-            self.commit_entry();
-        }
-        hit
+        let activated = self.tracker.update(hit, input.held, input.click, input.released);
+        self.pressed = self.tracker.pressed();
+        activated
     }
 
     fn page_input(
@@ -725,6 +748,7 @@ impl OptionsDialog {
     }
 
     fn command(&mut self, command: Command) {
+        self.tracker.reset();
         let loc = &self.res.localization;
         match command {
             Command::GammaDialog => {
@@ -994,13 +1018,23 @@ impl OptionsDialog {
                     p.label(&label, w.rect, align, w.enabled);
                 }
             }
-            (ControlKind::CheckButton, Some(Binding::Toggle(toggle))) => {
-                p.check_box(w.rect, &label, toggle.get(config), w.enabled)
+            (ControlKind::CheckButton, Some(Binding::Toggle(toggle))) => p.check_box(
+                w.rect,
+                &label,
+                toggle.get(config),
+                ButtonState::active(w.enabled, armed, pressed),
+            ),
+            (ControlKind::CheckButton, _) => {
+                p.check_box(w.rect, &label, false, ButtonState::new(false))
             }
-            (ControlKind::CheckButton, _) => p.check_box(w.rect, &label, false, false),
             (ControlKind::RadioButton, binding) => {
                 let selected = binding == Some(Binding::Skill(config.gameplay.skill));
-                p.radio(w.rect, &label, selected, w.enabled)
+                p.radio(
+                    w.rect,
+                    &label,
+                    selected,
+                    ButtonState::active(w.enabled, armed, pressed),
+                )
             }
             (ControlKind::ComboBox, Some(Binding::Choice(choice))) => {
                 let open = self.combo.as_ref().is_some_and(|o| o.combo == w.rect);
@@ -1047,7 +1081,9 @@ impl OptionsDialog {
                     default: binding == Some(Binding::Command(Command::SubOk)),
                 },
             ),
-            (ControlKind::UrlButton, _) => p.url(w.rect, &label, w.enabled),
+            (ControlKind::UrlButton, _) => {
+                p.url(w.rect, &label, ButtonState::active(w.enabled, armed, pressed))
+            }
             (ControlKind::Divider, _) => p.divider(w.rect),
             (ControlKind::ImagePanel, _) => {
                 let image = c.image.to_ascii_lowercase();
@@ -1314,17 +1350,22 @@ mod tests {
         }
 
         fn click(&mut self, at: Vec2) -> OptionsOutcome {
-            let outcome = self.frame(Input {
+            let first = self.frame(Input {
                 pointer: Some(at),
                 click: true,
                 held: true,
                 ..Default::default()
             });
-            self.frame(Input {
+            let second = self.frame(Input {
                 pointer: Some(at),
+                released: true,
                 ..Default::default()
             });
-            outcome
+            if !matches!(first, OptionsOutcome::None) {
+                first
+            } else {
+                second
+            }
         }
 
         fn key(&mut self, key: Key) -> OptionsOutcome {
@@ -1714,5 +1755,111 @@ mod tests {
             .find(|q| q.destination.w == CREDITS_SIZE.x && q.destination.h == CREDITS_SIZE.y)
             .expect("video credits frame quad");
         assert_eq!(video_credits_frame.color.a, 1.0);
+    }
+
+    #[test]
+    fn options_dialog_buttons_follow_press_cancel_and_release_activation() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+
+        // 1. OK button interaction
+        let ok_rect = button_rects()[0];
+        let ok_pos = DIALOG + vec2(ok_rect.x + 4., ok_rect.y + 4.);
+        let away_pos = DIALOG + vec2(10., 10.);
+
+        // Hover over OK
+        h.frame(Input {
+            pointer: Some(ok_pos),
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.armed, Some(Target::Ok));
+        assert_eq!(h.dialog.pressed, None);
+
+        // Press down on OK
+        let outcome = h.frame(Input {
+            pointer: Some(ok_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        assert_eq!(outcome, OptionsOutcome::None, "no action on press down");
+        assert_eq!(h.dialog.pressed, Some(Target::Ok));
+
+        // Move away while held: pressed state is cancelled
+        h.frame(Input {
+            pointer: Some(away_pos),
+            held: true,
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.pressed, None, "cancelled on move away");
+
+        // Release away: does not activate
+        let outcome = h.frame(Input {
+            pointer: Some(away_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert_eq!(outcome, OptionsOutcome::None, "no action on release away");
+
+        // Click on OK properly (press then release over button)
+        h.frame(Input {
+            pointer: Some(ok_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.pressed, Some(Target::Ok));
+        let outcome = h.frame(Input {
+            pointer: Some(ok_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert_eq!(outcome, OptionsOutcome::Close(None));
+
+        // 2. CheckBox interaction (Invert mouse at page(30., 20.))
+        h.dialog.open(Config::default());
+        h.tab(Tab::Mouse);
+        let chk_pos = page(30., 20.);
+        assert!(!h.dialog.draft().mouse.invert);
+
+        // Press down on checkbox
+        h.frame(Input {
+            pointer: Some(chk_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        assert!(!h.dialog.draft().mouse.invert, "not toggled on press down");
+        assert!(h.dialog.pressed.is_some());
+
+        // Move away while held
+        h.frame(Input {
+            pointer: Some(away_pos),
+            held: true,
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.pressed, None);
+
+        // Release away
+        h.frame(Input {
+            pointer: Some(away_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert!(!h.dialog.draft().mouse.invert, "not toggled after cancel");
+
+        // Click checkbox properly
+        h.frame(Input {
+            pointer: Some(chk_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        h.frame(Input {
+            pointer: Some(chk_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert!(h.dialog.draft().mouse.invert, "toggled on release");
     }
 }
