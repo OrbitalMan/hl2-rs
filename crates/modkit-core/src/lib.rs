@@ -5,6 +5,7 @@ pub mod animation;
 pub mod decals;
 pub mod lighting;
 pub mod movement;
+pub mod studio_decals;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Vertex {

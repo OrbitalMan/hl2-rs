@@ -15,6 +15,7 @@ mod movement;
 mod performance;
 mod rendering;
 mod sky;
+mod studio_decals;
 mod tonemap;
 mod visibility;
 use anyhow::{Context, Result, bail};
@@ -332,6 +333,7 @@ fn main() -> Result<()> {
         .insert_resource(simulation)
         .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
+        .init_resource::<studio_decals::StudioDecals>()
         .insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.1)))
         .add_plugins(
             DefaultPlugins
@@ -384,6 +386,7 @@ fn main() -> Result<()> {
                 rendering::present_weapons,
                 effects::present,
                 effects::present_gibs,
+                studio_decals::present,
                 sky::present,
                 monitors::present,
                 monitors::present_materials,
@@ -698,6 +701,13 @@ type RenderResources<'w> = (
     Res<'w, tonemap::Tonemap>,
     Res<'w, Assets<rendering::SourceMaterial>>,
 );
+/// Exit writer and optional diagnostics read by `monitor`.
+type ExitResources<'w> = (
+    MessageWriter<'w, AppExit>,
+    Option<Res<'w, performance::Performance>>,
+    Option<Res<'w, bevy::diagnostic::DiagnosticsStore>>,
+    Res<'w, studio_decals::StudioDecals>,
+);
 fn monitor(
     mut commands: Commands,
     (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
@@ -705,11 +715,7 @@ fn monitor(
     status: Res<Status>,
     (adapter, pvs, tonemap, source_materials): RenderResources,
     (cameras, draws, map_entities, all_cameras, meshes, images, geometry, two_textures): DiagnosticQueries,
-    (mut exit, performance, render_diagnostics): (
-        MessageWriter<AppExit>,
-        Option<Res<performance::Performance>>,
-        Option<Res<bevy::diagnostic::DiagnosticsStore>>,
-    ),
+    (mut exit, performance, render_diagnostics, studio): ExitResources,
 ) {
     let _timing = performance::scope(performance.as_deref(), "diagnostics");
     control.frames += 1;
@@ -749,7 +755,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         report.presentation["two_texture_materials"] = serde_json::json!(
             two_textures

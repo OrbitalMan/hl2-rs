@@ -232,6 +232,10 @@ pub struct Effects {
     observed_grenades: usize,
 }
 impl Effects {
+    /// A loaded decal material (impact textures) by name.
+    pub(crate) fn decal_material(&self, name: &str) -> Option<Handle<EffectMaterial>> {
+        self.materials.get(name).cloned()
+    }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"sprite_draws":self.draws,"pooled_quads":self.quads.len(),
             "viewmodel_sprite_draws":self.viewmodel_draws,"stuck_bolt_draws":self.stuck.len(),

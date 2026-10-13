@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 15 (continued): studio decals on NPCs (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** DESIGN 13f. (1) `modkit_core::studio_decals`: `project` clips the posed triangles facing the shot to the decal square (depth = radius), carrying barycentric bind positions, blended top-4 bone weights and UVs; `ray_distance` finds the front face along a ray. (2) Simulation: bullet hits on NPCs queue `Impacts::studio_requests` with Impact.Flesh (TranslationData F -> decals/flesh/blood1-5_subrect, drawn with their `$modelmaterial` decals/flesh/bloodN at the subrect's size), and bug bait splats on NPCs queue BeerSplash (drawn with decals/beersplashmodel, 64 units); `$modelmaterial` read from the VMTs, model decal textures preloaded. (3) Host `studio_decals.rs`: builds each request from the NPC's GPU-skinned draws (main-world mesh + joint GlobalTransforms x inverse binds), re-shoots along the shot onto the skin, spawns a decal mesh sharing the draw's `SkinnedMesh` joints (follows animation), tinted by the light state at the hit, hidden with the entity, 50 per model. Report `presentation.studio_decals`, `impacts.studio_created`. Fixtures bevy-studio-decal-cop, -bugbait-cop, -bugbait-citizen.
+
+**Why:** owner item 0b: NPCs must take decals like native studio decals (bug bait stains, blood, paint).
+
+**Tested how:** unit tests (clipped area and bind-space positions, UVs, weights across a bone seam, back faces/out of depth/degenerate rejected, ray front-face hit), workspace and owned tests, strict Clippy, fmt. Packaged (artifacts/s15): three pistol shots at posed terminal_side_cop: 2 blood decals on the belt/abdomen (sdecal3-zoom.png), one grazing hit builds nothing; before the skin re-shoot only 1/3 built (the hit lies on the convex trace shape). Bug bait at the posed cop from 200 units (80 units is inside the bait's non-solid grace period) builds a 1788-triangle stain over the torso; a tint-1 diagnostic showed the geometry and z-fighting (lift raised 0.05 -> 0.25). Native (oracle T160710Z: terminal_side_cop is behind a fence natively, bait hit the fence; T160814Z: bait at the queue citizen's back): no clearly visible stain on the dark clothing natively, nor in ours at the same views (ours hit a different citizen: the queue had progressed differently). Inconclusive; native blood on NPCs not captured.
+
+**Result:** bullets leave blood on NPCs that moves with them; bug bait stains NPCs.
+
+**Still broken or not tested:** native comparison of blood/bait decals on NPCs (needs an open, deterministic native NPC); shot direction is the reversed trace normal; TraceBleed blood on world surfaces behind NPCs; other game materials (antlion/alien/metal NPCs use flesh); per-vertex lighting of translucent model decals; ragdolls; thin seams at creases from the flat lift.
+
+**Next:** VPhysics constraints (owner item 0c; also needed for ragdoll gibs).
 ## 2026-10-13 session 15 (continued): breakable prop gibs (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

@@ -2,6 +2,8 @@
 
 ## Stacked props and prop CCD cost (session 15, 2026-10-13)
 
+Studio decals: `bevy-studio-decal-cop.json` (posed terminal_side_cop, 3 pistol shots): 2 blood decals built (sdecal3-zoom.png), 1 grazing hit empty (1/3 built before re-shooting along the shot onto the skin). `bevy-studio-decal-bugbait-cop.json` (200 units): 1 BeerSplash model decal over 1788 triangles, tint 0.08 (alley light). Native oracle T160814Z (bait at the queue citizen's back from (-3800,-2248)) shows no clear stain on dark clothing; ours at the same views (`bevy-studio-decal-bugbait-citizen.json`) neither; the queue state differs. Inconclusive.
+
 Gibs: pallet #327 launched into the hall wall (`bevy-pallet-launched-into-wall.json`) spawns 7 wood_pallet001a chunks (gibcap.png mid-break; the intact pallet at the same spot, intact.png, has the same cool lighting); `bevy-pallet-gibs-fade.json` (look away at tick 100): alpha falls after each chunk's fadetime (2 s / 10 s) and all 7 are removed by 20.4 s. Native not compared.
 
 Packaged d1_trainstation_02, `--volume 0.01 --no-focus`, artifacts/s15; `step_ms` = whole fixed host step.

@@ -73,8 +73,31 @@ pub struct Texture {
     /// modulate it (bullet holes, DecalModulate).
     pub translucent: bool,
 }
+/// A decal on a skinned NPC (DESIGN 13f): built by the host from the model as posed
+/// now, then carried by its bones.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct StudioDecal {
+    pub id: usize,
+    pub entity: usize,
+    pub position: glam::Vec3,
+    /// The shot's direction (into the model).
+    pub direction: glam::Vec3,
+    /// The world decal's `$modelmaterial` (its texture is in `Impacts::textures`).
+    pub material: String,
+    /// Half the world decal's width (subrect width x $decalscale / 2).
+    pub radius: f32,
+    pub angle: f32,
+}
 /// Surface property of NPC hitboxes (HL2 humans and Combine use "flesh").
 const FLESH: &str = "flesh";
+/// TranslationData "F" -> Impact.Flesh (owned scripts/decals_subrect.txt).
+const FLESH_DECALS: [&str; 5] = [
+    "decals/flesh/blood1_subrect",
+    "decals/flesh/blood2_subrect",
+    "decals/flesh/blood3_subrect",
+    "decals/flesh/blood4_subrect",
+    "decals/flesh/blood5_subrect",
+];
 #[derive(Default)]
 pub struct Impacts {
     pub marks: Vec<Mark>,
@@ -86,6 +109,11 @@ pub struct Impacts {
     pub errors: BTreeMap<String, String>,
     pub created: usize,
     pub unclippable: usize,
+    /// Studio decals waiting for the host to build them, and how many were queued.
+    pub studio_requests: Vec<StudioDecal>,
+    pub studio_created: usize,
+    /// World decal -> its `$modelmaterial` (drawn on models instead).
+    model_materials: HashMap<String, String>,
 }
 impl Impacts {
     pub fn new(vfs: &Vfs, world: &World) -> Self {
@@ -137,7 +165,20 @@ impl Impacts {
         let materials = ["metal", "wood", "glass", "sand", "concrete"]
             .into_iter()
             .flat_map(|family| (1..=5).map(move |i| format!("decals/{family}/shot{i}")))
-            .chain([crate::weapon_bugbait::SPLAT_DECAL.to_string()]);
+            .chain([crate::weapon_bugbait::SPLAT_DECAL.to_string()])
+            .chain(FLESH_DECALS.map(String::from));
+        let mut materials: Vec<String> = materials.collect();
+        for material in materials.clone() {
+            if let Some(model) = vfs
+                .material_value(&material, "$modelmaterial")
+                .ok()
+                .flatten()
+                .map(|m| m.trim().replace('\\', "/").to_lowercase())
+            {
+                result.model_materials.insert(material, model.clone());
+                materials.push(model);
+            }
+        }
         {
             for material in materials {
                 match load_decal(vfs, &material) {
@@ -447,6 +488,9 @@ impl Impacts {
                     ..sound.into()
                 });
             }
+            // Impact.Flesh on the model (FX_ImpactTrace -> DecalShoot).
+            let decal = FLESH_DECALS[self.studio_created % FLESH_DECALS.len()];
+            self.add_studio_decal(&hit, decal);
             return;
         }
         let Some(prop) = self.hit_surfaceprop(&hit, world, physics, scene) else {
@@ -489,8 +533,35 @@ impl Impacts {
             }
         }
     }
-    /// UTIL_DecalTrace: project a loaded decal material onto the surface a trace hit
-    /// (not onto NPCs: studio decals are not reconstructed).
+    /// Queue a studio decal on an NPC: the world decal's size, drawn with its
+    /// `$modelmaterial`, from the hit along the reversed hit normal.
+    fn add_studio_decal(&mut self, hit: &RayHit, decal: &str) {
+        let Some(texture) = self.textures.get(decal) else {
+            return;
+        };
+        let radius = f32::from(texture.image.width) * texture.scale * 0.5;
+        let material = self
+            .model_materials
+            .get(decal)
+            .filter(|m| self.textures.contains_key(*m))
+            .cloned()
+            .unwrap_or_else(|| decal.to_string());
+        if self.studio_requests.len() >= 64 {
+            self.studio_requests.remove(0);
+        }
+        self.studio_requests.push(StudioDecal {
+            id: self.studio_created,
+            entity: hit.entity,
+            position: hit.position,
+            direction: -hit.normal,
+            material,
+            radius,
+            angle: (self.studio_created as f32 * 2.399963).rem_euclid(std::f32::consts::TAU),
+        });
+        self.studio_created += 1;
+    }
+    /// UTIL_DecalTrace: project a loaded decal material onto the surface a trace hit;
+    /// NPCs get a studio decal request.
     pub fn add_decal(
         &mut self,
         hit: RayHit,
@@ -504,6 +575,7 @@ impl Impacts {
             .get(hit.entity)
             .is_some_and(|e| e.class().starts_with("npc_"))
         {
+            self.add_studio_decal(&hit, material);
             return;
         }
         let located = match self.locate(&hit, world, physics, scene) {
