@@ -730,8 +730,9 @@ impl Gameplay {
         {
             self.scene.sounds.push(event.options.into());
         }
-        for (hit, _melee) in self.inventory.impacts.drain(..) {
-            self.impacts.add(hit, &self.world, physics, &mut self.scene);
+        for (hit, _melee, direction) in self.inventory.impacts.drain(..) {
+            self.impacts
+                .add_shot(hit, direction, &self.world, physics, &mut self.scene);
         }
         // Projectile UTIL_ImpactTrace (crossbow bolts in the world).
         for hit in std::mem::take(&mut self.projectiles.impacts) {

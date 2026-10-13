@@ -476,6 +476,28 @@ impl Impacts {
         }
     }
     pub fn add(&mut self, hit: RayHit, world: &World, physics: &Physics, scene: &mut Scene) {
+        self.add_along(hit, None, world, physics, scene);
+    }
+    /// `add` for a shot with a known direction (FX_ImpactTrace keeps the ray: studio
+    /// decals on NPCs are shot along it).
+    pub fn add_shot(
+        &mut self,
+        hit: RayHit,
+        direction: GVec3,
+        world: &World,
+        physics: &Physics,
+        scene: &mut Scene,
+    ) {
+        self.add_along(hit, Some(direction), world, physics, scene);
+    }
+    fn add_along(
+        &mut self,
+        hit: RayHit,
+        direction: Option<GVec3>,
+        world: &World,
+        physics: &Physics,
+        scene: &mut Scene,
+    ) {
         // NPC hitboxes use the flesh surface: impact sound only, no decal here.
         if world
             .entities
@@ -490,7 +512,7 @@ impl Impacts {
             }
             // Impact.Flesh on the model (FX_ImpactTrace -> DecalShoot).
             let decal = FLESH_DECALS[self.studio_created % FLESH_DECALS.len()];
-            self.add_studio_decal(&hit, decal);
+            self.add_studio_decal(&hit, decal, direction);
             return;
         }
         let Some(prop) = self.hit_surfaceprop(&hit, world, physics, scene) else {
@@ -534,8 +556,8 @@ impl Impacts {
         }
     }
     /// Queue a studio decal on an NPC: the world decal's size, drawn with its
-    /// `$modelmaterial`, from the hit along the reversed hit normal.
-    fn add_studio_decal(&mut self, hit: &RayHit, decal: &str) {
+    /// `$modelmaterial`, along the shot (else the reversed hit normal).
+    fn add_studio_decal(&mut self, hit: &RayHit, decal: &str, direction: Option<GVec3>) {
         let Some(texture) = self.textures.get(decal) else {
             return;
         };
@@ -553,7 +575,10 @@ impl Impacts {
             id: self.studio_created,
             entity: hit.entity,
             position: hit.position,
-            direction: -hit.normal,
+            direction: direction
+                .map(GVec3::normalize_or_zero)
+                .filter(|d| *d != GVec3::ZERO)
+                .unwrap_or(-hit.normal),
             material,
             radius,
             angle: (self.studio_created as f32 * 2.399963).rem_euclid(std::f32::consts::TAU),
@@ -575,7 +600,7 @@ impl Impacts {
             .get(hit.entity)
             .is_some_and(|e| e.class().starts_with("npc_"))
         {
-            self.add_studio_decal(&hit, material);
+            self.add_studio_decal(&hit, material, None);
             return;
         }
         let located = match self.locate(&hit, world, physics, scene) {

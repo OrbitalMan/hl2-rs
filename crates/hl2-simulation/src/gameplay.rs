@@ -238,7 +238,8 @@ pub fn fall_damage(fall_speed: f32) -> f32 {
 #[serde(default)]
 pub struct Inventory {
     #[serde(skip)]
-    pub impacts: Vec<(crate::physics::RayHit, bool)>,
+    /// Bullet/melee hits with whether melee and the shot direction.
+    pub impacts: Vec<(crate::physics::RayHit, bool, Vec3)>,
     #[serde(skip)]
     pub projectile_spawns: Vec<ProjectileSpawn>,
     pub previous: String,
@@ -1418,7 +1419,7 @@ impl Inventory {
         // SDK UTIL_ImpactTrace: every bullet and player-crowbar hit plays the hit surface's
         // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
         // WeaponSound(MELEE_HIT) is the NPC-operator path.
-        self.impacts.push((hit, melee));
+        self.impacts.push((hit, melee, direction));
         if melee {
             self.animate("hitcenter1", scene.time);
         }
@@ -2866,7 +2867,7 @@ mod tests {
         assert!(inv.impacts[0].0.position.distance(Vec3::X * 100.) < 0.001);
         assert!(inv.impacts[1..]
             .iter()
-            .any(|(hit, _)| hit.position.y.abs() > 0.1));
+            .any(|(hit, _, _)| hit.position.y.abs() > 0.1));
         assert_eq!(inv.owned["weapon_shotgun"], 5);
     }
 

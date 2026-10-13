@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 15 (continued): studio decals along the shot (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** weapon hits keep their shot direction (`Inventory::impacts` entries gain it; `Impacts::add_shot`), and NPC studio decals are shot along it instead of the reversed trace-shape normal.
+
+**Why:** FX_ImpactTrace shoots decals along the ray; the trace shape's normal missed the skin on grazing hits.
+
+**Tested how:** workspace tests, strict Clippy, fmt; packaged `bevy-studio-decal-cop.json`: 3/3 shots build blood decals at the hit points (was 2/3), sdecal4-zoom.png. Owned tests not rerun for this change (no owned-data path changed).
+
+**Result:** blood lands where the bullet hits.
+
+**Still broken or not tested:** native comparison of NPC blood.
+
+**Next:** handoff.
 ## 2026-10-13 session 15 (continued): VPhysics constraints (hinges), spawn-embedded CCD (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
