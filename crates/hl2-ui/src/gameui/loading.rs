@@ -136,9 +136,9 @@ impl LoadingDialog {
         }
     }
 
-    /// Returns the origin and scale for centering the loading dialog on the canvas.
-    pub fn layout_geometry(canvas_size: Vec2, scale: f32) -> (Vec2, f32) {
-        let scaled_size = LOADING_DIALOG_SIZE * scale;
+    /// Returns the origin and scale for centering a dialog with the given size on the canvas.
+    pub fn layout_geometry_sized(canvas_size: Vec2, scale: f32, dialog_size: Vec2) -> (Vec2, f32) {
+        let scaled_size = dialog_size * scale;
         let origin = Vec2::new(
             ((canvas_size.x - scaled_size.x) * 0.5).max(0.0).round(),
             ((canvas_size.y - scaled_size.y) * 0.5).max(0.0).round(),
@@ -146,11 +146,37 @@ impl LoadingDialog {
         (origin, scale)
     }
 
+    /// Returns the origin and scale for centering the loading dialog on the canvas.
+    pub fn layout_geometry(canvas_size: Vec2, scale: f32) -> (Vec2, f32) {
+        Self::layout_geometry_sized(canvas_size, scale, LOADING_DIALOG_SIZE)
+    }
+
     /// Draws the loading dialog centered within the painter's canvas bounds.
     pub fn draw(&self, painter: &Painter, loc: &Localization) {
-        let (origin, scale) = Self::layout_geometry(
+        let label_text = self.status_text(loc);
+        let text_color = if self.error.is_some() {
+            Color::new(1.0, 0.35, 0.35, 1.0)
+        } else {
+            painter.theme.text
+        };
+        // Wrap status/warning text to 340px width (parent dialog width 380 - 20px padding each side)
+        let max_label_w = 340.0;
+        let lines = crate::gameui::widgets::wrap(&label_text, max_label_w, |s| {
+            painter.text_width(s, false)
+        });
+        let line_count = lines.len().max(1);
+
+        // Dynamically expand dialog height and shift progress bar if text wraps beyond 2 lines
+        let font_tall = crate::gameui::widgets::FONT_TALL;
+        let label_h = (line_count as f32 * font_tall).max(24.0);
+        let bar_y = 34.0 + label_h + 6.0;
+        let dialog_h = (bar_y + 24.0 + 16.0).max(LOADING_DIALOG_SIZE.y);
+        let dialog_size = Vec2::new(LOADING_DIALOG_SIZE.x, dialog_h);
+
+        let (origin, scale) = Self::layout_geometry_sized(
             Vec2::new(painter.canvas.width(), painter.canvas.height()),
             painter.scale,
+            dialog_size,
         );
         let p = Painter {
             canvas: painter.canvas,
@@ -160,7 +186,6 @@ impl LoadingDialog {
             scale,
         };
 
-        let size = LOADING_DIALOG_SIZE;
         // Title: "#GameUI_Loading" -> "LOADING...", no close button
         let title_token = loc.localize("#GameUI_Loading");
         let title = if title_token == "#GameUI_Loading" {
@@ -168,19 +193,17 @@ impl LoadingDialog {
         } else {
             title_token
         };
-        p.frame_with_close(size, &title, None);
+        p.frame_with_close(dialog_size, &title, None);
 
-        // Info label: x: 20, y: 34, w: 340, h: 24
-        let label_text = self.status_text(loc);
-        let text_color = if self.error.is_some() {
-            Color::new(1.0, 0.35, 0.35, 1.0)
-        } else {
-            p.theme.text
-        };
-        p.text(&label_text, Vec2::new(20., 36.), text_color, false);
+        // Render each line inside the label area
+        let mut y = 34.0;
+        for line in &lines {
+            p.text(line, Vec2::new(20., y), text_color, false);
+            y += font_tall;
+        }
 
-        // Progress bar: x: 20, y: 64, w: 340, h: 24
-        let bar_rect = Rect::new(20., 64., 340., 24.);
+        // Progress bar: positioned below the label
+        let bar_rect = Rect::new(20., bar_y, 340., 24.);
         let bar_bg = Color::new(0.0, 0.0, 0.0, 0.6);
         let bar_fg = p.theme.text;
         p.progress_bar(bar_rect, self.fraction, bar_fg, bar_bg);
@@ -338,6 +361,45 @@ mod tests {
                 ((2560. - scaled_size_retina.x) * 0.5).round(),
                 ((1600. - scaled_size_retina.y) * 0.5).round()
             )
+        );
+    }
+
+    #[test]
+    fn loading_dialog_multiline_status_wraps_and_expands_bounds() {
+        use crate::canvas::Canvas;
+        use crate::gameui::widgets::{Fonts, Theme};
+
+        let loc = Localization::default();
+        let mut dialog = LoadingDialog::new("ep1_citadel_00");
+        dialog.set_error(
+            "Warning: Map transition failed due to missing asset or parsing failure. Please verify game files.",
+        );
+
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.0,
+        };
+
+        dialog.draw(&painter, &loc);
+        let quads = canvas.drain();
+
+        // The background frame quad should have expanded height > LOADING_DIALOG_SIZE.y (112.0)
+        let frame_quad = quads
+            .iter()
+            .find(|q| {
+                q.destination.w == LOADING_DIALOG_SIZE.x && q.destination.h >= LOADING_DIALOG_SIZE.y
+            })
+            .expect("loading dialog frame quad");
+        assert!(
+            frame_quad.destination.h > LOADING_DIALOG_SIZE.y,
+            "Expected dialog height to expand beyond 112px, got {}",
+            frame_quad.destination.h
         );
     }
 }

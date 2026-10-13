@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-13 Wrapped multi-line labels, dialog layouts
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`: enhanced greedy word wrapping `wrap` to split words longer than `width` character-by-character (handling Unicode scalar values safely), guaranteeing lines never exceed parent bounds. Added `Painter::multiline_label` with alignment support and parent height bounding. Updated `Painter::wrapped` to delegate to `multiline_label`. Expanded unit test `wrap_breaks_on_measured_width` covering very long words, multi-byte UTF-8 localization, explicit `\n`, and zero-width edge cases.
+- `hl2-ui::gameui::loading`: added `LoadingDialog::layout_geometry_sized` and updated `LoadingDialog::draw` to wrap status/warning labels to 340px width. Dynamically expands dialog frame height and shifts the progress bar downward when warning or error text wraps beyond 2 lines, keeping all content strictly inside the dialog frame without overlap. Added unit test `loading_dialog_multiline_status_wraps_and_expands_bounds`.
+- `hl2-ui::gameui::options`: resolved label overlap in 3rd-party technology credits dialogs (`OptionsSubAudioThirdPartyDlg` / `OptionsSubVideoThirdPartyDlg`). Replaced static overlapping `ypos` layout with sequential vertical measurement (`measure_credits_height`, `draw_credits_subdialog`, `CreditItem`). Wrapped text and images strictly stay within `view_rect` (between title and fixed Close button at bottom right). When content height exceeds available view height (e.g. Audio credits), renders a vertical scrollbar and enables mouse wheel scrolling via `credits_scroll` and `credits_input`. Added unit test `credits_subdialog_layout_prevents_overlap_and_scrolls`.
+
+**Why:**
+- Long status, warning, and error messages in the map loading dialog previously overflowed horizontally outside the frame bounds and overlapped the progress bar. In the 3rd-party technology credits dialogs, retail `.res` coordinates placed multi-line labels (`Label1`, `Label3`, `Label2`, `BinkImage`) at fixed vertical offsets that caused wrapped lines to print directly over subsequent labels and overlap the Close button. Word-based wrapping with character breaking, dynamic dialog height expansion, sequential vertical layout, and vertical scrolling eliminate clipping and overlaps.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui`: all 126 unit tests passed (including `wrap_breaks_on_measured_width`, `loading_dialog_multiline_status_wraps_and_expands_bounds`, and `credits_subdialog_layout_prevents_overlap_and_scrolls`).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed.
+- `cargo clippy --locked -p hl2-ui -- -D warnings`: strict clippy passed with 0 warnings.
+- `cargo fmt --all --check`: clean formatting verified across all workspace crates.
+- `cargo test --locked`: all 91 simulation/assets tests and 66 Bevy host tests passed.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed (30 frames rendered, exit code 0).
+
+**Result:** Multi-line labels wrap within parent bounds, map loading dialog warnings expand without overflow, and 3rd-party technology credits display with sequential non-overlapping layout and scrollbar support.
+
+**Still broken or not tested:** Visual check on physical display (unverified, needs manual check at 1280x800 and native Retina for loading dialog warning and credits scrollbar).
+
+**Next:** Task 6: Input blocking behind dialogs (shared modal/occlusion check).
+
 ## 2026-10-13 High-DPI / scale-factor consistency
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

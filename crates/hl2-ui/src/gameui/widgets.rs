@@ -275,16 +275,30 @@ impl Painter<'_> {
         }
     }
 
-    /// Word-wrapped text from the top-left of `rect` (north-west labels).
-    pub fn wrapped(&self, text: &str, rect: Rect, color: Color) {
+    /// Draws multi-line text with word wrapping, respecting `rect` bounds and alignment.
+    /// Lines exceeding `rect.h` are truncated so text never overflows its parent bounds.
+    pub fn multiline_label(&self, text: &str, rect: Rect, align: Align, color: Color) {
+        let max_w = rect.w.max(1.);
+        let lines = wrap(text, max_w, |s| self.text_width(s, false));
         let mut y = rect.y;
-        for line in wrap(text, rect.w, |s| self.text_width(s, false)) {
+        for line in lines {
             if y + FONT_TALL > rect.y + rect.h + FONT_TALL * 0.5 {
                 break;
             }
-            self.text(&line, vec2(rect.x, y), color, false);
+            let line_w = self.text_width(&line, false);
+            let x = match align {
+                Align::Left => rect.x,
+                Align::Center => rect.x + ((rect.w - line_w) * 0.5).max(0.),
+                Align::Right => rect.x + (rect.w - line_w).max(0.),
+            };
+            self.text(&line, vec2(x, y), color, false);
             y += FONT_TALL;
         }
+    }
+
+    /// Word-wrapped text from the top-left of `rect` (north-west labels).
+    pub fn wrapped(&self, text: &str, rect: Rect, color: Color) {
+        self.multiline_label(text, rect, Align::Left, color);
     }
 
     /// A filled disc approximated by one rectangle per scaled pixel row.
@@ -939,7 +953,8 @@ pub fn menu_list_hit(list: Rect, first: usize, items: usize, point: Vec2) -> Opt
     (index < items).then_some(index)
 }
 
-/// Greedy word wrap by measured width; long words stay on their own line.
+/// Greedy word wrap by measured width; words longer than `width` are broken by character
+/// so lines never exceed `width`.
 pub fn wrap(text: &str, width: f32, measure: impl Fn(&str) -> f32) -> Vec<String> {
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
@@ -951,7 +966,26 @@ pub fn wrap(text: &str, width: f32, measure: impl Fn(&str) -> f32) -> Vec<String
                 format!("{line} {word}")
             };
             if !line.is_empty() && measure(&candidate) > width {
-                lines.push(std::mem::replace(&mut line, word.to_owned()));
+                lines.push(std::mem::take(&mut line));
+            }
+            if line.is_empty() {
+                if measure(word) <= width || width <= 0. {
+                    line = word.to_owned();
+                } else {
+                    // Very long word exceeds max width: break by character
+                    let mut chunk = String::new();
+                    for ch in word.chars() {
+                        let mut next = chunk.clone();
+                        next.push(ch);
+                        if !chunk.is_empty() && measure(&next) > width {
+                            lines.push(std::mem::take(&mut chunk));
+                        }
+                        chunk.push(ch);
+                    }
+                    if !chunk.is_empty() {
+                        line = chunk;
+                    }
+                }
             } else {
                 line = candidate;
             }
@@ -1048,6 +1082,33 @@ mod tests {
         });
         assert_eq!(lines, ["Adjust the", "slider until", "all three"]);
         assert_eq!(wrap("", 10., |_| 0.), [""]);
+
+        // Very long word exceeding width is broken character-by-character
+        let long_word_lines = wrap("Supercalifragilistic", 30., |s| s.len() as f32 * 5.);
+        assert_eq!(long_word_lines, ["Superc", "alifra", "gilist", "ic"]);
+        for line in &long_word_lines {
+            assert!(line.len() as f32 * 5. <= 30.);
+        }
+
+        // Localized multi-byte UTF-8 string with umlauts and symbols
+        let loc_lines = wrap(
+            "Urheberrecht © 1991-2001 RAD Game Tools. Überragend!",
+            80.,
+            |s| s.chars().count() as f32 * 5.,
+        );
+        for line in &loc_lines {
+            assert!(line.chars().count() as f32 * 5. <= 80.);
+        }
+
+        // Explicit newlines preserved
+        let multiline = wrap("First line\nSecond line is longer", 50., |s| {
+            s.len() as f32 * 5.
+        });
+        assert_eq!(multiline, ["First line", "Second", "line is", "longer"]);
+
+        // Zero width falls back safely
+        let zero_lines = wrap("hello world", 0., |_| 10.);
+        assert_eq!(zero_lines, ["hello", "world"]);
     }
 
     #[test]

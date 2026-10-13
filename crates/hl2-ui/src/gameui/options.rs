@@ -234,6 +234,12 @@ pub struct ActiveTooltip {
     pub pointer: Vec2,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum CreditItem {
+    Label(String),
+    Image { path: String, size: Vec2 },
+}
+
 pub struct OptionsDialog {
     res: Arc<GameUiResources>,
     modes: DisplayModes,
@@ -255,6 +261,7 @@ pub struct OptionsDialog {
     bink_texture: Option<Texture2D>,
     log: Vec<String>,
     pub(crate) active_tooltip: Option<ActiveTooltip>,
+    pub credits_scroll: f32,
 }
 
 impl Default for OptionsDialog {
@@ -281,6 +288,7 @@ impl Default for OptionsDialog {
             bink_texture: None,
             log: Vec::new(),
             active_tooltip: None,
+            credits_scroll: 0.0,
         }
     }
 }
@@ -391,6 +399,7 @@ impl OptionsDialog {
         self.confirm = None;
         self.sub = None;
         self.active_tooltip = None;
+        self.credits_scroll = 0.0;
     }
 
     pub fn tab(&self) -> Tab {
@@ -430,6 +439,7 @@ impl OptionsDialog {
             return true;
         }
         if let Some(sub) = self.sub.take() {
+            self.credits_scroll = 0.0;
             if let Sub::Gamma { saved } = sub {
                 self.draft.config.video.gamma = saved;
             }
@@ -556,7 +566,7 @@ impl OptionsDialog {
             self.active_tooltip = None;
             let size = frame_size(&self.res, sub);
             let pointer = local(centered(canvas, size, scale));
-            self.sub_input(sub, size, input, pointer);
+            self.sub_input(sub, size, input, pointer, measure);
             return OptionsOutcome::None;
         }
         let pointer = local(centered(canvas, DIALOG_SIZE, scale));
@@ -874,8 +884,14 @@ impl OptionsDialog {
                     saved: self.draft.config.video.gamma,
                 })
             }
-            Command::AudioCredits => self.sub = Some(Sub::AudioCredits),
-            Command::VideoCredits => self.sub = Some(Sub::VideoCredits),
+            Command::AudioCredits => {
+                self.credits_scroll = 0.0;
+                self.sub = Some(Sub::AudioCredits);
+            }
+            Command::VideoCredits => {
+                self.credits_scroll = 0.0;
+                self.sub = Some(Sub::VideoCredits);
+            }
             Command::KeyDefaults => {
                 self.confirm = Some(MessageBox::new(
                     loc.text("#GameUI_KeyboardSettings"),
@@ -899,8 +915,12 @@ impl OptionsDialog {
                 let label = command.placeholder().unwrap_or_default();
                 self.placeholder(label);
             }
-            Command::SubOk => self.sub = None,
+            Command::SubOk => {
+                self.credits_scroll = 0.0;
+                self.sub = None;
+            }
             Command::SubCancel => {
+                self.credits_scroll = 0.0;
                 if let Some(Sub::Gamma { saved }) = self.sub {
                     self.draft.config.video.gamma = saved;
                 }
@@ -1004,7 +1024,18 @@ impl OptionsDialog {
         }
     }
 
-    fn sub_input(&mut self, sub: Sub, size: Vec2, input: &Input, pointer: Option<Vec2>) {
+    fn sub_input(
+        &mut self,
+        sub: Sub,
+        size: Vec2,
+        input: &Input,
+        pointer: Option<Vec2>,
+        measure: &Painter,
+    ) {
+        if sub.is_credits() {
+            self.credits_input(sub, size, input, pointer, measure);
+            return;
+        }
         let res = self.res.clone();
         let area = Rect::new(0., 0., size.x, size.y);
         let list = layout_widgets(&res, sub.panel(), area, &self.draft, &self.applied);
@@ -1027,6 +1058,237 @@ impl OptionsDialog {
             _ if input.pressed(Key::Enter) && !was_editing => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 self.command(Command::SubOk);
+            }
+            _ => {}
+        }
+    }
+
+    fn credits_items(&self, sub: Sub) -> Vec<CreditItem> {
+        let mut items = Vec::new();
+        if let Some(layout) = self.res.layout(sub.panel().layout()) {
+            let mut controls: Vec<&Control> = layout
+                .controls
+                .iter()
+                .filter(|c| {
+                    c.visible
+                        && !c.name.eq_ignore_ascii_case("Button2")
+                        && !matches!(c.kind, ControlKind::Button | ControlKind::Other(_))
+                })
+                .collect();
+            controls.sort_by(|a, b| {
+                a.y.resolve(CREDITS_SIZE.y)
+                    .partial_cmp(&b.y.resolve(CREDITS_SIZE.y))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for c in controls {
+                match c.kind {
+                    ControlKind::Label => {
+                        items.push(CreditItem::Label(c.label.clone()));
+                    }
+                    ControlKind::ImagePanel => {
+                        items.push(CreditItem::Image {
+                            path: c.image.clone(),
+                            size: Vec2::new(c.wide, c.tall),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if items.is_empty() {
+            match sub {
+                Sub::AudioCredits => {
+                    items.push(CreditItem::Label("#GameUI_Miles_Audio".into()));
+                    items.push(CreditItem::Label("#GameUI_Miles_Voice".into()));
+                    items.push(CreditItem::Label("#GameUI_Bink".into()));
+                    items.push(CreditItem::Image {
+                        path: "vgui/techcredits/bink".into(),
+                        size: Vec2::new(100., 40.),
+                    });
+                }
+                Sub::VideoCredits => {
+                    items.push(CreditItem::Label("#GameUI_Bink".into()));
+                    items.push(CreditItem::Image {
+                        path: "vgui/techcredits/bink".into(),
+                        size: Vec2::new(100., 40.),
+                    });
+                }
+                _ => {}
+            }
+        }
+        items
+    }
+
+    fn measure_credits_height(
+        &self,
+        items: &[CreditItem],
+        content_w: f32,
+        measure_w: impl Fn(&str) -> f32,
+    ) -> f32 {
+        let mut total_h = 0.0;
+        let loc = &self.res.localization;
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                total_h += 10.0;
+            }
+            match item {
+                CreditItem::Label(token) => {
+                    let text = loc.localize(token);
+                    let lines = widgets::wrap(&text, content_w, &measure_w);
+                    total_h += lines.len() as f32 * widgets::FONT_TALL;
+                }
+                CreditItem::Image { size, .. } => {
+                    total_h += size.y;
+                }
+            }
+        }
+        total_h
+    }
+
+    fn draw_credits_subdialog(&self, sp: &Painter, sub: Sub, size: Vec2, modal: bool) {
+        let loc = &self.res.localization;
+        let items = self.credits_items(sub);
+        let view_rect = Rect::new(16., 34., size.x - 32., size.y - 34. - 42.);
+        let sb_w = widgets::SCROLLBAR_WIDTH;
+
+        let total_h_full =
+            self.measure_credits_height(&items, view_rect.w, |s| sp.text_width(s, false));
+        let needs_scroll = total_h_full > view_rect.h;
+        let (content_w, total_h, max_scroll) = if needs_scroll {
+            let cw = view_rect.w - sb_w - 6.0;
+            let th = self.measure_credits_height(&items, cw, |s| sp.text_width(s, false));
+            (cw, th, (th - view_rect.h).max(0.0))
+        } else {
+            (view_rect.w, total_h_full, 0.0)
+        };
+
+        let scroll = self.credits_scroll.clamp(0.0, max_scroll);
+        let mut y_cursor = view_rect.y - scroll;
+
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                y_cursor += 10.0;
+            }
+            match item {
+                CreditItem::Label(token) => {
+                    let text = loc.localize(token);
+                    let lines = widgets::wrap(&text, content_w, |s| sp.text_width(s, false));
+                    for line in lines {
+                        let line_y = y_cursor;
+                        if line_y >= view_rect.y
+                            && line_y + widgets::FONT_TALL <= view_rect.y + view_rect.h + 2.0
+                        {
+                            sp.text(&line, Vec2::new(view_rect.x, line_y), sp.theme.text, false);
+                        }
+                        y_cursor += widgets::FONT_TALL;
+                    }
+                }
+                CreditItem::Image {
+                    path,
+                    size: img_size,
+                } => {
+                    let img_y = y_cursor;
+                    if img_y >= view_rect.y && img_y + img_size.y <= view_rect.y + view_rect.h + 2.0
+                    {
+                        let texture = if path.to_ascii_lowercase().contains("bink") {
+                            self.bink_texture.as_ref()
+                        } else {
+                            None
+                        };
+                        if let Some(tex) = texture {
+                            sp.image(Rect::new(view_rect.x, img_y, img_size.x, img_size.y), tex);
+                        }
+                    }
+                    y_cursor += img_size.y;
+                }
+            }
+        }
+
+        if needs_scroll && max_scroll > 0.0 {
+            let sb_rect = Rect::new(
+                view_rect.x + view_rect.w - sb_w,
+                view_rect.y,
+                sb_w,
+                view_rect.h,
+            );
+            sp.scroll_bar(
+                sb_rect,
+                scroll.round() as usize,
+                view_rect.h.round() as usize,
+                total_h.round() as usize,
+            );
+        }
+
+        let close_rect = Rect::new(size.x - 96., size.y - 34., 80., 24.);
+        let close_armed = !modal && self.armed == Some(Target::Cancel);
+        let close_pressed = !modal && self.pressed == Some(Target::Cancel);
+        sp.button(
+            close_rect,
+            &loc.text("#GameUI_Close"),
+            ButtonState {
+                armed: close_armed,
+                pressed: close_pressed,
+                enabled: !modal,
+                default: true,
+            },
+        );
+    }
+
+    fn credits_input(
+        &mut self,
+        sub: Sub,
+        size: Vec2,
+        input: &Input,
+        pointer: Option<Vec2>,
+        measure: &Painter,
+    ) {
+        let items = self.credits_items(sub);
+        let view_rect = Rect::new(16., 34., size.x - 32., size.y - 34. - 42.);
+        let sb_w = widgets::SCROLLBAR_WIDTH;
+
+        let total_h_full =
+            self.measure_credits_height(&items, view_rect.w, |s| measure.text_width(s, false));
+        let max_scroll = if total_h_full > view_rect.h {
+            let cw = view_rect.w - sb_w - 6.0;
+            let th = self.measure_credits_height(&items, cw, |s| measure.text_width(s, false));
+            (th - view_rect.h).max(0.0)
+        } else {
+            0.0
+        };
+
+        if input.wheel != 0. && max_scroll > 0.0 {
+            let step = input.wheel * 24.0;
+            self.credits_scroll = (self.credits_scroll - step).clamp(0.0, max_scroll);
+        }
+
+        let sb_rect = Rect::new(
+            view_rect.x + view_rect.w - sb_w,
+            view_rect.y,
+            sb_w,
+            view_rect.h,
+        );
+        if let Some(p) = pointer {
+            if (input.click || input.held) && max_scroll > 0.0 && sb_rect.contains(p) {
+                let fraction = ((p.y - sb_rect.y) / sb_rect.h).clamp(0.0, 1.0);
+                self.credits_scroll = (fraction * max_scroll).clamp(0.0, max_scroll);
+            }
+        }
+
+        let close_rect = Rect::new(size.x - 96., size.y - 34., 80., 24.);
+        let title_close_rect = widgets::close_button_rect(size);
+        let extra = [
+            (Target::Close, title_close_rect),
+            (Target::Cancel, close_rect),
+        ];
+
+        match self.track(&[], &extra, pointer, input) {
+            Some(Target::Close | Target::Cancel) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                self.command(Command::SubCancel);
+            }
+            _ if input.pressed(Key::Enter) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                self.command(Command::SubCancel);
             }
             _ => {}
         }
@@ -1130,13 +1392,17 @@ impl OptionsDialog {
                     default: false,
                 }),
             );
-            let area = Rect::new(0., 0., size.x, size.y);
-            let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
-            for (i, widget) in list.iter().enumerate() {
-                let target = Some(Target::Control(i));
-                let armed = !sub_modal && self.armed == target;
-                let pressed = !sub_modal && self.pressed == target;
-                self.draw_widget(&sp, widget, &env, armed, pressed);
+            if sub.is_credits() {
+                self.draw_credits_subdialog(&sp, sub, size, sub_modal);
+            } else {
+                let area = Rect::new(0., 0., size.x, size.y);
+                let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
+                for (i, widget) in list.iter().enumerate() {
+                    let target = Some(Target::Control(i));
+                    let armed = !sub_modal && self.armed == target;
+                    let pressed = !sub_modal && self.pressed == target;
+                    self.draw_widget(&sp, widget, &env, armed, pressed);
+                }
             }
         }
         if let Some(confirm) = &self.confirm {
@@ -2240,5 +2506,150 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(h.dialog.active_tooltip(), None);
+    }
+
+    #[test]
+    fn credits_subdialog_layout_prevents_overlap_and_scrolls() {
+        let mut h = Harness::new();
+        let mut loc = Localization::default();
+        loc.insert(
+            "GameUI_Miles_Audio",
+            "Miles Sound System Copyright © 1991-2001 RAD Game Tools, Inc. Unmatched quality audio processing.",
+        );
+        loc.insert(
+            "GameUI_Miles_Voice",
+            "Miles Voice Compression System Copyright © 1991-2001 RAD Game Tools, Inc.",
+        );
+        loc.insert(
+            "GameUI_Bink",
+            "Uses Bink Video. Copyright © 1997-2004 by RAD Game Tools, Inc.",
+        );
+        loc.insert("GameUI_Close", "Close");
+        h.dialog.res = Arc::new(GameUiResources {
+            localization: loc,
+            ..Default::default()
+        });
+
+        h.dialog.sub = Some(Sub::AudioCredits);
+        let painter = Painter {
+            canvas: &h.canvas,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        // 1. Initial draw with scroll = 0
+        h.dialog.draw(&painter);
+        let quads = h.canvas.drain();
+
+        let origin = centered(vec2(1280., 720.), CREDITS_SIZE, 1.);
+        let view_rect = Rect::new(
+            origin.x + 16.,
+            origin.y + 34.,
+            CREDITS_SIZE.x - 32.,
+            CREDITS_SIZE.y - 76.,
+        );
+        let close_rect = Rect::new(
+            origin.x + CREDITS_SIZE.x - 96.,
+            origin.y + CREDITS_SIZE.y - 34.,
+            80.,
+            24.,
+        );
+
+        // Verify sequential measurements: audio credits exceed view_rect.h (needs scrollbar),
+        // while video credits fit within view_rect.h.
+        let audio_items = h.dialog.credits_items(Sub::AudioCredits);
+        let audio_h = h
+            .dialog
+            .measure_credits_height(&audio_items, view_rect.w - 22., |s| s.len() as f32 * 7.);
+        assert!(
+            audio_h > view_rect.h,
+            "Audio credits height ({}) must exceed view height ({})",
+            audio_h,
+            view_rect.h
+        );
+
+        let video_items = h.dialog.credits_items(Sub::VideoCredits);
+        let video_h = h
+            .dialog
+            .measure_credits_height(&video_items, view_rect.w, |s| s.len() as f32 * 7.);
+        assert!(
+            video_h <= view_rect.h,
+            "Video credits height ({}) must fit in view height ({})",
+            video_h,
+            view_rect.h
+        );
+
+        // Verify scrollbar exists because audio credits exceed 134px height
+        let sb_w = widgets::SCROLLBAR_WIDTH;
+        let sb_rect = Rect::new(
+            view_rect.x + view_rect.w - sb_w,
+            view_rect.y,
+            sb_w,
+            view_rect.h,
+        );
+        let has_scrollbar = quads.iter().any(|q| {
+            let r = q.destination;
+            r.x >= sb_rect.x - 1. && r.x + r.w <= sb_rect.x + sb_rect.w + 1. && r.h > 10.
+        });
+        assert!(
+            has_scrollbar,
+            "Expected vertical scrollbar when content exceeds view height"
+        );
+
+        // Close button quad must be present and positioned strictly outside view_rect
+        let has_close_button = quads.iter().any(|q| {
+            let r = q.destination;
+            r.x >= close_rect.x - 1.
+                && r.x + r.w <= close_rect.x + close_rect.w + 1.
+                && r.y >= close_rect.y - 1.
+        });
+        assert!(
+            has_close_button,
+            "Expected Close button quad at bottom right"
+        );
+        assert!(
+            close_rect.y >= view_rect.y + view_rect.h,
+            "Close button must stay outside view_rect"
+        );
+
+        // 2. Wheel scrolling updates credits_scroll
+        let prev_scroll = h.dialog.credits_scroll;
+        h.dialog.input(
+            &Input {
+                wheel: -2.0,
+                ..Default::default()
+            },
+            &painter,
+        );
+        assert!(
+            h.dialog.credits_scroll > prev_scroll,
+            "Mouse wheel should scroll down"
+        );
+
+        // 3. Close button dismisses credits
+        let close_click_pos = vec2(close_rect.x + 10., close_rect.y + 10.);
+        h.dialog.input(
+            &Input {
+                pointer: Some(close_click_pos),
+                click: true,
+                held: true,
+                ..Default::default()
+            },
+            &painter,
+        );
+        h.dialog.input(
+            &Input {
+                pointer: Some(close_click_pos),
+                released: true,
+                ..Default::default()
+            },
+            &painter,
+        );
+        assert!(
+            h.dialog.sub.is_none(),
+            "Close button should dismiss credits subdialog"
+        );
     }
 }
