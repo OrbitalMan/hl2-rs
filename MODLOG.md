@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-13 High-DPI / scale-factor consistency
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::menu`: replaced static unscaled button vertical spacing (`MENU_BUTTON_SPACING = 20.`) with proportional spacing derived from the 480p scale basis (`BASE_MENU_BUTTON_SPACING = 12.`, `button_spacing(scale) = (BASE_MENU_BUTTON_SPACING * scale).round()`). At 1280x800 reference resolution (scale 5/3), spacing remains exactly 20.0 px, preserving existing layout invariants while scaling button spacing proportionally on High-DPI/Retina screens (e.g. 40.0 px at 1600p height). Added `MenuLayout::geometry_scaled(height, scale_factor)` supporting explicit window scale factors. Updated unit test `native_menu_uses_480_coordinate_scaling_with_proportional_spacing` asserting exact 1280x800 stability and Retina 2.0 scaling.
+- `hl2-ui::gameui::widgets`: added `Painter::scale_for_window(logical_height, scale_factor) -> f32` computing the shared dialog scale `(effective_height / 720.).max(1.)`. Added unit test `scale_computation_for_scale_factors_and_window_sizes` verifying scale computation for scale factors 1.0 and 2.0 across several standard resolutions (480p, 720p, 800p, 1080p, 1440p, 2160p) with regression assertions for 1280x800 layout scaling.
+- `hl2-ui::gameui::loading`: added `LoadingDialog::layout_geometry(canvas_size, scale) -> (Vec2, f32)` centering `LOADING_DIALOG_SIZE * scale` on canvas. Updated `LoadingDialog::draw` to scale dialog size and origin with `painter.scale`. Added unit test `loading_dialog_scaling_and_layout_geometry` verifying centered placement and proportional sizing at 720p (1.0x), 1280x800 (1.11x), and Retina 2.0x (2.22x).
+- `hl2-ui::console`: updated `Console::draw` in both gameplay mode and menu mode to pass `scale = Painter::scale_for(self.canvas.height())` to `loading.draw` instead of hardcoded 1.0.
+
+**Why:**
+- On native Retina and High-DPI displays, menu button vertical spacing was locked to a static 20px constant, causing buttons to appear cramped and squished relative to the scaled font and title text. Furthermore, the map loading dialog was drawn with an unscaled 1.0 scale factor and unscaled centering, causing it to render as a tiny box at high resolutions. Deriving button spacing from the 480p scale basis and scaling the loading dialog via the shared dialog scale policy ensures full resolution and DPI agnosticism.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui`: all 124 unit tests passed (including `scale_computation_for_scale_factors_and_window_sizes`, `native_menu_uses_480_coordinate_scaling_with_proportional_spacing`, and `loading_dialog_scaling_and_layout_geometry`).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed.
+- `cargo clippy --locked -p hl2-ui -- -D warnings`: strict clippy passed with 0 warnings.
+- `cargo fmt --all --check`: clean formatting verified across all workspace crates.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed (30 frames rendered, exit code 0).
+
+**Result:** Menu button vertical spacing and map loading dialog sizing are resolution and DPI agnostic across all scale factors, while exactly preserving the 1280x800 layout values.
+
+**Still broken or not tested:** Physical monitor visual inspection at native Retina and 1280x800 (unverified, needs manual check).
+
+**Next:** Task 5: Wrapped multi-line labels, dialog layouts (shared word wrapping, loading dialog warning, 3rd party credits scrolling).
+
 ## 2026-10-13 Check box checkmark
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

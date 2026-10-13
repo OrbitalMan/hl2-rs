@@ -1331,7 +1331,8 @@ impl Console {
         }
         if self.mode == Mode::Gameplay {
             if let Some(loading) = &self.loading_dialog {
-                loading.draw(&self.painter(Vec2::ZERO, 1.), &self.gameui.localization);
+                let scale = Painter::scale_for(self.canvas.height());
+                loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
             }
             return;
         }
@@ -1558,7 +1559,8 @@ impl Console {
             }
         }
         if let Some(loading) = &self.loading_dialog {
-            loading.draw(&self.painter(Vec2::ZERO, 1.), &self.gameui.localization);
+            let scale = Painter::scale_for(self.canvas.height());
+            loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
         }
     }
 }

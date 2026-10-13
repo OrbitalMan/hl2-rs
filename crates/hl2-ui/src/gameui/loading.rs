@@ -136,21 +136,31 @@ impl LoadingDialog {
         }
     }
 
+    /// Returns the origin and scale for centering the loading dialog on the canvas.
+    pub fn layout_geometry(canvas_size: Vec2, scale: f32) -> (Vec2, f32) {
+        let scaled_size = LOADING_DIALOG_SIZE * scale;
+        let origin = Vec2::new(
+            ((canvas_size.x - scaled_size.x) * 0.5).max(0.0).round(),
+            ((canvas_size.y - scaled_size.y) * 0.5).max(0.0).round(),
+        );
+        (origin, scale)
+    }
+
     /// Draws the loading dialog centered within the painter's canvas bounds.
     pub fn draw(&self, painter: &Painter, loc: &Localization) {
-        let size = LOADING_DIALOG_SIZE;
-        let origin = Vec2::new(
-            ((painter.canvas.width() - size.x) / 2.0).max(0.0),
-            ((painter.canvas.height() - size.y) / 2.0).max(0.0),
+        let (origin, scale) = Self::layout_geometry(
+            Vec2::new(painter.canvas.width(), painter.canvas.height()),
+            painter.scale,
         );
         let p = Painter {
             canvas: painter.canvas,
             fonts: painter.fonts,
             theme: painter.theme,
             origin: painter.origin + origin,
-            scale: painter.scale,
+            scale,
         };
 
+        let size = LOADING_DIALOG_SIZE;
         // Title: "#GameUI_Loading" -> "LOADING...", no close button
         let title_token = loc.localize("#GameUI_Loading");
         let title = if title_token == "#GameUI_Loading" {
@@ -294,5 +304,40 @@ mod tests {
 
         reset_progress();
         assert_eq!(current_progress(), None);
+    }
+
+    #[test]
+    fn loading_dialog_scaling_and_layout_geometry() {
+        // Standard 720p base (scale = 1.0): size is 380x112, centered on 1280x720
+        let (origin_720, scale_720) = LoadingDialog::layout_geometry(Vec2::new(1280., 720.), 1.0);
+        assert_eq!(scale_720, 1.0);
+        assert_eq!(origin_720, Vec2::new(450., 304.));
+
+        // 1280x800 standard reference (scale = 800/720)
+        let scale_800 = Painter::scale_for(800.);
+        let (origin_800, scale) = LoadingDialog::layout_geometry(Vec2::new(1280., 800.), scale_800);
+        assert_eq!(scale, 800. / 720.);
+        let scaled_size = LOADING_DIALOG_SIZE * scale;
+        assert_eq!(
+            origin_800,
+            Vec2::new(
+                ((1280. - scaled_size.x) * 0.5).round(),
+                ((800. - scaled_size.y) * 0.5).round()
+            )
+        );
+
+        // Native Retina / High-DPI 2560x1600 (scale = 1600/720)
+        let scale_retina = Painter::scale_for_window(800., 2.0);
+        let (origin_retina, scale_ret) =
+            LoadingDialog::layout_geometry(Vec2::new(2560., 1600.), scale_retina);
+        assert_eq!(scale_ret, 1600. / 720.);
+        let scaled_size_retina = LOADING_DIALOG_SIZE * scale_ret;
+        assert_eq!(
+            origin_retina,
+            Vec2::new(
+                ((2560. - scaled_size_retina.x) * 0.5).round(),
+                ((1600. - scaled_size_retina.y) * 0.5).round()
+            )
+        );
     }
 }

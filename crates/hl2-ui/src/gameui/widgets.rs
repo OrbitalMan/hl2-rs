@@ -167,6 +167,11 @@ impl Painter<'_> {
         (canvas_height / 720.).max(1.)
     }
 
+    /// Computes the dialog scale for a given window logical height and display scale factor.
+    pub fn scale_for_window(logical_height: f32, scale_factor: f32) -> f32 {
+        Self::scale_for(logical_height * scale_factor.max(1.0))
+    }
+
     pub fn at(&self, offset: Vec2) -> Painter<'_> {
         Painter {
             canvas: self.canvas,
@@ -1344,5 +1349,29 @@ mod tests {
         let ys_pressed: Vec<f32> = check_pressed.iter().map(|q| q.destination.y).collect();
         assert_eq!(xs_pressed, vec![16., 17., 18., 19., 20., 21., 22.]);
         assert_eq!(ys_pressed, vec![22., 23., 24., 23., 22., 21., 20.]);
+    }
+
+    #[test]
+    fn scale_computation_for_scale_factors_and_window_sizes() {
+        // Scale factor 1.0 (standard DPI)
+        assert_eq!(Painter::scale_for_window(480., 1.0), 1.0);
+        assert_eq!(Painter::scale_for_window(720., 1.0), 1.0);
+        assert_eq!(Painter::scale_for_window(800., 1.0), 800. / 720.);
+        assert_eq!(Painter::scale_for_window(1080., 1.0), 1080. / 720.);
+        assert_eq!(Painter::scale_for_window(1440., 1.0), 1440. / 720.);
+        assert_eq!(Painter::scale_for_window(2160., 1.0), 2160. / 720.);
+
+        // Scale factor 2.0 (High-DPI / Retina)
+        assert_eq!(Painter::scale_for_window(480., 2.0), 960. / 720.);
+        assert_eq!(Painter::scale_for_window(720., 2.0), 1440. / 720.);
+        assert_eq!(Painter::scale_for_window(800., 2.0), 1600. / 720.);
+        assert_eq!(Painter::scale_for_window(1080., 2.0), 2160. / 720.);
+        assert_eq!(Painter::scale_for_window(1440., 2.0), 2880. / 720.);
+        assert_eq!(Painter::scale_for_window(2160., 2.0), 4320. / 720.);
+
+        // Regression assertion: 1280x800 layout scale is unchanged
+        let scale_800_1x = Painter::scale_for_window(800., 1.0);
+        assert_eq!(scale_800_1x, Painter::scale_for(800.));
+        assert_eq!(scale_800_1x, 800. / 720.);
     }
 }
