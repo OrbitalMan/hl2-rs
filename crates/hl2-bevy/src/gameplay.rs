@@ -47,6 +47,17 @@ pub enum Action {
         #[serde(default)]
         parameter: String,
     },
+    /// Test only: teleport a map prop_physics body (entity id) to a pose with an
+    /// optional velocity, standing in for prop_physics_create until runtime entity
+    /// creation exists (DESIGN 14r); never called by ordinary campaign play.
+    PropPose {
+        entity: usize,
+        origin: [f32; 3],
+        #[serde(default)]
+        angles: [f32; 3],
+        #[serde(default)]
+        velocity: [f32; 3],
+    },
 }
 impl Action {
     pub fn valid(&self) -> bool {
@@ -61,6 +72,16 @@ impl Action {
                     && origin.iter().all(|v| v.is_finite())
                     && yaw.is_finite()
             }
+            Self::PropPose {
+                origin,
+                angles,
+                velocity,
+                ..
+            } => origin
+                .iter()
+                .chain(angles)
+                .chain(velocity)
+                .all(|v| v.is_finite() && v.abs() < 65536.),
             Self::Slot { slot } => *slot < 6,
             Self::Wheel { delta } => (-100..=100).contains(delta),
             Self::Send {
@@ -451,6 +472,27 @@ impl Gameplay {
                             .diagnostics
                             .unsupported
                             .entry(format!("fixture actor pose target missing: {target}"))
+                            .or_default() += 1;
+                    }
+                    continue;
+                }
+                Action::PropPose {
+                    entity,
+                    origin,
+                    angles,
+                    velocity,
+                } => {
+                    if !physics.place_body(
+                        entity,
+                        Vec3::from_array(origin),
+                        Vec3::from_array(angles),
+                        Vec3::from_array(velocity),
+                    ) {
+                        *self
+                            .scene
+                            .diagnostics
+                            .unsupported
+                            .entry(format!("fixture prop pose: no dynamic body {entity}"))
                             .or_default() += 1;
                     }
                     continue;

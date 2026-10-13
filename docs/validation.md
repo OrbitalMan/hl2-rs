@@ -1,5 +1,14 @@
 # Local validation — 2026-10-05
 
+## Player/prop contacts, NPC hulls, prop drag fractions (session 14, 2026-10-13)
+
+All packaged runs on d1_trainstation_02 with `--volume 0.01 --no-focus`, reports in artifacts/s14 (`hull_contacts`, `shadow`, `physics_ms`, `carrying` sample fields).
+- **Stuck on props** (`test-inputs/bevy-player-on-box.json`, `bevy-player-walk-into-boxes.json`, `bevy-player-push.json`): before, landing on cardboard box #710 sank it ~1.5 units into the floor (the explicit 85 kg weight impulse) and its rebound overlapped the hull 0.7-1.5 units (stuck); walking diagonally stuck the player on #711 for 230 ticks. After: 0/28 and 0/42 stuck samples; the wall push leaves only <0.01-unit momentary contacts; box rest (-3360.0,-2607.9) vs native (-3358.3,-2607.4). Rejected on the way: a 0.25-unit inset shadow (a box rebounded off the wall into the gap), a velocity clip alone and a "blocked" rule alone at the wall jam, a kinematic shadow (not retail).
+- **Frag +USE** (`bevy-frag-use-pickup.json`): thrown at the feet, picked up via the FCAP_USE_IN_RADIUS sphere search, carried until the fuse (capture fraguse-held.png). Native not compared.
+- **NPC hull** (`bevy-player-on-npc-hull.json`): feet stay at 137.0 (posed cop origin z 65 + 72) while moving 21 units over the shoulder; the pre-change build slid off. SDK-derived; native not captured.
+- **Pallet on cop** (`bevy-pallet-on-npc-hull.json`, pallet placed 110 units up over the posed cop): physics step mean/max 25.5/62.2 ms with model colliders vs 4.7/9.4 ms with the hull; the pallet rests at z 76.9 on the hull.
+- **Pallet launch vs native T021822Z** (`bevy-physcannon-pallet.json`): y at 0.08/0.45/0.9 s and rest: ours -4235/-3899/-3673/-3521, native -4258/-3904 (0.47 s)/-3711 (0.91 s)/-3572. Counterfactuals: old -4246/-3999/-3843/-3769; stored fractions only -4235/-3911/-3679/-3539; plus IVP axis pairing -4235/-3894/-3690/-3529; axis pairing only -4248/-3990/-3835/-3775. Frag replay (owned, best RMS lob/roll/high/plaza): stored fractions 31.7/16.3/3.4/40.1, both 21.2/65.0/-/-, kept estimate 27.6/16.4/3.8/12.8.
+- **Cop impact kill** (`bevy-pallet-kills-cop-physdamagescale1.json`): terminal_side_cop has map physdamagescale 0; with `AddOutput physdamagescale 1` a 20 kg pallet at 1500 u/s kills it on contact with the hull; without, it is unhurt.
 ## Bug bait, player shadow and plaza cop vs native (session 13, 2026-10-13)
 
 Bug bait (eye (-4200,-224,1) setang 0 180 in the d1_trainstation_02 spawn room; native T012846Z, ours `test-inputs/bevy-bugbait-wall.json`): native leaves a dark reddish stain right of the crosshair; ours with the retail subrect decal lit by the wall lightmap gives a similar stain (artifacts/frag-s13/bait-wall-crop.png). The standalone decals/beersplash texture (10% mean alpha) was nearly invisible: rejected. Earlier floor/outdoor comparisons were invalid (the "splash" was a floor texture stain in both).

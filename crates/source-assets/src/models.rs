@@ -981,6 +981,7 @@ pub fn read_physics(
         let checksum = crate::phy::identity_root_checksum(&mdl)?;
         let read = crate::phy::read(&phy, checksum)?;
         solid.compact_inertia = Some((read.mass_center, read.rotation_inertia));
+        solid.drag_fractions = Some(read.drag_fractions);
         Ok(read.pieces)
     })();
     Ok(Some((solid, pieces)))
@@ -1327,6 +1328,21 @@ mod owned_phy_inertia {
         // Long (Source z) axis 0.000711 m^2/kg, cross axes 0.00428.
         assert!((inertia.z - 0.000711).abs() < 1e-5, "{inertia}");
         assert!((inertia.x - 0.004283).abs() < 1e-5 && (inertia.y - 0.004283).abs() < 1e-5);
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_pallet_phy_stores_its_drag_fractions() {
+        let root = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&root).unwrap();
+        let (solid, _) = super::read_physics(&vfs, "models/props_junk/wood_pallet001a.mdl")
+            .unwrap()
+            .unwrap();
+        // VPHY header words (private drag-axes research): the slatted pallet's gaps
+        // show in the middle fraction, unlike a convex silhouette (~1, 1, 1).
+        let f = solid.drag_fractions.unwrap();
+        let expected = glam::Vec3::new(0.941_666_6, 0.402_616_3, 0.993_643_4);
+        assert!((f - expected).abs().max_element() < 1e-6, "{f}");
+        assert_eq!(solid.mass, 20.);
     }
 }
 #[cfg(test)]

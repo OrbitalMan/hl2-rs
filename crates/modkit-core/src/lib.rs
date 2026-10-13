@@ -153,6 +153,9 @@ pub struct PhysicsSolid {
     /// rotation inertia per kilogram (m^2, Source axes), when the solid was read.
     #[serde(default)]
     pub compact_inertia: Option<(Vec3, Vec3)>,
+    /// The collision file's stored drag fractions (VPHY header, stored order), when read.
+    #[serde(default)]
+    pub drag_fractions: Option<Vec3>,
 }
 impl Default for PhysicsSolid {
     fn default() -> Self {
@@ -165,6 +168,7 @@ impl Default for PhysicsSolid {
             surfaceprop: "default".into(),
             volume: 0.,
             compact_inertia: None,
+            drag_fractions: None,
         }
     }
 }

@@ -127,9 +127,16 @@ pub fn queue_npc_damage(
             else {
                 continue;
             };
+            // An AddOutput "physdamagescale <v>" at runtime overrides the map keyvalue.
+            let scale = scene
+                .keyvalue_overrides
+                .get(&(npc, "physdamagescale".to_string()))
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite() && *v >= 0.)
+                .unwrap_or_else(|| energy_scale(entity));
             let damage = npc_damage(
                 *mass,
-                energy_scale(entity),
+                scale,
                 Impactor {
                     mass: event.masses[other],
                     pre: event.pre_velocities[other],

@@ -18,6 +18,9 @@ pub struct Phy {
     /// IVP_Compact_Surface rotation_inertia per kilogram of mass (m^2), on the
     /// Source axes: the principal inertia VPhysics scales by mass and `inertia`.
     pub rotation_inertia: Vec3,
+    /// VPHY header drag fractions (file offsets 32/36/40, the stored orthographic
+    /// area fractions retail vphysics copies for its drag bases, in stored order).
+    pub drag_fractions: Vec3,
     /// Preserves duplicate sections/keys; mass/material mapping is separate work.
     pub keyvalues: Vec<keyvalues::Entry>,
 }
@@ -54,7 +57,7 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
     {
         bail!("unsupported VPHY version/type/axis map");
     }
-    vec3(data, 32)?;
+    let drag_fractions = vec3(data, 32)?;
     let compact = data.get(48..end).context("truncated PHY compact solid")?;
     if compact.len() != u32le(data, 28)? as usize
         || compact.len() < 48
@@ -185,6 +188,7 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
         pieces,
         mass_center,
         rotation_inertia,
+        drag_fractions,
         keyvalues,
     })
 }

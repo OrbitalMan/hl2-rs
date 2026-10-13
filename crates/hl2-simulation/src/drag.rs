@@ -9,11 +9,14 @@
 //! and the inverse mass (linear) or inverse rotational inertia (angular). Native
 //! `air_density` prints 2.00 (session 12, d1_trainstation_02).
 //!
-//! Not verified: the orthographic fractions are computed here as the projected area of
-//! the hull vertices over the AABB face (vphysics' own method is not traced); the bases
-//! pair with Source-local axes (the retail velocity frame may be IVP's (x, -z, y), which
-//! would swap the y and z terms); Rapier's principal inertia frame stands in for the
-//! core's.
+//! The fractions are the collision file's stored VPHY header words when the solid was
+//! read (retail copies them; physics-research-20261013b/drag-axes); otherwise the
+//! projected hull area over the AABB face stands in. Open: retail queries velocity in the
+//! IVP frame (Source (x, -z, y) when object and core frames align), which would pair the
+//! ordered bases with (vx, vz, vy); tried in session 14 it moved the native pallet
+//! launch little and broke the frag roll replay (RMS 16 -> 65), so the Source pairing is
+//! kept until the object/core frame alignment is traced. The angular query's frame is
+//! also unverified (Rapier's principal inertia frame stands in for the core's).
 use glam::{Vec2, Vec3};
 
 /// Native `air_density` (CPhysicsEnvironment default, observed 2.00).
@@ -29,6 +32,13 @@ pub struct DragGeometry {
 }
 impl DragGeometry {
     /// From body-local hull points in metres.
+    /// The same geometry with the collision file's stored fractions.
+    pub fn with_fractions(self, stored: Vec3) -> Self {
+        Self {
+            ortho: stored.clamp(Vec3::ZERO, Vec3::ONE),
+            ..self
+        }
+    }
     pub fn from_points(points: &[Vec3]) -> Option<Self> {
         let (first, rest) = points.split_first()?;
         let (lo, hi) = rest

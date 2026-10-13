@@ -42,16 +42,57 @@ const NPC_GROUP: Group = Group::GROUP_3;
 /// The player's VPhysics shadow (CBasePlayer::SetupVPhysicsShadow): it only pushes and
 /// rests on movable props; traces and player movement ignore it.
 const SHADOW_GROUP: Group = Group::GROUP_4;
+/// NPC movement hulls (SOLID_BBOX: an axis-aligned box of the class hull, e.g.
+/// HULL_HUMAN): player movement and physics props collide with them; traces use the
+/// model-shaped colliders instead.
+const HULL_GROUP: Group = Group::GROUP_5;
 const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
+    Group::ALL,
+    Group::ALL
+        .difference(PROJECTILE_GROUP)
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP),
+);
+/// Player movement: everything solid to the player, NPC hull boxes included.
+const PLAYER_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
     Group::ALL
         .difference(PROJECTILE_GROUP)
         .difference(SHADOW_GROUP),
 );
+/// The SDK hull (mins, maxs) of npc_* classes (SetHullType), for those done so far.
+pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
+    // HULL_HUMAN (ai_hull.cpp, non-HL1 table).
+    const HUMAN: (Vec3, Vec3) = (Vec3::new(-13., -13., 0.), Vec3::new(13., 13., 72.));
+    matches!(
+        class,
+        "npc_metropolice"
+            | "npc_combine_s"
+            | "npc_citizen"
+            | "npc_alyx"
+            | "npc_barney"
+            | "npc_kleiner"
+            | "npc_eli"
+            | "npc_breen"
+            | "npc_mossman"
+            | "npc_magnusson"
+            | "npc_gman"
+            | "npc_monk"
+            | "npc_zombie"
+            | "npc_zombine"
+            | "npc_poisonzombie"
+            | "npc_fastzombie"
+            | "npc_stalker"
+            | "npc_assassin"
+    )
+    .then_some(HUMAN)
+}
 /// Traces with COLLISION_GROUP_NONE (FindUseEntity, the gravity gun's FindObject and
 /// punt): they also hit COLLISION_GROUP_WEAPON bodies such as a thrown frag.
-const PICK_GROUPS: InteractionGroups =
-    InteractionGroups::new(Group::ALL, Group::ALL.difference(SHADOW_GROUP));
+const PICK_GROUPS: InteractionGroups = InteractionGroups::new(
+    Group::ALL,
+    Group::ALL.difference(SHADOW_GROUP).difference(HULL_GROUP),
+);
 /// Entity ids of VPhysics projectile bodies (thrown frags), above every map entity
 /// index, so the entity-keyed +USE and gravity gun holds can take them.
 pub const PROJECTILE_ENTITY_BASE: usize = 1 << 40;
@@ -425,11 +466,20 @@ pub struct Physics {
     drag_geometry: HashMap<RigidBodyHandle, Option<crate::drag::DragGeometry>>,
     /// Bodies with drag disabled (EnableDrag(false): a held object's controlled body).
     pub drag_disabled: std::collections::HashSet<RigidBodyHandle>,
+    /// Stored drag fractions of bodies from a read collision file (PhysicsSolid).
+    drag_fractions: HashMap<RigidBodyHandle, Vec3>,
     pub native_shape_count: usize,
     pub native_shape_fallbacks: usize,
     pub skipped: usize,
     /// The player's VPhysics shadow body and whether it uses the crouch hull.
     pub player_shadow: Option<(RigidBodyHandle, bool)>,
+    /// NPC hull box collider and its (mins, maxs) per entity.
+    npc_hulls: BTreeMap<usize, (ColliderHandle, Vec3, Vec3)>,
+    /// Model-shaped colliders of NPCs that have a hull box: hitboxes for traces only,
+    /// not solid to player movement and without contacts.
+    npc_hitboxes: std::collections::HashSet<ColliderHandle>,
+    /// Diagnostics: wall-clock milliseconds of the last tick.
+    pub last_step_ms: f64,
 }
 /// Body-local hull points (metres) of a body's colliders for its drag geometry.
 fn drag_geometry(body: &RigidBody, colliders: &ColliderSet) -> Option<crate::drag::DragGeometry> {
@@ -720,6 +770,11 @@ impl Physics {
             if let (Some(id), Some(body)) = (entity, body) {
                 p.dynamic.insert(id, body);
             }
+            if let (Some(body), Some(fractions)) =
+                (body, solid.as_ref().and_then(|s| s.drag_fractions))
+            {
+                p.drag_fractions.insert(body, fractions);
+            }
             let material = solid
                 .as_ref()
                 .and_then(|s| surface_material(world, &s.surfaceprop));
@@ -773,6 +828,34 @@ impl Physics {
                     },
                 );
             }
+            // SOLID_BBOX NPCs: movement and physics collide with the class hull box at
+            // the entity origin (never rotated); the model shape stays for traces.
+            if let (Some(id), Some((mins, maxs))) = (entity, npc_hull(&instance.kind)) {
+                for c in p.entity_colliders.get(&id).cloned().unwrap_or_default() {
+                    if let Some(collider) = p.colliders.get_mut(c) {
+                        collider.set_active_collision_types(ActiveCollisionTypes::empty());
+                    }
+                    p.npc_hitboxes.insert(c);
+                }
+                let half = (maxs - mins) * 0.5;
+                let hull = p.colliders.insert(
+                    ColliderBuilder::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
+                        .translation(vector(instance.origin + (mins + maxs) * 0.5))
+                        .friction(0.7)
+                        .user_data(id as u128 + 1)
+                        .collision_groups(InteractionGroups::new(
+                            HULL_GROUP,
+                            Group::ALL
+                                .difference(PROJECTILE_GROUP)
+                                .difference(SHADOW_GROUP),
+                        )),
+                );
+                p.npc_collider_contents.insert(hull, CONTENTS_MONSTER);
+                if let Some(s) = &solid {
+                    p.collider_materials.insert(hull, s.surfaceprop.clone());
+                }
+                p.npc_hulls.insert(id, (hull, mins, maxs));
+            }
         }
         // Fold additional (authored) mass properties in before the first query.
         for handle in p.dynamic.values() {
@@ -793,6 +876,16 @@ impl Physics {
                 .get_mut(*dynamic.unwrap())
                 .unwrap()
                 .set_enabled(enabled);
+        }
+        if let Some(&(hull, mins, maxs)) = self.npc_hulls.get(&id) {
+            let at = pose(origin + (mins + maxs) * 0.5, Quat::IDENTITY);
+            if let Some(c) = self.colliders.get_mut(hull) {
+                if *c.position() != at || c.is_enabled() != enabled {
+                    c.set_position(at);
+                    c.set_enabled(enabled);
+                    self.changed_entity_colliders.push(hull);
+                }
+            }
         }
         let target = dynamic.is_none().then(|| pose(origin, rotation));
         if let Some(colliders) = self.entity_colliders.get(&id) {
@@ -836,6 +929,11 @@ impl Physics {
         self.changed_entity_colliders.clear();
     }
     pub fn tick(&mut self, dt: f32) {
+        let started = std::time::Instant::now();
+        self.tick_inner(dt);
+        self.last_step_ms = started.elapsed().as_secs_f64() * 1000.;
+    }
+    fn tick_inner(&mut self, dt: f32) {
         self.player_convex_cache
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -848,11 +946,11 @@ impl Physics {
             }
             if self.air_density > 0. && !self.drag_disabled.contains(&handle) {
                 let colliders = &self.colliders;
-                if let Some(geometry) = *self
-                    .drag_geometry
-                    .entry(handle)
-                    .or_insert_with(|| drag_geometry(body, colliders))
-                {
+                let stored = self.drag_fractions.get(&handle).copied();
+                if let Some(geometry) = *self.drag_geometry.entry(handle).or_insert_with(|| {
+                    drag_geometry(body, colliders)
+                        .map(|g| stored.map_or(g, |fractions| g.with_fractions(fractions)))
+                }) {
                     apply_drag(body, &geometry, self.air_density, dt);
                 }
             }
@@ -1118,6 +1216,11 @@ impl Physics {
         if let Some(b) = self.bodies.get_mut(body) {
             b.recompute_mass_properties_from_colliders(&self.colliders);
         }
+        // The frag keeps the projected-hull fractions: its native replay
+        // (owned_frag_throws_follow_native_samples) was validated with them, and the
+        // stored fractions moved the plaza throw from RMS 12.8 to 40.1 (session 14)
+        // while fitting the native pallet launch: an unmodelled frame difference
+        // (physics-research-20261013b/drag-axes) remains open.
         body
     }
     /// IPhysicsObject::GetContactPoint != 0: the entity's body touches something.
@@ -1143,7 +1246,7 @@ impl Physics {
             &self.colliders,
             &position,
             &Cuboid::new(vector(half)),
-            groups_filter(QUERY_GROUPS),
+            groups_filter(PLAYER_GROUPS),
             |handle| {
                 let c = &self.colliders[handle];
                 // Penetration depth (units) and normal from the hull into the collider.
@@ -1210,6 +1313,23 @@ impl Physics {
             })
         })
     }
+    /// Teleport an entity's dynamic body (test fixtures): Source angles, world
+    /// velocity, no spin. False when the entity has no dynamic body.
+    pub fn place_body(
+        &mut self,
+        id: usize,
+        origin: Vec3,
+        angles_deg: Vec3,
+        velocity: Vec3,
+    ) -> bool {
+        let Some(body) = self.dynamic.get(&id).and_then(|h| self.bodies.get_mut(*h)) else {
+            return false;
+        };
+        body.set_position(pose(origin, angles(angles_deg)), true);
+        body.set_linvel(vector(velocity), true);
+        body.set_angvel(vector![0., 0., 0.], true);
+        true
+    }
     /// Diagnostics: the player VPhysics shadow's center.
     pub fn player_shadow_center(&self) -> Option<Vec3> {
         let body = self.bodies.get(self.player_shadow?.0)?;
@@ -1253,6 +1373,8 @@ impl Physics {
             self.entity_colliders.remove(&id);
             self.prop_materials.remove(&id);
         }
+        self.drag_fractions.remove(&handle);
+        self.drag_geometry.remove(&handle);
         self.bodies.remove(
             handle,
             &mut self.islands,
@@ -1802,7 +1924,10 @@ impl NpcCollisionWorld for Physics {
             let entity = entity_of(collider);
             collider.is_enabled()
                 && !collider.is_sensor()
-                && !matches!(collider.collision_groups().memberships, PROJECTILE_GROUP | SHADOW_GROUP)
+                && !matches!(
+                    collider.collision_groups().memberships,
+                    PROJECTILE_GROUP | SHADOW_GROUP | HULL_GROUP
+                )
                 && entity.is_none_or(|id| !query.excluded_entities.contains(&id))
                 // Explicit actor bounds supersede an NPC's render-mesh collider.
                 && !entity.is_some_and(|id| {
@@ -2003,10 +2128,11 @@ impl CollisionWorld for Physics {
         let player_contents_filter = |handle: ColliderHandle, collider: &Collider| {
             collider.is_enabled()
                 && !self.world_brush_contents.contains_key(&handle)
+                && !self.npc_hitboxes.contains(&handle)
                 && !player_convex::supported(collider)
         };
         let filter = QueryFilter::default()
-            .groups(QUERY_GROUPS)
+            .groups(PLAYER_GROUPS)
             .exclude_sensors()
             .predicate(&player_contents_filter);
         // A standing hull merely touching the floor must not prevent uncrouching.
@@ -2050,6 +2176,7 @@ impl CollisionWorld for Physics {
                         PROJECTILE_GROUP | SHADOW_GROUP
                     )
                     && !self.world_brush_contents.contains_key(handle)
+                    && !self.npc_hitboxes.contains(handle)
                 {
                     if let Some(brush) = cache.brush(*handle, collider) {
                         let hit =
@@ -2341,6 +2468,103 @@ mod tests {
             .projectile_sweep(start, end, ProjectileHull::Box(Vec3::splat(3.)), &[])
             .is_none());
         assert!(physics.entity_closest_point(0, start).is_none());
+    }
+    #[test]
+    fn npc_hull_box_carries_the_player_while_traces_hit_the_model_shape() {
+        // Synthetic citizen: an 8-unit-wide model column 60 tall (not game data).
+        let instance = modkit_core::ModelInstance {
+            background: false,
+            model: "synthetic_citizen.mdl".into(),
+            origin: Vec3::ZERO,
+            angles: Vec3::new(0., 30., 0.),
+            skin: 0,
+            scale: 1.,
+            kind: "npc_citizen".into(),
+            solid: true,
+            solid_mode: Some(2),
+            entity: Some(0),
+        };
+        let key = instance.asset_key();
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![("classname".into(), "npc_citizen".into())],
+            }],
+            model_assets: BTreeMap::from([(
+                key,
+                vec![box_surface(Vec3::new(-4., -4., 0.), Vec3::new(4., 4., 60.))],
+            )]),
+            model_instances: vec![instance],
+            ..Default::default()
+        };
+        let mut physics = Physics::new(&world);
+        let (mins, maxs) = (Vec3::new(-16., -16., 0.), Vec3::new(16., 16., 72.));
+        // Standing over the shoulder (player center 20 units out, beyond the model but
+        // over the 13-unit hull): the fall stops on the hull top at z 72.
+        let fall = physics.trace_hull(Vec3::new(20., 0., 100.), Vec3::new(20., 0., 0.), mins, maxs);
+        assert!(
+            (100. - fall.fraction * 100. - 72.).abs() < 0.1,
+            "{}",
+            fall.fraction
+        );
+        // A shot just outside the model column misses (the hull is not a hitbox) ...
+        assert!(physics
+            .impact_ray(Vec3::new(8., 0., 100.), -Vec3::Z, 200.)
+            .is_none());
+        // ... and one into the column hits the NPC.
+        let hit = physics
+            .impact_ray(Vec3::new(0., 0., 100.), -Vec3::Z, 200.)
+            .unwrap();
+        assert_eq!(hit.entity, 0);
+        assert!((hit.position.z - 60.).abs() < 0.1, "{}", hit.position);
+        // The box follows the entity without rotating, and goes with it when disabled.
+        physics.set_entity(0, Vec3::X * 100., Quat::from_rotation_z(0.7), true);
+        physics.refresh_queries();
+        let moved = physics.trace_hull(
+            Vec3::new(120., 0., 100.),
+            Vec3::new(120., 0., 0.),
+            mins,
+            maxs,
+        );
+        assert!(
+            (100. - moved.fraction * 100. - 72.).abs() < 0.1,
+            "{}",
+            moved.fraction
+        );
+        // A thrown 5 kg box strikes the hull box: the contact event names the NPC
+        // (impact damage input) and the box stops at the hull face.
+        let body = physics.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(vector![160. * SCALE, 0., 40. * SCALE])
+                .linvel(vector![-600. * SCALE, 0., 0.])
+                .gravity_scale(0.)
+                .additional_mass(5.),
+        );
+        physics.colliders.insert_with_parent(
+            ColliderBuilder::cuboid(4. * SCALE, 4. * SCALE, 4. * SCALE).density(0.),
+            body,
+            &mut physics.bodies,
+        );
+        let mut struck = false;
+        for _ in 0..20 {
+            physics.tick(TICK);
+            struck |= physics
+                .collisions
+                .iter()
+                .any(|c| c.entities.contains(&Some(0)));
+        }
+        assert!(struck);
+        let x = physics.bodies[body].translation().x / SCALE;
+        assert!(x > 100. + 13., "box passed into the hull: x {x}");
+        physics.remove_body(body);
+        physics.set_entity(0, Vec3::X * 100., Quat::IDENTITY, false);
+        physics.refresh_queries();
+        let gone = physics.trace_hull(
+            Vec3::new(120., 0., 100.),
+            Vec3::new(120., 0., 0.),
+            mins,
+            maxs,
+        );
+        assert_eq!(gone.fraction, 1.);
     }
     fn native_prop_world() -> World {
         let instance = modkit_core::ModelInstance {

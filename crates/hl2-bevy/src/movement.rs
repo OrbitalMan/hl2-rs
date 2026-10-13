@@ -95,6 +95,8 @@ struct Sample {
     hull_contacts: Vec<(Option<usize>, bool, f32, glam::Vec3)>,
     /// The player VPhysics shadow's center.
     shadow: Option<glam::Vec3>,
+    /// Wall-clock milliseconds of the last physics step.
+    physics_ms: f64,
     console: Option<serde_json::Value>,
 }
 #[derive(Resource)]
@@ -458,6 +460,7 @@ impl Simulation {
                     if self.player.crouched { 36. } else { 72. },
                 ),
                 shadow: self.physics.player_shadow_center(),
+                physics_ms: self.physics.last_step_ms,
                 ray_entity: self
                     .physics
                     .ray(
