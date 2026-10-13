@@ -316,6 +316,29 @@ impl Painter<'_> {
             );
         }
     }
+
+    /// Draws a checkmark inside a checkbox's box rectangle (`box_rect`).
+    ///
+    /// Matches the Source VGUI checkmark appearance: a 2-pixel-thick tick mark
+    /// with a short descending left stroke and longer ascending right stroke.
+    pub fn check_mark(&self, box_rect: Rect, color: Color, offset: f32) {
+        let x0 = box_rect.x + offset;
+        let y0 = box_rect.y + offset;
+        // The checkmark is composed of 7 vertical columns (each 2 units tall) centered inside the 12x12 box:
+        // Left arm descends from (3, 5) to apex at (5, 8); right arm ascends from (5, 8) to (9, 3).
+        const COLUMNS: [(f32, f32); 7] = [
+            (3., 5.),
+            (4., 6.),
+            (5., 7.),
+            (6., 6.),
+            (7., 5.),
+            (8., 4.),
+            (9., 3.),
+        ];
+        for (dx, dy) in COLUMNS {
+            self.fill(Rect::new(x0 + dx, y0 + dy, 1., 2.), color);
+        }
+    }
 }
 
 /// Frame client area offsets (`Frame.ClientInsetX`, title height) at 1:1 scale.
@@ -569,10 +592,7 @@ impl Painter<'_> {
             } else {
                 0.
             };
-            self.fill(
-                Rect::new(bx.x + 3. + offset, bx.y + 3. + offset, bx.w - 6., bx.h - 6.),
-                color,
-            );
+            self.check_mark(bx, color, offset);
         }
         let text_rect = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
         let text_color = if !state.enabled {
@@ -1274,5 +1294,55 @@ mod tests {
             quads_full.len() > quads_half.len(),
             "100% draws all segment blocks"
         );
+    }
+
+    #[test]
+    fn check_box_checked_draws_white_checkmark_not_plain_square() {
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        let rect = Rect::new(10., 10., 120., 24.);
+
+        // Unchecked: emits bg + 4 border quads
+        painter.check_box(rect, "Test", false, ButtonState::new(true));
+        let quads_unchecked = canvas.drain();
+        assert_eq!(quads_unchecked.len(), 5);
+
+        // Checked: emits bg + 4 border quads + 7 checkmark quads
+        painter.check_box(rect, "Test", true, ButtonState::new(true));
+        let quads_checked = canvas.drain();
+        assert_eq!(quads_checked.len(), 12);
+
+        // Checkmark quads should have theme.check color (white)
+        let check_quads = &quads_checked[5..12];
+        for quad in check_quads {
+            assert_eq!(quad.color, theme.check);
+            assert_eq!(quad.destination.w, 1.);
+            assert_eq!(quad.destination.h, 2.);
+        }
+
+        // Verify shape: X coordinates span 15..=21 (bx.x is 12., columns are dx=3..=9)
+        // Y coordinates descend to apex at dx=5 (bx.y is 16., dy=7 -> y=23) and ascend to dy=3 (y=19)
+        let xs: Vec<f32> = check_quads.iter().map(|q| q.destination.x).collect();
+        let ys: Vec<f32> = check_quads.iter().map(|q| q.destination.y).collect();
+        assert_eq!(xs, vec![15., 16., 17., 18., 19., 20., 21.]);
+        assert_eq!(ys, vec![21., 22., 23., 22., 21., 20., 19.]);
+
+        // When pressed, checkmark should be shifted by 1px offset
+        painter.check_box(rect, "Test", true, ButtonState::active(true, true, true));
+        let quads_pressed = canvas.drain();
+        let check_pressed = &quads_pressed[5..12];
+        let xs_pressed: Vec<f32> = check_pressed.iter().map(|q| q.destination.x).collect();
+        let ys_pressed: Vec<f32> = check_pressed.iter().map(|q| q.destination.y).collect();
+        assert_eq!(xs_pressed, vec![16., 17., 18., 19., 20., 21., 22.]);
+        assert_eq!(ys_pressed, vec![22., 23., 24., 23., 22., 21., 20.]);
     }
 }

@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-13 Check box checkmark
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`: replaced the filled square placeholder in `Painter::check_box` with `Painter::check_mark`, which draws an authentic 2-pixel-thick checkmark using simple UI shapes (7 vertical column rectangles forming a descending short left stroke from dx=3, dy=5 to apex dx=5, dy=7..8, and an ascending long right stroke from dx=5, dy=7..8 to dx=9, dy=3). The checkmark shifts by +1px on press when enabled, scales seamlessly across all DPI scale factors, and uses `theme.check` (white) when enabled or `theme.text_disabled` when disabled.
+- `hl2-ui::gameui::widgets`: added unit test `check_box_checked_draws_white_checkmark_not_plain_square` verifying unchecked vs checked quad counts, white checkmark color, exact shape coordinates, and +1px pressed offset.
+
+**Why:**
+- In Source VGUI, checked check boxes render an authentic white checkmark (tick glyph) rather than a filled solid square placeholder.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui`: all 122 unit tests passed (including `check_box_checked_draws_white_checkmark_not_plain_square`).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed.
+- `cargo clippy --locked -p hl2-ui -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed (30 frames rendered, exit code 0).
+
+**Result:** Checked check boxes display an authentic white checkmark matching the Source VGUI look.
+
+**Still broken or not tested:** Visual appearance on a physical display (unverified, needs manual check at 1280x800 and native Retina).
+
+**Next:** Task 4: High-DPI / scale-factor consistency (DPI-agnostic button spacing & loading dialog scaling).
+
 ## 2026-10-13 Episode submenu titles
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
