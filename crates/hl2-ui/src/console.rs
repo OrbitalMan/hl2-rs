@@ -557,8 +557,7 @@ impl Console {
         self.background_level = background;
         self.confirm_box = None;
         self.main_menu.back(&self.gameui.localization);
-        self.main_menu.selection = None;
-        self.pause_menu.selection = None;
+        self.clear_menu_hover();
         self.mode = if background {
             Mode::MainMenu
         } else {
@@ -569,6 +568,7 @@ impl Console {
 
     /// Displays the modal loading dialog for the given map.
     pub fn start_loading(&mut self, map: &str) {
+        self.clear_menu_hover();
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new(map));
         crate::gameui::loading::reset_progress();
     }
@@ -590,12 +590,72 @@ impl Console {
     /// Clears the loading dialog once the level has completely loaded.
     pub fn loading_complete(&mut self) {
         self.loading_dialog = None;
+        self.clear_menu_hover();
         crate::gameui::loading::reset_progress();
     }
 
     /// Whether a map load is currently in progress.
     pub fn is_loading(&self) -> bool {
         self.loading_dialog.as_ref().is_some_and(|l| !l.is_failed())
+    }
+
+    /// Whether any modal dialog or blocking widget is currently active over the menus.
+    pub fn modal_dialog_open(&self) -> bool {
+        self.mode == Mode::Options
+            || self.confirm_box.is_some()
+            || self.loading_dialog.is_some()
+            || self.mode == Mode::Console
+    }
+
+    /// Bounding rectangle in canvas pixels of the currently active modal dialog, if any.
+    pub fn modal_bounds(&self) -> Option<Rect> {
+        if self.loading_dialog.is_some() {
+            let scale = Painter::scale_for(self.canvas.height());
+            let canvas = vec2(self.canvas.width(), self.canvas.height());
+            let (origin, _) = crate::gameui::loading::LoadingDialog::layout_geometry(canvas, scale);
+            let size = crate::gameui::loading::LOADING_DIALOG_SIZE * scale;
+            return Some(Rect::new(origin.x, origin.y, size.x, size.y));
+        }
+        if let Some((confirm, _)) = &self.confirm_box {
+            let (origin, scale, layout) = self.quit_geometry(confirm);
+            return Some(Rect::new(
+                origin.x,
+                origin.y,
+                layout.size.x * scale,
+                layout.size.y * scale,
+            ));
+        }
+        if self.mode == Mode::Options {
+            let scale = Painter::scale_for(self.canvas.height());
+            let canvas = vec2(self.canvas.width(), self.canvas.height());
+            let size = crate::gameui::options::DIALOG_SIZE * scale;
+            let origin = ((canvas - size) * 0.5).round();
+            return Some(Rect::new(origin.x, origin.y, size.x, size.y));
+        }
+        if self.mode == Mode::Console {
+            return Some(Rect::new(0., 0., self.canvas.width(), self.canvas.height()));
+        }
+        None
+    }
+
+    /// Whether a point in canvas coordinates is covered by an active modal dialog.
+    pub fn is_occluded(&self, point: Vec2) -> bool {
+        self.modal_bounds().is_some_and(|b| b.contains(point))
+    }
+
+    /// Clears hovered and selected state on both main and pause menus so underlying buttons
+    /// are not armed while or immediately after a modal dialog is displayed.
+    pub fn clear_menu_hover(&mut self) {
+        self.main_menu.selection = None;
+        self.pause_menu.selection = None;
+        self.last_menu_hover = None;
+        self.menu_tracker.reset();
+    }
+
+    /// Resets mouse tracker and hover state on the menus without wiping keyboard selection.
+    pub fn reset_menu_interaction(&mut self) {
+        self.last_menu_hover = None;
+        self.menu_tracker.reset();
     }
 
     pub fn paused(&self) -> bool {
@@ -610,15 +670,18 @@ impl Console {
                 self.loading_dialog = None;
                 self.mode = Mode::MainMenu;
                 self.main_menu.back(&self.gameui.localization);
+                self.clear_menu_hover();
             }
             return;
         }
         if self.confirm_box.take().is_some() {
+            self.reset_menu_interaction();
             return;
         }
         if self.mode == Mode::Options {
             if !self.options.escape() {
                 self.mode = self.options_return;
+                self.reset_menu_interaction();
             }
             return;
         }
@@ -649,8 +712,10 @@ impl Console {
     pub fn toggle(&mut self) {
         if self.mode == Mode::Console {
             self.mode = self.previous;
+            self.clear_menu_hover();
         } else {
             self.previous = self.mode;
+            self.clear_menu_hover();
             self.mode = Mode::Console;
         }
     }
@@ -1010,51 +1075,109 @@ impl Console {
                 self.loading_dialog = None;
                 self.mode = Mode::MainMenu;
                 self.main_menu.back(&self.gameui.localization);
+                self.clear_menu_hover();
             }
             return Vec::new();
         }
+        if self.confirm_box.is_some() {
+            return self.confirm_input(input);
+        }
         if self.mode == Mode::Options {
-            let measure = Painter {
-                canvas: &self.canvas,
-                fonts: &self.widget_fonts,
-                theme: &self.theme,
-                origin: Vec2::ZERO,
-                scale: 1.,
-            };
-            let outcome = self.options.input(input, &measure);
-            for line in self.options.take_log() {
-                self.log(line);
-            }
-            let mut effects: Vec<Effect> = self
-                .options
-                .take_sounds()
-                .into_iter()
-                .map(Effect::PlaySound)
-                .collect();
-            let (config, close) = match outcome {
-                OptionsOutcome::None => return effects,
-                OptionsOutcome::Apply(config) => (Some(config), false),
-                OptionsOutcome::Close(config) => (config, true),
-            };
-            if close {
-                self.mode = self.options_return;
-            }
-            let Some(config) = config else {
-                return effects;
-            };
-            if let Err(error) = config.save() {
-                self.log(format!("Could not save settings: {error}"));
-            }
-            self.config = config.clone();
-            effects.push(Effect::ApplyConfig(Box::new(config)));
-            return effects;
+            return self.options_input(input);
+        }
+        if self.mode == Mode::Console {
+            return self.console_input(input);
         }
         if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
             return self.menu_input(input);
         }
-        if self.mode != Mode::Console {
-            return Vec::new();
+        Vec::new()
+    }
+
+    fn options_input(&mut self, input: &Input) -> Vec<Effect> {
+        let measure = Painter {
+            canvas: &self.canvas,
+            fonts: &self.widget_fonts,
+            theme: &self.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        let outcome = self.options.input(input, &measure);
+        for line in self.options.take_log() {
+            self.log(line);
         }
+        let mut effects: Vec<Effect> = self
+            .options
+            .take_sounds()
+            .into_iter()
+            .map(Effect::PlaySound)
+            .collect();
+        let (config, close) = match outcome {
+            OptionsOutcome::None => return effects,
+            OptionsOutcome::Apply(config) => (Some(config), false),
+            OptionsOutcome::Close(config) => (config, true),
+        };
+        if close {
+            self.mode = self.options_return;
+            self.reset_menu_interaction();
+        }
+        let Some(config) = config else {
+            return effects;
+        };
+        if let Err(error) = config.save() {
+            self.log(format!("Could not save settings: {error}"));
+        }
+        self.config = config.clone();
+        effects.push(Effect::ApplyConfig(Box::new(config)));
+        effects
+    }
+
+    fn confirm_input(&mut self, input: &Input) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if let Some((mut confirm, kind)) = self.confirm_box.take() {
+            let (origin, scale, layout) = self.quit_geometry(&confirm);
+            let pointer = input.pointer.map(|p| (p - origin) / scale);
+            let down = input.click || input.held;
+            let outcome = confirm.input(
+                &layout,
+                pointer,
+                down,
+                input.click,
+                input.released,
+                input.pressed(Key::Enter),
+            );
+            for sound in confirm.take_sounds() {
+                effects.push(Effect::PlaySound(sound));
+            }
+            match outcome {
+                Some(true) => match kind {
+                    ConfirmKind::Quit => {
+                        effects.push(Effect::Quit);
+                        return effects;
+                    }
+                    ConfirmKind::ReturnToMainMenu => {
+                        self.mode = Mode::MainMenu;
+                        self.clear_menu_hover();
+                        match self.background_map().map(str::to_owned) {
+                            Some(map) => effects.push(Effect::MainMenuMap(map)),
+                            None => {
+                                self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
+                                self.level_loaded(true);
+                            }
+                        }
+                        return effects;
+                    }
+                },
+                Some(false) => {
+                    self.reset_menu_interaction();
+                }
+                None => self.confirm_box = Some((confirm, kind)),
+            }
+        }
+        effects
+    }
+
+    fn console_input(&mut self, input: &Input) -> Vec<Effect> {
         for c in input.text.chars() {
             if !c.is_control() && c != '`' && c != '~' && self.input.len() + c.len_utf8() <= 1024 {
                 self.input.insert(self.cursor, c);
@@ -1157,45 +1280,10 @@ impl Console {
     }
 
     fn menu_input(&mut self, input: &Input) -> Vec<Effect> {
-        let mut effects = Vec::new();
-        if let Some((mut confirm, kind)) = self.confirm_box.take() {
-            let (origin, scale, layout) = self.quit_geometry(&confirm);
-            let pointer = input.pointer.map(|p| (p - origin) / scale);
-            let down = input.click || input.held;
-            let outcome = confirm.input(
-                &layout,
-                pointer,
-                down,
-                input.click,
-                input.released,
-                input.pressed(Key::Enter),
-            );
-            for sound in confirm.take_sounds() {
-                effects.push(Effect::PlaySound(sound));
-            }
-            match outcome {
-                Some(true) => match kind {
-                    ConfirmKind::Quit => {
-                        effects.push(Effect::Quit);
-                        return effects;
-                    }
-                    ConfirmKind::ReturnToMainMenu => {
-                        self.mode = Mode::MainMenu;
-                        match self.background_map().map(str::to_owned) {
-                            Some(map) => effects.push(Effect::MainMenuMap(map)),
-                            None => {
-                                self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
-                                self.level_loaded(true);
-                            }
-                        }
-                        return effects;
-                    }
-                },
-                Some(false) => {}
-                None => self.confirm_box = Some((confirm, kind)),
-            }
-            return effects;
+        if self.modal_dialog_open() {
+            return Vec::new();
         }
+        let mut effects = Vec::new();
         let count = self.game_menu().map_or(0, |menu| menu.entries().len());
         let rows = self.menu_rows(count);
         let menu = match self.mode {
@@ -1242,7 +1330,8 @@ impl Console {
     }
 
     fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
-        let loc = &self.gameui.localization;
+        let gameui = self.gameui.clone();
+        let loc = &gameui.localization;
         let outcome = match self.mode {
             Mode::MainMenu => self.main_menu.activate(index, loc),
             Mode::Pause => self.pause_menu.activate(index, loc),
@@ -1258,16 +1347,20 @@ impl Console {
             MenuOutcome::OpenOptions => {
                 self.options_return = self.mode;
                 self.mode = Mode::Options;
+                self.reset_menu_interaction();
                 self.options.open(self.config.clone());
             }
             MenuOutcome::ConfirmQuit => {
+                self.reset_menu_interaction();
                 self.confirm_box = Some((MessageBox::quit(loc), ConfirmKind::Quit));
             }
             MenuOutcome::NewGame(map) => {
+                self.clear_menu_hover();
                 self.start_loading(&map);
                 return vec![Effect::Map(map)];
             }
             MenuOutcome::ReturnToMainMenu => {
+                self.reset_menu_interaction();
                 self.confirm_box = Some((
                     MessageBox::return_to_main_menu(loc),
                     ConfirmKind::ReturnToMainMenu,
@@ -1423,14 +1516,16 @@ impl Console {
             } else {
                 &self.pause_menu
             };
+            let modal_open = self.modal_dialog_open();
             for (i, entry) in menu.entries().iter().enumerate() {
                 if entry.spacer {
                     continue;
                 }
-                let is_pressed = self.menu_tracker.is_pressed(i);
+                let is_pressed = !modal_open && self.menu_tracker.is_pressed(i);
+                let armed = !modal_open && (is_pressed || menu.selection == Some(i));
                 let color = if !entry.enabled {
                     self.theme.text_disabled
-                } else if is_pressed || menu.selection == Some(i) {
+                } else if armed {
                     self.style.menu_armed
                 } else {
                     self.style.menu
@@ -2363,5 +2458,134 @@ mod tests {
         assert_eq!(console.main_menu.category(), "ep2");
         assert_eq!(console.current_title(), "Half-Life 2\n--- Episode Two ---");
         assert_eq!(console.current_title().lines().count(), 2);
+    }
+
+    #[test]
+    fn modal_dialog_blocks_underlying_menu_hover_sounds_and_clicks() {
+        let mut console = installed_console();
+        console.mode = Mode::MainMenu;
+        console.canvas.resize(1280., 720.);
+
+        // 1. When no modal dialog is open, hovering and clicking menu rows work normally
+        assert!(!console.modal_dialog_open());
+        assert_eq!(console.modal_bounds(), None);
+        assert!(!console.is_occluded(vec2(100., 100.)));
+
+        let hover_effects = console.input(&Input {
+            pointer: row(&console, 0),
+            ..Default::default()
+        });
+        assert!(
+            hover_effects.contains(&Effect::PlaySound("ui/buttonrollover.wav".into())),
+            "hovering menu row should play rollover sound when no dialog is open"
+        );
+        assert_eq!(console.main_menu.selection, Some(0));
+
+        // 2. Open Options dialog: modal check is true, bounds are present, occlusion detects dialog
+        console.mode = Mode::Options;
+        assert!(console.modal_dialog_open());
+        let opt_bounds = console.modal_bounds().expect("options bounds");
+        assert!(
+            opt_bounds.w > 0. && opt_bounds.h > 0.,
+            "modal bounds must have positive area"
+        );
+        let center = vec2(
+            opt_bounds.x + opt_bounds.w * 0.5,
+            opt_bounds.y + opt_bounds.h * 0.5,
+        );
+        assert!(console.is_occluded(center));
+        assert!(!console.is_occluded(vec2(0., 0.)));
+
+        // Cursor over menu row 0 behind/beside Options does NOT play rollover sound or change menu selection
+        let hover_effects = console.input(&Input {
+            pointer: row(&console, 0),
+            ..Default::default()
+        });
+        assert!(
+            !hover_effects.contains(&Effect::PlaySound("ui/buttonrollover.wav".into())),
+            "hover over underlying menu row must not produce rollover sound while Options is open"
+        );
+
+        // Click over menu row does not activate any menu command
+        let click_effects = click_row(&mut console, 0);
+        assert!(
+            click_effects.is_empty(),
+            "click over underlying menu row must not activate while Options is open"
+        );
+
+        // Closing options via escape preserves keyboard selection and returns to main menu
+        console.escape();
+        assert_eq!(console.mode, Mode::MainMenu);
+        assert!(!console.modal_dialog_open());
+        assert_eq!(console.main_menu.selection, Some(0));
+
+        // 3. Open confirmation dialog: modal check is true, underlying rows inert
+        let loc = console.gameui.localization.clone();
+        console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+        assert!(console.modal_dialog_open());
+        let confirm_bounds = console.modal_bounds().expect("confirm box bounds");
+        assert!(console.is_occluded(vec2(
+            confirm_bounds.x + confirm_bounds.w * 0.5,
+            confirm_bounds.y + confirm_bounds.h * 0.5
+        )));
+
+        // Hover over menu row 0 produces no rollover sound
+        let hover_effects = console.input(&Input {
+            pointer: row(&console, 0),
+            ..Default::default()
+        });
+        assert!(
+            !hover_effects.contains(&Effect::PlaySound("ui/buttonrollover.wav".into())),
+            "hover over underlying menu row must not produce rollover sound while ConfirmBox is open"
+        );
+
+        // Click over menu row 0 does not activate
+        let click_effects = click_row(&mut console, 0);
+        assert!(
+            click_effects.is_empty(),
+            "click over underlying menu row must not pass through while ConfirmBox is open"
+        );
+        assert!(console.confirm_box.is_some(), "confirm box remains open");
+
+        // Escape dismisses confirm box and preserves menu selection
+        console.escape();
+        assert!(console.confirm_box.is_none());
+        assert!(!console.modal_dialog_open());
+        assert_eq!(console.main_menu.selection, Some(0));
+
+        // 4. Loading dialog: modal check is true, underlying rows inert
+        console.start_loading("d1_trainstation_01");
+        assert!(console.modal_dialog_open());
+        assert!(console.is_loading());
+        let load_bounds = console.modal_bounds().expect("loading bounds");
+        assert!(console.is_occluded(vec2(
+            load_bounds.x + load_bounds.w * 0.5,
+            load_bounds.y + load_bounds.h * 0.5
+        )));
+
+        let hover_effects = console.input(&Input {
+            pointer: row(&console, 0),
+            ..Default::default()
+        });
+        assert!(
+            !hover_effects.contains(&Effect::PlaySound("ui/buttonrollover.wav".into())),
+            "hover over menu row must not produce sound while LoadingDialog is open"
+        );
+
+        let click_effects = click_row(&mut console, 0);
+        assert!(click_effects.is_empty());
+        console.loading_complete();
+        assert!(!console.modal_dialog_open());
+        assert_eq!(console.main_menu.selection, None);
+
+        // 5. Console: modal check is true
+        console.toggle();
+        assert_eq!(console.mode, Mode::Console);
+        assert!(console.modal_dialog_open());
+        let click_effects = click_row(&mut console, 0);
+        assert!(click_effects.is_empty());
+        console.toggle();
+        assert_eq!(console.mode, Mode::MainMenu);
+        assert!(!console.modal_dialog_open());
     }
 }

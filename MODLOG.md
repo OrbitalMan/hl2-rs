@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-13 Input blocking behind dialogs
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::console`: implemented shared modal dialog occlusion and input blocking. Added `modal_dialog_open(&self) -> bool` checking whether any modal dialog or overlay is active (`Mode::Options`, `confirm_box.is_some()`, `loading_dialog.is_some()`, `Mode::Console`). Added `modal_bounds(&self) -> Option<Rect>` and `is_occluded(&self, point: Vec2) -> bool` returning exact canvas bounding rectangles for active modal dialogs. Added `reset_menu_interaction(&mut self)` to clear pointer hover and button tracker state while preserving keyboard selection. Added `clear_menu_hover(&mut self)` to reset all menu selection on level loads and transitions. Extracted modular input handlers `confirm_input`, `options_input`, and `console_input`.
+- Gated `Console::menu_input`: early-returns empty action and sound event vectors when `modal_dialog_open()` is true, completely preventing rollover sounds, button presses, clicks, and activations from passing through to underlying buttons.
+- Gated `Console::draw`: underlying menu buttons are drawn unarmed (`armed = !modal_open && (is_pressed || menu.selection == Some(i))`, `is_pressed = !modal_open && self.menu_tracker.is_pressed(i)`), eliminating hover highlights on buttons underneath open dialogs.
+- Preserved keyboard navigation: closing dialogs via Cancel/Escape calls `reset_menu_interaction()` rather than wiping keyboard selection, keeping focus on the initiating menu button for subsequent keyboard navigation.
+- Added unit test `modal_dialog_blocks_underlying_menu_hover_sounds_and_clicks` verifying input and rollover sound suppression while options or confirmation dialogs are open, and verifying restoration upon closure.
+
+**Why:**
+- When an options dialog, confirmation message box, map loading dialog, or console overlay was open, moving the cursor over the underlying main menu or submenu buttons triggered hover effects, rollover sounds, and clicks passing through. A shared modal check and input gating mechanism guarantees that underneath buttons are completely inert and non-interactive until dialogs are dismissed.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui`: all 127 unit tests passed (including `modal_dialog_blocks_underlying_menu_hover_sounds_and_clicks`).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed.
+- `cargo clippy --locked -p hl2-ui -- -D warnings`: strict clippy passed with 0 warnings.
+- `cargo fmt --all --check`: clean formatting verified across all workspace crates.
+- `cargo test --locked -p hl2-bevy`: all 66 unit tests passed.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30` passed (30 frames rendered, exit code 0).
+
+**Result:** Underlying menu buttons are visually unarmed and completely inert while dialogs or overlays are open; no clicks, rollover sounds, or activations pass through.
+
+**Still broken or not tested:** None.
+
+**Next:** Task 7: Episode map loading failures (UTF-8 tolerant decoding).
+
 ## 2026-10-13 Wrapped multi-line labels, dialog layouts
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
