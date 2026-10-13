@@ -29,8 +29,16 @@ const SMALL_MASS_MIN_SPEED_SQR: f32 = 36. * 36.;
 const LARGE_MASS_MIN: f32 = 500.;
 const LARGE_MASS_SCALE: f32 = 4.;
 const LARGE_MASS_FALLING_SCALE: f32 = 5.;
-/// CBaseCombatCharacter m_impactEnergyScale default (keyvalue physdamagescale).
-const ENERGY_SCALE: f32 = 1.;
+/// CBaseCombatCharacter m_impactEnergyScale (keyvalue physdamagescale, default 1). The
+/// d1_trainstation_02 plaza cops set 0: native thrown crates break on them and only
+/// make them flinch (oracle T015556Z).
+pub fn energy_scale(entity: &modkit_core::Entity) -> f32 {
+    entity
+        .get("physdamagescale")
+        .and_then(|v| v.trim().parse::<f32>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.)
+        .unwrap_or(1.)
+}
 
 /// ReadDamageTable: the entry before the first threshold above `energy`.
 fn read_table(table: &[(f32, f32)], energy: f32) -> f32 {
@@ -55,7 +63,7 @@ pub struct Impactor {
 
 /// CalculatePhysicsImpactDamage (linear) for an NPC shadow of `npc_mass` (it does not
 /// lose speed itself) hit by `other`; allowStaticDamage false.
-pub fn npc_damage(npc_mass: f32, other: Impactor) -> f32 {
+pub fn npc_damage(npc_mass: f32, energy_scale: f32, other: Impactor) -> f32 {
     let speed_sqr = other.pre.length_squared();
     if other.mass < MIN_MASS
         || (other.mass < SMALL_MASS_MAX && speed_sqr < SMALL_MASS_MIN_SPEED_SQR)
@@ -74,7 +82,7 @@ pub fn npc_damage(npc_mass: f32, other: Impactor) -> f32 {
             energy *= 1. + factor * (LARGE_MASS_FALLING_SCALE - 1.);
         }
     }
-    energy *= ENERGY_SCALE / npc_mass;
+    energy *= energy_scale / npc_mass;
     let damage = read_table(&NPC_LINEAR, energy);
     // Small dynamic objects never do more than the cap.
     if other.mass < SMALL_MASS_MAX {
@@ -121,6 +129,7 @@ pub fn queue_npc_damage(
             };
             let damage = npc_damage(
                 *mass,
+                energy_scale(entity),
                 Impactor {
                     mass: event.masses[other],
                     pre: event.pre_velocities[other],
@@ -154,16 +163,26 @@ mod tests {
     fn launched_barrel_kills_and_light_junk_is_capped() {
         // 30 kg at the gravity gun's 1500 u/s stopping on a 90 kg cop: 1500^2 x 30 / 90
         // = 750000 -> the 500^2 entry, 100 damage.
-        assert_eq!(npc_damage(90., hit(30., 1500., 0.)), 100.);
+        assert_eq!(npc_damage(90., 1., hit(30., 1500., 0.)), 100.);
         // A 7 kg paint can: 175000 -> 50.
-        assert_eq!(npc_damage(90., hit(7., 1500., 0.)), 50.);
+        assert_eq!(npc_damage(90., 1., hit(7., 1500., 0.)), 50.);
         // A 1 kg bottle is under the 2 kg minimum; a 3 kg object caps at 5.
-        assert_eq!(npc_damage(90., hit(1., 1500., 0.)), 0.);
-        assert_eq!(npc_damage(90., hit(3., 1500., 0.)), 5.);
+        assert_eq!(npc_damage(90., 1., hit(1., 1500., 0.)), 0.);
+        assert_eq!(npc_damage(90., 1., hit(3., 1500., 0.)), 5.);
         // Slow or glancing (no speed lost) contacts do nothing.
-        assert_eq!(npc_damage(90., hit(30., 20., 0.)), 0.);
-        assert_eq!(npc_damage(90., hit(30., 800., 800.)), 0.);
+        assert_eq!(npc_damage(90., 1., hit(30., 20., 0.)), 0.);
+        assert_eq!(npc_damage(90., 1., hit(30., 800., 800.)), 0.);
         // Large masses read 4x the energy.
-        assert_eq!(npc_damage(90., hit(600., 120., 0.)), 100.);
+        assert_eq!(npc_damage(90., 1., hit(600., 120., 0.)), 100.);
+        // physdamagescale 0 (the trainstation_02 plaza cops) takes no impact damage.
+        assert_eq!(npc_damage(90., 0., hit(30., 1500., 0.)), 0.);
+        let cop = modkit_core::Entity {
+            properties: vec![("physdamagescale".into(), "0".into())],
+        };
+        assert_eq!(energy_scale(&cop), 0.);
+        assert_eq!(
+            energy_scale(&modkit_core::Entity { properties: vec![] }),
+            1.
+        );
     }
 }
