@@ -97,10 +97,15 @@ struct Sample {
     shadow: Option<glam::Vec3>,
     /// Wall-clock milliseconds of the last physics step.
     physics_ms: f64,
+    /// Wall-clock milliseconds of the last whole fixed host step (gameplay, NPCs,
+    /// projectiles, physics and player).
+    step_ms: f64,
     console: Option<serde_json::Value>,
 }
 #[derive(Resource)]
 pub struct Simulation {
+    /// Wall-clock milliseconds of the last whole fixed step (test reports).
+    last_step_ms: f64,
     pub player: Player,
     pub physics: Physics,
     eye: glam::Vec3,
@@ -136,6 +141,7 @@ impl Simulation {
         commands: Vec<Command>,
     ) -> Self {
         Self {
+            last_step_ms: 0.,
             player: Player::new(eye),
             physics: Physics::new(world),
             eye,
@@ -461,6 +467,7 @@ impl Simulation {
                 ),
                 shadow: self.physics.player_shadow_center(),
                 physics_ms: self.physics.last_step_ms,
+                step_ms: self.last_step_ms,
                 ray_entity: self
                     .physics
                     .ray(
@@ -676,7 +683,9 @@ fn fixed_step(
     performance: Option<Res<crate::performance::Performance>>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "fixed_simulation");
+    let started = std::time::Instant::now();
     sim.step(game.as_deref_mut(), ui.as_deref_mut());
+    sim.last_step_ms = started.elapsed().as_secs_f64() * 1000.;
     if ui.is_some_and(|u| u.quit_requested) {
         exit.write(AppExit::Success);
     }

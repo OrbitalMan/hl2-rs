@@ -113,6 +113,19 @@ pub const PLAYER_PUSH_MASS_LIMIT: f32 = 350.;
 pub const VPHYSICS_CONTACT_MARGIN: f32 = 0.5;
 /// SetPushSpeedLimit(50): the shadow's speed into a pushable object's contact normal.
 pub const PLAYER_PUSH_SPEED_LIMIT: f32 = 50.;
+/// The smallest extent of a body's pieces together, in its own frame (meters).
+fn body_thickness(body: &RigidBody, colliders: &ColliderSet) -> f32 {
+    let mut bounds: Option<rapier3d::parry::bounding_volume::Aabb> = None;
+    for c in body.colliders().iter().filter_map(|c| colliders.get(*c)) {
+        let local = c
+            .position_wrt_parent()
+            .copied()
+            .unwrap_or_else(Isometry::identity);
+        let aabb = c.shape().compute_aabb(&local);
+        bounds = Some(bounds.map_or(aabb, |b| b.merged(&aabb)));
+    }
+    bounds.map_or(f32::INFINITY, |b| b.extents().min())
+}
 fn groups_filter(groups: InteractionGroups) -> QueryFilter<'static> {
     static ENABLED: fn(ColliderHandle, &Collider) -> bool = |_, c| c.is_enabled();
     QueryFilter::default()
@@ -380,6 +393,11 @@ pub struct WorldSideMaterials {
     /// held object).
     pub shadow: Vec<ColliderHandle>,
     pub shadow_excluded: Vec<RigidBodyHandle>,
+    /// Model-shaped NPC colliders of hull-box NPCs: trace hitboxes only. Rapier enables
+    /// a pair when either collider's active collision types allow it, so a dynamic prop
+    /// still generated and solved contacts against every animated hitbox (owner report:
+    /// a pallet sliding off a plaza cop dropped 46 -> 17 fps); the pair filter drops them.
+    pub hitboxes: std::collections::HashSet<ColliderHandle>,
 }
 impl WorldSideMaterials {
     /// The side whose outward normal best matches `outward` (from the brush toward
@@ -397,6 +415,10 @@ impl PhysicsHooks for WorldSideMaterials {
     /// (dynamic) bodies within the push mass limit, never world geometry, doors or
     /// the object the player holds.
     fn filter_contact_pair(&self, context: &PairFilterContext) -> Option<SolverFlags> {
+        if self.hitboxes.contains(&context.collider1) || self.hitboxes.contains(&context.collider2)
+        {
+            return None;
+        }
         let other = if self.shadow.contains(&context.collider1) {
             context.rigid_body2
         } else if self.shadow.contains(&context.collider2) {
@@ -411,6 +433,17 @@ impl PhysicsHooks for WorldSideMaterials {
         .then_some(SolverFlags::COMPUTE_IMPULSES)
     }
     fn modify_solver_contacts(&self, context: &mut ContactModificationContext) {
+        // VPhysics keeps one collision margin per contact pair, but Rapier adds both
+        // colliders' skins: two props would rest a full margin further apart than a
+        // prop on the floor (owner report: stacked crates sat higher than native).
+        let skin = |c| context.colliders.get(c).map_or(0., |c| c.contact_skin());
+        let shared = skin(context.collider1).min(skin(context.collider2));
+        if shared > 0. {
+            for contact in context.solver_contacts.iter_mut() {
+                contact.dist += shared;
+            }
+            return;
+        }
         let n = Vec3::new(context.normal.x, context.normal.y, context.normal.z);
         let (side, other) = if let Some(side) = self.side(context.collider1, n) {
             (side, context.collider2)
@@ -469,6 +502,13 @@ pub struct Physics {
     drag_geometry: HashMap<RigidBodyHandle, Option<crate::drag::DragGeometry>>,
     /// Bodies with drag disabled (EnableDrag(false): a held object's controlled body).
     pub drag_disabled: std::collections::HashSet<RigidBodyHandle>,
+    /// Prop bodies whose continuous collision runs only while their linear travel per
+    /// step exceeds the body's own thickness (cached, 0 = not computed yet), so a body
+    /// never skips past anything thicker than itself. Rapier's own test uses the
+    /// thinnest piece (a pallet slat) and counts rotation too: its time-of-impact
+    /// search against the world cost 17-40 ms per step while a pallet rocked on and
+    /// tipped off a cop (owner report: 46 -> 17 fps) and 2-4 ms with props at rest.
+    ccd_gated: HashMap<RigidBodyHandle, f32>,
     /// Stored drag fractions of bodies from a read collision file (PhysicsSolid).
     drag_fractions: HashMap<RigidBodyHandle, Vec3>,
     pub native_shape_count: usize,
@@ -771,12 +811,12 @@ impl Physics {
                         .additional_mass_properties(masses.unwrap_or_default())
                         .position(position)
                         .sleeping(prop_flags & 1 != 0)
-                        .ccd_enabled(true)
                         .linear_damping(linear_damping)
                         .angular_damping(angular_damping),
                 )
             });
             if let (Some(id), Some(body)) = (entity, body) {
+                p.ccd_gated.insert(body, 0.);
                 p.dynamic.insert(id, body);
                 if world
                     .entities
@@ -822,7 +862,8 @@ impl Physics {
                             Some(_) => collider.density(0.),
                             None => collider.mass(10.),
                         }
-                        .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE);
+                        .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                        .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS);
                         p.colliders
                             .insert_with_parent(collider, body, &mut p.bodies)
                     }
@@ -853,8 +894,10 @@ impl Physics {
                 for c in p.entity_colliders.get(&id).cloned().unwrap_or_default() {
                     if let Some(collider) = p.colliders.get_mut(c) {
                         collider.set_active_collision_types(ActiveCollisionTypes::empty());
+                        collider.set_active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
                     }
                     p.npc_hitboxes.insert(c);
+                    p.world_sides.hitboxes.insert(c);
                 }
                 let half = (maxs - mins) * 0.5;
                 let hull = p.colliders.insert(
@@ -962,6 +1005,15 @@ impl Physics {
         for (handle, body) in self.bodies.iter_mut() {
             if !body.is_dynamic() || body.is_sleeping() || !body.is_enabled() {
                 continue;
+            }
+            if let Some(thickness) = self.ccd_gated.get_mut(&handle) {
+                if *thickness <= 0. {
+                    *thickness = body_thickness(body, &self.colliders);
+                }
+                let fast = body.linvel().norm() * dt > *thickness;
+                if body.is_ccd_enabled() != fast {
+                    body.enable_ccd(fast);
+                }
             }
             if self.air_density > 0. && !self.drag_disabled.contains(&handle) {
                 let colliders = &self.colliders;
@@ -1203,10 +1255,10 @@ impl Physics {
                 .position(pose(position, rotation))
                 .linvel(vector(velocity))
                 .angvel(vector![angular.x, angular.y, angular.z])
-                .ccd_enabled(true)
                 .linear_damping(solid.damping)
                 .angular_damping(solid.rotdamping),
         );
+        self.ccd_gated.insert(body, 0.);
         let material = surface_material(world, &solid.surfaceprop);
         for shape in shapes {
             let builder =
@@ -1394,6 +1446,7 @@ impl Physics {
         }
         self.drag_fractions.remove(&handle);
         self.drag_geometry.remove(&handle);
+        self.ccd_gated.remove(&handle);
         self.bodies.remove(
             handle,
             &mut self.islands,
@@ -2566,6 +2619,26 @@ mod tests {
                 .any(|c| c.entities.contains(&Some(0)));
         }
         assert!(struck);
+        // The model-shaped hitboxes never form contact pairs with props (Rapier
+        // enables a pair when either side's collision types allow it): a box placed
+        // across the model column's face touches only the hull.
+        let inside = physics.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(vector![4. * SCALE, 0., 30. * SCALE])
+                .gravity_scale(0.),
+        );
+        physics.colliders.insert_with_parent(
+            ColliderBuilder::cuboid(2. * SCALE, 2. * SCALE, 2. * SCALE),
+            inside,
+            &mut physics.bodies,
+        );
+        physics.tick(TICK);
+        assert!(physics.narrow.contact_pairs().all(|pair| {
+            !physics.npc_hitboxes.contains(&pair.collider1)
+                && !physics.npc_hitboxes.contains(&pair.collider2)
+                || !pair.has_any_active_contact
+        }));
+        physics.remove_body(inside);
         let x = physics.bodies[body].translation().x / SCALE;
         assert!(x > 100. + 13., "box passed into the hull: x {x}");
         physics.remove_body(body);
@@ -3608,6 +3681,42 @@ mod tests {
         );
         physics.refresh_queries();
         (physics, body)
+    }
+    #[test]
+    fn stacked_props_keep_one_margin_like_a_prop_on_the_floor() {
+        // Two 16-unit boxes with the prop skin dropped onto a floor plate (synthetic).
+        let mut physics = Physics::new(&World::default());
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(2000. * SCALE, 2000. * SCALE, 8. * SCALE).translation(vector![
+                0.,
+                0.,
+                -8. * SCALE
+            ]),
+        );
+        let boxes = [9., 26.].map(|z| {
+            let body = physics
+                .bodies
+                .insert(RigidBodyBuilder::dynamic().translation(vector![0., 0., z * SCALE]));
+            physics.colliders.insert_with_parent(
+                ColliderBuilder::cuboid(8. * SCALE, 8. * SCALE, 8. * SCALE)
+                    .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                    .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS),
+                body,
+                &mut physics.bodies,
+            );
+            body
+        });
+        for _ in 0..200 {
+            physics.tick(TICK);
+        }
+        let z = boxes.map(|b| physics.bodies[b].translation().z / SCALE);
+        let floor_gap = z[0] - 8.;
+        let stack_gap = z[1] - z[0] - 16.;
+        assert!(
+            (floor_gap - 0.5).abs() < 0.1,
+            "floor gap {floor_gap} stack {stack_gap}"
+        );
+        assert!((stack_gap - 0.5).abs() < 0.1, "stack gap {stack_gap}");
     }
     #[test]
     fn player_shadow_shoves_light_props_but_not_heavy_ones() {

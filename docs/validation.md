@@ -1,5 +1,12 @@
 # Local validation — 2026-10-05
 
+## Stacked props and prop CCD cost (session 15, 2026-10-13)
+
+Packaged d1_trainstation_02, `--volume 0.01 --no-focus`, artifacts/s15; `step_ms` = whole fixed host step.
+- **Pallet off-center onto plaza cop #427** (`bevy-pallet-tips-off-plaza-cop.json`, eye (-1978.8,-2267.4,64) yaw 180, pallet #882 posed at (-2048,-2272,130) roll 10): before, physics 20-40 ms per step for ~0.7 s while it tipped off (the 15 ms tick falls behind: owner 46 -> 17 fps) and 3-7 ms idle; a temporary Rapier `profiler` build attributed it to the CCD time-of-impact search (17-26 ms; broad+narrow+solver ~2 ms) with 38 awake bodies at idle. After CCD gating: worst 2.5 ms, idle 1.1-2 ms. The posed terminal cop (`bevy-pallet-tips-off-npc-hull.json`) was already cheap (the pallet fell off flat).
+- **Crate on box** (`bevy-crate-on-box-stack.json`, crate #715 dropped onto box #710): crate-box origin offset 20.404 with summed skins, 19.904 now (box z 76.392 both). Native not measured numerically.
+- **Pallet launch** (`bevy-physcannon-pallet.json`): y -4235/-4012/-3849 at f305/f320/f335 as in session 14, rest -3479 (session 14 -3495; native -3572; tumbling diverges). Soft CCD variant rejected (first-bounce z 75, rest -3467).
+
 ## Player/prop contacts, NPC hulls, prop drag fractions (session 14, 2026-10-13)
 
 All packaged runs on d1_trainstation_02 with `--volume 0.01 --no-focus`, reports in artifacts/s14 (`hull_contacts`, `shadow`, `physics_ms`, `carrying` sample fields).

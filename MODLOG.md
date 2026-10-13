@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-13 session 15: stacked-prop margin, prop CCD frame drop (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Prop-on-prop contacts keep one VPhysics margin: Rapier adds both colliders' contact skins (narrow_phase: `contact.dist - skin1 - skin2`), so two props rested 1.0 apart while a prop rests 0.5 above the floor; dynamic prop colliders now run the solver-contact hook, which adds the shared skin back for pairs where both sides carry one. (2) Prop CCD gating: map props and runtime bodies (frag) no longer keep Rapier's hard CCD on permanently; each tick an awake body enables it only while its linear travel per step exceeds the body's own thickness (smallest extent of its pieces' union in the body frame). (3) Model-shaped hitboxes of hull-box NPCs are excluded in the contact-pair filter (Rapier enables a pair when either collider's active collision types allow it, so clearing the hitboxes' types alone did not stop props touching them: a pallet balanced on a plaza cop was pushed off by the animated hitboxes). (4) Movement-report sample field `step_ms` (whole fixed host step). Fixtures bevy-crate-on-box-stack, bevy-pallet-tips-off-plaza-cop, bevy-pallet-tips-off-npc-hull.
+
+**Why:** owner playtest: props stacked on each other rest visibly higher than native; dropping the pallet off-center onto a plaza cop so it tips over still drops 46 -> 17 fps.
+
+**Tested how:** unit tests (two stacked boxes: floor and stack gaps both 0.5 +- 0.1; hull-box test extended with a box across the hitbox face), workspace tests, owned tests with HL2_ROOT (all pass; frag replay bests lob 27.6, roll 15.6 (was 16.4), high 3.8, plaza 12.8, wall 44.1), strict Clippy, fmt. Packaged d1_trainstation_02 (artifacts/s15): Rapier profiler (temporary build, reverted) showed the cost was the CCD time-of-impact search (17-26 ms per step while the pallet rocked, 2-4.5 ms at idle; collision+solver ~2 ms); plaza cop #427 tip-off (`bevy-pallet-tips-off-plaza-cop.json`): worst physics step 2.5 ms over the run (before 20-40 ms for ~0.7 s while falling, 3-7 ms idle); crate #715 dropped on box #710 rests exactly 0.500 lower than with the old skin sum (crate-box 20.404 -> 19.904; box unchanged). Pallet street launch vs native T021822Z: identical to session 14 through the first bounces (y -4235/-4012/-3849 at f305/f320/f335), then diverges while tumbling: rest -3479 (session 14 -3495, native -3572). Rejected: Rapier soft CCD (speculative 8-unit prediction) for slow props: the launched pallet bounced to z 75 on its first ground hit and rested at -3467.
+
+**Result:** stacked props sit one margin apart; the pallet-on-cop frame drop is gone in the measured case.
+
+**Still broken or not tested:** native stack gap not measured numerically (pairwise 0.5 follows the floor measurement and the owner's visual comparison); tunneling of thin props moving less than their own thickness per tick through zero-thickness geometry is not tested; why ~7-38 props never sleep at idle (tic-tac-toe blocks without constraints and props near z -4) is open; owner's live gravity-gun drop not re-run by the owner.
+
+**Next:** owner item 0 (gibs, NPC decals, constraints, carried-bottle crouch).
 ## 2026-10-13 session 14 (late): VPhysics contact margin, prop impact damage (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

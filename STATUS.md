@@ -1,6 +1,12 @@
 # STATUS
 
-Checkpoint: 2026-10-13 session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+Checkpoint: 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+
+## Current session 15 (2026-10-13)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged. Owner playtest reports first:
+- **Stacked props rest higher than native (owner screenshot, red crate on a cardboard box): fixed.** Rapier summed both props' 0.5 skins (1.0 apart vs 0.5 on the floor); the solver-contact hook now keeps one margin per prop pair. Crate #715 on box #710 rests 0.500 lower than before. Native gap not measured numerically.
+- **Pallet tipping off a cop still dropped 46 -> 17 fps: fixed in the measured case.** Cause (Rapier profiler): permanent hard CCD on every prop; a thin-slatted pallet triggered the time-of-impact search every tick while rotating/falling (17-40 ms per step; 2-4.5 ms at idle). CCD now runs only while a body's per-tick travel exceeds its own thickness; worst step 2.5 ms in the plaza cop fixture. Hitboxes of hull-box NPCs are also filtered out of prop contacts (they still pushed props). Soft CCD was tried and rejected (launch bounce). Open: 7-38 props never sleep at idle.
 
 ## Current session 14 (2026-10-13)
 
