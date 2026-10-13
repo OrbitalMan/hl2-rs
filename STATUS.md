@@ -1,6 +1,12 @@
 # STATUS
 
-Checkpoint: 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+Checkpoint: 2026-10-13 session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+
+## Current session 13 (2026-10-13)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged.
+- **Done, owner report (floating/hamster-ball frag):** the frag is a rigid body from w_grenade.phy by default (SDK spawn orientation, round cylinder for the 12-sided prism, .phy IVP inertia, VPhysics speed limits). Evidence: docs/validation.md "Frag rigid body (session 13)". `--frag-swept-box` keeps the old fit.
+- **Open:** wall rebound is larger than native for some spins; IVP impact friction not reproduced (retail friction product kept; a lower friction fit was rejected: it ruins the roll, RMS 60-106). Two Bevy image `should_panic` tests in hl2-bevy fail under `cargo test --release` (debug-only assertions; pre-existing).
 
 ## Current session 12 (2026-10-12): local validation of the cloud arsenal + physics branches
 

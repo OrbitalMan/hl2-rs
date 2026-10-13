@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-13 session 13: frag as a real w_grenade.phy rigid body (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** the thrown frag is a Rapier rigid body from w_grenade.phy by default (`--frag-swept-box` keeps the old fitted box): SDK spawn orientation (vec3_angle for throw/lob, (0, yaw, -90) for roll; ProjectileSpawn gained `angles`); the 12-sided .phy prism collides as a round cylinder; mass center and rotation inertia from the .phy IVP compact surface (source-assets phy.rs -> PhysicsSolid::compact_inertia); VPhysics performance-default speed limits (2000 u/s, 3600 deg/s) on every dynamic body. Owned test `owned_frag_throws_follow_native_samples` replays five native throws; unit test for the rolling prism; owned test for the frag .phy inertia; fixture `test-inputs/bevy-frag-wall.json`.
+
+**Why:** owner report: the frag floated above surfaces (4-unit swept box vs the 1.8-unit hull), rolled artificially, flopped at walls instead of bouncing; the session-12 rigid body stopped dead because it spawned aligned with the throw (SDK spawns it upright) and the faceted hull lost energy on every edge.
+
+**Tested how:** headless replay on d1_trainstation_02 collision vs native ent_text samples (best of seven spins, RMS units): lob 27.6, roll 16.4, overhand 3.8, plaza 12.8, wall 44.1 (old swept box 92.1/22.3/13.1/44.7/105.8). Three new native wall throws (oracle T000533Z, T002157Z, T002243Z). Packaged captures (artifacts/frag-s13): ground-level views of landed frags on the hall floor and on top of cardboard box #710 (rests at hull radius, no gap). Workspace tests, strict Clippy, fmt.
+
+**Result:** frag lies on its side on surfaces and rolls with real rotation; wall impacts pop it up and deflect it.
+
+**Still broken or not tested:** wall rebound for some spins is larger than the three native throws (in game, spin -0.5: lands ~90 units out vs native 18-60); IVP impact friction is not reproduced (retail friction product kept); packaged audio of the rigid frag vs native not rerun; two Bevy image `should_panic` tests fail in release builds only (debug assertions; pre-existing, unrelated).
+
+**Next:** bug bait splat (BeerSplash decal + SporeExplosion), player physics shadow (push props), pallet launch flop, breakables, rest of 13b.
+
 ## 2026-10-12 session 12: local validation of the cloud arsenal + physics branches (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Validates work written by the cloud sessions (Claude Code cloud, `claude-opus-5-5`, SDK-only: crossbow, RPG, bug bait, gravity gun, viewmodel effects, sound stop/patch path, view punch, authored VPhysics props, surfaceprops, impact sounds, frag rigid body, +USE carry, ground surfaces, per-side world materials).

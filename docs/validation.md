@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Frag rigid body (session 13, 2026-10-13)
+
+Owned replay (`cargo test --release -p hl2-bevy owned_frag -- --ignored --nocapture`, HL2 installed): SDK launch math from the native eye/angles, seven spins per case, compared by time since the release command minus the native spawn delay. Best/mean RMS: lob 27.6/77.9, roll 16.4/16.5, overhand (setang -30 -20) 3.8/7.8, plaza (-10 12) 12.8/40.4, wall 44.1/81.5. Swept box: 92.1/22.3/13.1/44.7/105.8 (best). Bounds asserted: 35/30/8/25/55.
+Native wall throws (oracle, eye (-3000,-1998,128) setang 0 180, timescale 0.25, `ent_text npc_grenade_frag`): T000533Z 0.661 s (-3157.6,-2002.0,163.5), 1.639 (-3134.0,-1999.3,66.2), 2.085 (-3123.3,-1992.8,66.1); T002157Z 0.707 (~-3145,-2044,~66), 1.217 (-3144.3,-2064.4,66.1), 1.673 (~-3192,-2069,66.1), 2.061 (~-3169,-2077,66.1); T002243Z 1.498 (-3192.1,-2092.2,69.7), 2.087 (~-3192,-2092,66.2). Native stays within ~18-60 units of the wall, sometimes pops up (z 163 at 0.66 s), drops and rolls along it (once into the door recess). Ours (packaged `test-inputs/bevy-frag-wall.json`, spin -0.5): pops up to z 156, lands ~90 units out: larger rebound than native for that spin.
+Rest height: native frags at rest z 66.1-66.2 on the z 64 platform; ours 65.7 (hull radius 1.808). Ground-level captures artifacts/frag-s13/box-close-nw.png and top-se.png.
+
 ## Cloud arsenal/physics validation (session 12, 2026-10-12)
 
 Frag rigid body (`--frag-rigid-body`, Rapier body from w_grenade.phy) vs the session-11 native samples, packaged, compared by time since spawn: overhand flight RMS 3.4 (max 5.4); roll RMS 14.0 (swept box 22.4); lob RMS 106.6, end 169.8 (stops on landing, body upright, native rolls on); trainstation throw RMS 42.6, end 56.7 (swept box rest within 4). Default stays the swept box.
