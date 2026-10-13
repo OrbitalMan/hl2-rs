@@ -8,6 +8,14 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Component)]
 pub(crate) struct MapOwned;
+
+/// Observable completion marker recorded when a map has finished loading and is installed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapLoaded {
+    pub map: String,
+    pub background: bool,
+}
+
 struct Request {
     map: String,
     landmark: String,
@@ -24,20 +32,33 @@ struct Job {
 pub struct Campaign {
     job: Option<Job>,
     pub metadata: serde_json::Value,
+    /// Name of the currently active, fully loaded map.
+    pub loaded_map: Option<String>,
+    pub last_event: Option<MapLoaded>,
     history: Vec<serde_json::Value>,
     failures: Vec<String>,
     loading_frames: u64,
 }
 impl Campaign {
     pub fn new(loaded: &assets::LoadedMap) -> Self {
+        let name = loaded.world.name.clone();
         Self {
             metadata: assets::map_metadata(loaded),
+            loaded_map: Some(name.clone()),
+            last_event: Some(MapLoaded {
+                map: name,
+                background: false,
+            }),
             ..default()
         }
     }
+    /// Whether map loading has finished and the map is in an observable gameplay-ready state.
+    pub fn is_gameplay_ready(&self) -> bool {
+        self.job.is_none() && self.loaded_map.is_some()
+    }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"loading":self.job.as_ref().map(|j|&j.request.map),"loading_frames":self.loading_frames,
-            "active_map":self.metadata["map"],"history":self.history,"failures":self.failures,
+            "active_map":self.metadata["map"],"loaded_map":self.loaded_map,"gameplay_ready":self.is_gameplay_ready(),"last_event":self.last_event.as_ref().map(|e| &e.map),"failures":self.failures,
             "limitations":"landmark eye, inventory and global-state transfer; saved entity/AI state, full player transfer and complete campaign remain unfinished"})
     }
 }
@@ -56,7 +77,15 @@ pub fn poll(
     mut windows: Query<&mut CursorOptions, With<PrimaryWindow>>,
     status: Res<Status>,
 ) {
-    if campaign.job.is_none() {
+    if let Some(job) = &campaign.job {
+        // Setting a background map must never interrupt an ongoing gameplay map load.
+        if !job.request.background && ui.background_request {
+            ui.source
+                .log("Gameplay map load in progress; background map request ignored");
+            ui.background_request = false;
+            ui.map_request = None;
+        }
+    } else {
         let background = std::mem::take(&mut ui.background_request);
         let request = ui
             .map_request
@@ -119,6 +148,17 @@ pub fn poll(
     let mut loaded = match result {
         Ok(loaded) => loaded,
         Err(error) => {
+            if job.request.background {
+                let warning = format!(
+                    "Warning: background map {} failed: {error}",
+                    job.request.map
+                );
+                ui.source.log(&warning);
+                campaign.failures.push(warning);
+                sim.loading_failed();
+                ui.source.loading_complete();
+                return;
+            }
             let error = format!("Map transition failed for {}: {error}", job.request.map);
             ui.source.log(&error);
             ui.source.loading_failed(&error);
@@ -166,6 +206,11 @@ pub fn poll(
     campaign.history.push(serde_json::json!({"from":game.world.name,"to":loaded.world.name,"direct":job.request.direct,"landmark":job.request.landmark,
         "previous_eye":previous_eye.to_array(),"arrival_eye":eye.to_array(),"inventory":loaded.gameplay.inventory,"previous_time":game.scene.time}));
     campaign.metadata = assets::map_metadata(&loaded);
+    campaign.loaded_map = Some(loaded.world.name.clone());
+    campaign.last_event = Some(MapLoaded {
+        map: loaded.world.name.clone(),
+        background: job.request.background,
+    });
     for entity in &old_draws {
         commands.entity(entity).despawn();
     }
@@ -184,6 +229,8 @@ pub fn poll(
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
         }
+    } else {
+        ui.source.level_loaded(false);
     }
     ui.source.log(format!("Loaded {}", loaded.world.name));
     let _unused_new_console = crate::install_map(

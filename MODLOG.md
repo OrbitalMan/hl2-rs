@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-13 Episode map loading failures (UTF-8 tolerant decoding)
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `source-assets::scenes`: replaced strict `std::str::from_utf8` decoding with tolerant `String::from_utf8_lossy(&tail[..length]).into_owned()` in `scenes::Cache::parse` when parsing string table entries in Valve Scene Image Files (`scenes/scenes.image`). Added unit regression test `scene_cache_tolerates_non_utf8_strings` covering non-UTF-8 bytes at index 10.
+- `hl2-bevy::campaign`: added `MapLoaded` completion marker struct, `Campaign::loaded_map: Option<String>`, and `Campaign::is_gameplay_ready(&self) -> bool` providing an observable gameplay-ready state distinguishing successful full loads from merely passing parser stages. Added background map load failure tolerance: when a background map fails to load, logs a warning to the console, records the failure, clears the loading dialog, and continues the session rather than presenting a fatal error modal or aborting. Guarded ongoing gameplay map loads against being interrupted by background map requests while a gameplay load is active.
+- `hl2-bevy::simulation`: guarded `Effect::MainMenuMap` in `Simulation::console_effects` from overwriting active gameplay map load requests. Added unit test `background_map_setting_does_not_interrupt_gameplay_map_load`.
+- `hl2-ui::console`: guarded `map_background` console command against interrupting active gameplay map loading (saves config and logs notice without dispatching effect). Added unit test assertion in `background_map_and_map_background_console_commands`.
+- `hl2-bevy::main`: made `load_startup_map` resilient against custom background map failures with automatic fallback to the default startup background map. Added owned-install test `episode_maps_load_successfully` asserting that both Episode One (`ep1_citadel_00`) and Episode Two (`ep2_outland_01`) load completely into an active gameplay-ready state (`is_gameplay_ready`, `sim.loading == false`, `!sim.player.dead`, and console `Mode::Gameplay`).
+
+**Why:**
+- Loading initial maps for Episode One (`ep1_citadel_00`) and Episode Two (`ep2_outland_01`) failed with `map transition failed: invalid utf-8 sequence of 1 bytes from index 10`. The retail VSIF scene cache (`scenes.image`) string pool contains byte-oriented C strings with non-UTF-8 characters. Strict UTF-8 decoding rejected the entire choreography cache during world load. Tolerant decoding at the C string parser boundary resolves the issue without compromising UTF-8 validation elsewhere. Additionally, background map requests or failures previously risked disrupting ongoing or startup map loads.
+
+**Tested how:**
+- `cargo test --locked -p source-assets`: all 92 tests passed (including `scene_cache_tolerates_non_utf8_strings`).
+- `cargo test --locked -p hl2-ui`: all 127 tests passed + 3 owned-install tests passed.
+- `cargo test --locked -p hl2-bevy`: all 67 tests passed (including `background_map_setting_does_not_interrupt_gameplay_map_load`).
+- `cargo test --locked -p hl2-bevy episode_maps_load_successfully -- --ignored`: both `ep1_citadel_00` and `ep2_outland_01` verified loading completely into active gameplay state.
+- Runtime headless executions: `hl2-bevy --map ep1_citadel_00 --frames 30` and `hl2-bevy --map ep2_outland_01 --frames 30` both verified loading and executing 30 frames in active gameplay mode.
+- `cargo clippy --locked -p hl2-ui -p hl2-bevy -p source-assets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+
+**Result:** `ep1_citadel_00` and `ep2_outland_01` load completely into active gameplay; background map failures log warnings without aborting; gameplay map loading is protected from background map interruption.
+
+**Still broken or not tested:** None.
+
+**Next:** Task 8: Background map on submenu entry.
+
 ## 2026-10-13 Input blocking behind dialogs
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

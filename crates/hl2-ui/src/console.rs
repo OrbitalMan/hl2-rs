@@ -1038,6 +1038,12 @@ impl Console {
                 {
                     return Err("map_background: use a simple installed map name".into());
                 }
+                if self.is_loading() && !self.background_level {
+                    self.config.gameplay.background_map = Some(map.to_owned());
+                    let _ = self.config.save();
+                    self.log("Gameplay map load in progress; background map persisted without interrupting load.");
+                    return Ok(None);
+                }
                 self.config.gameplay.background_map = Some(map.to_owned());
                 let _ = self.config.save();
                 self.start_loading(map);
@@ -2384,6 +2390,18 @@ mod tests {
         assert_eq!(console.background_map(), Some("background04"));
         assert!(console.is_loading());
         assert_eq!(console.loading_dialog.as_ref().unwrap().map, "background04");
+
+        // Setting background map while gameplay map is loading persists without interrupting load
+        console.start_loading("d1_trainstation_01");
+        console.background_level = false;
+        assert!(console.is_loading());
+        let effects = console.submit("map_background background05");
+        assert!(effects.is_empty());
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().map,
+            "d1_trainstation_01"
+        );
+        assert_eq!(console.background_map(), Some("background05"));
     }
 
     #[test]

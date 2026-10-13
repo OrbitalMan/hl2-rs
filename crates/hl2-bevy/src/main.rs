@@ -348,8 +348,18 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
             "no main-menu background map in scripts/chapterbackgrounds.txt or config; pass a loadable --map",
         )?;
     println!("Loading owned main-menu background {background}...");
-    let loaded = assets::load(&options.game, &background)
-        .with_context(|| format!("load main-menu background map {background}"))?;
+    let loaded = match assets::load(&options.game, &background) {
+        Ok(loaded) => loaded,
+        Err(err) => {
+            eprintln!(
+                "Warning: background map {background} failed to load: {err:#}; falling back to default background"
+            );
+            let default_bg = hl2_ui::gameui::resources::startup_background_map(&vfs)
+                .unwrap_or_else(|| "background01".to_owned());
+            assets::load(&options.game, &default_bg)
+                .with_context(|| format!("load fallback main-menu background map {default_bg}"))?
+        }
+    };
     Ok((loaded, true))
 }
 
@@ -1074,5 +1084,37 @@ mod tests {
         let args = ["--background-map".to_owned(), "background02".to_owned()];
         let parsed = Options::parse_from(args).expect("parse options with background map");
         assert_eq!(parsed.background_map.as_deref(), Some("background02"));
+    }
+    #[test]
+    #[ignore]
+    fn episode_maps_load_successfully() {
+        let game = source_assets::install::discover().expect("owned install");
+        for map in ["ep1_citadel_00", "ep2_outland_01"] {
+            let loaded = crate::assets::load(&game, map)
+                .unwrap_or_else(|err| panic!("Failed to load {}: {:?}", map, err));
+            assert_eq!(loaded.world.name, map);
+            assert_eq!(loaded.gameplay.world.name, map);
+
+            // Observable completion signals
+            let campaign = crate::campaign::Campaign::new(&loaded);
+            assert!(campaign.is_gameplay_ready());
+            assert_eq!(campaign.loaded_map.as_deref(), Some(map));
+
+            // Verify simulation transition to gameplay
+            let (spawn, spawn_yaw) = loaded.world.spawn();
+            let mut sim =
+                simulation::Simulation::new(&loaded.world, spawn, spawn_yaw, 0., false, vec![]);
+            sim.change_map(&loaded.world, spawn, true);
+            assert!(!sim.loading());
+            assert!(!sim.player.dead);
+
+            // Verify Console transitions to gameplay state on direct level load
+            let mut console = hl2_ui::console::Console::default();
+            console.start_loading(map);
+            assert!(console.is_loading());
+            console.level_loaded(false);
+            assert!(!console.is_loading());
+            assert_eq!(console.mode, hl2_ui::console::Mode::Gameplay);
+        }
     }
 }

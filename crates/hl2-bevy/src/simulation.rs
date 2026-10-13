@@ -249,9 +249,14 @@ impl Simulation {
                     self.loading = true;
                 }
                 Effect::MainMenuMap(map) => {
-                    ui.map_request = Some(map);
-                    ui.background_request = true;
-                    self.loading = true;
+                    if self.loading && !ui.background_request {
+                        ui.source
+                            .log("Gameplay map load in progress; ignoring background map request");
+                    } else {
+                        ui.map_request = Some(map);
+                        ui.background_request = true;
+                        self.loading = true;
+                    }
                 }
                 Effect::Fire {
                     target,
@@ -841,5 +846,45 @@ mod tests {
             hl2_simulation::sounds::SoundRequest::ui("ui/buttonclickrelease.wav")
         );
         assert!(game.sound_requests[1].ui);
+    }
+
+    #[test]
+    fn background_map_setting_does_not_interrupt_gameplay_map_load() {
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
+
+        // Simulate gameplay map load requested
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::Map("ep1_citadel_00".into())],
+        );
+        assert!(sim.loading);
+        assert_eq!(ui.map_request.as_deref(), Some("ep1_citadel_00"));
+        assert!(!ui.background_request);
+
+        // Attempting to set a background map while gameplay map is loading must NOT overwrite the gameplay load
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::MainMenuMap("background02".into())],
+        );
+        assert!(sim.loading);
+        assert_eq!(ui.map_request.as_deref(), Some("ep1_citadel_00"));
+        assert!(!ui.background_request);
+        assert!(
+            ui.source
+                .output
+                .iter()
+                .any(|s| s.contains("Gameplay map load in progress"))
+        );
     }
 }
