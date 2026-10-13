@@ -227,6 +227,13 @@ impl Widget<'_> {
     }
 }
 
+/// Active tooltip overlay state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActiveTooltip {
+    pub text: String,
+    pub pointer: Vec2,
+}
+
 pub struct OptionsDialog {
     res: Arc<GameUiResources>,
     modes: DisplayModes,
@@ -247,6 +254,7 @@ pub struct OptionsDialog {
     gamma_texture: Option<Texture2D>,
     bink_texture: Option<Texture2D>,
     log: Vec<String>,
+    pub(crate) active_tooltip: Option<ActiveTooltip>,
 }
 
 impl Default for OptionsDialog {
@@ -272,6 +280,7 @@ impl Default for OptionsDialog {
             gamma_texture: None,
             bink_texture: None,
             log: Vec::new(),
+            active_tooltip: None,
         }
     }
 }
@@ -381,6 +390,7 @@ impl OptionsDialog {
         self.keys.capture = None;
         self.confirm = None;
         self.sub = None;
+        self.active_tooltip = None;
     }
 
     pub fn tab(&self) -> Tab {
@@ -411,6 +421,7 @@ impl OptionsDialog {
     pub fn escape(&mut self) -> bool {
         self.drag = None;
         self.last_armed = None;
+        self.active_tooltip = None;
         if self.keys.capture.take().is_some()
             || self.combo.take().is_some()
             || self.editing.take().is_some()
@@ -425,6 +436,41 @@ impl OptionsDialog {
             return true;
         }
         false
+    }
+
+    /// Returns the localized tooltip for `control_name` in `panel`, if the layout provides one.
+    pub fn tip_for_control(&self, panel: Panel, control_name: &str) -> Option<String> {
+        let layout = self.res.layout(panel.layout())?;
+        let control = layout.get(control_name)?;
+        if control.tooltip.trim().is_empty() {
+            return None;
+        }
+        let text = self.res.localization.localize(&control.tooltip);
+        if text.trim().is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    }
+
+    /// Returns the tooltip text that should be shown for the given pointer position on the active tab, if any.
+    pub fn tooltip_at(&self, canvas: Vec2, pointer: Vec2) -> Option<String> {
+        let panel = self.tab.panel()?;
+        let scale = Painter::scale_for(canvas.y);
+        let origin = centered(canvas, DIALOG_SIZE, scale);
+        let dialog_pointer = (pointer - origin) / scale;
+        let page = page_rect();
+        if !page.contains(dialog_pointer) {
+            return None;
+        }
+        let widgets = layout_widgets(&self.res, panel, page, &self.draft, &self.applied);
+        let hovered = widgets.iter().rev().find(|w| w.rect.contains(dialog_pointer))?;
+        self.tip_for_control(panel, &hovered.control.name)
+    }
+
+    /// Currently active tooltip overlay (if any).
+    pub fn active_tooltip(&self) -> Option<&ActiveTooltip> {
+        self.active_tooltip.as_ref()
     }
 
     fn tab_label(&self, tab: Tab) -> String {
@@ -458,6 +504,7 @@ impl OptionsDialog {
     fn select_tab(&mut self, tab: Tab) {
         self.commit_entry();
         self.combo = None;
+        self.active_tooltip = None;
         self.tracker.reset();
         if self.tab != tab {
             self.tab = tab;
@@ -482,6 +529,7 @@ impl OptionsDialog {
         let scale = Painter::scale_for(canvas.y);
         let local = |origin: Vec2| input.pointer.map(|p| (p - origin) / scale);
         if let Some(mut confirm) = self.confirm.take() {
+            self.active_tooltip = None;
             let layout = confirm.layout(|t| measure.text_width(t, false));
             let pointer = local(centered(canvas, layout.size, scale));
             let down = input.click || input.held;
@@ -502,6 +550,7 @@ impl OptionsDialog {
             return OptionsOutcome::None;
         }
         if let Some(sub) = self.sub {
+            self.active_tooltip = None;
             let size = frame_size(&self.res, sub);
             let pointer = local(centered(canvas, size, scale));
             self.sub_input(sub, size, input, pointer);
@@ -509,6 +558,7 @@ impl OptionsDialog {
         }
         let pointer = local(centered(canvas, DIALOG_SIZE, scale));
         if let Some(row) = self.keys.capture {
+            self.active_tooltip = None;
             if let Some(key) = input.binding_keys.iter().find(|k| *k != "Escape") {
                 if let Some(KeyRow::Action { command, .. }) = self.res.key_rows.get(row) {
                     keys::assign(&mut self.draft.config.keys, command, key);
@@ -518,6 +568,7 @@ impl OptionsDialog {
             return OptionsOutcome::None;
         }
         if let Some(combo) = self.combo.take() {
+            self.active_tooltip = None;
             self.combo_input(combo, input, pointer);
             return OptionsOutcome::None;
         }
@@ -686,6 +737,22 @@ impl OptionsDialog {
             self.key_list_keys(input, &list);
         }
         let clicked = self.track(&list, &extra, pointer, input);
+        self.active_tooltip = if !input.click && !input.held {
+            pointer.and_then(|dialog_p| {
+                if !page.contains(dialog_p) {
+                    return None;
+                }
+                let panel = self.tab.panel()?;
+                let widget = list.iter().rev().find(|w| w.rect.contains(dialog_p))?;
+                let tip = self.tip_for_control(panel, &widget.control.name)?;
+                input.pointer.map(|canvas_p| ActiveTooltip {
+                    text: tip,
+                    pointer: canvas_p,
+                })
+            })
+        } else {
+            None
+        };
         match clicked {
             Some(Target::Tab(i)) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
@@ -1071,6 +1138,17 @@ impl OptionsDialog {
             let layout = confirm.layout(|t| p.text_width(t, false));
             confirm.draw(&painter_at(centered(canvas, layout.size, scale)), &layout);
         }
+        if let Some(tip) = &self.active_tooltip {
+            let tip_painter = Painter {
+                canvas: base.canvas,
+                fonts: base.fonts,
+                theme: base.theme,
+                origin: Vec2::ZERO,
+                scale,
+            };
+            let screen_layout_bounds = Rect::new(0., 0., canvas.x / scale, canvas.y / scale);
+            tip_painter.tooltip(&tip.text, tip.pointer / scale, screen_layout_bounds);
+        }
     }
 
     fn draw_widget(&self, p: &Painter, w: &Widget, env: &Env, armed: bool, pressed: bool) {
@@ -1303,7 +1381,8 @@ mod tests {
 
     const MOUSE: &str = r##""Resource/OptionsSubMouse.res" {
         "ReverseMouse" { "ControlName" "CCvarNegateCheckButton" "fieldName" "ReverseMouse"
-            "xpos" "28" "ypos" "9" "wide" "150" "tall" "28" "labelText" "#GameUI_ReverseMouse" }
+            "xpos" "28" "ypos" "9" "wide" "150" "tall" "28" "labelText" "#GameUI_ReverseMouse"
+            "tooltiptext" "#GameUI_ReverseMouseLabel" }
         "Slider" { "ControlName" "CCvarSlider" "fieldName" "Slider" "xpos" "200" "ypos" "40"
             "wide" "200" "tall" "40" "leftText" "#GameUI_Low" "rightText" "#GameUI_High" }
         "SensitivityLabel" { "ControlName" "TextEntry" "fieldName" "SensitivityLabel"
@@ -1355,6 +1434,10 @@ mod tests {
         let mut localization = Localization::default();
         localization.insert("GameUI_Gamepad", "Gamepad");
         localization.insert("GameUI_AdvancedEllipsis", "Advanced...");
+        localization.insert(
+            "GameUI_ReverseMouseLabel",
+            "Reverse mouse up-down axis",
+        );
         let mut layouts = BTreeMap::new();
         for (name, text) in [
             ("optionssubmouse", MOUSE),
@@ -2067,5 +2150,83 @@ mod tests {
         // Subdialog is closed and gamma is restored to saved value
         assert_eq!(h.dialog.sub, None);
         assert_eq!(h.dialog.draft().video.gamma, 2.2);
+    }
+
+    #[test]
+    fn options_tooltips_lookup_and_missing_case() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+
+        // 1. Direct tip_for_control lookup:
+        // Present tooltip:
+        assert_eq!(
+            h.dialog.tip_for_control(Panel::Mouse, "ReverseMouse"),
+            Some("Reverse mouse up-down axis".to_string())
+        );
+        // Missing tooltip:
+        assert_eq!(h.dialog.tip_for_control(Panel::Mouse, "Slider"), None);
+        assert_eq!(
+            h.dialog.tip_for_control(Panel::Mouse, "SensitivityLabel"),
+            None
+        );
+        // Missing control:
+        assert_eq!(h.dialog.tip_for_control(Panel::Mouse, "NonExistent"), None);
+
+        // 2. Hover tip lookup via tooltip_at:
+        // ReverseMouse is at (28, 9, 150, 28) on page
+        let rev_ptr = page(35., 15.);
+        assert_eq!(
+            h.dialog.tooltip_at(vec2(1280., 720.), rev_ptr),
+            Some("Reverse mouse up-down axis".to_string())
+        );
+        // Slider is at (200, 40, 200, 40) on page (has no tooltip)
+        let slider_ptr = page(250., 50.);
+        assert_eq!(h.dialog.tooltip_at(vec2(1280., 720.), slider_ptr), None);
+        // Blank space on page
+        assert_eq!(h.dialog.tooltip_at(vec2(1280., 720.), page(10., 10.)), None);
+
+        // 3. Active tooltip lifecycle in frame input:
+        // Hovering ReverseMouse sets active_tooltip
+        h.frame(Input {
+            pointer: Some(rev_ptr),
+            ..Default::default()
+        });
+        assert_eq!(
+            h.dialog.active_tooltip(),
+            Some(&ActiveTooltip {
+                text: "Reverse mouse up-down axis".to_string(),
+                pointer: rev_ptr,
+            })
+        );
+
+        // Hovering Slider (missing tip) clears active_tooltip
+        h.frame(Input {
+            pointer: Some(slider_ptr),
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.active_tooltip(), None);
+
+        // Hovering ReverseMouse again restores active_tooltip
+        h.frame(Input {
+            pointer: Some(rev_ptr),
+            ..Default::default()
+        });
+        assert!(h.dialog.active_tooltip().is_some());
+
+        // Mouse click dismisses active_tooltip
+        h.frame(Input {
+            pointer: Some(rev_ptr),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.active_tooltip(), None);
+
+        // Moving outside page clears active_tooltip
+        h.frame(Input {
+            pointer: Some(vec2(10., 10.)),
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.active_tooltip(), None);
     }
 }

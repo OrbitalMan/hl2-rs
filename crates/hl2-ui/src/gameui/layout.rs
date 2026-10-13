@@ -124,6 +124,8 @@ pub struct Control {
     /// Slider end labels (`leftText` / `rightText`), usually tokens.
     pub left_text: String,
     pub right_text: String,
+    /// Tooltip text / token (`tooltiptext`).
+    pub tooltip: String,
 }
 
 impl Control {
@@ -208,6 +210,7 @@ fn control(entry: &Entry) -> Option<Control> {
         align: text("textAlignment").map(Align::parse).unwrap_or_default(),
         left_text: text("leftText").unwrap_or_default().to_owned(),
         right_text: text("rightText").unwrap_or_default().to_owned(),
+        tooltip: text("tooltiptext").unwrap_or_default().to_owned(),
     })
 }
 
@@ -218,7 +221,8 @@ mod tests {
     const MOUSE: &str = r##""Resource/OptionsSubMouse.res"
 {
     "ReverseMouse" { "ControlName" "CCvarNegateCheckButton" "fieldName" "ReverseMouse"
-        "xpos" "28" "ypos" "9" "wide" "150" "tall" "28" "labelText" "#GameUI_ReverseMouse" }
+        "xpos" "28" "ypos" "9" "wide" "150" "tall" "28" "labelText" "#GameUI_ReverseMouse"
+        "tooltiptext" "#GameUI_ReverseMouseLabel" }
     "MouseRaw" { "ControlName" "CCvarToggleCheckButton" "fieldName" "MouseRaw"
         "xpos" "30" "ypos" "70" "wide" "150" "tall" "24"
         "enabled" "1" [!$OSX]
@@ -240,6 +244,7 @@ mod tests {
         let reverse = layout.get("reversemouse").unwrap();
         assert_eq!(reverse.kind, ControlKind::CheckButton);
         assert_eq!(reverse.label, "#GameUI_ReverseMouse");
+        assert_eq!(reverse.tooltip, "#GameUI_ReverseMouseLabel");
         assert_eq!(reverse.rect((460., 300.)), (28., 9., 150., 28.));
         assert_eq!(
             layout.get("MouseRaw").unwrap().enabled,

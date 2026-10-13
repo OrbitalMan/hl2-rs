@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-13 Options tooltips
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::layout`: added `tooltip: String` field to `Control` struct and parsed `tooltiptext` property in KeyValues control definitions. Added unit test verifying `reverse.tooltip` parses `#GameUI_ReverseMouseLabel`.
+- `hl2-ui::gameui::widgets`: added `tooltip_bg`, `tooltip_text`, and `tooltip_border` to `Theme` with defaults matching Source VGUI scheme values (`Tooltip.BgColor` orange `(255, 155, 0, 240)`, `Tooltip.TextColor` black, dark 1px border `(40, 40, 40, 255)`). Added `tooltip_rect(pointer, tip_size, bounds)` implementing Source SDK positioning rules (hangs +20px down and right, flips upwards or leftwards on screen overflow, strictly clamped within screen bounds). Added `Painter::tooltip` rendering wrapped multiline tips, background box, and border. Added unit test `tooltip_geometry_and_screen_clamping`.
+- `hl2-ui::gameui::options`: added `ActiveTooltip { pub text: String, pub pointer: Vec2 }` and `pub(crate) active_tooltip: Option<ActiveTooltip>` to `OptionsDialog`. Added `tip_for_control(&self, panel, control_name) -> Option<String>` looking up `control.tooltip` in layout and resolving via `loc.localize` (returning `None` if missing or empty). Added `tooltip_at(&self, canvas, pointer) -> Option<String>` looking up hovered controls on the active page. In `page_input`, updates `active_tooltip` on pointer motion, and clears it on clicking, dragging, blank page hovering, or hovering controls with no authored tip (missing-tip case). In `input`, clears tooltip when confirmation dialog, subdialog, combo dropdown, or key-bind capture is active. In `draw`, renders `active_tooltip` on top of all dialog layers within screen bounds. Added unit test `options_tooltips_lookup_and_missing_case`.
+
+**Why:**
+- Half-Life 2 GameUI options controls (such as Reverse Mouse, Mouse Filter, Raw Input, Mouse Acceleration) specify explanatory hints in their `.res` resource files via `tooltiptext` pointing to `gameui_english.txt` tokens.
+- When hovering an options control with an authored tooltip, a tooltip box displays near the cursor, flipped and clamped to stay within screen boundaries per Source SDK `vgui_controls/Tooltip.cpp` rules. Controls without tooltips display nothing.
+
+**Tested how:**
+- `cargo test --locked`: all 103 unit tests in `hl2-ui`, 64 in `hl2-bevy`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and exited code 0.
+
+**Result:** Authentic options tooltips styled per VGUI scheme with SDK positioning, multi-line wrapping, bounds clamping, and clean dismissal on clicks/subdialogs.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 8 (Map loading dialog).
+
 ## 2026-10-13 "Return to main menu" confirmation dialog
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

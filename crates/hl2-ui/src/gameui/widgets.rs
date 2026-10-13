@@ -40,6 +40,9 @@ pub struct Theme {
     pub arrow_armed: Color,
     pub scrollbar_bg: Color,
     pub url_text: Color,
+    pub tooltip_bg: Color,
+    pub tooltip_text: Color,
+    pub tooltip_border: Color,
 }
 
 impl Default for Theme {
@@ -68,6 +71,9 @@ impl Default for Theme {
             arrow_armed: rgba(255, 255, 255, 255),
             scrollbar_bg: rgba(255, 255, 255, 64),
             url_text: rgba(255, 155, 0, 255),
+            tooltip_bg: rgba(255, 155, 0, 240),
+            tooltip_text: rgba(0, 0, 0, 255),
+            tooltip_border: rgba(40, 40, 40, 255),
         }
     }
 }
@@ -76,7 +82,7 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 21] = [
+        let fields: [(&str, &mut Color); 23] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
@@ -98,6 +104,8 @@ impl Theme {
             ("ComboBoxButton.ArrowColor", &mut theme.arrow),
             ("ComboBoxButton.ArmedArrowColor", &mut theme.arrow_armed),
             ("ScrollBarSlider.BgColor", &mut theme.scrollbar_bg),
+            ("Tooltip.BgColor", &mut theme.tooltip_bg),
+            ("Tooltip.TextColor", &mut theme.tooltip_text),
         ];
         for (name, slot) in fields {
             if let Some(color) = scheme_color(root, name) {
@@ -783,6 +791,49 @@ impl Painter<'_> {
             },
         );
     }
+
+    /// Draws a tooltip box anchored at `pointer` in layout units, keeping it strictly inside `bounds`.
+    pub fn tooltip(&self, text: &str, pointer: Vec2, bounds: Rect) {
+        if text.trim().is_empty() {
+            return;
+        }
+        let max_text_width = 280.;
+        let lines = wrap(text, max_text_width, |s| self.text_width(s, false));
+        if lines.is_empty() {
+            return;
+        }
+        let mut max_line_w: f32 = 0.;
+        for line in &lines {
+            max_line_w = max_line_w.max(self.text_width(line, false));
+        }
+        let pad_x = 6.;
+        let pad_y = 4.;
+        let tip_w = max_line_w + pad_x * 2.;
+        let tip_h = lines.len() as f32 * FONT_TALL + pad_y * 2.;
+
+        let rect = tooltip_rect(pointer, vec2(tip_w, tip_h), bounds);
+        self.fill(rect, self.theme.tooltip_bg);
+        self.border(rect, self.theme.tooltip_border, self.theme.tooltip_border);
+        for (i, line) in lines.iter().enumerate() {
+            let line_y = rect.y + pad_y + i as f32 * FONT_TALL;
+            self.text(line, vec2(rect.x + pad_x, line_y), self.theme.tooltip_text, false);
+        }
+    }
+}
+
+/// Calculates the placed tooltip rectangle per Source SDK positioning and screen clamping rules.
+pub fn tooltip_rect(pointer: Vec2, tip_size: Vec2, bounds: Rect) -> Rect {
+    let mut x = pointer.x;
+    let mut y = pointer.y + 20.;
+    if x + tip_size.x > bounds.x + bounds.w {
+        x = pointer.x - tip_size.x;
+    }
+    if y + tip_size.y > bounds.y + bounds.h {
+        y = pointer.y - tip_size.y - 20.;
+    }
+    let x = x.clamp(bounds.x, (bounds.x + bounds.w - tip_size.x).max(bounds.x));
+    let y = y.clamp(bounds.y, (bounds.y + bounds.h - tip_size.y).max(bounds.y));
+    Rect::new(x, y, tip_size.x, tip_size.y)
 }
 
 /// Check box / radio indicator size and the label indent after it.
@@ -1094,5 +1145,49 @@ mod tests {
         );
         let quads_pressed = canvas.drain();
         assert_eq!(quads_pressed.len(), quads_with_close.len());
+    }
+
+    #[test]
+    fn tooltip_geometry_and_screen_clamping() {
+        let bounds = Rect::new(0., 0., 1280., 720.);
+        let tip_size = vec2(200., 40.);
+
+        // 1. Normal interior point: hangs right and down
+        let normal = tooltip_rect(vec2(100., 100.), tip_size, bounds);
+        assert_eq!(normal, Rect::new(100., 120., 200., 40.));
+
+        // 2. Near right edge: flips to hang left
+        let right = tooltip_rect(vec2(1200., 100.), tip_size, bounds);
+        assert_eq!(right, Rect::new(1000., 120., 200., 40.));
+        assert!(right.x + right.w <= bounds.w);
+
+        // 3. Near bottom edge: flips to hang up
+        let bottom = tooltip_rect(vec2(100., 700.), tip_size, bounds);
+        assert_eq!(bottom, Rect::new(100., 640., 200., 40.));
+        assert!(bottom.y + bottom.h <= bounds.h);
+
+        // 4. Bottom-right corner: flips both left and up
+        let corner = tooltip_rect(vec2(1250., 710.), tip_size, bounds);
+        assert_eq!(corner, Rect::new(1050., 650., 200., 40.));
+        assert!(corner.x >= bounds.x && corner.x + corner.w <= bounds.w);
+        assert!(corner.y >= bounds.y && corner.y + corner.h <= bounds.h);
+
+        // 5. Painter drawing tooltip produces canvas quads and empty text is ignored
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        painter.tooltip("", vec2(100., 100.), bounds);
+        assert!(canvas.drain().is_empty(), "Empty tooltip draws nothing");
+
+        painter.tooltip("Hover tip text", vec2(100., 100.), bounds);
+        let quads = canvas.drain();
+        assert!(!quads.is_empty(), "Tooltip draws background and border");
     }
 }
