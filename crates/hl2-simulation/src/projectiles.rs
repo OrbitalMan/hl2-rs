@@ -57,6 +57,8 @@ pub struct Fuse {
 
 #[derive(Clone, Copy, Debug)]
 pub struct ProjectileSpawn {
+    /// Spawn orientation (Source angles); None faces the launch direction.
+    pub angles: Option<Vec3>,
     pub kind: ProjectileKind,
     pub position: Vec3,
     pub velocity: Vec3,
@@ -267,13 +269,17 @@ impl Projectiles {
             position: launch.position,
             previous_position: launch.position,
             velocity: launch.velocity,
-            angles: Vec3::new(
-                (-direction.z)
-                    .atan2(direction.truncate().length())
-                    .to_degrees(),
-                direction.y.atan2(direction.x).to_degrees(),
-                0.,
-            ),
+            angles: if let Some(angles) = launch.angles {
+                angles
+            } else {
+                Vec3::new(
+                    (-direction.z)
+                        .atan2(direction.truncate().length())
+                        .to_degrees(),
+                    direction.y.atan2(direction.x).to_degrees(),
+                    0.,
+                )
+            },
             angular_velocity: launch.angular_velocity,
             spawned_at: launch.at,
             radius: if ball {
@@ -1021,6 +1027,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::FragGrenade,
                 position: Vec3::Z * 1000.,
                 velocity: Vec3::ZERO,
@@ -1128,6 +1135,7 @@ mod tests {
 
     fn launch(kind: ProjectileKind, position: Vec3, velocity: Vec3) -> ProjectileSpawn {
         ProjectileSpawn {
+            angles: None,
             kind,
             position,
             velocity,
@@ -1184,6 +1192,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::FragGrenade,
                 position: Vec3::new(0., 0., 1000.),
                 velocity: Vec3::new(500., 0., 0.),
@@ -1233,6 +1242,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::FragGrenade,
                 position: Vec3::new(0., 0., 60.),
                 velocity: Vec3::new(350., 0., 0.),
@@ -1321,6 +1331,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::FragGrenade,
                 position: Vec3::new(0., 0., 60.),
                 velocity: Vec3::new(350., 0., 0.),
@@ -1709,5 +1720,100 @@ mod tests {
             1
         );
         assert_eq!(projectiles.active[0].next_whiz, 0.53);
+    }
+    #[test]
+    fn frag_prism_lands_on_its_side_and_rolls_about_its_long_axis() {
+        // A 12-sided prism like w_grenade.phy (synthetic copy; radius 1.808, 8.9 long),
+        // thrown upright like Fraggrenade_Create's vec3_angle lob onto a floor at z 64.
+        let mut world = World::default();
+        let mut vertices = Vec::new();
+        for k in 0..12 {
+            let a = k as f32 * std::f32::consts::TAU / 12.;
+            for z in [-4.353, 4.509] {
+                vertices.push(Vec3::new(1.808 * a.cos(), 1.808 * a.sin(), z));
+            }
+        }
+        world.model_collision.insert(
+            frag_key(),
+            vec![modkit_core::ConvexPiece {
+                vertices,
+                indices: vec![],
+            }],
+        );
+        world.model_physics.insert(
+            frag_key(),
+            modkit_core::PhysicsSolid {
+                mass: 1.,
+                surfaceprop: "synthetic_grenade".into(),
+                compact_inertia: Some((Vec3::ZERO, Vec3::new(0.00428, 0.00428, 0.000711))),
+                ..Default::default()
+            },
+        );
+        world.surface_materials.insert(
+            "synthetic_grenade".into(),
+            modkit_core::SurfaceMaterial {
+                friction: 0.9,
+                elasticity: 0.01,
+                ..Default::default()
+            },
+        );
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(2000. / 39.37, 2000. / 39.37, 8. / 39.37)
+                .translation(vector![0., 0., 56. / 39.37])
+                .friction(0.8)
+                .restitution(0.2)
+                .friction_combine_rule(CoefficientCombineRule::Multiply)
+                .restitution_combine_rule(CoefficientCombineRule::Multiply),
+        );
+        physics.tick(0.015);
+        let mut projectiles = Projectiles::default();
+        projectiles.spawn(
+            ProjectileSpawn {
+                angles: Some(Vec3::ZERO),
+                kind: ProjectileKind::FragGrenade,
+                position: Vec3::new(0., 0., 120.),
+                velocity: Vec3::new(317., 0., -98.),
+                angular_velocity: Vec3::new(200., 0., 0.),
+                at: 0.,
+                damage: 125.,
+                radius: 250.,
+                mass: 0.,
+                lifetime: 3.,
+            },
+            &mut scene,
+        );
+        let mut samples = vec![];
+        for tick in 0..100 {
+            scene.time = f64::from(tick) * 0.015;
+            projectiles.tick(
+                &world,
+                &mut scene,
+                &mut physics,
+                Vec3::splat(9999.),
+                false,
+                0.015,
+            );
+            physics.tick(0.015);
+            if tick == 60 || tick == 90 {
+                samples.push(projectiles.active[0].clone());
+            }
+        }
+        for frag in &samples {
+            let axis = crate::physics::angles(frag.angles) * Vec3::Z;
+            // Lying on its side: the origin one radius above the floor, long axis flat.
+            assert!((frag.position.z - 65.8).abs() < 0.5, "{}", frag.position);
+            assert!(axis.z.abs() < 0.1, "{axis}");
+        }
+        // Still rolling forward across its axis (native lob: ~150 u/s held after landing).
+        let (a, b) = (&samples[0], &samples[1]);
+        assert!(
+            b.position.x - a.position.x > 15.,
+            "{} {}",
+            a.position,
+            b.position
+        );
+        assert!(a.velocity.length() > 40., "{}", a.velocity);
     }
 }

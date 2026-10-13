@@ -13,6 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct Phy {
     pub checksum: u32,
     pub pieces: Vec<ConvexPiece>,
+    /// IVP_Compact_Surface mass_center, Source units and axes.
+    pub mass_center: Vec3,
+    /// IVP_Compact_Surface rotation_inertia per kilogram of mass (m^2), on the
+    /// Source axes: the principal inertia VPhysics scales by mass and `inertia`.
+    pub rotation_inertia: Vec3,
     /// Preserves duplicate sections/keys; mass/material mapping is separate work.
     pub keyvalues: Vec<keyvalues::Entry>,
 }
@@ -61,6 +66,11 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
     for at in (0..28).step_by(4) {
         f32le(compact, at)?;
     }
+    // IVP axes (x, y, z) are Source (x, -z, y) in meters.
+    let ivp = vec3(compact, 0)?;
+    let mass_center = Vec3::new(ivp.x, ivp.z, -ivp.y) / 0.0254;
+    let ivp = vec3(compact, 12)?;
+    let rotation_inertia = Vec3::new(ivp.x, ivp.z, ivp.y);
     let root = u32le(compact, 32)? as usize;
     if root < 48 {
         bail!("PHY tree overlaps compact header");
@@ -173,6 +183,8 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
     Ok(Phy {
         checksum,
         pieces,
+        mass_center,
+        rotation_inertia,
         keyvalues,
     })
 }

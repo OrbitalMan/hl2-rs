@@ -302,6 +302,7 @@ impl Inventory {
         // Weapon_ShootPosition is the eye; the player is never at water level 3 here
         // (water movement is not implemented), so the air speed applies.
         self.projectile_spawns.push(ProjectileSpawn {
+            angles: None,
             kind: ProjectileKind::CrossbowBolt,
             position: eye,
             velocity: aim * BOLT_AIR_VELOCITY,
@@ -683,6 +684,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::CrossbowBolt,
                 position: Vec3::ZERO,
                 velocity,
@@ -716,6 +718,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::CrossbowBolt,
                 position: Vec3::ZERO,
                 velocity: Vec3::X * 2500.,
@@ -765,6 +768,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::CrossbowBolt,
                 position: Vec3::new(350., 0., 0.),
                 velocity,
@@ -794,6 +798,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::CrossbowBolt,
                 position: Vec3::new(390., -100., 0.),
                 velocity: Vec3::new(1000., 2291.29, 0.),

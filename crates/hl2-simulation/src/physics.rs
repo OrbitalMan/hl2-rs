@@ -28,6 +28,9 @@ pub struct ProjectileHit {
     pub fraction: f32,
 }
 const SCALE: f32 = 1. / 39.37;
+/// k_flMaxVelocity / k_flMaxAngularVelocity (SDK public/vphysics/performance.h).
+const MAX_VELOCITY: f32 = 2000.;
+const MAX_ANGULAR_VELOCITY: f32 = 360. * 10.;
 // Retail CGameMovement::PlayerSolidMask(true): NPC-only clip volumes do not
 // block players. Keep their colliders available for other query categories.
 const PLAYER_BRUSH_MASK: u32 = 0x1400b;
@@ -196,6 +199,41 @@ fn world_material(world: &World) -> impl Fn(ColliderBuilder) -> ColliderBuilder 
 /// The body's mass properties from the authored total mass: uniform density over
 /// the convex pieces, then the whole inertia tensor times the solid's "inertia"
 /// multiplier (VPhysics scales the object's tensor, parallel-axis terms included).
+/// A hull that is a prism of at least 10 equal-radius sides about the model z axis (the
+/// frag's w_grenade.phy: 12 sides, radius 1.808) as a smooth Rapier cylinder. Native IVP
+/// rolls such a hull along the floor with little loss (lob/roll samples: ~150 u/s held for
+/// most of a second); Rapier's faceted hull loses energy on every edge impact and stops
+/// within ~1 s, so the round body stands in for IVP's rolling contact.
+fn prism_cylinder(vertices: &[Vec3]) -> Option<SharedShape> {
+    let rim: Vec<_> = vertices
+        .iter()
+        .filter(|v| v.truncate().length() > 0.5)
+        .collect();
+    if rim.len() < 20 {
+        return None;
+    }
+    let radius = rim.iter().map(|v| v.truncate().length()).sum::<f32>() / rim.len() as f32;
+    if rim
+        .iter()
+        .any(|v| (v.truncate().length() - radius).abs() > 0.02 * radius)
+    {
+        return None;
+    }
+    let (low, high) = rim
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), v| (l.min(v.z), h.max(v.z)));
+    if high - low < radius {
+        return None;
+    }
+    // Rapier cylinders run along their local y; turn that onto the model z axis.
+    Some(SharedShape::compound(vec![(
+        Isometry::new(
+            vector![0., 0., (low + high) * 0.5 * SCALE],
+            vector![std::f32::consts::FRAC_PI_2, 0., 0.],
+        ),
+        SharedShape::cylinder((high - low) * 0.5 * SCALE, radius * SCALE),
+    )]))
+}
 fn authored_mass_properties(shapes: &[SharedShape], mass: f32, inertia: f32) -> MassProperties {
     let unit = shapes
         .iter()
@@ -791,6 +829,21 @@ impl Physics {
             &(),
         );
         self.time += f64::from(dt);
+        // physics_performanceparams_t::Defaults (SDK performance.h; CPhysicsHook keeps
+        // them): world-space speed limits of 2000 u/s and 3600 deg/s per object.
+        for (_, body) in self.bodies.iter_mut() {
+            if !body.is_dynamic() || body.is_sleeping() {
+                continue;
+            }
+            let (v, w) = (*body.linvel(), *body.angvel());
+            let (max_v, max_w) = (MAX_VELOCITY * SCALE, MAX_ANGULAR_VELOCITY.to_radians());
+            if v.norm() > max_v {
+                body.set_linvel(v * (max_v / v.norm()), false);
+            }
+            if w.norm() > max_w {
+                body.set_angvel(w * (max_w / w.norm()), false);
+            }
+        }
         // Rapier finds a new contact at the end of a step and resolves it in the next:
         // last step's events get their post-impact velocities now.
         let mut resolved = std::mem::take(&mut self.collisions);
@@ -941,13 +994,15 @@ impl Physics {
                 pieces
                     .iter()
                     .map(|piece| {
-                        SharedShape::convex_hull(
-                            &piece
-                                .vertices
-                                .iter()
-                                .map(|point| Point::from(vector(*point)))
-                                .collect::<Vec<_>>(),
-                        )
+                        prism_cylinder(&piece.vertices).or_else(|| {
+                            SharedShape::convex_hull(
+                                &piece
+                                    .vertices
+                                    .iter()
+                                    .map(|point| Point::from(vector(*point)))
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
                     })
                     .collect::<Option<Vec<_>>>()
             })
@@ -959,7 +1014,20 @@ impl Physics {
                     half_extents.z * SCALE,
                 )]
             });
-        let masses = authored_mass_properties(&shapes, solid.mass.max(0.001), solid.inertia);
+        let mass = solid.mass.max(0.001);
+        // VPhysics takes the inertia precomputed in the collision model (IVP compact
+        // surface, per kilogram) rather than one derived from the hull it simulates.
+        let masses = match solid.compact_inertia {
+            Some((center, inertia)) if inertia.is_finite() && inertia.min_element() > 0. => {
+                let inertia = inertia * mass * solid.inertia;
+                MassProperties::new(
+                    Point::from(vector(center)),
+                    mass,
+                    vector![inertia.x, inertia.y, inertia.z],
+                )
+            }
+            _ => authored_mass_properties(&shapes, mass, solid.inertia),
+        };
         let angular = rotation * (local_angular_degrees * std::f32::consts::PI / 180.);
         let body = self.bodies.insert(
             RigidBodyBuilder::dynamic()

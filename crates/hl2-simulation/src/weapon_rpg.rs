@@ -327,6 +327,7 @@ impl Inventory {
             0.
         };
         self.projectile_spawns.push(ProjectileSpawn {
+            angles: None,
             kind: ProjectileKind::RpgMissile,
             position: muzzle,
             // CMissile::Create: forward x 300 + 128 up until IgniteThink.
@@ -658,6 +659,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::RpgMissile,
                 position: at,
                 velocity,

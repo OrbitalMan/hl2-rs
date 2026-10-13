@@ -896,11 +896,13 @@ pub fn read_physics(
         return Ok(None);
     };
     let entries = crate::phy::read_keyvalues(&phy)?;
-    let solid = crate::phy::first_solid(&entries).context("PHY has no solid block")?;
+    let mut solid = crate::phy::first_solid(&entries).context("PHY has no solid block")?;
     let pieces = (|| {
         let mdl = vfs.read(model)?.context("PHY companion MDL missing")?;
         let checksum = crate::phy::identity_root_checksum(&mdl)?;
-        Ok(crate::phy::read(&phy, checksum)?.pieces)
+        let read = crate::phy::read(&phy, checksum)?;
+        solid.compact_inertia = Some((read.mass_center, read.rotation_inertia));
+        Ok(read.pieces)
     })();
     Ok(Some((solid, pieces)))
 }
@@ -1227,5 +1229,24 @@ mod tests {
                 vec![false, true, true]
             );
         }
+    }
+}
+#[cfg(test)]
+mod owned_phy_inertia {
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_frag_phy_reads_its_ivp_inertia() {
+        let root = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&root).unwrap();
+        let (solid, pieces) = super::read_physics(&vfs, "models/weapons/w_grenade.mdl")
+            .unwrap()
+            .unwrap();
+        // One 12-sided prism (24 rim vertices + 2 cap tips), radius 1.808.
+        assert_eq!(pieces.unwrap()[0].vertices.len(), 26);
+        let (center, inertia) = solid.compact_inertia.unwrap();
+        assert!(center.length() < 0.1, "{center}");
+        // Long (Source z) axis 0.000711 m^2/kg, cross axes 0.00428.
+        assert!((inertia.z - 0.000711).abs() < 1e-5, "{inertia}");
+        assert!((inertia.x - 0.004283).abs() < 1e-5 && (inertia.y - 0.004283).abs() < 1e-5);
     }
 }

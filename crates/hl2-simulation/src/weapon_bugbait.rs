@@ -249,6 +249,7 @@ impl Inventory {
         };
         let spin = (self.random() * 1200.).round();
         self.projectile_spawns.push(ProjectileSpawn {
+            angles: None,
             kind: ProjectileKind::BugBait,
             position: eye + forward * 18. + right * 12.,
             velocity: velocity + forward * 1000.,
@@ -405,6 +406,7 @@ mod tests {
         let mut projectiles = Projectiles::default();
         projectiles.spawn(
             ProjectileSpawn {
+                angles: None,
                 kind: ProjectileKind::BugBait,
                 position: Vec3::ZERO,
                 velocity: Vec3::X * 1000.,

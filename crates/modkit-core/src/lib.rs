@@ -145,6 +145,10 @@ pub struct PhysicsSolid {
     pub surfaceprop: String,
     /// Cubic inches, 0 when absent.
     pub volume: f32,
+    /// The collision model's precomputed IVP mass center (Source units) and principal
+    /// rotation inertia per kilogram (m^2, Source axes), when the solid was read.
+    #[serde(default)]
+    pub compact_inertia: Option<(Vec3, Vec3)>,
 }
 impl Default for PhysicsSolid {
     fn default() -> Self {
@@ -156,6 +160,7 @@ impl Default for PhysicsSolid {
             rotdamping: 0.1,
             surfaceprop: "default".into(),
             volume: 0.,
+            compact_inertia: None,
         }
     }
 }

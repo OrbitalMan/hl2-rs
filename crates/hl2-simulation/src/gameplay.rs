@@ -1252,6 +1252,7 @@ impl Inventory {
             Vec3::new(self.random(), self.random(), self.random()) * 400.
         };
         self.projectile_spawns.push(ProjectileSpawn {
+            angles: None,
             kind: if ball {
                 crate::projectiles::ProjectileKind::CombineBall
             } else {
@@ -1518,10 +1519,11 @@ impl Inventory {
         for kind in std::mem::take(&mut self.frag.pending) {
             // random() is already uniform in [-1, 1] (RandomInt(-1200, 1200) spin).
             let random = self.random();
-            let (position, throw, angular) =
+            let (position, throw, angular, angles) =
                 frag_launch(physics, kind, eye, forward, velocity, feet, ground, random);
             self.projectile_spawns.push(ProjectileSpawn {
                 kind: crate::projectiles::ProjectileKind::FragGrenade,
+                angles: Some(angles),
                 position,
                 velocity: throw,
                 angular_velocity: angular,
@@ -1680,7 +1682,7 @@ pub fn frag_launch(
     feet: Vec3,
     ground: Option<Vec3>,
     random: f32,
-) -> (Vec3, Vec3, Vec3) {
+) -> (Vec3, Vec3, Vec3, Vec3) {
     let right = forward.cross(Vec3::Z).normalize_or_zero();
     let check = |from: Vec3, to: Vec3| {
         physics
@@ -1701,6 +1703,9 @@ pub fn frag_launch(
                 source,
                 velocity + aim * 1200.,
                 Vec3::new(600., (random * 1200.).round(), 0.),
+                // Fraggrenade_Create(..., vec3_angle, ...): thrown and lobbed frags start
+                // upright (model z up), whatever the aim.
+                Vec3::ZERO,
             )
         }
         FragThrow::Lob => {
@@ -1709,6 +1714,7 @@ pub fn frag_launch(
                 source,
                 velocity + forward * 350. + Vec3::Z * 50.,
                 Vec3::new(200., (random * 600.).round(), 0.),
+                Vec3::ZERO,
             )
         }
         FragThrow::Roll => {
@@ -1720,7 +1726,15 @@ pub fn frag_launch(
             }
             let start = feet + Vec3::Z * 4.;
             let source = check(feet + Vec3::Z * 36., start + facing * 18.);
-            (source, velocity + facing * 700., Vec3::new(0., 0., 720.))
+            // QAngle orientation(0, yaw, -90): the long axis lies across the roll and
+            // the 720 deg/s spin about it rolls the frag forward.
+            let yaw = forward.y.atan2(forward.x).to_degrees();
+            (
+                source,
+                velocity + facing * 700.,
+                Vec3::new(0., 0., 720.),
+                Vec3::new(0., yaw, -90.),
+            )
         }
     }
 }
@@ -1891,7 +1905,7 @@ mod tests {
         let world = World::default();
         let physics = Physics::new(&world);
         let eye = Vec3::new(0., 0., 64.);
-        let (source, velocity, spin) = frag_launch(
+        let (source, velocity, spin, _) = frag_launch(
             &physics,
             FragThrow::Throw,
             eye,
@@ -1905,7 +1919,7 @@ mod tests {
         assert_eq!(source, Vec3::new(18., -8., 64.));
         assert_eq!(velocity, Vec3::new(1200., 10., 120.));
         assert_eq!(spin, Vec3::new(600., 600., 0.));
-        let (source, velocity, _) = frag_launch(
+        let (source, velocity, _, _) = frag_launch(
             &physics,
             FragThrow::Lob,
             eye,
@@ -1917,7 +1931,7 @@ mod tests {
         );
         assert_eq!(source, Vec3::new(18., -8., 56.));
         assert_eq!(velocity, Vec3::new(350., 0., 50.));
-        let (source, velocity, spin) = frag_launch(
+        let (source, velocity, spin, _) = frag_launch(
             &physics,
             FragThrow::Roll,
             eye,
