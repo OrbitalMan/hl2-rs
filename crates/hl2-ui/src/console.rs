@@ -1667,8 +1667,9 @@ impl Console {
                 1.,
                 Color::from_rgba(150, 158, 147, 255),
             );
+            let console_title = self.gameui.localization.text("#GameUI_Console");
             text(
-                "Console",
+                &console_title,
                 left + 12. * scale,
                 top + 24. * scale,
                 18.,
@@ -2014,28 +2015,7 @@ mod tests {
     }
     /// A console with the built-in menu structure, a known first chapter and a background map.
     fn installed_console() -> Console {
-        let mut loc = Localization::default();
-        for (token, text) in [
-            ("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU"),
-            (
-                "GameUI_MainMenuWarning",
-                "Are you sure?\nAll unsaved progress will be lost.",
-            ),
-            ("GameUI_OK", "OK"),
-            ("GameUI_Cancel", "Cancel"),
-            ("GameUI_QuitConfirmationTitle", "QUIT"),
-            (
-                "GameUI_QuitConfirmationText",
-                "Are you sure you want to quit?",
-            ),
-            ("GameUI_Quit", "Quit"),
-            ("GameUI_HalfLife2LostCoast", "Half-Life 2: Lost Coast"),
-            ("GameUI_Worskhop_MenuName", "Workshop"),
-            ("GameUI_Workshop_MenuName", "Workshop"),
-            ("GameUI_LostCoast", "Lost Coast"),
-        ] {
-            loc.insert(token, text);
-        }
+        let loc = Localization::default();
         let resources = GameUiResources {
             localization: loc,
             game_menu: fallback_game_menu(),

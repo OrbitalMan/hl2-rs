@@ -1,6 +1,35 @@
 # MODLOG
 
-## 2026-10-13 Submenu title encoding
+## 2026-10-13 Hardcoded UI strings audit
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::localize`: added centralized `FALLBACK_STRINGS` table (`&[(&str, &str)]`) with authentic English fallback constants for GameUI dialogs (`GameUI_ConfirmMainMenu_Title`, `GameUI_MainMenuWarning`, `GameUI_QuitConfirmationTitle`, `GameUI_QuitConfirmationText`, `GameUI_Console_QuitWarning`, `GameUI_Quit`, `GameUI_OK`, `GameUI_Cancel`, `GameUI_Apply`, `GameUI_Close`), Console (`GameUI_Console`, `Console_Title`), Options (`GameUI_Options`, `GameUI_Gameplay`, `GameUI_Keyboard`, `GameUI_Mouse`, `GameUI_Gamepad`, `GameUI_Audio`, `GameUI_Video`, `GameUI_Action`, `GameUI_KeyButton`, `GameUI_AdjustGamma_Title`, `GameUI_ThirdPartyTechCredits`, `GameUI_KeyboardSettings`, `GameUI_KeyboardSettingsText`), Expansions (`GameUI_HalfLife2`, `GameUI_EpisodeOne`, `GameUI_EpisodeTwo`, `GameUI_LostCoast`, `GameUI_HalfLife2LostCoast`, `GameUI_Worskhop_MenuName`, `GameUI_Workshop_MenuName`), Credits (`GameUI_Miles_Voice`, `GameUI_Miles_Audio`, `GameUI_Bink`), Loading (`GameUI_Loading`, `GameUI_LoadingFilename`, `LoadingProgress_*`), and HUD (`Valve_Hud_HEALTH`, `Valve_Hud_SUIT`, `Valve_Hud_AMMO`, `Valve_Hud_AMMO_ALT`). Added `fallback_lookup(token: &str) -> Option<&'static str>` wired into `Localization::lookup` so `loc.text("#...")` automatically resolves standard fallbacks when game resources are missing.
+- Verified localized game resource escape sequences: scanned all 29 retail localization files and verified that escape sequences (`\n`, `\t`, `\"`, `\\`) exist across 42 tokens in `gameui_english.txt`, 12 in `ep2_english.txt`, 10 in `valve_english.txt`, 9 in `episodic_english.txt`, 9 in `hl2_english.txt`, and 9 in `lostcoast_english.txt`. Preserved escape sequence handling strictly at the parser boundary (`Localization::add_resource` and `Localization::insert`) and removed redundant unescape operations from runtime non-token lookups.
+- `hl2-ui::console`: replaced hardcoded `"Console"` title literal in `Console::draw` with `self.gameui.localization.text("#GameUI_Console")`. Simplified `installed_console()` test to use `Localization::default()`.
+- `hl2-ui::gameui::loading`: replaced hardcoded loading stage match arms with `loc.text(stage)`, replaced loading template with `loc.text("#GameUI_LoadingFilename")` with `%s1` substitution, and localized loading dialog title with `loc.text("#GameUI_Loading")`.
+- `hl2-ui::gameui::resources`: updated `category_title_fallback` to use `loc.text("#GameUI_HalfLife2")`, `loc.text("#GameUI_EpisodeOne")`, `loc.text("#GameUI_EpisodeTwo")`, `loc.text("#GameUI_LostCoast")`.
+- `hl2-ui::hud`: added `health_label`, `suit_label`, `ammo_label`, `alt_label` fields to `WeaponHud`, populated during `WeaponHud::load` from mounted VFS localization resources (`resource/valve_english.txt`, `resource/gameui_english.txt`, `resource/hl2_english.txt`) via `Localization`, falling back to `FALLBACK_STRINGS`. Replaced literal `"HEALTH"`, `"SUIT"`, `"AMMO"`, `"ALT"` in `WeaponHud::draw_status` with `&self.health_label`, `&self.suit_label`, `&self.ammo_label`, `&self.alt_label`.
+- Tests: added `central_fallback_table_resolves_standard_tokens_when_resources_absent`, `loaded_game_resources_take_precedence_over_central_fallbacks`, and audit test `audit_no_hardcoded_user_visible_strings_in_ui_code_outside_fallback_constants` ensuring non-test UI code contains no hardcoded user-visible literals outside the central table.
+- Simplified existing tests in `console.rs`, `resources.rs`, and `menu.rs` to rely on `Localization::default()` rather than manual inline token insertions.
+
+**Why:**
+- In the original GameUI and HUD, user-visible strings are loaded from localized resource files (`gameui_english.txt`, `valve_english.txt`, etc.). Hardcoded inline English strings break localization and maintainability. Centralizing fallback constants in a single table ensures that when game resources are missing, authentic fallbacks are used consistently without scattering ad-hoc string literals throughout UI draw routines or test fixtures.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all 300+ workspace tests pass.
+- `cargo test --locked -p hl2-ui`: all 139 unit tests pass.
+- `cargo test --locked -p hl2-ui -- --ignored`: 3 owned install tests pass.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+- Headless runtime: `hl2-bevy --frames 30` ran 30 frames cleanly on Metal.
+
+**Result:** All user-visible UI and HUD strings are resolved from game resources via `Localization`, with central authentic English fallbacks defined in one table. No hardcoded user-visible string literals remain in non-test UI code.
+
+**Still broken or not tested:** Manual visual check of HUD and dialog labels across non-English language packs.
+
+**Next:** Task 5 (Background map on submenu entry).
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
 

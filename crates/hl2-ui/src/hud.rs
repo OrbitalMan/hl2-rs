@@ -1,6 +1,7 @@
 //! The PC HL2 HUD layout is read from the owned game's scheme and resource files.
 //! Bucket positioning and visibility follow CHudWeaponSelection, rather than a new UI design.
 use crate::canvas::*;
+use crate::gameui::localize::Localization;
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
 use hl2_simulation::{
@@ -1449,6 +1450,10 @@ pub struct WeaponHud {
     damage_layout: [f32; 5],
     /// Client screen fades (CViewEffects).
     fades: MutexCell<crate::fades::ScreenFades>,
+    health_label: String,
+    suit_label: String,
+    ammo_label: String,
+    alt_label: String,
 }
 
 impl WeaponHud {
@@ -1592,6 +1597,20 @@ impl WeaponHud {
         for number in 1..=4 {
             corners.push(texture(vfs, &format!("vgui/hud/8x800corner{number}"))?);
         }
+        let mut loc = Localization::default();
+        for loc_path in [
+            "resource/valve_english.txt",
+            "resource/gameui_english.txt",
+            "resource/hl2_english.txt",
+        ] {
+            if let Ok(Some(bytes)) = vfs.read(loc_path) {
+                loc.add_resource(loc_path, &bytes);
+            }
+        }
+        let health_label = loc.text("#Valve_Hud_HEALTH");
+        let suit_label = loc.text("#Valve_Hud_SUIT");
+        let ammo_label = loc.text("#Valve_Hud_AMMO");
+        let alt_label = loc.text("#Valve_Hud_AMMO_ALT");
         Ok(Self {
             corners,
             canvas,
@@ -1650,6 +1669,10 @@ impl WeaponHud {
                 ]
             },
             fades: MutexCell::new(Default::default()),
+            health_label,
+            suit_label,
+            ammo_label,
+            alt_label,
         })
     }
 
@@ -2113,14 +2136,14 @@ impl WeaponHud {
         }
         self.numeric_panel(
             &self.health_panel,
-            "HEALTH",
+            &self.health_label,
             inv.health as i32,
             None,
             effects.panels[NumericPanel::Health as usize],
         );
         self.numeric_panel(
             &self.suit_panel,
-            "SUIT",
+            &self.suit_label,
             inv.armor as i32,
             None,
             effects.panels[NumericPanel::Suit as usize],
@@ -2135,14 +2158,14 @@ impl WeaponHud {
             let reserve = inv.reserve_for(&inv.active, weapons);
             self.numeric_panel(
                 &self.ammo_panel,
-                "AMMO",
+                &self.ammo_label,
                 if clip < 0 { reserve } else { clip },
                 (clip >= 0).then_some(reserve),
                 effects.panels[NumericPanel::Ammo as usize],
             );
             self.ammo_icon(
                 &self.ammo_panel,
-                "AMMO",
+                &self.ammo_label,
                 self.ammo_icons.get(&inv.active),
                 effects.panels[NumericPanel::Ammo as usize],
             );
@@ -2150,14 +2173,14 @@ impl WeaponHud {
         let secondary_effects = effects.panels[NumericPanel::AmmoSecondary as usize];
         self.numeric_panel(
             &self.secondary_ammo_panel,
-            "ALT",
+            &self.alt_label,
             effects.secondary_ammo,
             None,
             secondary_effects,
         );
         self.ammo_icon(
             &self.secondary_ammo_panel,
-            "ALT",
+            &self.alt_label,
             self.secondary_ammo_icons.get(&inv.active),
             secondary_effects,
         );

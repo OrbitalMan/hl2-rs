@@ -1048,14 +1048,7 @@ mod tests {
 
     #[test]
     fn return_to_main_menu_multiline_layout() {
-        let mut loc = Localization::default();
-        loc.insert("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU");
-        loc.insert(
-            "GameUI_MainMenuWarning",
-            "Are you sure?\\nAll unsaved progress will be lost.",
-        );
-        loc.insert("GameUI_OK", "OK");
-        loc.insert("GameUI_Cancel", "Cancel");
+        let loc = Localization::default();
         let msg_box = MessageBox::return_to_main_menu(&loc);
         assert_eq!(
             msg_box.text,

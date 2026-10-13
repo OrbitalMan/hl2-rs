@@ -111,28 +111,15 @@ impl LoadingDialog {
         if let Some(custom) = &self.status_override {
             return custom.clone();
         }
-        if let Some(stage) = self.stage {
-            if let Some(localized) = loc.lookup(stage) {
-                return localized.to_owned();
-            }
-            // Standard Source retail token fallbacks
-            match stage {
-                "LoadingProgress_SpawningServer" => "Starting local game server...".into(),
-                "LoadingProgress_LoadMap" => "Loading world...".into(),
-                "LoadingProgress_PrecacheWorld" => "Initializing world...".into(),
-                "LoadingProgress_SignonDataLocal" => "Initializing game data...".into(),
-                "LoadingProgress_LoadResources" => "Loading resources...".into(),
-                "LoadingProgress_SignonLocal" => "Initializing resources...".into(),
-                _ => stage.into(),
-            }
-        } else if let Some(template) = loc.lookup("GameUI_LoadingFilename") {
+        if let Some(stage) = &self.stage {
+            loc.text(stage)
+        } else {
+            let template = loc.text("#GameUI_LoadingFilename");
             if template.contains("%s1") {
                 template.replace("%s1", &self.map)
             } else {
-                format!("Loading {} ...", self.map)
+                format!("{template} {}", self.map)
             }
-        } else {
-            format!("Loading {} ...", self.map)
         }
     }
 
@@ -186,13 +173,7 @@ impl LoadingDialog {
             scale,
         };
 
-        // Title: "#GameUI_Loading" -> "LOADING...", no close button
-        let title_token = loc.localize("#GameUI_Loading");
-        let title = if title_token == "#GameUI_Loading" {
-            "LOADING...".into()
-        } else {
-            title_token
-        };
+        let title = loc.text("#GameUI_Loading");
         p.frame_with_close(dialog_size, &title, None);
 
         // Render each line inside the label area

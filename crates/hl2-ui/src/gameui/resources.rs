@@ -669,7 +669,6 @@ pub fn parse_gameinfo_title(bytes: &[u8]) -> Option<String> {
     }
 }
 
-/// Fallback titles for each menu category, resolving localized tokens if present with clean fallback strings.
 pub fn category_title_fallback(category: &str, loc: &Localization) -> String {
     let canonical = match category {
         "hl2ep1" => "episodic",
@@ -677,21 +676,21 @@ pub fn category_title_fallback(category: &str, loc: &Localization) -> String {
         "hl2lc" => "lostcoast",
         other => other,
     };
-    let hl2 = loc.lookup("GameUI_HalfLife2").unwrap_or("Half-Life 2");
+    let hl2 = loc.text("#GameUI_HalfLife2");
     match canonical {
         "episodic" => {
-            let ep1 = loc.lookup("GameUI_EpisodeOne").unwrap_or("Episode One");
+            let ep1 = loc.text("#GameUI_EpisodeOne");
             format!("{hl2}\n--- {ep1} ---")
         }
         "ep2" => {
-            let ep2 = loc.lookup("GameUI_EpisodeTwo").unwrap_or("Episode Two");
+            let ep2 = loc.text("#GameUI_EpisodeTwo");
             format!("{hl2}\n--- {ep2} ---")
         }
         "lostcoast" => {
-            let lc = loc.lookup("GameUI_LostCoast").unwrap_or("Lost Coast");
+            let lc = loc.text("#GameUI_LostCoast");
             format!("{hl2}\n--- {lc} ---")
         }
-        _ => hl2.to_owned(),
+        _ => hl2,
     }
 }
 
@@ -916,12 +915,7 @@ mod tests {
 
     #[test]
     fn category_titles_fallback_provides_two_line_episode_titles() {
-        let mut loc = Localization::default();
-        loc.insert("GameUI_HalfLife2", "Half-Life 2");
-        loc.insert("GameUI_EpisodeOne", "Episode One");
-        loc.insert("GameUI_EpisodeTwo", "Episode Two");
-        loc.insert("GameUI_LostCoast", "Lost Coast");
-
+        let loc = Localization::default();
         let titles = fallback_category_titles(&loc);
         assert_eq!(titles.get("main").map(String::as_str), Some("Half-Life 2"));
         assert_eq!(titles.get("hl2").map(String::as_str), Some("Half-Life 2"));

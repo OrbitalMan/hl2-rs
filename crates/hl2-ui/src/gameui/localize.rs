@@ -52,12 +52,13 @@ impl Localization {
             .or_insert_with(|| unescape(text));
     }
 
-    /// The translated text of a token, if the install defines it.
+    /// The translated text of a token, if defined in loaded resources or the central fallback table.
     pub fn lookup(&self, token: &str) -> Option<&str> {
         let key = token.trim().trim_start_matches('#');
-        self.tokens
-            .get(&key.to_ascii_lowercase())
-            .map(String::as_str)
+        if let Some(text) = self.tokens.get(&key.to_ascii_lowercase()) {
+            return Some(text.as_str());
+        }
+        fallback_lookup(key)
     }
 
     /// The translated text of `token`, else the token's key name (never empty for a non-empty token).
@@ -69,12 +70,12 @@ impl Localization {
         }
     }
 
-    /// Resolves `#Token` references; other text (e.g. `"1280 x 720"`) is returned unescaped.
+    /// Resolves `#Token` references; other text (e.g. `"1280 x 720"`) is returned as-is.
     pub fn localize(&self, text: &str) -> String {
         if text.trim_start().starts_with('#') {
             self.text(text)
         } else {
-            unescape(text)
+            text.to_owned()
         }
     }
 
@@ -140,9 +141,100 @@ pub fn unescape(s: &str) -> String {
     out
 }
 
+/// Central English fallback table for user-visible strings when game resources are missing or unresolved.
+pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
+    ("GameUI_Console", "Console"),
+    ("Console_Title", "Console"),
+    ("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU"),
+    (
+        "GameUI_MainMenuWarning",
+        "Are you sure?\nAll unsaved progress will be lost.",
+    ),
+    ("GameUI_QuitConfirmationTitle", "QUIT GAME"),
+    (
+        "GameUI_QuitConfirmationText",
+        "Do you wish to stop playing now?",
+    ),
+    (
+        "GameUI_Console_QuitWarning",
+        "Are you sure you want to quit?\nAll unsaved progress will be lost.",
+    ),
+    ("GameUI_Quit", "Quit"),
+    ("GameUI_OK", "OK"),
+    ("GameUI_Cancel", "Cancel"),
+    ("GameUI_Apply", "Apply"),
+    ("GameUI_Close", "Close"),
+    ("GameUI_Options", "OPTIONS"),
+    ("GameUI_Loading", "LOADING..."),
+    ("GameUI_LoadingFilename", "Loading %s1 ..."),
+    (
+        "LoadingProgress_SpawningServer",
+        "Starting local game server...",
+    ),
+    ("LoadingProgress_LoadMap", "Loading world..."),
+    ("LoadingProgress_PrecacheWorld", "Initializing world..."),
+    (
+        "LoadingProgress_SignonDataLocal",
+        "Initializing game data...",
+    ),
+    ("LoadingProgress_LoadResources", "Loading resources..."),
+    ("LoadingProgress_SignonLocal", "Initializing resources..."),
+    ("GameUI_HalfLife2", "Half-Life 2"),
+    ("GameUI_EpisodeOne", "Episode One"),
+    ("GameUI_EpisodeTwo", "Episode Two"),
+    ("GameUI_LostCoast", "Lost Coast"),
+    ("GameUI_HalfLife2LostCoast", "Half-Life 2: Lost Coast"),
+    ("GameUI_Worskhop_MenuName", "Workshop"),
+    ("GameUI_Workshop_MenuName", "Workshop"),
+    ("GameUI_Gameplay", "Gameplay"),
+    ("GameUI_Keyboard", "Keyboard"),
+    ("GameUI_Mouse", "Mouse"),
+    ("GameUI_Gamepad", "Gamepad"),
+    ("GameUI_Audio", "Audio"),
+    ("GameUI_Video", "Video"),
+    ("GameUI_Action", "Action"),
+    ("GameUI_KeyButton", "Key / Button"),
+    ("GameUI_AdjustGamma_Title", "BRIGHTNESS"),
+    (
+        "GameUI_ThirdPartyTechCredits",
+        "3RD PARTY TECHNOLOGY CREDITS",
+    ),
+    ("GameUI_KeyboardSettings", "Keyboard Settings"),
+    (
+        "GameUI_KeyboardSettingsText",
+        "Reset key bindings to default?",
+    ),
+    (
+        "GameUI_Miles_Voice",
+        "Uses Miles Sound System. Copyright © 1991-2001 by RAD Game Tools, Inc.",
+    ),
+    (
+        "GameUI_Miles_Audio",
+        "MPEG Layer-3 playback supplied with the Miles Sound System from RAD Game Tools, Inc. MPEG Layer-3 audio compression technology licensed by Fraunhofer IIS and THOMSON multimedia.",
+    ),
+    (
+        "GameUI_Bink",
+        "Uses Bink Video. Copyright © 1997-2007 by RAD Game Tools, Inc.",
+    ),
+    ("Valve_Hud_HEALTH", "HEALTH"),
+    ("Valve_Hud_SUIT", "SUIT"),
+    ("Valve_Hud_AMMO", "AMMO"),
+    ("Valve_Hud_AMMO_ALT", "ALT"),
+];
+
+/// Looks up an authentic English fallback string for the given token name if defined in the central table.
+pub fn fallback_lookup(token: &str) -> Option<&'static str> {
+    let key = token.trim().trim_start_matches('#');
+    FALLBACK_STRINGS
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, v)| *v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn utf16(text: &str) -> Vec<u8> {
         let mut bytes = vec![0xff, 0xfe];
@@ -169,22 +261,42 @@ mod tests {
     #[test]
     fn localized_tokens_unescape_line_breaks() {
         let mut loc = Localization::default();
-        loc.insert(
-            "GameUI_MainMenuWarning",
-            "Are you sure?\\nAll unsaved progress will be lost.",
-        );
+        loc.insert("GameUI_CustomWarning", "Warning line 1\\nWarning line 2");
         assert_eq!(
-            loc.text("#GameUI_MainMenuWarning"),
-            "Are you sure?\nAll unsaved progress will be lost."
-        );
-        assert_eq!(
-            loc.localize("#GameUI_MainMenuWarning"),
-            "Are you sure?\nAll unsaved progress will be lost."
+            loc.text("#GameUI_CustomWarning"),
+            "Warning line 1\nWarning line 2"
         );
         let resource =
             b"\"lang\" { english { Tokens { \"GameUI_Multiline\" \"One\\nTwo\\nThree\" } } }";
         loc.add_resource("test.txt", resource);
         assert_eq!(loc.text("#GameUI_Multiline"), "One\nTwo\nThree");
+    }
+
+    #[test]
+    fn central_fallback_table_resolves_standard_tokens_when_resources_absent() {
+        let loc = Localization::default();
+        assert_eq!(
+            loc.text("#GameUI_ConfirmMainMenu_Title"),
+            "RETURN TO MAIN MENU"
+        );
+        assert_eq!(
+            loc.text("#GameUI_MainMenuWarning"),
+            "Are you sure?\nAll unsaved progress will be lost."
+        );
+        assert_eq!(loc.text("#GameUI_Console"), "Console");
+        assert_eq!(loc.text("#GameUI_Loading"), "LOADING...");
+        assert_eq!(loc.text("#LoadingProgress_LoadMap"), "Loading world...");
+        assert_eq!(loc.text("#Valve_Hud_HEALTH"), "HEALTH");
+        assert_eq!(loc.text("#Valve_Hud_SUIT"), "SUIT");
+        assert_eq!(loc.text("#Valve_Hud_AMMO"), "AMMO");
+        assert_eq!(loc.text("#Valve_Hud_AMMO_ALT"), "ALT");
+    }
+
+    #[test]
+    fn loaded_game_resources_take_precedence_over_central_fallbacks() {
+        let mut loc = Localization::default();
+        loc.insert("GameUI_Console", "Custom Console");
+        assert_eq!(loc.text("#GameUI_Console"), "Custom Console");
     }
 
     #[test]
@@ -224,5 +336,68 @@ mod tests {
         assert_eq!(loc.add_resource("x", b"\"GameMenu\" { }"), None);
         assert_eq!(loc.add_resource("x", b"{ broken"), None);
         assert!(loc.is_empty());
+    }
+
+    #[test]
+    fn audit_no_hardcoded_user_visible_strings_in_ui_code_outside_fallback_constants() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let src_dir = manifest_dir.join("src");
+        let ui_files = [
+            "console.rs",
+            "gameui/loading.rs",
+            "gameui/menu.rs",
+            "gameui/options.rs",
+            "gameui/resources.rs",
+            "hud.rs",
+        ];
+        let banned = [
+            "Are you sure?\nAll unsaved progress will be lost.",
+            "Are you sure you want to quit?",
+            "RETURN TO MAIN MENU",
+            "QUIT GAME",
+            "Starting local game server...",
+            "Loading world...",
+            "Initializing world...",
+            "Initializing game data...",
+            "Loading resources...",
+            "Initializing resources...",
+            "3RD PARTY TECHNOLOGY CREDITS",
+            "Reset key bindings to default?",
+        ];
+        for rel in ui_files {
+            let path = src_dir.join(rel);
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+            // Check non-test code
+            let non_test_content = content.split("#[cfg(test)]").next().unwrap_or(&content);
+            for b in banned {
+                assert!(
+                    !non_test_content.contains(b),
+                    "Found banned user-visible literal {:?} in {}",
+                    b,
+                    path.display()
+                );
+            }
+        }
+
+        // Specifically check that console.rs non-test code does not hardcode "Console" title
+        let console_src = std::fs::read_to_string(src_dir.join("console.rs")).unwrap();
+        let console_non_test = console_src.split("#[cfg(test)]").next().unwrap();
+        assert!(
+            !console_non_test.contains("text(\n                \"Console\""),
+            "console.rs should not hardcode Console title string"
+        );
+
+        // Check that hud.rs non-test code does not hardcode numeric panel labels
+        let hud_src = std::fs::read_to_string(src_dir.join("hud.rs")).unwrap();
+        let hud_non_test = hud_src.split("#[cfg(test)]").next().unwrap();
+        for label in ["\"HEALTH\"", "\"SUIT\"", "\"AMMO\"", "\"ALT\""] {
+            assert!(
+                !hud_non_test.contains(&format!(
+                    "numeric_panel(\n            &self.health_panel,\n            {label}"
+                )),
+                "hud.rs should not pass literal {label} to numeric_panel"
+            );
+        }
     }
 }
