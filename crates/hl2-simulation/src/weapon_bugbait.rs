@@ -19,9 +19,9 @@ pub const BAIT_MODEL: &str = "models/weapons/w_bugbait.mdl";
 pub const HEAR_RADIUS: f32 = 2500.;
 pub const DISTRACT_TIME: f32 = 5.;
 pub const GRENADE_RADIUS: f32 = 150.;
-/// BugBaitTouch UTIL_DecalTrace "BeerSplash" (retail decals_subrect.txt maps it to
-/// decals/beersplash_subrect, an atlas copy of this material).
-pub const SPLAT_DECAL: &str = "decals/beersplash";
+/// BugBaitTouch UTIL_DecalTrace "BeerSplash": retail decals_subrect.txt maps it to this
+/// Subrect of the decals/decals_lit atlas (translucent LightmappedGeneric).
+pub const SPLAT_DECAL: &str = "decals/beersplash_subrect";
 /// CGrenadeBugBait::Spawn UTIL_SetSize(-2, 2).
 const HALF_SIZE: f32 = 2.;
 const GRAVITY: f32 = 600.;

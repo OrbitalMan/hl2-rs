@@ -140,27 +140,9 @@ impl Impacts {
             .chain([crate::weapon_bugbait::SPLAT_DECAL.to_string()]);
         {
             for material in materials {
-                match crate::projectile_visuals::load_sprite(vfs, &material) {
-                    Ok(sprite) => {
-                        let scale = vfs
-                            .material_value(&material, "$decalscale")
-                            .ok()
-                            .flatten()
-                            .and_then(|s| s.parse::<f32>().ok())
-                            .unwrap_or(0.1);
-                        let translucent = vfs
-                            .material_value(&material, "$translucent")
-                            .ok()
-                            .flatten()
-                            .is_some_and(|v| v.trim() == "1");
-                        result.textures.insert(
-                            material,
-                            Texture {
-                                image: sprite.image,
-                                scale,
-                                translucent,
-                            },
-                        );
+                match load_decal(vfs, &material) {
+                    Ok(texture) => {
+                        result.textures.insert(material, texture);
                     }
                     Err(e) => {
                         result.errors.insert(material, format!("{e:#}"));
@@ -543,17 +525,20 @@ impl Impacts {
             return;
         };
         let factor = texture.scale;
-        // LightmappedGeneric decals are lit like the surface beneath; the leaf ambient
-        // cube and world lights at the hit stand in for the lightmap sample.
+        // LightmappedGeneric decals multiply by the lightmap of the surface beneath
+        // (DecalBaseTimesLightmapAlphaBlend): sample it at the hit; the leaf ambient
+        // cube stands in where the surface has no lightmap (models).
         let tint = if texture.translucent {
-            world.lighting.as_ref().map_or([1.; 3], |lighting| {
-                let n = normal.normalize_or_zero();
-                let light =
-                    lighting
-                        .state_at(hit.position + n)
-                        .vertex_light(hit.position, n, false);
-                light.to_array()
-            })
+            lightmap_light(world, surfaces, center, normal)
+                .or_else(|| {
+                    world.lighting.as_ref().map(|lighting| {
+                        let n = normal.normalize_or_zero();
+                        lighting
+                            .state_at(hit.position + n)
+                            .vertex_light(hit.position, n, false)
+                    })
+                })
+                .map_or([1.; 3], |light| light.to_array())
         } else {
             [1.; 3]
         };
@@ -583,6 +568,132 @@ impl Impacts {
     }
 }
 
+/// A decal material's texture. Retail decals_subrect.txt names "Subrect" materials
+/// ($Material atlas, $Pos/$Size in the atlas's full-size texels, own $decalscale); the
+/// atlas region is cut from the decoded (possibly reduced) mip.
+fn load_decal(vfs: &Vfs, material: &str) -> anyhow::Result<Texture> {
+    use anyhow::Context;
+    let value = |m: &str, key: &str| vfs.material_value(m, key).ok().flatten();
+    let scale = value(material, "$decalscale")
+        .and_then(|s| s.trim().parse::<f32>().ok())
+        .unwrap_or(0.1);
+    let Some(atlas) = value(material, "$Material") else {
+        let sprite = crate::projectile_visuals::load_sprite(vfs, material)?;
+        return Ok(Texture {
+            image: sprite.image,
+            scale,
+            translucent: value(material, "$translucent").is_some_and(|v| v.trim() == "1"),
+        });
+    };
+    let pair = |key: &str| -> anyhow::Result<[usize; 2]> {
+        let text = value(material, key).with_context(|| format!("subrect {key} missing"))?;
+        let v: Vec<usize> = text
+            .split_whitespace()
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .with_context(|| format!("subrect {key} {text}"))?;
+        anyhow::ensure!(v.len() == 2, "subrect {key} {text}");
+        Ok([v[0], v[1]])
+    };
+    let (pos, size) = (pair("$Pos")?, pair("$Size")?);
+    let base = vfs
+        .base_texture(&atlas)?
+        .context("subrect atlas base texture missing")?;
+    let data = vfs
+        .read(&format!("materials/{}.vtf", base.trim_end_matches(".vtf")))?
+        .context("subrect atlas texture missing")?;
+    // VTF header: full-size width/height at bytes 16/18.
+    let full = usize::from(u16::from_le_bytes([
+        *data.get(16).context("short VTF")?,
+        *data.get(17).context("short VTF")?,
+    ]));
+    let sprite = crate::projectile_visuals::load_sprite(vfs, &atlas)?;
+    let atlas_image = &sprite.image;
+    let (w, h) = (
+        usize::from(atlas_image.width),
+        usize::from(atlas_image.height),
+    );
+    let ratio = w as f32 / full.max(1) as f32;
+    let [x0, y0] = pos.map(|v| (v as f32 * ratio) as usize);
+    let [cw, ch] = size.map(|v| ((v as f32 * ratio) as usize).max(1));
+    anyhow::ensure!(x0 + cw <= w && y0 + ch <= h, "subrect outside its atlas");
+    let mut rgba = Vec::with_capacity(cw * ch * 4);
+    for y in y0..y0 + ch {
+        rgba.extend_from_slice(&atlas_image.rgba[(y * w + x0) * 4..(y * w + x0 + cw) * 4]);
+    }
+    Ok(Texture {
+        // The decal's world size follows the full-size subrect: scale the width the
+        // projection reads back up to full-size texels.
+        scale: scale * size[0] as f32 / cw as f32,
+        image: Arc::new(vtf::Image {
+            width: u16::try_from(cw)?,
+            height: u16::try_from(ch)?,
+            rgba,
+            format: atlas_image.format,
+            translucent: atlas_image.translucent,
+        }),
+        translucent: value(&atlas, "$translucent").is_some_and(|v| v.trim() == "1"),
+    })
+}
+/// Baked light (linear) at `point` on the lightmapped face of `surfaces` it lies on.
+fn lightmap_light(
+    world: &World,
+    surfaces: &[Surface],
+    point: GVec3,
+    normal: GVec3,
+) -> Option<GVec3> {
+    let normal = normal.normalize_or_zero();
+    for surface in surfaces.iter().filter(|s| !s.background) {
+        let Some(lightmap) = surface.lightmap.and_then(|i| world.lightmaps.get(i)) else {
+            continue;
+        };
+        for tri in surface.indices.as_chunks::<3>().0 {
+            let v = [0, 1, 2].map(|k| &surface.vertices[tri[k] as usize]);
+            let (a, b, c) = (v[0].position, v[1].position, v[2].position);
+            let n = (b - a).cross(c - a);
+            if n.length_squared() < 1e-8
+                || n.normalize().dot(normal).abs() < 0.85
+                || (point - a).dot(n.normalize()).abs() > 1.
+            {
+                continue;
+            }
+            // Barycentric coordinates of the point projected onto the triangle.
+            let (e0, e1, e2) = (b - a, c - a, point - a);
+            let (d00, d01, d11) = (e0.dot(e0), e0.dot(e1), e1.dot(e1));
+            let (d20, d21) = (e2.dot(e0), e2.dot(e1));
+            let denom = d00 * d11 - d01 * d01;
+            if denom.abs() < 1e-8 {
+                continue;
+            }
+            let w1 = (d11 * d20 - d01 * d21) / denom;
+            let w2 = (d00 * d21 - d01 * d20) / denom;
+            let w0 = 1. - w1 - w2;
+            if w0 < -0.01 || w1 < -0.01 || w2 < -0.01 {
+                continue;
+            }
+            let uv = v[0].light_uv * w0 + v[1].light_uv * w1 + v[2].light_uv * w2;
+            let x =
+                ((uv.x * f32::from(lightmap.width)) as usize).min(usize::from(lightmap.width) - 1);
+            let y = ((uv.y * f32::from(lightmap.height)) as usize)
+                .min(usize::from(lightmap.height) - 1);
+            let texel = (y * usize::from(lightmap.width) + x) * 4;
+            let rgb = lightmap.rgba.get(texel..texel + 3)?;
+            return Some(GVec3::new(half(rgb[0]), half(rgb[1]), half(rgb[2])));
+        }
+    }
+    None
+}
+/// IEEE half-float bits to f32.
+fn half(bits: u16) -> f32 {
+    let sign = if bits & 0x8000 != 0 { -1. } else { 1. };
+    let exponent = i32::from((bits >> 10) & 0x1f);
+    let mantissa = f32::from(bits & 0x3ff);
+    sign * match exponent {
+        0 => mantissa * 2f32.powi(-24),
+        31 => f32::INFINITY,
+        e => (1. + mantissa / 1024.) * 2f32.powi(e - 15),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
