@@ -1366,6 +1366,27 @@ impl Inventory {
                                 ..name.as_str().into()
                             });
                         }
+                        // PropBreakableCreateAll takes the prop's pose and motion.
+                        let body = physics.entity_body(id).filter(|_| !npc);
+                        if let (Some(body), Some(instance), Some(state)) = (
+                            body,
+                            world.model_instances.iter().find(|i| i.entity == Some(id)),
+                            body.and_then(|b| physics.body_state(b)),
+                        ) {
+                            let angular = state.rotation
+                                * (state.local_angular_degrees * std::f32::consts::PI / 180.);
+                            let center_of_mass =
+                                physics.center_of_mass(body).unwrap_or(state.position);
+                            scene.prop_breaks.push(crate::gibs::PropBreak {
+                                entity: id,
+                                model_key: instance.asset_key(),
+                                origin: state.position,
+                                rotation: state.rotation,
+                                velocity: state.velocity,
+                                angular_velocity: angular,
+                                center_of_mass,
+                            });
+                        }
                         scene.states[id].killed = true;
                         scene.states[id].visible = false;
                         physics.set_entity(

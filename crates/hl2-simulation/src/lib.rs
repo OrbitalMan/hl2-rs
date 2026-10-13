@@ -11,6 +11,7 @@ pub mod actors;
 pub mod entities;
 pub mod footsteps;
 pub mod gameplay;
+pub mod gibs;
 pub mod globals;
 pub mod grab;
 pub mod impact_damage;

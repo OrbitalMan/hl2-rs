@@ -111,6 +111,8 @@ pub struct Gameplay {
     pub selection: Selection,
     pub npcs: Controller,
     pub projectiles: Projectiles,
+    /// Gibs of broken props (runtime prop bodies until DESIGN 14r entities).
+    pub gibs: hl2_simulation::gibs::Gibs,
     pub impacts: hl2_simulation::impacts::Impacts,
     pub primary: bool,
     pub secondary: bool,
@@ -298,6 +300,7 @@ impl Gameplay {
             selection: Selection::new(),
             npcs: Controller::new(None, Default::default()),
             projectiles: Projectiles::default(),
+            gibs: Default::default(),
             impacts: Default::default(),
             primary: false,
             secondary: false,
@@ -347,6 +350,7 @@ impl Gameplay {
             selection: Selection::new(),
             npcs,
             projectiles: Projectiles::default(),
+            gibs: Default::default(),
             primary: false,
             secondary: false,
             actions: vec![],
@@ -684,6 +688,13 @@ impl Gameplay {
         damage.append(&mut self.scene.entity_damage);
         self.inventory
             .apply_projectile_damage(damage, &self.world, &mut self.scene, physics);
+        // PropBreakableCreateAll for props broken by this tick's damage.
+        self.gibs.spawn(
+            std::mem::take(&mut self.scene.prop_breaks),
+            &self.world,
+            physics,
+            self.scene.time,
+        );
         physics.tick(TICK);
         // VPhysicsShadowCollision impact damage to NPCs (queued for the next tick).
         let held = |id: usize| {
@@ -707,6 +718,9 @@ impl Gameplay {
             &mut physics.launched,
             &held,
         );
+        // Gib poses and SUB_FadeOut (not while seen or held).
+        self.gibs
+            .tick(physics, self.scene.time, TICK, eye, direction, held);
         // VPhysics impact sounds of props and thrown frags (PhysCollisionSound).
         self.impacts
             .physics_collision_sounds(physics, &self.world, &mut self.scene);
@@ -776,7 +790,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

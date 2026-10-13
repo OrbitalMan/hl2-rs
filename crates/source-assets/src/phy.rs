@@ -259,7 +259,7 @@ pub fn solids(entries: &[keyvalues::Entry]) -> Vec<modkit_core::PhysicsSolid> {
 }
 
 /// CBreakParser (props_shared.cpp): the `break` blocks of the PHY KeyValues, in file
-/// order. Unknown keys (burst, placement, multiplayer_break, velocity) are ignored.
+/// order. Unknown keys (placement, multiplayer_break, velocity) are ignored.
 pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel> {
     entries
         .iter()
@@ -273,6 +273,7 @@ pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel
                 fade_time: 20.,
                 debris: None,
                 motion_disabled: false,
+                burst: None,
             };
             for child in block.children() {
                 let Some(value) = child.text().map(str::trim) else {
@@ -298,6 +299,7 @@ pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel
                     "health" => gib.health = number.unwrap_or(gib.health),
                     "fadetime" => gib.fade_time = number.unwrap_or(gib.fade_time),
                     "debris" => gib.debris = number.map(|v| v > 0.),
+                    "burst" => gib.burst = number,
                     _ => {}
                 }
             }

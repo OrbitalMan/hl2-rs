@@ -261,6 +261,8 @@ pub struct Scene {
     pub globals: crate::globals::Globals,
     /// Damage dealt to entities by scene logic (trigger_hurt) this tick.
     pub entity_damage: Vec<crate::projectiles::Damage>,
+    /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
+    pub prop_breaks: Vec<crate::gibs::PropBreak>,
     /// Set by the host: a dead player no longer takes damage (m_takedamage).
     pub player_dead: bool,
     /// ScreenFade messages for the local player (env_fade).
@@ -308,6 +310,7 @@ impl Scene {
             player_damage: Vec::new(),
             globals: crate::globals::Globals::spawn(world),
             entity_damage: Vec::new(),
+            prop_breaks: Vec::new(),
             keyvalue_overrides: BTreeMap::new(),
             player_dead: false,
             screen_fades: Vec::new(),

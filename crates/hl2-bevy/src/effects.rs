@@ -19,14 +19,23 @@ use std::collections::BTreeMap;
 
 pub struct PreparedEffects {
     pub sprites: ProjectileVisuals,
-    /// Rendered projectile models (SMG grenade, frag grenade) by model path.
-    pub models: BTreeMap<&'static str, Vec<Surface>>,
+    /// Rendered projectile and gib models (SMG grenade, frag grenade, the map's
+    /// breakable-prop gibs) by model path.
+    pub models: BTreeMap<String, Vec<Surface>>,
     model_errors: Vec<String>,
 }
 impl PreparedEffects {
-    pub fn load(vfs: &Vfs) -> Self {
+    pub fn load(vfs: &Vfs, world: &modkit_core::World) -> Self {
         let mut model_errors = Vec::new();
         let mut loaded = BTreeMap::new();
+        // Gib models are precached with their breakable props (PrecacheGibsForModel).
+        let gibs: std::collections::BTreeSet<&str> = world
+            .model_breaks
+            .values()
+            .flatten()
+            .filter(|gib| !gib.ragdoll)
+            .map(|gib| gib.model.as_str())
+            .collect();
         for path in [
             hl2_simulation::projectiles::GRENADE_MODEL,
             hl2_simulation::projectiles::FRAG_MODEL,
@@ -34,13 +43,16 @@ impl PreparedEffects {
             hl2_simulation::weapon_rpg::MISSILE_LAUNCH_MODEL,
             hl2_simulation::weapon_rpg::MISSILE_MODEL,
             hl2_simulation::weapon_bugbait::BAIT_MODEL,
-        ] {
+        ]
+        .into_iter()
+        .chain(gibs)
+        {
             match models::read_model(vfs, path, 0).and_then(|mut surfaces| {
                 pose_sequence_zero(vfs, path, &mut surfaces)?;
                 Ok(surfaces)
             }) {
                 Ok(surfaces) => {
-                    loaded.insert(path, surfaces);
+                    loaded.insert(path.to_string(), surfaces);
                 }
                 Err(e) => model_errors.push(format!("{path}: {e:#}")),
             }
@@ -193,7 +205,13 @@ pub struct Effects {
     materials: BTreeMap<String, Handle<EffectMaterial>>,
     quads: Vec<QuadDraw>,
     marks: BTreeMap<usize, (Entity, Handle<Mesh>)>,
-    grenade_meshes: BTreeMap<&'static str, Vec<ModelPart>>,
+    grenade_meshes: BTreeMap<String, Vec<ModelPart>>,
+    /// Gib draws by gib id: entity, its own material (lighting and fade alpha) and the
+    /// material's authored alpha mode.
+    gibs: BTreeMap<u64, Vec<(Entity, Handle<rendering::SourceMaterial>, AlphaMode)>>,
+    /// Lighting origin and alpha last applied per gib.
+    gib_state: BTreeMap<u64, (glam::Vec3, u8)>,
+    gib_draws: usize,
     grenades: BTreeMap<u64, Vec<Entity>>,
     /// Stuck crossbow bolt model instances by StuckBolt id.
     stuck: BTreeMap<u64, Vec<Entity>>,
@@ -217,7 +235,7 @@ impl Effects {
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"sprite_draws":self.draws,"pooled_quads":self.quads.len(),
             "viewmodel_sprite_draws":self.viewmodel_draws,"stuck_bolt_draws":self.stuck.len(),
-            "grenade_draws":self.grenade_draws,"decal_draws":self.mark_draws,"pose_mismatches":self.pose_mismatches, "observed_decals":self.observed_decals,"observed_grenades":self.observed_grenades,
+            "grenade_draws":self.grenade_draws,"gib_draws":self.gib_draws,"decal_draws":self.mark_draws,"pose_mismatches":self.pose_mismatches, "observed_decals":self.observed_decals,"observed_grenades":self.observed_grenades,
             "ball_frames":self.source.ball_frames,"effect_frames":self.source.effect_frames,
             "particle_emitters":self.source.particles.diagnostics,"missing_particle_draws":self.source.missing_particle_draws,
             "sprite_errors":self.source.errors,"model_errors":self.model_errors,
@@ -306,7 +324,7 @@ pub fn install(
         .effects
         .models
         .iter()
-        .flat_map(|(model, surfaces)| surfaces.iter().map(move |s| (*model, s)))
+        .flat_map(|(model, surfaces)| surfaces.iter().map(move |s| (model.clone(), s)))
     {
         let fallback = crate::assets::MaterialData::default();
         let definition = loaded.materials.get(&surface.material).unwrap_or(&fallback);
@@ -352,6 +370,9 @@ pub fn install(
         pose_mismatches: 0,
         observed_decals: 0,
         observed_grenades: 0,
+        gibs: BTreeMap::new(),
+        gib_state: BTreeMap::new(),
+        gib_draws: 0,
     });
 }
 pub fn adopt(source: ProjectileVisuals, commands: &mut Commands) {
@@ -780,6 +801,94 @@ pub fn present(
         effects.stuck.insert(bolt.id, entities);
     }
 }
+
+/// Breakable-prop gibs: the gib model at its body pose, lit from the map's light state
+/// at its center like other studio models, and alpha-blended while SUB_FadeOut runs.
+pub fn present_gibs(
+    mut commands: Commands,
+    mut effects: ResMut<Effects>,
+    game: Res<Gameplay>,
+    mut materials: ResMut<Assets<rendering::SourceMaterial>>,
+    mut draws: Query<&mut Transform, With<GibDraw>>,
+) {
+    let live: std::collections::BTreeSet<u64> = game.gibs.active.iter().map(|g| g.id).collect();
+    let gone: Vec<u64> = effects
+        .gibs
+        .keys()
+        .copied()
+        .filter(|id| !live.contains(id))
+        .collect();
+    for id in gone {
+        for (entity, material, _) in effects.gibs.remove(&id).unwrap_or_default() {
+            commands.entity(entity).despawn();
+            materials.remove(&material);
+        }
+        effects.gib_state.remove(&id);
+    }
+    effects.gib_draws = 0;
+    let lighting = game.world.lighting.as_deref();
+    for gib in &game.gibs.active {
+        let transform = rendering::entity_transform(gib.position, gib.rotation);
+        if !effects.gibs.contains_key(&gib.id) {
+            let parts: Vec<ModelPart> = effects
+                .grenade_meshes
+                .get(&gib.model)
+                .cloned()
+                .unwrap_or_default();
+            let mut spawned = Vec::new();
+            for (mesh, material) in parts {
+                let Some(own) = materials.get(&material).cloned() else {
+                    continue;
+                };
+                let alpha = own.alpha;
+                let own = materials.add(own);
+                let entity = commands
+                    .spawn((
+                        crate::campaign::MapOwned,
+                        Mesh3d(mesh),
+                        MeshMaterial3d(own.clone()),
+                        transform,
+                        Visibility::Visible,
+                        GibDraw,
+                    ))
+                    .id();
+                spawned.push((entity, own, alpha));
+            }
+            effects.gibs.insert(gib.id, spawned);
+        }
+        let center = gib.position;
+        let refresh = effects
+            .gib_state
+            .get(&gib.id)
+            .is_none_or(|(last, alpha)| last.distance_squared(center) >= 1. || *alpha != gib.alpha);
+        effects.gib_draws += effects.gibs[&gib.id].len();
+        let parts = &effects.gibs[&gib.id];
+        for (entity, material, authored) in parts {
+            if let Ok(mut current) = draws.get_mut(*entity) {
+                *current = transform;
+            }
+            if !refresh {
+                continue;
+            }
+            if let Some(mut m) = materials.get_mut(material) {
+                if let Some(data) = lighting {
+                    m.lighting =
+                        rendering::ModelLighting::from_state(&data.state_at(center), false);
+                }
+                m.tint.w = f32::from(gib.alpha) / 255.;
+                // kRenderTransTexture once the fade starts.
+                m.alpha = if gib.alpha < 255 {
+                    AlphaMode::Blend
+                } else {
+                    *authored
+                };
+            }
+        }
+        effects.gib_state.insert(gib.id, (center, gib.alpha));
+    }
+}
+#[derive(Component)]
+pub(crate) struct GibDraw;
 
 fn agrees(actual: &Transform, expected: &Transform) -> bool {
     actual.translation.distance(expected.translation) < 0.001

@@ -174,6 +174,10 @@ pub struct BreakModel {
     /// "debris" > 0: COLLISION_GROUP_DEBRIS.
     pub debris: Option<bool>,
     pub motion_disabled: bool,
+    /// "burst": outward speed (units/s) away from the parent origin; absent = the
+    /// breaking prop's default (CBreakableProp::Break: 100).
+    #[serde(default)]
+    pub burst: Option<f32>,
 }
 impl Default for PhysicsSolid {
     fn default() -> Self {

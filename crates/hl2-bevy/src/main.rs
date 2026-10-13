@@ -383,6 +383,7 @@ fn main() -> Result<()> {
                 rendering::present_entities,
                 rendering::present_weapons,
                 effects::present,
+                effects::present_gibs,
                 sky::present,
                 monitors::present,
                 monitors::present_materials,

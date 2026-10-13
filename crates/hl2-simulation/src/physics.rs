@@ -1202,6 +1202,63 @@ impl Physics {
         velocity: Vec3,
         local_angular_degrees: Vec3,
     ) -> RigidBodyHandle {
+        self.add_runtime_body(
+            world,
+            model_key,
+            half_extents,
+            position,
+            rotation,
+            velocity,
+            local_angular_degrees,
+            false,
+        )
+    }
+    /// A runtime prop_physics body (BreakModelCreate_Prop: a gib): the model's .phy
+    /// solid like `add_projectile_body`, but colliding as an ordinary prop (NPC hulls,
+    /// other props and gibs, the player shadow) with the VPhysics margin and the .phy's
+    /// stored drag fractions.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_prop_body(
+        &mut self,
+        world: &World,
+        model_key: &str,
+        half_extents: Vec3,
+        position: Vec3,
+        rotation: Quat,
+        velocity: Vec3,
+        local_angular_degrees: Vec3,
+    ) -> RigidBodyHandle {
+        let body = self.add_runtime_body(
+            world,
+            model_key,
+            half_extents,
+            position,
+            rotation,
+            velocity,
+            local_angular_degrees,
+            true,
+        );
+        if let Some(fractions) = world
+            .model_physics
+            .get(model_key)
+            .and_then(|s| s.drag_fractions)
+        {
+            self.drag_fractions.insert(body, fractions);
+        }
+        body
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn add_runtime_body(
+        &mut self,
+        world: &World,
+        model_key: &str,
+        half_extents: Vec3,
+        position: Vec3,
+        rotation: Quat,
+        velocity: Vec3,
+        local_angular_degrees: Vec3,
+        prop: bool,
+    ) -> RigidBodyHandle {
         let solid = world
             .model_physics
             .get(model_key)
@@ -1261,15 +1318,19 @@ impl Physics {
         self.ccd_gated.insert(body, 0.);
         let material = surface_material(world, &solid.surfaceprop);
         for shape in shapes {
-            let builder =
-                ColliderBuilder::new(shape)
-                    .density(0.)
-                    .collision_groups(InteractionGroups::new(
-                        PROJECTILE_GROUP,
-                        Group::ALL
-                            .difference(NPC_GROUP)
-                            .difference(PROJECTILE_GROUP),
-                    ));
+            let builder = ColliderBuilder::new(shape).density(0.);
+            let builder = if prop {
+                builder
+                    .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                    .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS)
+            } else {
+                builder.collision_groups(InteractionGroups::new(
+                    PROJECTILE_GROUP,
+                    Group::ALL
+                        .difference(NPC_GROUP)
+                        .difference(PROJECTILE_GROUP),
+                ))
+            };
             let builder = match material {
                 Some(m) => builder
                     .friction(m.friction)
@@ -1738,6 +1799,15 @@ impl Physics {
             b.set_linvel(vector(velocity), true);
             b.set_angvel(vector![w.x, w.y, w.z], true);
         }
+    }
+    /// The entity's VPhysics body (map prop or bound runtime body).
+    pub fn entity_body(&self, id: usize) -> Option<RigidBodyHandle> {
+        self.dynamic.get(&id).copied()
+    }
+    /// World center of mass (units); the body's linear velocity is the velocity there.
+    pub fn center_of_mass(&self, handle: RigidBodyHandle) -> Option<Vec3> {
+        let c = self.bodies.get(handle)?.center_of_mass();
+        Some(Vec3::new(c.x, c.y, c.z) / SCALE)
     }
     pub fn entity_pose(&self, id: usize) -> Option<(Vec3, Quat)> {
         let b = self.bodies.get(*self.dynamic.get(&id)?)?;

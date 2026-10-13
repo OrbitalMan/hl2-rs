@@ -208,7 +208,7 @@ pub fn load_with_canvas(
     let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
-    let effects = crate::effects::PreparedEffects::load(&vfs);
+    let effects = crate::effects::PreparedEffects::load(&vfs, &world);
     let mut names = rendered_material_names(&world);
     names.extend(
         effects
