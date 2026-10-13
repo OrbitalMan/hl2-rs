@@ -37,7 +37,7 @@ impl Localization {
             if let std::collections::hash_map::Entry::Vacant(slot) =
                 self.tokens.entry(entry.key.to_ascii_lowercase())
             {
-                slot.insert(text.to_owned());
+                slot.insert(unescape(text));
                 added += 1;
             }
         }
@@ -49,7 +49,7 @@ impl Localization {
     pub fn insert(&mut self, token: &str, text: &str) {
         self.tokens
             .entry(token.trim_start_matches('#').to_ascii_lowercase())
-            .or_insert_with(|| text.to_owned());
+            .or_insert_with(|| unescape(text));
     }
 
     /// The translated text of a token, if the install defines it.
@@ -69,12 +69,12 @@ impl Localization {
         }
     }
 
-    /// Resolves `#Token` references; other text (e.g. `"1280 x 720"`) is returned unchanged.
+    /// Resolves `#Token` references; other text (e.g. `"1280 x 720"`) is returned unescaped.
     pub fn localize(&self, text: &str) -> String {
         if text.trim_start().starts_with('#') {
             self.text(text)
         } else {
-            text.to_owned()
+            unescape(text)
         }
     }
 
@@ -101,6 +101,45 @@ fn token_block(root: &Entry) -> Option<&Entry> {
     })
 }
 
+/// Unescapes common Source localization escape sequences (`\n`, `\r`, `\t`, `\"`, `\\`),
+/// leaving non-escape backslashes intact.
+pub fn unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.peek() {
+                Some('n') => {
+                    chars.next();
+                    out.push('\n');
+                }
+                Some('r') => {
+                    chars.next();
+                    out.push('\r');
+                }
+                Some('t') => {
+                    chars.next();
+                    out.push('\t');
+                }
+                Some('\\') => {
+                    chars.next();
+                    out.push('\\');
+                }
+                Some('"') => {
+                    chars.next();
+                    out.push('"');
+                }
+                _ => {
+                    out.push('\\');
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +150,41 @@ mod tests {
             bytes.extend(unit.to_le_bytes());
         }
         bytes
+    }
+
+    #[test]
+    fn unescape_handles_linebreaks_tabs_quotes_and_preserves_literal_backslashes() {
+        assert_eq!(unescape("No escapes here"), "No escapes here");
+        assert_eq!(unescape("Line 1\\nLine 2"), "Line 1\nLine 2");
+        assert_eq!(unescape("Line 1\\r\\nLine 2"), "Line 1\r\nLine 2");
+        assert_eq!(unescape("Col 1\\tCol 2"), "Col 1\tCol 2");
+        assert_eq!(unescape("He said \\\"hi\\\""), "He said \"hi\"");
+        assert_eq!(unescape("Path\\\\to\\\\file"), "Path\\to\\file");
+        // Literal backslashes that are not escape sequences stay intact:
+        assert_eq!(unescape("C:\\Games\\Half-Life"), "C:\\Games\\Half-Life");
+        assert_eq!(unescape("Trailing backslash\\"), "Trailing backslash\\");
+        assert_eq!(unescape("Single \\ in middle"), "Single \\ in middle");
+    }
+
+    #[test]
+    fn localized_tokens_unescape_line_breaks() {
+        let mut loc = Localization::default();
+        loc.insert(
+            "GameUI_MainMenuWarning",
+            "Are you sure?\\nAll unsaved progress will be lost.",
+        );
+        assert_eq!(
+            loc.text("#GameUI_MainMenuWarning"),
+            "Are you sure?\nAll unsaved progress will be lost."
+        );
+        assert_eq!(
+            loc.localize("#GameUI_MainMenuWarning"),
+            "Are you sure?\nAll unsaved progress will be lost."
+        );
+        let resource =
+            b"\"lang\" { english { Tokens { \"GameUI_Multiline\" \"One\\nTwo\\nThree\" } } }";
+        loc.add_resource("test.txt", resource);
+        assert_eq!(loc.text("#GameUI_Multiline"), "One\nTwo\nThree");
     }
 
     #[test]

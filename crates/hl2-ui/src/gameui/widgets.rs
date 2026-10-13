@@ -219,19 +219,27 @@ impl Painter<'_> {
         }
     }
 
-    /// Text width in layout units.
+    /// Text width in layout units (max line width for multi-line text).
     pub fn text_width(&self, text: &str, bold: bool) -> f32 {
-        self.font(bold)
-            .map_or(text.chars().count() as f32 * 7., |f| {
-                f.width_cell(text, FONT_TALL)
-            })
+        self.font(bold).map_or(
+            text.lines()
+                .map(|l| l.chars().count() as f32 * 7.)
+                .fold(0.0, f32::max),
+            |f| {
+                text.lines()
+                    .map(|l| f.width_cell(l, FONT_TALL))
+                    .fold(0.0, f32::max)
+            },
+        )
     }
 
-    /// Draws text with its cell top-left at a layout position.
+    /// Draws text with its cell top-left at a layout position. Multi-line text is split on newlines.
     pub fn text(&self, text: &str, at: Vec2, color: Color, bold: bool) {
         if let Some(font) = self.font(bold) {
-            let p = self.origin + at * self.scale;
-            font.draw_cell(text, p.round(), FONT_TALL * self.scale, color);
+            for (i, line) in text.lines().enumerate() {
+                let p = self.origin + (at + vec2(0., i as f32 * FONT_TALL)) * self.scale;
+                font.draw_cell(line, p.round(), FONT_TALL * self.scale, color);
+            }
         }
     }
 

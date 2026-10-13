@@ -339,7 +339,9 @@ impl MessageBox {
     /// the buttons plus 30; buttons sit at the quarter points, 15 above the client bottom (the SDK
     /// `vgui::MessageBox::PerformLayout` rules).
     pub fn layout(&self, measure: impl Fn(&str) -> f32) -> MessageBoxLayout {
-        let text_w = measure(&self.text).ceil();
+        let lines: Vec<&str> = self.text.lines().collect();
+        let line_count = lines.len().max(1);
+        let text_w = lines.iter().map(|l| measure(l)).fold(0.0, f32::max).ceil();
         let button = |label: &str| {
             vec2(
                 (measure(label) + 10.).ceil().max(64.),
@@ -349,7 +351,7 @@ impl MessageBox {
         let ok = button(&self.ok);
         let cancel = self.cancel.as_deref().map(button);
         let width = (text_w + 100.).max((ok.x + cancel.map_or(0., |c| c.x)) * 2. + 30.);
-        let size = vec2(width, FONT_TALL + 100.);
+        let size = vec2(width, FONT_TALL * line_count as f32 + 100.);
         let right = size.x - CLIENT_INSET_X;
         let bottom = size.y - 6.;
         let y = bottom - ok.y - 15.;
@@ -855,6 +857,27 @@ mod tests {
             Some(true),
             "Enter accepts"
         );
+    }
+
+    #[test]
+    fn return_to_main_menu_multiline_layout() {
+        let mut loc = Localization::default();
+        loc.insert("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU");
+        loc.insert(
+            "GameUI_MainMenuWarning",
+            "Are you sure?\\nAll unsaved progress will be lost.",
+        );
+        loc.insert("GameUI_OK", "OK");
+        loc.insert("GameUI_Cancel", "Cancel");
+        let msg_box = MessageBox::return_to_main_menu(&loc);
+        assert_eq!(
+            msg_box.text,
+            "Are you sure?\nAll unsaved progress will be lost."
+        );
+        let measure = |s: &str| s.len() as f32 * 6.;
+        let layout = msg_box.layout(measure);
+        // Height expands for 2 lines: 2 * FONT_TALL (16) + 100 = 132
+        assert_eq!(layout.size.y, 132.);
     }
 
     #[test]

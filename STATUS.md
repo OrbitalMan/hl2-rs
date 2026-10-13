@@ -2,7 +2,13 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: GameUI follow-up pass (2026-10-13, branch `orbitalman/main-menu`)
+## Current session: GameUI bug-fix and gap-filling pass (2026-10-13, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family. 9-task bug-fix and gap-filling pass underway:
+- **Task 1 (Literal \n in localized text): Complete.** Added `unescape` in `hl2-ui::gameui::localize` supporting `\n`, `\r`, `\t`, `\"`, `\\` while preserving non-escape backslashes intact. Integrated into `Localization::add_resource`, `insert`, and `localize`. Updated `Painter::text_width` and `Painter::text` to split multi-line strings across newlines and step vertically by `FONT_TALL * scale`. Updated `MessageBox::layout` to measure multi-line widths and expand height dynamically for multiple lines. Added unit tests `unescape_handles_linebreaks_tabs_quotes_and_preserves_literal_backslashes`, `localized_tokens_unescape_line_breaks`, and `return_to_main_menu_multiline_layout`. 118 `hl2-ui` tests pass, 3 owned-install tests pass, clippy clean, 30-frame headless Bevy run clean.
+- **Task 2 (Episode submenu titles): In progress.**
+
+## Previous session: GameUI follow-up pass (2026-10-13, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family. 10-task follow-up pass underway:
 - **Task 1 (Crate restructuring and renames): Complete.** Renamed `movement.rs` -> `simulation.rs`, `hud.rs` -> `canvas_renderer.rs`, `console.rs` -> `ui_host.rs`, and `ui.rs` -> `ui_system.rs` in `hl2-bevy`. Verified `hl2-ui` / `hl2-bevy` crate boundaries and dependencies (all UI logic, layouts, models and viewport geometry in `hl2-ui`, Bevy host systems and renderers in `hl2-bevy`). Verified by 90 unit tests in `hl2-ui`, 64 unit tests in `hl2-bevy`, strict clippy (`-D warnings`), and 30-frame headless Bevy runtime test. No functional regressions.

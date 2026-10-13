@@ -1,5 +1,30 @@
 # MODLOG
 
+## 2026-10-13 Literal \n in localized text
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::localize`: added `pub fn unescape(s: &str) -> String` unescaping standard Source escape sequences (`\n`, `\r`, `\t`, `\"`, `\\`) while preserving non-escape literal backslashes intact. Integrated `unescape` into `Localization::add_resource`, `Localization::insert`, and `Localization::localize`. Added unit tests `unescape_handles_linebreaks_tabs_quotes_and_preserves_literal_backslashes` and `localized_tokens_unescape_line_breaks`.
+- `hl2-ui::gameui::widgets`: updated `Painter::text_width` and `Painter::text` to split multi-line strings across newline boundaries, computing max line width and rendering lines vertically incremented by `FONT_TALL * self.scale`.
+- `hl2-ui::gameui::menu`: updated `MessageBox::layout` to compute text dimensions across multiple lines and expand box height by `FONT_TALL * line_count + 100.`. Added unit test `return_to_main_menu_multiline_layout`.
+
+**Why:**
+- Resolves literal `\n` in localized dialogs (e.g. Return to main menu confirmation `#GameUI_MainMenuWarning`) at the shared localization resolver level so every localized text consumer automatically receives clean unescaped line breaks.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui`: all 118 unit tests passed (0 failures).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed.
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- `cargo fmt --all --check`: clean formatting verified.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed (30 frames rendered, exit code 0).
+
+**Result:** Localized strings with escape sequences render line breaks cleanly; message boxes dynamically adjust bounds for multi-line text.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 2: Episode submenu titles (two-line titles for Episode One and Episode Two).
+
 ## 2026-10-13 Background map handling
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
