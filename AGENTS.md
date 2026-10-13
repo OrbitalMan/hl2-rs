@@ -13,6 +13,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 5. Do not put credentials, tokens or passwords in project files, logs or commits.
 6. No FAL, replacement assets, crossovers or unsolicited Discord messages. This phase reconstructs HL2. Mods and crossovers with other Rust game rewrites are the long-term goal after 1:1 fidelity (owner, 2026-10-07); keep `modkit-core::ModPlugin` and shared crates mod-friendly. There is no single-player/offline-only project restriction; multiplayer/netcode fidelity is not implemented or tested.
 7. Fonts and UI typography must come strictly from the owned game installation VFS (in-place reading of installed `resource/*.ttf`, `platform/resource/linux_fonts/*.ttf`) or permissively licensed project assets (MIT `ProggyClean.ttf`). Never probe, read, bundle, or depend on proprietary host OS font files (`C:/Windows/Fonts`, `/System/Library/Fonts`, `/Library/Fonts`). Everything must be 100% legally clean and safe.
+8. User-visible UI strings must come strictly from localized game resources (`resource/gameui_english.txt`, `resource/valve_english.txt`, `resource/vgui_english.txt`, `hl2_complete/resource/merged_loc_all.txt`, etc.). Never hardcode user-visible English literals in UI or HUD drawing routines. Authentic English fallback values are permitted only when game resources are missing or the key cannot be resolved, and must be defined as named constants in the centralized fallback table (`hl2-ui::gameui::localize::FALLBACK_STRINGS`), never as inline literals.
 
 ## How to work
 
@@ -56,10 +57,47 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 - Agent: Claude Code desktop (2026-10-06/07 sessions, Claude Opus 5.5); earlier runs used Codex Desktop with GPT-6.1 Extra High/Normal Speed. Select new-chat settings explicitly.
 - Active checkout: workspace outputs/hl2-rs-bevy on main. Sibling outputs/hl2-rs is a detached historical checkout of the former Macroquad main (b4b1731).
 
+## GameUI, Localization & Resource Conventions
+
+- **UI Strings & Localization Fallback**:
+  - All user-visible strings across UI, HUD, and console MUST resolve via `Localization::text("#Token")` from mounted game resources (`resource/gameui_english.txt`, `resource/valve_english.txt`, `resource/vgui_english.txt`, `hl2_complete/resource/merged_loc_all.txt`, etc.).
+  - Never introduce hardcoded English literals in UI or HUD drawing code. If game resources are missing or a key is unresolvable, fallback strings MUST be defined as named constants in `hl2-ui::gameui::localize::FALLBACK_STRINGS`, never as inline literals.
+  - Localization files in retail contain authentic escape sequences (`\n`, `\t`, `\"`, `\\`) across multiple tokens. Escape sequences MUST be handled strictly at the resource parser/insertion boundary (`Localization::add_resource` and `Localization::insert`). Never duplicate unescape logic at runtime lookup sites, and never dynamically unescape arbitrary non-token text.
+  - Verify compliance with the audit test: `cargo test -p hl2-ui audit_no_hardcoded_user_visible_strings_in_ui_code_outside_fallback_constants`.
+
+- **Text Encodings & BOM Handling**:
+  - Retail resource files use diverse text encodings: UTF-8 with BOM (`[0xef, 0xbb, 0xbf]`), UTF-16 LE with BOM (`[0xff, 0xfe]`), UTF-16 LE without BOM heuristic, and Windows-1252 / ISO-8859-1 for 8-bit text (e.g. en-dash `\x96` in `gameinfo.txt`, copyright `\xa9`).
+  - Never call `String::from_utf8_lossy` directly on VFS text files; always decode via `source_assets::keyvalues::decode_text`.
+  - Strip leading BOM bytes during tokenization so zero-width no-break spaces (`\u{feff}`) never pollute token keys or values.
+  - Menu subtitle lines (`title2`, e.g. `--- Episode One ---`) must render with `menu_font` (`Tahoma`), NOT `title_font` (`HALFLIFE2.ttf`), because `HALFLIFE2.ttf` only maps logo glyphs for `HALF-LIFE'` and maps lowercase letters to symbol art icons.
+
+- **VFS Search Path Layering**:
+  - Source search paths are strictly layered: an expansion mount (`episodic`, `ep2`, `lostcoast`) must check its loose directory AND its VPK archives together before falling through to base `hl2` (`SearchPath { root, archives }`).
+  - Never separate loose directory checks from VPK checks globally; doing so causes loose base `hl2` files (like `hl2/scripts/chapterbackgrounds.txt`) to shadow expansion VPK archives (`episodic/ep1_pak_dir.vpk`).
+  - When an expansion map shares a filename with a base game map (e.g. Lost Coast's `lostcoast/maps/background01.bsp` vs `hl2/maps/background01.bsp`), canonicalize internal resource keys (`"lostcoast_background01"`) while translating back to on-disk map names during asset loading.
+
+- **Widget Interaction & Audio**:
+  - Only main menu and submenu navigation buttons play the button rollover sound (`ui/buttonrollover.wav`).
+  - Dialog push buttons, radio buttons, dropdowns, check boxes, and text input fields do NOT play rollover sounds on hover. Restrict rollover audio at the widget model level via `WidgetKind::has_rollover_sound()`, never through per-dialog ad-hoc exclusions.
+  - Dialog push buttons DO play the release-click sound (`ui/buttonclickrelease.wav`) when activated.
+
+- **Dialog Sizing & Content Containment**:
+  - Sizing for fixed-content dialogs (such as 3rd-party technology credits) must be flexible and derived from wrapped content layout plus title/button margins, rather than using an arbitrary scroll view.
+  - All labels, images, and buttons must stay strictly within dialog bounds without overlapping.
+  - Display resolutions too small to fit dialogs must log a report to the console rather than arbitrarily clipping or reintroducing unwanted scrolling.
+
+- **Expansion Background Maps**:
+  - Entering an expansion's submenu (Half-Life 2, Episode One, Episode Two, Lost Coast) updates the background map to that expansion's initial chapter background and triggers an asynchronous 3D scene swap.
+  - Background map load failures only log a warning to console and `campaign.failures`; they must never crash the game, terminate the process, or dismiss the menu.
+  - Navigating Back or pressing Escape preserves the current expansion background map; it must not revert to base Half-Life 2 until another expansion is explicitly chosen.
+  - Verification of background map transitions must use end-to-end headless Bevy app tests that assert asynchronous loader completion and active scene entity replacement; unit-testing state transitions alone is insufficient.
+
 ## Runtime invariants to preserve
 
 - Walking uses shared Player/Physics; F2/--fly enables flight. Escape cancels selection before pause; tilde opens console. Consume transition input and pause simulation/audio. Map workers freeze fixed/script clocks; replace map-owned resources only after success. Missing maps preserve the world; saved/global state transfer is unfinished.
 - Startup: a loadable `--map` starts gameplay; no `--map` or an unloadable one opens the main menu over the paused chapter-1 background map, except that map-dependent arguments (position/angles/fly/movement script/live, burst or monitor captures) without a loadable `--map` fail the launch with an error. Escape never turns a background level into gameplay.
+- Submenu background maps: entering an expansion submenu updates the background map and scene asynchronously; failures log a warning and leave the menu intact. Back or Escape preserves the expansion background map.
+- Modal dialog occlusion: when a modal dialog (message box, options dialog, loading dialog) is open, underlying menu buttons must not be hovered, armed, or clicked.
 - HUD uses owned resources and an ordered CPU canvas. GDI font rasterization is setup-only.
 - Sky background layer3/order-2, miniature sky layer4/order-1, world layer0: independent depth/color clears and BSP 2D/3D eligibility. Current animation bounds and all active player/monitor views drive visibility; missing data fails open, script-hidden/killed entities remain hidden. Spatial splitting is opt-in.
 - Eyes use owned MDL records, animated eyes attachment origin/forward and iris projection before entity transform/scale. Preserve authored LOOKAT ramps, cancellation tails, pause refresh, cycler meshes and one target for both eyes. EyeRefract uses explicit Eyes_dx8 fallback; native head/facial/random/tactical attention is unfinished.
