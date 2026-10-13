@@ -140,6 +140,9 @@ pub enum EffectKind {
     BoltGlow,
     /// g_pEffects->Sparks where a bolt hit the world (host-drawn; not drawn yet).
     Sparks,
+    /// The bug bait's SporeExplosion (env_sporeexplosion): emits for 5 s
+    /// (bugbait_distract_time) toward `normal`, its last particles live 2 s more.
+    SporeExplosion,
 }
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Effect {
@@ -159,6 +162,7 @@ impl Effect {
             EffectKind::BallExplosion => 8.,
             EffectKind::BoltGlow => crate::weapon_crossbow::STUCK_GLOW_TIME,
             EffectKind::Sparks => 0.5,
+            EffectKind::SporeExplosion => f64::from(crate::weapon_bugbait::DISTRACT_TIME) + 2.,
         }
     }
 }
@@ -204,6 +208,8 @@ pub struct Projectiles {
     /// UTIL_ImpactTrace requests from projectiles (decal and surface impact sound);
     /// the host drains them into its impact system.
     pub impacts: Vec<crate::physics::RayHit>,
+    /// UTIL_DecalTrace requests: (trace hit, decal material).
+    pub decals: Vec<(crate::physics::RayHit, &'static str)>,
     /// The player's RPG laser dot, copied from the weapon each tick by the host.
     pub laser_dot: Option<crate::weapon_rpg::LaserDot>,
     /// Missile deaths/removals this tick; the host notifies the RPG.
@@ -539,8 +545,22 @@ impl Projectiles {
                     if let Some(at) =
                         crate::weapon_bugbait::bait_tick(&mut projectile, physics, scene.time, dt)
                     {
-                        // BugBaitTouch: SporeExplosion (not drawn), BeerSplash decal (not
-                        // placed), the splat sound, sensors/antlion call, removal.
+                        // BugBaitTouch: SporeExplosion facing back along the flight, a
+                        // BeerSplash decal where a 64-unit MASK_SHOT trace along the
+                        // velocity hits, the splat sound, sensors/antlion call, removal.
+                        let direction = projectile.velocity.normalize_or_zero();
+                        self.effect(Effect {
+                            id: 0,
+                            magnitude: 0.,
+                            kind: EffectKind::SporeExplosion,
+                            position: at,
+                            normal: -direction,
+                            at: scene.time,
+                            radius: 32.,
+                        });
+                        if let Some(hit) = physics.projectile_ray(at, at + direction * 64., &[]) {
+                            self.decals.push((hit, crate::weapon_bugbait::SPLAT_DECAL));
+                        }
                         scene.sounds.push(crate::sounds::SoundRequest {
                             origin: Some(at),
                             .."GrenadeBugBait.Splat".into()

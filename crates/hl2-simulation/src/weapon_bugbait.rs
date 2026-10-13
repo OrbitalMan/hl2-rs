@@ -19,6 +19,9 @@ pub const BAIT_MODEL: &str = "models/weapons/w_bugbait.mdl";
 pub const HEAR_RADIUS: f32 = 2500.;
 pub const DISTRACT_TIME: f32 = 5.;
 pub const GRENADE_RADIUS: f32 = 150.;
+/// BugBaitTouch UTIL_DecalTrace "BeerSplash" (retail decals_subrect.txt maps it to
+/// decals/beersplash_subrect, an atlas copy of this material).
+pub const SPLAT_DECAL: &str = "decals/beersplash";
 /// CGrenadeBugBait::Spawn UTIL_SetSize(-2, 2).
 const HALF_SIZE: f32 = 2.;
 const GRAVITY: f32 = 600.;
@@ -442,6 +445,31 @@ mod tests {
         assert!((event.position.x - 297.).abs() < 0.5, "{}", event.position);
         // Falling 600 u/s^2 for ~0.3 s.
         assert!((event.position.z + 0.5 * 600. * 0.297 * 0.297).abs() < 3.);
+        // The spore explosion faces back along the flight; the splat decal lands on
+        // the surface the 64-unit velocity trace hits.
+        let spores: Vec<_> = projectiles
+            .effects
+            .iter()
+            .filter(|e| e.kind == crate::projectiles::EffectKind::SporeExplosion)
+            .collect();
+        assert_eq!(spores.len(), 1);
+        assert!(spores[0].normal.x < -0.8, "{}", spores[0].normal);
+        assert_eq!(projectiles.decals.len(), 1);
+        assert_eq!(projectiles.decals[0].1, SPLAT_DECAL);
+        assert!(projectiles.decals[0].0.normal.x < -0.9);
+        // 8 events per second for 5 s: four spores and one puff each, scheduled.
+        let mut particles = crate::explosion_particles::Particles::default();
+        let at = spores[0].at;
+        particles.sync(&projectiles.effects, at, &physics);
+        let kind = crate::explosion_particles::Kind::Spore;
+        assert_eq!(particles.diagnostics.emitted[&kind], 200);
+        let eye = event.position + Vec3::new(-200., 0., 0.);
+        let early = particles.draw(eye, Vec3::X, at + 0.01, &physics).len();
+        particles.sync(&projectiles.effects, at + 2., &physics);
+        let later = particles.draw(eye, Vec3::X, at + 2., &physics).len();
+        assert!(early > 0 && early <= 5 && later > early, "{early} {later}");
+        particles.sync(&projectiles.effects, at + 7.5, &physics);
+        assert!(particles.draw(eye, Vec3::X, at + 7.5, &physics).is_empty());
     }
 
     #[test]

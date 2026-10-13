@@ -667,6 +667,11 @@ impl Gameplay {
         for hit in std::mem::take(&mut self.projectiles.impacts) {
             self.impacts.add(hit, &self.world, physics, &mut self.scene);
         }
+        // Projectile UTIL_DecalTrace (the bug bait's BeerSplash).
+        for (hit, material) in std::mem::take(&mut self.projectiles.decals) {
+            self.impacts
+                .add_decal(hit, material, &self.world, physics, &self.scene);
+        }
         for sound in self.scene.sounds.drain(..) {
             self.sound_cues.push(sound.name.clone());
             if self.sound_requests.len() < 1024 {

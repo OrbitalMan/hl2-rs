@@ -63,10 +63,15 @@ pub struct Mark {
     pub material: String,
     pub entity: usize,
     pub scale: f32,
+    /// Linear light at the hit for translucent (lightmapped) decals; white otherwise.
+    pub tint: [f32; 3],
 }
 pub struct Texture {
     pub image: Arc<vtf::Image>,
     pub scale: f32,
+    /// `$translucent` decals alpha-blend over the surface (beersplash); the others
+    /// modulate it (bullet holes, DecalModulate).
+    pub translucent: bool,
 }
 /// Surface property of NPC hitboxes (HL2 humans and Combine use "flesh").
 const FLESH: &str = "flesh";
@@ -129,9 +134,12 @@ impl Impacts {
                         .unwrap_or("default".into())
                 });
         }
-        for family in ["metal", "wood", "glass", "sand", "concrete"] {
-            for i in 1..=5 {
-                let material = format!("decals/{family}/shot{i}");
+        let materials = ["metal", "wood", "glass", "sand", "concrete"]
+            .into_iter()
+            .flat_map(|family| (1..=5).map(move |i| format!("decals/{family}/shot{i}")))
+            .chain([crate::weapon_bugbait::SPLAT_DECAL.to_string()]);
+        {
+            for material in materials {
                 match crate::projectile_visuals::load_sprite(vfs, &material) {
                     Ok(sprite) => {
                         let scale = vfs
@@ -140,11 +148,17 @@ impl Impacts {
                             .flatten()
                             .and_then(|s| s.parse::<f32>().ok())
                             .unwrap_or(0.1);
+                        let translucent = vfs
+                            .material_value(&material, "$translucent")
+                            .ok()
+                            .flatten()
+                            .is_some_and(|v| v.trim() == "1");
                         result.textures.insert(
                             material,
                             Texture {
                                 image: sprite.image,
                                 scale,
+                                translucent,
                             },
                         );
                     }
@@ -453,6 +467,63 @@ impl Impacts {
             }
             return;
         }
+        let Some(prop) = self.hit_surfaceprop(&hit, world, physics, scene) else {
+            return;
+        };
+        // Bullets and the player's crowbar alike (SDK PlayImpactSound).
+        if let Some(sound) = self.property(&prop, "bulletimpact") {
+            scene.sounds.push(crate::sounds::SoundRequest {
+                origin: Some(hit.position),
+                ..sound.into()
+            });
+        }
+        let family = match self
+            .property(&prop, "gamematerial")
+            .as_deref()
+            .unwrap_or("C")
+        {
+            "M" | "V" | "G" => "metal",
+            "W" => "wood",
+            "Y" => "glass",
+            "N" => "sand",
+            _ => "concrete",
+        };
+        let material = format!("decals/{family}/shot{}", self.created % 5 + 1);
+        self.add_decal(hit, &material, world, physics, scene);
+    }
+    /// Surfaceprop of the surface a trace hit, None (counted) when it cannot be located.
+    fn hit_surfaceprop(
+        &mut self,
+        hit: &RayHit,
+        world: &World,
+        physics: &Physics,
+        scene: &Scene,
+    ) -> Option<String> {
+        match self.locate(hit, world, physics, scene) {
+            Ok(located) => Some(located.prop),
+            Err(unclippable) => {
+                self.unclippable += usize::from(unclippable);
+                None
+            }
+        }
+    }
+    /// UTIL_DecalTrace: project a loaded decal material onto the surface a trace hit
+    /// (not onto NPCs: studio decals are not reconstructed).
+    pub fn add_decal(
+        &mut self,
+        hit: RayHit,
+        material: &str,
+        world: &World,
+        physics: &Physics,
+        scene: &Scene,
+    ) {
+        if world
+            .entities
+            .get(hit.entity)
+            .is_some_and(|e| e.class().starts_with("npc_"))
+        {
+            return;
+        }
         let located = match self.locate(&hit, world, physics, scene) {
             Ok(located) => located,
             Err(unclippable) => {
@@ -465,33 +536,27 @@ impl Impacts {
             center,
             normal,
             scale,
-            prop,
+            ..
         } = located;
         let surfaces = &surfaces[..];
-        let prop = prop.as_str();
-        // Bullets and the player's crowbar alike (SDK PlayImpactSound).
-        if let Some(sound) = self.property(prop, "bulletimpact") {
-            scene.sounds.push(crate::sounds::SoundRequest {
-                origin: Some(hit.position),
-                ..sound.into()
-            });
-        }
-        let family = match self
-            .property(prop, "gamematerial")
-            .as_deref()
-            .unwrap_or("C")
-        {
-            "M" | "V" | "G" => "metal",
-            "W" => "wood",
-            "Y" => "glass",
-            "N" => "sand",
-            _ => "concrete",
-        };
-        let material = format!("decals/{family}/shot{}", self.created % 5 + 1);
-        let Some(texture) = self.textures.get(&material) else {
+        let Some(texture) = self.textures.get(material) else {
             return;
         };
         let factor = texture.scale;
+        // LightmappedGeneric decals are lit like the surface beneath; the leaf ambient
+        // cube and world lights at the hit stand in for the lightmap sample.
+        let tint = if texture.translucent {
+            world.lighting.as_ref().map_or([1.; 3], |lighting| {
+                let n = normal.normalize_or_zero();
+                let light =
+                    lighting
+                        .state_at(hit.position + n)
+                        .vertex_light(hit.position, n, false);
+                light.to_array()
+            })
+        } else {
+            [1.; 3]
+        };
         let vertices = decals::project(
             surfaces,
             center,
@@ -509,9 +574,10 @@ impl Impacts {
         self.marks.push(Mark {
             id: self.created,
             vertices,
-            material,
+            material: material.into(),
             entity: hit.entity,
             scale,
+            tint,
         });
         self.created += 1;
     }
@@ -566,6 +632,7 @@ mod tests {
                 Texture {
                     image: image.clone(),
                     scale: 0.1,
+                    translucent: false,
                 },
             );
         }
@@ -630,7 +697,10 @@ mod tests {
             .world("d1_trainstation_02")
             .unwrap();
         let mut impacts = Impacts::new(&vfs, &world);
-        assert_eq!(impacts.textures.len(), 20, "{:?}", impacts.errors);
+        // 20 bullet decals (no sand set) and the translucent bug bait splash.
+        assert_eq!(impacts.textures.len(), 21, "{:?}", impacts.errors);
+        assert!(impacts.textures[crate::weapon_bugbait::SPLAT_DECAL].translucent);
+        assert!(!impacts.textures["decals/concrete/shot1"].translucent);
         assert_eq!(impacts.errors.len(), 5);
         assert!(impacts.errors.keys().all(|k| k.starts_with("decals/sand/")));
         assert!(!impacts.required_sound_requests().is_empty());

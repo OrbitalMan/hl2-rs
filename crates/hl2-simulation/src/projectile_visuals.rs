@@ -710,7 +710,10 @@ impl ProjectileVisuals {
                         self.spawn_sparks(position, time);
                     }
                 }
-                EffectKind::GrenadeExplosion | EffectKind::BallExplosion => (),
+                // Particles only (explosion_particles.rs).
+                EffectKind::GrenadeExplosion
+                | EffectKind::BallExplosion
+                | EffectKind::SporeExplosion => (),
             }
             self.effect_frames += 1;
         }

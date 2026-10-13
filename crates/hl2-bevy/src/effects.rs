@@ -278,11 +278,22 @@ pub fn install(
         ));
         handles.insert(
             name.clone(),
-            effects.add(EffectMaterial {
-                texture,
-                parameters: Vec4::new(0.001, 1., 2., 0.),
-                kind: 4,
-                ignore_z: false,
+            effects.add(if decal.translucent {
+                // Alpha-blended, lit through the mark's vertex colour.
+                EffectMaterial {
+                    texture,
+                    parameters: Vec4::new(0.001, 0., 1., 0.),
+                    kind: 2,
+                    ignore_z: false,
+                }
+            } else {
+                // DecalModulate (mod2x).
+                EffectMaterial {
+                    texture,
+                    parameters: Vec4::new(0.001, 1., 2., 0.),
+                    kind: 4,
+                    ignore_z: false,
+                }
             }),
         );
     }
@@ -631,7 +642,15 @@ pub fn present(
                     })
                     .collect(),
                 mark.vertices.iter().map(|v| v.uv.to_array()).collect(),
-                vec![[1.; 4]; mark.vertices.len()],
+                // The shader applies colour before its sRGB decode: pass the linear
+                // light gamma-encoded so the decoded result is texture x light.
+                vec![
+                    {
+                        let [r, g, b] = mark.tint.map(|c| c.max(0.).powf(1. / 2.2));
+                        [r, g, b, 1.]
+                    };
+                    mark.vertices.len()
+                ],
                 (0..mark.vertices.len() as u32).collect(),
                 false,
             ));
