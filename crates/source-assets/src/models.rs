@@ -514,6 +514,12 @@ pub struct ModelReport {
 }
 pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
     let mut physics_report = (0usize, Vec::new());
+    let prop_data = vfs
+        .read("scripts/propdata.txt")
+        .ok()
+        .flatten()
+        .and_then(|data| crate::keyvalues::parse(&String::from_utf8_lossy(&data)).ok())
+        .unwrap_or_default();
     match crate::surfaceprops::read(vfs) {
         Ok(table) => world.surface_materials = table,
         Err(error) => physics_report
@@ -696,6 +702,20 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 world.model_mass.insert(instance.asset_key(), mass);
             }
         }
+        // Breakable props: prop_data health from the MDL keyvalues.
+        if instance.kind.starts_with("prop_physics")
+            && !world.model_prop_health.contains_key(&instance.asset_key())
+        {
+            if let Some(health) = vfs
+                .read(&instance.model)
+                .ok()
+                .flatten()
+                .and_then(|mdl| studio_keyvalues(&mdl).ok().flatten())
+                .and_then(|text| prop_data_health(&prop_data, &text))
+            {
+                world.model_prop_health.insert(instance.asset_key(), health);
+            }
+        }
         // VPhysics props (CPhysicsProp::CreateVPhysics): authored solid parameters and,
         // when the identity-root adapter applies, the authored convex pieces.
         if instance.kind.starts_with("prop_physics")
@@ -866,6 +886,65 @@ pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result
     world.model_physics.insert(key.clone(), solid);
     world.model_collision.insert(key, pieces?);
     Ok(())
+}
+/// studiohdr_t keyvalueindex/keyvaluesize (offsets 312/316 in MDL 44-49): the model's
+/// $keyvalues text (prop_data, physgun_interactions, ...).
+pub fn studio_keyvalues(mdl: &[u8]) -> Result<Option<String>> {
+    if bytes(mdl, 0, 4)? != b"IDST" {
+        bail!("model magic mismatch");
+    }
+    let (index, size) = (u32le(mdl, 312)? as usize, u32le(mdl, 316)? as usize);
+    if index == 0 || size == 0 {
+        return Ok(None);
+    }
+    let text = bytes(mdl, index, size)?;
+    let end = text.iter().position(|b| *b == 0).unwrap_or(text.len());
+    Ok(Some(String::from_utf8_lossy(&text[..end]).into_owned()))
+}
+/// CPropData::ParsePropFromKV health: the "base" entry of scripts/propdata.txt first
+/// (recursively), then the block's own "health". None when the model has no prop_data.
+pub fn prop_data_health(
+    prop_data: &[crate::keyvalues::Entry],
+    model_keyvalues: &str,
+) -> Option<f32> {
+    let entries = crate::keyvalues::parse(model_keyvalues).ok()?;
+    // The studio keyvalue text wraps its blocks in "mdlkeyvalue { ... }".
+    let block = entries
+        .iter()
+        .flat_map(|e| std::iter::once(e).chain(e.children()))
+        .find(|e| e.key.eq_ignore_ascii_case("prop_data"))?;
+    fn section<'a>(
+        entries: &'a [crate::keyvalues::Entry],
+        name: &str,
+    ) -> Option<&'a crate::keyvalues::Entry> {
+        entries.iter().find_map(|e| {
+            if e.key.eq_ignore_ascii_case(name) && !e.children().is_empty() {
+                Some(e)
+            } else if e.key.eq_ignore_ascii_case("BreakableModels") {
+                None
+            } else {
+                section(e.children(), name)
+            }
+        })
+    }
+    fn health(
+        prop_data: &[crate::keyvalues::Entry],
+        block: &crate::keyvalues::Entry,
+        depth: usize,
+    ) -> f32 {
+        let value = block
+            .get("base")
+            .and_then(|b| b.text())
+            .filter(|_| depth < 8)
+            .and_then(|base| section(prop_data, base))
+            .map_or(0., |base| health(prop_data, base, depth + 1));
+        block
+            .get("health")
+            .and_then(|h| h.text())
+            .and_then(|h| h.trim().parse::<f32>().ok())
+            .unwrap_or(value)
+    }
+    Some(health(prop_data, block, 0))
 }
 /// studiohdr_t::mass (offset 328 in MDL 44-49; owned police.mdl 90, combine_soldier
 /// 100, wood_crate001a 30).
@@ -1248,5 +1327,30 @@ mod owned_phy_inertia {
         // Long (Source z) axis 0.000711 m^2/kg, cross axes 0.00428.
         assert!((inertia.z - 0.000711).abs() < 1e-5, "{inertia}");
         assert!((inertia.x - 0.004283).abs() < 1e-5 && (inertia.y - 0.004283).abs() < 1e-5);
+    }
+}
+#[cfg(test)]
+mod owned_prop_data {
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_prop_data_health_matches_native_ent_text() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let prop_data = crate::keyvalues::parse(&String::from_utf8_lossy(
+            &vfs.read("scripts/propdata.txt").unwrap().unwrap(),
+        ))
+        .unwrap();
+        // Native ent_text (oracle, session 13): Cardboard.small 10, Wooden.Large 50.
+        for (model, expected) in [
+            ("models/props_junk/cardboard_box001a.mdl", Some(10.)),
+            ("models/props_junk/wood_pallet001a.mdl", Some(50.)),
+        ] {
+            let mdl = vfs.read(model).unwrap().unwrap();
+            let text = super::studio_keyvalues(&mdl).unwrap().unwrap();
+            assert_eq!(
+                super::prop_data_health(&prop_data, &text),
+                expected,
+                "{model}"
+            );
+        }
     }
 }

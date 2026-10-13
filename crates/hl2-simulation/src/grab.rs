@@ -181,11 +181,16 @@ impl GrabController {
             return;
         };
         physics.drag_disabled.remove(&handle);
+        let colliders = &physics.colliders;
         let Some(body) = physics.bodies.get_mut(handle) else {
             return;
         };
         if let Some(props) = self.saved_props {
             body.set_additional_mass_properties(props, true);
+            // Apply the restored mass now: Rapier defers it to the next step, and the drag
+            // controller runs before that step; with the 1 kg carry mass a launched pallet
+            // took 20x its drag and stopped dead (owner report, session 13).
+            body.recompute_mass_properties_from_colliders(colliders);
         }
         body.set_gravity_scale(self.saved_gravity, true);
         body.set_angular_damping(self.saved_rot_damping);

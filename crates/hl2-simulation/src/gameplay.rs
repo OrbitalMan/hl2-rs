@@ -1301,10 +1301,27 @@ impl Inventory {
                         continue;
                     }
                     let npc = entity.class().starts_with("npc_");
-                    let health = entity
-                        .get("health")
-                        .and_then(|s| s.parse::<f32>().ok())
+                    // CPropData::ParsePropData: prop_data health overrides the keyvalue
+                    // (not on *_override props); 0 means unbreakable.
+                    let prop_data = entity
+                        .class()
+                        .starts_with("prop_physics")
+                        .then(|| entity.class().ends_with("_override"))
+                        .filter(|o| !o)
+                        .and_then(|_| {
+                            world
+                                .model_instances
+                                .iter()
+                                .find(|i| i.entity == Some(id))
+                                .and_then(|i| world.model_prop_health.get(&i.asset_key()))
+                        })
+                        .copied();
+                    let health = prop_data
+                        .or_else(|| entity.get("health").and_then(|s| s.parse::<f32>().ok()))
                         .filter(|v| *v > 0.);
+                    if !npc && prop_data == Some(0.) {
+                        continue;
+                    }
                     if !npc
                         && !matches!(entity.class(), "func_breakable" | "func_physbox")
                         && !entity.class().starts_with("prop_physics")

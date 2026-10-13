@@ -127,6 +127,10 @@ pub struct World {
     /// asset key.
     #[serde(default)]
     pub model_mass: std::collections::BTreeMap<String, f32>,
+    /// prop_data health per model asset key (CPropData::ParsePropData: the MDL's
+    /// prop_data block over its propdata.txt base chain); 0 = unbreakable.
+    #[serde(default)]
+    pub model_prop_health: std::collections::BTreeMap<String, f32>,
     /// Resolved surfaceproperties entries (lowercase name, "base" inheritance applied).
     #[serde(default)]
     pub surface_materials: std::collections::BTreeMap<String, SurfaceMaterial>,
