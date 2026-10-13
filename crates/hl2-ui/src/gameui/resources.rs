@@ -259,12 +259,24 @@ pub struct GameUiResources {
     pub spoken_languages: Vec<String>,
     /// Main-menu background map (`scripts/chapterbackgrounds.txt`, chapter 1).
     pub background_map: Option<String>,
+    /// Category / expansion -> chapter 1 background map (`scripts/chapterbackgrounds.txt`).
+    pub background_maps: BTreeMap<String, String>,
     /// Game -> first chapter map (`cfg/chapter1.cfg` of each mounted game).
     pub new_game_maps: BTreeMap<String, String>,
     /// Category -> menu title (two lines for episodes, e.g. "Half-Life 2\n--- Episode One ---").
     pub category_titles: BTreeMap<String, String>,
     /// Files that could not be read or parsed (reported in the console log).
     pub missing: Vec<String>,
+}
+
+impl GameUiResources {
+    /// Returns the background map configured for the given category, if any.
+    pub fn background_map_for(&self, category: &str) -> Option<&str> {
+        self.background_maps
+            .get(category)
+            .map(String::as_str)
+            .or(self.background_map.as_deref())
+    }
 }
 
 impl GameUiResources {
@@ -325,9 +337,32 @@ impl GameUiResources {
         if res.spoken_languages.is_empty() {
             res.spoken_languages.push("english".into());
         }
-        res.background_map = reader
-            .read_text("scripts/chapterbackgrounds.txt")
-            .and_then(|text| background_map(&text));
+        res.background_maps = fallback_background_maps();
+        for &(game, _, default_map) in INITIAL_BACKGROUND_MAPS {
+            let map = if game == "main" || game == "hl2" {
+                reader
+                    .read_text("scripts/chapterbackgrounds.txt")
+                    .and_then(|text| background_map(&text))
+                    .unwrap_or_else(|| default_map.to_owned())
+            } else {
+                let exp_map = vfs
+                    .game_root()
+                    .and_then(|root| {
+                        source_assets::vpk::Vfs::mount_expansion(root, Some(game)).ok()
+                    })
+                    .and_then(|exp_vfs| {
+                        Reader::new(&exp_vfs).read_text("scripts/chapterbackgrounds.txt")
+                    })
+                    .and_then(|text| background_map(&text));
+                exp_map.unwrap_or_else(|| default_map.to_owned())
+            };
+            res.background_maps.insert(game.to_owned(), map);
+        }
+        res.background_map = res
+            .background_maps
+            .get("hl2")
+            .cloned()
+            .or_else(|| res.background_maps.get("main").cloned());
         for &(game, cfg_path, default_map) in INITIAL_EPISODE_MAPS {
             let map = reader
                 .read_text(cfg_path)
@@ -439,6 +474,35 @@ pub fn background_map(text: &str) -> Option<String> {
         .and_then(|e| e.text())
         .map(|map| map.trim().to_owned())
         .filter(|map| !map.is_empty())
+}
+
+/// Initial background maps for each game and episode category.
+pub const INITIAL_BACKGROUND_MAPS: &[(&str, &str, &str)] = &[
+    ("main", "scripts/chapterbackgrounds.txt", "background01"),
+    ("hl2", "scripts/chapterbackgrounds.txt", "background01"),
+    (
+        "episodic",
+        "episodic/scripts/chapterbackgrounds.txt",
+        "ep1_background01",
+    ),
+    (
+        "ep2",
+        "ep2/scripts/chapterbackgrounds.txt",
+        "ep2_background01",
+    ),
+    (
+        "lostcoast",
+        "lostcoast/scripts/chapterbackgrounds.txt",
+        "background01",
+    ),
+];
+
+/// Fallback initial background maps for each game and episode category.
+pub fn fallback_background_maps() -> BTreeMap<String, String> {
+    INITIAL_BACKGROUND_MAPS
+        .iter()
+        .map(|(game, _, map)| ((*game).to_owned(), (*map).to_owned()))
+        .collect()
 }
 
 /// Initial game and episode maps verified against retail Source installation configs.
@@ -604,6 +668,34 @@ mod tests {
             maps.get("lostcoast").map(String::as_str),
             Some("d2_lostcoast")
         );
+    }
+
+    #[test]
+    fn initial_background_maps_table_and_fallbacks() {
+        let maps = fallback_background_maps();
+        assert_eq!(maps.get("main").map(String::as_str), Some("background01"));
+        assert_eq!(maps.get("hl2").map(String::as_str), Some("background01"));
+        assert_eq!(
+            maps.get("episodic").map(String::as_str),
+            Some("ep1_background01")
+        );
+        assert_eq!(
+            maps.get("ep2").map(String::as_str),
+            Some("ep2_background01")
+        );
+        assert_eq!(
+            maps.get("lostcoast").map(String::as_str),
+            Some("background01")
+        );
+
+        let res = GameUiResources {
+            background_maps: maps,
+            ..Default::default()
+        };
+        assert_eq!(res.background_map_for("episodic"), Some("ep1_background01"));
+        assert_eq!(res.background_map_for("ep2"), Some("ep2_background01"));
+        assert_eq!(res.background_map_for("hl2"), Some("background01"));
+        assert_eq!(res.background_map_for("unknown"), None);
     }
 
     #[test]

@@ -144,6 +144,9 @@ pub struct Console {
     pub loading_dialog: Option<crate::gameui::loading::LoadingDialog>,
     /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
     background_level: bool,
+    /// Currently loaded map name, if any.
+    pub loaded_map: Option<String>,
+    pending_map: Option<String>,
     theme: Theme,
     widget_fonts: Fonts,
     style: Style,
@@ -342,6 +345,8 @@ impl Default for Console {
             confirm_box: None,
             loading_dialog: None,
             background_level: false,
+            loaded_map: None,
+            pending_map: None,
             theme: Theme::default(),
             widget_fonts: Fonts::default(),
             style: Style::default(),
@@ -556,8 +561,15 @@ impl Console {
         crate::gameui::loading::reset_progress();
         self.background_level = background;
         self.confirm_box = None;
-        self.main_menu.back(&self.gameui.localization);
+        if !background {
+            self.main_menu.back(&self.gameui.localization);
+        }
         self.clear_menu_hover();
+        if let Some(pending) = self.pending_map.take() {
+            self.loaded_map = Some(pending);
+        } else if self.loaded_map.is_none() && background {
+            self.loaded_map = self.background_map().map(str::to_owned);
+        }
         self.mode = if background {
             Mode::MainMenu
         } else {
@@ -568,6 +580,7 @@ impl Console {
 
     /// Displays the modal loading dialog for the given map.
     pub fn start_loading(&mut self, map: &str) {
+        self.pending_map = Some(map.to_owned());
         self.clear_menu_hover();
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new(map));
         crate::gameui::loading::reset_progress();
@@ -582,6 +595,7 @@ impl Console {
 
     /// Marks the active loading dialog as failed with the given error message.
     pub fn loading_failed(&mut self, error: &str) {
+        self.pending_map = None;
         if let Some(loading) = &mut self.loading_dialog {
             loading.set_error(error);
         }
@@ -590,6 +604,7 @@ impl Console {
     /// Clears the loading dialog once the level has completely loaded.
     pub fn loading_complete(&mut self) {
         self.loading_dialog = None;
+        self.pending_map = None;
         self.clear_menu_hover();
         crate::gameui::loading::reset_progress();
     }
@@ -1372,6 +1387,34 @@ impl Console {
                     ConfirmKind::ReturnToMainMenu,
                 ));
             }
+            MenuOutcome::SwitchExpansion(game) => {
+                let target_map = self
+                    .gameui
+                    .background_map_for(&game)
+                    .unwrap_or("background01")
+                    .to_owned();
+                self.config.gameplay.background_map = Some(target_map.clone());
+                let _ = self.config.save();
+                if !self.background_level || self.loaded_map.as_deref() != Some(&target_map) {
+                    self.start_loading(&target_map);
+                    return vec![Effect::MainMenuMap(target_map)];
+                }
+            }
+            MenuOutcome::SwitchCategory(category) => {
+                if category != "main" && category != "extras" {
+                    if let Some(target_map) =
+                        self.gameui.background_map_for(&category).map(str::to_owned)
+                    {
+                        self.config.gameplay.background_map = Some(target_map.clone());
+                        let _ = self.config.save();
+                        if !self.background_level || self.loaded_map.as_deref() != Some(&target_map)
+                        {
+                            self.start_loading(&target_map);
+                            return vec![Effect::MainMenuMap(target_map)];
+                        }
+                    }
+                }
+            }
             MenuOutcome::Placeholder(label) => {
                 self.log(format!("{label}: not implemented in HL2-RS yet."));
             }
@@ -1946,6 +1989,7 @@ mod tests {
             localization: loc,
             game_menu: fallback_game_menu(),
             background_map: Some("background01".into()),
+            background_maps: crate::gameui::resources::fallback_background_maps(),
             new_game_maps: crate::gameui::resources::fallback_new_game_maps(),
             ..Default::default()
         };
@@ -2244,9 +2288,13 @@ mod tests {
         // Row 1 on main menu: HL2: EPISODE ONE
         assert_eq!(
             click_row(&mut console, 1),
-            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::MainMenuMap("ep1_background01".into()),
+            ]
         );
         assert_eq!(console.main_menu.category(), "episodic");
+        console.level_loaded(true);
 
         // Row 0 in Episode One submenu: NEW GAME
         let effects = click_row(&mut console, 0);
@@ -2281,9 +2329,13 @@ mod tests {
         // Row 2 on main menu: HL2: EPISODE TWO
         assert_eq!(
             click_row(&mut console, 2),
-            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::MainMenuMap("ep2_background01".into()),
+            ]
         );
         assert_eq!(console.main_menu.category(), "ep2");
+        console.level_loaded(true);
 
         // Row 0 in Episode Two submenu: NEW GAME
         let effects = click_row(&mut console, 0);
@@ -2605,5 +2657,121 @@ mod tests {
         console.toggle();
         assert_eq!(console.mode, Mode::MainMenu);
         assert!(!console.modal_dialog_open());
+    }
+
+    #[test]
+    fn submenu_entry_switches_background_map_and_persists() {
+        let mut console = installed_console();
+        console.mode = Mode::MainMenu;
+        console.background_level = true;
+        console.loaded_map = Some("background01".into());
+
+        // Initial background map state is background01
+        assert_eq!(console.background_map(), Some("background01"));
+
+        // 1. Enter Episode One submenu (row 1: "HL2: EPISODE ONE")
+        let effects = click_row(&mut console, 1);
+        assert_eq!(console.main_menu.category(), "episodic");
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("ep1_background01"),
+            "single background-map state is updated to episode 1"
+        );
+        assert!(console.is_loading());
+        assert!(
+            effects.contains(&Effect::MainMenuMap("ep1_background01".into())),
+            "dispatches Effect::MainMenuMap for ep1_background01"
+        );
+
+        // Map loads and level_loaded is called
+        console.level_loaded(true);
+        assert_eq!(
+            console.main_menu.category(),
+            "episodic",
+            "category remains in episodic submenu after background map load"
+        );
+        assert_eq!(console.loaded_map.as_deref(), Some("ep1_background01"));
+        assert!(!console.is_loading());
+
+        // 2. Return to main category via Escape, then enter Episode Two submenu
+        console.escape();
+        assert_eq!(console.main_menu.category(), "main");
+        // Background map remains ep1_background01 until a different expansion is selected
+        assert_eq!(console.loaded_map.as_deref(), Some("ep1_background01"));
+
+        // Click row 2: "HL2: EPISODE TWO"
+        let effects = click_row(&mut console, 2);
+        assert_eq!(console.main_menu.category(), "ep2");
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("ep2_background01"),
+            "persisted background map updated to ep2"
+        );
+        assert!(console.is_loading());
+        assert!(effects.contains(&Effect::MainMenuMap("ep2_background01".into())));
+
+        console.level_loaded(true);
+        assert_eq!(console.main_menu.category(), "ep2");
+        assert_eq!(console.loaded_map.as_deref(), Some("ep2_background01"));
+
+        // 3. Return to main, then enter Half-Life 2 submenu (row 0)
+        console.escape();
+        assert_eq!(console.main_menu.category(), "main");
+
+        let effects = click_row(&mut console, 0);
+        assert_eq!(console.main_menu.category(), "hl2");
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("background01")
+        );
+        assert!(effects.contains(&Effect::MainMenuMap("background01".into())));
+
+        console.level_loaded(true);
+        assert_eq!(console.main_menu.category(), "hl2");
+        assert_eq!(console.loaded_map.as_deref(), Some("background01"));
+
+        // 4. Entering Half-Life 2 submenu when already on background01 does not reload
+        console.escape();
+        assert_eq!(console.main_menu.category(), "main");
+        let effects = click_row(&mut console, 0);
+        assert_eq!(console.main_menu.category(), "hl2");
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::MainMenuMap(_))),
+            "no redundant reload when target background map is already active"
+        );
+        assert!(!console.is_loading());
+    }
+
+    #[test]
+    fn submenu_back_and_escape_preserves_background_map() {
+        let mut console = installed_console();
+        console.mode = Mode::MainMenu;
+        console.background_level = true;
+        console.loaded_map = Some("background01".into());
+
+        // Switch to Episode One
+        let _ = click_row(&mut console, 1);
+        console.level_loaded(true);
+        assert_eq!(console.main_menu.category(), "episodic");
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("ep1_background01")
+        );
+
+        // In episodic submenu, row 5 is "BACK"
+        let back_effects = click_row(&mut console, 5);
+        assert_eq!(console.main_menu.category(), "main");
+        assert!(
+            !back_effects
+                .iter()
+                .any(|e| matches!(e, Effect::MainMenuMap(_))),
+            "Back button does not trigger map reload"
+        );
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("ep1_background01"),
+            "background map persistence stays intact on Back"
+        );
+        assert_eq!(console.loaded_map.as_deref(), Some("ep1_background01"));
     }
 }

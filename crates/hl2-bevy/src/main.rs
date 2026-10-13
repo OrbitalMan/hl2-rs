@@ -618,6 +618,7 @@ fn setup(
     (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
+    let map_name = loaded.world.name.clone();
     commands.insert_resource(campaign::Campaign::new(&loaded));
     let (spawn, yaw) = loaded.world.spawn();
     let position = options
@@ -643,6 +644,7 @@ fn setup(
         ),
     );
     let mut console_ui = ui_host::Console::new(ui);
+    console_ui.source.loaded_map = Some(map_name);
     console_ui.source.level_loaded(prepared.1);
     if let Some(map) = &options.map {
         console_ui.map_request = Some(map.clone());

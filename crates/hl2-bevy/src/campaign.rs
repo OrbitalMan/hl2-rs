@@ -222,6 +222,7 @@ pub fn poll(
         if options.fly {
             sim.fly = true;
         }
+        ui.source.loaded_map = Some(loaded.world.name.clone());
         ui.source.level_loaded(job.request.background);
         if !job.request.background
             && let Ok(mut cursor) = windows.single_mut()
@@ -230,6 +231,7 @@ pub fn poll(
             cursor.visible = false;
         }
     } else {
+        ui.source.loaded_map = Some(loaded.world.name.clone());
         ui.source.level_loaded(false);
     }
     ui.source.log(format!("Loaded {}", loaded.world.name));

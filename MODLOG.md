@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-13 Background map on submenu entry
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::resources`: added `INITIAL_BACKGROUND_MAPS` data-driven table mapping verified initial background maps (`hl2` -> `background01`, `episodic` -> `ep1_background01`, `ep2` -> `ep2_background01`, `lostcoast` -> `background01`, `main` -> `background01`). Added `fallback_background_maps()`, `GameUiResources::background_maps: BTreeMap<String, String>`, and `GameUiResources::background_map_for(&self, category: &str) -> Option<&str>`. Populated `background_maps` from mounted expansion search paths in `GameUiResources::load`.
+- `hl2-ui::gameui::menu`: added `MenuOutcome::SwitchExpansion(String)` and `MenuOutcome::SwitchCategory(String)` variants to `MenuOutcome`. Emitted these outcomes from `GameMenu::activate` upon activating expansion and category buttons rather than returning `MenuOutcome::None`.
+- `hl2-ui::console`: added `loaded_map: Option<String>` and `pending_map: Option<String>` to `Console`. Updated `level_loaded(background)` to retain current menu category when loading background levels (only returning to root category when `!background`), update `loaded_map` from `pending_map` (or fallback to `background_map()` on startup), and update `activate_menu` to switch background maps on submenu entry via `Effect::MainMenuMap`, updating and persisting `config.gameplay.background_map` without redundant reloads if the target background map is already active.
+- `hl2-bevy::campaign` and `hl2-bevy::main`: tracked `ui.source.loaded_map` on level transition completions and startup map initialization.
+- Added unit tests: `initial_background_maps_table_and_fallbacks`, `submenu_entry_switches_background_map_and_persists`, and `submenu_back_and_escape_preserves_background_map`.
+
+**Why:**
+- Entering the Half-Life 2, Episode One, or Episode Two submenus previously failed to transition the main menu background map because `MenuCommand::SwitchExpansion` returned `MenuOutcome::None` and `level_loaded(true)` unconditionally reset `main_menu.back(...)`, wiping the submenu category. Associating each expansion with its authentic background map, dispatching `Effect::MainMenuMap` on expansion entry, persisting the single background map state, avoiding redundant reloads of active background maps, and keeping the submenu category active upon background level load completes the authentic GameUI navigation flow.
+
+**Tested how:**
+- `cargo test --locked -p hl2-ui`: 130 unit tests + 3 owned-install tests passed.
+- `cargo test --locked -p hl2-bevy`: 67 unit tests passed.
+- `cargo test --locked -p hl2-bevy episode_maps_load_successfully -- --ignored`: passed.
+- Headless runtime: `hl2-bevy --map ep1_background01 --frames 30` and `hl2-bevy --map ep2_background01 --frames 30` ran 30 frames cleanly.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+
+**Result:** Entering Half-Life 2, Episode One, or Episode Two submenu transitions the background map, preserves submenu category, and persists the single background map state across sessions.
+
+**Still broken or not tested:** Physical monitor visual inspection at 1280x800 and Retina needs manual check.
+
+**Next:** Task 9: Half-Life 2: Lost Coast and the Extras submenu.
+
 ## 2026-10-13 Episode map loading failures (UTF-8 tolerant decoding)
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

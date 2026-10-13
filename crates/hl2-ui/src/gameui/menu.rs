@@ -78,6 +78,10 @@ pub enum MenuOutcome {
     /// Start the named map (first chapter of a game).
     NewGame(String),
     ReturnToMainMenu,
+    /// Switched to an expansion submenu (e.g. "hl2", "episodic", "ep2").
+    SwitchExpansion(String),
+    /// Switched to a category submenu (e.g. "main", "extras").
+    SwitchCategory(String),
     /// A disabled placeholder was activated; the label is reported to the console.
     Placeholder(String),
 }
@@ -244,11 +248,11 @@ impl GameMenu {
         match entry.command {
             MenuCommand::SwitchExpansion(game) => {
                 self.set_category(&game, loc);
-                MenuOutcome::None
+                MenuOutcome::SwitchExpansion(game)
             }
             MenuCommand::SwitchCategory(category) => {
                 self.set_category(&category, loc);
-                MenuOutcome::None
+                MenuOutcome::SwitchCategory(category)
             }
             MenuCommand::OpenOptions => MenuOutcome::OpenOptions,
             MenuCommand::Quit => MenuOutcome::ConfirmQuit,
@@ -734,7 +738,10 @@ mod tests {
             [(0, "hl2", true), (1, "episodic", false), (2, "ep2", false)]
         {
             let mut menu = menu();
-            assert_eq!(menu.activate(index, &loc), MenuOutcome::None);
+            assert_eq!(
+                menu.activate(index, &loc),
+                MenuOutcome::SwitchExpansion(game.into())
+            );
             assert_eq!(menu.category(), game);
             assert_eq!(
                 labels(&menu),
@@ -753,7 +760,10 @@ mod tests {
                 "placeholders"
             );
             assert_eq!(menu.activate(4, &loc), MenuOutcome::OpenOptions);
-            assert_eq!(menu.activate(5, &loc), MenuOutcome::None);
+            assert_eq!(
+                menu.activate(5, &loc),
+                MenuOutcome::SwitchCategory(MAIN_CATEGORY.into())
+            );
             assert_eq!(
                 menu.category(),
                 MAIN_CATEGORY,
