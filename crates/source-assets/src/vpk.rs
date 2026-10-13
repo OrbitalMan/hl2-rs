@@ -169,15 +169,85 @@ pub struct Vfs {
     custom_roots: Vec<PathBuf>,
     custom_archives: Vec<Vpk>,
 }
+/// Returns the expansion directory name corresponding to the given Source map name, if any.
+pub fn expansion_for_map(map: &str) -> Option<&'static str> {
+    let lower = map.trim_end_matches(".bsp").to_ascii_lowercase();
+    if lower.starts_with("ep2_") {
+        Some("ep2")
+    } else if lower.starts_with("ep1_") {
+        Some("episodic")
+    } else if lower.contains("lostcoast") {
+        Some("lostcoast")
+    } else {
+        None
+    }
+}
+
 impl Vfs {
+    /// Mounts the installed game and platform content, defaulting to the base Half-Life 2 search path.
     pub fn mount(game: &Path) -> Result<Self> {
-        let roots = vec![game.join("hl2"), game.join("platform")];
+        Self::mount_expansion(game, None)
+    }
+
+    /// Mounts content for an optional specific expansion (`episodic`, `ep2`, `lostcoast`).
+    ///
+    /// Search paths follow Source engine inheritance:
+    /// - `ep2` -> `ep2` + `episodic` + `hl2` + `platform`
+    /// - `episodic` -> `episodic` + `hl2` + `platform`
+    /// - `lostcoast` -> `lostcoast` + `hl2` + `platform`
+    /// - base `hl2` -> `hl2` + `platform`
+    pub fn mount_expansion(game: &Path, expansion: Option<&str>) -> Result<Self> {
+        let mut roots = Vec::new();
+        if let Some(exp) = expansion {
+            match exp {
+                "ep2" => {
+                    let ep2 = game.join("ep2");
+                    if ep2.is_dir() {
+                        roots.push(ep2);
+                    }
+                    let episodic = game.join("episodic");
+                    if episodic.is_dir() {
+                        roots.push(episodic);
+                    }
+                }
+                "episodic" => {
+                    let episodic = game.join("episodic");
+                    if episodic.is_dir() {
+                        roots.push(episodic);
+                    }
+                }
+                "lostcoast" => {
+                    let lostcoast = game.join("lostcoast");
+                    if lostcoast.is_dir() {
+                        roots.push(lostcoast);
+                    }
+                }
+                other => {
+                    let path = game.join(other);
+                    if path.is_dir() {
+                        roots.push(path);
+                    }
+                }
+            }
+        }
+        roots.push(game.join("hl2"));
+        roots.push(game.join("platform"));
         let mut archives = Vec::new();
         let mut warnings = Vec::new();
         let mut custom_roots = Vec::new();
         let mut custom_archives = Vec::new();
-        let custom = game.join("hl2/custom");
-        if custom.is_dir() {
+        let mut custom_dirs = Vec::new();
+        if let Some(exp) = expansion {
+            let p = game.join(format!("{exp}/custom"));
+            if p.is_dir() {
+                custom_dirs.push(p);
+            }
+        }
+        let hl2_custom = game.join("hl2/custom");
+        if hl2_custom.is_dir() {
+            custom_dirs.push(hl2_custom);
+        }
+        for custom in custom_dirs {
             let mut paths = std::fs::read_dir(custom)?
                 .filter_map(|e| e.ok().map(|e| e.path()))
                 .collect::<Vec<_>>();
@@ -383,5 +453,18 @@ mod tests {
         std::fs::write(&p, b"bad").unwrap();
         assert!(Vpk::open(&p).is_err());
         std::fs::remove_file(p).unwrap();
+    }
+
+    #[test]
+    fn expansion_for_map_detects_episodes_and_lostcoast() {
+        assert_eq!(expansion_for_map("d1_trainstation_01"), None);
+        assert_eq!(expansion_for_map("d1_trainstation_01.bsp"), None);
+        assert_eq!(expansion_for_map("ep1_citadel_00"), Some("episodic"));
+        assert_eq!(expansion_for_map("ep1_citadel_00.bsp"), Some("episodic"));
+        assert_eq!(expansion_for_map("ep1_c17_00"), Some("episodic"));
+        assert_eq!(expansion_for_map("ep2_outland_01"), Some("ep2"));
+        assert_eq!(expansion_for_map("ep2_outland_01.bsp"), Some("ep2"));
+        assert_eq!(expansion_for_map("d2_lostcoast"), Some("lostcoast"));
+        assert_eq!(expansion_for_map("lostcoast"), Some("lostcoast"));
     }
 }

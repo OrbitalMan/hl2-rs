@@ -326,11 +326,16 @@ impl GameUiResources {
         res.background_map = reader
             .read_text("scripts/chapterbackgrounds.txt")
             .and_then(|text| background_map(&text));
-        if let Some(map) = reader
-            .read_text("cfg/chapter1.cfg")
-            .and_then(|t| chapter_map(&t))
-        {
-            res.new_game_maps.insert("hl2".into(), map);
+        for &(game, cfg_path, default_map) in INITIAL_EPISODE_MAPS {
+            let map = reader
+                .read_text(cfg_path)
+                .or_else(|| {
+                    vfs.game_root()
+                        .and_then(|root| std::fs::read_to_string(root.join(cfg_path)).ok())
+                })
+                .and_then(|text| chapter_map(&text))
+                .unwrap_or_else(|| default_map.to_owned());
+            res.new_game_maps.insert(game.to_owned(), map);
         }
         res
     }
@@ -415,15 +420,33 @@ pub fn background_map(text: &str) -> Option<String> {
         .filter(|map| !map.is_empty())
 }
 
-/// The map of a chapter config (`map d1_trainstation_01`).
+/// Initial game and episode maps verified against retail Source installation configs.
+pub const INITIAL_EPISODE_MAPS: &[(&str, &str, &str)] = &[
+    ("hl2", "cfg/chapter1.cfg", "d1_trainstation_01"),
+    ("episodic", "episodic/cfg/chapter1.cfg", "ep1_citadel_00"),
+    ("ep2", "ep2/cfg/chapter1.cfg", "ep2_outland_01"),
+    ("lostcoast", "lostcoast/cfg/chapter1.cfg", "d2_lostcoast"),
+];
+
+/// Fallback initial new game maps for each game and episode category.
+pub fn fallback_new_game_maps() -> BTreeMap<String, String> {
+    INITIAL_EPISODE_MAPS
+        .iter()
+        .map(|(game, _, map)| ((*game).to_owned(), (*map).to_owned()))
+        .collect()
+}
+
+/// The map of a chapter config (`map d1_trainstation_01` or `playvideo_exitcommand ep1_recap map ep2_outland_01`).
 pub fn chapter_map(text: &str) -> Option<String> {
     text.lines().find_map(|line| {
-        let mut words = line.split("//").next()?.split_whitespace();
-        words
-            .next()
-            .filter(|w| w.eq_ignore_ascii_case("map"))
-            .and_then(|_| words.next())
-            .map(|m| m.trim_matches('"').to_owned())
+        let clean = line.split("//").next()?;
+        let mut words = clean.split_whitespace();
+        while let Some(w) = words.next() {
+            if w.eq_ignore_ascii_case("map") {
+                return words.next().map(|m| m.trim_matches('"').to_owned());
+            }
+        }
+        None
     })
 }
 
@@ -488,7 +511,28 @@ mod tests {
             chapter_map("// comment\nmap d1_trainstation_01\n"),
             Some("d1_trainstation_01".into())
         );
+        assert_eq!(
+            chapter_map("map ep1_citadel_00"),
+            Some("ep1_citadel_00".into())
+        );
+        assert_eq!(
+            chapter_map("playvideo_exitcommand ep1_recap map ep2_outland_01"),
+            Some("ep2_outland_01".into())
+        );
+        assert_eq!(
+            chapter_map("map \"d2_lostcoast\""),
+            Some("d2_lostcoast".into())
+        );
         assert_eq!(chapter_map("echo hi"), None);
+    }
+
+    #[test]
+    fn initial_episode_maps_table_and_fallbacks() {
+        let maps = fallback_new_game_maps();
+        assert_eq!(maps.get("hl2").map(String::as_str), Some("d1_trainstation_01"));
+        assert_eq!(maps.get("episodic").map(String::as_str), Some("ep1_citadel_00"));
+        assert_eq!(maps.get("ep2").map(String::as_str), Some("ep2_outland_01"));
+        assert_eq!(maps.get("lostcoast").map(String::as_str), Some("d2_lostcoast"));
     }
 
     #[test]
@@ -553,6 +597,18 @@ mod tests {
         assert_eq!(
             res.new_game_maps.get("hl2").map(String::as_str),
             Some("d1_trainstation_01")
+        );
+        assert_eq!(
+            res.new_game_maps.get("episodic").map(String::as_str),
+            Some("ep1_citadel_00")
+        );
+        assert_eq!(
+            res.new_game_maps.get("ep2").map(String::as_str),
+            Some("ep2_outland_01")
+        );
+        assert_eq!(
+            res.new_game_maps.get("lostcoast").map(String::as_str),
+            Some("d2_lostcoast")
         );
         println!("missing: {:?}", res.missing);
     }

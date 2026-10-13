@@ -556,6 +556,7 @@ impl Console {
             if loading.is_failed() {
                 self.loading_dialog = None;
                 self.mode = Mode::MainMenu;
+                self.main_menu.back(&self.gameui.localization);
             }
             return;
         }
@@ -905,6 +906,7 @@ impl Console {
             if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {
                 self.loading_dialog = None;
                 self.mode = Mode::MainMenu;
+                self.main_menu.back(&self.gameui.localization);
             }
             return Vec::new();
         }
@@ -1707,15 +1709,13 @@ mod tests {
         ] {
             loc.insert(token, text);
         }
-        let mut resources = GameUiResources {
+        let resources = GameUiResources {
             localization: loc,
             game_menu: fallback_game_menu(),
             background_map: Some("background01".into()),
+            new_game_maps: crate::gameui::resources::fallback_new_game_maps(),
             ..Default::default()
         };
-        resources
-            .new_game_maps
-            .insert("hl2".into(), "d1_trainstation_01".into());
         let mut console = Console::default();
         console.set_resources(resources);
         console
@@ -2002,5 +2002,81 @@ mod tests {
         console.level_loaded(false);
         assert!(console.loading_dialog.is_none());
         assert_eq!(console.mode, Mode::Gameplay);
+    }
+
+    #[test]
+    fn episode_one_and_two_new_game_navigation_and_missing_content_error_recovery() {
+        let mut console = installed_console();
+        console.level_loaded(true);
+        assert_eq!(console.mode, Mode::MainMenu);
+
+        // Row 1 on main menu: HL2: EPISODE ONE
+        assert_eq!(
+            click_row(&mut console, 1),
+            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        );
+        assert_eq!(console.main_menu.category(), "episodic");
+
+        // Row 0 in Episode One submenu: NEW GAME
+        let effects = click_row(&mut console, 0);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::Map("ep1_citadel_00".into()),
+            ]
+        );
+        assert!(console.is_loading());
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().map,
+            "ep1_citadel_00"
+        );
+
+        // Graceful error handling for missing episode content:
+        // Loader reports failure, error is latched onto loading dialog.
+        console.loading_failed("owned map ep1_citadel_00.bsp not found");
+        assert!(!console.is_loading());
+        assert!(console.loading_dialog.as_ref().unwrap().is_failed());
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().error.as_deref(),
+            Some("owned map ep1_citadel_00.bsp not found")
+        );
+
+        // Player dismisses failed dialog via Escape and returns to main menu
+        console.escape();
+        assert!(console.loading_dialog.is_none());
+        assert_eq!(console.mode, Mode::MainMenu);
+
+        // Row 2 on main menu: HL2: EPISODE TWO
+        assert_eq!(
+            click_row(&mut console, 2),
+            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        );
+        assert_eq!(console.main_menu.category(), "ep2");
+
+        // Row 0 in Episode Two submenu: NEW GAME
+        let effects = click_row(&mut console, 0);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::Map("ep2_outland_01".into()),
+            ]
+        );
+        assert!(console.is_loading());
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().map,
+            "ep2_outland_01"
+        );
+
+        // Missing episode content error is dismissed via Enter input
+        console.loading_failed("owned map ep2_outland_01.bsp not found");
+        let enter = Input {
+            keys: [Key::Enter].into_iter().collect(),
+            ..Default::default()
+        };
+        console.input(&enter);
+        assert!(console.loading_dialog.is_none());
+        assert_eq!(console.mode, Mode::MainMenu);
     }
 }

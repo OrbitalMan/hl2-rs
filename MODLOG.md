@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-13 Episode One & Two New Game maps
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `source-assets::vpk`: added `expansion_for_map(map)` detecting `ep2`, `episodic`, and `lostcoast` from map name prefixes (`ep2_*`, `ep1_*`, `*lostcoast*`). Added `Vfs::mount_expansion(game, expansion)` implementing Source engine search path inheritance (`ep2` -> `ep2` + `episodic` + `hl2` + `platform`; `episodic` -> `episodic` + `hl2` + `platform`; `lostcoast` -> `lostcoast` + `hl2` + `platform`). Kept `Vfs::mount(game)` as default `hl2` + `platform` mount. Added unit test `expansion_for_map_detects_episodes_and_lostcoast`.
+- `hl2-ui::gameui::resources`: added `INITIAL_EPISODE_MAPS` data-driven table mapping `"hl2"` -> `"d1_trainstation_01"`, `"episodic"` -> `"ep1_citadel_00"`, `"ep2"` -> `"ep2_outland_01"`, and `"lostcoast"` -> `"d2_lostcoast"`. Added `fallback_new_game_maps()`. Updated `chapter_map` to extract map names from composite commands (such as `playvideo_exitcommand ep1_recap map ep2_outland_01` in Episode Two's `chapter1.cfg`). Updated `GameUiResources::load` to populate `new_game_maps` from each expansion's installed `chapter1.cfg` with fallbacks. Added unit tests `initial_episode_maps_table_and_fallbacks` and extended `chapter_files_name_their_maps`.
+- `hl2-ui::console`: updated `installed_console` to populate all episode categories via `fallback_new_game_maps()`. Updated failed loading dialog dismissal in `Console::escape` and `Console::input` to reset `main_menu` category to root (`main`). Added unit test `episode_one_and_two_new_game_navigation_and_missing_content_error_recovery` verifying New Game actions across Episode One and Episode Two, failure state latching on missing content, and modal return to main menu on Escape / Enter.
+- `hl2-bevy::assets`: updated `load_with_canvas` to mount expansion content via `Vfs::mount_expansion(game, expansion_for_map(map))` ensuring episode BSPs and assets in `episodic/` and `ep2/` are discovered.
+
+**Why:**
+- In the retail 20th Anniversary combined launcher, the main menu supports starting New Game directly for Half-Life 2, Episode One, and Episode Two.
+- When episode content or maps are missing from an installation, the engine provides graceful error handling via the modal loading dialog without panicking or crashing.
+
+**Tested how:**
+- `cargo test --locked`: all 112 unit tests in `hl2-ui`, 64 in `hl2-bevy`, 91 in `source-assets`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed (verifying `hl2`, `episodic`, `ep2`, and `lostcoast` map discoveries).
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and exited code 0.
+- Headless Bevy runtime Episode One: `cargo run --locked -p hl2-bevy -- --frames 30 --map ep1_citadel_00 --no-focus` passed and exited code 0.
+- Headless Bevy runtime Episode Two: `cargo run --locked -p hl2-bevy -- --frames 30 --map ep2_outland_01 --no-focus` passed and exited code 0.
+
+**Result:** Data-driven episode map table verified against retail game files, authentic search path inheritance, and graceful loading dialog failure recovery for missing content.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 10 (Background map handling).
+
 ## 2026-10-13 Map loading dialog
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
