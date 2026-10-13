@@ -234,6 +234,8 @@ pub struct OptionsDialog {
     draft: Draft,
     pub(crate) armed: Option<Target>,
     pub(crate) pressed: Option<Target>,
+    last_armed: Option<Target>,
+    sounds: Vec<String>,
     tracker: widgets::ButtonTracker<Target>,
     drag: Option<(Value, Rect)>,
     combo: Option<OpenCombo>,
@@ -257,6 +259,8 @@ impl Default for OptionsDialog {
             applied: config,
             armed: None,
             pressed: None,
+            last_armed: None,
+            sounds: Vec::new(),
             tracker: widgets::ButtonTracker::new(),
             drag: None,
             combo: None,
@@ -369,6 +373,7 @@ impl OptionsDialog {
         self.applied = config;
         self.armed = None;
         self.pressed = None;
+        self.last_armed = None;
         self.drag = None;
         self.combo = None;
         self.editing = None;
@@ -396,9 +401,15 @@ impl OptionsDialog {
         std::mem::take(&mut self.log)
     }
 
+    /// Drains any queued UI sound cues (e.g. rollover or release activation).
+    pub fn take_sounds(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.sounds)
+    }
+
     /// Closes the innermost layer. Returns `false` when the dialog itself closes (Cancel).
     pub fn escape(&mut self) -> bool {
         self.drag = None;
+        self.last_armed = None;
         if self.keys.capture.take().is_some()
             || self.combo.take().is_some()
             || self.editing.take().is_some()
@@ -473,14 +484,16 @@ impl OptionsDialog {
             let layout = confirm.layout(|t| measure.text_width(t, false));
             let pointer = local(centered(canvas, layout.size, scale));
             let down = input.click || input.held;
-            match confirm.input(
+            let outcome = confirm.input(
                 &layout,
                 pointer,
                 down,
                 input.click,
                 input.released,
                 input.pressed(Key::Enter),
-            ) {
+            );
+            self.sounds.extend(confirm.take_sounds());
+            match outcome {
                 Some(true) => self.use_default_keys(),
                 Some(false) => {}
                 None => self.confirm = Some(confirm),
@@ -519,6 +532,9 @@ impl OptionsDialog {
             let step: i32 = if input.pressed(Key::Up) { -1 } else { 1 };
             let current = combo.highlight.map_or(-1, |i| i as i32);
             let next = (current + step).clamp(0, count as i32 - 1) as usize;
+            if Some(next) != combo.highlight {
+                self.sounds.push("ui/buttonrollover.wav".to_string());
+            }
             combo.highlight = Some(next);
             combo.reveal(next);
         }
@@ -528,6 +544,9 @@ impl OptionsDialog {
             .filter(|p| !on_scroll_bar(*p))
             .and_then(|p| widgets::menu_list_hit(combo.list, combo.first, count, p));
         if hit.is_some() {
+            if hit != combo.highlight {
+                self.sounds.push("ui/buttonrollover.wav".to_string());
+            }
             combo.highlight = hit;
         }
         let pick = if input.click {
@@ -543,6 +562,7 @@ impl OptionsDialog {
         };
         match pick {
             Some(Some(index)) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 let env = Env {
                     localization: &self.res.localization,
                     languages: &self.res.spoken_languages,
@@ -601,6 +621,14 @@ impl OptionsDialog {
                 })
         });
         self.armed = hit;
+        let armed_target = hit.filter(|target| match target {
+            Target::Control(i) => widgets.get(*i).is_some_and(|w| w.enabled),
+            _ => true,
+        });
+        if armed_target.is_some() && armed_target != self.last_armed {
+            self.sounds.push("ui/buttonrollover.wav".to_string());
+        }
+        self.last_armed = armed_target;
         if input.click {
             let keep_editing = matches!(
                 (&self.editing, pointer),
@@ -657,12 +685,27 @@ impl OptionsDialog {
         }
         let clicked = self.track(&list, &extra, pointer, input);
         match clicked {
-            Some(Target::Tab(i)) => self.select_tab(Tab::ALL[i]),
-            Some(Target::Ok) => return self.ok(),
-            Some(Target::Cancel) => return OptionsOutcome::Close(None),
-            Some(Target::Apply) => return self.apply(),
+            Some(Target::Tab(i)) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                self.select_tab(Tab::ALL[i]);
+            }
+            Some(Target::Ok) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                return self.ok();
+            }
+            Some(Target::Cancel) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                return OptionsOutcome::Close(None);
+            }
+            Some(Target::Apply) => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                return self.apply();
+            }
             Some(Target::Control(i)) => {
                 if let (Some(widget), Some(p)) = (list.get(i), pointer) {
+                    if !matches!(widget.binding, Some(Binding::Slider(_))) {
+                        self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                    }
                     return self.activate(widget, p);
                 }
             }
@@ -670,6 +713,7 @@ impl OptionsDialog {
         }
         let keyboard_selection = self.tab == Tab::Keyboard && self.keys.selected.is_some();
         if input.pressed(Key::Enter) && !was_editing && !keyboard_selection && clicked.is_none() {
+            self.sounds.push("ui/buttonclickrelease.wav".to_string());
             return self.ok();
         }
         OptionsOutcome::None
@@ -894,10 +938,16 @@ impl OptionsDialog {
         match self.track(&list, &[], pointer, input) {
             Some(Target::Control(i)) => {
                 if let (Some(widget), Some(p)) = (list.get(i), pointer) {
+                    if !matches!(widget.binding, Some(Binding::Slider(_))) {
+                        self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                    }
                     self.activate(widget, p);
                 }
             }
-            _ if input.pressed(Key::Enter) && !was_editing => self.command(Command::SubOk),
+            _ if input.pressed(Key::Enter) && !was_editing => {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                self.command(Command::SubOk);
+            }
             _ => {}
         }
     }
@@ -1861,5 +1911,50 @@ mod tests {
             ..Default::default()
         });
         assert!(h.dialog.draft().mouse.invert, "toggled on release");
+    }
+
+    #[test]
+    fn options_dialog_sound_events_hover_and_activation() {
+        let mut h = Harness::new();
+        h.dialog.open(Config::default());
+        let ok_rect = button_rects()[0];
+        let ok_pos = DIALOG + vec2(ok_rect.x + 4., ok_rect.y + 4.);
+        let away_pos = DIALOG + vec2(10., 10.);
+
+        // 1. Hovering OK button emits rollover sound
+        h.frame(Input {
+            pointer: Some(ok_pos),
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonrollover.wav"]);
+
+        // 2. Hovering OK button again does not re-emit
+        h.frame(Input {
+            pointer: Some(ok_pos),
+            ..Default::default()
+        });
+        assert!(h.dialog.take_sounds().is_empty());
+
+        // 3. Moving away emits nothing
+        h.frame(Input {
+            pointer: Some(away_pos),
+            ..Default::default()
+        });
+        assert!(h.dialog.take_sounds().is_empty());
+
+        // 4. Clicking and releasing OK button emits click sound
+        h.frame(Input {
+            pointer: Some(ok_pos),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        let _ = h.dialog.take_sounds(); // hover sound on re-entry
+        h.frame(Input {
+            pointer: Some(ok_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
     }
 }

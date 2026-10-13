@@ -271,6 +271,8 @@ pub struct MessageBox {
     pub cancel: Option<String>,
     pub armed: Option<usize>,
     pub pressed: Option<usize>,
+    last_armed: Option<usize>,
+    sounds: Vec<String>,
     tracker: ButtonTracker<usize>,
 }
 
@@ -291,8 +293,15 @@ impl MessageBox {
             cancel,
             armed: None,
             pressed: None,
+            last_armed: None,
+            sounds: Vec::new(),
             tracker: ButtonTracker::new(),
         }
+    }
+
+    /// Drains any queued UI sound cues (e.g. rollover or release activation).
+    pub fn take_sounds(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.sounds)
     }
 
     /// The Quit confirmation (`#GameUI_QuitConfirmationTitle`/`Text`, `#GameUI_Quit`, `#GameUI_Cancel`).
@@ -368,12 +377,18 @@ impl MessageBox {
     ) -> Option<bool> {
         let hovered = pointer.and_then(|p| layout.buttons.iter().position(|b| b.contains(p)));
         self.armed = hovered;
+        if hovered.is_some() && hovered != self.last_armed {
+            self.sounds.push("ui/buttonrollover.wav".to_string());
+        }
+        self.last_armed = hovered;
         let activated = self.tracker.update(hovered, down, click, released);
         self.pressed = self.tracker.pressed();
-        if enter {
-            return Some(true);
+        let enter_activated = enter.then_some(0);
+        let final_activated = activated.or(enter_activated);
+        if final_activated.is_some() {
+            self.sounds.push("ui/buttonclickrelease.wav".to_string());
         }
-        match activated {
+        match final_activated {
             Some(0) => Some(true),
             Some(_) => Some(false),
             None => None,
@@ -837,5 +852,46 @@ mod tests {
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         assert_eq!(ranges, vec![(11., None)]);
         assert!(resource_font(root, "Absent").is_none());
+    }
+
+    #[test]
+    fn message_box_sound_events_hover_and_release() {
+        let mut quit = MessageBox::new(
+            "Title".into(),
+            "Text".into(),
+            "OK".into(),
+            Some("Cancel".into()),
+        );
+        let layout = quit.layout(|_| 100.);
+        let center = |r: Rect| Some(vec2(r.x + r.w / 2., r.y + r.h / 2.));
+
+        // 1. Moving from outside to over button 0 emits rollover sound
+        quit.input(&layout, center(layout.buttons[0]), false, false, false, false);
+        assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
+
+        // 2. Staying over button 0 on next frame does not re-emit rollover
+        quit.input(&layout, center(layout.buttons[0]), false, false, false, false);
+        assert!(quit.take_sounds().is_empty());
+
+        // 3. Moving to button 1 emits rollover sound
+        quit.input(&layout, center(layout.buttons[1]), false, false, false, false);
+        assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
+
+        // 4. Moving outside emits nothing
+        quit.input(&layout, None, false, false, false, false);
+        assert!(quit.take_sounds().is_empty());
+
+        // 5. Press and release on button 0 emits rollover (on entry), then release sound on activation
+        quit.input(&layout, center(layout.buttons[0]), true, true, false, false);
+        assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
+        quit.input(&layout, center(layout.buttons[0]), false, false, true, false);
+        assert_eq!(quit.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+
+        // 6. Press, move away, and release emits no release sound
+        quit.input(&layout, center(layout.buttons[0]), true, true, false, false);
+        let _ = quit.take_sounds();
+        quit.input(&layout, None, true, false, false, false);
+        quit.input(&layout, None, false, false, true, false);
+        assert!(quit.take_sounds().is_empty());
     }
 }

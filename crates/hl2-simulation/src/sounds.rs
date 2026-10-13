@@ -337,6 +337,21 @@ pub struct SoundRequest {
     pub volume: Option<f32>,
     /// World position for distance gain with the script soundlevel; None is unspatialized.
     pub origin: Option<glam::Vec3>,
+    /// UI sounds bypass simulation pausing so menu events play while paused.
+    pub ui: bool,
+}
+
+impl SoundRequest {
+    pub fn ui(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            actor: None,
+            ambient: None,
+            volume: None,
+            origin: None,
+            ui: true,
+        }
+    }
 }
 
 impl From<String> for SoundRequest {
@@ -347,6 +362,7 @@ impl From<String> for SoundRequest {
             ambient: None,
             volume: None,
             origin: None,
+            ui: false,
         }
     }
 }
@@ -910,6 +926,7 @@ mod tests {
             ambient: None,
             volume: None,
             origin: None,
+            ui: false,
             name: cue.into(),
             actor: Some(SoundActor {
                 name: "actor diagnostic name".into(),

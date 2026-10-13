@@ -270,6 +270,10 @@ impl Simulation {
                     self.pending_video_config = Some(cfg.video.clone());
                     ui.source.config = *cfg;
                 }
+                Effect::PlaySound(sound) => {
+                    game.sound_requests
+                        .push(hl2_simulation::sounds::SoundRequest::ui(sound));
+                }
             }
         }
     }
@@ -809,5 +813,40 @@ mod tests {
         assert_eq!(sim.fov, 90.0);
         assert_eq!(ui.source.config.video.fov, 90.0);
         assert_eq!(ui.source.config.audio.volume, 0.42);
+    }
+
+    #[test]
+    fn console_effects_routes_play_sound_to_ui_sound_requests() {
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::ZERO,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
+
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![
+                hl2_ui::console::Effect::PlaySound("ui/buttonrollover.wav".into()),
+                hl2_ui::console::Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+            ],
+        );
+
+        assert_eq!(game.sound_requests.len(), 2);
+        assert_eq!(
+            game.sound_requests[0],
+            hl2_simulation::sounds::SoundRequest::ui("ui/buttonrollover.wav")
+        );
+        assert!(game.sound_requests[0].ui);
+        assert_eq!(
+            game.sound_requests[1],
+            hl2_simulation::sounds::SoundRequest::ui("ui/buttonclickrelease.wav")
+        );
+        assert!(game.sound_requests[1].ui);
     }
 }

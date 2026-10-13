@@ -345,6 +345,9 @@ impl PreparedAudio {
                 "Player.FallDamage",
                 "Player.FallGib",
                 "Player.Death",
+                "ui/buttonrollover.wav",
+                "ui/buttonclick.wav",
+                "ui/buttonclickrelease.wav",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -511,6 +514,8 @@ pub struct SoundPlayer {
     soundscape: Option<u64>,
     /// A music channel, scaled by the music volume (see [`hl2_simulation::sounds::is_music`]).
     music: bool,
+    /// UI sounds bypass simulation pausing so menu events play while paused.
+    ui: bool,
 }
 impl Audio {
     fn emit(
@@ -524,6 +529,7 @@ impl Audio {
         let wave = match self.library.resolve_wave(request) {
             Ok(wave) => wave,
             Err(error) => {
+                warn!("sound request failed: {error:#}");
                 self.library
                     .errors
                     .insert(request.name.clone(), format!("{error:#}"));
@@ -533,6 +539,7 @@ impl Audio {
         };
         let path = wave.path;
         let Some(handle) = self.handles.get(&path) else {
+            warn!("sound cue was not preloaded: {path}");
             self.library.errors.entry(path).or_insert_with(|| {
                 "cue variant was not preloaded; no file reads are allowed in playback systems"
                     .into()
@@ -560,6 +567,7 @@ impl Audio {
                 ambient,
                 soundscape,
                 music,
+                ui: request.ui,
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
@@ -612,6 +620,7 @@ impl Audio {
                 ambient: None,
                 soundscape: None,
                 music: false,
+                ui: request.ui,
             },
             AudioPlayer::new(sources.add(AudioSource { bytes: wav.into() })),
             PlaybackSettings {
@@ -744,7 +753,9 @@ pub fn queue(
     for (entity, player, mut settings, sink) in &mut players {
         owned.push((entity, player.ambient, player.soundscape));
         count += 1;
-        settings.paused = paused;
+        if !player.ui {
+            settings.paused = paused;
+        }
         let mut sink = sink;
         // Soundscape loops fade; their current volume replaces the spawn volume.
         let base = player
@@ -763,9 +774,9 @@ pub fn queue(
             audio.spatial.push((player.path.clone(), distance, volume));
         }
         if let Some(sink) = sink {
-            if paused && !sink.is_paused() {
+            if !player.ui && paused && !sink.is_paused() {
                 sink.pause();
-            } else if !paused && sink.is_paused() {
+            } else if !player.ui && !paused && sink.is_paused() {
                 sink.play();
             }
         }
@@ -824,7 +835,7 @@ pub fn queue(
                 &request,
                 false,
                 (request.volume.unwrap_or(volume), pitch, spatial),
-                (paused, None, None),
+                (if request.ui { false } else { paused }, None, None),
             )
         } {
             count += 1;

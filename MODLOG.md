@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-13 UI sounds: hover rollover, click release and GameUI audio routing
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-simulation::sounds`: added `pub ui: bool` field to `SoundRequest` and helper `SoundRequest::ui(name)` to distinguish UI-triggered audio cues from spatial in-world simulation audio.
+- `hl2-bevy::audio`: added `ui: bool` to `SoundPlayer`. Preloaded `"ui/buttonrollover.wav"`, `"ui/buttonclick.wav"`, and `"ui/buttonclickrelease.wav"` cues on initialization. In `Audio::emit` and `Audio::queue`, UI sounds bypass the simulation pause check so menu/dialog sounds play normally when the game or background level is paused. Routed volume scaling through master volume (`global.volume.to_linear()`) and `snd_mute_losefocus`. Added `warn!` logging for missing sound requests and missing cues.
+- `hl2-bevy::simulation`: routed `Effect::PlaySound(sound)` from UI console effects to `game.sound_requests.push(SoundRequest::ui(sound))`. Added unit test `console_effects_routes_play_sound_to_ui_sound_requests`.
+- `hl2-ui::console`: added `Effect::PlaySound(String)`. Added `last_menu_hover: Option<usize>` tracking to emit `"ui/buttonrollover.wav"` only on boundary entry from outside, on keyboard Up/Down navigation, and `"ui/buttonclickrelease.wav"` on menu item activation. Forwarded drained sounds from `OptionsDialog` and `MessageBox`.
+- `hl2-ui::gameui::options`: added `last_armed: Option<Target>` tracking and sound queue (`take_sounds()`). Emits `"ui/buttonrollover.wav"` on control hover entry and combo navigation, and `"ui/buttonclickrelease.wav"` on button/tab/item activation (excluding slider drags). Added unit test `options_dialog_sound_events_hover_and_activation`.
+- `hl2-ui::gameui::menu`: added `last_armed: Option<usize>` tracking and sound queue to `MessageBox`. Emits `"ui/buttonrollover.wav"` on button hover entry and `"ui/buttonclickrelease.wav"` on button activation. Added unit test `message_box_sound_events_hover_and_release`.
+
+**Why:**
+- Half-Life 2 GameUI plays distinct audio cues on button rollover (`ui/buttonrollover.wav`) and activation (`ui/buttonclickrelease.wav`).
+- UI audio must trigger only on new hover transitions (not repeated every frame while hovering), respect button release-activation rules, and play even while the simulation clock is paused.
+
+**Tested how:**
+- `cargo test --locked`: all 96 unit tests in `hl2-ui`, 64 in `hl2-bevy`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed and exited code 0.
+
+**Result:** Authentic GameUI sound feedback on hover and release across main menu, options dialogs, message boxes, and combo boxes, playing while paused and respecting master volume.
+
+**Still broken or not tested:** Physical monitor audio output not directly listened to in headless environment.
+
+**Next:** Task 5 (Close button on dialogs/menus).
+
 ## 2026-10-13 Button interaction model: pressed state, pointer release and cancellation semantics
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

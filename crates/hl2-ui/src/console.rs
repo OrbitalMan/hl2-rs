@@ -92,6 +92,8 @@ pub enum Effect {
     ApplyConfig(Box<crate::config::Config>),
     /// Load the main-menu background map and show the main menu over it ("Return to main menu").
     MainMenuMap(String),
+    /// Play a UI sound cue (e.g. button hover or release activation).
+    PlaySound(String),
 }
 
 pub struct Console {
@@ -129,6 +131,7 @@ pub struct Console {
     widget_fonts: Fonts,
     style: Style,
     pub menu_tracker: ButtonTracker<usize>,
+    last_menu_hover: Option<usize>,
     pub options: OptionsDialog,
     /// The menu the options dialog was opened from (drawn behind it and restored on close).
     options_return: Mode,
@@ -324,6 +327,7 @@ impl Default for Console {
             widget_fonts: Fonts::default(),
             style: Style::default(),
             menu_tracker: ButtonTracker::new(),
+            last_menu_hover: None,
             options: OptionsDialog::default(),
             options_return: Mode::MainMenu,
             config,
@@ -859,8 +863,14 @@ impl Console {
             for line in self.options.take_log() {
                 self.log(line);
             }
+            let mut effects: Vec<Effect> = self
+                .options
+                .take_sounds()
+                .into_iter()
+                .map(Effect::PlaySound)
+                .collect();
             let (config, close) = match outcome {
-                OptionsOutcome::None => return Vec::new(),
+                OptionsOutcome::None => return effects,
                 OptionsOutcome::Apply(config) => (Some(config), false),
                 OptionsOutcome::Close(config) => (config, true),
             };
@@ -868,13 +878,14 @@ impl Console {
                 self.mode = self.options_return;
             }
             let Some(config) = config else {
-                return Vec::new();
+                return effects;
             };
             if let Err(error) = config.save() {
                 self.log(format!("Could not save settings: {error}"));
             }
             self.config = config.clone();
-            return vec![Effect::ApplyConfig(Box::new(config))];
+            effects.push(Effect::ApplyConfig(Box::new(config)));
+            return effects;
         }
         if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
             return self.menu_input(input);
@@ -984,23 +995,31 @@ impl Console {
     }
 
     fn menu_input(&mut self, input: &Input) -> Vec<Effect> {
+        let mut effects = Vec::new();
         if let Some(mut quit) = self.quit_box.take() {
             let (origin, scale, layout) = self.quit_geometry(&quit);
             let pointer = input.pointer.map(|p| (p - origin) / scale);
             let down = input.click || input.held;
-            match quit.input(
+            let outcome = quit.input(
                 &layout,
                 pointer,
                 down,
                 input.click,
                 input.released,
                 input.pressed(Key::Enter),
-            ) {
-                Some(true) => return vec![Effect::Quit],
+            );
+            for sound in quit.take_sounds() {
+                effects.push(Effect::PlaySound(sound));
+            }
+            match outcome {
+                Some(true) => {
+                    effects.push(Effect::Quit);
+                    return effects;
+                }
                 Some(false) => {}
                 None => self.quit_box = Some(quit),
             }
-            return Vec::new();
+            return effects;
         }
         let count = self.game_menu().map_or(0, |menu| menu.entries().len());
         let rows = self.menu_rows(count);
@@ -1009,10 +1028,18 @@ impl Console {
             _ => &mut self.pause_menu,
         };
         if input.pressed(Key::Up) {
+            let prev = menu.selection;
             menu.step(-1);
+            if menu.selection != prev && menu.selection.is_some() {
+                effects.push(Effect::PlaySound("ui/buttonrollover.wav".into()));
+            }
         }
         if input.pressed(Key::Down) {
+            let prev = menu.selection;
             menu.step(1);
+            if menu.selection != prev && menu.selection.is_some() {
+                effects.push(Effect::PlaySound("ui/buttonrollover.wav".into()));
+            }
         }
         let hovered = input
             .pointer
@@ -1021,6 +1048,10 @@ impl Console {
         if let Some(index) = hovered {
             menu.selection = Some(index);
         }
+        if hovered.is_some() && hovered != self.last_menu_hover {
+            effects.push(Effect::PlaySound("ui/buttonrollover.wav".into()));
+        }
+        self.last_menu_hover = hovered;
         let down = input.click || input.held;
         let mut activate = self
             .menu_tracker
@@ -1028,7 +1059,11 @@ impl Console {
         if input.pressed(Key::Enter) {
             activate = activate.or(menu.selection);
         }
-        activate.map_or_else(Vec::new, |index| self.activate_menu(index))
+        if let Some(index) = activate {
+            effects.push(Effect::PlaySound("ui/buttonclickrelease.wav".into()));
+            effects.extend(self.activate_menu(index));
+        }
+        effects
     }
 
     fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
@@ -1600,18 +1635,33 @@ mod tests {
         assert!(console.output.back().unwrap().contains("not implemented"));
         assert_eq!(
             click_row(&mut console, 5),
-            vec![Effect::MainMenuMap("background01".into())]
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::MainMenuMap("background01".into()),
+            ]
         );
         // The pointer left Return to main menu selected; Down moves to Quit, and Enter asks for
         // confirmation instead of quitting.
-        assert!(keys(&mut console, &[Key::Down]).is_empty());
-        assert!(keys(&mut console, &[Key::Enter]).is_empty());
+        assert_eq!(
+            keys(&mut console, &[Key::Down]),
+            vec![Effect::PlaySound("ui/buttonrollover.wav".into())]
+        );
+        assert_eq!(
+            keys(&mut console, &[Key::Enter]),
+            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        );
         assert!(console.quit_box.is_some());
         console.escape();
         assert!(console.quit_box.is_none(), "Escape closes only the box");
         assert_eq!(console.mode, Mode::Pause);
         keys(&mut console, &[Key::Enter]);
-        assert_eq!(keys(&mut console, &[Key::Enter]), vec![Effect::Quit]);
+        assert_eq!(
+            keys(&mut console, &[Key::Enter]),
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::Quit,
+            ]
+        );
         console.quit_box = None;
         click_row(&mut console, 0);
         assert_eq!(console.mode, Mode::Gameplay, "Resume");
@@ -1632,7 +1682,10 @@ mod tests {
         click_row(&mut console, 0);
         assert_eq!(
             click_row(&mut console, 0),
-            vec![Effect::Map("d1_trainstation_01".into())]
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::Map("d1_trainstation_01".into()),
+            ]
         );
         console.level_loaded(false);
         assert_eq!(console.mode, Mode::Gameplay);
@@ -1658,11 +1711,20 @@ mod tests {
                 ..Default::default()
             })
         };
-        assert!(click_btn(&mut console, layout.buttons[1]).is_empty());
+        assert_eq!(
+            click_btn(&mut console, layout.buttons[1]),
+            vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
+        );
         assert!(console.quit_box.is_none(), "Cancel closes the box");
         assert_eq!(console.mode, Mode::MainMenu);
         click_row(&mut console, 6);
-        assert_eq!(click_btn(&mut console, layout.buttons[0]), vec![Effect::Quit]);
+        assert_eq!(
+            click_btn(&mut console, layout.buttons[0]),
+            vec![
+                Effect::PlaySound("ui/buttonclickrelease.wav".into()),
+                Effect::Quit,
+            ]
+        );
     }
 
     #[test]
