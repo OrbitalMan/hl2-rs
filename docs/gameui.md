@@ -112,8 +112,8 @@ What exists:
 - New Game in the HALF-LIFE 2 category loads chapter 1 as gameplay. Escape on a background level
   closes the quit box or returns from a category, but never resumes the background into gameplay.
 
-Placeholders (shown disabled; activating logs to the console): Load Game, Achievements, Extras.
-Episode One/Two New Game are disabled because only the `hl2` chapter-1 map is mapped so far.
+Placeholders (shown disabled; activating logs to the console): Load Game, Achievements, Workshop.
+EXTRAS opens the Extras submenu (Lost Coast and Workshop placeholder). New Game supports Half-Life 2, Episode One, Episode Two, and Lost Coast.
 
 Limitations:
 

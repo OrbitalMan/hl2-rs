@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-13 Half-Life 2: Lost Coast and the Extras submenu
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::menu`: added `MenuCommand::Workshop` variant, parsed `"openworkshopdialog"` to `MenuCommand::Workshop`, and enabled `MenuCommand::SwitchCategory(category)` for all populated categories (including `extras`). Left `MenuCommand::Workshop` disabled (`false` in `implemented`), so it draws disabled and activating it emits `MenuOutcome::Placeholder("WORKSHOP")`. Updated tests to verify Extras and Lost Coast navigation and keyboard selection skipping disabled rows and spacers.
+- `hl2-ui::gameui::resources`: updated `fallback_game_menu` to include `lostcoast` under `["hl2", "episodic", "ep2", "lostcoast"]` with standard 6-row game submenu structure (New Game, Load Game placeholder, Achievements placeholder, spacer, Options, Back) and `extras` category with Lost Coast (`SwitchExpansion lostcoast`), Workshop placeholder (`openworkshopdialog`), spacer, and Back (`SwitchCategory main`). Added `normalize_menu_categories` applied during `GameUiResources::load` to normalize `lostcoast` and `extras` entries across both owned `gamemenu.res` and fallback structures.
+- `hl2-ui::console`: added `lostcoast_navigation_and_missing_content_error_recovery` unit test covering full navigation through main menu -> Extras -> Lost Coast -> New Game, error reporting via modal `LoadingDialog`, and graceful Escape dismissal.
+- `hl2-bevy::main`: expanded owned-install test `episode_maps_load_successfully` to include `d2_lostcoast`, verifying full level load and gameplay-ready campaign state.
+- Documentation: updated `README.md`, `docs/gameui.md`, `STATUS.md` so EXTRAS is no longer listed as a pure placeholder.
+
+**Why:**
+- Completes Half-Life 2: Lost Coast and Extras submenu support according to authentic retail GameUI specifications. The main menu EXTRAS button now opens the Extras submenu containing Lost Coast and a disabled Workshop placeholder. Lost Coast opens a standardized 6-row game submenu matching Half-Life 2, Episode One, and Episode Two, resolving its title from game resources (`lostcoast/gameinfo.txt`), background map (`background01`), and initial map (`d2_lostcoast`). Missing content is handled gracefully through the modal loading dialog without crashes.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all 300+ workspace tests passed.
+- `cargo test --locked -p hl2-ui`: 133 unit tests + 3 owned-install tests passed.
+- `cargo test --locked -p hl2-bevy`: 67 unit tests passed.
+- `cargo test --locked -p hl2-bevy episode_maps_load_successfully -- --ignored`: passed (loading `ep1_citadel_00`, `ep2_outland_01`, and `d2_lostcoast`).
+- Headless runtime: `hl2-bevy --map d2_lostcoast --frames 30` ran 30 frames cleanly.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+
+**Result:** EXTRAS button opens Extras submenu with Lost Coast and Workshop placeholder; Lost Coast opens authentic game submenu and starts `d2_lostcoast` with loading dialog; missing content recovers gracefully to main menu.
+
+**Still broken or not tested:** Physical monitor visual inspection at 1280x800 and Retina needs manual check.
+
+**Next:** All 9 tasks in the bug-fix and gap-filling pass are complete!
+
 ## 2026-10-13 Background map on submenu entry
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

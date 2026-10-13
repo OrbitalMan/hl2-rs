@@ -3,7 +3,7 @@
 //!
 //! Entries come from `GameMenu.res`. Out of game the current `MenuCategory` is shown in file
 //! order; in game the uncategorized `OnlyInGame` entries are shown sorted by `InGameOrder`.
-//! Commands without a Rust implementation (Load/Save Game, Achievements, Extras, New Game for a
+//! Commands without a Rust implementation (Load/Save Game, Achievements, Workshop, New Game for a
 //! game whose maps are not mounted) are shown disabled, so they are visibly placeholders.
 
 use super::localize::Localization;
@@ -30,6 +30,7 @@ pub enum MenuCommand {
     LoadGame,
     SaveGame,
     Achievements,
+    Workshop,
     ReturnToMainMenu,
     Unsupported(String),
 }
@@ -53,6 +54,7 @@ impl MenuCommand {
             "openloadgamedialog" => Self::LoadGame,
             "opensavegamedialog" => Self::SaveGame,
             "openachievementsdialog" => Self::Achievements,
+            "openworkshopdialog" => Self::Workshop,
             "openmainmenudialog" | "disconnect" => Self::ReturnToMainMenu,
             _ => Self::Unsupported(command.to_owned()),
         }
@@ -193,8 +195,14 @@ impl GameMenu {
                 .items
                 .iter()
                 .any(|i| i.category.as_deref() == Some(game.as_str())),
-            // The Extras category (Workshop, Lost Coast) is a placeholder in this build.
-            MenuCommand::SwitchCategory(category) => category == MAIN_CATEGORY,
+            // The Extras category opens the extras submenu (Lost Coast, Workshop placeholder).
+            MenuCommand::SwitchCategory(category) => {
+                category == MAIN_CATEGORY
+                    || self
+                        .items
+                        .iter()
+                        .any(|i| i.category.as_deref() == Some(category.as_str()))
+            }
             MenuCommand::NewGame(game) => self.new_game_maps.contains_key(game),
             MenuCommand::OpenOptions
             | MenuCommand::Quit
@@ -203,6 +211,7 @@ impl GameMenu {
             MenuCommand::LoadGame
             | MenuCommand::SaveGame
             | MenuCommand::Achievements
+            | MenuCommand::Workshop
             | MenuCommand::Unsupported(_) => false,
         }
     }
@@ -683,6 +692,10 @@ mod tests {
             ("GameUI_HalfLife2EpisodeOne", "HL2: Episode One"),
             ("GameUI_HalfLife2EpisodeTwo", "HL2: Episode Two"),
             ("GameUI_Extras", "Extras"),
+            ("GameUI_HalfLife2LostCoast", "Half-Life 2: Lost Coast"),
+            ("GameUI_Worskhop_MenuName", "Workshop"),
+            ("GameUI_Workshop_MenuName", "Workshop"),
+            ("GameUI_LostCoast", "Lost Coast"),
             ("GameUI_GameMenu_Options", "Options"),
             ("GameUI_GameMenu_Quit", "Quit"),
             ("GameUI_GameMenu_NewGame", "New Game"),
@@ -727,7 +740,7 @@ mod tests {
             ]
         );
         assert!(menu.entries()[3].spacer);
-        assert!(!menu.entries()[4].enabled, "Extras is a placeholder");
+        assert!(menu.entries()[4].enabled, "Extras opens the extras submenu");
         assert!(menu.entries()[5].enabled && menu.entries()[6].enabled);
     }
 
@@ -777,11 +790,18 @@ mod tests {
         let loc = loc();
         let mut menu = menu();
         assert_eq!(menu.activate(6, &loc), MenuOutcome::ConfirmQuit);
+        assert_eq!(menu.activate(3, &loc), MenuOutcome::None, "spacer");
         assert_eq!(
             menu.activate(4, &loc),
-            MenuOutcome::Placeholder("EXTRAS".into())
+            MenuOutcome::SwitchCategory("extras".into())
         );
-        assert_eq!(menu.activate(3, &loc), MenuOutcome::None, "spacer");
+        assert_eq!(menu.category(), "extras");
+        assert_eq!(
+            menu.activate(1, &loc),
+            MenuOutcome::Placeholder("WORKSHOP".into())
+        );
+        assert!(menu.back(&loc));
+        assert_eq!(menu.category(), MAIN_CATEGORY);
         menu.activate(0, &loc);
         assert_eq!(
             menu.activate(0, &loc),
@@ -797,14 +817,120 @@ mod tests {
         menu.step(1);
         assert_eq!(menu.selection, Some(0));
         menu.step(1);
+        assert_eq!(menu.selection, Some(1));
         menu.step(1);
+        assert_eq!(menu.selection, Some(2));
         menu.step(1);
-        assert_eq!(menu.selection, Some(5), "spacer and Extras skipped");
+        assert_eq!(menu.selection, Some(4), "spacer skipped, Extras enabled");
         menu.step(1);
+        assert_eq!(menu.selection, Some(5));
+        menu.step(1);
+        assert_eq!(menu.selection, Some(6));
         menu.step(1);
         assert_eq!(menu.selection, Some(0), "wraps around");
         menu.step(-1);
         assert_eq!(menu.selection, Some(6));
+    }
+
+    #[test]
+    fn extras_submenu_and_lostcoast_game_submenu() {
+        let loc = loc();
+        let maps = BTreeMap::from([
+            ("hl2".to_owned(), "d1_trainstation_01".to_owned()),
+            ("lostcoast".to_owned(), "d2_lostcoast".to_owned()),
+        ]);
+        let mut menu = GameMenu::new(fallback_game_menu(), maps, &loc);
+
+        // Main menu EXTRAS button opens extras submenu
+        assert_eq!(
+            menu.activate(4, &loc),
+            MenuOutcome::SwitchCategory("extras".into())
+        );
+        assert_eq!(menu.category(), "extras");
+        assert_eq!(
+            labels(&menu),
+            ["HALF-LIFE 2: LOST COAST", "WORKSHOP", "", "BACK"]
+        );
+        assert!(menu.entries()[0].enabled, "Lost Coast entry enabled");
+        assert!(
+            !menu.entries()[1].enabled,
+            "Workshop button is disabled placeholder"
+        );
+        assert!(menu.entries()[2].spacer, "spacer");
+        assert!(menu.entries()[3].enabled, "Back button enabled");
+
+        // Activating Workshop returns placeholder outcome
+        assert_eq!(
+            menu.activate(1, &loc),
+            MenuOutcome::Placeholder("WORKSHOP".into())
+        );
+
+        // Activating Lost Coast entry opens lostcoast game submenu
+        assert_eq!(
+            menu.activate(0, &loc),
+            MenuOutcome::SwitchExpansion("lostcoast".into())
+        );
+        assert_eq!(menu.category(), "lostcoast");
+        assert_eq!(
+            labels(&menu),
+            [
+                "NEW GAME",
+                "LOAD GAME",
+                "ACHIEVEMENTS",
+                "",
+                "OPTIONS",
+                "BACK"
+            ]
+        );
+        assert!(menu.entries()[0].enabled, "New Game enabled for lostcoast");
+        assert!(!menu.entries()[1].enabled, "Load Game placeholder");
+        assert!(!menu.entries()[2].enabled, "Achievements placeholder");
+        assert!(menu.entries()[3].spacer, "spacer");
+        assert!(menu.entries()[4].enabled, "Options enabled");
+        assert!(menu.entries()[5].enabled, "Back enabled");
+
+        // New game in lostcoast starts d2_lostcoast
+        assert_eq!(
+            menu.activate(0, &loc),
+            MenuOutcome::NewGame("d2_lostcoast".into())
+        );
+
+        // Options opens options
+        assert_eq!(menu.activate(4, &loc), MenuOutcome::OpenOptions);
+
+        // Back returns to main category
+        assert_eq!(
+            menu.activate(5, &loc),
+            MenuOutcome::SwitchCategory(MAIN_CATEGORY.into())
+        );
+        assert_eq!(menu.category(), MAIN_CATEGORY);
+
+        // Re-entering extras and testing Escape
+        assert_eq!(
+            menu.activate(4, &loc),
+            MenuOutcome::SwitchCategory("extras".into())
+        );
+        assert_eq!(menu.category(), "extras");
+        assert!(menu.back(&loc));
+        assert_eq!(menu.category(), MAIN_CATEGORY);
+    }
+
+    #[test]
+    fn extras_keyboard_selection_skips_workshop_placeholder_and_spacer() {
+        let loc = loc();
+        let mut menu = menu();
+        menu.activate(4, &loc);
+        assert_eq!(menu.category(), "extras");
+        menu.step(1);
+        assert_eq!(menu.selection, Some(0)); // HALF-LIFE 2: LOST COAST
+        menu.step(1);
+        assert_eq!(
+            menu.selection,
+            Some(3),
+            "skips disabled Workshop (1) and spacer (2)"
+        );
+        menu.step(1);
+        assert_eq!(menu.selection, Some(0), "wraps around to Lost Coast");
     }
 
     #[test]

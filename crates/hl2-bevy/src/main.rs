@@ -1091,7 +1091,7 @@ mod tests {
     #[ignore]
     fn episode_maps_load_successfully() {
         let game = source_assets::install::discover().expect("owned install");
-        for map in ["ep1_citadel_00", "ep2_outland_01"] {
+        for map in ["ep1_citadel_00", "ep2_outland_01", "d2_lostcoast"] {
             let loaded = crate::assets::load(&game, map)
                 .unwrap_or_else(|err| panic!("Failed to load {}: {:?}", map, err));
             assert_eq!(loaded.world.name, map);

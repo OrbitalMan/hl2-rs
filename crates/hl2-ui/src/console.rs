@@ -1982,6 +1982,10 @@ mod tests {
                 "Are you sure you want to quit?",
             ),
             ("GameUI_Quit", "Quit"),
+            ("GameUI_HalfLife2LostCoast", "Half-Life 2: Lost Coast"),
+            ("GameUI_Worskhop_MenuName", "Workshop"),
+            ("GameUI_Workshop_MenuName", "Workshop"),
+            ("GameUI_LostCoast", "Lost Coast"),
         ] {
             loc.insert(token, text);
         }
@@ -2773,5 +2777,70 @@ mod tests {
             "background map persistence stays intact on Back"
         );
         assert_eq!(console.loaded_map.as_deref(), Some("ep1_background01"));
+    }
+
+    #[test]
+    fn lostcoast_navigation_and_missing_content_error_recovery() {
+        let mut console = installed_console();
+        console.mode = Mode::MainMenu;
+        console.background_level = true;
+        console.loaded_map = Some("background01".into());
+
+        // In main menu: row 4 is EXTRAS
+        let effects = click_row(&mut console, 4);
+        assert_eq!(console.main_menu.category(), "extras");
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::MainMenuMap(_))),
+            "entering extras does not reload background map"
+        );
+
+        // In extras: row 1 is disabled Workshop placeholder
+        assert!(!console.main_menu.entries()[1].enabled);
+        assert_eq!(console.main_menu.entries()[1].label, "WORKSHOP");
+        console.activate_menu(1);
+        assert!(console
+            .output
+            .iter()
+            .any(|line| line.contains("WORKSHOP: not implemented")));
+
+        // In extras: row 0 is HALF-LIFE 2: LOST COAST
+        let lc_effects = click_row(&mut console, 0);
+        assert_eq!(console.main_menu.category(), "lostcoast");
+        // Target background map for lostcoast is background01, which is already active
+        assert!(
+            !lc_effects
+                .iter()
+                .any(|e| matches!(e, Effect::MainMenuMap(_))),
+            "no redundant reload when target background map is already active"
+        );
+        assert_eq!(
+            console.config.gameplay.background_map.as_deref(),
+            Some("background01")
+        );
+
+        // In lostcoast: row 0 is NEW GAME
+        let new_game_effects = click_row(&mut console, 0);
+        assert!(
+            new_game_effects
+                .iter()
+                .any(|e| matches!(e, Effect::Map(map) if map == "d2_lostcoast")),
+            "starts loading d2_lostcoast"
+        );
+        assert!(console.is_loading());
+        assert_eq!(console.loading_dialog.as_ref().unwrap().map, "d2_lostcoast");
+
+        // Simulate missing content error
+        console.loading_failed("owned map d2_lostcoast.bsp not found");
+        assert!(!console.is_loading());
+        assert!(console.loading_dialog.as_ref().unwrap().is_failed());
+        assert_eq!(
+            console.loading_dialog.as_ref().unwrap().error.as_deref(),
+            Some("owned map d2_lostcoast.bsp not found")
+        );
+
+        // Dismiss error with Escape -> returns to menu without crash
+        console.escape();
+        assert!(console.loading_dialog.is_none());
+        assert_eq!(console.mode, Mode::MainMenu);
     }
 }

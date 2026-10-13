@@ -173,7 +173,7 @@ pub fn fallback_game_menu() -> Vec<MenuItem> {
         ),
         item("#GameUI_GameMenu_Quit", "Quit", None, 100, OnlyInGame),
     ];
-    for game in ["hl2", "episodic", "ep2"] {
+    for game in ["hl2", "episodic", "ep2", "lostcoast"] {
         let category = Some(game);
         items.extend([
             item(
@@ -214,14 +214,110 @@ pub fn fallback_game_menu() -> Vec<MenuItem> {
             ),
         ]);
     }
-    items.push(item(
-        "#GameUI_Back",
-        "SwitchCategory main",
-        Some("extras"),
-        100,
-        NotInGame,
-    ));
+    items.extend([
+        item(
+            "#GameUI_HalfLife2LostCoast",
+            "SwitchExpansion lostcoast",
+            Some("extras"),
+            70,
+            NotInGame,
+        ),
+        item(
+            "#GameUI_Worskhop_MenuName",
+            "openworkshopdialog",
+            Some("extras"),
+            72,
+            NotInGame,
+        ),
+        item("", "", Some("extras"), 85, NotInGame),
+        item(
+            "#GameUI_Back",
+            "SwitchCategory main",
+            Some("extras"),
+            100,
+            NotInGame,
+        ),
+    ]);
     items
+}
+
+/// Normalizes expansion submenus (e.g. Lost Coast and Extras) so they conform to the standard
+/// game submenu pattern across both installed GameMenu.res and fallback structures.
+pub fn normalize_menu_categories(items: &mut Vec<MenuItem>) {
+    items.retain(|i| {
+        i.category.as_deref() != Some("extras") && i.category.as_deref() != Some("lostcoast")
+    });
+    let item = |label: &str, command: &str, category: &str, order, visibility| MenuItem {
+        label: label.into(),
+        command: command.into(),
+        category: Some(category.into()),
+        order,
+        visibility,
+        caps: true,
+    };
+    use Visibility::NotInGame;
+    items.extend([
+        item(
+            "#GameUI_HalfLife2LostCoast",
+            "SwitchExpansion lostcoast",
+            "extras",
+            70,
+            NotInGame,
+        ),
+        item(
+            "#GameUI_Worskhop_MenuName",
+            "openworkshopdialog",
+            "extras",
+            72,
+            NotInGame,
+        ),
+        item("", "", "extras", 85, NotInGame),
+        item(
+            "#GameUI_Back",
+            "SwitchCategory main",
+            "extras",
+            100,
+            NotInGame,
+        ),
+    ]);
+    items.extend([
+        item(
+            "#GameUI_GameMenu_NewGame",
+            "OpenNewGameDialog lostcoast",
+            "lostcoast",
+            20,
+            NotInGame,
+        ),
+        item(
+            "#GameUI_GameMenu_LoadGame",
+            "OpenLoadGameDialog lostcoast",
+            "lostcoast",
+            30,
+            NotInGame,
+        ),
+        item(
+            "#GameUI_GameMenu_Achievements",
+            "OpenAchievementsDialog lostcoast",
+            "lostcoast",
+            70,
+            NotInGame,
+        ),
+        item("", "", "lostcoast", 85, NotInGame),
+        item(
+            "#GameUI_GameMenu_Options",
+            "OpenOptionsDialog",
+            "lostcoast",
+            90,
+            NotInGame,
+        ),
+        item(
+            "#GameUI_Back",
+            "SwitchCategory main",
+            "lostcoast",
+            100,
+            NotInGame,
+        ),
+    ]);
 }
 
 /// Decoded RGBA image (gamma test pattern, credit logos).
@@ -300,7 +396,10 @@ impl GameUiResources {
             .as_deref()
             .and_then(parse_game_menu)
         {
-            Some(items) => items,
+            Some(mut items) => {
+                normalize_menu_categories(&mut items);
+                items
+            }
             None => {
                 res.missing.push("resource/gamemenu.res".into());
                 fallback_game_menu()
@@ -614,7 +713,7 @@ mod tests {
     #[test]
     fn fallback_menu_has_every_requested_category() {
         let menu = fallback_game_menu();
-        for category in ["main", "hl2", "episodic", "ep2", "extras"] {
+        for category in ["main", "hl2", "episodic", "ep2", "extras", "lostcoast"] {
             assert!(
                 menu.iter().any(|i| i.category.as_deref() == Some(category)),
                 "{category}"
@@ -625,6 +724,36 @@ mod tests {
                 .all(|i| i.is_spacer() || i.label.starts_with('#')),
             "labels stay tokens"
         );
+
+        let extras_items: Vec<_> = menu
+            .iter()
+            .filter(|i| i.category.as_deref() == Some("extras"))
+            .collect();
+        assert_eq!(extras_items.len(), 4);
+        assert_eq!(extras_items[0].label, "#GameUI_HalfLife2LostCoast");
+        assert_eq!(extras_items[0].command, "SwitchExpansion lostcoast");
+        assert_eq!(extras_items[1].label, "#GameUI_Worskhop_MenuName");
+        assert_eq!(extras_items[1].command, "openworkshopdialog");
+        assert!(extras_items[2].is_spacer());
+        assert_eq!(extras_items[3].label, "#GameUI_Back");
+        assert_eq!(extras_items[3].command, "SwitchCategory main");
+
+        let lc_items: Vec<_> = menu
+            .iter()
+            .filter(|i| i.category.as_deref() == Some("lostcoast"))
+            .collect();
+        assert_eq!(lc_items.len(), 6);
+        assert_eq!(lc_items[0].label, "#GameUI_GameMenu_NewGame");
+        assert_eq!(lc_items[0].command, "OpenNewGameDialog lostcoast");
+        assert_eq!(lc_items[1].label, "#GameUI_GameMenu_LoadGame");
+        assert_eq!(lc_items[1].command, "OpenLoadGameDialog lostcoast");
+        assert_eq!(lc_items[2].label, "#GameUI_GameMenu_Achievements");
+        assert_eq!(lc_items[2].command, "OpenAchievementsDialog lostcoast");
+        assert!(lc_items[3].is_spacer());
+        assert_eq!(lc_items[4].label, "#GameUI_GameMenu_Options");
+        assert_eq!(lc_items[4].command, "OpenOptionsDialog");
+        assert_eq!(lc_items[5].label, "#GameUI_Back");
+        assert_eq!(lc_items[5].command, "SwitchCategory main");
     }
 
     #[test]
