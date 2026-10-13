@@ -261,6 +261,8 @@ pub struct GameUiResources {
     pub background_map: Option<String>,
     /// Game -> first chapter map (`cfg/chapter1.cfg` of each mounted game).
     pub new_game_maps: BTreeMap<String, String>,
+    /// Category -> menu title (two lines for episodes, e.g. "Half-Life 2\n--- Episode One ---").
+    pub category_titles: BTreeMap<String, String>,
     /// Files that could not be read or parsed (reported in the console log).
     pub missing: Vec<String>,
 }
@@ -336,6 +338,25 @@ impl GameUiResources {
                 .and_then(|text| chapter_map(&text))
                 .unwrap_or_else(|| default_map.to_owned());
             res.new_game_maps.insert(game.to_owned(), map);
+        }
+        for category in ["main", "hl2", "episodic", "ep2", "lostcoast"] {
+            let gameinfo_path = match category {
+                "episodic" => "episodic/gameinfo.txt",
+                "ep2" => "ep2/gameinfo.txt",
+                "lostcoast" => "lostcoast/gameinfo.txt",
+                _ => "gameinfo.txt",
+            };
+            let title = reader
+                .read(gameinfo_path)
+                .or_else(|| {
+                    vfs.game_root()
+                        .and_then(|root| std::fs::read(root.join(gameinfo_path)).ok())
+                })
+                .as_deref()
+                .and_then(parse_gameinfo_title);
+            let title =
+                title.unwrap_or_else(|| category_title_fallback(category, &res.localization));
+            res.category_titles.insert(category.to_owned(), title);
         }
         res
     }
@@ -457,6 +478,47 @@ pub fn startup_background_map(vfs: &Vfs) -> Option<String> {
         .and_then(|text| background_map(&text))
 }
 
+/// Extracts the menu title from a `gameinfo.txt` file (`title` + optional `title2` joined by `\n`).
+pub fn parse_gameinfo_title(bytes: &[u8]) -> Option<String> {
+    let roots = keyvalues::parse_resource(bytes).ok()?;
+    let root = roots.into_iter().next()?;
+    let title = root.get("title")?.text()?.to_owned();
+    if let Some(title2) = root.get("title2").and_then(|t| t.text()) {
+        Some(format!("{title}\n{title2}"))
+    } else {
+        Some(title)
+    }
+}
+
+/// Fallback titles for each menu category, resolving localized tokens if present with clean fallback strings.
+pub fn category_title_fallback(category: &str, loc: &Localization) -> String {
+    let hl2 = loc.lookup("GameUI_HalfLife2").unwrap_or("Half-Life 2");
+    match category {
+        "episodic" => {
+            let ep1 = loc.lookup("GameUI_EpisodeOne").unwrap_or("Episode One");
+            format!("{hl2}\n--- {ep1} ---")
+        }
+        "ep2" => {
+            let ep2 = loc.lookup("GameUI_EpisodeTwo").unwrap_or("Episode Two");
+            format!("{hl2}\n--- {ep2} ---")
+        }
+        "lostcoast" => {
+            let lc = loc.lookup("GameUI_LostCoast").unwrap_or("Lost Coast");
+            format!("{hl2}\n--- {lc} ---")
+        }
+        _ => hl2.to_owned(),
+    }
+}
+
+/// Returns fallback titles for all recognized categories.
+pub fn fallback_category_titles(loc: &Localization) -> BTreeMap<String, String> {
+    let mut titles = BTreeMap::new();
+    for category in ["main", "hl2", "episodic", "ep2", "lostcoast"] {
+        titles.insert(category.to_owned(), category_title_fallback(category, loc));
+    }
+    titles
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,6 +607,60 @@ mod tests {
     }
 
     #[test]
+    fn parse_gameinfo_title_handles_single_and_two_line_titles() {
+        let single = b"\"GameInfo\" { \"game\" \"HALF-LIFE 2\" \"title\" \"HALF-LIFE'\" }";
+        assert_eq!(parse_gameinfo_title(single), Some("HALF-LIFE'".into()));
+
+        let episode1 = b"\"GameInfo\" { \"game\" \"HALF-LIFE 2\" \"title\" \"HALF-LIFE'\" \"title2\" \"== episode one==\" }";
+        assert_eq!(
+            parse_gameinfo_title(episode1),
+            Some("HALF-LIFE'\n== episode one==".into())
+        );
+
+        let episode2 = b"\"GameInfo\" { \"game\" \"HALF-LIFE 2\" \"title\" \"HALF-LIFE'\" \"title2\" \"== episode two ==\" }";
+        assert_eq!(
+            parse_gameinfo_title(episode2),
+            Some("HALF-LIFE'\n== episode two ==".into())
+        );
+    }
+
+    #[test]
+    fn category_titles_fallback_provides_two_line_episode_titles() {
+        let mut loc = Localization::default();
+        loc.insert("GameUI_HalfLife2", "Half-Life 2");
+        loc.insert("GameUI_EpisodeOne", "Episode One");
+        loc.insert("GameUI_EpisodeTwo", "Episode Two");
+        loc.insert("GameUI_LostCoast", "Lost Coast");
+
+        let titles = fallback_category_titles(&loc);
+        assert_eq!(titles.get("main").map(String::as_str), Some("Half-Life 2"));
+        assert_eq!(titles.get("hl2").map(String::as_str), Some("Half-Life 2"));
+        assert_eq!(
+            titles.get("episodic").map(String::as_str),
+            Some("Half-Life 2\n--- Episode One ---")
+        );
+        assert_eq!(
+            titles.get("ep2").map(String::as_str),
+            Some("Half-Life 2\n--- Episode Two ---")
+        );
+        assert_eq!(
+            titles.get("lostcoast").map(String::as_str),
+            Some("Half-Life 2\n--- Lost Coast ---")
+        );
+
+        let empty_loc = Localization::default();
+        let fallback_empty = fallback_category_titles(&empty_loc);
+        assert_eq!(
+            fallback_empty.get("episodic").map(String::as_str),
+            Some("Half-Life 2\n--- Episode One ---")
+        );
+        assert_eq!(
+            fallback_empty.get("ep2").map(String::as_str),
+            Some("Half-Life 2\n--- Episode Two ---")
+        );
+    }
+
+    #[test]
     fn spoken_languages_list_installed_voice_packs_english_first() {
         let dir = std::env::temp_dir().join(format!("hl2-rs-vo-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -618,6 +734,14 @@ mod tests {
         assert_eq!(
             res.new_game_maps.get("lostcoast").map(String::as_str),
             Some("d2_lostcoast")
+        );
+        assert_eq!(
+            res.category_titles.get("episodic").map(String::as_str),
+            Some("HALF-LIFE'\n== episode one==")
+        );
+        assert_eq!(
+            res.category_titles.get("ep2").map(String::as_str),
+            Some("HALF-LIFE'\n== episode two ==")
         );
         println!("missing: {:?}", res.missing);
     }

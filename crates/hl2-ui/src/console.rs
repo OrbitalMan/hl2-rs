@@ -3,14 +3,14 @@ use crate::gameui::{
     display::DisplayModes,
     menu::{GameMenu, MenuLayout, MenuOutcome, MessageBox, MessageBoxLayout},
     options::{OptionsDialog, OptionsOutcome},
-    resources::{fallback_game_menu, GameUiResources},
+    resources::{self, fallback_game_menu, GameUiResources},
     widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
 };
 use crate::{canvas::*, hud::FontFace};
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 const COMMANDS: &[(&str, &str)] = &[
@@ -130,6 +130,7 @@ pub struct Console {
     title_face: Option<Arc<fontdue::Font>>,
     title_metrics: CellMetrics,
     title: String,
+    category_titles: BTreeMap<String, String>,
     menu_layout: MenuLayout,
     mono: Option<FontFace>,
     developer_font: Option<FontFace>,
@@ -331,6 +332,7 @@ impl Default for Console {
             title_face: None,
             title_metrics: CellMetrics::default(),
             title: "HL2-RS".into(),
+            category_titles: resources::fallback_category_titles(&gameui.localization),
             menu_layout: MenuLayout::default(),
             mono: None,
             developer_font: None,
@@ -436,9 +438,13 @@ impl Console {
             } else {
                 console.title_face = None;
                 console.title_metrics = CellMetrics::default();
+                console.category_titles =
+                    resources::fallback_category_titles(&console.gameui.localization);
                 console.log("Owned HalfLife2 title font could not be loaded; using the HL2-RS fallback title.");
             }
         } else {
+            console.category_titles =
+                resources::fallback_category_titles(&console.gameui.localization);
             console.log("Owned HalfLife2 title font not found; using the HL2-RS fallback title.");
         }
         // Installed desktop GameUI colors. Layout/window controls remain an initial implementation.
@@ -486,8 +492,32 @@ impl Console {
             loc,
         );
         self.pause_menu.set_in_game(true, loc);
+        self.category_titles = resources.category_titles.clone();
         self.gameui = Arc::new(resources);
         self.options.set_resources(self.gameui.clone());
+    }
+
+    /// Returns the main menu title for the given category.
+    pub fn category_title(&self, category: &str) -> &str {
+        self.category_titles
+            .get(category)
+            .map(String::as_str)
+            .unwrap_or(&self.title)
+    }
+
+    /// The active menu title for the current mode and selected category.
+    pub fn current_title(&self) -> &str {
+        let shown = if self.mode == Mode::Options {
+            self.options_return
+        } else {
+            self.mode
+        };
+        let category = if shown == Mode::Pause {
+            self.pause_menu.category()
+        } else {
+            self.main_menu.category()
+        };
+        self.category_title(category)
     }
 
     /// Resolutions for the Video page, from the host's monitor query.
@@ -1332,32 +1362,60 @@ impl Console {
         };
         if menu_shown {
             let geometry = self.menu_layout.geometry(self.canvas.height());
+            let title = self.current_title();
             if let Some(face) = &self.title_face {
                 let em = geometry.title_tall * self.title_metrics.em_per_cell;
-                let mut pen = geometry.title;
-                for character in self.title.chars() {
+                for (line_idx, line) in title.lines().enumerate() {
+                    let mut pen = match line_idx {
+                        0 => geometry.title,
+                        1 => geometry.title2,
+                        _ => {
+                            geometry.title2
+                                + vec2(
+                                    0.,
+                                    (line_idx - 1) as f32
+                                        * (geometry.title2.y - geometry.title.y).max(1.),
+                                )
+                        }
+                    };
+                    for character in line.chars() {
+                        draw_cell_text(
+                            &self.canvas,
+                            &character.to_string(),
+                            pen,
+                            geometry.title_tall,
+                            self.title_font.as_ref(),
+                            self.title_metrics,
+                            WHITE,
+                        );
+                        // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
+                        pen.x += face.metrics(character, em).advance_width.round();
+                    }
+                }
+            } else {
+                for (line_idx, line) in title.lines().enumerate() {
+                    let pen = match line_idx {
+                        0 => geometry.title,
+                        1 => geometry.title2,
+                        _ => {
+                            geometry.title2
+                                + vec2(
+                                    0.,
+                                    (line_idx - 1) as f32
+                                        * (geometry.title2.y - geometry.title.y).max(1.),
+                                )
+                        }
+                    };
                     draw_cell_text(
                         &self.canvas,
-                        &character.to_string(),
+                        line,
                         pen,
                         geometry.title_tall,
                         self.title_font.as_ref(),
                         self.title_metrics,
                         WHITE,
                     );
-                    // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
-                    pen.x += face.metrics(character, em).advance_width.round();
                 }
-            } else {
-                draw_cell_text(
-                    &self.canvas,
-                    &self.title,
-                    geometry.title,
-                    geometry.title_tall,
-                    self.title_font.as_ref(),
-                    self.title_metrics,
-                    WHITE,
-                );
             }
             let menu = if shown == Mode::MainMenu {
                 &self.main_menu
@@ -1576,6 +1634,7 @@ fn tokenize(line: &str) -> Result<Vec<Vec<String>>, String> {
 mod tests {
     use super::*;
     use crate::gameui::localize::Localization;
+    use crate::gameui::resources::{MenuItem, Visibility};
     #[test]
     fn cell_metrics_rejects_missing_font() {
         assert!(CellMetrics::from_bytes(b"missing font").is_none());
@@ -2228,5 +2287,79 @@ mod tests {
         assert_eq!(console.background_map(), Some("background04"));
         assert!(console.is_loading());
         assert_eq!(console.loading_dialog.as_ref().unwrap().map, "background04");
+    }
+
+    #[test]
+    fn episode_submenus_show_two_line_titles() {
+        let mut console = Console::default();
+        let mut loc = Localization::default();
+        loc.insert("GameUI_HalfLife2", "Half-Life 2");
+        loc.insert("GameUI_EpisodeOne", "Episode One");
+        loc.insert("GameUI_EpisodeTwo", "Episode Two");
+        console.set_resources(GameUiResources {
+            localization: loc.clone(),
+            category_titles: resources::fallback_category_titles(&loc),
+            ..Default::default()
+        });
+        console.mode = Mode::MainMenu;
+        assert_eq!(console.current_title(), "Half-Life 2");
+
+        // Menu with items to navigate between main, episodic, and ep2 categories
+        console.main_menu = GameMenu::new(
+            vec![
+                MenuItem {
+                    label: "#GameUI_HalfLife2EpisodeOne".into(),
+                    command: "SwitchExpansion episodic".into(),
+                    category: Some("main".into()),
+                    order: 10,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+                MenuItem {
+                    label: "#GameUI_HalfLife2EpisodeTwo".into(),
+                    command: "SwitchExpansion ep2".into(),
+                    category: Some("main".into()),
+                    order: 20,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+                MenuItem {
+                    label: "#GameUI_Back".into(),
+                    command: "SwitchCategory main".into(),
+                    category: Some("episodic".into()),
+                    order: 30,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+                MenuItem {
+                    label: "#GameUI_Back".into(),
+                    command: "SwitchCategory main".into(),
+                    category: Some("ep2".into()),
+                    order: 40,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+            ],
+            Default::default(),
+            &loc,
+        );
+
+        // Activate Episode One entry
+        console.main_menu.activate(0, &loc);
+        assert_eq!(console.main_menu.category(), "episodic");
+        assert_eq!(console.current_title(), "Half-Life 2\n--- Episode One ---");
+        assert_eq!(console.current_title().lines().count(), 2);
+
+        // Activate Back button to return to main
+        console.main_menu.activate(0, &loc);
+        assert_eq!(console.main_menu.category(), "main");
+        assert_eq!(console.current_title(), "Half-Life 2");
+        assert_eq!(console.current_title().lines().count(), 1);
+
+        // Activate Episode Two entry
+        console.main_menu.activate(1, &loc);
+        assert_eq!(console.main_menu.category(), "ep2");
+        assert_eq!(console.current_title(), "Half-Life 2\n--- Episode Two ---");
+        assert_eq!(console.current_title().lines().count(), 2);
     }
 }

@@ -464,6 +464,10 @@ pub const BASE_SCREEN_HEIGHT: f32 = 480.;
 pub const DEFAULT_TITLE_X: f32 = 76.;
 /// Default Y offset for the main menu title in 480p units (`Main.Title1.Y`).
 pub const DEFAULT_TITLE_Y: f32 = 145.;
+/// Default X offset for the submenu secondary title in 480p units (`Main.Title2.X`).
+pub const DEFAULT_TITLE2_X: f32 = 76.;
+/// Default Y offset for the submenu secondary title in 480p units (`Main.Title2.Y`).
+pub const DEFAULT_TITLE2_Y: f32 = 172.;
 /// Default X offset for the menu buttons in 480p units (`Main.Menu.X`).
 pub const DEFAULT_MENU_X: f32 = 76.;
 /// Default Y offset for the menu buttons in 480p units (`Main.Menu.Y`).
@@ -484,6 +488,8 @@ pub const MENU_ROW_BASE_WIDTH: f32 = 250.;
 pub struct MenuLayout {
     pub title_x: f32,
     pub title_y: f32,
+    pub title2_x: f32,
+    pub title2_y: f32,
     pub menu_x: f32,
     pub menu_y: f32,
     pub title_tall: f32,
@@ -498,6 +504,8 @@ impl Default for MenuLayout {
         Self {
             title_x: DEFAULT_TITLE_X,
             title_y: DEFAULT_TITLE_Y,
+            title2_x: DEFAULT_TITLE2_X,
+            title2_y: DEFAULT_TITLE2_Y,
             menu_x: DEFAULT_MENU_X,
             menu_y: DEFAULT_MENU_Y,
             title_tall: DEFAULT_TITLE_TALL,
@@ -512,6 +520,7 @@ impl Default for MenuLayout {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MenuGeometry {
     pub title: Vec2,
+    pub title2: Vec2,
     pub menu: Vec2,
     pub title_tall: f32,
     pub font_tall: f32,
@@ -561,6 +570,10 @@ impl MenuLayout {
                 (self.title_x * scale).trunc(),
                 (self.title_y * scale).trunc(),
             ),
+            title2: vec2(
+                (self.title2_x * scale).trunc(),
+                (self.title2_y * scale).trunc(),
+            ),
             menu: vec2((self.menu_x * scale).trunc(), (self.menu_y * scale).trunc()),
             title_tall: (self.title_tall * scale).round(),
             font_tall,
@@ -592,6 +605,8 @@ impl MenuLayout {
         for (key, target) in [
             ("Main.Title1.X", &mut self.title_x),
             ("Main.Title1.Y", &mut self.title_y),
+            ("Main.Title2.X", &mut self.title2_x),
+            ("Main.Title2.Y", &mut self.title2_y),
             ("Main.Menu.X", &mut self.menu_x),
             ("Main.Menu.Y", &mut self.menu_y),
         ] {
@@ -885,11 +900,14 @@ mod tests {
         let layout = MenuLayout::default();
         let at_720 = layout.geometry(720.);
         assert_eq!(at_720.title, vec2(114., 217.));
+        assert_eq!(at_720.title2, vec2(114., 258.));
         assert_eq!(at_720.menu, vec2(114., 360.));
         assert_eq!(at_720.title_tall, 48.);
         assert_eq!(at_720.item_tall, 36.);
         assert_eq!(at_720.font_tall, 16.);
         let at_480 = layout.geometry(480.);
+        assert_eq!(at_480.title, vec2(76., 145.));
+        assert_eq!(at_480.title2, vec2(76., 172.));
         assert_eq!(at_480.menu, vec2(76., 240.));
         assert_eq!(at_480.font_tall, 16.);
         assert_eq!(at_480.title_tall, 32.);

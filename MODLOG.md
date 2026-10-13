@@ -1,5 +1,30 @@
 # MODLOG
 
+## 2026-10-13 Episode submenu titles
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::menu`: added `title2_x` and `title2_y` layout fields to `MenuLayout` (with Source-authentic defaults `DEFAULT_TITLE2_X = 76.` and `DEFAULT_TITLE2_Y = 172.` from `Main.Title2` in `ClientScheme.res`), added `title2` coordinates to `MenuGeometry`, and parsed `Main.Title2.X` and `Main.Title2.Y` in `apply_client_scheme`. Updated unit test `native_menu_uses_480_coordinate_scaling_with_static_spacing`.
+- `hl2-ui::gameui::resources`: added `category_titles` to `GameUiResources` resolving titles for each category (`"main"`, `"hl2"`, `"episodic"`, `"ep2"`, `"lostcoast"`). Added `parse_gameinfo_title` extracting `title` and optional `title2` (joined with `\n`), `category_title_fallback` generating localized two-line titles (`"Half-Life 2\n--- Episode One ---"` / `"Half-Life 2\n--- Episode Two ---"`), and `fallback_category_titles`. Populated `category_titles` in `GameUiResources::load` from expansion `gameinfo.txt` files with clean fallbacks. Added unit tests `parse_gameinfo_title_handles_single_and_two_line_titles` and `category_titles_fallback_provides_two_line_episode_titles`.
+- `hl2-ui::console`: added `category_titles` to `Console` and methods `category_title(&self, category)` and `current_title(&self)` returning the active category title (falling back to `self.title`). Updated `Console::draw` to split multi-line titles across lines, positioning line 0 at `geometry.title` and line 1 at `geometry.title2` with GDI-aligned ABC pen advances for `title_face` and baseline cell rendering for text fallbacks. Added unit test `episode_submenus_show_two_line_titles`.
+
+**Why:**
+- In the original GameUI and 20th Anniversary launcher, Episode One and Episode Two submenus display authentic two-line titles ("Half-Life 2" on line 1, "--- Episode One ---" / "--- Episode Two ---" on line 2), resolved directly from game resources (`gameinfo.txt` `title` and `title2` or localized tokens) with clean fallbacks.
+
+**Tested how:**
+- `cargo test --locked`: all 121 unit tests in `hl2-ui`, 66 in `hl2-bevy`, 91 in `source-assets`, and 90 in `hl2-simulation` passed (0 failures).
+- `cargo test --locked -p hl2-ui -- --ignored`: all 3 owned-install tests passed (verifying `res.category_titles` parses `== episode one==` and `== episode two ==`).
+- `cargo clippy --locked --all-targets -- -D warnings`: strict clippy passed with 0 warnings.
+- `cargo fmt --all --check`: clean formatting verified across all workspace crates.
+- Headless Bevy runtime verification: `cargo run --locked -p hl2-bevy -- --frames 30 --no-focus` passed (30 frames rendered, exit code 0).
+
+**Result:** Episode One and Episode Two submenus now resolve and render authentic two-line titles with scheme-defined `Main.Title1` and `Main.Title2` offsets and clean localization fallbacks.
+
+**Still broken or not tested:** Physical monitor visual inspection not performed in headless environment.
+
+**Next:** Task 3: Check box checkmark (authentic white checkmark shape in checked state instead of plain square).
+
 ## 2026-10-13 Literal \n in localized text
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
