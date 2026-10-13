@@ -41,6 +41,9 @@ const TANGENTS: [f32; 7] = [
 /// FVPHYSICS_NO_PLAYER_PICKUP are not modeled.
 pub fn can_pickup(world: &World, physics: &Physics, id: usize) -> bool {
     // A thrown frag (CBaseGrenade::Use -> PickupObject) or a prop_physics.
+    if physics.no_pickup.contains(&id) {
+        return false;
+    }
     let grenade = is_projectile_entity(id) && physics.dynamic.contains_key(&id);
     if !grenade
         && !world
@@ -567,5 +570,17 @@ mod tests {
         );
         assert!(!inv.carrying());
         assert!(!physics.dynamic.contains_key(&frag));
+    }
+
+    #[test]
+    fn prevent_pickup_spawnflag_blocks_use_and_gravity_gun_pickup() {
+        // SF_PHYSPROP_PREVENT_PICKUP (0x200) on entity 0 (synthetic).
+        let world = world();
+        let mut physics = prop(Vec3::new(60., 0., 50.), 5.);
+        assert!(can_pickup(&world, &physics, 0));
+        assert!(crate::weapon_physcannon::can_pickup(&physics, 0));
+        physics.no_pickup.insert(0);
+        assert!(!can_pickup(&world, &physics, 0));
+        assert!(!crate::weapon_physcannon::can_pickup(&physics, 0));
     }
 }

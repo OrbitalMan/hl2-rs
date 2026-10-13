@@ -111,7 +111,7 @@ pub fn punt_impulse(forward: Vec3, mass: f32) -> (Vec3, Vec3) {
 /// body (VPhysics object) of at most 250 kg. Hinges, NO_PLAYER_PICKUP and the
 /// prop spawnflag overrides are not modeled.
 pub fn can_pickup(physics: &Physics, id: usize) -> bool {
-    body_mass(physics, id).is_some_and(|m| m <= MAX_MASS)
+    !physics.no_pickup.contains(&id) && body_mass(physics, id).is_some_and(|m| m <= MAX_MASS)
 }
 
 impl Inventory {

@@ -486,6 +486,9 @@ pub struct Physics {
     /// Props launched by the gravity gun whose first collision has not happened yet
     /// (CPhysicsProp m_bFirstCollisionAfterLaunch).
     pub launched: std::collections::HashSet<usize>,
+    /// Props with SF_PHYSPROP_PREVENT_PICKUP (0x200): FVPHYSICS_NO_PLAYER_PICKUP and
+    /// CPhysicsProp::CanBePickedUpByPhyscannon false.
+    pub no_pickup: std::collections::HashSet<usize>,
 }
 /// Body-local hull points (metres) of a body's colliders for its drag geometry.
 fn drag_geometry(body: &RigidBody, colliders: &ColliderSet) -> Option<crate::drag::DragGeometry> {
@@ -775,6 +778,15 @@ impl Physics {
             });
             if let (Some(id), Some(body)) = (entity, body) {
                 p.dynamic.insert(id, body);
+                if world
+                    .entities
+                    .get(id)
+                    .and_then(|e| e.get("spawnflags"))
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .is_some_and(|flags| flags & 0x200 != 0)
+                {
+                    p.no_pickup.insert(id);
+                }
             }
             if let (Some(body), Some(fractions)) =
                 (body, solid.as_ref().and_then(|s| s.drag_fractions))
