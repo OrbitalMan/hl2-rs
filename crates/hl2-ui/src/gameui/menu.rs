@@ -68,6 +68,19 @@ pub struct MenuEntry {
     pub command: MenuCommand,
     pub spacer: bool,
     pub enabled: bool,
+    pub kind: super::widgets::WidgetKind,
+    pub rollover_sound: Option<&'static str>,
+}
+
+impl MenuEntry {
+    /// Returns whether this menu entry is eligible to play a rollover sound.
+    /// Only enabled non-spacer menu buttons play rollover sounds.
+    pub fn has_rollover_sound(&self) -> bool {
+        self.kind.has_rollover_sound()
+            && self.rollover_sound.is_some()
+            && self.enabled
+            && !self.spacer
+    }
 }
 
 /// What activating an entry asks the owner to do.
@@ -179,11 +192,22 @@ impl GameMenu {
                         text
                     }
                 };
+                let enabled = !item.is_spacer() && self.implemented(&command);
+                let (kind, rollover_sound) = if item.is_spacer() {
+                    (super::widgets::WidgetKind::Other, None)
+                } else {
+                    (
+                        super::widgets::WidgetKind::MenuButton,
+                        Some("ui/buttonrollover.wav"),
+                    )
+                };
                 MenuEntry {
-                    enabled: !item.is_spacer() && self.implemented(&command),
+                    enabled,
                     spacer: item.is_spacer(),
                     label,
                     command,
+                    kind,
+                    rollover_sound,
                 }
             })
             .collect();
@@ -425,9 +449,6 @@ impl MessageBox {
                 })
         });
         self.armed = hovered;
-        if hovered.is_some() && hovered != self.last_armed {
-            self.sounds.push("ui/buttonrollover.wav".to_string());
-        }
         self.last_armed = hovered;
         let activated = self.tracker.update(hovered, down, click, released);
         self.pressed = self.tracker.pressed();
@@ -1130,18 +1151,7 @@ mod tests {
         let layout = quit.layout(|_| 100.);
         let center = |r: Rect| Some(vec2(r.x + r.w / 2., r.y + r.h / 2.));
 
-        // 1. Moving from outside to over button 0 emits rollover sound
-        quit.input(
-            &layout,
-            center(layout.buttons[0]),
-            false,
-            false,
-            false,
-            false,
-        );
-        assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
-
-        // 2. Staying over button 0 on next frame does not re-emit rollover
+        // 1. Moving from outside to over button 0 emits no rollover sound (dialog button)
         quit.input(
             &layout,
             center(layout.buttons[0]),
@@ -1152,7 +1162,18 @@ mod tests {
         );
         assert!(quit.take_sounds().is_empty());
 
-        // 3. Moving to button 1 emits rollover sound
+        // 2. Staying over button 0 on next frame does not emit sound
+        quit.input(
+            &layout,
+            center(layout.buttons[0]),
+            false,
+            false,
+            false,
+            false,
+        );
+        assert!(quit.take_sounds().is_empty());
+
+        // 3. Moving to button 1 emits no rollover sound
         quit.input(
             &layout,
             center(layout.buttons[1]),
@@ -1161,15 +1182,15 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
+        assert!(quit.take_sounds().is_empty());
 
         // 4. Moving outside emits nothing
         quit.input(&layout, None, false, false, false, false);
         assert!(quit.take_sounds().is_empty());
 
-        // 5. Press and release on button 0 emits rollover (on entry), then release sound on activation
+        // 5. Press and release on button 0 emits release sound on activation (no rollover on entry)
         quit.input(&layout, center(layout.buttons[0]), true, true, false, false);
-        assert_eq!(quit.take_sounds(), vec!["ui/buttonrollover.wav"]);
+        assert!(quit.take_sounds().is_empty());
         quit.input(
             &layout,
             center(layout.buttons[0]),
@@ -1210,7 +1231,7 @@ mod tests {
 
         let center = |r: Rect| Some(vec2(r.x + r.w / 2., r.y + r.h / 2.));
 
-        // Hover over close button: emits rollover sound
+        // Hover over close button: does not emit rollover sound (dialog button)
         msg_box.input(
             &layout_with_close,
             center(close_rect),
@@ -1219,7 +1240,7 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(msg_box.take_sounds(), vec!["ui/buttonrollover.wav"]);
+        assert!(msg_box.take_sounds().is_empty());
 
         // Click and release on close button: activates Cancel outcome (Some(false))
         msg_box.input(
@@ -1240,5 +1261,54 @@ mod tests {
         );
         assert_eq!(outcome, Some(false), "Close button behaves like Cancel");
         assert_eq!(msg_box.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+    }
+
+    #[test]
+    fn rollover_sound_eligibility_only_for_menu_buttons() {
+        use super::super::layout::ControlKind;
+        use super::super::widgets::WidgetKind;
+
+        // Eligibility check on WidgetKind
+        assert!(
+            WidgetKind::MenuButton.has_rollover_sound(),
+            "menu button yes"
+        );
+        assert!(
+            !WidgetKind::DialogButton.has_rollover_sound(),
+            "dialog button no"
+        );
+        assert!(!WidgetKind::RadioButton.has_rollover_sound(), "radio no");
+        assert!(!WidgetKind::Dropdown.has_rollover_sound(), "dropdown no");
+        assert!(!WidgetKind::TextInput.has_rollover_sound(), "text input no");
+
+        // Eligibility check on ControlKind
+        assert!(
+            !ControlKind::Button.widget_kind().has_rollover_sound(),
+            "dialog button no"
+        );
+        assert!(
+            !ControlKind::RadioButton.widget_kind().has_rollover_sound(),
+            "radio no"
+        );
+        assert!(
+            !ControlKind::ComboBox.widget_kind().has_rollover_sound(),
+            "dropdown no"
+        );
+        assert!(
+            !ControlKind::TextEntry.widget_kind().has_rollover_sound(),
+            "text input no"
+        );
+
+        // Eligibility check on MenuEntry
+        let menu = menu();
+        let main_entries = menu.entries();
+        assert!(
+            main_entries[0].has_rollover_sound(),
+            "enabled menu button has rollover sound"
+        );
+        assert!(
+            !main_entries[3].has_rollover_sound(),
+            "spacer has no rollover sound"
+        );
     }
 }

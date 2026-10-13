@@ -15,6 +15,40 @@ use source_assets::keyvalues::Entry;
 /// Character-cell height of the scheme's `Default`/`DefaultBold` fonts at 1:1 scale.
 pub const FONT_TALL: f32 = 16.;
 
+/// Classification of interactive UI controls for sound and interaction behaviors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WidgetKind {
+    /// Main menu and pause/submenu navigation buttons.
+    MenuButton,
+    /// Standard push button inside dialogs (OK, Cancel, Apply, Advanced, etc.).
+    DialogButton,
+    /// Radio button choice option.
+    RadioButton,
+    /// Dropdown / combo box list selector.
+    Dropdown,
+    /// Single-line or multi-line text input field.
+    TextInput,
+    /// Check box toggle button.
+    CheckBox,
+    /// Slider drag control.
+    Slider,
+    /// Non-interactive or decorative element.
+    Other,
+}
+
+impl WidgetKind {
+    /// Returns whether this control kind is eligible for the hover / rollover sound cue
+    /// (`ui/buttonrollover.wav`).
+    ///
+    /// In authentic Source / Half-Life 2 GameUI, only top-level menu and submenu navigation buttons
+    /// play a rollover sound when hovered or stepped. Dialog buttons, radio buttons, dropdowns, and
+    /// text input fields inside dialogs do not play rollover sounds.
+    #[inline]
+    pub fn has_rollover_sound(self) -> bool {
+        matches!(self, Self::MenuButton)
+    }
+}
+
 /// Scheme colors used by the GameUI controls.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {

@@ -150,6 +150,23 @@ pub(crate) enum Target {
     Close,
 }
 
+impl Target {
+    fn widget_kind(self, widgets: &[Widget]) -> widgets::WidgetKind {
+        match self {
+            Target::Control(i) => widgets
+                .get(i)
+                .map_or(widgets::WidgetKind::Other, |w| w.control.widget_kind()),
+            Target::Tab(_) | Target::Ok | Target::Cancel | Target::Apply | Target::Close => {
+                widgets::WidgetKind::DialogButton
+            }
+        }
+    }
+
+    fn has_rollover_sound(self, widgets: &[Widget]) -> bool {
+        self.widget_kind(widgets).has_rollover_sound()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct OpenCombo {
     choice: Choice,
@@ -597,9 +614,6 @@ impl OptionsDialog {
             let step: i32 = if input.pressed(Key::Up) { -1 } else { 1 };
             let current = combo.highlight.map_or(-1, |i| i as i32);
             let next = (current + step).clamp(0, count as i32 - 1) as usize;
-            if Some(next) != combo.highlight {
-                self.sounds.push("ui/buttonrollover.wav".to_string());
-            }
             combo.highlight = Some(next);
             combo.reveal(next);
         }
@@ -609,9 +623,6 @@ impl OptionsDialog {
             .filter(|p| !on_scroll_bar(*p))
             .and_then(|p| widgets::menu_list_hit(combo.list, combo.first, count, p));
         if hit.is_some() {
-            if hit != combo.highlight {
-                self.sounds.push("ui/buttonrollover.wav".to_string());
-            }
             combo.highlight = hit;
         }
         let pick = if input.click {
@@ -690,8 +701,10 @@ impl OptionsDialog {
             Target::Control(i) => widgets.get(*i).is_some_and(|w| w.enabled),
             _ => true,
         });
-        if armed_target.is_some() && armed_target != self.last_armed {
-            self.sounds.push("ui/buttonrollover.wav".to_string());
+        if let Some(target) = armed_target {
+            if armed_target != self.last_armed && target.has_rollover_sound(widgets) {
+                self.sounds.push("ui/buttonrollover.wav".to_string());
+            }
         }
         self.last_armed = armed_target;
         if input.click {
@@ -2303,14 +2316,14 @@ mod tests {
         let ok_pos = DIALOG + vec2(ok_rect.x + 4., ok_rect.y + 4.);
         let away_pos = DIALOG + vec2(10., 10.);
 
-        // 1. Hovering OK button emits rollover sound
+        // 1. Hovering OK button does NOT emit rollover sound (dialog button)
         h.frame(Input {
             pointer: Some(ok_pos),
             ..Default::default()
         });
-        assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonrollover.wav"]);
+        assert!(h.dialog.take_sounds().is_empty());
 
-        // 2. Hovering OK button again does not re-emit
+        // 2. Hovering OK button again emits nothing
         h.frame(Input {
             pointer: Some(ok_pos),
             ..Default::default()
@@ -2331,7 +2344,7 @@ mod tests {
             held: true,
             ..Default::default()
         });
-        let _ = h.dialog.take_sounds(); // hover sound on re-entry
+        assert!(h.dialog.take_sounds().is_empty());
         h.frame(Input {
             pointer: Some(ok_pos),
             released: true,
@@ -2360,6 +2373,7 @@ mod tests {
             ..Default::default()
         });
         assert!(h.dialog.draft().mouse.invert);
+        let _ = h.dialog.take_sounds();
 
         let close_rect = widgets::close_button_rect(DIALOG_SIZE);
         let close_pos = DIALOG
@@ -2368,13 +2382,13 @@ mod tests {
                 close_rect.y + close_rect.h / 2.,
             );
 
-        // Hover over close button: emits rollover sound and arms Close
+        // Hover over close button: arms Close without emitting rollover sound
         h.frame(Input {
             pointer: Some(close_pos),
             ..Default::default()
         });
         assert_eq!(h.dialog.armed, Some(Target::Close));
-        let _ = h.dialog.take_sounds();
+        assert!(h.dialog.take_sounds().is_empty());
 
         // Click and release close button: activates Cancel outcome (Close(None))
         h.frame(Input {

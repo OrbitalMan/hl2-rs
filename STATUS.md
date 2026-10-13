@@ -2,7 +2,12 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: GameUI bug-fix and gap-filling pass (2026-10-13, branch `orbitalman/main-menu`)
+## Current session: GameUI bug-fix pass (2026-10-13, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family. 5-task bug-fix pass underway:
+- **Task 1 (Rollover sound only for menu buttons): Complete.** Restricted rollover sound (`ui/buttonrollover.wav`) exclusively to menu and submenu buttons (`WidgetKind::MenuButton`). Added `WidgetKind` in `hl2-ui::gameui::widgets` with `has_rollover_sound(self) -> bool` returning true strictly for `MenuButton`. Mapped dialog controls (`Button`/`UrlButton` -> `DialogButton`, `RadioButton`, `ComboBox` -> `Dropdown`, `TextEntry` -> `TextInput`) in `hl2-ui::gameui::layout` and `hl2-ui::gameui::options::Target`. Removed rollover hover sounds from `MessageBox::input` and `combo_input`. Maintained button release click sounds (`ui/buttonclickrelease.wav`) across all dialog controls. Added unit test `rollover_sound_eligibility_only_for_menu_buttons` and updated sound interaction tests. 133 `hl2-ui` tests pass, workspace tests pass, clippy clean, 30-frame headless Bevy run clean.
+
+## Previous session: GameUI bug-fix and gap-filling pass (2026-10-13, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family. 9-task bug-fix and gap-filling pass underway:
 - **Task 1 (Literal \n in localized text): Complete.** Added `unescape` in `hl2-ui::gameui::localize` supporting `\n`, `\r`, `\t`, `\"`, `\\` while preserving non-escape backslashes intact. Integrated into `Localization::add_resource`, `insert`, and `localize`. Updated `Painter::text_width` and `Painter::text` to split multi-line strings across newlines and step vertically by `FONT_TALL * scale`. Updated `MessageBox::layout` to measure multi-line widths and expand height dynamically for multiple lines. Added unit tests `unescape_handles_linebreaks_tabs_quotes_and_preserves_literal_backslashes`, `localized_tokens_unescape_line_breaks`, and `return_to_main_menu_multiline_layout`. 118 `hl2-ui` tests pass, 3 owned-install tests pass, clippy clean, 30-frame headless Bevy run clean.

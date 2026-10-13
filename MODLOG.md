@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-13 Rollover sound only for menu buttons
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`: added `WidgetKind` classification enum (`MenuButton`, `DialogButton`, `RadioButton`, `Dropdown`, `TextInput`, `CheckBox`, `Slider`, `Other`) with `has_rollover_sound(self) -> bool` returning `true` strictly for `MenuButton`.
+- `hl2-ui::gameui::layout`: implemented `ControlKind::widget_kind(&self) -> WidgetKind` and `Control::widget_kind(&self)` & `Control::has_rollover_sound(&self) -> bool` (mapping `Button`/`UrlButton` to `DialogButton`, `RadioButton`, `ComboBox` to `Dropdown`, `TextEntry` to `TextInput`, etc.).
+- `hl2-ui::gameui::menu`: added `kind: WidgetKind` and `rollover_sound: Option<&'static str>` to `MenuEntry`, with `has_rollover_sound(&self) -> bool` gated on `kind.has_rollover_sound() && rollover_sound.is_some() && enabled && !spacer`. Initialized menu items to `WidgetKind::MenuButton` and `Some("ui/buttonrollover.wav")` while spacers get `WidgetKind::Other` and `None`. Removed rollover sound from `MessageBox::input` on button hover.
+- `hl2-ui::gameui::options`: implemented `Target::widget_kind(&self, widgets: &[Widget])` and `Target::has_rollover_sound(&self, widgets: &[Widget])`. In `OptionsDialog::track`, restricted rollover sound triggering strictly to targets that satisfy `has_rollover_sound(widgets)`. Removed rollover sound in `combo_input` on dropdown highlight change.
+- `hl2-ui::console`: in `menu_input`, gated `Effect::PlaySound("ui/buttonrollover.wav")` on `menu.entries().get(index).is_some_and(|e| e.has_rollover_sound())` for hover and arrow key navigation.
+- Tests: updated `options_dialog_sound_events_hover_and_activation`, `options_dialog_close_button_behaves_like_cancel`, and `message_box_sound_events_hover_and_release` to verify dialog buttons do not emit rollover sound on hover while release-activation sound (`ui/buttonclickrelease.wav`) remains intact. Added `rollover_sound_eligibility_only_for_menu_buttons` unit test asserting `MenuButton` is eligible (`true`), and dialog buttons, radio buttons, dropdowns, and text input fields are not (`false`).
+
+**Why:**
+- In authentic Source / Half-Life 2 GameUI, generic VGUI widgets (`vgui::Button`, `vgui::RadioButton`, `vgui::ComboBox`, `vgui::TextEntry`, etc.) do not have rollover sound (`sound_armed`) configured by default. Only top-level main menu and submenu navigation buttons play `ui/buttonrollover.wav`. Previously, generic widgets inside dialogs played the rollover sound on cursor hover. This fix restricts rollover sounds to menu buttons through data-driven eligibility on the widget definition rather than per-dialog exclusions.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all 300+ tests passed.
+- `cargo test --locked -p hl2-ui rollover_sound_eligibility_only_for_menu_buttons`: passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+- Headless runtime: `hl2-bevy --frames 30` ran 30 frames cleanly.
+
+**Result:** Only menu and submenu buttons emit rollover sound on hover and keyboard navigation. Dialog buttons, radio buttons, dropdown lists, and text inputs inside dialogs remain silent on hover, while preserving activation click sounds.
+
+**Still broken or not tested:** Audible verification with physical sound playback needs manual check.
+
+**Next:** Task 2 (Credits dialog sizing).
+
 ## 2026-10-13 Half-Life 2: Lost Coast and the Extras submenu
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

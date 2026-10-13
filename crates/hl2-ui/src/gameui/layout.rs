@@ -46,6 +46,18 @@ impl ControlKind {
             _ => Self::Other(class.to_owned()),
         }
     }
+
+    pub fn widget_kind(&self) -> super::widgets::WidgetKind {
+        match self {
+            Self::Button | Self::UrlButton => super::widgets::WidgetKind::DialogButton,
+            Self::RadioButton => super::widgets::WidgetKind::RadioButton,
+            Self::ComboBox => super::widgets::WidgetKind::Dropdown,
+            Self::TextEntry => super::widgets::WidgetKind::TextInput,
+            Self::CheckButton => super::widgets::WidgetKind::CheckBox,
+            Self::Slider => super::widgets::WidgetKind::Slider,
+            _ => super::widgets::WidgetKind::Other,
+        }
+    }
 }
 
 /// One VGUI coordinate along an axis.
@@ -137,6 +149,14 @@ impl Control {
             self.wide,
             self.tall,
         )
+    }
+
+    pub fn widget_kind(&self) -> super::widgets::WidgetKind {
+        self.kind.widget_kind()
+    }
+
+    pub fn has_rollover_sound(&self) -> bool {
+        self.widget_kind().has_rollover_sound()
     }
 }
 

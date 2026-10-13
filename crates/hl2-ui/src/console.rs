@@ -1314,14 +1314,24 @@ impl Console {
         if input.pressed(Key::Up) {
             let prev = menu.selection;
             menu.step(-1);
-            if menu.selection != prev && menu.selection.is_some() {
+            if menu.selection != prev
+                && menu
+                    .selection
+                    .and_then(|i| menu.entries().get(i))
+                    .is_some_and(|e| e.has_rollover_sound())
+            {
                 effects.push(Effect::PlaySound("ui/buttonrollover.wav".into()));
             }
         }
         if input.pressed(Key::Down) {
             let prev = menu.selection;
             menu.step(1);
-            if menu.selection != prev && menu.selection.is_some() {
+            if menu.selection != prev
+                && menu
+                    .selection
+                    .and_then(|i| menu.entries().get(i))
+                    .is_some_and(|e| e.has_rollover_sound())
+            {
                 effects.push(Effect::PlaySound("ui/buttonrollover.wav".into()));
             }
         }
@@ -1332,7 +1342,12 @@ impl Console {
         if let Some(index) = hovered {
             menu.selection = Some(index);
         }
-        if hovered.is_some() && hovered != self.last_menu_hover {
+        if hovered.is_some()
+            && hovered != self.last_menu_hover
+            && hovered
+                .and_then(|i| menu.entries().get(i))
+                .is_some_and(|e| e.has_rollover_sound())
+        {
             effects.push(Effect::PlaySound("ui/buttonrollover.wav".into()));
         }
         self.last_menu_hover = hovered;
