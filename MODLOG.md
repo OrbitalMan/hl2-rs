@@ -1,5 +1,30 @@
 # MODLOG
 
+## 2026-10-14 Menu button letter outline along glyph contours
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::hud`: added `TextOutline` struct (`color: Color`, `thickness: f32`, `is_visible()`) and implemented `FontFace::draw_baseline_outlined` and `FontFace::draw_cell_outlined` to render an outline along glyph contours. Glyphs are rasterized and looked up from the cache once, then emitted as 8-directional offset textured quads (`[-1, 0, 1]` offsets scaled by `thickness`) with `outline.color` before emitting the foreground glyphs. Added unit test `font_draw_baseline_and_cell_outlined_emits_glyph_edge_contours`.
+- `hl2-ui::console`: added `draw_cell_text_outlined` helper using `TextOutline`. In `Console::draw`, updated menu button rendering (`Mode::MainMenu` and `Mode::Pause`) to draw non-spacer entry labels with `draw_cell_text_outlined` using a thin semi-transparent black outline (`TextOutline::new(border_color, 1.0)`, where `border_color` is `Color::new(0.0, 0.0, 0.0, 0.45)` default / `0.65` armed / `0.25` disabled). No rectangular bounding boxes, fills, or panels are drawn on the button clickable area. When pressed, the letter text and its contour outline shift together by `(1.0, 1.0)`. Added unit test `menu_buttons_draw_letters_with_border_along_edge_path_and_no_box_fill`.
+- `HL2RS/AGENTS.md`: documented the menu button letter contour outline conventions.
+
+**Why:**
+- To improve text legibility on white, light, or bright 3D background scenes without drawing unwanted bounding boxes or background fills around the button clickable area. Rendering an 8-direction thin semi-transparent black border along the letter edge paths keeps the authentic transparent button layout while providing contrast along the character paths.
+
+**Tested how:**
+- `cargo test --manifest-path HL2RS/Cargo.toml --workspace --locked`: all 216+ workspace unit tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked`: all 147 unit tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml --locked -p hl2-ui -- --ignored`: owned install tests pass.
+- `cargo clippy --manifest-path HL2RS/Cargo.toml --workspace --all-targets --locked -- -D warnings`: 0 warnings.
+- `cargo fmt --manifest-path HL2RS/Cargo.toml --all -- --check`: clean formatting.
+
+**Result:** Menu buttons draw their letter glyphs with a crisp 1px semi-transparent black outline along the character contours with no box or rectangular background fill.
+
+**Still broken or not tested:** Physical monitor display capture.
+
+**Next:** Ready for commit.
+
 ## 2026-10-14 Background loading blur overlay
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

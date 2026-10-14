@@ -6,7 +6,10 @@ use crate::gameui::{
     resources::{self, fallback_game_menu, GameUiResources},
     widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
 };
-use crate::{canvas::*, hud::FontFace};
+use crate::{
+    canvas::*,
+    hud::{FontFace, TextOutline},
+};
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
@@ -201,8 +204,31 @@ impl CellMetrics {
     }
 }
 
+fn draw_cell_text_outlined(
+    value: &str,
+    origin: Vec2,
+    tall: f32,
+    font: Option<&FontFace>,
+    metrics: CellMetrics,
+    color: Color,
+    outline: TextOutline,
+) {
+    let em = (tall * metrics.em_per_cell).max(1.);
+    let raster_size = em.round().clamp(1., 1024.);
+    if let Some(font) = font {
+        font.draw_baseline_outlined(
+            value,
+            origin + vec2(0., tall * metrics.ascent_per_cell),
+            raster_size,
+            em / raster_size,
+            color,
+            outline,
+        );
+    }
+}
+
 fn draw_cell_text(
-    canvas: &Canvas,
+    _canvas: &Canvas,
     value: &str,
     origin: Vec2,
     tall: f32,
@@ -210,17 +236,7 @@ fn draw_cell_text(
     metrics: CellMetrics,
     color: Color,
 ) {
-    let em = (tall * metrics.em_per_cell).max(1.);
-    let raster_size = em.round().clamp(1., 1024.);
-    text(
-        canvas,
-        value,
-        origin + vec2(0., tall * metrics.ascent_per_cell),
-        raster_size,
-        em / raster_size,
-        font,
-        color,
-    );
+    draw_cell_text_outlined(value, origin, tall, font, metrics, color, TextOutline::NONE);
 }
 fn text(
     _canvas: &Canvas,
@@ -1662,15 +1678,22 @@ impl Console {
                 } else {
                     self.style.menu
                 };
+                let border_color = if !entry.enabled {
+                    Color::new(0.0, 0.0, 0.0, 0.25)
+                } else if armed {
+                    Color::new(0.0, 0.0, 0.0, 0.65)
+                } else {
+                    Color::new(0.0, 0.0, 0.0, 0.45)
+                };
                 let offset = if is_pressed { vec2(1., 1.) } else { Vec2::ZERO };
-                draw_cell_text(
-                    &self.canvas,
+                draw_cell_text_outlined(
                     &entry.label,
                     geometry.row_text_pos(i) + offset,
                     geometry.font_tall,
                     self.menu_font.as_ref(),
                     self.menu_metrics,
                     color,
+                    TextOutline::new(border_color, 1.0),
                 );
             }
             if let Some((confirm, _)) = &self.confirm_box {
@@ -3040,6 +3063,99 @@ mod tests {
         assert!(
             blur_quads.is_empty(),
             "no blur overlay quads once background map loading is complete"
+        );
+    }
+
+    #[test]
+    fn menu_buttons_draw_letters_with_border_along_edge_path_and_no_box_fill() {
+        let mut console = Console::default();
+        console.canvas.resize(1280., 720.);
+        console.mode = Mode::MainMenu;
+        console.title = String::new();
+        let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
+        console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
+        assert!(console.menu_font.is_some());
+
+        // 1. Critical requirement: Verify that NO rectangular background boxes or fills are drawn
+        // around the button rows (only textured glyph quads).
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+
+        let untextured_quads: Vec<_> = quads.iter().filter(|q| q.texture.is_none()).collect();
+        assert!(
+            untextured_quads.is_empty(),
+            "menu button clickable area must not have rectangular box or fill quads: found {:?}",
+            untextured_quads.len()
+        );
+
+        // 2. Verify outline quads are emitted along the letter paths with semi-transparent black
+        let default_border = Color::new(0.0, 0.0, 0.0, 0.45);
+        let outline_quads: Vec<_> = quads.iter().filter(|q| q.color == default_border).collect();
+        assert!(
+            !outline_quads.is_empty(),
+            "menu buttons must emit outline quads along letter paths with default border color"
+        );
+        assert!(
+            outline_quads.iter().all(|q| q.texture.is_some()),
+            "outline quads must be textured glyphs tracing the letter contour"
+        );
+
+        // For each character drawn, there must be 8 outline quads (offsets) per 1 foreground quad
+        let fg_quads: Vec<_> = quads
+            .iter()
+            .filter(|q| q.color == console.style.menu)
+            .collect();
+        assert!(
+            !fg_quads.is_empty(),
+            "menu buttons must emit foreground glyph quads"
+        );
+        assert_eq!(
+            outline_quads.len(),
+            fg_quads.len() * 8,
+            "each letter must emit exactly 8 outline glyph quads (1px in 8 directions) for its contour"
+        );
+
+        // 3. Armed state (hovered/selected):
+        // When selection is set, the selected item's letters use armed border color (alpha 0.65)
+        // and armed foreground color.
+        console.main_menu.selection = Some(0);
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+
+        let armed_border = Color::new(0.0, 0.0, 0.0, 0.65);
+        let armed_outline_quads: Vec<_> =
+            quads.iter().filter(|q| q.color == armed_border).collect();
+        let armed_fg_quads: Vec<_> = quads
+            .iter()
+            .filter(|q| q.color == console.style.menu_armed)
+            .collect();
+        assert!(
+            !armed_outline_quads.is_empty(),
+            "armed menu button must use armed outline color (alpha 0.65)"
+        );
+        assert_eq!(
+            armed_outline_quads.len(),
+            armed_fg_quads.len() * 8,
+            "armed item must have 8 outline quads per foreground letter quad"
+        );
+
+        // 4. Pressed state offset shift:
+        // When pressed, all letter quads (outline and foreground) shift by (1.0, 1.0)
+        let unpressed_first_fg_pos = armed_fg_quads[0].destination;
+        console.menu_tracker.update(Some(0), true, true, false); // press button 0
+        console.draw(0.0);
+        let pressed_quads = console.canvas.drain();
+        let pressed_fg_quads: Vec<_> = pressed_quads
+            .iter()
+            .filter(|q| q.color == console.style.menu_armed)
+            .collect();
+        assert_eq!(
+            pressed_fg_quads[0].destination.x,
+            unpressed_first_fg_pos.x + 1.0
+        );
+        assert_eq!(
+            pressed_fg_quads[0].destination.y,
+            unpressed_first_fg_pos.y + 1.0
         );
     }
 }

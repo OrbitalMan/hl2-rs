@@ -2,7 +2,16 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: Background loading blur overlay (2026-10-14, branch `orbitalman/main-menu`)
+## Current session: Menu button letter outline along glyph contours (2026-10-14, branch `orbitalman/menu-button-text-border`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Menu button letter outline along glyph contours:** Implemented thin semi-transparent black border along the glyph paths of menu button labels, ensuring crisp text contrast on light/white/bright backgrounds without drawing bounding boxes, panels, or fills around button clickable areas:
+  - In `hl2-ui::hud`, added `TextOutline` struct (`color: Color`, `thickness: f32`, `is_visible()`) and implemented `FontFace::draw_baseline_outlined` and `FontFace::draw_cell_outlined` to render an outline along glyph contours. Glyphs are rasterized and looked up from the cache once, then emitted as 8-directional offset textured quads (`[-1, 0, 1]` offsets scaled by `thickness`) with `outline.color` before emitting the foreground glyphs. Added unit test `font_draw_baseline_and_cell_outlined_emits_glyph_edge_contours`.
+  - In `hl2-ui::console`, added `draw_cell_text_outlined` helper using `TextOutline`. In `Console::draw`, updated menu button rendering (`Mode::MainMenu` and `Mode::Pause`) to draw non-spacer entry labels with `draw_cell_text_outlined` using a thin semi-transparent black outline (`TextOutline::new(border_color, 1.0)`, where `border_color` is `Color::new(0.0, 0.0, 0.0, 0.45)` default / `0.65` armed / `0.25` disabled). No rectangular bounding boxes, fills, or panels are drawn on the button clickable area. When pressed, the letter text and its contour outline shift together by `(1.0, 1.0)`. Added unit test `menu_buttons_draw_letters_with_border_along_edge_path_and_no_box_fill`.
+  - In `HL2RS/AGENTS.md`, documented the menu button letter contour outline conventions.
+- **Validation:** 147 `hl2-ui` tests pass, all workspace unit tests pass; all owned-install tests pass; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Background loading blur overlay (2026-10-14, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Background loading blur overlay:** Differentiated the background map loading overlay from gameplay map loading:

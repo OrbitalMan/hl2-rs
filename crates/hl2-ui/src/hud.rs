@@ -52,6 +52,34 @@ fn uses_secondary_ammo(weapon: &Weapon) -> bool {
         && !weapon.secondary_ammo_type.eq_ignore_ascii_case("none")
 }
 
+/// Outline style for rendering borders along font glyph contours.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TextOutline {
+    pub color: Color,
+    pub thickness: f32,
+}
+
+impl Default for TextOutline {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+impl TextOutline {
+    pub const NONE: Self = Self {
+        color: Color::new(0., 0., 0., 0.),
+        thickness: 0.,
+    };
+
+    pub const fn new(color: Color, thickness: f32) -> Self {
+        Self { color, thickness }
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.color.a > 0.0 && self.thickness > 0.0
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct FontFace {
     canvas: Canvas,
@@ -185,44 +213,108 @@ impl FontFace {
     pub(crate) fn width_cell(&self, value: &str, cell: f32) -> f32 {
         self.width_em(value, cell / self.cell_height)
     }
-    /// Draws `value` with its character cell's top-left corner at `top_left`. Glyphs are
-    /// rasterized at a whole-pixel EM and scaled, so the glyph cache stays bounded.
-    pub(crate) fn draw_cell(&self, value: &str, top_left: Vec2, cell: f32, color: Color) {
+    /// Draws `value` with an outline/border along the letter edge path with its character cell's
+    /// top-left corner at `top_left`. Glyphs are rasterized at a whole-pixel EM and scaled.
+    pub(crate) fn draw_cell_outlined(
+        &self,
+        value: &str,
+        top_left: Vec2,
+        cell: f32,
+        color: Color,
+        outline: TextOutline,
+    ) {
         let em = (cell / self.cell_height).max(1.);
         let raster = em.round().clamp(1., 1024.);
-        self.draw_baseline(
+        self.draw_baseline_outlined(
             value,
             top_left + Vec2::new(0., (self.ascent * em).round()),
             raster,
             em / raster,
             color,
+            outline,
         );
+    }
+    /// Draws `value` with its character cell's top-left corner at `top_left`. Glyphs are
+    /// rasterized at a whole-pixel EM and scaled, so the glyph cache stays bounded.
+    pub(crate) fn draw_cell(&self, value: &str, top_left: Vec2, cell: f32, color: Color) {
+        self.draw_cell_outlined(value, top_left, cell, color, TextOutline::NONE);
+    }
+    /// Draws `value` with an outline/border along the letter edge path.
+    pub(crate) fn draw_baseline_outlined(
+        &self,
+        value: &str,
+        origin: Vec2,
+        em: f32,
+        scale: f32,
+        color: Color,
+        outline: TextOutline,
+    ) {
+        let mut pen = origin;
+        let mut glyphs = Vec::with_capacity(value.len());
+        for c in value.chars() {
+            let glyph = self.raster(c, em, 0, 0);
+            if let Some(texture) = &glyph.texture {
+                let pos = vec2(
+                    pen.x + glyph.x * scale,
+                    pen.y + (glyph.y - self.ascent * em) * scale,
+                );
+                glyphs.push((texture.clone(), pos, texture.size() * scale));
+            }
+            pen.x += glyph.advance * scale;
+        }
+
+        if outline.is_visible() {
+            const OFFSETS: [(f32, f32); 8] = [
+                (-1.0, 0.0),
+                (1.0, 0.0),
+                (0.0, -1.0),
+                (0.0, 1.0),
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (-1.0, 1.0),
+                (1.0, 1.0),
+            ];
+            for (dx, dy) in OFFSETS {
+                let offset = vec2(dx * outline.thickness, dy * outline.thickness);
+                for (texture, pos, size) in &glyphs {
+                    draw_texture_ex(
+                        &self.canvas,
+                        texture,
+                        pos.x + offset.x,
+                        pos.y + offset.y,
+                        outline.color,
+                        DrawTextureParams {
+                            dest_size: Some(*size),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        for (texture, pos, size) in &glyphs {
+            draw_texture_ex(
+                &self.canvas,
+                texture,
+                pos.x,
+                pos.y,
+                color,
+                DrawTextureParams {
+                    dest_size: Some(*size),
+                    ..Default::default()
+                },
+            );
+        }
     }
     pub(crate) fn draw_baseline(
         &self,
         value: &str,
-        mut origin: Vec2,
+        origin: Vec2,
         em: f32,
         scale: f32,
         color: Color,
     ) {
-        for c in value.chars() {
-            let glyph = self.raster(c, em, 0, 0);
-            if let Some(texture) = &glyph.texture {
-                draw_texture_ex(
-                    &self.canvas,
-                    texture,
-                    origin.x + glyph.x * scale,
-                    origin.y + (glyph.y - self.ascent * em) * scale,
-                    color,
-                    DrawTextureParams {
-                        dest_size: Some(texture.size() * scale),
-                        ..Default::default()
-                    },
-                );
-            }
-            origin.x += glyph.advance * scale;
-        }
+        self.draw_baseline_outlined(value, origin, em, scale, color, TextOutline::NONE);
     }
     fn draw_cropped(
         &self,
@@ -2949,5 +3041,42 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].target, "128");
         assert!(keyvalues::parse_resource(b"Scheme { x 1").is_err());
+    }
+
+    #[test]
+    fn font_draw_baseline_and_cell_outlined_emits_glyph_edge_contours() {
+        let canvas = Canvas::default();
+        let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
+        let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
+
+        // Transparent outline / zero thickness should emit only 1 foreground quad per glyph
+        font.draw_baseline("OK", vec2(10., 20.), 16., 1.0, WHITE);
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 2, "2 foreground quads for 'OK'");
+        assert!(quads
+            .iter()
+            .all(|q| q.color == WHITE && q.texture.is_some()));
+
+        // Active outline should emit 8 offset outline quads plus 1 foreground quad per glyph
+        let border_color = Color::new(0.0, 0.0, 0.0, 0.45);
+        let outline = TextOutline::new(border_color, 1.0);
+        font.draw_baseline_outlined("OK", vec2(10., 20.), 16., 1.0, WHITE, outline);
+        let quads = canvas.drain();
+        // 2 characters * 8 outline offsets = 16 outline quads, + 2 foreground quads = 18 total quads
+        assert_eq!(quads.len(), 18);
+
+        let outline_quads: Vec<_> = quads.iter().filter(|q| q.color == border_color).collect();
+        let fg_quads: Vec<_> = quads.iter().filter(|q| q.color == WHITE).collect();
+        assert_eq!(outline_quads.len(), 16);
+        assert_eq!(fg_quads.len(), 2);
+
+        // Verify draw_cell_outlined also emits the 8 outline quads + foreground
+        font.draw_cell_outlined("A", vec2(50., 60.), 16., WHITE, outline);
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 9, "8 outline + 1 fg for 'A'");
+        let outline_count = quads.iter().filter(|q| q.color == border_color).count();
+        let fg_count = quads.iter().filter(|q| q.color == WHITE).count();
+        assert_eq!(outline_count, 8);
+        assert_eq!(fg_count, 1);
     }
 }

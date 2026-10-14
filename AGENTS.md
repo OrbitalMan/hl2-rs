@@ -103,6 +103,12 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Retail Valve resource files (e.g. `ep2/scripts/HudLayout.res` in the 20th Anniversary update) contain authentic authoring errors, such as unquoted identifiers merged into quoted literals (`"ypos" "426"HudPoisonDamageIndicator`).
   - Following Source SDK `KeyValues.cpp` (`RecursiveLoadFromBuffer: got } in key`), when `}` is encountered where a value is expected, the parser breaks out of the current block cleanly instead of aborting the parse. This allows retail expansion HUD and chapter background maps to load without error.
 
+- **Menu Button Letter Outline**:
+  - Main menu and pause menu button labels (`Mode::MainMenu` and `Mode::Pause`) are drawn with a thin semi-transparent black border along the letter edge paths/contours of the characters rather than drawing rectangular bounding boxes or background fills around the button clickable area.
+  - The letter border is rendered via `FontFace::draw_baseline_outlined` / `draw_cell_text_outlined` emitting 8-directional 1px offset glyph quads with semi-transparent black (`TextOutline::new(Color::new(0.0, 0.0, 0.0, 0.45), 1.0)` default / `0.65` armed / `0.25` disabled) before emitting the foreground glyphs.
+  - When pressed, the letter text and its contour outline shift together by `(1.0, 1.0)`.
+  - Spacers and disabled rows never emit active buttons, and the letter outline ensures crisp text contrast on bright, light, or white backgrounds without modifying menu geometry or drawing button boxes.
+
 ## Runtime invariants to preserve
 
 - Walking uses shared Player/Physics; F2/--fly enables flight. Escape cancels selection before pause; tilde opens console. Consume transition input and pause simulation/audio. Map workers freeze fixed/script clocks; replace map-owned resources only after success. Missing maps preserve the world; saved/global state transfer is unfinished.
