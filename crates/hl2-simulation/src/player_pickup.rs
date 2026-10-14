@@ -168,6 +168,7 @@ impl Inventory {
         let Some(id) = find_use_prop(world, physics, eye, forward, up, feet, height) else {
             return false;
         };
+        scene.prop_player_used(world, id);
         // Can't pick up what you're standing on.
         if physics
             .impact_ray(feet + Vec3::Z * 2., -Vec3::Z, 4.)

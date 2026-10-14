@@ -98,6 +98,24 @@ const FLESH_DECALS: [&str; 5] = [
     "decals/flesh/blood4_subrect",
     "decals/flesh/blood5_subrect",
 ];
+/// UTIL_BloodDecalTrace's "Blood" and "YellowBlood" decal groups (owned
+/// scripts/decals_subrect.txt).
+const BLOOD_DECALS: [&str; 6] = [
+    "decals/blood1_subrect",
+    "decals/blood2_subrect",
+    "decals/blood3_subrect",
+    "decals/blood4_subrect",
+    "decals/blood5_subrect",
+    "decals/blood6_subrect",
+];
+const YELLOW_BLOOD_DECALS: [&str; 6] = [
+    "decals/yblood1_subrect",
+    "decals/yblood2_subrect",
+    "decals/yblood3_subrect",
+    "decals/yblood4_subrect",
+    "decals/yblood5_subrect",
+    "decals/yblood6_subrect",
+];
 #[derive(Default)]
 pub struct Impacts {
     pub marks: Vec<Mark>,
@@ -166,6 +184,12 @@ impl Impacts {
             .into_iter()
             .flat_map(|family| (1..=5).map(move |i| format!("decals/{family}/shot{i}")))
             .chain([crate::weapon_bugbait::SPLAT_DECAL.to_string()])
+            .chain(
+                BLOOD_DECALS
+                    .iter()
+                    .chain(&YELLOW_BLOOD_DECALS)
+                    .map(|m| m.to_string()),
+            )
             .chain(FLESH_DECALS.map(String::from));
         let mut materials: Vec<String> = materials.collect();
         for material in materials.clone() {
@@ -585,6 +609,23 @@ impl Impacts {
         });
         self.studio_created += 1;
     }
+    /// UTIL_BloodDecalTrace for a TraceBleed hit: a Blood (red) or YellowBlood decal,
+    /// the group's entries in turn.
+    pub fn add_blood(
+        &mut self,
+        hit: RayHit,
+        color: crate::gameplay::BloodColor,
+        world: &World,
+        physics: &Physics,
+        scene: &Scene,
+    ) {
+        let group = match color {
+            crate::gameplay::BloodColor::Red => &BLOOD_DECALS,
+            crate::gameplay::BloodColor::Yellow => &YELLOW_BLOOD_DECALS,
+        };
+        let material = group[self.created % group.len()];
+        self.add_decal(hit, material, world, physics, scene);
+    }
     /// UTIL_DecalTrace: project a loaded decal material onto the surface a trace hit;
     /// NPCs get a studio decal request.
     pub fn add_decal(
@@ -907,8 +948,11 @@ mod tests {
         let mut impacts = Impacts::new(&vfs, &world);
         // 20 bullet decals (no sand set) and the translucent bug bait splash.
         // 21 world decals + Impact.Flesh's 5 subrects and their 5 $modelmaterials +
-        // decals/beersplashmodel (studio decals).
-        assert_eq!(impacts.textures.len(), 32, "{:?}", impacts.errors);
+        // decals/beersplashmodel (studio decals) + the Blood/YellowBlood groups' 12
+        // subrects and their 12 $modelmaterials (TraceBleed).
+        assert_eq!(impacts.textures.len(), 56, "{:?}", impacts.errors);
+        assert!(impacts.textures.contains_key("decals/blood1_subrect"));
+        assert!(impacts.textures.contains_key("decals/yblood6_subrect"));
         assert!(impacts.textures.contains_key("decals/flesh/blood1"));
         assert!(impacts.textures.contains_key("decals/beersplashmodel"));
         assert!(impacts.textures[crate::weapon_bugbait::SPLAT_DECAL].translucent);

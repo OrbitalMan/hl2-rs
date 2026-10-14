@@ -113,6 +113,7 @@ pub struct Gameplay {
     pub projectiles: Projectiles,
     /// Gibs of broken props (runtime prop bodies until DESIGN 14r entities).
     pub gibs: hl2_simulation::gibs::Gibs,
+    pub phys_explosions: hl2_simulation::phys_explosion::PhysExplosions,
     pub impacts: hl2_simulation::impacts::Impacts,
     pub primary: bool,
     pub secondary: bool,
@@ -301,6 +302,7 @@ impl Gameplay {
             npcs: Controller::new(None, Default::default()),
             projectiles: Projectiles::default(),
             gibs: Default::default(),
+            phys_explosions: Default::default(),
             impacts: Default::default(),
             primary: false,
             secondary: false,
@@ -351,6 +353,7 @@ impl Gameplay {
             npcs,
             projectiles: Projectiles::default(),
             gibs: Default::default(),
+            phys_explosions: Default::default(),
             primary: false,
             secondary: false,
             actions: vec![],
@@ -684,6 +687,9 @@ impl Gameplay {
             self.inventory
                 .rpg_missile_event(event, &self.weapons, &self.world, &mut self.scene);
         }
+        // env_physexplosion pushes (and blast damage) from this tick's inputs.
+        self.phys_explosions
+            .apply(&self.world, &mut self.scene, physics);
         // trigger_hurt touchers from this tick's scene logic share the entity path.
         damage.append(&mut self.scene.entity_damage);
         self.inventory
@@ -733,6 +739,11 @@ impl Gameplay {
         for (hit, _melee, direction) in self.inventory.impacts.drain(..) {
             self.impacts
                 .add_shot(hit, direction, &self.world, physics, &mut self.scene);
+        }
+        // TraceBleed: blood on the world behind shot NPCs.
+        for (hit, color) in self.inventory.blood.drain(..) {
+            self.impacts
+                .add_blood(hit, color, &self.world, physics, &self.scene);
         }
         // Projectile UTIL_ImpactTrace (crossbow bolts in the world).
         for hit in std::mem::take(&mut self.projectiles.impacts) {
@@ -791,7 +802,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

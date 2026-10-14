@@ -100,6 +100,8 @@ struct Sample {
     /// Wall-clock milliseconds of the last whole fixed host step (gameplay, NPCs,
     /// projectiles, physics and player).
     step_ms: f64,
+    /// Awake dynamic bodies after the step (props that never sleep at idle).
+    awake_bodies: usize,
     console: Option<serde_json::Value>,
 }
 #[derive(Resource)]
@@ -468,6 +470,7 @@ impl Simulation {
                 shadow: self.physics.player_shadow_center(),
                 physics_ms: self.physics.last_step_ms,
                 step_ms: self.last_step_ms,
+                awake_bodies: self.physics.awake_bodies(),
                 ray_entity: self
                     .physics
                     .ray(

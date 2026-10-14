@@ -1,0 +1,56 @@
+[
+{
+"tick": 1,
+"eye": [
+-4540,
+-3599,
+64
+],
+"yaw": 0,
+"pitch": -15
+},
+{
+"tick": 60,
+"label": "before"
+},
+{
+"tick": 61,
+"label": "use",
+"actions": [
+{
+"action": "use"
+}
+]
+},
+{
+"tick": 62
+},
+{
+"tick": 64,
+"label": "u64"
+},
+{
+"tick": 70,
+"label": "u70"
+},
+{
+"tick": 80,
+"label": "u80"
+},
+{
+"tick": 100,
+"label": "u100"
+},
+{
+"tick": 130,
+"label": "u130"
+},
+{
+"tick": 200,
+"label": "u200"
+},
+{
+"tick": 400,
+"label": "u400"
+}
+]

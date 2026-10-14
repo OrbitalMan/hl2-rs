@@ -263,6 +263,8 @@ pub struct Scene {
     pub entity_damage: Vec<crate::projectiles::Damage>,
     /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
     pub prop_breaks: Vec<crate::gibs::PropBreak>,
+    /// env_physexplosion entities whose Explode input arrived (phys_explosion).
+    pub phys_explosions: Vec<usize>,
     /// Set by the host: a dead player no longer takes damage (m_takedamage).
     pub player_dead: bool,
     /// ScreenFade messages for the local player (env_fade).
@@ -311,6 +313,7 @@ impl Scene {
             globals: crate::globals::Globals::spawn(world),
             entity_damage: Vec::new(),
             prop_breaks: Vec::new(),
+            phys_explosions: Vec::new(),
             keyvalue_overrides: BTreeMap::new(),
             player_dead: false,
             screen_fades: Vec::new(),
@@ -2051,6 +2054,17 @@ impl Scene {
             self.send(id, "Toggle", "");
         } else if entity.class() == "func_button" {
             self.fire(id, "OnPressed", usize::MAX);
+        } else {
+            self.prop_player_used(world, id);
+        }
+    }
+    /// CPhysicsProp::Use by the player: OnPlayerUse with SF_PHYSPROP_ENABLE_PICKUP_OUTPUT
+    /// (256), before the pickup attempt.
+    pub fn prop_player_used(&mut self, world: &World, id: usize) {
+        if world.entities.get(id).is_some_and(|e| {
+            e.class().starts_with("prop_physics") && number(e, "spawnflags", 0.) as u32 & 256 != 0
+        }) {
+            self.fire(id, "OnPlayerUse", usize::MAX);
         }
     }
     fn deliver(&mut self, world: &World, id: usize, p: &Pending, player_feet: Vec3) {
@@ -2094,6 +2108,7 @@ impl Scene {
                     _ => self.unsupported_input(class, "AddOutput:malformed"),
                 }
             }
+            "explode" if class == "env_physexplosion" => self.phys_explosions.push(id),
             // CEnvTonemapController: custom auto-exposure limits and the manual tonemap rate.
             "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
             "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,

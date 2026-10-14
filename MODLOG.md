@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-14 session 16 (continued): env_physexplosion, prop OnPlayerUse, TraceBleed, world-collision-disabled constraints (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `hl2_simulation::phys_explosion` (env_physexplosion Explode input: targets by name, else class within the radius, else everything in the radius; SDK falloff and explosive damage force applied at the explosion origin; DMG_BLAST damage unless NODAMAGE; report `gameplay.phys_explosions`); prop_physics with spawnflag 256 fire OnPlayerUse on +USE (pickup path and ray-use path); world constraints with SF_CONSTRAINT_DISABLE_COLLISION make their body ignore static colliders without an entity (BSP, displacements, static props); TraceBleed (CBaseEntity::TraceBleed: 1/2/4 noisy traces 172 units along the shot behind a hit NPC, Blood/YellowBlood decal groups by BloodColor, machines none; `Inventory::blood`, `Impacts::add_blood`); `Physics::remove_body` updates the query pipeline (a faded gib left a stale entry: one intermittent Rapier 'No element at index' panic in batch s16b, d1_trainstation_01, where debris bottles #869/#870 authored ~47 units above the displacement now shatter on landing under the glass table); movement-report sample field `awake_bodies`. Fixtures bevy-tictactoe-use-spins-block, bevy-trace-bleed-cop-wall. Oracle (private): `!use`/`!unuse` and `!npc` (npc_create, ORACLE_NPC) view suffixes (backup run_view_oracle.py.bak-20261014).
+
+**Why:** owner items 0c (env_physexplosion, the playground tic-tac-toe blocks and ghost swings) and 0b (TraceBleed world blood behind NPCs, native blood comparison).
+
+**Tested how:** unit tests (explosion impulse band and blast damage; TraceBleed trace counts, wall hits, mechanical NPCs), owned tests (decal preload count 56), strict Clippy, fmt, workspace tests; packaged: +USE on block 5 fires one explosion and the block turns (before: it sat 4.7 units inside the frame rod and could not move), native T001349Z at eye (-4540,-3599,64) pitch 15 yaw 0; three pistol shots at terminal_side_cop posed at (-3330,-2560,64) in front of the hall wall: 3 blood decals on the wall behind him (bleed-side.png), native T002821Z (npc_create cop at the same spot): splats on the same wall/pillar and on the chest; native's are larger and the native cop died after 3 shots (ours survives: NPC health is item 3). Regression batch artifacts/s16b-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 only), no panics; finals vs s16-regression mean <= 0.51; Breen screen feed differs by 24 pixels at the mouth (one lip-sync frame, to recheck), slate feed identical.
+
+**Result:** the tic-tac-toe blocks react to +USE; shot NPCs leave blood on the wall behind them like native.
+
+**Still broken or not tested:** native turns the block about a quarter turn and it settles within 0.3 s; ours spins at the angular speed cap for over 6 s (open, research needed: IVP hinge friction units / impulse transfer / angular drag); swing pushes need ropes (off); PUSH_PLAYER; carousel thruster.
+
+**Next:** STATUS session 16.
 ## 2026-10-14 session 16: prop data, chunk gibs, displacement and clip collision, world hinges (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

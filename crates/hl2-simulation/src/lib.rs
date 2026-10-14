@@ -16,6 +16,7 @@ pub mod globals;
 pub mod grab;
 pub mod impact_damage;
 pub mod npc;
+pub mod phys_explosion;
 pub mod player_damage;
 pub mod player_pickup;
 pub mod projectiles;

@@ -437,6 +437,11 @@ pub struct WorldSideMaterials {
     /// ShouldCollide tests against PhysicsSolidMaskForEntity: physics objects (MASK_SOLID)
     /// pass through them. Player movement and traces keep their own clip handling.
     pub clip_brushes: std::collections::HashSet<ColliderHandle>,
+    /// Bodies whose world constraint has SF_CONSTRAINT_DISABLE_COLLISION: the
+    /// constraint disables the entity pair with the world entity
+    /// (PhysDisableEntityCollisions on g_PhysWorldObject), which also owns the static
+    /// props, so these bodies ignore every static collider without an entity.
+    pub world_disabled_bodies: std::collections::HashSet<RigidBodyHandle>,
 }
 impl WorldSideMaterials {
     /// The side whose outward normal best matches `outward` (from the brush toward
@@ -462,6 +467,22 @@ impl PhysicsHooks for WorldSideMaterials {
             || self.clip_brushes.contains(&context.collider2)
         {
             return None;
+        }
+        if !self.world_disabled_bodies.is_empty() {
+            let world = |c| {
+                context
+                    .colliders
+                    .get(c)
+                    .is_some_and(|c| c.parent().is_none() && c.user_data == 0)
+            };
+            let disabled = |b: Option<RigidBodyHandle>| {
+                b.is_some_and(|b| self.world_disabled_bodies.contains(&b))
+            };
+            if (disabled(context.rigid_body1) && world(context.collider2))
+                || (disabled(context.rigid_body2) && world(context.collider1))
+            {
+                return None;
+            }
         }
         if !self.disabled_pairs.is_empty() {
             let entity = |c| {
@@ -1157,6 +1178,20 @@ impl Physics {
                     .map_or(frame, |body| body.position().inv_mul(&frame))
             };
             let contacts = flags & 1 == 0;
+            if !contacts && world_hinge {
+                self.world_sides.world_disabled_bodies.insert(b);
+                for c in self
+                    .bodies
+                    .get(b)
+                    .map(|body| body.colliders().to_vec())
+                    .unwrap_or_default()
+                {
+                    if let Some(collider) = self.colliders.get_mut(c) {
+                        let hooks = collider.active_hooks() | ActiveHooks::FILTER_CONTACT_PAIRS;
+                        collider.set_active_hooks(hooks);
+                    }
+                }
+            }
             let joint: GenericJoint = match class {
                 "phys_hinge" => {
                     // kg in^2/s^2 -> N m.
@@ -1250,6 +1285,10 @@ impl Physics {
         // colliders, so replacing them moves the center.
         body.set_additional_mass_properties(snapped_props, true);
         body.recompute_mass_properties_from_colliders(&self.colliders);
+    }
+    /// Dynamic bodies the island manager keeps awake.
+    pub fn awake_bodies(&self) -> usize {
+        self.islands.active_dynamic_bodies().len()
     }
     pub fn set_entity(&mut self, id: usize, origin: Vec3, rotation: Quat, enabled: bool) {
         let dynamic = self.dynamic.get(&id);
@@ -1862,10 +1901,13 @@ impl Physics {
         }
     }
     pub fn remove_body(&mut self, handle: RigidBodyHandle) {
-        if let Some(body) = self.bodies.get(handle) {
-            for collider in body.colliders() {
-                self.collider_materials.remove(collider);
-            }
+        let removed: Vec<ColliderHandle> = self
+            .bodies
+            .get(handle)
+            .map(|body| body.colliders().to_vec())
+            .unwrap_or_default();
+        for collider in &removed {
+            self.collider_materials.remove(collider);
         }
         if let Some(id) = self
             .dynamic
@@ -1888,6 +1930,12 @@ impl Physics {
             &mut self.multibody,
             true,
         );
+        // Queries between now and the next step must not reach the removed colliders
+        // (a faded gib panicked a later ray in the query pipeline).
+        if !removed.is_empty() {
+            self.query
+                .update_incremental(&self.colliders, &[], &removed, true);
+        }
     }
     /// Position, rotation, velocity (units/s) and local angular velocity (deg/s).
     /// CBasePlayer::PostThinkVPhysics / UpdateVPhysicsPosition for one tick: the 85 kg

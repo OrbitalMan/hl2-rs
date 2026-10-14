@@ -228,6 +228,48 @@ pub(crate) struct EmptyFire {
 
 /// CSingleplayRules::FlPlayerFallDamage with the HL2_DLL constants: damage grows linearly
 /// from the maximum safe fall speed (526.5) to 100 at the fatal speed (922.5).
+/// BloodColor() of an NPC class (SDK SetBloodColor): red, any other color (drawn with
+/// the YellowBlood decal by UTIL_BloodDecalTrace), or None for DONT_BLEED /
+/// BLOOD_COLOR_MECH.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BloodColor {
+    Red,
+    Yellow,
+}
+pub fn blood_color(class: &str) -> Option<BloodColor> {
+    match class {
+        "npc_cscanner"
+        | "npc_clawscanner"
+        | "npc_manhack"
+        | "npc_rollermine"
+        | "npc_turret_floor"
+        | "npc_turret_ceiling"
+        | "npc_turret_ground"
+        | "npc_combine_camera"
+        | "npc_strider"
+        | "npc_helicopter"
+        | "npc_combinegunship"
+        | "npc_combinedropship"
+        | "npc_dog"
+        | "npc_bullseye"
+        | "npc_enemyfinder"
+        | "npc_apcdriver" => None,
+        "npc_antlion"
+        | "npc_antlionguard"
+        | "npc_headcrab"
+        | "npc_headcrab_fast"
+        | "npc_headcrab_black"
+        | "npc_headcrab_poison"
+        | "npc_zombie"
+        | "npc_fastzombie"
+        | "npc_poisonzombie"
+        | "npc_zombine"
+        | "npc_barnacle"
+        | "npc_houndeye"
+        | "npc_vortigaunt" => Some(BloodColor::Yellow),
+        _ => Some(BloodColor::Red),
+    }
+}
 /// CAmmoDef DamageForce of the player's bullet ammo (hl2_gamerules.cpp BULLET_IMPULSE:
 /// ft/s x 12 x the grains' mass in kg x 3.5), kg in/s.
 pub fn bullet_impulse(ammo_type: &str) -> f32 {
@@ -295,6 +337,9 @@ pub struct Inventory {
     #[serde(skip)]
     /// Bullet/melee hits with whether melee and the shot direction.
     pub impacts: Vec<(crate::physics::RayHit, bool, Vec3)>,
+    /// TraceBleed world hits and their blood color this tick.
+    #[serde(skip)]
+    pub blood: Vec<(crate::physics::RayHit, BloodColor)>,
     #[serde(skip)]
     pub projectile_spawns: Vec<ProjectileSpawn>,
     pub previous: String,
@@ -383,6 +428,7 @@ impl Default for Inventory {
     fn default() -> Self {
         Self {
             impacts: Vec::new(),
+            blood: Vec::new(),
             projectile_spawns: Vec::new(),
             previous: String::new(),
             health: 100.,
@@ -454,6 +500,7 @@ impl Inventory {
             reload.at += delta;
         }
         self.impacts.clear();
+        self.blood.clear();
         self.projectile_spawns.clear();
         self.attack_input = None;
         self.holding_attack = false;
@@ -1527,6 +1574,7 @@ impl Inventory {
                 }
                 return;
             }
+            self.trace_bleed(physics, world, id, &hit, direction, weapon.damage);
             let explicit_health = e.get("health").and_then(|v| v.parse::<f32>().ok());
             if scene.states[id].value <= 0. {
                 scene.states[id].value = explicit_health.filter(|v| *v > 0.).unwrap_or(40.);
@@ -1746,6 +1794,51 @@ impl Inventory {
         let right = direction.cross(axis).normalize_or_zero();
         let up = right.cross(direction).normalize_or_zero();
         (direction + right * x * spread_cone + up * y * spread_cone).normalize_or_zero()
+    }
+    /// CBaseEntity::TraceBleed for a bullet/club hit on an NPC: 1/2/4 traces (damage
+    /// < 10 / < 25 / more) continuing the shot direction with +/-0.1/0.2/0.3 noise per
+    /// axis for 172 units (MASK_SOLID_BRUSHONLY minus grates, ignoring the NPC); each hit
+    /// gets a Blood (red) or YellowBlood decal (UTIL_BloodDecalTrace). Mechanical NPCs
+    /// do not bleed.
+    fn trace_bleed(
+        &mut self,
+        physics: &Physics,
+        world: &World,
+        id: usize,
+        hit: &crate::physics::RayHit,
+        direction: Vec3,
+        damage: f32,
+    ) {
+        let class = world.entities.get(id).map_or("", |e| e.class());
+        let Some(color) = blood_color(class) else {
+            return;
+        };
+        if damage <= 0. {
+            return;
+        }
+        let (noise, count) = if damage < 10. {
+            (0.1, 1)
+        } else if damage < 25. {
+            (0.2, 2)
+        } else {
+            (0.3, 4)
+        };
+        for _ in 0..count {
+            let jitter = Vec3::new(self.random(), self.random(), self.random()) * noise;
+            let trace = -direction + jitter;
+            let end = hit.position + trace * -172.;
+            if let Some(blood) = physics
+                .projectile_ray(hit.position, end, &[id])
+                .filter(|b| {
+                    world
+                        .entities
+                        .get(b.entity)
+                        .is_none_or(|e| !e.class().starts_with("npc_"))
+                })
+            {
+                self.blood.push((blood, color));
+            }
+        }
     }
     pub(crate) fn random(&mut self) -> f32 {
         self.rng ^= self.rng << 13;
@@ -2100,6 +2193,49 @@ mod tests {
         assert!((source - Vec3::new(18., 0., 4.)).length() < 1e-4);
         assert!((velocity - Vec3::new(700., 0., 0.)).length() < 1e-3);
         assert_eq!(spin, Vec3::new(0., 0., 720.));
+    }
+    #[test]
+    fn trace_bleed_marks_the_wall_behind_bleeding_npcs() {
+        use rapier3d::prelude::*;
+        const S: f32 = 1. / 39.37;
+        let mut world = World::default();
+        let npc = |class: &str| modkit_core::Entity {
+            properties: vec![("classname".into(), class.into())],
+        };
+        world.entities.push(npc("npc_metropolice"));
+        world.entities.push(npc("npc_cscanner"));
+        // Synthetic wall 100 units behind the hit point (not game data).
+        let mut physics = Physics::default();
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(5. * S, 200. * S, 200. * S).translation(vector![
+                100. * S,
+                0.,
+                0.
+            ]),
+        );
+        physics.refresh_queries();
+        let hit = crate::physics::RayHit {
+            entity: 0,
+            position: Vec3::ZERO,
+            normal: -Vec3::X,
+        };
+        let mut inv = Inventory::default();
+        let count = |inv: &mut Inventory, id: usize, damage: f32| {
+            inv.blood.clear();
+            inv.trace_bleed(&physics, &world, id, &hit, Vec3::X, damage);
+            inv.blood.len()
+        };
+        // 1 / 2 / 4 traces by damage, all reaching the wall within 172 units.
+        assert_eq!(count(&mut inv, 0, 5.), 1);
+        assert_eq!(count(&mut inv, 0, 12.), 2);
+        assert_eq!(count(&mut inv, 0, 40.), 4);
+        assert!(inv
+            .blood
+            .iter()
+            .all(|(b, c)| (b.position.x - 95.).abs() < 1. && *c == BloodColor::Red));
+        // Machines do not bleed.
+        assert_eq!(count(&mut inv, 1, 40.), 0);
+        assert_eq!(blood_color("npc_headcrab"), Some(BloodColor::Yellow));
     }
     #[test]
     fn breakable_damage_applies_prop_data_modifiers() {
