@@ -629,7 +629,7 @@ impl Gameplay {
         // weapon_frag throws from this tick's animation events.
         if !self.inventory.frag.pending.is_empty() {
             let ground = physics
-                .impact_ray(player.feet + glam::Vec3::Z * 4., -glam::Vec3::Z, 16.)
+                .ground_ray(player.feet + glam::Vec3::Z * 4., -glam::Vec3::Z, 16.)
                 .map(|hit| hit.normal);
             self.inventory.launch_frags(
                 &self.weapons,

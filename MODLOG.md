@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-14 session 16: prop data, chunk gibs, displacement and clip collision, world hinges (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) DESIGN 13e steps 4-5: the whole prop_data block resolves over its propdata.txt base chain (`World::model_prop_data`: dmg.bullets/club/explosive, damage_table, breakable_model/count/skin) and the BreakableModels chunk sets (`World::breakable_chunks`); entity damage carries DMG_* bits (`projectiles::Damage::kind`); breakables take GetBreakableDamage (`gameplay::breakable_damage`, CBreakable func_breakdmg defaults for func_breakable/func_physbox); player bullets and melee on breakables go through the entity damage path (props with prop_data health now break under fire: before, only props with an explicit health keyvalue did, without gibs or break sound); glass impact table for damage_table "glass" (`impact_damage::GLASS_TABLE`, retail registry = SDK); gibs take the parent's skin and the break block's collision group (fadetime -> debris); breakable props without .phy gibs break into their chunk set (`Gibs::spawn_chunks`: count, max size, mid-plane points, 100 u/s burst, AlignBoxes, breakable_skin, 5-10 s fade); the host preloads gib skins and used chunk models. (2) Physics fixes found on the way: displacement colliders reversed (BSP clockwise winding made Rapier's oriented trimesh inside-out: props fell through displacements) and built without internal-edge correction; player/NPC clip-only brushes have no contacts with physics objects and shot/use traces skip them (`Physics::ground_ray` keeps them for the player's ground traces); logic_collision_pair startdisabled; SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY world hinges as revolute joints after the SDK mass-center snap onto the axis; bullet/melee push = ApplyForceOffset at the hit point with the ammo's BULLET_IMPULSE / melee damage x 300 kg in/s (`Physics::impulse_at`, `gameplay::bullet_impulse`). Fixtures bevy-pistol-breaks-bottle-skin4, bevy-pistol-breaks-teeter-seat-chunks.
+
+**Why:** owner item 0a (propdata damage tables/modifiers, chunk sets, parent skin on gibs) and 0c (assume-world-geometry hinges). The pot falling through the playground and the teeter seat flying off surfaced while testing them.
+
+**Tested how:** unit tests (modifiers, glass table order, chunk placement/alignment/skin, gib skin/render key, clip brushes vs bodies and traces), owned tests (prop_data modifiers/tables/chunk sets; 18 + 24 owned pass), workspace tests (the two known release-only Bevy should_panic tests run in debug), strict Clippy, fmt; packaged fixtures and native oracle views (docs/validation.md session 16); regression batch artifacts/s16-regression (same as s15b).
+
+**Result:** bottles and chunk-set wood props break under fire like native, in the right skin; props rest on displacements; the teeter seat sits on its hinge.
+
+**Still broken or not tested:** the teeter seat rocks far less than native under pistol fire and native broke it in 5 shots (ours 8); ragdoll gibs; explosive props; gib limits; carousel (SF 9 + phys_thruster) not checked; other displacement maps not checked visually.
+
+**Next:** env_physexplosion + OnPlayerUse (tic-tac-toe blocks, ghost swings), then the remaining item-0 work (STATUS session 16).
 ## 2026-10-13 session 15 (end): debris props (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

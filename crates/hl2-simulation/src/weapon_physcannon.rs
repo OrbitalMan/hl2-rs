@@ -540,6 +540,7 @@ impl Inventory {
             scene.entity_damage.push(crate::projectiles::Damage {
                 target: crate::projectiles::DamageTarget::Entity(id),
                 amount: 1.,
+                kind: crate::player_damage::DMG_CRUSH,
                 dissolve: false,
                 direction: forward,
                 origin: hit.position,

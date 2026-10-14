@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## Breakables, displacement/clip collision, teeter hinge (session 16, 2026-10-14)
+
+Packaged d1_trainstation_02, `--volume 0.01 --no-focus --fly`, artifacts/s16; native views in private original-oracle (HDR Full, skill 2).
+- **Pistol at bottle #712** (`bevy-pistol-breaks-bottle-skin4.json`, eye (-3300,-2500,128), Bevy pitch -34.4 yaw 4.34): one shot breaks it into 3 garbage_glassbottle003a chunks drawn in the parent's skin 4 (green; bottle-after1.png). Native T232957Z at the same view: one bottle breaks into green chunks too, but native's bullet struck the plastic crate first and pushed it back; ours hit the bottle directly.
+- **Pistol at the teeter-totter seat** (`bevy-pistol-breaks-teeter-seat-chunks.json`, eye (-4851,-3611,80), pitch -26.6 yaw 90): seat (Wooden.Medium 30, bullets 0.75, pistol 5) breaks on shot 8 into 4 WoodChunks (no .phy gibs) spread along the board, debris, on the ground at z 1-2 (teeter-broken.png). Native T235049Z: level at rest (same as ours), visibly rocking after 2 shots and broken by shot 5; ours rocks ~5 degrees over 7 shots even with the SDK bullet impulse at the hit point. Open.
+- **Terracotta pot #491** (playground, eye (-4205,-3596,40) pitch 25 yaw 180): before, it fell through the displacement 9 units onto the brush below and broke under the glass table (pot-ours.png); after the terrain winding fix it rests upright at z 0.39 (base 0.45 above the gravel, 0.5 margin) like native T231808Z (pot-ours3.png vs native pot.png). With Rapier's internal-edge correction still on, the resting pot jittered, wandered 2.5 units and tipped over within 5 s (rejected).
+- **Teeter seat at rest:** before, it overlapped a DETAIL|MONSTERCLIP brush by ~14 units and was flung at up to 1600 u/s (contacts at -13.8 units with the clip brush); now clip-only brushes have no contacts with physics objects, the seat-base pair is disabled (logic_collision_pair) and the SF 8 hinge holds the seat level at (-4851.36,-3491.65,19.78) for 400 ticks.
+- Native pot probes T231934Z/T232019Z (ent_dump/ent_text via !picker): rejected twice, the picker named nothing.
+- **Regression batch artifacts/s16-regression:** weapons 17/17, attention 26/26, movement 25/26 (the known doll01 PHY root-rotation warning only); finals vs s15b-regression mean 0.00-1.37 (Breen slate exposure; max pixel 8), Breen feeds identical, Kleiner feed 336 pixels at the mouth (lipsync timing), attention 0.05-0.58.
+
 ## Stacked props and prop CCD cost (session 15, 2026-10-13)
 
 Constraints (`bevy-playground-constraints.json`): tic-tac-toe blocks at hinge heights z 63/46/29 (play1.png); teeter seat (-4848,-3488,19); swing seats and carousel at z -10 as before. Carried bottle (`bevy-carry-bottle-shove.json`, now from (-3356,-2520)): crouch works while carrying; bottle minimum z 66.5 (floor rest 66.6); held bottle overlapping the crouched hull by 0.6 froze the player via CheckStuck until debris props (SF 4) stopped colliding with the player (now 0 stuck samples). Regression batches artifacts/s15-regression and s15b-regression: 25/17/26 (doll01 only), finals vs previous mean <= 1.03 / 0.59, feeds identical.

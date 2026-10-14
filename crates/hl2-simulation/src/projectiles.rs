@@ -175,6 +175,8 @@ pub enum DamageTarget {
 pub struct Damage {
     pub target: DamageTarget,
     pub amount: f32,
+    /// DMG_* bits (player_damage).
+    pub kind: u32,
     pub dissolve: bool,
     pub direction: Vec3,
     /// The inflictor's origin (the projectile or the trigger).
@@ -626,6 +628,7 @@ impl Projectiles {
                                 damage.push(Damage {
                                     target: DamageTarget::Entity(hit.entity),
                                     amount: 0.,
+                                    kind: crate::player_damage::DMG_DISSOLVE,
                                     dissolve: true,
                                     direction: projectile.velocity.normalize_or_zero(),
                                     origin: projectile.position,
@@ -792,6 +795,7 @@ impl Projectiles {
                     damage.push(Damage {
                         target: DamageTarget::Entity(id),
                         amount,
+                        kind: crate::player_damage::DMG_BLAST,
                         dissolve: false,
                         direction: delta.normalize_or_zero(),
                         origin,
@@ -807,6 +811,7 @@ impl Projectiles {
             damage.push(Damage {
                 target: DamageTarget::Player,
                 amount,
+                kind: crate::player_damage::DMG_BLAST,
                 dissolve: false,
                 direction: (target - origin).normalize_or_zero(),
                 origin,

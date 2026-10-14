@@ -1,0 +1,13 @@
+[
+  {"tick":1,"label":"aim","eye":[-3300,-2500,128],"yaw":4.34,"pitch":-34.4,"actions":[{"action":"loadout"},{"action":"slot","slot":1}]},
+  {"tick":2,"actions":[{"action":"confirm"}]},
+  {"tick":4},
+  {"tick":100,"label":"look"},
+  {"tick":120,"label":"shot1","primary":true},
+  {"tick":121},
+  {"tick":124,"label":"after1"},
+  {"tick":200,"label":"shot2","primary":true},
+  {"tick":201},
+  {"tick":204,"label":"after2"},
+  {"tick":260,"label":"later"}
+]

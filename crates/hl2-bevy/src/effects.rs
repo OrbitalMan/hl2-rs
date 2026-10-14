@@ -28,15 +28,33 @@ impl PreparedEffects {
     pub fn load(vfs: &Vfs, world: &modkit_core::World) -> Self {
         let mut model_errors = Vec::new();
         let mut loaded = BTreeMap::new();
-        // Gib models are precached with their breakable props (PrecacheGibsForModel).
-        let gibs: std::collections::BTreeSet<&str> = world
-            .model_breaks
-            .values()
-            .flatten()
-            .filter(|gib| !gib.ragdoll)
-            .map(|gib| gib.model.as_str())
-            .collect();
-        for path in [
+        // Gib models are precached with their breakable props (PrecacheGibsForModel), in
+        // the skins they can take: the parent's (BreakModelCreateSingle) or a chunk
+        // set's breakable_skin; propdata chunk models only where a prop uses them.
+        let mut gibs: std::collections::BTreeSet<(String, i32)> = std::collections::BTreeSet::new();
+        for instance in &world.model_instances {
+            let key = instance.asset_key();
+            if let Some(list) = world.model_breaks.get(&key) {
+                for gib in list.iter().filter(|gib| !gib.ragdoll) {
+                    gibs.insert((gib.model.clone(), instance.skin as i32));
+                }
+            } else if let Some(data) = world.model_prop_data.get(&key) {
+                let set = data.breakable_model.as_deref().and_then(|name| {
+                    world
+                        .breakable_chunks
+                        .iter()
+                        .find(|(set, _)| set.starts_with(name))
+                });
+                if let Some((_, models)) =
+                    set.filter(|_| data.health > 0. && data.breakable_count > 0)
+                {
+                    for model in models {
+                        gibs.insert((model.clone(), data.breakable_skin));
+                    }
+                }
+            }
+        }
+        let fixed = [
             hl2_simulation::projectiles::GRENADE_MODEL,
             hl2_simulation::projectiles::FRAG_MODEL,
             hl2_simulation::weapon_crossbow::BOLT_MODEL,
@@ -45,16 +63,20 @@ impl PreparedEffects {
             hl2_simulation::weapon_bugbait::BAIT_MODEL,
         ]
         .into_iter()
-        .chain(gibs)
-        {
-            match models::read_model(vfs, path, 0).and_then(|mut surfaces| {
-                pose_sequence_zero(vfs, path, &mut surfaces)?;
+        .map(|path| (path.to_string(), 0));
+        for (path, skin) in fixed.chain(gibs) {
+            let key = hl2_simulation::gibs::render_key(&path, skin);
+            if loaded.contains_key(&key) {
+                continue;
+            }
+            match models::read_model(vfs, &path, skin.max(0) as usize).and_then(|mut surfaces| {
+                pose_sequence_zero(vfs, &path, &mut surfaces)?;
                 Ok(surfaces)
             }) {
                 Ok(surfaces) => {
-                    loaded.insert(path.to_string(), surfaces);
+                    loaded.insert(key, surfaces);
                 }
-                Err(e) => model_errors.push(format!("{path}: {e:#}")),
+                Err(e) => model_errors.push(format!("{key}: {e:#}")),
             }
         }
         Self {
@@ -836,7 +858,7 @@ pub fn present_gibs(
         if !effects.gibs.contains_key(&gib.id) {
             let parts: Vec<ModelPart> = effects
                 .grenade_meshes
-                .get(&gib.model)
+                .get(&gib.render_key())
                 .cloned()
                 .unwrap_or_default();
             let mut spawned = Vec::new();

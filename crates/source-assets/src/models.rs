@@ -520,6 +520,7 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         .flatten()
         .and_then(|data| crate::keyvalues::parse(&String::from_utf8_lossy(&data)).ok())
         .unwrap_or_default();
+    world.breakable_chunks = breakable_chunks(&prop_data);
     match crate::surfaceprops::read(vfs) {
         Ok(table) => world.surface_materials = table,
         Err(error) => physics_report
@@ -706,14 +707,16 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         if instance.kind.starts_with("prop_physics")
             && !world.model_prop_health.contains_key(&instance.asset_key())
         {
-            if let Some(health) = vfs
+            if let Some(data) = vfs
                 .read(&instance.model)
                 .ok()
                 .flatten()
                 .and_then(|mdl| studio_keyvalues(&mdl).ok().flatten())
-                .and_then(|text| prop_data_health(&prop_data, &text))
+                .and_then(|text| resolve_prop_data(&prop_data, &text))
             {
+                let health = data.health;
                 world.model_prop_health.insert(instance.asset_key(), health);
+                world.model_prop_data.insert(instance.asset_key(), data);
                 // PropBreakableCreateAll's gib list (BuildGibList: the .phy break
                 // blocks); `append_break_physics` preloads the gibs' physics.
                 if health > 0. {
@@ -904,6 +907,7 @@ pub fn append_break_physics(world: &mut World, vfs: &Vfs) -> Vec<String> {
         .values()
         .flatten()
         .map(|gib| gib.model.clone())
+        .chain(used_chunk_models(world))
         .collect();
     for model in models {
         if world.model_physics.contains_key(&format!("{model}#0")) {
@@ -914,6 +918,28 @@ pub fn append_break_physics(world: &mut World, vfs: &Vfs) -> Vec<String> {
         }
     }
     skipped
+}
+/// Chunk models of the propdata chunk sets that breakable props without .phy gibs use
+/// (PropBreakableCreateAll's else-branch; ParsePropDataFile precaches every chunk model).
+pub fn used_chunk_models(world: &World) -> Vec<String> {
+    let mut models = Vec::new();
+    for (key, data) in &world.model_prop_data {
+        if data.health <= 0. || data.breakable_count <= 0 || world.model_breaks.contains_key(key) {
+            continue;
+        }
+        let Some(name) = &data.breakable_model else {
+            continue;
+        };
+        // GetRandomChunkModel: the first set whose name starts with the requested one.
+        if let Some((_, set)) = world
+            .breakable_chunks
+            .iter()
+            .find(|(set, _)| set.starts_with(name.as_str()))
+        {
+            models.extend(set.iter().cloned());
+        }
+    }
+    models
 }
 /// Adds a non-map model's .phy solid (and supported pieces) to the world under its
 /// skin-0 asset key, e.g. a thrown frag's w_grenade.phy. Returns the reason on failure.
@@ -944,6 +970,15 @@ pub fn prop_data_health(
     prop_data: &[crate::keyvalues::Entry],
     model_keyvalues: &str,
 ) -> Option<f32> {
+    resolve_prop_data(prop_data, model_keyvalues).map(|data| data.health)
+}
+/// CPropData::ParsePropFromKV: the model's prop_data block over its propdata.txt "base"
+/// chain (the base is parsed first, then the block's own keys override). None when the
+/// model has no prop_data.
+pub fn resolve_prop_data(
+    prop_data: &[crate::keyvalues::Entry],
+    model_keyvalues: &str,
+) -> Option<modkit_core::PropData> {
     let entries = crate::keyvalues::parse(model_keyvalues).ok()?;
     // The studio keyvalue text wraps its blocks in "mdlkeyvalue { ... }".
     let block = entries
@@ -964,24 +999,88 @@ pub fn prop_data_health(
             }
         })
     }
-    fn health(
+    fn apply(
         prop_data: &[crate::keyvalues::Entry],
         block: &crate::keyvalues::Entry,
         depth: usize,
-    ) -> f32 {
-        let value = block
+        data: &mut modkit_core::PropData,
+    ) {
+        if let Some(base) = block
             .get("base")
             .and_then(|b| b.text())
             .filter(|_| depth < 8)
             .and_then(|base| section(prop_data, base))
-            .map_or(0., |base| health(prop_data, base, depth + 1));
-        block
-            .get("health")
-            .and_then(|h| h.text())
-            .and_then(|h| h.trim().parse::<f32>().ok())
-            .unwrap_or(value)
+        {
+            apply(prop_data, base, depth + 1, data);
+        }
+        let text = |key: &str| {
+            block
+                .children()
+                .iter()
+                .find(|e| e.key.eq_ignore_ascii_case(key))
+                .and_then(|e| e.text())
+                .map(str::trim)
+        };
+        let number = |key: &str| text(key).and_then(|v| v.parse::<f32>().ok());
+        if let Some(v) = number("health") {
+            data.health = v;
+        }
+        if let Some(v) = number("dmg.bullets") {
+            data.dmg_bullets = v;
+        }
+        if let Some(v) = number("dmg.club") {
+            data.dmg_club = v;
+        }
+        if let Some(v) = number("dmg.explosive") {
+            data.dmg_explosive = v;
+        }
+        if let Some(v) = text("damage_table") {
+            data.damage_table = (!v.is_empty()).then(|| v.to_string());
+        }
+        if let Some(v) = text("breakable_model") {
+            data.breakable_model = (!v.is_empty()).then(|| v.to_string());
+        }
+        // GetInt: atoi of the text.
+        if let Some(v) = number("breakable_count") {
+            data.breakable_count = v as i32;
+        }
+        if let Some(v) = number("breakable_skin") {
+            data.breakable_skin = v as i32;
+        }
     }
-    Some(health(prop_data, block, 0))
+    let mut data = modkit_core::PropData::default();
+    apply(prop_data, block, 0, &mut data);
+    Some(data)
+}
+/// CPropData::ParsePropDataFile: the "BreakableModels" chunk sets in file order, model
+/// names normalized like gib models.
+pub fn breakable_chunks(prop_data: &[crate::keyvalues::Entry]) -> Vec<(String, Vec<String>)> {
+    fn find(entries: &[crate::keyvalues::Entry]) -> Option<&crate::keyvalues::Entry> {
+        entries.iter().find_map(|e| {
+            if e.key.eq_ignore_ascii_case("BreakableModels") {
+                Some(e)
+            } else {
+                find(e.children())
+            }
+        })
+    }
+    find(prop_data)
+        .map(|section| {
+            section
+                .children()
+                .iter()
+                .map(|set| {
+                    (
+                        set.key.clone(),
+                        set.children()
+                            .iter()
+                            .map(|model| crate::phy::fixup_model_name(&model.key))
+                            .collect(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 /// studiohdr_t::mass (offset 328 in MDL 44-49; owned police.mdl 90, combine_soldier
 /// 100, wood_crate001a 30).
@@ -1423,5 +1522,55 @@ mod owned_prop_data {
                 "{model}"
             );
         }
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_prop_data_modifiers_tables_and_chunk_sets() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let prop_data = crate::keyvalues::parse(&String::from_utf8_lossy(
+            &vfs.read("scripts/propdata.txt").unwrap().unwrap(),
+        ))
+        .unwrap();
+        let data = |model: &str| {
+            let mdl = vfs.read(model).unwrap().unwrap();
+            let text = super::studio_keyvalues(&mdl).unwrap().unwrap();
+            super::resolve_prop_data(&prop_data, &text).unwrap()
+        };
+        // Wooden.Large over Wooden.Base: health 50, bullets 0.75, club 2, explosive 1.5,
+        // WoodChunks x 6 (used only without .phy gibs).
+        let pallet = data("models/props_junk/wood_pallet001a.mdl");
+        assert_eq!(
+            (
+                pallet.health,
+                pallet.dmg_bullets,
+                pallet.dmg_club,
+                pallet.dmg_explosive
+            ),
+            (50., 0.75, 2., 1.5)
+        );
+        assert_eq!(pallet.breakable_model.as_deref(), Some("WoodChunks"));
+        assert_eq!((pallet.breakable_count, pallet.breakable_skin), (6, 0));
+        assert_eq!(pallet.damage_table, None);
+        // Cardboard.small: bullets 0.5, no chunk set.
+        let box_ = data("models/props_junk/cardboard_box001a.mdl");
+        assert_eq!((box_.health, box_.dmg_bullets), (10., 0.5));
+        assert_eq!(box_.breakable_model, None);
+        // glass.Small bottles use the glass impact table.
+        let bottle = data("models/props_junk/garbage_glassbottle003a.mdl");
+        assert_eq!(bottle.damage_table.as_deref(), Some("glass"));
+        // The tic-tac-toe blocks override health 0 (unbreakable); furniture_couch01a
+        // (Wooden.Huge, no .phy gibs, tr03) breaks into 10 WoodChunks.
+        let block = data("models/props_c17/playgroundtick-tack-toe_block01a.mdl");
+        assert_eq!((block.health, block.breakable_count), (0., 2));
+        let couch = data("models/props_interiors/furniture_couch01a.mdl");
+        assert_eq!((couch.health, couch.breakable_count), (130., 10));
+        let chunks = super::breakable_chunks(&prop_data);
+        let names: Vec<&str> = chunks.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            ["WoodChunks", "GlassChunks", "ConcreteChunks", "MetalChunks"]
+        );
+        assert_eq!(chunks[0].1[0], "models/gibs/wood_gib01e.mdl");
+        assert_eq!(chunks[0].1.len(), 5);
     }
 }

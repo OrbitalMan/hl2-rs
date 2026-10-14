@@ -1,6 +1,15 @@
 # STATUS
 
-Checkpoint: 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop, gibs, NPC studio decals, hinges, debris props; branch head after b0dc562 + debris); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+Checkpoint: 2026-10-14 session 16 (prop data, chunk gibs, displacement and clip collision, world hinges); 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop, gibs, NPC studio decals, hinges, debris props; branch head after b0dc562 + debris); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+
+## Current session 16 (2026-10-14)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged.
+- **Breakables (owner item 0a): propdata damage tables/modifiers, chunk sets and parent skin done.** prop_data resolves over its base chain; bullets/clubs/blasts use GetBreakableDamage; player bullets and melee now break prop_data props (gibs, break sound) where only explicit-health props broke before; glass props use the glass impact table; gibs keep the parent's skin (bottle #712: green skin-4 chunks, as native) and debris group; props without .phy gibs break into their chunk set (teeter seat: 4 WoodChunks after 8 pistol shots). Open: native broke the teeter seat within 5 shots after it rocked visibly; ours barely rocks (bullet impulse now SDK-sized at the hit point). Ragdoll gibs, explosive props, gib limits open.
+- **Found and fixed: props fell through displacements** (BSP winding made the terrain trimesh inside-out; pot #491 fell 9 units and broke). Displacement colliders are reversed and built without internal-edge correction (with it the pot wandered and tipped). Native pot rests upright: ours now too.
+- **Found and fixed: props collided with player/NPC clip brushes** (VBSP keeps them as separate world solids that MASK_SOLID objects ignore). The teeter seat overlapped a monster clip by 14 units: that, plus its base (logic_collision_pair startdisabled, now honoured), was session 15's hinge drift. Shots and +USE traces skip clip brushes too (MASK_SHOT/MASK_SOLID).
+- **SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY hinges (owner item 0c): done for the teeter seat** (mass center snapped to the axis, revolute joint): level on its hinge like native. Carousel not checked; ropes still off.
+- Regression batch artifacts/s16-regression: same 25/17/26 (doll01 only); finals vs s15b mean <= 1.37, Breen feeds identical.
 
 ## Current session 15 (2026-10-13)
 

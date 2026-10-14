@@ -136,6 +136,14 @@ pub struct World {
     /// physics is in `model_physics`/`model_collision` under its skin-0 key.
     #[serde(default)]
     pub model_breaks: std::collections::BTreeMap<String, Vec<BreakModel>>,
+    /// The resolved prop_data block per breakable model asset key (damage modifiers,
+    /// damage table, propdata chunk sets).
+    #[serde(default)]
+    pub model_prop_data: std::collections::BTreeMap<String, PropData>,
+    /// scripts/propdata.txt "BreakableModels": chunk set name -> chunk models (smallest
+    /// first), each model's physics under its skin-0 key when a map prop can use it.
+    #[serde(default)]
+    pub breakable_chunks: Vec<(String, Vec<String>)>,
     /// Resolved surfaceproperties entries (lowercase name, "base" inheritance applied).
     #[serde(default)]
     pub surface_materials: std::collections::BTreeMap<String, SurfaceMaterial>,
@@ -162,6 +170,35 @@ pub struct PhysicsSolid {
     #[serde(default)]
     pub drag_fractions: Option<Vec3>,
 }
+/// A prop's prop_data after CPropData::ParsePropFromKV: the propdata.txt "base" chain
+/// first, then the model's own block. Defaults follow CBreakableProp (modifiers 1).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PropData {
+    pub health: f32,
+    pub dmg_bullets: f32,
+    pub dmg_club: f32,
+    pub dmg_explosive: f32,
+    /// Custom physics impact damage table ("glass"); None = the NPC table.
+    pub damage_table: Option<String>,
+    /// Propdata chunk set ("WoodChunks") used when the model has no .phy gibs.
+    pub breakable_model: Option<String>,
+    pub breakable_count: i32,
+    pub breakable_skin: i32,
+}
+impl Default for PropData {
+    fn default() -> Self {
+        Self {
+            health: 0.,
+            dmg_bullets: 1.,
+            dmg_club: 1.,
+            dmg_explosive: 1.,
+            damage_table: None,
+            breakable_model: None,
+            breakable_count: 0,
+            breakable_skin: 0,
+        }
+    }
+}
 /// One gib of a breakable model: a .phy `break` block (CBreakParser defaults: health 1,
 /// fadetime 20 s, not a ragdoll, no offset).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -172,7 +209,8 @@ pub struct BreakModel {
     pub offset: Vec3,
     pub health: f32,
     pub fade_time: f32,
-    /// "debris" > 0: COLLISION_GROUP_DEBRIS.
+    /// Some(true): COLLISION_GROUP_DEBRIS ("debris" > 0, or a "fadetime" without an
+    /// earlier "debris"); Some(false): INTERACTIVE; None: the breaking prop's group.
     pub debris: Option<bool>,
     pub motion_disabled: bool,
     /// "burst": outward speed (units/s) away from the parent origin; absent = the

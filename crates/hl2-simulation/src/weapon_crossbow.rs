@@ -412,6 +412,7 @@ pub(crate) fn bolt_tick(
         damage.push(Damage {
             target: DamageTarget::Entity(hit.entity),
             amount: bolt.damage,
+            kind: crate::player_damage::DMG_BULLET | crate::player_damage::DMG_NEVERGIB,
             dissolve: false,
             direction,
             origin: bolt.position,

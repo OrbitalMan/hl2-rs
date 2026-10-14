@@ -1905,6 +1905,7 @@ impl Scene {
             self.entity_damage.push(crate::projectiles::Damage {
                 target: crate::projectiles::DamageTarget::Entity(target),
                 amount,
+                kind,
                 dissolve: false,
                 direction: Vec3::ZERO,
                 origin: self.states[id].origin,

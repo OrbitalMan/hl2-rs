@@ -46,6 +46,9 @@ const SHADOW_GROUP: Group = Group::GROUP_4;
 /// HULL_HUMAN): player movement and physics props collide with them; traces use the
 /// model-shaped colliders instead.
 const HULL_GROUP: Group = Group::GROUP_5;
+/// MASK_SOLID (CONTENTS_SOLID | MOVEABLE | WINDOW | MONSTER | GRATE): what physics
+/// objects collide with (CBaseEntity::PhysicsSolidMaskForEntity).
+const MASK_SOLID: u32 = 0x1 | 0x4000 | 0x2 | 0x2000000 | 0x8;
 /// prop_physics with SF_PHYSPROP_DEBRIS (4): COLLISION_GROUP_DEBRIS collides only with
 /// COLLISION_GROUP_NONE (CGameRules::ShouldCollide): the world and ordinary props, not
 /// the player (movement or shadow), NPCs, thrown frags or other debris. Traces (bullets,
@@ -206,6 +209,19 @@ fn mesh_shape(
     convex: bool,
     matrices: Option<&[Mat4]>,
 ) -> Option<SharedShape> {
+    mesh_shape_with(
+        surfaces,
+        convex,
+        matrices,
+        TriMeshFlags::MERGE_DUPLICATE_VERTICES | TriMeshFlags::FIX_INTERNAL_EDGES,
+    )
+}
+fn mesh_shape_with(
+    surfaces: &[Surface],
+    convex: bool,
+    matrices: Option<&[Mat4]>,
+    flags: TriMeshFlags,
+) -> Option<SharedShape> {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     for s in surfaces {
@@ -227,12 +243,7 @@ fn mesh_shape(
     if convex {
         SharedShape::convex_hull(&vertices)
     } else {
-        SharedShape::trimesh_with_flags(
-            vertices,
-            indices,
-            TriMeshFlags::MERGE_DUPLICATE_VERTICES | TriMeshFlags::FIX_INTERNAL_EDGES,
-        )
-        .ok()
+        SharedShape::trimesh_with_flags(vertices, indices, flags).ok()
     }
 }
 /// The .phy solid after CPhysicsProp::CreateVPhysics' keyvalue scaling: mass x
@@ -418,6 +429,14 @@ pub struct WorldSideMaterials {
     /// still generated and solved contacts against every animated hitbox (owner report:
     /// a pallet sliding off a plaza cop dropped 46 -> 17 fps); the pair filter drops them.
     pub hitboxes: std::collections::HashSet<ColliderHandle>,
+    /// Entity pairs that never collide (logic_collision_pair with startdisabled 1:
+    /// PhysDisableEntityCollisions), smaller id first.
+    pub disabled_pairs: std::collections::HashSet<(usize, usize)>,
+    /// World brushes that are only player/NPC clips (no MASK_SOLID contents). VBSP
+    /// builds them as separate world solids whose contents CCollisionEvent::
+    /// ShouldCollide tests against PhysicsSolidMaskForEntity: physics objects (MASK_SOLID)
+    /// pass through them. Player movement and traces keep their own clip handling.
+    pub clip_brushes: std::collections::HashSet<ColliderHandle>,
 }
 impl WorldSideMaterials {
     /// The side whose outward normal best matches `outward` (from the brush toward
@@ -438,6 +457,24 @@ impl PhysicsHooks for WorldSideMaterials {
         if self.hitboxes.contains(&context.collider1) || self.hitboxes.contains(&context.collider2)
         {
             return None;
+        }
+        if self.clip_brushes.contains(&context.collider1)
+            || self.clip_brushes.contains(&context.collider2)
+        {
+            return None;
+        }
+        if !self.disabled_pairs.is_empty() {
+            let entity = |c| {
+                context
+                    .colliders
+                    .get(c)
+                    .and_then(|c| (c.user_data as usize).checked_sub(1))
+            };
+            if let (Some(a), Some(b)) = (entity(context.collider1), entity(context.collider2)) {
+                if self.disabled_pairs.contains(&(a.min(b), a.max(b))) {
+                    return None;
+                }
+            }
         }
         let other = if self.shadow.contains(&context.collider1) {
             context.rigid_body2
@@ -647,7 +684,18 @@ impl Physics {
                 } else {
                     builder
                 };
+                // Clip-only brushes: no contacts with physics objects (see clip_brushes).
+                let clip = brush.contents & MASK_SOLID == 0;
+                let builder = if clip {
+                    let hooks = builder.active_hooks | ActiveHooks::FILTER_CONTACT_PAIRS;
+                    builder.active_hooks(hooks)
+                } else {
+                    builder
+                };
                 let collider = p.colliders.insert(builder);
+                if clip {
+                    p.world_sides.clip_brushes.insert(collider);
+                }
                 if let Some(sides) = sides {
                     p.world_sides.sides.insert(collider, sides);
                 }
@@ -658,7 +706,24 @@ impl Physics {
             }
         }
         for surface in &world.terrain {
-            if let Some(shape) = mesh_shape(std::slice::from_ref(surface), false, None) {
+            // Displacement triangles keep the BSP's clockwise-front winding (their
+            // geometric normals point away from the face normal), while Rapier's
+            // oriented trimesh (FIX_INTERNAL_EDGES) treats the counter-clockwise side as
+            // the outside: reversed, props rest on displacements instead of falling
+            // through them (terracotta pot #491 on the tr02 playground fell 9 units).
+            // Without internal-edge correction: with it, a pot resting on the flat
+            // playground displacement jittered, wandered and tipped over within 5 s
+            // (native rests upright); VPhysics displacement collision has none either.
+            let mut surface = surface.clone();
+            for triangle in surface.indices.as_chunks_mut::<3>().0 {
+                triangle.swap(1, 2);
+            }
+            if let Some(shape) = mesh_shape_with(
+                std::slice::from_ref(&surface),
+                false,
+                None,
+                TriMeshFlags::MERGE_DUPLICATE_VERTICES,
+            ) {
                 p.colliders
                     .insert(world_material(ColliderBuilder::new(shape)));
             }
@@ -952,8 +1017,45 @@ impl Physics {
             }
         }
         p.add_constraints(world);
+        p.add_collision_pairs(world);
         p.query.update(&p.colliders);
         p
+    }
+    /// logic_collision_pair (logicentities.cpp CLogicCollisionPair::Activate): with
+    /// startdisabled 1 the two named entities never collide with each other, e.g. the
+    /// d1_trainstation_02 teeter-totter seat and the static base it is authored inside.
+    /// Not modeled: the EnableCollisions/DisableCollisions inputs.
+    fn add_collision_pairs(&mut self, world: &World) {
+        let named = |name: &str| {
+            world.entities.iter().position(|e| {
+                e.get("targetname")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name.trim()))
+            })
+        };
+        for e in world.entities.iter() {
+            if e.class() != "logic_collision_pair"
+                || e.get("startdisabled")
+                    .and_then(|v| v.trim().parse::<i32>().ok())
+                    != Some(1)
+            {
+                continue;
+            }
+            let (Some(a), Some(b)) = (
+                e.get("attach1").and_then(named),
+                e.get("attach2").and_then(named),
+            ) else {
+                continue;
+            };
+            self.world_sides.disabled_pairs.insert((a.min(b), a.max(b)));
+            for id in [a, b] {
+                for c in self.entity_colliders.get(&id).cloned().unwrap_or_default() {
+                    if let Some(collider) = self.colliders.get_mut(c) {
+                        let hooks = collider.active_hooks() | ActiveHooks::FILTER_CONTACT_PAIRS;
+                        collider.set_active_hooks(hooks);
+                    }
+                }
+            }
+        }
     }
     /// VPhysics constraint entities (SDK physconstraint.cpp CPhysConstraint::
     /// ActivateConstraint) as Rapier impulse joints between the attached bodies; a
@@ -998,6 +1100,7 @@ impl Physics {
                     .push(format!("{class} #{id}: no physics attachment"));
                 continue;
             }
+            let world_hinge = a.is_none() || b.is_none();
             let world_body =
                 *fixed.get_or_insert_with(|| self.bodies.insert(RigidBodyBuilder::fixed()));
             // The world side first (a multibody's fixed root is its parent).
@@ -1010,16 +1113,24 @@ impl Physics {
                 .get("spawnflags")
                 .and_then(|v| v.trim().parse::<u32>().ok())
                 .unwrap_or(0);
-            // SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY: native world hinges become IVP
-            // BecomeHinged objects. As impulse joints the teeter-totter seat (hinge
-            // inside its static base) drifted 115 units off its pivot, and multibody
-            // joints panicked in Rapier (session 15): left unconstrained as before.
-            if flags & 8 != 0 {
-                self.constraint_errors
-                    .push(format!("{class} #{id}: assume-world-geometry not modeled"));
-                continue;
-            }
             let origin = e.origin();
+            // SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY on a world hinge (CPhysHinge::Spawn):
+            // the object's mass center is snapped onto the hinge axis
+            // (masscenteroverride_t::SnapToAxis) and IVP makes it a BecomeHinged object;
+            // here the snapped body keeps an ordinary revolute joint to the world. Session
+            // 15's impulse joint drifted 115 units because the teeter-totter seat also
+            // collided with the base it is authored inside; logic_collision_pair now
+            // disables that pair.
+            if class == "phys_hinge" && flags & 8 != 0 && world_hinge {
+                if let Some(axis) = e
+                    .get("hingeaxis")
+                    .and_then(modkit_core::parse_vec3)
+                    .map(|p| (p - origin).normalize_or_zero())
+                    .filter(|a| a.length_squared() > 0.5)
+                {
+                    self.snap_mass_center_to_axis(b, origin, axis);
+                }
+            }
             let point = |key: &str| e.get(key).and_then(modkit_core::parse_vec3);
             let number = |key: &str| {
                 e.get(key)
@@ -1114,6 +1225,31 @@ impl Physics {
             self.impulses.insert(a, b, joint, true);
             self.constraints += 1;
         }
+    }
+    /// masscenteroverride_t::SnapToAxis: move a body's mass center to the closest point
+    /// on the line through `point` along `axis` (world space), keeping mass and inertia.
+    fn snap_mass_center_to_axis(&mut self, handle: RigidBodyHandle, point: Vec3, axis: Vec3) {
+        let Some(body) = self.bodies.get_mut(handle) else {
+            return;
+        };
+        let props = body.mass_properties().local_mprops;
+        let com = body.position() * props.local_com;
+        let com = Vec3::new(com.x, com.y, com.z) / SCALE;
+        let snapped = point + axis * (com - point).dot(axis);
+        let local = body
+            .position()
+            .inverse_transform_point(&Point::from(vector(snapped)));
+        let mass = props.mass();
+        let snapped_props = MassProperties::with_principal_inertia_frame(
+            local,
+            mass,
+            props.principal_inertia(),
+            props.principal_inertia_local_frame,
+        );
+        // Map props carry their mass as additional properties over zero-density
+        // colliders, so replacing them moves the center.
+        body.set_additional_mass_properties(snapped_props, true);
+        body.recompute_mass_properties_from_colliders(&self.colliders);
     }
     pub fn set_entity(&mut self, id: usize, origin: Vec3, rotation: Quat, enabled: bool) {
         let dynamic = self.dynamic.get(&id);
@@ -1713,6 +1849,18 @@ impl Physics {
         self.entity_colliders.insert(id, colliders);
         self.dynamic.insert(id, handle);
     }
+    /// COLLISION_GROUP_DEBRIS for a runtime prop body (a debris gib): it keeps colliding
+    /// with the world and ordinary props only.
+    pub fn set_body_debris(&mut self, handle: RigidBodyHandle) {
+        let Some(body) = self.bodies.get(handle) else {
+            return;
+        };
+        for collider in body.colliders().to_vec() {
+            if let Some(c) = self.colliders.get_mut(collider) {
+                c.set_collision_groups(DEBRIS_GROUPS);
+            }
+        }
+    }
     pub fn remove_body(&mut self, handle: RigidBodyHandle) {
         if let Some(body) = self.bodies.get(handle) {
             for collider in body.colliders() {
@@ -2046,12 +2194,18 @@ impl Physics {
         self.impact_ray(origin, direction, distance)
             .map(|h| (h.entity, h.position))
     }
+    /// Shot/use trace (MASK_SHOT, MASK_SOLID): player/NPC-only clip brushes do not stop
+    /// it.
     pub fn impact_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
-        self.ray_with(origin, direction, distance, QUERY_GROUPS)
+        self.ray_with(origin, direction, distance, QUERY_GROUPS, false)
+    }
+    /// Ground trace under the player (MASK_PLAYERSOLID: clip brushes count).
+    pub fn ground_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
+        self.ray_with(origin, direction, distance, QUERY_GROUPS, true)
     }
     /// `impact_ray` with COLLISION_GROUP_NONE: also hits thrown frags.
     pub fn pick_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
-        self.ray_with(origin, direction, distance, PICK_GROUPS)
+        self.ray_with(origin, direction, distance, PICK_GROUPS, false)
     }
     /// `impact_hull` with COLLISION_GROUP_NONE: also hits thrown frags.
     pub fn pick_hull(
@@ -2061,7 +2215,7 @@ impl Physics {
         distance: f32,
         half: Vec3,
     ) -> Option<RayHit> {
-        self.hull_with(origin, direction, distance, half, PICK_GROUPS)
+        self.hull_with(origin, direction, distance, half, PICK_GROUPS, false)
     }
     fn ray_with(
         &self,
@@ -2069,7 +2223,11 @@ impl Physics {
         direction: Vec3,
         distance: f32,
         groups: InteractionGroups,
+        clips: bool,
     ) -> Option<RayHit> {
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            collider.is_enabled() && (clips || !self.world_sides.clip_brushes.contains(&handle))
+        };
         let ray = Ray::new(
             Point::from(vector(origin)),
             vector![direction.x, direction.y, direction.z],
@@ -2080,7 +2238,7 @@ impl Physics {
             &ray,
             distance * SCALE,
             true,
-            groups_filter(groups),
+            groups_filter(groups).predicate(&predicate),
         )?;
         let id = self.colliders[h].user_data as usize;
         Some(RayHit {
@@ -2088,6 +2246,18 @@ impl Physics {
             position: origin + direction * (hit.time_of_impact / SCALE),
             normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
         })
+    }
+    /// IPhysicsObject::ApplyForceOffset: an impulse (kg m/s, world) at a world point
+    /// (units) on the entity's body.
+    pub fn impulse_at(&mut self, id: usize, impulse: Vec3, point: Vec3) {
+        if let Some(b) = self.dynamic.get(&id).and_then(|h| self.bodies.get_mut(*h)) {
+            let p = vector(point);
+            b.apply_impulse_at_point(
+                vector![impulse.x, impulse.y, impulse.z],
+                Point::from(p),
+                true,
+            );
+        }
     }
     pub fn impulse(&mut self, id: usize, direction: Vec3, strength: f32) {
         if let Some(h) = self.dynamic.get(&id) {
@@ -2225,7 +2395,7 @@ impl Physics {
         distance: f32,
         half: Vec3,
     ) -> Option<RayHit> {
-        self.hull_with(origin, direction, distance, half, QUERY_GROUPS)
+        self.hull_with(origin, direction, distance, half, QUERY_GROUPS, false)
     }
     fn hull_with(
         &self,
@@ -2234,10 +2404,14 @@ impl Physics {
         distance: f32,
         half: Vec3,
         groups: InteractionGroups,
+        clips: bool,
     ) -> Option<RayHit> {
         if distance <= 0. || direction.length_squared() < 1e-8 {
             return None;
         }
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            collider.is_enabled() && (clips || !self.world_sides.clip_brushes.contains(&handle))
+        };
         let shape = Cuboid::new(vector(half));
         let options = ShapeCastOptions {
             max_time_of_impact: 1.,
@@ -2252,7 +2426,7 @@ impl Physics {
             &vector(direction * distance),
             &shape,
             options,
-            groups_filter(groups),
+            groups_filter(groups).predicate(&predicate),
         )?;
         Some(RayHit {
             entity: (self.colliders[handle].user_data as usize).wrapping_sub(1),
@@ -3646,12 +3820,39 @@ mod tests {
         assert!(!sweep.start_solid);
         let inside = Vec3::new(15., 0., 40.);
         assert!(!physics.trace_hull(inside, inside, mins, maxs).start_solid);
-        // This change is limited to player queries; existing weapon traces and
-        // retained world brush/collider data keep their prior behavior.
+        // Shots and use traces (MASK_SHOT / MASK_SOLID) pass clip-only brushes; the
+        // player's ground trace (MASK_PLAYERSOLID) still finds them.
         assert!(physics
             .impact_ray(Vec3::new(-5., 0., 40.), Vec3::X, 40.)
+            .is_none());
+        assert!(physics
+            .ground_ray(Vec3::new(15., 0., 140.), -Vec3::Z, 60.)
             .is_some());
         assert_eq!(physics.colliders.len(), 1);
+    }
+    #[test]
+    fn physics_objects_pass_clip_only_brushes_but_rest_on_solid_ones() {
+        // CCollisionEvent::ShouldCollide: world contents vs MASK_SOLID.
+        for (contents, rests) in [(0x8020000, false), (0x10000, false), (1, true)] {
+            let mut physics = Physics::new(&clip_box(contents));
+            let body = physics
+                .bodies
+                .insert(RigidBodyBuilder::dynamic().translation(vector![
+                    15. * SCALE,
+                    0.,
+                    110. * SCALE
+                ]));
+            physics.colliders.insert_with_parent(
+                ColliderBuilder::ball(4. * SCALE).density(100.),
+                body,
+                &mut physics.bodies,
+            );
+            for _ in 0..80 {
+                physics.tick(0.015);
+            }
+            let z = physics.bodies[body].translation().z / SCALE;
+            assert_eq!(z > 100., rests, "contents {contents:#x}: z {z}");
+        }
     }
     #[test]
     fn player_clip_solid_and_mixed_monster_solid_still_block_players() {

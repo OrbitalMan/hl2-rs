@@ -275,6 +275,7 @@ pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel
                 motion_disabled: false,
                 burst: None,
             };
+            let mut wrote_collision_group = false;
             for child in block.children() {
                 let Some(value) = child.text().map(str::trim) else {
                     continue;
@@ -297,8 +298,18 @@ pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel
                         }
                     }
                     "health" => gib.health = number.unwrap_or(gib.health),
-                    "fadetime" => gib.fade_time = number.unwrap_or(gib.fade_time),
-                    "debris" => gib.debris = number.map(|v| v > 0.),
+                    // CBreakParser: a fade time makes the piece debris unless a "debris"
+                    // key came first; "debris" is atoi > 0 (else INTERACTIVE).
+                    "fadetime" => {
+                        gib.fade_time = number.unwrap_or(gib.fade_time);
+                        if !wrote_collision_group {
+                            gib.debris = Some(true);
+                        }
+                    }
+                    "debris" => {
+                        gib.debris = Some(value.parse::<f32>().map_or(0, |v| v as i32) > 0);
+                        wrote_collision_group = true;
+                    }
                     "burst" => gib.burst = number,
                     _ => {}
                 }
@@ -309,7 +320,7 @@ pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel
 }
 
 /// FixupModelName: lowercase forward-slash path with a "models/" prefix and ".mdl".
-fn fixup_model_name(name: &str) -> String {
+pub(crate) fn fixup_model_name(name: &str) -> String {
     let mut name = name.replace('\\', "/").to_lowercase();
     if !name.starts_with("models/") {
         name = format!("models/{name}");

@@ -147,12 +147,61 @@ pub fn queue_npc_damage(
                 scene.entity_damage.push(Damage {
                     target: DamageTarget::Entity(npc),
                     amount: damage,
+                    kind: crate::player_damage::DMG_CRUSH,
                     dissolve: false,
                     direction: event.pre_velocities[other].normalize_or_zero(),
                     origin: event.origins[other],
                 });
             }
         }
+    }
+}
+
+/// The impactdamagetable_t fields the prop path reads (allowStaticDamage true skips
+/// the minimum mass/speed gates).
+pub struct ImpactTable {
+    pub linear: &'static [(f32, f32)],
+    pub small_mass_max: f32,
+    pub small_mass_cap: f32,
+    pub large_mass_min: f32,
+    pub large_mass_scale: f32,
+    pub large_mass_falling_scale: f32,
+}
+pub const NPC_TABLE: ImpactTable = ImpactTable {
+    linear: &NPC_LINEAR,
+    small_mass_max: SMALL_MASS_MAX,
+    small_mass_cap: SMALL_MASS_CAP,
+    large_mass_min: LARGE_MASS_MIN,
+    large_mass_scale: LARGE_MASS_SCALE,
+    large_mass_falling_scale: LARGE_MASS_FALLING_SCALE,
+};
+/// gGlassImpactDamageTable ("glass", propdata Glass.Small/Glass.Window/Pottery). The
+/// retail registry entry (physics-research-20261011 SI-25) equals the SDK, including
+/// the out-of-order last row (ReadDamageTable stops at the first threshold above the
+/// energy, so from 250000 up it runs past the 62500 row and reads 500: the 100 row is
+/// never the answer) and a falling scale of 0.
+const GLASS_LINEAR: [(f32, f32); 6] = [
+    (25. * 25., 10.),
+    (50. * 50., 20.),
+    (100. * 100., 50.),
+    (200. * 200., 75.),
+    (500. * 500., 100.),
+    (250. * 250., 500.),
+];
+pub const GLASS_TABLE: ImpactTable = ImpactTable {
+    linear: &GLASS_LINEAR,
+    small_mass_max: 1.,
+    small_mass_cap: 10.,
+    large_mass_min: 50.,
+    large_mass_scale: 4.,
+    large_mass_falling_scale: 0.,
+};
+/// CalculateDefaultPhysicsDamage's table lookup: a registered name ("npc", "glass";
+/// the player tables are not modeled here) or the NPC table.
+pub fn table_named(name: Option<&str>) -> &'static ImpactTable {
+    match name {
+        Some("glass") => &GLASS_TABLE,
+        _ => &NPC_TABLE,
     }
 }
 
@@ -175,36 +224,42 @@ pub fn prop_energy_scale(entity: &modkit_core::Entity, overridden: Option<&str>)
 /// true, as CPhysicsProp::VPhysicsCollision passes): the speed both bodies lost, the
 /// other weighted by its mass, per kilogram of this prop. A static or unmoving other
 /// contributes only this prop's own loss.
-pub fn prop_damage(mass: f32, energy_scale: f32, own: Impactor, other: Impactor) -> f32 {
+pub fn prop_damage(
+    table: &ImpactTable,
+    mass: f32,
+    energy_scale: f32,
+    own: Impactor,
+    other: Impactor,
+) -> f32 {
     if mass <= 0. || energy_scale <= 0. {
         return 0.;
     }
-    // myMinVelocity is 0 in the NPC table: no filtering of this prop's own loss.
+    // myMinVelocity is 0 in both tables: no filtering of this prop's own loss.
     let delta = own.pre.length() - own.post.length();
     let mut energy = delta * delta * mass;
     let delta = other.pre.length() - other.post.length();
     let mut other_energy = delta * delta * other.mass;
-    if other.mass >= LARGE_MASS_MIN {
-        other_energy *= LARGE_MASS_SCALE;
+    if other.mass >= table.large_mass_min {
+        other_energy *= table.large_mass_scale;
         let dz = other.pre.z - other.post.z;
         if delta > 0. && dz < 0. && other.pre.z < 0. {
             let factor = (dz / delta).abs();
-            other_energy *= 1. + factor * (LARGE_MASS_FALLING_SCALE - 1.);
+            other_energy *= 1. + factor * (table.large_mass_falling_scale - 1.);
         }
     }
     energy += other_energy;
     energy *= energy_scale / mass;
-    let damage = read_table(&NPC_LINEAR, energy);
-    if other.mass > 0. && other.mass < SMALL_MASS_MAX {
-        damage.clamp(0., SMALL_MASS_CAP)
+    let damage = read_table(table.linear, energy);
+    if other.mass > 0. && other.mass < table.small_mass_max && table.small_mass_cap > 0. {
+        damage.clamp(0., table.small_mass_cap)
     } else {
         damage
     }
 }
 
 /// CPhysicsProp::VPhysicsCollision physics damage for prop_physics (breakables take it
-/// through the entity damage path; unbreakable props ignore it there): the NPC table
-/// (no prop names another table here yet), x10 on the first collision after a gravity
+/// through the entity damage path; unbreakable props ignore it there): the prop_data
+/// damage_table ("glass") or the NPC table, x10 on the first collision after a gravity
 /// gun launch (`launched`, cleared by any collision). Objects the player holds take
 /// none from the player and no static damage; NPCs and props hit by them are handled
 /// by their own side of the event.
@@ -239,7 +294,17 @@ pub fn queue_prop_damage(
                 .keyvalue_overrides
                 .get(&(id, "physdamagescale".to_string()))
                 .map(String::as_str);
+            // CBreakableProp's damage_table (prop_data), else the NPC table.
+            let table = table_named(
+                world
+                    .model_instances
+                    .iter()
+                    .find(|i| i.entity == Some(id))
+                    .and_then(|i| world.model_prop_data.get(&i.asset_key()))
+                    .and_then(|d| d.damage_table.as_deref()),
+            );
             let mut damage = prop_damage(
+                table,
                 event.masses[index],
                 prop_energy_scale(entity, overridden),
                 Impactor {
@@ -260,6 +325,7 @@ pub fn queue_prop_damage(
                 scene.entity_damage.push(Damage {
                     target: DamageTarget::Entity(id),
                     amount: damage,
+                    kind: crate::player_damage::DMG_CRUSH,
                     dissolve: false,
                     direction: event.pre_velocities[index].normalize_or_zero(),
                     origin: event.origins[index],
@@ -321,14 +387,49 @@ mod tests {
         // A 20 kg crate stopping from 500 u/s on the world: 500^2 x 0.1 = 25000 -> 5,
         // x10 after a gravity gun launch: 50 (wood_crate001a breaks at 30 health).
         let stop = hit(20., 500., 0.);
-        assert_eq!(prop_damage(20., 0.1, stop, floor), 5.);
+        assert_eq!(prop_damage(&NPC_TABLE, 20., 0.1, stop, floor), 5.);
         // A gentle 100 u/s landing does nothing.
-        assert_eq!(prop_damage(20., 0.1, hit(20., 100., 0.), floor), 0.);
+        assert_eq!(
+            prop_damage(&NPC_TABLE, 20., 0.1, hit(20., 100., 0.), floor),
+            0.
+        );
         // A 1 kg bottle thrown at the crate is capped at 5.
         assert_eq!(
-            prop_damage(20., 1., hit(20., 0., 0.), hit(1., 1500., 0.)),
+            prop_damage(&NPC_TABLE, 20., 1., hit(20., 0., 0.), hit(1., 1500., 0.)),
             5.
         );
+    }
+
+    #[test]
+    fn glass_table_breaks_bottles_on_light_drops_and_keeps_its_row_order() {
+        let floor = Impactor {
+            mass: 0.,
+            pre: Vec3::ZERO,
+            post: Vec3::ZERO,
+        };
+        // A 1 kg glass prop (energy scale 0.1) stopping from 100 u/s on the world:
+        // 100^2 x 0.1 = 1000 -> the 625 row: 10 (a 10-health Glass.Small bottle breaks),
+        // where the NPC table reads nothing.
+        let drop = hit(1., 100., 0.);
+        assert_eq!(prop_damage(&GLASS_TABLE, 1., 0.1, drop, floor), 10.);
+        assert_eq!(prop_damage(&NPC_TABLE, 1., 0.1, drop, floor), 0.);
+        // 300 u/s at scale 1: 90000 stops before the 250000 row -> 75; from 250000
+        // the lookup runs past the out-of-order 62500 row: 500, never 100.
+        assert_eq!(
+            prop_damage(&GLASS_TABLE, 1., 1., hit(1., 300., 0.), floor),
+            75.
+        );
+        assert_eq!(
+            prop_damage(&GLASS_TABLE, 1., 1., hit(1., 600., 0.), floor),
+            500.
+        );
+        // A lighter-than-1 kg moving object caps glass damage at 10.
+        assert_eq!(
+            prop_damage(&GLASS_TABLE, 1., 1., hit(1., 0., 0.), hit(0.5, 1500., 0.)),
+            10.
+        );
+        assert!(std::ptr::eq(table_named(Some("glass")), &GLASS_TABLE));
+        assert!(std::ptr::eq(table_named(None), &NPC_TABLE));
     }
 
     #[test]

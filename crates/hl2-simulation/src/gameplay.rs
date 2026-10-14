@@ -228,6 +228,61 @@ pub(crate) struct EmptyFire {
 
 /// CSingleplayRules::FlPlayerFallDamage with the HL2_DLL constants: damage grows linearly
 /// from the maximum safe fall speed (526.5) to 100 at the fatal speed (922.5).
+/// CAmmoDef DamageForce of the player's bullet ammo (hl2_gamerules.cpp BULLET_IMPULSE:
+/// ft/s x 12 x the grains' mass in kg x 3.5), kg in/s.
+pub fn bullet_impulse(ammo_type: &str) -> f32 {
+    let impulse = |grains: f32, feet_per_second: f32| {
+        let pounds = 0.002285 * grains / 16.;
+        feet_per_second * 12. * pounds * 0.453_592 * 3.5
+    };
+    match ammo_type.to_ascii_lowercase().as_str() {
+        "357" => impulse(800., 5000.),
+        "buckshot" => impulse(400., 1200.),
+        // Pistol, SMG1, AR2.
+        _ => impulse(200., 1225.),
+    }
+}
+/// CBreakable's modifiers: func_breakdmg_bullet 0.5, func_breakdmg_club 1.5,
+/// func_breakdmg_explosive 1.25 (props.cpp convar defaults).
+const FUNC_BREAKABLE_DAMAGE: modkit_core::PropData = modkit_core::PropData {
+    health: 0.,
+    dmg_bullets: 0.5,
+    dmg_club: 1.5,
+    dmg_explosive: 1.25,
+    damage_table: None,
+    breakable_model: None,
+    breakable_count: 0,
+    breakable_skin: 0,
+};
+/// GetBreakableDamage (props.cpp) for a breakable with prop data (CBreakableProp,
+/// modifiers default 1): bullets x dmg.bullets (buckshot twice that), clubs x dmg.club,
+/// blasts x dmg.explosive, slash + crush x 10, time-based damage none.
+pub fn breakable_damage(amount: f32, kind: u32, data: Option<&modkit_core::PropData>) -> f32 {
+    use crate::player_damage::*;
+    let defaults = modkit_core::PropData::default();
+    let data = data.unwrap_or(&defaults);
+    let mut damage = amount;
+    if kind & DMG_BULLET != 0 {
+        damage *= if kind & DMG_BUCKSHOT != 0 {
+            data.dmg_bullets * 2.
+        } else {
+            data.dmg_bullets
+        };
+    }
+    if kind & DMG_CLUB != 0 {
+        damage *= data.dmg_club;
+    }
+    if kind & DMG_BLAST != 0 {
+        damage *= data.dmg_explosive;
+    }
+    if kind & DMG_SLASH != 0 && kind & DMG_CRUSH != 0 {
+        damage *= 10.;
+    }
+    if kind & TIME_BASED != 0 {
+        damage = 0.;
+    }
+    damage
+}
 pub fn fall_damage(fall_speed: f32) -> f32 {
     const MAX_SAFE: f32 = 526.5;
     const FATAL: f32 = 922.5;
@@ -1287,7 +1342,7 @@ impl Inventory {
                     // (skill, armor, HUD message); knockback is not modeled.
                     scene.player_damage.push(crate::player_damage::DamageInfo {
                         amount: damage.amount,
-                        kind: crate::player_damage::DMG_BLAST,
+                        kind: damage.kind,
                         inflictor: damage.origin,
                     });
                 }
@@ -1304,19 +1359,20 @@ impl Inventory {
                     let npc = entity.class().starts_with("npc_");
                     // CPropData::ParsePropData: prop_data health overrides the keyvalue
                     // (not on *_override props); 0 means unbreakable.
-                    let prop_data = entity
+                    let data = entity
                         .class()
                         .starts_with("prop_physics")
-                        .then(|| entity.class().ends_with("_override"))
-                        .filter(|o| !o)
-                        .and_then(|_| {
+                        .then(|| {
                             world
                                 .model_instances
                                 .iter()
                                 .find(|i| i.entity == Some(id))
-                                .and_then(|i| world.model_prop_health.get(&i.asset_key()))
+                                .and_then(|i| world.model_prop_data.get(&i.asset_key()))
                         })
-                        .copied();
+                        .flatten();
+                    let prop_data = data
+                        .filter(|_| !entity.class().ends_with("_override"))
+                        .map(|d| d.health);
                     let health = prop_data
                         .or_else(|| entity.get("health").and_then(|s| s.parse::<f32>().ok()))
                         .filter(|v| *v > 0.);
@@ -1344,7 +1400,15 @@ impl Inventory {
                         if state.value <= 0. {
                             state.value = health.unwrap_or(40.);
                         }
-                        state.value -= damage.amount;
+                        // CBreakable (func_breakable, func_physbox) starts from the
+                        // func_breakdmg_* convars instead of 1.
+                        let brush = matches!(entity.class(), "func_breakable" | "func_physbox")
+                            .then_some(&FUNC_BREAKABLE_DAMAGE);
+                        state.value -= if npc {
+                            damage.amount
+                        } else {
+                            breakable_damage(damage.amount, damage.kind, data.or(brush))
+                        };
                     }
                     let dead = state.value <= 0.;
                     scene.fire(id, "OnDamaged", usize::MAX);
@@ -1386,6 +1450,7 @@ impl Inventory {
                                 velocity: state.velocity,
                                 angular_velocity: angular,
                                 center_of_mass,
+                                skin: instance.skin as i32,
                             });
                         }
                         scene.states[id].killed = true;
@@ -1424,30 +1489,61 @@ impl Inventory {
             self.animate("hitcenter1", scene.time);
         }
         self.hits += 1;
-        physics.impulse(id, direction, if melee { 4. } else { 1. });
+        // VPhysicsTakeDamage: ApplyForceOffset(damage force, hit point). Bullets carry
+        // their ammo's CalculateBulletDamageForce impulse, melee CalculateMeleeDamageForce
+        // (damage x ImpulseScale(75, 4)), both kg in/s with phys_pushscale 1.
+        let force = if melee {
+            weapon.damage * 75. * 4.
+        } else {
+            bullet_impulse(&weapon.ammo_type)
+        };
+        physics.impulse_at(id, direction * (force / 39.37), hit.position);
         if let Some(e) = entity {
+            if !flesh {
+                // Breakables take the shot through the entity damage path like every
+                // other damage source (CBreakableProp::OnTakeDamage: prop_data health,
+                // GetBreakableDamage modifiers, break sound, gibs); that path decides
+                // whether the entity can break. Buckshot ammo adds DMG_BUCKSHOT, the
+                // crowbar/stunstick deal DMG_CLUB.
+                if matches!(e.class(), "func_breakable" | "func_physbox")
+                    || e.class().starts_with("prop_physics")
+                {
+                    use crate::player_damage::{DMG_BUCKSHOT, DMG_BULLET, DMG_CLUB};
+                    let kind = if melee {
+                        DMG_CLUB
+                    } else if weapon.ammo_type.eq_ignore_ascii_case("Buckshot") {
+                        DMG_BULLET | DMG_BUCKSHOT
+                    } else {
+                        DMG_BULLET
+                    };
+                    scene.entity_damage.push(crate::projectiles::Damage {
+                        target: crate::projectiles::DamageTarget::Entity(id),
+                        amount: weapon.damage,
+                        kind,
+                        dissolve: false,
+                        direction,
+                        origin: hit.position,
+                    });
+                }
+                return;
+            }
             let explicit_health = e.get("health").and_then(|v| v.parse::<f32>().ok());
-            if flesh
-                || matches!(e.class(), "func_breakable" | "func_physbox")
-                || e.class() == "prop_physics" && explicit_health.is_some_and(|v| v > 0.)
-            {
-                if scene.states[id].value <= 0. {
-                    scene.states[id].value = explicit_health.filter(|v| *v > 0.).unwrap_or(40.);
-                }
-                scene.states[id].value -= weapon.damage;
-                scene.fire(id, "OnDamaged", usize::MAX);
-                if scene.states[id].value <= 0. {
-                    self.kills += 1;
-                    scene.fire(id, if flesh { "OnDeath" } else { "OnBreak" }, usize::MAX);
-                    scene.states[id].killed = true;
-                    scene.states[id].visible = false;
-                    physics.set_entity(
-                        id,
-                        scene.states[id].origin,
-                        scene.states[id].rotation,
-                        false,
-                    );
-                }
+            if scene.states[id].value <= 0. {
+                scene.states[id].value = explicit_health.filter(|v| *v > 0.).unwrap_or(40.);
+            }
+            scene.states[id].value -= weapon.damage;
+            scene.fire(id, "OnDamaged", usize::MAX);
+            if scene.states[id].value <= 0. {
+                self.kills += 1;
+                scene.fire(id, "OnDeath", usize::MAX);
+                scene.states[id].killed = true;
+                scene.states[id].visible = false;
+                physics.set_entity(
+                    id,
+                    scene.states[id].origin,
+                    scene.states[id].rotation,
+                    false,
+                );
             }
         }
     }
@@ -2004,6 +2100,38 @@ mod tests {
         assert!((source - Vec3::new(18., 0., 4.)).length() < 1e-4);
         assert!((velocity - Vec3::new(700., 0., 0.)).length() < 1e-3);
         assert_eq!(spin, Vec3::new(0., 0., 720.));
+    }
+    #[test]
+    fn breakable_damage_applies_prop_data_modifiers() {
+        use crate::player_damage::*;
+        // Wooden.Large (owned propdata.txt): bullets 0.75, club 2, explosive 1.5.
+        let wood = modkit_core::PropData {
+            health: 50.,
+            dmg_bullets: 0.75,
+            dmg_club: 2.,
+            dmg_explosive: 1.5,
+            ..Default::default()
+        };
+        assert_eq!(breakable_damage(8., DMG_BULLET, Some(&wood)), 6.);
+        assert_eq!(
+            breakable_damage(8., DMG_BULLET | DMG_BUCKSHOT, Some(&wood)),
+            12.
+        );
+        assert_eq!(breakable_damage(10., DMG_CLUB, Some(&wood)), 20.);
+        assert_eq!(breakable_damage(10., DMG_BLAST, Some(&wood)), 15.);
+        assert_eq!(breakable_damage(10., DMG_CRUSH, Some(&wood)), 10.);
+        assert_eq!(
+            breakable_damage(1., DMG_SLASH | DMG_CRUSH, Some(&wood)),
+            10.
+        );
+        assert_eq!(breakable_damage(10., DMG_POISON, Some(&wood)), 0.);
+        // Without prop data the CBreakableProp defaults (1) apply; brush breakables
+        // use the func_breakdmg_* convars.
+        assert_eq!(breakable_damage(8., DMG_BULLET, None), 8.);
+        assert_eq!(
+            breakable_damage(8., DMG_BULLET, Some(&FUNC_BREAKABLE_DAMAGE)),
+            4.
+        );
     }
     #[test]
     fn fall_damage_and_armor_exceptions_follow_sdk() {
@@ -2792,6 +2920,7 @@ mod tests {
             vec![Damage {
                 target: DamageTarget::Player,
                 amount: 100.,
+                kind: crate::player_damage::DMG_BLAST,
                 dissolve: false,
                 direction: Vec3::X,
                 origin: Vec3::X,
@@ -2811,6 +2940,7 @@ mod tests {
         let dissolve = Damage {
             target: DamageTarget::Entity(0),
             amount: 0.,
+            kind: crate::player_damage::DMG_DISSOLVE,
             dissolve: true,
             direction: Vec3::X,
             origin: Vec3::ZERO,

@@ -336,7 +336,7 @@ impl Impacts {
         feet: GVec3,
         depth: f32,
     ) -> Option<String> {
-        let hit = physics.impact_ray(feet + GVec3::Z * 2., -GVec3::Z, depth + 2.)?;
+        let hit = physics.ground_ray(feet + GVec3::Z * 2., -GVec3::Z, depth + 2.)?;
         self.locate(&hit, world, physics, scene)
             .ok()
             .map(|l| l.prop)
