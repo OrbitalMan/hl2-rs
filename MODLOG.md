@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-10-15 Rounded dialog frame corners and overflow clipping
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`:
+  - Added named constant `FRAME_CORNER_RADIUS: f32 = 5.0` derived from Source SDK `Panel::GetCornerTextureSize` and `sourcescheme.res` `FrameBorder` (`backgroundtype 2`).
+  - Added `FrameStyle` (`corner_radius`, `rounded`, `clip_overflow`, `outer_3d_border`) with `FrameStyle::DEFAULT` enabling rounding, enabling overflow clipping, and disabling outer 3D borders. Added `contains_point` for geometric hit testing inside rounded boundaries and `clip_rect` for child layout clipping.
+  - Updated `FrameSpec` to include `style: FrameStyle`, with `with_style` builder and overflow-clipped `close_rect()`.
+  - Added `Painter::rounded_fill(&self, rect: Rect, color: Color, radius: f32)` decomposing the rounded frame into 3 rectangular quads (top, middle, bottom) and 4 corner fan quads via `Canvas::polygon` with zero seams and zero external texture requirements.
+  - Added `Painter::frame_spec(&self, spec: FrameSpec, close: Option<ButtonState>)` and updated `Painter::frame` / `Painter::frame_with_close` to route through it. Removed outer 3D raised border from dialog frames while leaving all non-dialog widgets (push buttons, close button, sliders, tabs, text inputs, checkboxes) with their authentic 3D borders.
+  - Added unit test `dialog_frame_style_rounded_corners_and_overflow_clipping` verifying rounding, overflow clipping, outer 3D border removal, hit testing, and non-dialog widget border preservation.
+- `hl2-ui::gameui::options`: updated subdialog credits frame quad lookups in tests to match the rounded frame decomposition.
+- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented dialog frame rounded corners and overflow clipping.
+- `HL2RS/STATUS.md`: updated status to record rounded dialog frames and outer 3D border removal.
+
+**Why:**
+- In retail Half-Life 2 / Source GameUI, dialog frames (`FrameBorder` `backgroundtype 2`) use rounded corners and do not have Windows 95-style outer 3D raised borders. Non-dialog controls keep their 3D borders.
+
+**Tested how:**
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked`: all 149 unit tests pass, including `dialog_frame_style_rounded_corners_and_overflow_clipping`.
+- `cargo test --manifest-path HL2RS/Cargo.toml --locked`: all 312+ workspace unit tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked -- --ignored`: owned install tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-bevy --locked -- --ignored headless_bevy_app_submenu_entry_switches_background_map_and_scene`: passes in 2.06s.
+- `cargo clippy --manifest-path HL2RS/Cargo.toml --locked -- -D warnings`: 0 warnings.
+- `cargo fmt --manifest-path HL2RS/Cargo.toml --all -- --check`: verified clean formatting.
+
+**Result:** Dialogs have rounded corners, no outer 3D border, and child elements clip cleanly, while buttons, tabs, sliders, and inputs retain their 3D borders.
+
+**Still broken or not tested:** Visual appearance on live display requires manual check.
+
+**Next:** Task 2: Episode and Lost Coast submenu subtitles investigation and fix.
+
 ## 2026-10-14 Menu title and subtitle letter contour outline
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

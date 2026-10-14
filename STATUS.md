@@ -2,7 +2,21 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: Menu title and subtitle letter contour outline (2026-10-14, branch `orbitalman/menu-button-text-border`)
+## Current session: Rounded dialog frame corners and overflow clipping (2026-10-15, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Rounded dialog corners and outer 3D border removal:** Implemented authentic Source GameUI rounded frame borders and overflow clipping across all dialogs:
+  - In `hl2-ui::gameui::widgets`, added `FRAME_CORNER_RADIUS: f32 = 5.0` (derived from Source SDK `Panel::GetCornerTextureSize` and `sourcescheme.res` `FrameBorder` `backgroundtype 2`).
+  - Added `FrameStyle` with `FrameStyle::DEFAULT` (`rounded: true`, `clip_overflow: true`, `outer_3d_border: false`, `corner_radius: 5.0`). Added geometric hit-testing via `contains_point` and child layout clipping via `clip_rect`.
+  - Updated `FrameSpec` to include `style: FrameStyle`, with `with_style` builder and overflow-clipped `close_rect()`.
+  - Added `Painter::rounded_fill(&self, rect: Rect, color: Color, radius: f32)` decomposing the rounded frame into 3 rectangular quads (top, middle, bottom) and 4 corner fan quads via `Canvas::polygon` with zero seams and zero external texture requirements.
+  - Added `Painter::frame_spec(&self, spec: FrameSpec, close: Option<ButtonState>)` and updated `Painter::frame` / `Painter::frame_with_close` to route through it. Removed outer 3D raised border from dialog frames while leaving all non-dialog widgets (push buttons, close button, sliders, tabs, text inputs, checkboxes) with their authentic 3D borders.
+  - Added unit test `dialog_frame_style_rounded_corners_and_overflow_clipping` verifying rounding, overflow clipping, outer 3D border removal, hit testing, and non-dialog widget border preservation.
+  - In `hl2-ui::gameui::options`, updated subdialog credits frame quad lookups in tests to match the rounded frame decomposition.
+  - In `HL2RS/AGENTS.md` and `RustLife2/AGENTS.md`, documented dialog frame rounded corners and overflow clipping.
+- **Validation:** 149 `hl2-ui` tests pass, all workspace unit tests pass; all owned-install tests pass; headless Bevy app test passes in 2.06s; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Menu title and subtitle letter contour outline (2026-10-14, branch `orbitalman/menu-button-text-border`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Menu title and subtitle letter contour outline:** Extended the glyph edge contour outline from menu buttons to the Half-Life 2 game title and expansion/episode subtitles across main and expansion submenus:

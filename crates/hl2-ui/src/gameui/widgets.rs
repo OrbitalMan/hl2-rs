@@ -405,6 +405,130 @@ pub const CLOSE_BUTTON_SIZE: Vec2 = vec2(18., 16.);
 /// Inset of the close button from the top-right corner of the frame.
 pub const CLOSE_BUTTON_INSET: Vec2 = vec2(24., 6.);
 
+/// Authentic corner radius for VGUI rounded dialog frames (`FrameBorder` `backgroundtype 2`).
+///
+/// In the Source SDK / retail GameUI, rounded frame borders (`FrameBorder`) use 8px corner
+/// textures at base resolution, scaling to ~5.0 layout points.
+pub const FRAME_CORNER_RADIUS: f32 = 5.0;
+
+/// Style configuration for VGUI dialog frames.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameStyle {
+    /// Corner radius in unscaled layout points.
+    pub corner_radius: f32,
+    /// Whether corners are rendered with rounded arcs.
+    pub rounded: bool,
+    /// Whether content, title bar, and close buttons are clipped to the rounded shape.
+    pub clip_overflow: bool,
+    /// Whether an outer 3D raised border is drawn.
+    ///
+    /// Per Source GameUI specifications (`sourcescheme.res` `FrameBorder`), dialog frames
+    /// use `backgroundtype 2` with rounded corners and do NOT draw outer 3D raised borders.
+    pub outer_3d_border: bool,
+}
+
+impl Default for FrameStyle {
+    fn default() -> Self {
+        Self {
+            corner_radius: FRAME_CORNER_RADIUS,
+            rounded: true,
+            clip_overflow: true,
+            outer_3d_border: false,
+        }
+    }
+}
+
+impl FrameStyle {
+    pub const DEFAULT: Self = Self {
+        corner_radius: FRAME_CORNER_RADIUS,
+        rounded: true,
+        clip_overflow: true,
+        outer_3d_border: false,
+    };
+
+    /// Returns whether `point` (in frame layout coordinates) falls inside the styled frame bounds.
+    pub fn contains_point(&self, point: Vec2, frame_size: Vec2) -> bool {
+        if point.x < 0. || point.y < 0. || point.x > frame_size.x || point.y > frame_size.y {
+            return false;
+        }
+        if !self.rounded || self.corner_radius <= 0. {
+            return true;
+        }
+        let r = self
+            .corner_radius
+            .min(frame_size.x * 0.5)
+            .min(frame_size.y * 0.5);
+        // Top-left corner
+        if point.x < r && point.y < r {
+            let dx = r - point.x;
+            let dy = r - point.y;
+            return dx * dx + dy * dy <= r * r;
+        }
+        // Top-right corner
+        if point.x > frame_size.x - r && point.y < r {
+            let dx = point.x - (frame_size.x - r);
+            let dy = r - point.y;
+            return dx * dx + dy * dy <= r * r;
+        }
+        // Bottom-left corner
+        if point.x < r && point.y > frame_size.y - r {
+            let dx = r - point.x;
+            let dy = point.y - (frame_size.y - r);
+            return dx * dx + dy * dy <= r * r;
+        }
+        // Bottom-right corner
+        if point.x > frame_size.x - r && point.y > frame_size.y - r {
+            let dx = point.x - (frame_size.x - r);
+            let dy = point.y - (frame_size.y - r);
+            return dx * dx + dy * dy <= r * r;
+        }
+        true
+    }
+
+    /// Clips a child layout rectangle to stay strictly within the frame bounds,
+    /// insetting from corners when `clip_overflow` is enabled.
+    pub fn clip_rect(&self, rect: Rect, frame_size: Vec2) -> Option<Rect> {
+        let mut x0 = rect.x.max(0.);
+        let mut y0 = rect.y.max(0.);
+        let mut x1 = (rect.x + rect.w).min(frame_size.x);
+        let mut y1 = (rect.y + rect.h).min(frame_size.y);
+
+        if x1 <= x0 || y1 <= y0 {
+            return None;
+        }
+
+        if self.clip_overflow && self.rounded && self.corner_radius > 0. {
+            let r = self
+                .corner_radius
+                .min(frame_size.x * 0.5)
+                .min(frame_size.y * 0.5);
+            let inset = r * 0.2929;
+            if x0 < r && y0 < r {
+                x0 = x0.max(inset);
+                y0 = y0.max(inset);
+            }
+            if x1 > frame_size.x - r && y0 < r {
+                x1 = x1.min(frame_size.x - inset);
+                y0 = y0.max(inset);
+            }
+            if x0 < r && y1 > frame_size.y - r {
+                x0 = x0.max(inset);
+                y1 = y1.min(frame_size.y - inset);
+            }
+            if x1 > frame_size.x - r && y1 > frame_size.y - r {
+                x1 = x1.min(frame_size.x - inset);
+                y1 = y1.min(frame_size.y - inset);
+            }
+        }
+
+        if x1 <= x0 || y1 <= y0 {
+            None
+        } else {
+            Some(Rect::new(x0, y0, x1 - x0, y1 - y0))
+        }
+    }
+}
+
 /// Calculates the layout rectangle of the close button for a frame of the given `size`.
 pub fn close_button_rect(frame_size: Vec2) -> Rect {
     Rect::new(
@@ -422,6 +546,8 @@ pub struct FrameSpec<'a> {
     pub title: &'a str,
     /// Whether the frame displays a close (X) button in the top-right corner.
     pub has_close: bool,
+    /// Style configuration for this frame (corners, borders, clipping).
+    pub style: FrameStyle,
 }
 
 impl<'a> FrameSpec<'a> {
@@ -430,6 +556,7 @@ impl<'a> FrameSpec<'a> {
             size,
             title,
             has_close: true,
+            style: FrameStyle::DEFAULT,
         }
     }
 
@@ -438,8 +565,21 @@ impl<'a> FrameSpec<'a> {
         self
     }
 
+    pub const fn with_style(mut self, style: FrameStyle) -> Self {
+        self.style = style;
+        self
+    }
+
     pub fn close_rect(&self) -> Option<Rect> {
-        self.has_close.then(|| close_button_rect(self.size))
+        if !self.has_close {
+            return None;
+        }
+        let raw_rect = close_button_rect(self.size);
+        if self.style.clip_overflow {
+            self.style.clip_rect(raw_rect, self.size)
+        } else {
+            Some(raw_rect)
+        }
     }
 }
 
@@ -552,6 +692,64 @@ impl<T: Copy + PartialEq> ButtonTracker<T> {
 }
 
 impl Painter<'_> {
+    /// Draws a filled rectangle with rounded corners using the specified layout radius.
+    pub fn rounded_fill(&self, rect: Rect, color: Color, radius: f32) {
+        let r = self.map(rect);
+        let cr = (radius * self.scale).round().min(r.w * 0.5).min(r.h * 0.5);
+        if cr <= 0. {
+            self.canvas.rectangle(r.x, r.y, r.w, r.h, color);
+            return;
+        }
+
+        // Top bar
+        self.canvas
+            .rectangle(r.x + cr, r.y, r.w - 2. * cr, cr, color);
+        // Middle bar
+        self.canvas
+            .rectangle(r.x, r.y + cr, r.w, r.h - 2. * cr, color);
+        // Bottom bar
+        self.canvas
+            .rectangle(r.x + cr, r.y + r.h - cr, r.w - 2. * cr, cr, color);
+
+        let k = 0.2929 * cr;
+
+        // Top-Left corner: center (r.x + cr, r.y + cr)
+        let tl_center = vec2(r.x + cr, r.y + cr);
+        self.canvas.polygon([
+            (tl_center, color),
+            (vec2(r.x + cr, r.y), color),
+            (vec2(r.x + k, r.y + k), color),
+            (vec2(r.x, r.y + cr), color),
+        ]);
+
+        // Top-Right corner: center (r.x + r.w - cr, r.y + cr)
+        let tr_center = vec2(r.x + r.w - cr, r.y + cr);
+        self.canvas.polygon([
+            (tr_center, color),
+            (vec2(r.x + r.w, r.y + cr), color),
+            (vec2(r.x + r.w - k, r.y + k), color),
+            (vec2(r.x + r.w - cr, r.y), color),
+        ]);
+
+        // Bottom-Right corner: center (r.x + r.w - cr, r.y + r.h - cr)
+        let br_center = vec2(r.x + r.w - cr, r.y + r.h - cr);
+        self.canvas.polygon([
+            (br_center, color),
+            (vec2(r.x + r.w - cr, r.y + r.h), color),
+            (vec2(r.x + r.w - k, r.y + r.h - k), color),
+            (vec2(r.x + r.w, r.y + r.h - cr), color),
+        ]);
+
+        // Bottom-Left corner: center (r.x + cr, r.y + r.h - cr)
+        let bl_center = vec2(r.x + cr, r.y + r.h - cr);
+        self.canvas.polygon([
+            (bl_center, color),
+            (vec2(r.x, r.y + r.h - cr), color),
+            (vec2(r.x + k, r.y + r.h - k), color),
+            (vec2(r.x + cr, r.y + r.h), color),
+        ]);
+    }
+
     /// A titled VGUI frame of `size` at the painter origin.
     pub fn frame(&self, size: Vec2, title: &str) {
         self.frame_with_close(size, title, None);
@@ -559,12 +757,33 @@ impl Painter<'_> {
 
     /// A titled VGUI frame of `size` with an optional close (X) button.
     pub fn frame_with_close(&self, size: Vec2, title: &str, close: Option<ButtonState>) {
-        let rect = Rect::new(0., 0., size.x, size.y);
-        self.fill(rect, self.theme.frame_bg);
-        self.raised(rect);
-        self.text(title, vec2(TITLE_INSET_X, 8.), self.theme.title_text, true);
+        self.frame_spec(FrameSpec::new(size, title), close);
+    }
+
+    /// Renders a titled VGUI frame according to the declarative [`FrameSpec`].
+    pub fn frame_spec(&self, spec: FrameSpec, close: Option<ButtonState>) {
+        let rect = Rect::new(0., 0., spec.size.x, spec.size.y);
+        if spec.style.rounded {
+            self.rounded_fill(rect, self.theme.frame_bg, spec.style.corner_radius);
+        } else {
+            self.fill(rect, self.theme.frame_bg);
+        }
+        if spec.style.outer_3d_border {
+            self.raised(rect);
+        }
+        self.text(
+            spec.title,
+            vec2(TITLE_INSET_X, 8.),
+            self.theme.title_text,
+            true,
+        );
         if let Some(state) = close {
-            self.close_button(close_button_rect(size), state);
+            if spec.has_close {
+                let close_rect = spec
+                    .close_rect()
+                    .unwrap_or_else(|| close_button_rect(spec.size));
+                self.close_button(close_rect, state);
+            }
         }
     }
 
@@ -1315,6 +1534,114 @@ mod tests {
         );
         let quads_pressed = canvas.drain();
         assert_eq!(quads_pressed.len(), quads_with_close.len());
+    }
+
+    #[test]
+    fn dialog_frame_style_rounded_corners_and_overflow_clipping() {
+        // 1. Verify default FrameStyle enables rounding, enables overflow clipping, disables outer 3D border
+        let default_style = FrameStyle::DEFAULT;
+        assert!(default_style.rounded);
+        assert!(default_style.clip_overflow);
+        assert!(!default_style.outer_3d_border);
+        assert_eq!(default_style.corner_radius, FRAME_CORNER_RADIUS);
+        assert_eq!(FrameStyle::default(), default_style);
+
+        // 2. Corner radius and bounds hit testing
+        let size = vec2(200., 150.);
+        // Interior point is contained
+        assert!(default_style.contains_point(vec2(100., 75.), size));
+        // Outside points
+        assert!(!default_style.contains_point(vec2(-1., 50.), size));
+        assert!(!default_style.contains_point(vec2(201., 50.), size));
+        assert!(!default_style.contains_point(vec2(50., -1.), size));
+        assert!(!default_style.contains_point(vec2(50., 151.), size));
+
+        // Corner hit testing: radius is 5.0.
+        // Extreme corner point (0.5, 0.5) is outside the circle (5-0.5)^2 + (5-0.5)^2 = 40.5 > 25
+        assert!(!default_style.contains_point(vec2(0.5, 0.5), size));
+        assert!(!default_style.contains_point(vec2(199.5, 0.5), size));
+        assert!(!default_style.contains_point(vec2(0.5, 149.5), size));
+        assert!(!default_style.contains_point(vec2(199.5, 149.5), size));
+
+        // Point inside the corner arc (3.0, 3.0): (5-3)^2 + (5-3)^2 = 8 <= 25
+        assert!(default_style.contains_point(vec2(3.0, 3.0), size));
+
+        // When rounding is disabled, extreme corner (0.5, 0.5) is contained
+        let square_style = FrameStyle {
+            rounded: false,
+            ..default_style
+        };
+        assert!(square_style.contains_point(vec2(0.5, 0.5), size));
+
+        // 3. Overflow clipping
+        let raw_corner = Rect::new(0., 0., 10., 10.);
+        let clipped = default_style
+            .clip_rect(raw_corner, size)
+            .expect("clipped rect");
+        assert!(clipped.x > 0.0);
+        assert!(clipped.y > 0.0);
+
+        // Completely outside rect returns None
+        assert_eq!(
+            default_style.clip_rect(Rect::new(-20., -20., 10., 10.), size),
+            None
+        );
+
+        // 4. FrameSpec integration with FrameStyle
+        let spec = FrameSpec::new(size, "Rounded Dialog");
+        assert_eq!(spec.style, default_style);
+        let close_rect = spec.close_rect().expect("close button rect");
+        // Close button must be within the frame boundaries
+        assert!(close_rect.x >= 0. && close_rect.x + close_rect.w <= size.x);
+        assert!(close_rect.y >= 0. && close_rect.y + close_rect.h <= size.y);
+
+        // 5. Canvas drawing verification:
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        // Drawing with default FrameStyle emits rounded fill (includes corner polygon quads) and NO outer 3D border
+        painter.frame_spec(spec.without_close(), None);
+        let quads_rounded = canvas.drain();
+        // 3 rectangular strips + 4 corner polygon quads = 7 quads
+        assert_eq!(quads_rounded.len(), 7);
+        let polygon_count = quads_rounded
+            .iter()
+            .filter(|q| q.vertices.is_some())
+            .count();
+        assert_eq!(polygon_count, 4);
+
+        // In contrast, a frame with outer_3d_border: true and rounded: false emits 1 fill + 4 3D border quads = 5 quads
+        let legacy_spec = spec.without_close().with_style(FrameStyle {
+            rounded: false,
+            outer_3d_border: true,
+            ..default_style
+        });
+        painter.frame_spec(legacy_spec, None);
+        let quads_legacy = canvas.drain();
+        assert_eq!(quads_legacy.len(), 5);
+        let legacy_polygons = quads_legacy.iter().filter(|q| q.vertices.is_some()).count();
+        assert_eq!(legacy_polygons, 0);
+
+        // 6. Non-dialog widgets unchanged: button and close button still draw 3D borders
+        let btn_rect = Rect::new(10., 10., 80., 24.);
+        painter.button(btn_rect, "OK", ButtonState::new(true));
+        let btn_quads = canvas.drain();
+        // A button draws 4 border quads (raised 3D border)
+        assert_eq!(btn_quads.len(), 4);
+
+        let close_btn_rect = Rect::new(50., 10., 18., 16.);
+        painter.close_button(close_btn_rect, ButtonState::new(true));
+        let close_quads = canvas.drain();
+        // Close button draws 4 border quads (raised 3D border)
+        assert_eq!(close_quads.len(), 4);
     }
 
     #[test]

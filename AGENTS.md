@@ -110,6 +110,11 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - When pressed, the button letter text and its contour outline shift together by `(1.0, 1.0)`.
   - Spacers and disabled rows never emit active buttons, and the letter outline ensures crisp text contrast on bright, light, or white backgrounds without modifying menu geometry or drawing button boxes.
 
+- **Dialog Frames, Rounded Corners & Overflow Clipping**:
+  - Dialog windows (options dialog, confirmation boxes for quit/main menu, map loading dialog, third-party technology credits, brightness/gamma, and all frames rendered via `Painter::frame` / `Painter::frame_with_close` / `Painter::frame_spec`) use rounded corners (`FRAME_CORNER_RADIUS: f32 = 5.0`) and omit Windows 95-style outer 3D raised borders (`FrameStyle::DEFAULT.outer_3d_border == false`), matching Source SDK `sourcescheme.res` `FrameBorder` (`backgroundtype 2`).
+  - Non-dialog widgets (push buttons, close button, sliders, tabs, scrollbars, text entries, checkboxes) strictly retain their 3D raised/sunken borders.
+  - Dialog frames enforce overflow clipping and corner containment (`FrameStyle::clip_overflow` and `FrameStyle::clip_rect`), ensuring child controls, title text, and the title bar close button never poke outside the rounded frame boundaries.
+
 ## Runtime invariants to preserve
 
 - Walking uses shared Player/Physics; F2/--fly enables flight. Escape cancels selection before pause; tilde opens console. Consume transition input and pause simulation/audio. Map workers freeze fixed/script clocks; replace map-owned resources only after success. Missing maps preserve the world; saved/global state transfer is unfinished.

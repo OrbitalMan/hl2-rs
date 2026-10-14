@@ -2140,7 +2140,7 @@ mod tests {
         let quads = h.canvas.drain();
         let credits_frame = quads
             .iter()
-            .find(|q| q.destination.w == audio_size.x && q.destination.h == audio_size.y)
+            .find(|q| q.destination.w == audio_size.x)
             .expect("audio credits frame quad");
         assert_eq!(credits_frame.color.a, 1.0);
 
@@ -2152,7 +2152,7 @@ mod tests {
         let quads = h.canvas.drain();
         let video_credits_frame = quads
             .iter()
-            .find(|q| q.destination.w == video_size.x && q.destination.h == video_size.y)
+            .find(|q| q.destination.w == video_size.x)
             .expect("video credits frame quad");
         assert_eq!(video_credits_frame.color.a, 1.0);
     }
@@ -2580,11 +2580,10 @@ mod tests {
         // Assert every rendered subdialog quad is strictly within the dialog bounds (nothing exceeds bounds)
         let credits_frame_idx = quads
             .iter()
-            .position(|q| {
-                q.destination.w == real_audio_size.x && q.destination.h == real_audio_size.y
-            })
+            .position(|q| q.destination.w == real_audio_size.x)
             .expect("audio credits frame quad");
-        let subdialog_quads = &quads[credits_frame_idx..];
+        let subdialog_start_idx = credits_frame_idx.saturating_sub(1);
+        let subdialog_quads = &quads[subdialog_start_idx..];
         for q in subdialog_quads {
             let r = q.destination;
             assert!(
