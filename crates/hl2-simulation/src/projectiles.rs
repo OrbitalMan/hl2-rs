@@ -339,6 +339,36 @@ impl Projectiles {
             grounded: false,
         });
     }
+    /// CBreakableProp::Break -> ExplosionCreate for the explosive props broken by this
+    /// tick's damage (SURFACEONLY). Native explodes before PropBreakableCreateAll, so
+    /// the host calls this after damage and before gibs spawn; the broken prop is
+    /// already removed, so RadiusDamage's ignored entity needs no filter. Returns the
+    /// blast damage (which can break further explosive props: the host repeats).
+    pub fn explode_props(
+        &mut self,
+        world: &World,
+        scene: &mut Scene,
+        physics: &mut Physics,
+        player_feet: Vec3,
+        player_ducked: bool,
+    ) -> Vec<Damage> {
+        let mut damage = Vec::new();
+        for (center, magnitude, radius) in std::mem::take(&mut scene.prop_explosions) {
+            self.grenade_explosion(
+                center,
+                magnitude,
+                radius,
+                Vec3::Z,
+                world,
+                scene,
+                physics,
+                player_feet,
+                player_ducked,
+                &mut damage,
+            );
+        }
+        damage
+    }
     /// Advance only on simulation ticks. Returns damage to be applied through
     /// Inventory so player health and weapon hit/kill counters stay authoritative.
     pub fn tick(
@@ -387,7 +417,9 @@ impl Projectiles {
                     ) {
                         projectile.position = hit.position;
                         self.grenade_explosion(
-                            &projectile,
+                            projectile.position,
+                            projectile.damage,
+                            projectile.radius,
                             hit.normal,
                             world,
                             scene,
@@ -412,7 +444,9 @@ impl Projectiles {
                     }
                     if think && scene.time > fuse.detonate {
                         self.grenade_explosion(
-                            &projectile,
+                            projectile.position,
+                            projectile.damage,
+                            projectile.radius,
                             Vec3::Z,
                             world,
                             scene,
@@ -536,7 +570,9 @@ impl Projectiles {
                             crate::sounds::projectile_emitter(projectile.id),
                         ));
                         self.grenade_explosion(
-                            &projectile,
+                            projectile.position,
+                            projectile.damage,
+                            projectile.radius,
                             Vec3::Z,
                             world,
                             scene,
@@ -728,7 +764,9 @@ impl Projectiles {
     #[allow(clippy::too_many_arguments)]
     fn grenade_explosion(
         &mut self,
-        projectile: &Projectile,
+        position: Vec3,
+        magnitude: f32,
+        radius: f32,
         normal: Vec3,
         world: &World,
         scene: &mut Scene,
@@ -740,16 +778,16 @@ impl Projectiles {
         self.diagnostics.grenade_detonations += 1;
         self.effect(Effect {
             id: 0,
-            magnitude: projectile.damage,
+            magnitude,
             kind: EffectKind::GrenadeExplosion,
-            position: projectile.position,
+            position,
             normal,
             at: scene.time,
-            radius: projectile.radius,
+            radius,
         });
         scene.sounds.push("BaseExplosionEffect.Sound".into());
-        let origin = projectile.position + Vec3::Z;
-        if projectile.radius <= 0. {
+        let origin = position + Vec3::Z;
+        if radius <= 0. {
             return;
         }
         for (id, entity) in world.entities.iter().enumerate() {
@@ -774,7 +812,7 @@ impl Projectiles {
                     },
             );
             let delta = target - origin;
-            let mut amount = projectile.damage * (1. - delta.length() / projectile.radius);
+            let mut amount = magnitude * (1. - delta.length() / radius);
             if amount <= 0. {
                 continue;
             }
@@ -807,7 +845,7 @@ impl Projectiles {
         let maxs = player_feet + Vec3::new(16., 16., if player_ducked { 36. } else { 72. });
         let mins = player_feet - Vec3::new(16., 16., 0.);
         let target = origin.clamp(mins, maxs);
-        let amount = projectile.damage * (1. - origin.distance(target) / projectile.radius);
+        let amount = magnitude * (1. - origin.distance(target) / radius);
         if amount > 0. && physics.projectile_ray(origin, target, &[]).is_none() {
             damage.push(Damage {
                 target: DamageTarget::Player,

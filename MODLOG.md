@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-14 session 17: explosive props (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** prop_data `explosive_damage`/`explosive_radius` (PropData, over the entity's ExplodeDamage/ExplodeRadius keyvalues, not on *_override props). CBreakableProp::Break of such a prop queues ExplosionCreate at its center (magnitude and radius scaled by modelscale, truncated to integers; radius 0 = magnitude x 2.5, env_explosion); the host detonates them after the tick's damage and before gibs spawn (native order: the explosion precedes PropBreakableCreateAll; a one-tick deferral let the barrel's own gibs block its blast), repeating so chains resolve in the tick (bounded at 32). `Projectiles::explode_props`; `grenade_explosion` takes position/magnitude/radius.
+
+**Why:** owner question (session 17): explosive barrels did not explode.
+
+**Tested how:** unit test `breaking_an_explosive_prop_queues_its_explosion`, hl2-simulation 233 passed, owned tests (HL2_ROOT, `--ignored`, workspace: 47 passed), strict workspace Clippy, fmt. Packaged d1_canals_01 (oildrum001_explosive: health 20, explosive 120/256), walking, eye (406,-2790,452) yaw 90 pitch -14, pistol at barrel #635: it breaks on the 4th shot, explodes (magnitude 120, radius 256) and chain-detonates #634 in the same tick; 17 gibs; the player (128-160 units away) takes about 60 + 45 and dies (SDK falloff). In fly mode the player takes no damage at all (pre-existing: player damage runs only in the walking branch). The packaged asset cache (bin/bevy-assets) must be rebuilt for new PropData fields: target/release runs used the old cache and saw no explosion.
+
+**Result:** explosive barrels explode and chain.
+
+**Still broken or not tested:** native comparison not done; fire is not modeled: native barrels ("ignite" "halfhealth", "explosive_resist") catch fire at half health from bullets and explode after burning, and blasts make them burn 0.1-5 s before exploding; ours explode at 0 health, chained ones instantly; PROPINTER_PHYSGUN_BREAK_EXPLODE (propane tanks) variant; explosion effect/decal flags (SURFACEONLY etc.) not distinguished; barrel gibs/flames.
+
+**Next:** record the physics/arsenal leftovers, regression batch, merge to main, then step 14 (owner, session 17).
 ## 2026-10-14 session 17: explosions break prop_data props; SDK blast blocking (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

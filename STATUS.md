@@ -5,7 +5,8 @@ Checkpoint: 2026-10-14 session 16 (prop data, chunk gibs, displacement and clip 
 ## Current session 17 (2026-10-14)
 
 Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged.
-- **Owner question: do explosives break props? Not before; now yes for frag, SMG grenade and RPG.** The shared blast damaged only props with a health keyvalue, and any prop in the way shielded fully. Now prop_data props take blast damage and blockers follow SDK RadiusDamage (physics blockers absorb mass/350). RPG at the hall props: box #700 and bottles #701/#702 break like native T060459Z. Open: explosive barrels (explosive_damage/radius), blast ignition, ragdoll gibs, glass chunks fly farther than native shards, scorch decal.
+- **Owner question: do explosives break props? Not before; now yes for frag, SMG grenade and RPG.** The shared blast damaged only props with a health keyvalue, and any prop in the way shielded fully. Now prop_data props take blast damage and blockers follow SDK RadiusDamage (physics blockers absorb mass/350). RPG at the hall props: box #700 and bottles #701/#702 break like native T060459Z. Open: blast ignition, ragdoll gibs, glass chunks fly farther than native shards, scorch decal.
+- **Explosive props: done (not compared with native).** prop_data explosive_damage/radius: a broken barrel explodes before its gibs spawn and chains within the tick (d1_canals_01 barrels #635/#634: both explode, player 128-160 units away takes ~105 and dies). Open: fire (native barrels ignite at half health and burn before exploding), propane-tank variant.
 
 ## Current session 16 (2026-10-14)
 

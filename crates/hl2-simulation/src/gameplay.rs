@@ -295,6 +295,8 @@ const FUNC_BREAKABLE_DAMAGE: modkit_core::PropData = modkit_core::PropData {
     breakable_model: None,
     breakable_count: 0,
     breakable_skin: 0,
+    explosive_damage: None,
+    explosive_radius: None,
 };
 /// GetBreakableDamage (props.cpp) for a breakable with prop data (CBreakableProp,
 /// modifiers default 1): bullets x dmg.bullets (buckshot twice that), clubs x dmg.club,
@@ -1478,6 +1480,45 @@ impl Inventory {
                                 ..name.as_str().into()
                             });
                         }
+                        // CBreakableProp::Break: an explosive prop (prop_data
+                        // explosive_damage/radius over the ExplodeDamage/ExplodeRadius
+                        // keyvalues, not on *_override props) calls ExplosionCreate at its
+                        // center with both scaled by the model scale; env_explosion takes
+                        // integers and a zero radius means magnitude x 2.5.
+                        if !npc && entity.class().starts_with("prop_physics") {
+                            let key = |k: &str| {
+                                entity
+                                    .get(k)
+                                    .and_then(|v| v.trim().parse::<f32>().ok())
+                                    .unwrap_or(0.)
+                            };
+                            let own = data.filter(|_| !entity.class().ends_with("_override"));
+                            let explode_damage = own
+                                .and_then(|d| d.explosive_damage)
+                                .unwrap_or_else(|| key("ExplodeDamage"));
+                            let explode_radius = own
+                                .and_then(|d| d.explosive_radius)
+                                .unwrap_or_else(|| key("ExplodeRadius"));
+                            if explode_damage > 0. || explode_radius > 0. {
+                                let scale = entity
+                                    .get("modelscale")
+                                    .and_then(|v| v.trim().parse::<f32>().ok())
+                                    .filter(|v| *v > 0.)
+                                    .unwrap_or(1.);
+                                let magnitude = (explode_damage * scale).trunc();
+                                let radius = (explode_radius * scale).trunc();
+                                let radius = if radius > 0. {
+                                    radius
+                                } else {
+                                    (magnitude * 2.5).trunc()
+                                };
+                                let center = physics
+                                    .entity_body(id)
+                                    .and_then(|b| physics.center_of_mass(b))
+                                    .unwrap_or(scene.states[id].origin);
+                                scene.prop_explosions.push((center, magnitude, radius));
+                            }
+                        }
                         // PropBreakableCreateAll takes the prop's pose and motion.
                         let body = physics.entity_body(id).filter(|_| !npc);
                         if let (Some(body), Some(instance), Some(state)) = (
@@ -2236,6 +2277,46 @@ mod tests {
         // Machines do not bleed.
         assert_eq!(count(&mut inv, 1, 40.), 0);
         assert_eq!(blood_color("npc_headcrab"), Some(BloodColor::Yellow));
+    }
+    #[test]
+    fn breaking_an_explosive_prop_queues_its_explosion() {
+        // Synthetic: prop_physics with health 10 and ExplodeDamage 100 (radius 0 ->
+        // magnitude x 2.5), and one with only health (no explosion).
+        use crate::projectiles::{Damage, DamageTarget};
+        let prop = |extra: &[(&str, &str)]| modkit_core::Entity {
+            properties: [("classname", "prop_physics"), ("health", "10")]
+                .iter()
+                .chain(extra)
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let world = World {
+            entities: vec![
+                prop(&[("ExplodeDamage", "100.7"), ("origin", "5 0 0")]),
+                prop(&[]),
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let hit = |id| Damage {
+            target: DamageTarget::Entity(id),
+            amount: 20.,
+            kind: crate::player_damage::DMG_BULLET,
+            dissolve: false,
+            direction: Vec3::X,
+            origin: Vec3::ZERO,
+        };
+        Inventory::default().apply_projectile_damage(
+            vec![hit(0), hit(1)],
+            &world,
+            &mut scene,
+            &mut physics,
+        );
+        assert!(scene.states[0].killed && scene.states[1].killed);
+        assert_eq!(scene.prop_explosions.len(), 1);
+        let (_, magnitude, radius) = scene.prop_explosions[0];
+        assert_eq!((magnitude, radius), (100., 250.));
     }
     #[test]
     fn breakable_damage_applies_prop_data_modifiers() {

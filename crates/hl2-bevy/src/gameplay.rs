@@ -694,6 +694,22 @@ impl Gameplay {
         damage.append(&mut self.scene.entity_damage);
         self.inventory
             .apply_projectile_damage(damage, &self.world, &mut self.scene, physics);
+        // Explosive props broken by that damage explode before their gibs spawn; chains
+        // resolve within the tick (bounded).
+        for _ in 0..32 {
+            if self.scene.prop_explosions.is_empty() {
+                break;
+            }
+            let blast = self.projectiles.explode_props(
+                &self.world,
+                &mut self.scene,
+                physics,
+                player.feet,
+                player.crouched,
+            );
+            self.inventory
+                .apply_projectile_damage(blast, &self.world, &mut self.scene, physics);
+        }
         // PropBreakableCreateAll for props broken by this tick's damage.
         self.gibs.spawn(
             std::mem::take(&mut self.scene.prop_breaks),

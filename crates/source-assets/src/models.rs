@@ -1034,6 +1034,12 @@ pub fn resolve_prop_data(
         if let Some(v) = number("dmg.explosive") {
             data.dmg_explosive = v;
         }
+        if let Some(v) = number("explosive_damage") {
+            data.explosive_damage = Some(v);
+        }
+        if let Some(v) = number("explosive_radius") {
+            data.explosive_radius = Some(v);
+        }
         if let Some(v) = text("damage_table") {
             data.damage_table = (!v.is_empty()).then(|| v.to_string());
         }

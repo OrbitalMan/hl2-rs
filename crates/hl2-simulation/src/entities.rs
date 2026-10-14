@@ -263,6 +263,9 @@ pub struct Scene {
     pub entity_damage: Vec<crate::projectiles::Damage>,
     /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
     pub prop_breaks: Vec<crate::gibs::PropBreak>,
+    /// Explosive props broken this tick (CBreakableProp::Break -> ExplosionCreate):
+    /// world-space center, integer magnitude and radius.
+    pub prop_explosions: Vec<(Vec3, f32, f32)>,
     /// env_physexplosion entities whose Explode input arrived (phys_explosion).
     pub phys_explosions: Vec<usize>,
     /// Set by the host: a dead player no longer takes damage (m_takedamage).
@@ -313,6 +316,7 @@ impl Scene {
             globals: crate::globals::Globals::spawn(world),
             entity_damage: Vec::new(),
             prop_breaks: Vec::new(),
+            prop_explosions: Vec::new(),
             phys_explosions: Vec::new(),
             keyvalue_overrides: BTreeMap::new(),
             player_dead: false,

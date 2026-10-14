@@ -184,6 +184,10 @@ pub struct PropData {
     pub breakable_model: Option<String>,
     pub breakable_count: i32,
     pub breakable_skin: i32,
+    /// explosive_damage / explosive_radius when the prop_data section sets them (they
+    /// override the entity's ExplodeDamage / ExplodeRadius keyvalues).
+    pub explosive_damage: Option<f32>,
+    pub explosive_radius: Option<f32>,
 }
 impl Default for PropData {
     fn default() -> Self {
@@ -196,6 +200,8 @@ impl Default for PropData {
             breakable_model: None,
             breakable_count: 0,
             breakable_skin: 0,
+            explosive_damage: None,
+            explosive_radius: None,
         }
     }
 }
