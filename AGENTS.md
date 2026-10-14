@@ -103,10 +103,11 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Retail Valve resource files (e.g. `ep2/scripts/HudLayout.res` in the 20th Anniversary update) contain authentic authoring errors, such as unquoted identifiers merged into quoted literals (`"ypos" "426"HudPoisonDamageIndicator`).
   - Following Source SDK `KeyValues.cpp` (`RecursiveLoadFromBuffer: got } in key`), when `}` is encountered where a value is expected, the parser breaks out of the current block cleanly instead of aborting the parse. This allows retail expansion HUD and chapter background maps to load without error.
 
-- **Menu Button Letter Outline**:
-  - Main menu and pause menu button labels (`Mode::MainMenu` and `Mode::Pause`) are drawn with a thin semi-transparent black border along the letter edge paths/contours of the characters rather than drawing rectangular bounding boxes or background fills around the button clickable area.
+- **Menu Button & Title Letter Outline**:
+  - Main menu and pause menu button labels (`Mode::MainMenu` and `Mode::Pause`), as well as game titles (`HALF-LIFE 2` / `HALF-LIFE'`) and expansion subtitles (`title2`, e.g. `--- Episode One ---`, `--- Episode Two ---`, `--- Lost Coast ---` across `hl2`, `hl2ep1`, `hl2ep2`, `hl2lc`), are drawn with a thin semi-transparent black border along the letter edge paths/contours of the characters (`TextOutline::DEFAULT`, `Color::new(0.0, 0.0, 0.0, 0.45)`, 1.0px thickness) rather than drawing rectangular bounding boxes or background fills.
   - The letter border is rendered via `FontFace::draw_baseline_outlined` / `draw_cell_text_outlined` emitting 8-directional 1px offset glyph quads with semi-transparent black (`TextOutline::new(Color::new(0.0, 0.0, 0.0, 0.45), 1.0)` default / `0.65` armed / `0.25` disabled) before emitting the foreground glyphs.
-  - When pressed, the letter text and its contour outline shift together by `(1.0, 1.0)`.
+  - When rendering character-by-character logos with per-glyph advances (such as `title_face` line 0), rendering uses two passes (Pass 1 emits all 8-directional outline quads for all characters, Pass 2 emits all foreground quads) so outline quads never overlap adjacent foreground characters.
+  - When pressed, the button letter text and its contour outline shift together by `(1.0, 1.0)`.
   - Spacers and disabled rows never emit active buttons, and the letter outline ensures crisp text contrast on bright, light, or white backgrounds without modifying menu geometry or drawing button boxes.
 
 ## Runtime invariants to preserve

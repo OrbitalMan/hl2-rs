@@ -1596,32 +1596,47 @@ impl Console {
                         }
                     };
                     if line_idx == 0 {
+                        let mut chars = Vec::with_capacity(line.len());
                         for character in line.chars() {
+                            chars.push((character, pen));
+                            // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
+                            pen.x += face.metrics(character, em).advance_width.round();
+                        }
+                        for &(character, char_pen) in &chars {
+                            draw_cell_text_outlined(
+                                &character.to_string(),
+                                char_pen,
+                                geometry.title_tall,
+                                self.title_font.as_ref(),
+                                self.title_metrics,
+                                Color::new(0., 0., 0., 0.),
+                                TextOutline::DEFAULT,
+                            );
+                        }
+                        for &(character, char_pen) in &chars {
                             draw_cell_text(
                                 &self.canvas,
                                 &character.to_string(),
-                                pen,
+                                char_pen,
                                 geometry.title_tall,
                                 self.title_font.as_ref(),
                                 self.title_metrics,
                                 WHITE,
                             );
-                            // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
-                            pen.x += face.metrics(character, em).advance_width.round();
                         }
                     } else {
                         // Subtitle line (e.g. episode subtitle). The HALFLIFE2.ttf logo font only maps
                         // HALF-LIFE' glyphs and maps lowercase letters to symbol icons.
                         // Subtitle text is drawn with the menu font so Latin letters and punctuation render cleanly.
                         let sub_tall = (geometry.title_tall * 0.55).round().max(14.);
-                        draw_cell_text(
-                            &self.canvas,
+                        draw_cell_text_outlined(
                             line,
                             pen,
                             sub_tall,
                             self.menu_font.as_ref(),
                             self.menu_metrics,
                             Color::from_rgba(255, 255, 255, 200),
+                            TextOutline::DEFAULT,
                         );
                     }
                 }
@@ -1644,8 +1659,7 @@ impl Console {
                     } else {
                         (geometry.title_tall * 0.55).round().max(14.)
                     };
-                    draw_cell_text(
-                        &self.canvas,
+                    draw_cell_text_outlined(
                         line,
                         pen,
                         tall,
@@ -1656,6 +1670,7 @@ impl Console {
                         } else {
                             Color::from_rgba(255, 255, 255, 200)
                         },
+                        TextOutline::DEFAULT,
                     );
                 }
             }
@@ -3156,6 +3171,181 @@ mod tests {
         assert_eq!(
             pressed_fg_quads[0].destination.y,
             unpressed_first_fg_pos.y + 1.0
+        );
+    }
+
+    #[test]
+    fn menu_titles_and_subtitles_draw_letters_with_border_along_edge_path() {
+        let mut console = Console::default();
+        console.canvas.resize(1280., 720.);
+        console.mode = Mode::MainMenu;
+
+        let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
+        console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
+        console.menu_metrics = CellMetrics::from_bytes(font_bytes).unwrap_or_default();
+        assert!(console.menu_font.is_some());
+
+        let mut loc = Localization::default();
+        loc.insert("GameUI_HalfLife2", "Half-Life 2");
+        loc.insert("GameUI_EpisodeOne", "Episode One");
+        loc.insert("GameUI_EpisodeTwo", "Episode Two");
+        loc.insert("GameUI_LostCoast", "Lost Coast");
+        console.set_resources(GameUiResources {
+            localization: loc.clone(),
+            category_titles: resources::fallback_category_titles(&loc),
+            ..Default::default()
+        });
+
+        let default_border = Color::new(0.0, 0.0, 0.0, 0.45);
+        let geometry = console.menu_layout.geometry(console.canvas.height());
+
+        for title_font_enabled in [false, true] {
+            if title_font_enabled {
+                console.title_metrics = CellMetrics::from_bytes(font_bytes).unwrap_or_default();
+                console.title_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
+                console.title_face = console.title_font.as_ref().map(FontFace::face);
+            } else {
+                console.title_font = None;
+                console.title_face = None;
+            }
+
+            // Test all expansion categories: hl2, hl2ep1, hl2ep2, hl2lc
+            for (category, has_subtitle) in [
+                ("hl2", false),
+                ("hl2ep1", true),
+                ("hl2ep2", true),
+                ("hl2lc", true),
+            ] {
+                console.main_menu = GameMenu::new(
+                    vec![
+                        MenuItem {
+                            label: category.into(),
+                            command: format!("SwitchExpansion {category}"),
+                            category: Some("main".into()),
+                            order: 10,
+                            visibility: Visibility::Always,
+                            caps: true,
+                        },
+                        MenuItem {
+                            label: "Back".into(),
+                            command: "SwitchCategory main".into(),
+                            category: Some(category.into()),
+                            order: 20,
+                            visibility: Visibility::Always,
+                            caps: true,
+                        },
+                    ],
+                    Default::default(),
+                    &loc,
+                );
+                console.main_menu.activate(0, &loc);
+                assert_eq!(console.main_menu.category(), category);
+                console.draw(0.0);
+                let quads = console.canvas.drain();
+
+                let title_quads: Vec<_> = quads
+                    .iter()
+                    .filter(|q| q.destination.y < geometry.menu.y)
+                    .collect();
+
+                // 1. No untextured background box or fill quads in title/subtitle area
+                let untextured: Vec<_> =
+                    title_quads.iter().filter(|q| q.texture.is_none()).collect();
+                assert!(
+                    untextured.is_empty(),
+                    "title/subtitle area for category {category} (title_font={title_font_enabled}) must not have box/fill quads: found {:?}",
+                    untextured.len()
+                );
+
+                // 2. Outline quads emitted along letter paths with default border color
+                let outline_quads: Vec<_> = title_quads
+                    .iter()
+                    .filter(|q| q.color == default_border)
+                    .collect();
+                assert!(
+                    !outline_quads.is_empty(),
+                    "title/subtitle for category {category} (title_font={title_font_enabled}) must emit outline quads"
+                );
+                assert!(
+                    outline_quads.iter().all(|q| q.texture.is_some()),
+                    "outline quads must be textured glyphs tracing the letter contour"
+                );
+
+                // 3. Foreground quads: line 0 is WHITE, subtitle (if present) is rgba(255, 255, 255, 200)
+                let fg_line0: Vec<_> = title_quads.iter().filter(|q| q.color == WHITE).collect();
+                assert!(
+                    !fg_line0.is_empty(),
+                    "title line 0 must emit white foreground glyph quads for category {category}"
+                );
+
+                let fg_sub: Vec<_> = title_quads
+                    .iter()
+                    .filter(|q| q.color == Color::from_rgba(255, 255, 255, 200))
+                    .collect();
+                if has_subtitle {
+                    assert!(
+                        !fg_sub.is_empty(),
+                        "subtitle line must emit subtitle foreground glyph quads for category {category}"
+                    );
+                } else {
+                    assert!(
+                        fg_sub.is_empty(),
+                        "category {category} should not emit subtitle foreground quads"
+                    );
+                }
+
+                let total_fg = fg_line0.len() + fg_sub.len();
+                assert_eq!(
+                    outline_quads.len(),
+                    total_fg * 8,
+                    "each title/subtitle letter in category {category} (title_font={title_font_enabled}) must emit 8 outline quads"
+                );
+
+                // 4. In title_font mode, verify two-pass layering for line 0:
+                // All line 0 outline quads must precede all line 0 foreground quads.
+                if title_font_enabled {
+                    let first_fg_line0_pos = title_quads
+                        .iter()
+                        .position(|q| q.color == WHITE)
+                        .expect("foreground quad for line 0");
+                    let outline_count_before_first_fg = title_quads[..first_fg_line0_pos]
+                        .iter()
+                        .filter(|q| q.color == default_border)
+                        .count();
+                    assert_eq!(
+                        outline_count_before_first_fg,
+                        fg_line0.len() * 8,
+                        "all line 0 outline quads must be drawn before any line 0 foreground quads"
+                    );
+                }
+            }
+        }
+
+        // 5. Verify Pause menu also renders title outline
+        console.mode = Mode::Pause;
+        console.pause_menu.set_in_game(true, &loc);
+        console.draw(0.0);
+        let pause_quads = console.canvas.drain();
+        let pause_title_quads: Vec<_> = pause_quads
+            .iter()
+            .filter(|q| q.destination.y < geometry.menu.y)
+            .collect();
+        let pause_outline: Vec<_> = pause_title_quads
+            .iter()
+            .filter(|q| q.color == default_border)
+            .collect();
+        let pause_fg: Vec<_> = pause_title_quads
+            .iter()
+            .filter(|q| q.color == WHITE)
+            .collect();
+        assert!(
+            !pause_outline.is_empty(),
+            "pause menu must emit title outline quads"
+        );
+        assert_eq!(
+            pause_outline.len(),
+            pause_fg.len() * 8,
+            "pause menu title letters must each have 8 outline quads"
         );
     }
 }

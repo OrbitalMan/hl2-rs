@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-14 Menu title and subtitle letter contour outline
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::hud`: added `TextOutline::DEFAULT` (`Color::new(0.0, 0.0, 0.0, 0.45)`, thickness `1.0`). In `FontFace::draw_baseline_outlined`, guarded foreground quad emission with `color.a > 0.0` so outline-only passes emit no zero-alpha foreground quads.
+- `hl2-ui::console`: in `Console::draw`, applied `TextOutline::DEFAULT` to menu titles (`HALF-LIFE 2` / `HALF-LIFE'`) and expansion subtitles (`title2`, e.g. `--- Episode One ---`, `--- Episode Two ---`, `--- Lost Coast ---`) across all categories (`hl2`, `hl2ep1` / `episodic`, `hl2ep2` / `ep2`, `hl2lc` / `lostcoast`), for both `title_face` font rendering and fallback menu font rendering. For character-by-character logo rendering (`title_face` line 0), implemented two-pass layering (Pass 1 emits all 8-directional outline quads for all glyphs; Pass 2 emits all foreground quads) to ensure no character outline quad ever overlaps adjacent foreground glyphs. Added unit test `menu_titles_and_subtitles_draw_letters_with_border_along_edge_path`.
+- `HL2RS/AGENTS.md`: expanded the Menu Button & Title Letter Outline convention to document title and subtitle letter contour outlines, two-pass character logo layering, and category coverage.
+- `HL2RS/STATUS.md`: recorded title and subtitle letter contour outlines across main and expansion submenus.
+
+**Why:**
+- The half-life 2 title and episode/expansion subtitles in the main menu and submenus were drawn with un-outlined white / translucent white text, making them difficult to read on bright or light 3D background maps. Applying the same thin semi-transparent black letter edge contour outline provides crisp readability while preserving the clean authentic look without box or rectangular fills.
+
+**Tested how:**
+- `cargo test --manifest-path HL2RS/Cargo.toml --workspace --locked`: all 217+ workspace unit tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked`: all 148 unit tests pass, including `menu_titles_and_subtitles_draw_letters_with_border_along_edge_path` across categories `hl2`, `hl2ep1`, `hl2ep2`, `hl2lc`, both with and without `title_face`.
+- `cargo test --manifest-path HL2RS/Cargo.toml --locked -p hl2-ui -- --ignored`: owned install tests pass.
+- `cargo clippy --manifest-path HL2RS/Cargo.toml --workspace --all-targets --locked -- -D warnings`: 0 warnings.
+- `cargo fmt --manifest-path HL2RS/Cargo.toml --all -- --check`: verified clean formatting.
+
+**Result:** Half-Life 2 titles and expansion subtitles across main and expansion submenus (`hl2`, `hl2ep1`, `hl2ep2`, `hl2lc`) render with a crisp 1px semi-transparent black outline along the letter edge paths.
+
+**Still broken or not tested:** Physical monitor display capture.
+
+**Next:** Ready for user review / commit.
+
 ## 2026-10-14 Menu button letter outline along glyph contours
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

@@ -2,7 +2,16 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: Menu button letter outline along glyph contours (2026-10-14, branch `orbitalman/menu-button-text-border`)
+## Current session: Menu title and subtitle letter contour outline (2026-10-14, branch `orbitalman/menu-button-text-border`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Menu title and subtitle letter contour outline:** Extended the glyph edge contour outline from menu buttons to the Half-Life 2 game title and expansion/episode subtitles across main and expansion submenus:
+  - In `hl2-ui::hud`, added `TextOutline::DEFAULT` (`Color::new(0.0, 0.0, 0.0, 0.45)`, thickness `1.0`). In `FontFace::draw_baseline_outlined`, guarded foreground quad emission with `color.a > 0.0` so outline-only passes emit no zero-alpha foreground quads.
+  - In `hl2-ui::console`, updated `Console::draw` to render menu titles (`HALF-LIFE 2` / `HALF-LIFE'`) and expansion subtitles (`title2`, e.g. `--- Episode One ---`, `--- Episode Two ---`, `--- Lost Coast ---` across `hl2`, `hl2ep1` / `episodic`, `hl2ep2` / `ep2`, `hl2lc` / `lostcoast`) with `TextOutline::DEFAULT`, for both the `title_face` font path and fallback `menu_font` path. For character-by-character logo rendering (`title_face` line 0), implemented two-pass layering (Pass 1 emits all 8-directional outline quads for all glyphs; Pass 2 emits all foreground quads) to ensure no character outline quad ever overlaps adjacent foreground glyphs. Added unit test `menu_titles_and_subtitles_draw_letters_with_border_along_edge_path`.
+  - In `HL2RS/AGENTS.md`, updated the Menu Button & Title Letter Outline convention to document title and subtitle letter contour outlines, two-pass character logo layering, and category coverage.
+- **Validation:** 148 `hl2-ui` tests, all workspace unit tests pass; all owned-install tests pass; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Menu button letter outline along glyph contours (2026-10-14, branch `orbitalman/menu-button-text-border`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Menu button letter outline along glyph contours:** Implemented thin semi-transparent black border along the glyph paths of menu button labels, ensuring crisp text contrast on light/white/bright backgrounds without drawing bounding boxes, panels, or fills around button clickable areas:

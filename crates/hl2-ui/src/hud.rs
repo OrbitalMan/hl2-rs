@@ -71,6 +71,11 @@ impl TextOutline {
         thickness: 0.,
     };
 
+    pub const DEFAULT: Self = Self {
+        color: Color::new(0.0, 0.0, 0.0, 0.45),
+        thickness: 1.0,
+    };
+
     pub const fn new(color: Color, thickness: f32) -> Self {
         Self { color, thickness }
     }
@@ -292,18 +297,20 @@ impl FontFace {
             }
         }
 
-        for (texture, pos, size) in &glyphs {
-            draw_texture_ex(
-                &self.canvas,
-                texture,
-                pos.x,
-                pos.y,
-                color,
-                DrawTextureParams {
-                    dest_size: Some(*size),
-                    ..Default::default()
-                },
-            );
+        if color.a > 0.0 {
+            for (texture, pos, size) in &glyphs {
+                draw_texture_ex(
+                    &self.canvas,
+                    texture,
+                    pos.x,
+                    pos.y,
+                    color,
+                    DrawTextureParams {
+                        dest_size: Some(*size),
+                        ..Default::default()
+                    },
+                );
+            }
         }
     }
     pub(crate) fn draw_baseline(
