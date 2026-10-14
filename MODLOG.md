@@ -1,5 +1,47 @@
 # MODLOG
 
+## 2026-10-15 Background map transition state sequence and dimming effect
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::loading`:
+  - Added `BackgroundTransitionState` enum with explicit states: `Idle`, `Starting { map: String }`, `Loading { map: String, elapsed: f32 }`, `Finished { map: String }`, and `Failed { map: String, reason: String }`.
+  - Added methods on `BackgroundTransitionState`: `start`, `update`, `finish`, `fail`, `reset`, `is_active`, `is_terminal`, `is_failed`, `is_finished`, `target_map`, and `overlay_alpha`.
+  - Updated `LoadingDialog` to embed `transition: BackgroundTransitionState`. In `new_background`, initializes transition to `Starting { map }`. In `update`, advances transition elapsed time. In `set_error`, transitions to `Failed { reason }`. In `set_complete`, transitions to `Finished`.
+  - Updated `draw_background_overlay` and `draw` (corner plaque) to only emit quads while `transition.is_active()` is true. Once failed or completed, no overlay or plaque quads are drawn.
+  - Added unit tests: `test_background_transition_success_sequence`, `test_background_transition_failure_sequence`, and `test_background_loading_dialog_failure_ends_transition_and_suppresses_overlay`.
+- `hl2-ui::console`:
+  - Added `background_transition: BackgroundTransitionState` to `Console`.
+  - Updated `Console::start_background_loading` to start the transition.
+  - Updated `Console::update_loading` to advance transition time.
+  - Added `Console::background_load_failed(&mut self, reason: &str)` and updated `Console::loading_failed(&mut self, error: &str)` to explicitly transition to `Failed { map, reason }`, dismiss the loading dialog and plaque, and reset progress.
+  - Updated `Console::loading_complete` and `Console::level_loaded` to transition active background transitions to `Finished { map }`.
+  - Added `Console::background_transition_state(&self) -> &BackgroundTransitionState`.
+  - Updated `Console::draw` to condition background overlay drawing on active transition state.
+  - Added unit tests: `background_loading_state_sequence_success`, `background_load_failed_ends_transition_and_cleans_up`, and `generic_loading_failed_on_background_cleans_up`.
+- `hl2-bevy::campaign`:
+  - In `step_map_load`, updated background load failure to invoke `ui.source.background_load_failed(&error.to_string())` instead of generic `loading_complete()`, ensuring background map load failures cleanly register as `Failed` in the transition state machine while keeping the menu intact.
+- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented background transition state machine, dimming overlay, and rendering subsystem analysis for 3D scene blur.
+- `HL2RS/STATUS.md`: updated status to record background transition state sequence and failure cleanup.
+
+**Why:**
+- Screen dimming without scene blur was investigated: in `hl2-bevy`, HUD material quads sample 2D canvas textures and do not sample the active 3D framebuffer (there is no intermediate render target or blur pass). True live scene blur in Source requires multi-pass offscreen render targets (`BlurFilterX/Y`), which is part of the 3D post-processing pipeline rather than 2D VGUI. Per guidance, rather than building a new post-processing subsystem, the contained effect retains the authentic dimming overlay and non-blocking plaque while modeling the transition as an explicit, robust state sequence (start, loading, finished/failed) that properly terminates and cleans up even upon load failure.
+
+**Tested how:**
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked`: all 157 unit tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked -- --ignored`: all owned install tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml --locked`: all 320+ workspace unit tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-bevy --locked -- campaign::tests::headless_bevy_app_submenu_entry_switches_background_map_and_scene --ignored`: passes in 2.08s.
+- `cargo clippy --manifest-path HL2RS/Cargo.toml --locked --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --manifest-path HL2RS/Cargo.toml --all -- --check`: verified clean formatting.
+
+**Result:** Background map loading transitions follow an explicit state sequence (`Idle` -> `Starting` -> `Loading` -> `Finished` / `Failed`). Failures cleanly dismiss the transition overlay and plaque.
+
+**Still broken or not tested:** True multi-pass Gaussian framebuffer blur is not implemented and requires a future post-processing render graph pass in Bevy (limitation documented). Visual presentation on display needs manual check.
+
+**Next:** Verification and handoff.
+
 ## 2026-10-15 Authentic episode and lost coast submenu subtitle fonts and glyph decorations
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

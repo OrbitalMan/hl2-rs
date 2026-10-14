@@ -160,7 +160,7 @@ pub fn poll(
                 ui.source.log(&warning);
                 campaign.failures.push(warning);
                 sim.loading_failed();
-                ui.source.loading_complete();
+                ui.source.background_load_failed(&error.to_string());
                 return;
             }
             let error = format!("Map transition failed for {}: {error}", job.request.map);

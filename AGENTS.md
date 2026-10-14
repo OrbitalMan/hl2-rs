@@ -92,12 +92,13 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Navigating Back or pressing Escape preserves the current expansion background map; it must not revert to base Half-Life 2 until another expansion is explicitly chosen.
   - Verification of background map transitions must use end-to-end headless Bevy app tests that assert asynchronous loader completion and active scene entity replacement; unit-testing state transitions alone is insufficient.
 
-- **Background vs Gameplay Loading UI/UX**:
+- **Background vs Gameplay Loading UI/UX & Transition State Sequence**:
   - Gameplay map loading uses the full modal centered `LoadingDialog` (380 x 112) with a segmented progress bar and localized stage reports (`#GameUI_LoadingFilename`, `#LoadingProgress_*`), blocking clicks to underlying menus.
-  - Background map loading uses a non-blocking bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark raised panel, without progress bars.
+  - Background map loading uses an explicit state sequence (`BackgroundTransitionState`: `Idle` -> `Starting` -> `Loading` -> `Finished` / `Failed`) and renders a non-blocking bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark raised panel, without progress bars.
   - Menu navigation buttons remain interactive, armed on hover, and clickable while a background map is loading.
-  - A full-canvas blurred backdrop overlay (`Quad::blur` with `rgba(0, 0, 0, 0.45)`) is drawn behind menu text and buttons during background map loading to soften and blur the underlying 3D scene.
-  - When background map loading finishes (or fails), the corner plaque and blur overlay disappear immediately.
+  - A full-canvas transition backdrop overlay (`Quad::blur` with `rgba(0, 0, 0, 0.45)`) is drawn behind menu text and buttons during background map loading to soften and dim the underlying 3D scene.
+  - When background map loading finishes or fails, the transition cleanly transitions to `Finished` or `Failed`, and the corner plaque and blur overlay disappear immediately.
+  - Technical note on scene blur: in retail Source, GameUI uses a 2D VGUI dimming overlay and corner loading plaque; full live 3D post-processing blur requires offscreen framebuffer render targets (`BlurFilterX/Y`), which is part of the 3D pipeline rather than 2D VGUI. In Bevy, 2D HUD material quads do not read the active 3D framebuffer, so the transition combines the authentic dimming overlay and non-blocking plaque.
 
 - **KeyValues Syntax Quirks & Parser Tolerance**:
   - Retail Valve resource files (e.g. `ep2/scripts/HudLayout.res` in the 20th Anniversary update) contain authentic authoring errors, such as unquoted identifiers merged into quoted literals (`"ypos" "426"HudPoisonDamageIndicator`).

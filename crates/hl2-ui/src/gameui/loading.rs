@@ -60,6 +60,115 @@ pub enum LoadingKind {
 /// Dimensions of the background loading plaque (130 x 36 per Source VGUI `CLoadingDiscPanel`).
 pub const BACKGROUND_LOADING_SIZE: Vec2 = Vec2::new(130., 36.);
 
+/// Explicit state sequence for background map transitions.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum BackgroundTransitionState {
+    /// No background transition is active.
+    #[default]
+    Idle,
+    /// Background transition initiated for the target map.
+    Starting { map: String },
+    /// Background loader is actively streaming/processing the target map.
+    Loading { map: String, elapsed: f32 },
+    /// Background map has successfully loaded; transition completed.
+    Finished { map: String },
+    /// Background map loading failed; transition ended with error.
+    Failed { map: String, reason: String },
+}
+
+impl BackgroundTransitionState {
+    /// Initiates a background map transition to the given map.
+    pub fn start(&mut self, map: impl Into<String>) {
+        *self = Self::Starting { map: map.into() };
+    }
+
+    /// Advances the transition state over time (dt in seconds).
+    pub fn update(&mut self, dt: f32) {
+        match self {
+            Self::Starting { map } => {
+                *self = Self::Loading {
+                    map: std::mem::take(map),
+                    elapsed: dt.max(0.0),
+                };
+            }
+            Self::Loading { elapsed, .. } => {
+                *elapsed += dt.max(0.0);
+            }
+            Self::Finished { .. } | Self::Failed { .. } | Self::Idle => {}
+        }
+    }
+
+    /// Completes the transition successfully.
+    pub fn finish(&mut self) {
+        match self {
+            Self::Starting { map } | Self::Loading { map, .. } => {
+                *self = Self::Finished {
+                    map: std::mem::take(map),
+                };
+            }
+            _ => *self = Self::Idle,
+        }
+    }
+
+    /// Ends the transition due to a loading failure.
+    pub fn fail(&mut self, reason: impl Into<String>) {
+        let map = match self {
+            Self::Starting { map } | Self::Loading { map, .. } => std::mem::take(map),
+            Self::Finished { map } | Self::Failed { map, .. } => std::mem::take(map),
+            Self::Idle => String::new(),
+        };
+        *self = Self::Failed {
+            map,
+            reason: reason.into(),
+        };
+    }
+
+    /// Resets the transition to idle.
+    pub fn reset(&mut self) {
+        *self = Self::Idle;
+    }
+
+    /// Whether a background transition is actively in progress (Starting or Loading).
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Starting { .. } | Self::Loading { .. })
+    }
+
+    /// Whether the transition has reached a terminal state (Finished or Failed).
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Finished { .. } | Self::Failed { .. })
+    }
+
+    /// Whether the transition ended with a failure.
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+
+    /// Whether the transition completed successfully.
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Self::Finished { .. })
+    }
+
+    /// Target map name if a transition is active or completed/failed.
+    pub fn target_map(&self) -> Option<&str> {
+        match self {
+            Self::Starting { map }
+            | Self::Loading { map, .. }
+            | Self::Finished { map }
+            | Self::Failed { map, .. } => Some(map.as_str()),
+            Self::Idle => None,
+        }
+    }
+
+    /// Transition overlay dimming alpha (0.0..=0.45).
+    pub fn overlay_alpha(&self) -> f32 {
+        if self.is_active() {
+            0.45
+        } else {
+            0.0
+        }
+    }
+}
+
 /// State of an active map loading dialog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadingDialog {
@@ -70,6 +179,7 @@ pub struct LoadingDialog {
     pub status_override: Option<String>,
     pub error: Option<String>,
     pub complete: bool,
+    pub transition: BackgroundTransitionState,
 }
 
 impl LoadingDialog {
@@ -83,19 +193,22 @@ impl LoadingDialog {
             status_override: None,
             error: None,
             complete: false,
+            transition: BackgroundTransitionState::Idle,
         }
     }
 
     /// Creates a new loading dialog for background map loading with a non-blocking corner plaque.
     pub fn new_background(map: impl Into<String>) -> Self {
+        let map_str = map.into();
         Self {
-            map: map.into(),
+            map: map_str.clone(),
             kind: LoadingKind::Background,
             stage: None,
             fraction: 0.0,
             status_override: None,
             error: None,
             complete: false,
+            transition: BackgroundTransitionState::Starting { map: map_str },
         }
     }
 
@@ -109,6 +222,9 @@ impl LoadingDialog {
         if self.error.is_some() || self.complete {
             return;
         }
+        if self.is_background() {
+            self.transition.update(1.0 / 60.0);
+        }
         if let Some(p) = progress {
             self.fraction = p.fraction.clamp(0.0, 1.0);
             self.stage = Some(p.stage);
@@ -117,11 +233,18 @@ impl LoadingDialog {
 
     /// Sets a failure error message. Locks the dialog in the failed state.
     pub fn set_error(&mut self, error: impl Into<String>) {
-        self.error = Some(error.into());
+        let err = error.into();
+        if self.is_background() {
+            self.transition.fail(&err);
+        }
+        self.error = Some(err);
     }
 
     /// Marks the loading operation as complete.
     pub fn set_complete(&mut self) {
+        if self.is_background() {
+            self.transition.finish();
+        }
         self.fraction = 1.0;
         self.complete = true;
     }
@@ -217,22 +340,27 @@ impl LoadingDialog {
     /// This softens and blurs the underlying 3D background behind the main menu.
     /// Never applies to gameplay map loading.
     pub fn draw_background_overlay(&self, canvas: &crate::canvas::Canvas) {
-        if !self.is_background() {
+        if !self.is_background() || !self.transition.is_active() {
             return;
         }
-        canvas.blur(
-            0.,
-            0.,
-            canvas.width(),
-            canvas.height(),
-            Color::new(0.0, 0.0, 0.0, 0.45),
-        );
+        let alpha = self.transition.overlay_alpha();
+        if alpha > 0.0 {
+            canvas.blur(
+                0.,
+                0.,
+                canvas.width(),
+                canvas.height(),
+                Color::new(0.0, 0.0, 0.0, alpha),
+            );
+        }
     }
 
     /// Draws the loading dialog centered within the painter's canvas bounds.
     pub fn draw(&self, painter: &Painter, loc: &Localization) {
         if self.is_background() {
-            self.draw_background_plaque(painter, loc);
+            if self.transition.is_active() {
+                self.draw_background_plaque(painter, loc);
+            }
             return;
         }
         let label_text = self.status_text(loc);
@@ -581,6 +709,132 @@ mod tests {
         assert!(
             draw_quads.iter().all(|q| !q.blur),
             "no quad in gameplay loading dialog may have blur enabled"
+        );
+    }
+
+    #[test]
+    fn test_background_transition_success_sequence() {
+        let mut state = BackgroundTransitionState::default();
+        assert_eq!(state, BackgroundTransitionState::Idle);
+        assert!(!state.is_active());
+        assert!(!state.is_terminal());
+        assert_eq!(state.overlay_alpha(), 0.0);
+
+        state.start("ep1_background01");
+        assert_eq!(
+            state,
+            BackgroundTransitionState::Starting {
+                map: "ep1_background01".into()
+            }
+        );
+        assert!(state.is_active());
+        assert!(!state.is_terminal());
+        assert_eq!(state.target_map(), Some("ep1_background01"));
+        assert_eq!(state.overlay_alpha(), 0.45);
+
+        state.update(0.1);
+        assert_eq!(
+            state,
+            BackgroundTransitionState::Loading {
+                map: "ep1_background01".into(),
+                elapsed: 0.1,
+            }
+        );
+        assert!(state.is_active());
+        assert_eq!(state.overlay_alpha(), 0.45);
+
+        state.update(0.05);
+        if let BackgroundTransitionState::Loading { elapsed, .. } = &state {
+            assert!((elapsed - 0.15).abs() < 1e-5);
+        } else {
+            panic!("expected Loading state");
+        }
+
+        state.finish();
+        assert_eq!(
+            state,
+            BackgroundTransitionState::Finished {
+                map: "ep1_background01".into()
+            }
+        );
+        assert!(!state.is_active());
+        assert!(state.is_terminal());
+        assert!(state.is_finished());
+        assert!(!state.is_failed());
+        assert_eq!(state.overlay_alpha(), 0.0);
+    }
+
+    #[test]
+    fn test_background_transition_failure_sequence() {
+        let mut state = BackgroundTransitionState::default();
+        state.start("ep2_background01");
+        assert!(state.is_active());
+
+        state.update(0.05);
+        assert!(matches!(state, BackgroundTransitionState::Loading { .. }));
+
+        state.fail("BSP file missing or corrupted");
+        assert_eq!(
+            state,
+            BackgroundTransitionState::Failed {
+                map: "ep2_background01".into(),
+                reason: "BSP file missing or corrupted".into(),
+            }
+        );
+        assert!(!state.is_active());
+        assert!(state.is_terminal());
+        assert!(state.is_failed());
+        assert!(!state.is_finished());
+        assert_eq!(state.overlay_alpha(), 0.0);
+        assert_eq!(state.target_map(), Some("ep2_background01"));
+    }
+
+    #[test]
+    fn test_background_loading_dialog_failure_ends_transition_and_suppresses_overlay() {
+        use crate::canvas::Canvas;
+        use crate::gameui::widgets::{Fonts, Theme};
+
+        let canvas = Canvas::default();
+        canvas.resize(1920., 1080.);
+        let mut dialog = LoadingDialog::new_background("lostcoast_background01");
+        assert!(dialog.is_background());
+        assert!(dialog.transition.is_active());
+
+        // Overlay is drawn when active
+        dialog.draw_background_overlay(&canvas);
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+
+        // Map loading fails
+        dialog.set_error("IO error loading map");
+        assert!(dialog.is_failed());
+        assert!(!dialog.transition.is_active());
+        assert!(dialog.transition.is_failed());
+        assert!(dialog.transition.is_terminal());
+
+        // Once failed, background overlay and plaque must NOT be drawn
+        dialog.draw_background_overlay(&canvas);
+        let overlay_quads = canvas.drain();
+        assert!(
+            overlay_quads.is_empty(),
+            "failed background map load must suppress overlay"
+        );
+
+        let loc = Localization::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.0,
+        };
+        dialog.draw(&painter, &loc);
+        let plaque_quads = canvas.drain();
+        assert!(
+            plaque_quads.is_empty(),
+            "failed background map load must suppress corner plaque"
         );
     }
 }

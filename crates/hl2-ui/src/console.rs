@@ -148,6 +148,7 @@ pub struct Console {
     pause_menu: GameMenu,
     pub(crate) confirm_box: Option<(MessageBox, ConfirmKind)>,
     pub loading_dialog: Option<crate::gameui::loading::LoadingDialog>,
+    pub background_transition: crate::gameui::loading::BackgroundTransitionState,
     /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
     background_level: bool,
     /// Currently loaded map name, if any.
@@ -366,6 +367,7 @@ impl Default for Console {
             pause_menu,
             confirm_box: None,
             loading_dialog: None,
+            background_transition: crate::gameui::loading::BackgroundTransitionState::Idle,
             background_level: false,
             loaded_map: None,
             pending_map: None,
@@ -650,6 +652,9 @@ impl Console {
     /// Called by the host after a map finished loading. A background level shows the main menu;
     /// any other map starts gameplay.
     pub fn level_loaded(&mut self, background: bool) {
+        if background && self.background_transition.is_active() {
+            self.background_transition.finish();
+        }
         self.loading_dialog = None;
         crate::gameui::loading::reset_progress();
         self.background_level = background;
@@ -682,15 +687,30 @@ impl Console {
     /// Displays the non-blocking corner plaque for background map loading.
     pub fn start_background_loading(&mut self, map: &str) {
         self.pending_map = Some(map.to_owned());
+        self.background_transition.start(map);
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
         crate::gameui::loading::reset_progress();
     }
 
     /// Updates loading progress from the latest background loader report.
     pub fn update_loading(&mut self) {
+        if self.background_transition.is_active() {
+            self.background_transition.update(1.0 / 60.0);
+        }
         if let Some(loading) = &mut self.loading_dialog {
             loading.update(crate::gameui::loading::current_progress());
         }
+    }
+
+    /// Ends the background transition due to a failure and dismisses the loading plaque.
+    pub fn background_load_failed(&mut self, reason: &str) {
+        self.background_transition.fail(reason);
+        if let Some(loading) = &mut self.loading_dialog {
+            loading.set_error(reason);
+        }
+        self.loading_dialog = None;
+        self.pending_map = None;
+        crate::gameui::loading::reset_progress();
     }
 
     /// Marks the active loading dialog as failed with the given error message.
@@ -698,11 +718,26 @@ impl Console {
         self.pending_map = None;
         if let Some(loading) = &mut self.loading_dialog {
             loading.set_error(error);
+            if loading.is_background() {
+                self.background_transition.fail(error);
+                self.loading_dialog = None;
+                crate::gameui::loading::reset_progress();
+            }
+        } else if self.background_transition.is_active() {
+            self.background_transition.fail(error);
         }
     }
 
     /// Clears the loading dialog once the level has completely loaded.
     pub fn loading_complete(&mut self) {
+        if let Some(loading) = &mut self.loading_dialog {
+            if loading.is_background() {
+                self.background_transition.finish();
+            }
+            loading.set_complete();
+        } else if self.background_transition.is_active() {
+            self.background_transition.finish();
+        }
         self.loading_dialog = None;
         self.pending_map = None;
         self.clear_menu_hover();
@@ -716,9 +751,18 @@ impl Console {
 
     /// Whether background map loading is currently active.
     pub fn is_background_loading(&self) -> bool {
-        self.loading_dialog
-            .as_ref()
-            .is_some_and(|l| l.is_background() && !l.is_failed() && !l.is_complete())
+        self.background_transition.is_active()
+            || self
+                .loading_dialog
+                .as_ref()
+                .is_some_and(|l| l.is_background() && !l.is_failed() && !l.is_complete())
+    }
+
+    /// Returns the current background transition state.
+    pub fn background_transition_state(
+        &self,
+    ) -> &crate::gameui::loading::BackgroundTransitionState {
+        &self.background_transition
     }
 
     /// Whether any modal dialog or blocking widget is currently active over the menus.
@@ -1632,6 +1676,17 @@ impl Console {
             if let Some(loading) = &self.loading_dialog {
                 if loading.is_background() {
                     loading.draw_background_overlay(&self.canvas);
+                }
+            } else if self.background_transition.is_active() {
+                let alpha = self.background_transition.overlay_alpha();
+                if alpha > 0.0 {
+                    self.canvas.blur(
+                        0.,
+                        0.,
+                        self.canvas.width(),
+                        self.canvas.height(),
+                        Color::new(0.0, 0.0, 0.0, alpha),
+                    );
                 }
             }
             let geometry = self.menu_layout.geometry(self.canvas.height());
@@ -3160,6 +3215,102 @@ mod tests {
     }
 
     #[test]
+    fn background_loading_state_sequence_success() {
+        let mut console = Console {
+            mode: Mode::MainMenu,
+            ..Default::default()
+        };
+        console.canvas.resize(1920., 1080.);
+
+        assert_eq!(
+            console.background_transition_state(),
+            &crate::gameui::loading::BackgroundTransitionState::Idle
+        );
+
+        console.start_background_loading("ep2_background01");
+        assert!(console.is_background_loading());
+        assert!(matches!(
+            console.background_transition_state(),
+            crate::gameui::loading::BackgroundTransitionState::Starting { .. }
+        ));
+        assert_eq!(
+            console.background_transition_state().target_map(),
+            Some("ep2_background01")
+        );
+
+        console.update_loading();
+        assert!(matches!(
+            console.background_transition_state(),
+            crate::gameui::loading::BackgroundTransitionState::Loading { .. }
+        ));
+
+        console.level_loaded(true);
+        assert!(!console.is_background_loading());
+        assert!(matches!(
+            console.background_transition_state(),
+            crate::gameui::loading::BackgroundTransitionState::Finished { .. }
+        ));
+        assert!(console.background_transition_state().is_terminal());
+
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+        assert!(quads.iter().all(|q| !q.blur));
+    }
+
+    #[test]
+    fn background_load_failed_ends_transition_and_cleans_up() {
+        let mut console = Console {
+            mode: Mode::MainMenu,
+            ..Default::default()
+        };
+        console.canvas.resize(1920., 1080.);
+
+        console.start_background_loading("lostcoast_background01");
+        assert!(console.is_background_loading());
+
+        console.background_load_failed("Failed to open BSP file");
+        assert!(!console.is_background_loading());
+        assert_eq!(
+            console.background_transition_state(),
+            &crate::gameui::loading::BackgroundTransitionState::Failed {
+                map: "lostcoast_background01".into(),
+                reason: "Failed to open BSP file".into(),
+            }
+        );
+        assert!(console.background_transition_state().is_terminal());
+        assert!(console.background_transition_state().is_failed());
+
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+        assert!(
+            quads.iter().all(|q| !q.blur),
+            "no blur overlay quads after background load failure"
+        );
+    }
+
+    #[test]
+    fn generic_loading_failed_on_background_cleans_up() {
+        let mut console = Console {
+            mode: Mode::MainMenu,
+            ..Default::default()
+        };
+        console.canvas.resize(1920., 1080.);
+
+        console.start_background_loading("ep1_background01");
+        assert!(console.is_background_loading());
+
+        // Generic loading_failed on a background map must dismiss the dialog and mark transition failed
+        console.loading_failed("Corrupt lump header");
+        assert!(!console.is_background_loading());
+        assert!(console.background_transition_state().is_failed());
+        assert!(console.loading_dialog.is_none());
+
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+        assert!(quads.iter().all(|q| !q.blur));
+    }
+
+    #[test]
     fn menu_buttons_draw_letters_with_border_along_edge_path_and_no_box_fill() {
         let mut console = Console::default();
         console.canvas.resize(1280., 720.);
@@ -3429,8 +3580,10 @@ mod tests {
 
     #[test]
     fn test_subtitle_font_selection_and_glyph_decoration() {
-        let mut console = Console::default();
-        console.mode = Mode::MainMenu;
+        let mut console = Console {
+            mode: Mode::MainMenu,
+            ..Default::default()
+        };
         console.canvas.resize(1280., 720.);
 
         let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");

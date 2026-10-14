@@ -2,7 +2,22 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: Authentic episode and lost coast submenu subtitle fonts and glyph decorations (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Background map transition state sequence and dimming effect (2026-10-15, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Background map transition state sequence & dimming effect:** Modeled background map loading as an explicit state sequence and hardened failure cleanup:
+  - In `hl2-ui::gameui::loading`, added `BackgroundTransitionState` (`Idle`, `Starting { map }`, `Loading { map, elapsed }`, `Finished { map }`, `Failed { map, reason }`) with methods `start`, `update`, `finish`, `fail`, `reset`, `is_active`, `is_terminal`, `is_failed`, `is_finished`, `target_map`, and `overlay_alpha`.
+  - In `hl2-ui::gameui::loading`, embedded `transition: BackgroundTransitionState` on `LoadingDialog`. In `new_background`, initializes transition to `Starting { map }`. In `update`, advances transition elapsed time. In `set_error`, transitions to `Failed { reason }`. In `set_complete`, transitions to `Finished`.
+  - In `hl2-ui::gameui::loading`, updated `draw_background_overlay` and `draw` (corner plaque) to only emit quads while `transition.is_active()` is true.
+  - Added unit tests: `test_background_transition_success_sequence`, `test_background_transition_failure_sequence`, and `test_background_loading_dialog_failure_ends_transition_and_suppresses_overlay`.
+  - In `hl2-ui::console`, added `background_transition: BackgroundTransitionState` to `Console`. Added `Console::background_load_failed` and updated `Console::loading_failed` to transition to `Failed` and dismiss the dialog and plaque. Updated `Console::level_loaded` and `Console::loading_complete` to mark active transitions as `Finished`. Added `Console::background_transition_state`.
+  - Added unit tests: `background_loading_state_sequence_success`, `background_load_failed_ends_transition_and_cleans_up`, and `generic_loading_failed_on_background_cleans_up`.
+  - In `hl2-bevy::campaign`, updated `step_map_load` on background load failure to invoke `ui.source.background_load_failed(&error.to_string())`, cleanly registering failure in the transition state machine while keeping the menu intact.
+  - Root cause analysis: in `hl2-bevy`, HUD material quads do not sample the active 3D framebuffer (no intermediate render target or blur pass). True live scene blur in Source requires multi-pass offscreen render targets (`BlurFilterX/Y`), which is part of the 3D pipeline rather than 2D VGUI. Per guidance, the contained effect retains the authentic dimming overlay and non-blocking plaque while modeling the transition as an explicit, robust state sequence.
+  - Documented findings in `HL2RS/AGENTS.md` and `RustLife2/AGENTS.md`.
+- **Validation:** 157 `hl2-ui` tests pass, all workspace unit tests pass; all owned-install tests pass; headless Bevy app test passes in 2.08s; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Authentic episode and lost coast submenu subtitle fonts and glyph decorations (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Authentic expansion submenu subtitle fonts and glyph decorations:** Fixed font selection and subtitle decorations across Episode One, Episode Two, and Lost Coast submenus:
