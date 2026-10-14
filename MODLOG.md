@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-14 session 17: metrocop AI fixes from the first packaged AI-on runs (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Fixes the cloud sessions' SDK-only AI code (`claude-opus-5-5`, cloud) found in its first packaged runs.
+
+**Changed:** (1) the metrocop AI's activities (ACT_PUSH_PLAYER, baton on/off, police harass, melee, flinches, weapon-translated move/idle/attack) are preloaded for npc_metropolice models (`models::METROPOLICE_AI_ACTIVITIES`): before, their sequences were never loaded, so shove/baton tasks failed and schedules reselected every think; (2) Weapon_TranslateActivity in `SceneMotor::set_activity` from the SDK stunstick/pistol/SMG1 acttables (`ai::host::weapon_translate_activity`; kept only when the model has the result), so ACT_MELEE_ATTACK1 plays the stunstick swing; (3) CAI_SentenceBase::Speak gating: FOkToMakeSound/JustMadeSound per NPC (equal or lower priority culled until 2 + U(1.5, 2.0) s, SDK priorities per sentence group, pain/die always), diagnostics `culled_sentences`; (4) `ai::Conditions` serializes as condition names (a u128 above u64::MAX blanked the whole `ai` report: "number out of range"); the report shows serialization errors instead of null; (5) Weapon_StunStick.Melee_Hit/Melee_Miss preloaded (the hit was refused at playback).
+
+**Why:** owner: metrocops shove and escalate when the player walks up close, not only on +USE; validation checklist steps 3-4.
+
+**Tested how:** hl2-simulation 270, owned tests (HL2_ROOT, all pass), strict Clippy, fmt. Packaged d1_trainstation_02 `--ai`, plaza cop #427: (a) +USE x3 from 50 units (SDK PrecriminalUse: warnings only, no shove at that range): warning 1 line, baton activation animation at 2, AdministerJustice swing at 3 knocks the player ~100 units back, return to post; before the fixes the cop never animated and queued a BACK_UP sentence every think (~80 in 13 s). (b) Walking into him: pushplayer shoves from warning 1, baton at 2, swing at 3 (player pushed back ~100 units), re-approach -> repeated swings with stunstick hit sounds; 3 sentences spoken, 7 culled; health stays 100 (precriminal). Native reference: research 14a native-metrocop movie (plaza cop swing, red fade, punch, displacement, health 100); not a side-by-side timing comparison.
+
+**Result:** the trainstation metrocop escalation chain runs in the packaged game.
+
+**Still broken or not tested:** NPC weapon models (baton not in hand); red fade/punch visuals not checked in captures; native timing comparison; checklist 5 (scripted cops with AI on) and 6 (F4 spawns); policing warnings at the terminal cop (route); citizen +USE speech.
+
+**Next:** STATUS session 17.
 ## 2026-10-14 session 17: NPC random look targets and head turns (DESIGN 14h, `wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

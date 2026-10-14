@@ -2678,9 +2678,9 @@ impl Scene {
             _ => self.unsupported_input(class, &p.input),
         }
     }
-    /// `animate` with an activity only when the actor's rig has a sequence for it.
-    fn animate_activity_if_present(&mut self, world: &World, id: usize, activity: &str) {
-        let present = world
+    /// HaveSequenceForActivity on the actor's loaded rig.
+    pub fn actor_has_activity(&self, world: &World, id: usize, activity: &str) -> bool {
+        world
             .model_instances
             .iter()
             .find(|i| i.entity == Some(id))
@@ -2689,8 +2689,11 @@ impl Scene {
                 r.sequences
                     .iter()
                     .any(|s| s.activity.eq_ignore_ascii_case(activity))
-            });
-        if present {
+            })
+    }
+    /// `animate` with an activity only when the actor's rig has a sequence for it.
+    fn animate_activity_if_present(&mut self, world: &World, id: usize, activity: &str) {
+        if self.actor_has_activity(world, id, activity) {
             self.animate(world, id, activity, false);
         }
     }

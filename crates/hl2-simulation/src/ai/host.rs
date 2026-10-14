@@ -28,6 +28,81 @@ pub struct SceneMotor<'a> {
     /// MaxYawSpeed for the current activity (the motor turns at 10x it per second).
     pub yaw_speed: f32,
 }
+/// SDK weapon acttables (weapon_stunstick.cpp, weapon_pistol.cpp, weapon_smg1.cpp
+/// m_acttable) for the NPC weapons the trainstation cops carry.
+pub fn weapon_translate_activity(weapon: &str, activity: &str) -> Option<&'static str> {
+    const STUNSTICK: &[(&str, &str)] = &[
+        ("ACT_MELEE_ATTACK1", "ACT_MELEE_ATTACK_SWING"),
+        ("ACT_IDLE_ANGRY", "ACT_IDLE_ANGRY_MELEE"),
+    ];
+    const PISTOL: &[(&str, &str)] = &[
+        ("ACT_IDLE", "ACT_IDLE_PISTOL"),
+        ("ACT_IDLE_ANGRY", "ACT_IDLE_ANGRY_PISTOL"),
+        ("ACT_RANGE_ATTACK1", "ACT_RANGE_ATTACK_PISTOL"),
+        ("ACT_RELOAD", "ACT_RELOAD_PISTOL"),
+        ("ACT_WALK_AIM", "ACT_WALK_AIM_PISTOL"),
+        ("ACT_RUN_AIM", "ACT_RUN_AIM_PISTOL"),
+        (
+            "ACT_GESTURE_RANGE_ATTACK1",
+            "ACT_GESTURE_RANGE_ATTACK_PISTOL",
+        ),
+        ("ACT_RELOAD_LOW", "ACT_RELOAD_PISTOL_LOW"),
+        ("ACT_RANGE_ATTACK1_LOW", "ACT_RANGE_ATTACK_PISTOL_LOW"),
+        ("ACT_COVER_LOW", "ACT_COVER_PISTOL_LOW"),
+        ("ACT_RANGE_AIM_LOW", "ACT_RANGE_AIM_PISTOL_LOW"),
+        ("ACT_GESTURE_RELOAD", "ACT_GESTURE_RELOAD_PISTOL"),
+        ("ACT_WALK", "ACT_WALK_PISTOL"),
+        ("ACT_RUN", "ACT_RUN_PISTOL"),
+    ];
+    const SMG1: &[(&str, &str)] = &[
+        ("ACT_RANGE_ATTACK1", "ACT_RANGE_ATTACK_SMG1"),
+        ("ACT_RELOAD", "ACT_RELOAD_SMG1"),
+        ("ACT_IDLE", "ACT_IDLE_SMG1"),
+        ("ACT_IDLE_ANGRY", "ACT_IDLE_ANGRY_SMG1"),
+        ("ACT_WALK", "ACT_WALK_RIFLE"),
+        ("ACT_WALK_AIM", "ACT_WALK_AIM_RIFLE"),
+        ("ACT_IDLE_RELAXED", "ACT_IDLE_SMG1_RELAXED"),
+        ("ACT_IDLE_STIMULATED", "ACT_IDLE_SMG1_STIMULATED"),
+        ("ACT_IDLE_AGITATED", "ACT_IDLE_ANGRY_SMG1"),
+        ("ACT_WALK_RELAXED", "ACT_WALK_RIFLE_RELAXED"),
+        ("ACT_WALK_STIMULATED", "ACT_WALK_RIFLE_STIMULATED"),
+        ("ACT_WALK_AGITATED", "ACT_WALK_AIM_RIFLE"),
+        ("ACT_RUN_RELAXED", "ACT_RUN_RIFLE_RELAXED"),
+        ("ACT_RUN_STIMULATED", "ACT_RUN_RIFLE_STIMULATED"),
+        ("ACT_RUN_AGITATED", "ACT_RUN_AIM_RIFLE"),
+        ("ACT_IDLE_AIM_RELAXED", "ACT_IDLE_SMG1_RELAXED"),
+        ("ACT_IDLE_AIM_STIMULATED", "ACT_IDLE_AIM_RIFLE_STIMULATED"),
+        ("ACT_IDLE_AIM_AGITATED", "ACT_IDLE_ANGRY_SMG1"),
+        ("ACT_WALK_AIM_RELAXED", "ACT_WALK_RIFLE_RELAXED"),
+        ("ACT_WALK_AIM_STIMULATED", "ACT_WALK_AIM_RIFLE_STIMULATED"),
+        ("ACT_WALK_AIM_AGITATED", "ACT_WALK_AIM_RIFLE"),
+        ("ACT_RUN_AIM_RELAXED", "ACT_RUN_RIFLE_RELAXED"),
+        ("ACT_RUN_AIM_STIMULATED", "ACT_RUN_AIM_RIFLE_STIMULATED"),
+        ("ACT_RUN_AIM_AGITATED", "ACT_RUN_AIM_RIFLE"),
+        ("ACT_WALK_CROUCH", "ACT_WALK_CROUCH_RIFLE"),
+        ("ACT_WALK_CROUCH_AIM", "ACT_WALK_CROUCH_AIM_RIFLE"),
+        ("ACT_RUN", "ACT_RUN_RIFLE"),
+        ("ACT_RUN_AIM", "ACT_RUN_AIM_RIFLE"),
+        ("ACT_RUN_CROUCH", "ACT_RUN_CROUCH_RIFLE"),
+        ("ACT_RUN_CROUCH_AIM", "ACT_RUN_CROUCH_AIM_RIFLE"),
+        ("ACT_GESTURE_RANGE_ATTACK1", "ACT_GESTURE_RANGE_ATTACK_SMG1"),
+        ("ACT_RANGE_ATTACK1_LOW", "ACT_RANGE_ATTACK_SMG1_LOW"),
+        ("ACT_COVER_LOW", "ACT_COVER_SMG1_LOW"),
+        ("ACT_RANGE_AIM_LOW", "ACT_RANGE_AIM_SMG1_LOW"),
+        ("ACT_RELOAD_LOW", "ACT_RELOAD_SMG1_LOW"),
+        ("ACT_GESTURE_RELOAD", "ACT_GESTURE_RELOAD_SMG1"),
+    ];
+    let table = match weapon {
+        "weapon_stunstick" => STUNSTICK,
+        "weapon_pistol" => PISTOL,
+        "weapon_smg1" => SMG1,
+        _ => return None,
+    };
+    table
+        .iter()
+        .find(|(from, _)| from.eq_ignore_ascii_case(activity))
+        .map(|(_, to)| *to)
+}
 pub fn yaw_of(scene: &Scene, entity: usize) -> f32 {
     let forward = scene.states[entity].rotation * Vec3::X;
     forward.y.atan2(forward.x).to_degrees()
@@ -56,8 +131,18 @@ impl SceneMotor<'_> {
 }
 impl Motor for SceneMotor<'_> {
     fn set_activity(&mut self, activity: &str) {
+        // CAI_BaseNPC::NPC_TranslateActivity -> Weapon_TranslateActivity: the held weapon's
+        // acttable (additionalequipment), kept only when the model has the result.
+        let weapon = self
+            .scene
+            .entity(self.world, self.entity)
+            .and_then(|e| e.get("additionalequipment"))
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let translated = weapon_translate_activity(&weapon, activity)
+            .filter(|t| self.scene.actor_has_activity(self.world, self.entity, t));
         self.scene
-            .ai_set_activity(self.world, self.entity, activity);
+            .ai_set_activity(self.world, self.entity, translated.unwrap_or(activity));
     }
     fn activity_finished(&self) -> bool {
         self.scene.ai_activity_finished(self.entity)

@@ -99,6 +99,8 @@ pub struct Diagnostics {
     pub thinks: u64,
     pub scripted_skips: u64,
     pub sentences: u64,
+    /// Sentences FOkToMakeSound refused (equal or lower priority while speaking).
+    pub culled_sentences: u64,
     pub player_hits: u64,
     pub unknown_goals: BTreeMap<String, u32>,
 }
@@ -129,6 +131,48 @@ pub struct AiRuntime {
     /// The AI ran last tick (switching it off returns NPCs to idle once).
     #[serde(skip)]
     was_enabled: bool,
+    /// CAI_BaseNPC m_flSoundWaitTime / m_nSoundPriority per NPC (FOkToMakeSound).
+    #[serde(skip)]
+    sound_wait: BTreeMap<usize, (f64, i32)>,
+}
+/// SentencePriority_t of the metrocop sentence groups as npc_metropolice.cpp speaks
+/// them (-1 = SENTENCE_PRIORITY_INVALID: plays without the sound timer).
+fn sentence_priority(group: &str) -> i32 {
+    const HIGH: [&str; 12] = [
+        "METROPOLICE_PLAYERHIT",
+        "METROPOLICE_HES_RUNNING",
+        "METROPOLICE_TAKE_HIM_DOWN",
+        "METROPOLICE_REFIND_ENEMY",
+        "METROPOLICE_DANGER",
+        "METROPOLICE_FT_MOUNT",
+        "METROPOLICE_FT_DISMOUNT",
+        "METROPOLICE_SO_BEGIN",
+        "METROPOLICE_SO_END",
+        // TASK_SPEAK_SENTENCE -> SpeakSentence (HIGH).
+        "METROPOLICE_ACTIVATE_BATON",
+        "METROPOLICE_DEACTIVATE_BATON",
+        "METROPOLICE_MOVE_ALONG",
+    ];
+    const MEDIUM: [&str; 9] = [
+        "METROPOLICE_BACK_UP",
+        "METROPOLICE_FREEZE",
+        "METROPOLICE_OVER_HERE",
+        "METROPOLICE_ARREST_IN_POS",
+        "METROPOLICE_HEARD_SOMETHING",
+        "METROPOLICE_LAST_OF_SQUAD",
+        "METROPOLICE_MAN_DOWN",
+        "METROPOLICE_FT_APPROACH",
+        "METROPOLICE_AS_ADV",
+    ];
+    if group.starts_with("METROPOLICE_PAIN") || group == "METROPOLICE_DIE" {
+        -1
+    } else if HIGH.iter().any(|g| group.starts_with(g)) {
+        2
+    } else if MEDIUM.iter().any(|g| group.starts_with(g)) {
+        1
+    } else {
+        0
+    }
 }
 impl AiRuntime {
     /// The AI for the map's NPCs (metrocops) and ai_goal_police entities. `vfs` reads
@@ -202,6 +246,7 @@ impl AiRuntime {
             ignore_player: false,
             player_disposition: None,
             was_enabled: false,
+            sound_wait: BTreeMap::new(),
             schedules,
             relationships: Relationships::default(),
             sounds: SoundEnt::default(),
@@ -679,6 +724,21 @@ impl AiRuntime {
         for request in requests {
             match request {
                 CopRequest::Sentence(group) => {
+                    // CAI_SentenceBase::Speak: FOkToMakeSound (no squads yet) culls a
+                    // sentence of equal or lower priority while the last one's timer runs;
+                    // JustMadeSound(priority, 2 s) sets it to 2 + U(1.5, 2.0) s.
+                    let priority = sentence_priority(group);
+                    if priority >= 0 {
+                        let now = scene.time;
+                        if let Some(&(until, last)) = self.sound_wait.get(&id) {
+                            if now <= until && priority <= last {
+                                self.diagnostics.culled_sentences += 1;
+                                continue;
+                            }
+                        }
+                        let wait = now + 2. + 1.5 + 0.5 * f64::from(self.random());
+                        self.sound_wait.insert(id, (wait, priority));
+                    }
                     self.diagnostics.sentences += 1;
                     scene.sounds.push(crate::sounds::SoundRequest {
                         origin: Some(origin + Vec3::Z * 64.),

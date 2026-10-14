@@ -368,6 +368,9 @@ impl PreparedAudio {
                 // weapon_bugbait.cpp squeeze, grenade_bugbait.cpp splat.
                 "Weapon_Bugbait.Splat",
                 "GrenadeBugBait.Splat",
+                // Metrocop baton hits (weapon_stunstick.txt SoundData melee_hit/melee_miss).
+                "Weapon_StunStick.Melee_Hit",
+                "Weapon_StunStick.Melee_Miss",
             ]
             .into_iter()
             .map(str::to_owned),

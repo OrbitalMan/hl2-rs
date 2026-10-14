@@ -768,6 +768,9 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 // Weapon-translated metrocop idles (weapon_pistol/smg1 acttables).
                 "ACT_IDLE_PISTOL",
                 "ACT_IDLE_SMG1",
+                // Stunstick acttable results for the metrocop shove/baton chain.
+                "ACT_MELEE_ATTACK_SWING",
+                "ACT_IDLE_ANGRY_MELEE",
                 "idle_subtle",
                 "idle_baton",
                 "walk_all",
@@ -788,6 +791,12 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             .into_iter()
             .map(String::from)
             .collect::<BTreeSet<_>>();
+            // npc_metropolice AI activities (hl2-simulation ai::metropolice/police and the
+            // weapon acttables): the cloud AI branch requested them at runtime only, so
+            // their sequences were never loaded and every task using them failed.
+            if instance.kind == "npc_metropolice" {
+                wanted.extend(METROPOLICE_AI_ACTIVITIES.iter().map(|a| a.to_lowercase()));
+            }
             for e in &world.entities {
                 for key in [
                     "DefaultAnim",
@@ -955,6 +964,40 @@ pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result
 }
 /// studiohdr_t keyvalueindex/keyvaluesize (offsets 312/316 in MDL 44-49): the model's
 /// $keyvalues text (prop_data, physgun_interactions, ...).
+/// Activities the metrocop AI sets (class schedules, policing, flinches, melee) and
+/// their stunstick/pistol/SMG1 acttable translations.
+pub const METROPOLICE_AI_ACTIVITIES: &[&str] = &[
+    "ACT_PUSH_PLAYER",
+    "ACT_MELEE_ATTACK1",
+    "ACT_MELEE_ATTACK_SWING",
+    "ACT_ACTIVATE_BATON",
+    "ACT_DEACTIVATE_BATON",
+    "ACT_POLICE_HARASS1",
+    "ACT_POLICE_HARASS2",
+    "ACT_IDLE_ANGRY",
+    "ACT_IDLE_ANGRY_MELEE",
+    "ACT_IDLE_ANGRY_PISTOL",
+    "ACT_IDLE_ANGRY_SMG1",
+    "ACT_WALK",
+    "ACT_RUN",
+    "ACT_WALK_PISTOL",
+    "ACT_RUN_PISTOL",
+    "ACT_WALK_RIFLE",
+    "ACT_RUN_RIFLE",
+    "ACT_WALK_ANGRY",
+    "ACT_SMALL_FLINCH",
+    "ACT_BIG_FLINCH",
+    "ACT_FLINCH_PHYSICS",
+    "ACT_COWER",
+    "ACT_RANGE_ATTACK_PISTOL",
+    "ACT_RANGE_ATTACK_SMG1",
+    "ACT_GESTURE_RANGE_ATTACK_PISTOL",
+    "ACT_GESTURE_RANGE_ATTACK_SMG1",
+    "ACT_RELOAD_PISTOL",
+    "ACT_RELOAD_SMG1",
+    "ACT_DUCK_DODGE",
+    "ACT_TO_COMBAT_SOUND",
+];
 pub fn studio_keyvalues(mdl: &[u8]) -> Result<Option<String>> {
     if bytes(mdl, 0, 4)? != b"IDST" {
         bail!("model magic mismatch");

@@ -168,8 +168,15 @@ impl Cond {
 }
 
 /// CAI_ScheduleBits: up to 128 conditions.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Conditions(pub u128);
+/// Reports list the set condition names: a u128 above u64::MAX (class conditions from
+/// bit 64 on) is out of range for serde_json and blanked the whole AI report.
+impl Serialize for Conditions {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.names().serialize(serializer)
+    }
+}
 impl Conditions {
     pub fn of(conditions: &[Cond]) -> Self {
         let mut set = Self::default();
