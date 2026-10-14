@@ -1,5 +1,11 @@
 # STATUS
 
+## Friendly game-folder setup (2026-10-15)
+
+Setup-only integration based on main `675c9df`: separate bootstrap window, Steam discovery plus remembered per-user folder, native Browse, editable/pasteable path, retry detection, content-readiness errors, Continue/Cancel, `--setup` and `--no-setup`. Beginner **Setup steps** are near the top of README. No NPC, simulation, in-game menu/settings or unrelated test changes are included; NPC branch references are unchanged.
+
+Main validation: five setup/control tests pass; workspace checks pass with **459 passed, 48 ignored and one unchanged physics test excluded**. The original glass-table `std::ptr::eq` assertion fails when explicitly executed (`main/original-physics-test.log`); its earlier test-only adjustment is excluded from main to preserve the requested setup-only scope. Strict Clippy, formatting and whitelist checks pass. The main release package was rebuilt; `main/setup-ready.png` and `main/gameplay.png` show the setup UI and station02 startup. Earlier missing-folder, readiness, preference and rejected-capture evidence remains under `artifacts/friendly-setup-20261015`. Native picker/clipboard interaction and macOS/Linux setup are **not tested** because Windows computer-use timed out through recovery. Readiness checks are bounded, not a full Steam integrity audit. Existing campaign limitations below remain applicable.
+
 Checkpoint: 2026-10-14 session 17 (explosions break props, explosive barrels, arsenal + physics merged to main with deferred leftovers, step 14 next); 2026-10-14 session 16 (prop data, chunk gibs, displacement and clip collision, world hinges); 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop, gibs, NPC studio decals, hinges, debris props; branch head after b0dc562 + debris); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
 
 ## Current session 17 (2026-10-14)

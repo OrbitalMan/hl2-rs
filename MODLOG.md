@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15: friendly game installation setup on main
+
+**Agent/model:** Codex Desktop, GPT-6 family (exact model identifier not exposed). No subagents.
+
+**Changed:** independent bootstrap window with editable/pasteable folder, native Browse, Retry detection, Continue/Cancel; remembered per-user installation, automatic recovery/discovery, `--setup`, `--no-setup` and a setup-preview diagnostic. Root/hl2-subfolder normalization and bounded map/core-content checks reuse source-assets/VFS. A helper owns the setup event loop before gameplay starts. Added beginner **Setup steps** near the top of README. Discovery now returns its validated root.
+
+**Why:** owner requested friendly first-launch setup and explicitly requested publication based on main without NPC changes.
+
+**Tested how:** based on main 675c9df: five setup/control tests; workspace tests 459 passed / 48 ignored / one unchanged physics pointer-identity test excluded; strict Clippy, formatting and diff/whitelist checks. Main release package rebuilt, setup screenshot visually inspected, station02 startup captured. Earlier owned readiness, missing-content and preference checks are recorded in docs/validation.md. Evidence: artifacts/friendly-setup-20261015/main.
+
+**Result:** only setup source, its dependencies, README and setup documentation are applied to main. NPC logic, animation, gameplay wiring and NPC branch references are untouched. The test-only physics adjustment from the earlier feature branch is also excluded. Initial rejected captures are preserved; preview now waits for renderer readiness.
+
+**Still broken or not tested:** the unchanged glass-table address assertion fails locally; it is documented, not modified. Native picker/clipboard interaction, title-bar cancellation and the complete interactive Continue-to-game transition could not be exercised because Windows computer-use timed out through recovery; control/validation/response paths have programmatic tests. macOS/Linux setup is **not tested**. Content checks are not a full integrity/compatibility audit.
+
+**Next:** exercise native picker/clipboard on supported desktops when computer use is available. Existing campaign work remains separate.
+
 ## 2026-10-14 session 17: explosive props (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
