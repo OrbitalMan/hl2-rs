@@ -167,6 +167,10 @@ pub struct State {
     pub parent: Option<Parent>,
 }
 impl State {
+    /// The actor plays authored locomotion (IsMoving for look-target choice).
+    pub fn is_moving(&self) -> bool {
+        self.movement_animation.is_some()
+    }
     /// Whether the entity's collider takes part in queries. Gear parented to an animated
     /// attachment (helmets on NPCs) moves with its parent's hierarchy and must not block
     /// that parent; native traces skip hierarchy children of the moving entity.
@@ -1100,14 +1104,36 @@ impl Scene {
         }
         hash
     }
+    /// A look target's EyePosition: the player's eye, an NPC's animated "eyes"
+    /// attachment (else origin + 64), another entity's origin, or the point itself.
+    pub fn look_position(&self, world: &World, target: crate::attention::Target) -> Option<Vec3> {
+        use crate::attention::Target;
+        match target {
+            Target::Player => Some(self.player_feet + Vec3::Z * 64.),
+            Target::Position(p) => Some(p),
+            Target::Entity(t) => {
+                let state = self.states.get(t).filter(|s| !s.killed)?;
+                if self.ent(world, t).class().starts_with("npc_") {
+                    let eyes = self.attachment_frames(world, t, &["eyes"])[0];
+                    Some(eyes.map_or(state.origin + Vec3::Z * 64., |m| m.w_axis.truncate()))
+                } else {
+                    Some(state.origin)
+                }
+            }
+        }
+    }
     /// MaintainLookTargets: blend this tick's interests into each NPC's head control.
     fn update_heads(&mut self, world: &World, dt: f32) {
-        let mut actors: BTreeSet<usize> = self.look_targets.report().keys().copied().collect();
+        let mut actors: BTreeSet<usize> = self.look_targets.actors().collect();
         actors.extend(self.heads.keys().copied());
         for actor in actors {
             let state = &self.states[actor];
             if state.killed || !self.ent(world, actor).class().starts_with("npc_") {
                 self.heads.remove(&actor);
+                continue;
+            }
+            // Outside the player's PVS the head control keeps its last values.
+            if !self.look_targets.in_pvs(actor) {
                 continue;
             }
             // CAI_BaseActor: eye position from the animated "eyes" attachment; self-interest
@@ -1119,21 +1145,23 @@ impl Scene {
                 glam::Mat3::from_mat4(m)
             });
             let forward = frame.x_axis;
+            // Active interests (random, then explicit) at their ramped Interest(), scaled by
+            // HeadTargetValidity; targets are eye positions (CAI_InterestTarget_t::
+            // GetPosition -> EyePosition).
+            let now = self.time;
             let targets = self
                 .look_targets
-                .report()
-                .get(&actor)
-                .into_iter()
-                .flatten()
+                .active(actor)
                 .filter_map(|interest| {
+                    let value = interest.interest(now);
                     let position = match interest.target {
-                        crate::attention::Target::Player => self.player_feet + Vec3::Z * 64.,
                         crate::attention::Target::Entity(t) if t == actor => {
-                            return Some((forward, interest.importance));
+                            return Some((forward, value));
                         }
-                        crate::attention::Target::Entity(t) => self.states.get(t)?.origin,
+                        target => self.look_position(world, target)?,
                     };
-                    Some((position - eye, interest.importance))
+                    let validity = crate::attention::head_target_validity(eye, forward, position);
+                    Some((position - eye, value * validity))
                 })
                 .collect::<Vec<_>>();
             let head = self.heads.entry(actor).or_default();
@@ -1550,6 +1578,7 @@ impl Scene {
                 crate::attention::Target::Player => self.player_feet,
                 crate::attention::Target::Entity(t) if t == actor => continue,
                 crate::attention::Target::Entity(t) => self.states[t].origin,
+                crate::attention::Target::Position(p) => p,
             };
             let forward = self.states[actor].rotation * Vec3::X;
             let current = forward.y.atan2(forward.x).to_degrees();

@@ -392,6 +392,7 @@ fn main() -> Result<()> {
                 sky::present,
                 monitors::present,
                 monitors::present_materials,
+                eyes::attention_pvs,
                 material_proxies::present,
                 hud::present,
             )

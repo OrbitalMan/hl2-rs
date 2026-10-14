@@ -171,8 +171,24 @@ pub fn present(
         let origin = bone.transform_point3(mesh_eye.eye.origin);
         let head_forward = -bone.transform_vector3(mesh_eye.eye.forward).normalize();
         let world_origin = state.origin + state.rotation * (origin * mesh_eye.scale);
-        // SetViewtarget is per actor; both eyes consume the same world target.
+        // SetViewtarget is per actor; both eyes consume the same world target. Outside the
+        // player's PVS an animated-face actor keeps its last view target.
+        let frozen = !game.scene.look_targets.in_pvs(owner.0)
+            && game
+                .scene
+                .entity(&game.world, owner.0)
+                .is_some_and(|e| hl2_simulation::attention::has_animated_face(e.class()));
+        let latched = frozen
+            .then(|| eyes.view_targets.get(&owner.0).copied())
+            .flatten();
         let selected = actor_targets.entry(owner.0).or_insert_with(|| {
+            if let Some(point) = latched {
+                return Some(Selected {
+                    point,
+                    label: "view".into(),
+                    interest: None,
+                });
+            }
             use hl2_simulation::attention::Target;
             let actor_eye = candidates.iter().find(|(id, _, _)| *id == Some(owner.0));
             let (actor_eye, forward) = actor_eye.map_or(
@@ -181,6 +197,7 @@ pub fn present(
             );
             let position = |target| match target {
                 Target::Player => Some(candidates[0].1),
+                Target::Position(p) => Some(p),
                 Target::Entity(id) => game.scene.states.get(id).filter(|s| !s.killed).map(|s| {
                     candidates
                         .iter()
@@ -188,6 +205,7 @@ pub fn present(
                         .map_or(s.origin, |(_, p, _)| *p)
                 }),
             };
+            // Explicit (scene/AI) and random (MaintainLookTargets glance) interests.
             if let Some((interest, point)) = game
                 .scene
                 .look_targets
@@ -196,12 +214,24 @@ pub fn present(
                 let label = match interest.target {
                     Target::Player => "player".into(),
                     Target::Entity(id) => format!("#{id}"),
+                    Target::Position(_) => "view".into(),
                 };
                 return Some(Selected {
                     point,
                     label,
-                    interest: Some(interest.clone()),
+                    // Random glances carry a ramp; only explicit interests count as scene.
+                    interest: (interest.ramp == 0.).then(|| interest.clone()),
                 });
+            }
+            // Actors with an animated face rely on their look queues (no target: the
+            // latched/random view point below); others (cyclers) keep the nearest-visible
+            // fallback.
+            if game
+                .scene
+                .entity(&game.world, owner.0)
+                .is_some_and(|e| hl2_simulation::attention::has_animated_face(e.class()))
+            {
+                return None;
             }
             candidates
                 .iter()
@@ -373,4 +403,47 @@ mod tests {
             eye + glam::Vec3::X * 0.5
         ));
     }
+}
+/// COND_IN_PVS for animated-face NPCs (CAI_BaseActor::MaintainLookTargets skips the head
+/// and eye updates when the player cannot see the actor): the BSP PVS of the player's eye
+/// or of the active monitor's point_camera (CPointCamera::SetupVisibility adds its view
+/// to the client's visibility; gating on the player alone froze Kleiner on Barney's
+/// monitor with his eyes rolled up), refreshed every 0.1 s of scene time. A PVS error
+/// leaves the set unknown, which fails open.
+pub fn attention_pvs(
+    mut game: ResMut<crate::gameplay::Gameplay>,
+    sim: Res<crate::movement::Simulation>,
+    sky: Res<crate::sky::Sky>,
+    monitors: Res<crate::monitors::Monitors>,
+) {
+    let now = game.scene.time;
+    if now - game.scene.look_targets.pvs_time < 0.1 && game.scene.look_targets.pvs_time > 0. {
+        return;
+    }
+    let mut eyes = vec![glam::Vec3::from_array(sim.eye().to_array())];
+    if let Some(camera) = monitors.selected() {
+        eyes.push(game.scene.states[camera].origin);
+    }
+    let mut visible = std::collections::BTreeSet::new();
+    for (id, entity) in game.world.entities.iter().enumerate() {
+        if !hl2_simulation::attention::has_animated_face(entity.class()) {
+            continue;
+        }
+        let state = &game.scene.states[id];
+        if state.killed {
+            continue;
+        }
+        let head = state.origin + glam::Vec3::Z * 64.;
+        for &eye in &eyes {
+            match sky.bounds_in_pvs(eye, state.origin, head) {
+                Ok(true) => {
+                    visible.insert(id);
+                    break;
+                }
+                Ok(false) => {}
+                Err(_) => return,
+            }
+        }
+    }
+    game.scene.look_targets.set_pvs(visible, now.max(1e-6));
 }

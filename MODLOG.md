@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-14 session 17: NPC random look targets and head turns (DESIGN 14h, `wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `attention` gains the CAI_BaseActor random look queue: ramped interests (CAI_InterestTarget_t::Interest), position targets, `LookTargets::maintain` (explicit interests cut random ones to ramp + 0.2 s and delay the next pick 1 s; else PickLookTarget(1.5, 2.5): PickRandomLookTarget over drawn studio-model entities and the player within 360 units, a moving player or 1 in 3 standing held 1-4 s, others random importance x10 NPC x10 moving, FVisible + ValidHeadTarget, fewer considered than RandomInt(0,5) -> MakeRandomLookTarget 128 units ahead at influence 0.01; next pick at duration - 0.4), `attention::think` every 0.1 s for animated-face classes (cops, Combine soldiers, citizens, Barney, Alyx, Breen, Eli, Kleiner, Mossman, Monk, Dog, generic actors) with or without `--ai`, COND_IN_PVS gating from the host's BSP PVS (`eyes::attention_pvs`; outside the PVS head and eyes keep their last values; unknown fails open). Head control takes random + explicit interests at Interest() x HeadTargetValidity with EyePosition targets (NPC eyes attachment). Eyes take the newest valid active interest (explicit first); the old nearest-visible fallback (which also ignored walls for the player: it excluded the world entity id) stays only for actors without an animated face (cyclers). Report keys `random_look_targets`, `heads`.
+
+**Why:** owner report (session 17): citizens side-eye the player with their eyes only and stare forever; native turns the head and glances periodically.
+
+**Tested how:** unit tests (Interest ramp curve, glance expiry/truncation/explicit priority, made-up point and scripted actors), hl2-simulation 270 passed, strict Clippy, fmt. Packaged d1_trainstation_02 fly eye (-4110,-2180,128) yaw 290 beside the dispenser queue (#580-582), 13 s: #580 turns his head up to ~49 degrees toward the player, holds 1-2 s and looks ahead again, about half the samples on the player; #581 alternates between #580 and the player; #582 looks at the others or ahead. Native at the same spot (original-oracle T071459Z, 14 frames ~2 s apart): the front citizen's head is turned to the camera in roughly 60-70% of frames and ahead in the rest; no continuous stare in either. A first spot (eye -4180,-2256) was behind the dispenser wall (rejected; the dispenser correctly blocked sight). PVS gating on the player alone froze Kleiner on Barney's monitor (head pitched up, eyes rolled back; rejected), so the PVS test includes the active monitor's point_camera (CPointCamera::SetupVisibility): Kleiner's feed is back to 6 changed pixels, Breen's broadcast feed differs by 1186 pixels from random glances when no LOOKAT is active (not verified against native). Regression batch artifacts/s17-look2-regression (player-only gating): 25/17/26 (doll01 only), no panics.
+
+**Result:** NPCs glance at the player and around with head turns instead of staring.
+
+**Still broken or not tested:** Breen's broadcast glances vs native; citizen +USE speech (TLK_USE via the response system: "We can't be seen talking", owner); tactical (enemy), navigation look-ahead and combat look-forward branches; synthetic queues; expressions; moving brush entities as candidates; entity sphere order (ours: player first, then load order); native random stream; no numerical native head-angle comparison (frames only); the citizen model variety (natives use random citizen heads).
+
+**Next:** AI-on checklist (warnings/shove at the plaza and terminal cops), NPC weapon models, merge after validation.
 ## 2026-10-14 session 17: step 14 merge onto main (local validation) and metrocop idle (`local/validate-npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Builds on the cloud sessions' `wip/cloud-npc-ai-20261010` (Claude Code cloud, `claude-opus-5-5`, SDK-only).
