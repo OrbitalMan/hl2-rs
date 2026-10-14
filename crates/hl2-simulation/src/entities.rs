@@ -240,6 +240,25 @@ pub struct SceneAnimationState {
     pub origin: [f32; 3],
     pub yaw_degrees: f32,
 }
+/// The idle activity a metrocop starts and returns to (CAI_BaseNPC idles on ACT_IDLE;
+/// CBaseCombatCharacter::Weapon_TranslateActivity maps it through the held weapon's
+/// acttable: weapon_pistol -> ACT_IDLE_PISTOL, weapon_smg1/ar2/shotgun -> ACT_IDLE_SMG1;
+/// weapon_stunstick has no ACT_IDLE entry). The sequence is then a weighted choice
+/// (SelectWeightedSequence: police.mdl batonidle1 x2 / batonidle2 x1). Before this,
+/// every cop without DefaultAnim played "Idle_Baton", a sequence without an activity
+/// that leans forward with an arm across the chest (owner report, session 17).
+pub fn metropolice_idle_activity(entity: &Entity) -> &'static str {
+    match entity
+        .get("additionalequipment")
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "weapon_pistol" => "ACT_IDLE_PISTOL",
+        "weapon_smg1" | "weapon_ar2" | "weapon_shotgun" => "ACT_IDLE_SMG1",
+        _ => "ACT_IDLE",
+    }
+}
 pub struct Scene {
     pub states: Vec<State>,
     /// KeyValues set at runtime by AddOutput, by (entity, lowercase key).
@@ -543,6 +562,13 @@ impl Scene {
                 let enabled = number(&world.entities[id], "spawnflags", 0.) as u32 & 0x80 == 0;
                 scene.states[id].enabled = enabled;
                 scene.camera_activity(world, id, false);
+            }
+        }
+        // Metrocops without a DefaultAnim start on their (weapon-translated) idle activity.
+        for id in 0..world.entities.len() {
+            let e = &world.entities[id];
+            if e.class() == "npc_metropolice" && e.get("DefaultAnim").is_none() {
+                scene.animate_activity_if_present(world, id, metropolice_idle_activity(e));
             }
         }
         scene.hold_template_children(world);
@@ -2623,6 +2649,22 @@ impl Scene {
             _ => self.unsupported_input(class, &p.input),
         }
     }
+    /// `animate` with an activity only when the actor's rig has a sequence for it.
+    fn animate_activity_if_present(&mut self, world: &World, id: usize, activity: &str) {
+        let present = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .is_some_and(|r| {
+                r.sequences
+                    .iter()
+                    .any(|s| s.activity.eq_ignore_ascii_case(activity))
+            });
+        if present {
+            self.animate(world, id, activity, false);
+        }
+    }
     fn animate(&mut self, world: &World, id: usize, name: &str, finish: bool) -> bool {
         let key = world
             .model_instances
@@ -2778,7 +2820,7 @@ impl Scene {
                 .or(self.ent(world, actor).get("DefaultAnim"))
                 .unwrap_or_else(|| {
                     let preferred = if self.ent(world, actor).class() == "npc_metropolice" {
-                        "idle_baton"
+                        metropolice_idle_activity(self.ent(world, actor))
                     } else {
                         "idle_subtle"
                     };
@@ -2787,7 +2829,9 @@ impl Scene {
                         .iter()
                         .find(|i| i.entity == Some(actor))
                         .and_then(|i| world.rigs.get(&i.asset_key()));
-                    if rig.is_some_and(|r| {
+                    if preferred.starts_with("ACT_") {
+                        preferred
+                    } else if rig.is_some_and(|r| {
                         !r.clips.contains_key(preferred)
                             && r.sequences
                                 .iter()
@@ -4293,6 +4337,82 @@ mod tests {
             touch_scene.transition,
             Some(("next".into(), "arrival".into()))
         );
+    }
+    #[test]
+    fn metrocops_idle_on_their_weapon_translated_idle_activity() {
+        // Synthetic police rig: Idle_Baton (no activity), batonidle1/2 (ACT_IDLE) and
+        // smg1idle1 (ACT_IDLE_SMG1); a stunstick cop, an SMG cop, one with DefaultAnim.
+        use modkit_core::{
+            animation::{Clip, Rig, Sequence},
+            ModelInstance,
+        };
+        let clip = || Clip {
+            layer: Default::default(),
+            events: Vec::new(),
+            fps: 30.,
+            looping: true,
+            frames: vec![vec![]; 10],
+        };
+        let seq = |name: &str, activity: &str, weight: i32, order: u32| Sequence {
+            name: name.into(),
+            activity: activity.into(),
+            weight,
+            order,
+        };
+        let w = World {
+            entities: vec![
+                entity(
+                    "npc_metropolice",
+                    "a",
+                    &[("additionalequipment", "weapon_stunstick")],
+                ),
+                entity(
+                    "npc_metropolice",
+                    "b",
+                    &[("additionalequipment", "weapon_smg1")],
+                ),
+                entity("npc_metropolice", "c", &[("DefaultAnim", "Idle_Baton")]),
+            ],
+            model_instances: (0..3)
+                .map(|id| ModelInstance {
+                    background: false,
+                    model: "police.mdl".into(),
+                    origin: Vec3::ZERO,
+                    angles: Vec3::ZERO,
+                    skin: 0,
+                    scale: 1.,
+                    kind: "npc_metropolice".into(),
+                    solid: false,
+                    solid_mode: None,
+                    entity: Some(id),
+                })
+                .collect(),
+            rigs: BTreeMap::from([(
+                "police.mdl#0".into(),
+                Rig {
+                    clips: ["idle_baton", "batonidle1", "batonidle2", "smg1idle1"]
+                        .into_iter()
+                        .map(|n| (n.to_string(), clip()))
+                        .collect(),
+                    sequences: vec![
+                        seq("idle_baton", "", 0, 0),
+                        seq("batonidle1", "ACT_IDLE", 2, 1),
+                        seq("batonidle2", "ACT_IDLE", 1, 2),
+                        seq("smg1idle1", "ACT_IDLE_SMG1", 2, 3),
+                    ],
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let scene = Scene::new(&w);
+        assert!(
+            ["batonidle1", "batonidle2"].contains(&scene.states[0].animation.as_str()),
+            "{}",
+            scene.states[0].animation
+        );
+        assert_eq!(scene.states[1].animation, "smg1idle1");
+        assert_eq!(scene.states[2].animation, "idle_baton");
     }
     #[test]
     fn combine_cameras_deploy_retract_and_redeploy() {

@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-14 session 17: step 14 merge onto main (local validation) and metrocop idle (`local/validate-npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Builds on the cloud sessions' `wip/cloud-npc-ai-20261010` (Claude Code cloud, `claude-opus-5-5`, SDK-only).
+
+**Changed:** merged `wip/cloud-npc-ai-20261010` onto main 675c9df (conflicts kept both sides: report keys ai/npc_spawns + phys_explosions/gibs, `--ai` + `--frag-swept-box` help, the AI's pre-move player impulse before the gravity-gun max speed, Scene `spawned` + `keyvalue_overrides`, physics `add_entity_hull` after the constraint code). The owned HEV sentence length test skips METROPOLICE_* (their `{Len 1.5}` is a placeholder). **Metrocop idle (owner report: cops lean as if against a wall):** cops without DefaultAnim played "Idle_Baton" (a sequence with no activity; leaning forward, arm across the chest); they now start (and return after scripts) on ACT_IDLE translated by their weapon's acttable (pistol -> ACT_IDLE_PISTOL, smg1/ar2/shotgun -> ACT_IDLE_SMG1, stunstick none) with weighted selection (batonidle1 x2 / batonidle2 x1); rigs preload ACT_IDLE_PISTOL/ACT_IDLE_SMG1. Oracle (private): `!cmd` view suffix runs ORACLE_CMD (backup run_view_oracle.py.bak-20261014b).
+
+**Why:** owner direction (session 17): merge the physics/arsenal work, then step 14; owner report on the cop idle pose.
+
+**Tested how:** workspace tests (hl2-simulation 266 + new `metrocops_idle_on_their_weapon_translated_idle_activity`; hl2-bevy's two release-only should_panic image tests fail as before), owned tests (HL2_ROOT, all pass after the HEV test fix), strict Clippy, fmt. AI-off regression batch artifacts/s17-ai-regression (before the idle fix): 25/17/26 (doll01 only), finals vs s17-regression max pixel <= 7 (exposure noise), Breen/Kleiner feeds identical. Native (original-oracle): T065205Z ent_text shows terminal_side_cop idling on sequence 8 batonidle2 (ACT_IDLE, SCHED_IDLE_STAND, behavior Policing) upright with arms down; T065343Z a prop_dynamic police.mdl on batonidle1 is upright too; T065122Z at 80 units the cop runs SCHED_POLICE_FACE_ALONG_GOAL with ACT_POLICE_HARASS2. Our offline decode of batonidle1/2 is smooth across its 30-frame sections (the clip decoder was not the cause). Packaged after the fix: cop #577 upright, arms down, same view as native (artifacts/s17/cop577-fixed-compare.png). d1_trainstation_02 launch to frame 30 with the spawn pool: ~7.5 s (main not timed side by side).
+
+**Result:** metrocops idle like native (minus the baton in hand).
+
+**Still broken or not tested:** NPC weapon models (native cops hold the baton); AI-on plaza/terminal checks (checklist 3-6) in progress: the hall walk to terminal_side_cop hits the hall wall (route needed); citizens/Barney keep their idle_subtle default (not compared); head/eye attention (owner: NPCs stare with their eyes only; native turns the head and glances periodically).
+
+**Next:** AI-on validation, NPC head/look attention research, weapon models.
 ## 2026-10-14 session 17: explosive props (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

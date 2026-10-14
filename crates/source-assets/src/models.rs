@@ -765,6 +765,9 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         if instance.entity.is_some() && !world.rigs.contains_key(&instance.asset_key()) {
             let mut wanted = [
                 "ACT_IDLE",
+                // Weapon-translated metrocop idles (weapon_pistol/smg1 acttables).
+                "ACT_IDLE_PISTOL",
+                "ACT_IDLE_SMG1",
                 "idle_subtle",
                 "idle_baton",
                 "walk_all",
