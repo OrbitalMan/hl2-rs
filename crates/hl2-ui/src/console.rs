@@ -132,6 +132,9 @@ pub struct Console {
     title_font: Option<FontFace>,
     title_face: Option<Arc<fontdue::Font>>,
     title_metrics: CellMetrics,
+    lostcoast_title_font: Option<FontFace>,
+    lostcoast_title_face: Option<Arc<fontdue::Font>>,
+    lostcoast_title_metrics: CellMetrics,
     title: String,
     category_titles: BTreeMap<String, String>,
     menu_layout: MenuLayout,
@@ -350,6 +353,9 @@ impl Default for Console {
             title_font: None,
             title_face: None,
             title_metrics: CellMetrics::default(),
+            lostcoast_title_font: None,
+            lostcoast_title_face: None,
+            lostcoast_title_metrics: CellMetrics::default(),
             title: "HL2-RS".into(),
             category_titles: resources::fallback_category_titles(&gameui.localization),
             menu_layout: MenuLayout::default(),
@@ -432,18 +438,39 @@ impl Console {
         if let Some(bytes) = menu_bytes {
             console.menu_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
         }
-        if let Some(bytes) = vfs.read("resource/HALFLIFE2.ttf").ok().flatten() {
+        let title_bytes = vfs
+            .read("resource/HL2EP2.ttf")
+            .ok()
+            .flatten()
+            .or_else(|| vfs.read("resource/hl2ep2.ttf").ok().flatten())
+            .or_else(|| {
+                vfs.game_root()
+                    .and_then(|root| std::fs::read(root.join("hl2/resource/hl2ep2.ttf")).ok())
+            })
+            .or_else(|| vfs.read("resource/HALFLIFE2.ttf").ok().flatten())
+            .or_else(|| vfs.read("resource/halflife2.ttf").ok().flatten())
+            .or_else(|| {
+                vfs.game_root()
+                    .and_then(|root| std::fs::read(root.join("hl2/resource/halflife2.ttf")).ok())
+            });
+        if let Some(bytes) = title_bytes {
             console.title_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
             console.title_font = FontFace::load(&bytes, canvas.clone()).ok();
             console.title_face = console.title_font.as_ref().map(FontFace::face);
             if console.title_font.is_some() {
-                // Owned 720px retail capture + GDI probe: requested cell48 -> EM41,
-                // native title baseline262 relative to ClientScheme panelY217.
-                // Other resolutions scale this measured GDI/label relation; font rasterization remains approximate.
-                console.title_metrics = CellMetrics {
-                    em_per_cell: 41. / 48.,
-                    ascent_per_cell: 45. / 48.,
-                };
+                let is_hl2_logo_font = console
+                    .title_face
+                    .as_ref()
+                    .is_some_and(|f| f.lookup_glyph_index('=') == 0);
+                if is_hl2_logo_font {
+                    // Owned 720px retail capture + GDI probe for halflife2.ttf: requested cell48 -> EM41,
+                    // native title baseline262 relative to ClientScheme panelY217.
+                    // Other resolutions scale this measured GDI/label relation; font rasterization remains approximate.
+                    console.title_metrics = CellMetrics {
+                        em_per_cell: 41. / 48.,
+                        ascent_per_cell: 45. / 48.,
+                    };
+                }
                 console.title = vfs
                     .read("gameinfo.txt")
                     .ok()
@@ -467,6 +494,23 @@ impl Console {
             console.category_titles =
                 resources::fallback_category_titles(&console.gameui.localization);
             console.log("Owned HalfLife2 title font not found; using the HL2-RS fallback title.");
+        }
+
+        let lc_bytes = vfs
+            .read("lostcoast/resource/lostcoast.ttf")
+            .ok()
+            .flatten()
+            .or_else(|| vfs.read("resource/lostcoast.ttf").ok().flatten())
+            .or_else(|| {
+                vfs.game_root().and_then(|root| {
+                    std::fs::read(root.join("lostcoast/resource/lostcoast.ttf")).ok()
+                })
+            });
+        if let Some(bytes) = lc_bytes {
+            console.lostcoast_title_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
+            console.lostcoast_title_font = FontFace::load(&bytes, canvas.clone()).ok();
+            console.lostcoast_title_face =
+                console.lostcoast_title_font.as_ref().map(FontFace::face);
         }
         // Installed desktop GameUI colors. Layout/window controls remain an initial implementation.
         if let Some(root) = vfs
@@ -516,6 +560,18 @@ impl Console {
         self.category_titles = resources.category_titles.clone();
         self.gameui = Arc::new(resources);
         self.options.set_resources(self.gameui.clone());
+    }
+
+    /// Checks whether the primary title font contains glyphs for all non-whitespace characters in `line`.
+    pub(crate) fn title_font_can_render(&self, line: &str) -> bool {
+        if let Some(face) = &self.title_face {
+            !line.is_empty()
+                && line
+                    .chars()
+                    .all(|c| c.is_whitespace() || face.lookup_glyph_index(c) != 0)
+        } else {
+            false
+        }
     }
 
     /// Returns the main menu title for the given category.
@@ -1625,19 +1681,41 @@ impl Console {
                             );
                         }
                     } else {
-                        // Subtitle line (e.g. episode subtitle). The HALFLIFE2.ttf logo font only maps
-                        // HALF-LIFE' glyphs and maps lowercase letters to symbol icons.
-                        // Subtitle text is drawn with the menu font so Latin letters and punctuation render cleanly.
-                        let sub_tall = (geometry.title_tall * 0.55).round().max(14.);
-                        draw_cell_text_outlined(
-                            line,
-                            pen,
-                            sub_tall,
-                            self.menu_font.as_ref(),
-                            self.menu_metrics,
-                            Color::from_rgba(255, 255, 255, 200),
-                            TextOutline::DEFAULT,
-                        );
+                        // Subtitle line (e.g. episode or lost coast submenu subtitle).
+                        let is_lostcoast = line.to_ascii_lowercase().contains("lost coast")
+                            || line.contains("lost coasT");
+                        if is_lostcoast && self.lostcoast_title_font.is_some() {
+                            draw_cell_text_outlined(
+                                line,
+                                pen,
+                                geometry.title_tall,
+                                self.lostcoast_title_font.as_ref(),
+                                self.lostcoast_title_metrics,
+                                Color::from_rgba(255, 255, 255, 200),
+                                TextOutline::DEFAULT,
+                            );
+                        } else if self.title_font_can_render(line) {
+                            draw_cell_text_outlined(
+                                line,
+                                pen,
+                                geometry.title_tall,
+                                self.title_font.as_ref(),
+                                self.title_metrics,
+                                Color::from_rgba(255, 255, 255, 200),
+                                TextOutline::DEFAULT,
+                            );
+                        } else {
+                            let sub_tall = (geometry.title_tall * 0.55).round().max(14.);
+                            draw_cell_text_outlined(
+                                line,
+                                pen,
+                                sub_tall,
+                                self.menu_font.as_ref(),
+                                self.menu_metrics,
+                                Color::from_rgba(255, 255, 255, 200),
+                                TextOutline::DEFAULT,
+                            );
+                        }
                     }
                 }
             } else {
@@ -2619,7 +2697,7 @@ mod tests {
         // Activate Episode One entry
         console.main_menu.activate(0, &loc);
         assert_eq!(console.main_menu.category(), "episodic");
-        assert_eq!(console.current_title(), "Half-Life 2\n--- Episode One ---");
+        assert_eq!(console.current_title(), "Half-Life 2\n== episode one==");
         assert_eq!(console.current_title().lines().count(), 2);
 
         // Activate Back button to return to main
@@ -2631,7 +2709,7 @@ mod tests {
         // Activate Episode Two entry
         console.main_menu.activate(1, &loc);
         assert_eq!(console.main_menu.category(), "ep2");
-        assert_eq!(console.current_title(), "Half-Life 2\n--- Episode Two ---");
+        assert_eq!(console.current_title(), "Half-Life 2\n== episode two ==");
         assert_eq!(console.current_title().lines().count(), 2);
     }
 
@@ -3346,6 +3424,130 @@ mod tests {
             pause_outline.len(),
             pause_fg.len() * 8,
             "pause menu title letters must each have 8 outline quads"
+        );
+    }
+
+    #[test]
+    fn test_subtitle_font_selection_and_glyph_decoration() {
+        let mut console = Console::default();
+        console.mode = Mode::MainMenu;
+        console.canvas.resize(1280., 720.);
+
+        let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
+        console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
+        console.menu_metrics = CellMetrics::from_bytes(font_bytes).unwrap_or_default();
+        console.title_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
+        console.title_face = console.title_font.as_ref().map(FontFace::face);
+        console.title_metrics = CellMetrics::from_bytes(font_bytes).unwrap_or_default();
+
+        // 1. Verify title_font_can_render correctly detects glyph coverage
+        assert!(console.title_font_can_render("== episode one=="));
+        assert!(console.title_font_can_render("== episode two =="));
+        assert!(!console.title_font_can_render(""));
+        // Character not in standard ASCII font
+        assert!(!console.title_font_can_render("λ episode"));
+
+        // 2. Set up category titles
+        let mut loc = Localization::default();
+        loc.insert("GameUI_HalfLife2", "Half-Life 2");
+        let titles = resources::fallback_category_titles(&loc);
+        console.set_resources(GameUiResources {
+            localization: loc.clone(),
+            category_titles: titles,
+            ..Default::default()
+        });
+
+        // 3. Test episode subtitle drawing with title_font
+        console.main_menu = GameMenu::new(
+            vec![
+                MenuItem {
+                    label: "Episode One".into(),
+                    command: "SwitchExpansion episodic".into(),
+                    category: Some("main".into()),
+                    order: 10,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+                MenuItem {
+                    label: "Back".into(),
+                    command: "SwitchCategory main".into(),
+                    category: Some("episodic".into()),
+                    order: 20,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+            ],
+            Default::default(),
+            &loc,
+        );
+        console.main_menu.activate(0, &loc);
+        assert_eq!(console.main_menu.category(), "episodic");
+        assert_eq!(console.current_title(), "Half-Life 2\n== episode one==");
+
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+        let geometry = console.menu_layout.geometry(console.canvas.height());
+        let subtitle_quads: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.destination.y >= geometry.title2.y - 5. && q.destination.y < geometry.menu.y
+            })
+            .collect();
+        assert!(
+            !subtitle_quads.is_empty(),
+            "subtitle must emit quads for '== episode one=='"
+        );
+        let fg_subtitle: Vec<_> = subtitle_quads
+            .iter()
+            .filter(|q| q.color == Color::from_rgba(255, 255, 255, 200))
+            .collect();
+        assert!(
+            !fg_subtitle.is_empty(),
+            "subtitle must have foreground quads with rgba(255, 255, 255, 200)"
+        );
+
+        // 4. Test lostcoast subtitle drawing with dedicated lostcoast_title_font
+        console.lostcoast_title_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
+        console.lostcoast_title_face = console.lostcoast_title_font.as_ref().map(FontFace::face);
+        console.lostcoast_title_metrics = CellMetrics::from_bytes(font_bytes).unwrap_or_default();
+
+        console.main_menu = GameMenu::new(
+            vec![
+                MenuItem {
+                    label: "Lost Coast".into(),
+                    command: "SwitchExpansion lostcoast".into(),
+                    category: Some("main".into()),
+                    order: 10,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+                MenuItem {
+                    label: "Back".into(),
+                    command: "SwitchCategory main".into(),
+                    category: Some("lostcoast".into()),
+                    order: 20,
+                    visibility: Visibility::Always,
+                    caps: true,
+                },
+            ],
+            Default::default(),
+            &loc,
+        );
+        console.main_menu.activate(0, &loc);
+        assert_eq!(console.main_menu.category(), "lostcoast");
+        assert_eq!(console.current_title(), "Half-Life 2\nlost coasT");
+
+        console.draw(0.0);
+        let lc_quads = console.canvas.drain();
+        let lc_subtitle_quads: Vec<_> = lc_quads
+            .iter()
+            .filter(|q| {
+                q.destination.y >= geometry.title2.y - 5. && q.destination.y < geometry.menu.y
+            })
+            .collect();
+        assert!(
+            !lc_subtitle_quads.is_empty(),
+            "lost coast subtitle must emit quads for 'lost coasT'"
         );
     }
 }

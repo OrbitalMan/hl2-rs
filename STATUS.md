@@ -2,7 +2,21 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: Rounded dialog frame corners and overflow clipping (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Authentic episode and lost coast submenu subtitle fonts and glyph decorations (2026-10-15, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Authentic expansion submenu subtitle fonts and glyph decorations:** Fixed font selection and subtitle decorations across Episode One, Episode Two, and Lost Coast submenus:
+  - In `hl2-ui::gameui::resources`, added `normalize_subtitle_decoration` to map dash decorations (`–`, `—`, `---`, `--`) to the authentic Source GameUI character representations (`== episode one==`, `== episode two ==`, `lost coasT`). Updated `parse_gameinfo_title` to route `title2` through `normalize_subtitle_decoration`.
+  - In `hl2-ui::gameui::resources`, updated `category_title_fallback` to return authentic two-line strings with `== episode one==`, `== episode two ==`, and `lost coasT`. Added unit test `test_normalize_subtitle_decoration` and updated category title tests. Added `lostcoast` title assertion in `game_ui_resources_loads_from_installed_game`.
+  - In `hl2-ui::console`, updated `Console` to load `HL2EP2.ttf` (from `resource/HL2EP2.ttf` / `hl2/resource/hl2ep2.ttf` or fallback `HALFLIFE2.ttf`) as `title_font`, and load `lostcoast.ttf` (from `lostcoast/resource/lostcoast.ttf`) as `lostcoast_title_font`.
+  - In `hl2-ui::console`, added `Console::title_font_can_render(&self, line: &str) -> bool` to check whether the title font has glyph coverage for all non-whitespace characters in a string.
+  - In `hl2-ui::console`, updated `Console::draw` to render subtitle lines using `lostcoast_title_font` (for Lost Coast) or `title_font` (for Episode One / Episode Two) at `geometry.title_tall` with `ClientTitleFont` color `rgba(255, 255, 255, 200)` and `TextOutline::DEFAULT`, falling back to `menu_font` at `geometry.title_tall * 0.55` only if a title font lacks glyphs.
+  - In `HL2EP2.ttf` (and `hl2ep1.ttf`), the `'='` character maps to GID 17: a wide horizontal bar decoration rule (not hyphens `---`).
+  - Added regression test `test_subtitle_font_selection_and_glyph_decoration` and updated existing title tests.
+  - In `HL2RS/AGENTS.md` and `RustLife2/AGENTS.md`, documented authentic subtitle fonts and glyph decorations.
+- **Validation:** 151 `hl2-ui` tests pass, all workspace unit tests pass; all owned-install tests pass; headless Bevy app test passes in 2.03s; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Rounded dialog frame corners and overflow clipping (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Rounded dialog corners and outer 3D border removal:** Implemented authentic Source GameUI rounded frame borders and overflow clipping across all dialogs:

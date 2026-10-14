@@ -661,13 +661,39 @@ pub fn startup_background_map(vfs: &Vfs) -> Option<String> {
         .and_then(|text| background_map(&text))
 }
 
+/// Normalizes subtitle decorations (dashes, en-dashes, em-dashes, hyphens) to the authentic
+/// Source GameUI character representations that match the glyph mappings of the title fonts.
+pub fn normalize_subtitle_decoration(title2: &str) -> String {
+    let trimmed = title2.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "== episode one==" || lower == "== episode one ==" || lower.contains("episode one")
+    {
+        "== episode one==".to_string()
+    } else if lower == "== episode two =="
+        || lower == "== episode two=="
+        || lower.contains("episode two")
+    {
+        "== episode two ==".to_string()
+    } else if lower.contains("lost coast") {
+        "lost coasT".to_string()
+    } else {
+        trimmed
+            .replace(['\u{2013}', '\u{2014}'], "=")
+            .replace("---", "==")
+            .replace("--", "==")
+    }
+}
+
 /// Extracts the menu title from a `gameinfo.txt` file (`title` + optional `title2` joined by `\n`).
 pub fn parse_gameinfo_title(bytes: &[u8]) -> Option<String> {
     let roots = keyvalues::parse_resource(bytes).ok()?;
     let root = roots.into_iter().next()?;
     let title = root.get("title")?.text()?.to_owned();
     if let Some(title2) = root.get("title2").and_then(|t| t.text()) {
-        Some(format!("{title}\n{title2}"))
+        Some(format!(
+            "{title}\n{}",
+            normalize_subtitle_decoration(title2)
+        ))
     } else {
         Some(title)
     }
@@ -682,18 +708,9 @@ pub fn category_title_fallback(category: &str, loc: &Localization) -> String {
     };
     let hl2 = loc.text("#GameUI_HalfLife2");
     match canonical {
-        "episodic" => {
-            let ep1 = loc.text("#GameUI_EpisodeOne");
-            format!("{hl2}\n--- {ep1} ---")
-        }
-        "ep2" => {
-            let ep2 = loc.text("#GameUI_EpisodeTwo");
-            format!("{hl2}\n--- {ep2} ---")
-        }
-        "lostcoast" => {
-            let lc = loc.text("#GameUI_LostCoast");
-            format!("{hl2}\n--- {lc} ---")
-        }
+        "episodic" => format!("{hl2}\n== episode one=="),
+        "ep2" => format!("{hl2}\n== episode two =="),
+        "lostcoast" => format!("{hl2}\nlost coasT"),
         _ => hl2,
     }
 }
@@ -917,7 +934,40 @@ mod tests {
             b"\"GameInfo\" { \"title\" \"HALF-LIFE'\" \"title2\" \"\x96 episode one \x96\" }";
         assert_eq!(
             parse_gameinfo_title(win1252),
-            Some("HALF-LIFE'\n– episode one –".into())
+            Some("HALF-LIFE'\n== episode one==".into())
+        );
+    }
+
+    #[test]
+    fn test_normalize_subtitle_decoration() {
+        assert_eq!(
+            normalize_subtitle_decoration("== episode one=="),
+            "== episode one=="
+        );
+        assert_eq!(
+            normalize_subtitle_decoration("== episode two =="),
+            "== episode two =="
+        );
+        assert_eq!(normalize_subtitle_decoration("lost coasT"), "lost coasT");
+        assert_eq!(
+            normalize_subtitle_decoration("– episode one –"),
+            "== episode one=="
+        );
+        assert_eq!(
+            normalize_subtitle_decoration("— episode two —"),
+            "== episode two =="
+        );
+        assert_eq!(
+            normalize_subtitle_decoration("--- Episode One ---"),
+            "== episode one=="
+        );
+        assert_eq!(
+            normalize_subtitle_decoration("--- Episode Two ---"),
+            "== episode two =="
+        );
+        assert_eq!(
+            normalize_subtitle_decoration("--- Lost Coast ---"),
+            "lost coasT"
         );
     }
 
@@ -929,51 +979,51 @@ mod tests {
         assert_eq!(titles.get("hl2").map(String::as_str), Some("Half-Life 2"));
         assert_eq!(
             titles.get("episodic").map(String::as_str),
-            Some("Half-Life 2\n--- Episode One ---")
+            Some("Half-Life 2\n== episode one==")
         );
         assert_eq!(
             titles.get("ep2").map(String::as_str),
-            Some("Half-Life 2\n--- Episode Two ---")
+            Some("Half-Life 2\n== episode two ==")
         );
         assert_eq!(
             titles.get("lostcoast").map(String::as_str),
-            Some("Half-Life 2\n--- Lost Coast ---")
+            Some("Half-Life 2\nlost coasT")
         );
         // Expansion aliases
         assert_eq!(
             titles.get("hl2ep1").map(String::as_str),
-            Some("Half-Life 2\n--- Episode One ---")
+            Some("Half-Life 2\n== episode one==")
         );
         assert_eq!(
             titles.get("hl2ep2").map(String::as_str),
-            Some("Half-Life 2\n--- Episode Two ---")
+            Some("Half-Life 2\n== episode two ==")
         );
         assert_eq!(
             titles.get("hl2lc").map(String::as_str),
-            Some("Half-Life 2\n--- Lost Coast ---")
+            Some("Half-Life 2\nlost coasT")
         );
 
         let empty_loc = Localization::default();
         let fallback_empty = fallback_category_titles(&empty_loc);
         assert_eq!(
             fallback_empty.get("episodic").map(String::as_str),
-            Some("Half-Life 2\n--- Episode One ---")
+            Some("Half-Life 2\n== episode one==")
         );
         assert_eq!(
             fallback_empty.get("ep2").map(String::as_str),
-            Some("Half-Life 2\n--- Episode Two ---")
+            Some("Half-Life 2\n== episode two ==")
         );
         assert_eq!(
             fallback_empty.get("hl2ep1").map(String::as_str),
-            Some("Half-Life 2\n--- Episode One ---")
+            Some("Half-Life 2\n== episode one==")
         );
         assert_eq!(
             fallback_empty.get("hl2ep2").map(String::as_str),
-            Some("Half-Life 2\n--- Episode Two ---")
+            Some("Half-Life 2\n== episode two ==")
         );
         assert_eq!(
             fallback_empty.get("hl2lc").map(String::as_str),
-            Some("Half-Life 2\n--- Lost Coast ---")
+            Some("Half-Life 2\nlost coasT")
         );
     }
 
@@ -1075,6 +1125,10 @@ mod tests {
         assert_eq!(
             res.category_titles.get("ep2").map(String::as_str),
             Some("HALF-LIFE'\n== episode two ==")
+        );
+        assert_eq!(
+            res.category_titles.get("lostcoast").map(String::as_str),
+            Some("HALF-LIFE'\nlost coasT")
         );
         println!("missing: {:?}", res.missing);
     }

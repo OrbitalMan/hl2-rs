@@ -1,5 +1,42 @@
 # MODLOG
 
+## 2026-10-15 Authentic episode and lost coast submenu subtitle fonts and glyph decorations
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::resources`:
+  - Added `normalize_subtitle_decoration` normalizing dashes, en-dashes (`\u{2013}` / `\x96`), em-dashes (`\u{2014}`), and hyphens to the authentic Source GameUI character representations (`== episode one==`, `== episode two ==`, `lost coasT`).
+  - Updated `parse_gameinfo_title` to route `title2` through `normalize_subtitle_decoration`.
+  - Updated `category_title_fallback` to return authentic two-line strings with `== episode one==`, `== episode two ==`, and `lost coasT`.
+  - Added unit test `test_normalize_subtitle_decoration` and updated category title tests.
+  - Added `lostcoast` title assertion in `game_ui_resources_loads_from_installed_game`.
+- `hl2-ui::console`:
+  - Updated `Console` to load `HL2EP2.ttf` (from `resource/HL2EP2.ttf` / `hl2/resource/hl2ep2.ttf` or fallback `HALFLIFE2.ttf`) as `title_font`, and load `lostcoast.ttf` (from `lostcoast/resource/lostcoast.ttf`) as `lostcoast_title_font`.
+  - Added `Console::title_font_can_render(&self, line: &str) -> bool` checking whether the title font has glyph coverage for all non-whitespace characters in a string.
+  - Updated `Console::draw` to render subtitle lines using `lostcoast_title_font` (for Lost Coast) or `title_font` (for Episode One / Episode Two) at `geometry.title_tall` with `ClientTitleFont` color `rgba(255, 255, 255, 200)` and `TextOutline::DEFAULT`, falling back to `menu_font` at `geometry.title_tall * 0.55` only if a title font lacks glyphs.
+  - In `HL2EP2.ttf` (and `hl2ep1.ttf`), the `'='` character maps to GID 17: a wide horizontal bar decoration rule (not hyphens `---`).
+  - Added regression test `test_subtitle_font_selection_and_glyph_decoration` and updated existing title tests.
+- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented authentic subtitle fonts and glyph decorations.
+- `HL2RS/STATUS.md`: updated status with verified subtitle fonts and glyph decorations.
+
+**Why:**
+- In retail Half-Life 2 / Source GameUI, the expansion subtitles (`title2`) are drawn using `ClientTitleFont` (`HL2EP2.ttf` / `lostcoast.ttf`) rather than sans-serif `menu_font`. In `HL2EP2.ttf`, the `'='` character maps to an authentic horizontal bar decoration rule flanking the lowercase episode text, and `lostcoast.ttf` contains the stylized letters for `"lost coasT"`. HL2RS previously fell back to drawing literal `---` hyphens with `menu_font`.
+
+**Tested how:**
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked`: all 151 unit tests pass, including `test_normalize_subtitle_decoration` and `test_subtitle_font_selection_and_glyph_decoration`.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui --locked -- --ignored`: all owned install tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml --locked`: all 314+ workspace unit tests pass.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-bevy --locked -- campaign::tests::headless_bevy_app_submenu_entry_switches_background_map_and_scene --ignored`: passes in 2.03s.
+- `cargo clippy --manifest-path HL2RS/Cargo.toml --locked -- -D warnings`: 0 warnings.
+- `cargo fmt --manifest-path HL2RS/Cargo.toml --all -- --check`: verified clean formatting.
+
+**Result:** Episode One, Episode Two, and Lost Coast submenu subtitles render with their authentic title fonts and horizontal bar rule decorations.
+
+**Still broken or not tested:** Visual appearance on live display is unverified and needs manual check (launch release build and open expansion submenus).
+
+**Next:** Task 3: Blur during background change.
+
 ## 2026-10-15 Rounded dialog frame corners and overflow clipping
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
