@@ -380,30 +380,6 @@ fn random_view_target(eye: glam::Vec3, forward: glam::Vec3, actor: usize, time: 
     eye + forward * 128. + right * (unit() * 32.) + up * (unit() * 16.)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn view_target_is_ahead_within_sdk_jitter_and_valid() {
-        let eye = glam::Vec3::new(10., 20., 30.);
-        for actor in 0..32 {
-            let p = random_view_target(eye, glam::Vec3::X, actor, actor as f64 * 0.37);
-            let d = p - eye;
-            assert!((d.x - 128.).abs() < 1e-4 && d.y.abs() <= 32. && d.z.abs() <= 16.);
-            assert!(valid_eye_target(eye, glam::Vec3::X, p));
-        }
-        assert!(!valid_eye_target(
-            eye,
-            glam::Vec3::X,
-            eye - glam::Vec3::X * 50.
-        ));
-        assert!(!valid_eye_target(
-            eye,
-            glam::Vec3::X,
-            eye + glam::Vec3::X * 0.5
-        ));
-    }
-}
 /// COND_IN_PVS for animated-face NPCs (CAI_BaseActor::MaintainLookTargets skips the head
 /// and eye updates when the player cannot see the actor): the BSP PVS of the player's eye
 /// or of the active monitor's point_camera (CPointCamera::SetupVisibility adds its view
@@ -446,4 +422,28 @@ pub fn attention_pvs(
         }
     }
     game.scene.look_targets.set_pvs(visible, now.max(1e-6));
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn view_target_is_ahead_within_sdk_jitter_and_valid() {
+        let eye = glam::Vec3::new(10., 20., 30.);
+        for actor in 0..32 {
+            let p = random_view_target(eye, glam::Vec3::X, actor, actor as f64 * 0.37);
+            let d = p - eye;
+            assert!((d.x - 128.).abs() < 1e-4 && d.y.abs() <= 32. && d.z.abs() <= 16.);
+            assert!(valid_eye_target(eye, glam::Vec3::X, p));
+        }
+        assert!(!valid_eye_target(
+            eye,
+            glam::Vec3::X,
+            eye - glam::Vec3::X * 50.
+        ));
+        assert!(!valid_eye_target(
+            eye,
+            glam::Vec3::X,
+            eye + glam::Vec3::X * 0.5
+        ));
+    }
 }
