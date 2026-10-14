@@ -1,12 +1,33 @@
 # STATUS
 
-Checkpoint: 2026-10-14 session 16 (prop data, chunk gibs, displacement and clip collision, world hinges); 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop, gibs, NPC studio decals, hinges, debris props; branch head after b0dc562 + debris); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
+Checkpoint: 2026-10-14 session 17 (explosions break props, explosive barrels, arsenal + physics merged to main with deferred leftovers, step 14 next); 2026-10-14 session 16 (prop data, chunk gibs, displacement and clip collision, world hinges); 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop, gibs, NPC studio decals, hinges, debris props; branch head after b0dc562 + debris); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
 
 ## Current session 17 (2026-10-14)
 
 Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged.
 - **Owner question: do explosives break props? Not before; now yes for frag, SMG grenade and RPG.** The shared blast damaged only props with a health keyvalue, and any prop in the way shielded fully. Now prop_data props take blast damage and blockers follow SDK RadiusDamage (physics blockers absorb mass/350). RPG at the hall props: box #700 and bottles #701/#702 break like native T060459Z. Open: blast ignition, ragdoll gibs, glass chunks fly farther than native shards, scorch decal.
+- **Regression batch artifacts/s17-regression (before the merge to main):** weapons 17/17, attention 26/26, movement 25/26 (the known doll01 PHY root-rotation warning only), no panics; finals vs s16c-regression mean <= 0.33; Breen slate feed identical, Breen screen feed differs by 105 pixels at the mouth only (lip-sync frame, as in s16b; still to recheck), Kleiner feed identical.
+- **Owner decision (session 17): merge the arsenal + physics work to main now with the leftovers recorded (section "Deferred physics/arsenal leftovers"), then step 14.**
 - **Explosive props: done (not compared with native).** prop_data explosive_damage/radius: a broken barrel explodes before its gibs spawn and chains within the tick (d1_canals_01 barrels #635/#634: both explode, player 128-160 units away takes ~105 and dies). Open: fire (native barrels ignite at half health and burn before exploding), propane-tank variant.
+
+## Deferred physics/arsenal leftovers (owner decision 2026-10-14)
+
+The owner moved the rest of step 0 and the DESIGN 13b leftovers to later branches/PRs so the arsenal + physics work can merge to main and step 14 (NPC AI) can start. Each item below is known and acknowledged, not forgotten; take them on `wip/*` branches after step 14 unless the owner reorders.
+
+Arsenal (13b):
+- Crossbow bolt trajectory and stick point vs native (two rejected attempts; next: timescale 0.25 with an earlier overlay view, or a closer wall); C_CrossbowBolt motion-blur halo trail; bolts pinning killed NPCs' ragdolls to the surface behind (needs ragdolls; not for gibbing/mechanical NPCs).
+- Weapon audio vs native per-process recordings: Missile.Ignite stop, Weapon_PhysCannon.HoldSound envelope, crossbow/RPG/bug bait cues.
+- RPG lowered pose when empty; view punch timing; carry speed; ground-surface friction (gravel/metal); gravity gun launch trajectory vs native (two rejected attempts, session 12).
+- Frag: some spins rebound further off walls than native; IVP impact friction not reproduced. Bug bait: spore specks sparser/dimmer (DESIGN 11f gamma-space sprites), stain sliver on an adjacent coplanar face.
+- doll01 root-rotated .phy (movement verifier 25/26); retail controller two/multi-normal constraints; the shadow pushing the player (VPhysicsShadowUpdate); the player weighing light props down (retail lead: support contacts with normal Z < -0.7).
+- Console help text (hl2-ui console.rs) still says "six implemented weapons"; impulse 101 grants the full loadout (left alone while hl2-ui is claimed).
+
+Physics (step 0):
+- Constraints: tic-tac-toe block spin (session 17 findings: block 5's mass center is 2 units above its bounds center, which lies on the hinge axis; SDK env_physexplosion aims at BodyTarget = the bounds center, so its force line passes through the axis, while ours aims at the mass center and gets a ~2-unit lever arm; native hinge friction holds the block against gravity torque (~2400 kg in^2/s^2 at 2 units) where ours, 50 kg in^2/s^2 converted to 0.03 N m, cannot: the vphysics hinge torque conversion at CreateHingeConstraint vphysics.dll 0x1000ee00 is unread); ropes (phys_lengthconstraint swings and swing_push; rope joints flung the seats twice); carousel (SF 9 hinge, friction 50, phys_thruster); TurnOn/TurnOff, breaking, constraint systems; func_physbox as dynamic bodies; logic_collision_pair inputs; env_physexplosion PUSH_PLAYER.
+- Teeter seat: native rocks under pistol fire and broke after 5 shots, ours barely rocks and breaks after 8.
+- Breakables: ragdoll gibs (cardboard boxes: 6-solid ragdoll .phy), gib limits (props_break_max_pieces), native crate/pallet gib comparison, glass chunks fly ~300 units after a blast where native shards stay near the spot, scorch decals; fire (burning props, barrels igniting at half health, explosive_resist burn delays, propane variant); robust NPC radius damage (edge spill) and BodyTarget points; native barrel comparison.
+- NPC decals: paint; NPC death/ragdoll blood (native cop died after 3 pistol shots: NPC sk_*_health is player-leftover item 3).
+- Other NPC hull types; drag IVP-frame axis pairing (rejected for now); one body still awake at idle in the hall (identify it); a real prop spawn (DESIGN 14r); tr01 debris bottles #869/#870 hang ~47 units above the displacement (native unchecked); player damage does not run in fly mode; Breen screen feed 24-pixel lip-sync frame difference (recheck).
 
 ## Current session 16 (2026-10-14)
 
