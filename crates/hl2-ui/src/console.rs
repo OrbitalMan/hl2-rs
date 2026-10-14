@@ -642,6 +642,13 @@ impl Console {
         self.loading_dialog.as_ref().is_some_and(|l| !l.is_failed())
     }
 
+    /// Whether background map loading is currently active.
+    pub fn is_background_loading(&self) -> bool {
+        self.loading_dialog
+            .as_ref()
+            .is_some_and(|l| l.is_background() && !l.is_failed() && !l.is_complete())
+    }
+
     /// Whether any modal dialog or blocking widget is currently active over the menus.
     pub fn modal_dialog_open(&self) -> bool {
         self.mode == Mode::Options
@@ -1550,19 +1557,10 @@ impl Console {
             );
         };
         if menu_shown {
-            if self
-                .loading_dialog
-                .as_ref()
-                .is_some_and(|l| l.is_background())
-            {
-                // Soften and darken the backdrop behind the menu during background map loading
-                self.canvas.rectangle(
-                    0.,
-                    0.,
-                    self.canvas.width(),
-                    self.canvas.height(),
-                    Color::new(0.0, 0.0, 0.0, 0.45),
-                );
+            if let Some(loading) = &self.loading_dialog {
+                if loading.is_background() {
+                    loading.draw_background_overlay(&self.canvas);
+                }
             }
             let geometry = self.menu_layout.geometry(self.canvas.height());
             let title = self.current_title();
@@ -2947,5 +2945,101 @@ mod tests {
             "HALF-LIFE'\nlost coasT"
         );
         assert_eq!(console.category_title("hl2lc"), "HALF-LIFE'\nlost coasT");
+    }
+
+    #[test]
+    fn background_loading_draw_emits_blur_overlay_behind_menu_and_corner_plaque() {
+        let mut console = Console::default();
+        console.canvas.resize(1920., 1080.);
+        console.mode = Mode::MainMenu;
+
+        console.start_background_loading("ep2_background01");
+        assert!(console.is_loading());
+        assert!(console.is_background_loading());
+        assert!(!console.modal_dialog_open());
+
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+
+        // Must emit exactly one blur quad representing the full-canvas background blur overlay
+        let blur_quads: Vec<_> = quads.iter().filter(|q| q.blur).collect();
+        assert_eq!(blur_quads.len(), 1, "expected exactly 1 blur overlay quad");
+        let overlay = blur_quads[0];
+        assert_eq!(overlay.destination.w, 1920.);
+        assert_eq!(overlay.destination.h, 1080.);
+        assert_eq!(overlay.color, Color::new(0.0, 0.0, 0.0, 0.45));
+
+        // The blur overlay must be drawn BEFORE the menu items so text is sharp over the blur
+        let blur_index = quads.iter().position(|q| q.blur).unwrap();
+        assert_eq!(
+            blur_index, 0,
+            "blur overlay must be the first quad drawn behind the menu"
+        );
+
+        let scale = Painter::scale_for(1080.);
+        let expected_plaque_w = (crate::gameui::loading::BACKGROUND_LOADING_SIZE.x * scale).round();
+        let expected_plaque_h = (crate::gameui::loading::BACKGROUND_LOADING_SIZE.y * scale).round();
+        let plaque_quad = quads
+            .iter()
+            .find(|q| {
+                (q.destination.w - expected_plaque_w).abs() < 0.1
+                    && (q.destination.h - expected_plaque_h).abs() < 0.1
+            })
+            .expect("bottom-right corner plaque quad");
+        assert!(!plaque_quad.blur);
+    }
+
+    #[test]
+    fn gameplay_loading_draw_does_not_emit_blur_overlay() {
+        let mut console = Console::default();
+        console.canvas.resize(1920., 1080.);
+        console.mode = Mode::MainMenu;
+
+        console.start_loading("d1_trainstation_01");
+        assert!(console.is_loading());
+        assert!(!console.is_background_loading());
+        assert!(console.modal_dialog_open());
+
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+
+        // Gameplay map loading must NEVER emit a blur quad
+        let blur_quads: Vec<_> = quads.iter().filter(|q| q.blur).collect();
+        assert!(
+            blur_quads.is_empty(),
+            "gameplay map loading must not emit any blur overlay quads"
+        );
+
+        // Frame and progress bar quads must be present
+        let scale = Painter::scale_for(1080.);
+        let expected_frame_w = (crate::gameui::loading::LOADING_DIALOG_SIZE.x * scale).round();
+        let frame_quad = quads
+            .iter()
+            .find(|q| (q.destination.w - expected_frame_w).abs() < 0.1)
+            .expect("centered gameplay loading dialog frame");
+        assert!(!frame_quad.blur);
+    }
+
+    #[test]
+    fn background_loading_completion_dismisses_blur_overlay() {
+        let mut console = Console::default();
+        console.canvas.resize(1920., 1080.);
+        console.mode = Mode::MainMenu;
+
+        console.start_background_loading("ep2_background01");
+        assert!(console.is_background_loading());
+
+        // Level loads
+        console.level_loaded(true);
+        assert!(!console.is_loading());
+        assert!(!console.is_background_loading());
+
+        console.draw(0.0);
+        let quads = console.canvas.drain();
+        let blur_quads: Vec<_> = quads.iter().filter(|q| q.blur).collect();
+        assert!(
+            blur_quads.is_empty(),
+            "no blur overlay quads once background map loading is complete"
+        );
     }
 }

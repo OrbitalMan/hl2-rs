@@ -96,8 +96,8 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Gameplay map loading uses the full modal centered `LoadingDialog` (380 x 112) with a segmented progress bar and localized stage reports (`#GameUI_LoadingFilename`, `#LoadingProgress_*`), blocking clicks to underlying menus.
   - Background map loading uses a non-blocking bottom-right corner plaque (`LoadingKind::Background`, 130 x 36) displaying localized `#GameUI_Loading` ("LOADING...") over a translucent dark raised panel, without progress bars.
   - Menu navigation buttons remain interactive, armed on hover, and clickable while a background map is loading.
-  - A softened backdrop scrim (`rgba(0, 0, 0, 0.45)`) is drawn behind menu text and buttons during background map loading to soften and darken the 3D scene.
-  - When background map loading finishes (or fails), the corner plaque and scrim disappear immediately.
+  - A full-canvas blurred backdrop overlay (`Quad::blur` with `rgba(0, 0, 0, 0.45)`) is drawn behind menu text and buttons during background map loading to soften and blur the underlying 3D scene.
+  - When background map loading finishes (or fails), the corner plaque and blur overlay disappear immediately.
 
 - **KeyValues Syntax Quirks & Parser Tolerance**:
   - Retail Valve resource files (e.g. `ep2/scripts/HudLayout.res` in the 20th Anniversary update) contain authentic authoring errors, such as unquoted identifiers merged into quoted literals (`"ypos" "426"HudPoisonDamageIndicator`).

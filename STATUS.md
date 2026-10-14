@@ -2,7 +2,18 @@
 
 Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
-## Current session: Episode Two background map and background loading UI/UX (2026-10-14, branch `orbitalman/main-menu`)
+## Current session: Background loading blur overlay (2026-10-14, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Background loading blur overlay:** Differentiated the background map loading overlay from gameplay map loading:
+  - In `hl2-ui::canvas`, added `blur: bool` field to `Quad` and implemented `Canvas::blur(x, y, w, h, color)` to queue a blur effect quad with an optional color tint.
+  - In `hl2-ui::gameui::loading`, implemented `LoadingDialog::draw_background_overlay(&self, canvas: &Canvas)` emitting a full-screen `Quad::blur` with `Color::new(0.0, 0.0, 0.0, 0.45)` when `is_background()` is true. For gameplay map loading (`LoadingKind::Gameplay`), `draw_background_overlay` is a strict no-op, preserving the isolated modal progress dialog without blur. Added unit tests `background_loading_overlay_emits_blur_quad` and `gameplay_loading_overlay_does_not_emit_blur_quad`.
+  - In `hl2-ui::console`, exposed `Console::is_background_loading(&self) -> bool` reporting active background loads. In `Console::draw`, replaced the plain rectangle backdrop with `loading.draw_background_overlay(&self.canvas)` drawn behind the main menu title and buttons. Added unit tests `background_loading_draw_emits_blur_overlay_behind_menu_and_corner_plaque`, `gameplay_loading_draw_does_not_emit_blur_overlay`, and `background_loading_completion_dismisses_blur_overlay`.
+  - In `hl2-bevy::canvas_renderer`, added `blur: bool` to `HudMaterial` and `HudMaterialKey`. When processing a `quad.blur` quad, `Hud::material` generates and caches a 32x32 Gaussian-blurred diffusion texture uploaded with linear filtering to soften and diffuse the underlying scene pixels. Added unit test `blur_quad_mesh_geometry`.
+  - In `HL2RS/AGENTS.md`, updated documentation on background vs gameplay loading UI/UX to specify the full-canvas blur overlay.
+- **Validation:** 145 `hl2-ui` tests, 70 `hl2-bevy` tests pass; all owned-install tests pass; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Episode Two background map and background loading UI/UX (2026-10-14, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Episode Two submenu background map update:** Diagnosed root cause of `ep2_background01` failing to load: in retail 20th Anniversary `ep2/ep2_pak_dir.vpk`, `scripts/HudLayout.res` contains an unquoted identifier merged into a quoted literal (`"ypos" "426"HudPoisonDamageIndicator` in `HudHealth [$DECK]`), shifting token pairs so that `}` appears where a value was expected. Implemented graceful block termination on `}` as value in `source_assets::keyvalues::parse_resource`, adhering to Source SDK `KeyValues.cpp:2490` (`got } in key`). Added unit test `parse_resource_tolerates_trailing_key_before_closing_brace` and owned test `parse_ep2_hudlayout`.

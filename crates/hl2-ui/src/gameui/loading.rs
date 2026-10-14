@@ -213,6 +213,22 @@ impl LoadingDialog {
         p.text(&title, Vec2::new(text_x, text_y), p.theme.text, false);
     }
 
+    /// Draws the backdrop blur overlay for background map loading across the canvas.
+    /// This softens and blurs the underlying 3D background behind the main menu.
+    /// Never applies to gameplay map loading.
+    pub fn draw_background_overlay(&self, canvas: &crate::canvas::Canvas) {
+        if !self.is_background() {
+            return;
+        }
+        canvas.blur(
+            0.,
+            0.,
+            canvas.width(),
+            canvas.height(),
+            Color::new(0.0, 0.0, 0.0, 0.45),
+        );
+    }
+
     /// Draws the loading dialog centered within the painter's canvas bounds.
     pub fn draw(&self, painter: &Painter, loc: &Localization) {
         if self.is_background() {
@@ -507,5 +523,64 @@ mod tests {
             })
             .expect("background loading plaque quad in bottom-right corner");
         assert_eq!(plaque_quad.color, Color::new(0.0, 0.0, 0.0, 0.65));
+        assert!(!plaque_quad.blur);
+    }
+
+    #[test]
+    fn background_loading_overlay_emits_blur_quad() {
+        use crate::canvas::Canvas;
+
+        let canvas = Canvas::default();
+        canvas.resize(1920., 1080.);
+        let dialog = LoadingDialog::new_background("ep2_background01");
+        assert!(dialog.is_background());
+
+        dialog.draw_background_overlay(&canvas);
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1, "expected exactly 1 overlay quad");
+        let overlay = &quads[0];
+        assert!(overlay.blur, "overlay quad must have blur set");
+        assert_eq!(overlay.destination.w, 1920.);
+        assert_eq!(overlay.destination.h, 1080.);
+        assert_eq!(overlay.color, Color::new(0.0, 0.0, 0.0, 0.45));
+    }
+
+    #[test]
+    fn gameplay_loading_overlay_does_not_emit_blur_quad() {
+        use crate::canvas::Canvas;
+        use crate::gameui::widgets::{Fonts, Theme};
+
+        let canvas = Canvas::default();
+        canvas.resize(1920., 1080.);
+        let dialog = LoadingDialog::new("d1_trainstation_01");
+        assert!(!dialog.is_background());
+
+        // Background overlay call must be a complete no-op for gameplay loading
+        dialog.draw_background_overlay(&canvas);
+        let overlay_quads = canvas.drain();
+        assert!(
+            overlay_quads.is_empty(),
+            "gameplay loading dialog must not emit any background overlay"
+        );
+
+        // Standard draw must only produce normal dialog quads, never a blur quad
+        let loc = Localization::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.0,
+        };
+
+        dialog.draw(&painter, &loc);
+        let draw_quads = canvas.drain();
+        assert!(!draw_quads.is_empty());
+        assert!(
+            draw_quads.iter().all(|q| !q.blur),
+            "no quad in gameplay loading dialog may have blur enabled"
+        );
     }
 }
