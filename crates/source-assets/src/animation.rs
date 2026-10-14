@@ -312,6 +312,23 @@ pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
     }
     Ok(rig)
 }
+/// The model's own sequence names in index order (not included models).
+pub fn sequence_names(vfs: &Vfs, path: &str) -> Result<Vec<String>> {
+    let data = vfs.read(path)?.context("MDL missing for animation")?;
+    let count = offset(&data, 188)?;
+    if count > 4096 {
+        bail!("sequence table too large");
+    }
+    let base = offset(&data, 192)?;
+    bytes(&data, base, count * 212)?;
+    (0..count)
+        .map(|i| Ok(sequence_metadata(&data, base + i * 212)?.name))
+        .collect()
+}
+/// The model's own sequence 0 (what an entity without a set sequence plays), if any.
+pub fn first_sequence_name(vfs: &Vfs, path: &str) -> Result<Option<String>> {
+    Ok(sequence_names(vfs, path)?.into_iter().next())
+}
 fn sequence_events(
     data: &[u8],
     sequence: usize,
@@ -1070,5 +1087,47 @@ mod tests {
     fn compressed_identity_quaternion() {
         let q = quaternion(&[0, 128, 0, 128, 0, 64], 0, false).unwrap();
         assert!(q.dot(Quat::IDENTITY) > 0.99999);
+    }
+}
+
+#[cfg(test)]
+mod owned_weapon_tests {
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn installed_grenade_viewmodel_has_sdk_throw_events() {
+        let root = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&root).unwrap();
+        let wanted = [
+            "act_vm_pullback_high",
+            "act_vm_pullback_low",
+            "act_vm_throw",
+            "act_vm_haulback",
+            "act_vm_secondaryattack",
+            "act_vm_draw",
+            "act_vm_idle",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let rig = super::load(&vfs, "models/weapons/v_grenade.mdl", &wanted).unwrap();
+        // (sequence, activity, frames, fps, event id, event cycle): SDK weapon_frag events.
+        let expected = [
+            ("drawbackhigh", "ACT_VM_PULLBACK_HIGH", 6, 20., 3900, 0.8),
+            ("drawbacklow", "ACT_VM_PULLBACK_LOW", 6, 20., 3900, 0.8),
+            ("throw", "ACT_VM_THROW", 12, 20., 3005, 1. / 11.),
+            ("roll", "ACT_VM_SECONDARYATTACK", 15, 20., 3013, 1. / 7.),
+            ("lob", "ACT_VM_HAULBACK", 15, 20., 3016, 1. / 7.),
+        ];
+        for (name, activity, frames, fps, id, cycle) in expected {
+            let seq = rig.sequences.iter().find(|s| s.name == name).unwrap();
+            assert_eq!(seq.activity, activity);
+            let clip = &rig.clips[name];
+            assert_eq!((clip.frames.len(), clip.fps), (frames, fps));
+            assert!(clip
+                .events
+                .iter()
+                .any(|e| e.id == id && (e.cycle - cycle).abs() < 1e-4));
+        }
+        assert_eq!(rig.clips["draw"].frames.len(), 39);
     }
 }

@@ -1,5 +1,378 @@
 # MODLOG
 
+## 2026-10-14 session 17: explosive props (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** prop_data `explosive_damage`/`explosive_radius` (PropData, over the entity's ExplodeDamage/ExplodeRadius keyvalues, not on *_override props). CBreakableProp::Break of such a prop queues ExplosionCreate at its center (magnitude and radius scaled by modelscale, truncated to integers; radius 0 = magnitude x 2.5, env_explosion); the host detonates them after the tick's damage and before gibs spawn (native order: the explosion precedes PropBreakableCreateAll; a one-tick deferral let the barrel's own gibs block its blast), repeating so chains resolve in the tick (bounded at 32). `Projectiles::explode_props`; `grenade_explosion` takes position/magnitude/radius.
+
+**Why:** owner question (session 17): explosive barrels did not explode.
+
+**Tested how:** unit test `breaking_an_explosive_prop_queues_its_explosion`, hl2-simulation 233 passed, owned tests (HL2_ROOT, `--ignored`, workspace: 47 passed), strict workspace Clippy, fmt. Packaged d1_canals_01 (oildrum001_explosive: health 20, explosive 120/256), walking, eye (406,-2790,452) yaw 90 pitch -14, pistol at barrel #635: it breaks on the 4th shot, explodes (magnitude 120, radius 256) and chain-detonates #634 in the same tick; 17 gibs; the player (128-160 units away) takes about 60 + 45 and dies (SDK falloff). In fly mode the player takes no damage at all (pre-existing: player damage runs only in the walking branch). The packaged asset cache (bin/bevy-assets) must be rebuilt for new PropData fields: target/release runs used the old cache and saw no explosion.
+
+**Result:** explosive barrels explode and chain.
+
+**Still broken or not tested:** native comparison not done; fire is not modeled: native barrels ("ignite" "halfhealth", "explosive_resist") catch fire at half health from bullets and explode after burning, and blasts make them burn 0.1-5 s before exploding; ours explode at 0 health, chained ones instantly; PROPINTER_PHYSGUN_BREAK_EXPLODE (propane tanks) variant; explosion effect/decal flags (SURFACEONLY etc.) not distinguished; barrel gibs/flames.
+
+**Next:** record the physics/arsenal leftovers, regression batch, merge to main, then step 14 (owner, session 17).
+## 2026-10-14 session 17: explosions break prop_data props; SDK blast blocking (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `Projectiles::grenade_explosion` (frag, SMG grenade, RPG) now sends DMG_BLAST damage to every prop_physics (the entity damage dispatch resolves prop_data health and skips unbreakable props); before, only props with an explicit `health` keyvalue were damaged, so prop_data props (crates, pallets, bottles, boxes) were only pushed. Blast line of sight follows CGameRules::RadiusDamage: the world or a brush entity blocks; an interposing studio-model entity never shields fully (the CONTENTS_SOLID re-trace's StandardFilterRules skips non-brush models): a physics object absorbs mass/350 of the damage (all from 350 kg), others 25% (`blast_blocked_fraction`); before, any prop shielded completely. `Physics::filtered_ray`, `Physics::entity_mass`.
+
+**Why:** owner question (session 17): do explosives break props? They did not (owner saw bottle #702 untouched next to an RPG blast).
+
+**Tested how:** unit test `interposing_props_absorb_blast_by_mass_instead_of_shielding`, hl2-simulation tests 232 passed, strict Clippy, fmt. Packaged d1_trainstation_02, eye (-3490,-2110,128) fly, yaw 236: RPG (pitch -30, blast at (-3565,-2210,64)): before the fix bottle #701 broke only by impact, bottle #702 survived because box #700 blocked the ray 1.5 units before it; after: box #700 and bottles #701/#702 break (6 glass chunks). SMG grenade (pitch -20) and frag lob (pitch -60, blast (-3516,-2165)): the same three break. Native (original-oracle T060459Z, same eye, pitch 30, weapon_rpg): box and both bottles gone after the blast.
+
+**Result:** frag, SMG grenade and RPG blasts break prop_data props like native in the tested spot.
+
+**Still broken or not tested:** the cardboard box's gib is a ragdoll gib (skipped until ragdolls); our glass chunks flew ~300 units while native shards stayed near the spot (not investigated); no scorch decal; explosive props (prop_data explosive_damage/radius: barrels) do not explode; non-lethal blast damage does not ignite props (CBreakableProp::OnTakeDamage Ignite); robust NPC radius damage (edge spill) and BodyTarget points not modeled.
+
+**Next:** explosive props, then the session 16 open items.
+## 2026-10-14 session 16 (continued): env_physexplosion, prop OnPlayerUse, TraceBleed, world-collision-disabled constraints (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `hl2_simulation::phys_explosion` (env_physexplosion Explode input: targets by name, else class within the radius, else everything in the radius; SDK falloff and explosive damage force applied at the explosion origin; DMG_BLAST damage unless NODAMAGE; report `gameplay.phys_explosions`); prop_physics with spawnflag 256 fire OnPlayerUse on +USE (pickup path and ray-use path); world constraints with SF_CONSTRAINT_DISABLE_COLLISION make their body ignore static colliders without an entity (BSP, displacements, static props); TraceBleed (CBaseEntity::TraceBleed: 1/2/4 noisy traces 172 units along the shot behind a hit NPC, Blood/YellowBlood decal groups by BloodColor, machines none; `Inventory::blood`, `Impacts::add_blood`); `Physics::remove_body` updates the query pipeline (a faded gib left a stale entry: one intermittent Rapier 'No element at index' panic in batch s16b, d1_trainstation_01, where debris bottles #869/#870 authored ~47 units above the displacement now shatter on landing under the glass table); movement-report sample field `awake_bodies`. Fixtures bevy-tictactoe-use-spins-block, bevy-trace-bleed-cop-wall. Oracle (private): `!use`/`!unuse` and `!npc` (npc_create, ORACLE_NPC) view suffixes (backup run_view_oracle.py.bak-20261014).
+
+**Why:** owner items 0c (env_physexplosion, the playground tic-tac-toe blocks and ghost swings) and 0b (TraceBleed world blood behind NPCs, native blood comparison).
+
+**Tested how:** unit tests (explosion impulse band and blast damage; TraceBleed trace counts, wall hits, mechanical NPCs), owned tests (decal preload count 56), strict Clippy, fmt, workspace tests; packaged: +USE on block 5 fires one explosion and the block turns (before: it sat 4.7 units inside the frame rod and could not move), native T001349Z at eye (-4540,-3599,64) pitch 15 yaw 0; three pistol shots at terminal_side_cop posed at (-3330,-2560,64) in front of the hall wall: 3 blood decals on the wall behind him (bleed-side.png), native T002821Z (npc_create cop at the same spot): splats on the same wall/pillar and on the chest; native's are larger and the native cop died after 3 shots (ours survives: NPC health is item 3). Regression batch artifacts/s16b-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 only), no panics; finals vs s16-regression mean <= 0.51; Breen screen feed differs by 24 pixels at the mouth (one lip-sync frame, to recheck), slate feed identical.
+
+**Result:** the tic-tac-toe blocks react to +USE; shot NPCs leave blood on the wall behind them like native.
+
+**Still broken or not tested:** native turns the block about a quarter turn and it settles within 0.3 s; ours spins at the angular speed cap for over 6 s (open, research needed: IVP hinge friction units / impulse transfer / angular drag); swing pushes need ropes (off); PUSH_PLAYER; carousel thruster.
+
+**Next:** STATUS session 16.
+## 2026-10-14 session 16: prop data, chunk gibs, displacement and clip collision, world hinges (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) DESIGN 13e steps 4-5: the whole prop_data block resolves over its propdata.txt base chain (`World::model_prop_data`: dmg.bullets/club/explosive, damage_table, breakable_model/count/skin) and the BreakableModels chunk sets (`World::breakable_chunks`); entity damage carries DMG_* bits (`projectiles::Damage::kind`); breakables take GetBreakableDamage (`gameplay::breakable_damage`, CBreakable func_breakdmg defaults for func_breakable/func_physbox); player bullets and melee on breakables go through the entity damage path (props with prop_data health now break under fire: before, only props with an explicit health keyvalue did, without gibs or break sound); glass impact table for damage_table "glass" (`impact_damage::GLASS_TABLE`, retail registry = SDK); gibs take the parent's skin and the break block's collision group (fadetime -> debris); breakable props without .phy gibs break into their chunk set (`Gibs::spawn_chunks`: count, max size, mid-plane points, 100 u/s burst, AlignBoxes, breakable_skin, 5-10 s fade); the host preloads gib skins and used chunk models. (2) Physics fixes found on the way: displacement colliders reversed (BSP clockwise winding made Rapier's oriented trimesh inside-out: props fell through displacements) and built without internal-edge correction; player/NPC clip-only brushes have no contacts with physics objects and shot/use traces skip them (`Physics::ground_ray` keeps them for the player's ground traces); logic_collision_pair startdisabled; SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY world hinges as revolute joints after the SDK mass-center snap onto the axis; bullet/melee push = ApplyForceOffset at the hit point with the ammo's BULLET_IMPULSE / melee damage x 300 kg in/s (`Physics::impulse_at`, `gameplay::bullet_impulse`). Fixtures bevy-pistol-breaks-bottle-skin4, bevy-pistol-breaks-teeter-seat-chunks.
+
+**Why:** owner item 0a (propdata damage tables/modifiers, chunk sets, parent skin on gibs) and 0c (assume-world-geometry hinges). The pot falling through the playground and the teeter seat flying off surfaced while testing them.
+
+**Tested how:** unit tests (modifiers, glass table order, chunk placement/alignment/skin, gib skin/render key, clip brushes vs bodies and traces), owned tests (prop_data modifiers/tables/chunk sets; 18 + 24 owned pass), workspace tests (the two known release-only Bevy should_panic tests run in debug), strict Clippy, fmt; packaged fixtures and native oracle views (docs/validation.md session 16); regression batch artifacts/s16-regression (same as s15b).
+
+**Result:** bottles and chunk-set wood props break under fire like native, in the right skin; props rest on displacements; the teeter seat sits on its hinge.
+
+**Still broken or not tested:** the teeter seat rocks far less than native under pistol fire and native broke it in 5 shots (ours 8); ragdoll gibs; explosive props; gib limits; carousel (SF 9 + phys_thruster) not checked; other displacement maps not checked visually.
+
+**Next:** env_physexplosion + OnPlayerUse (tic-tac-toe blocks, ghost swings), then the remaining item-0 work (STATUS session 16).
+## 2026-10-13 session 15 (end): debris props (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** prop_physics with SF_PHYSPROP_DEBRIS (4) use a DEBRIS collision group (SDK CGameRules::ShouldCollide: COLLISION_GROUP_DEBRIS collides only with COLLISION_GROUP_NONE): world and ordinary props yes; player movement (incl. the exact convex path), the player shadow, NPC hulls/models, thrown frags and other debris no; traces (bullets, +USE, gravity gun) still hit them. 18 of 66 prop_physics on d1_trainstation_02 carry the flag (e.g. bottle #701, box #700). Fixture bevy-carry-bottle-shove now starts at (-3356,-2520,128) (the old spot put the walking hull inside world geometry: stuck, so no crouch).
+
+**Why:** owner item 0d (carried bottle shoved into the floor, crouch while carrying): crouch works while carrying; the carried debris bottle overlapping the crouched hull froze the player via CheckStuck, which native avoids because debris never collides with the player.
+
+**Tested how:** unit test (a debris prop lets the player hull through and still stops a pick ray; a non-debris prop blocks), workspace tests, strict Clippy, fmt; packaged: crouched carry looking down: no stuck samples, no hull contacts (before: stuck from d186 with a 0.6-unit overlap), bottle minimum z 66.5 (floor rest 66.6). Regression batch artifacts/s15b-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 only); finals vs s15-regression mean <= 0.59, feeds identical.
+
+**Result:** debris props behave like native toward the player; the carried-bottle freeze is gone.
+
+**Still broken or not tested:** interactive-debris return to debris at rest (irrelevant until non-debris props are converted); native comparison of walking through debris; owned tests not rerun for this change (no asset path changed).
+
+**Next:** see STATUS session 15 and work/publishing/next-session-prompt-20261013c.txt.
+## 2026-10-13 session 15 (continued): studio decals along the shot (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** weapon hits keep their shot direction (`Inventory::impacts` entries gain it; `Impacts::add_shot`), and NPC studio decals are shot along it instead of the reversed trace-shape normal.
+
+**Why:** FX_ImpactTrace shoots decals along the ray; the trace shape's normal missed the skin on grazing hits.
+
+**Tested how:** workspace tests, strict Clippy, fmt; packaged `bevy-studio-decal-cop.json`: 3/3 shots build blood decals at the hit points (was 2/3), sdecal4-zoom.png. Owned tests not rerun for this change (no owned-data path changed).
+
+**Result:** blood lands where the bullet hits.
+
+**Still broken or not tested:** native comparison of NPC blood.
+
+**Next:** handoff.
+## 2026-10-13 session 15 (continued): VPhysics constraints (hinges), spawn-embedded CCD (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) `Physics::add_constraints` (SDK physconstraint.cpp ActivateConstraint/CreateConstraint): phys_hinge (revolute about hingeaxis - origin; hingefriction x 1000 kg in^2/s^2 as a capped zero-velocity motor), phys_ballsocket, phys_ragdollconstraint (spherical with x/y/z limits in the constraint angles), phys_constraint (fixed) as Rapier impulse joints between the attach1/attach2 bodies (missing or non-physics = a fixed world body); SF_CONSTRAINT_DISABLE_COLLISION. Reported, not built (`constraint_errors`): phys_lengthconstraint (rope joints rejected: the swing seats first dropped ~19 units then were flung to z 245, also with CCD off for jointed bodies), constraints with SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY (native BecomeHinged; the impulse teeter-totter hinge inside its static base drifted 115 units; multibody joints panicked in Rapier: "Matrix slicing out of bounds"), unknown attachments. (2) CCD gating fix: props authored interpenetrating a static entity (found once after the first step, contact deeper than 1 unit; world geometry and NPC hulls excluded) keep permanent CCD: with this morning's gating the teeter-totter seat was ejected from its base (to -4756 / -4406). A per-tick variant was rejected (kept CCD on for props pressed into hulls/terrain: plaza tip mean 7.7 ms). (3) The owned impacts test now expects the 11 studio-decal textures (32; it failed after the studio decal commit, which was pushed without rerunning owned tests).
+
+**Why:** owner item 0c: the playground tic-tac-toe blocks fall and jitter; native holds them on hinges.
+
+**Tested how:** unit test (hinged prop pushed off-axis keeps its pivot within 0.5 and does not fall; ropes reported; unknown attachment reported), workspace tests, owned tests (all pass; frag replay bests unchanged 27.6/16.4/3.8/12.8/44.1), strict Clippy, fmt. Packaged (`bevy-playground-constraints.json`, artifacts/s15/play*.json/png): the 8 tic-tac-toe blocks stay at their hinge heights z 63/46/29 (play1.png); teeter-totter seat stays at (-4848,-3488,19) (authored -4851,-3492,20); swing seats fall to z -10 as before; carousel rests at z -10 as before; plaza cop tip-off worst physics step 6.5 ms, mean 3.0 (before the CCD work 20-40 ms).
+
+**Result:** the tic-tac-toe board works as in native; nothing else on the playground regressed.
+
+**Still broken or not tested:** native comparison of the spinning blocks (only SDK + visual); swings (ropes), teeter-totter and carousel hinges (assume-world-geometry), constraint systems, breaking, TurnOn/TurnOff, phys_thruster, env_physexplosion (the playground ghost-swing pushes), func_physbox as dynamic bodies; props authored inside static entities keep permanent CCD (cost as before today).
+
+**Next:** regression batch, then the owner's carried-bottle crouch question.
+## 2026-10-13 session 15 (continued): studio decals on NPCs (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** DESIGN 13f. (1) `modkit_core::studio_decals`: `project` clips the posed triangles facing the shot to the decal square (depth = radius), carrying barycentric bind positions, blended top-4 bone weights and UVs; `ray_distance` finds the front face along a ray. (2) Simulation: bullet hits on NPCs queue `Impacts::studio_requests` with Impact.Flesh (TranslationData F -> decals/flesh/blood1-5_subrect, drawn with their `$modelmaterial` decals/flesh/bloodN at the subrect's size), and bug bait splats on NPCs queue BeerSplash (drawn with decals/beersplashmodel, 64 units); `$modelmaterial` read from the VMTs, model decal textures preloaded. (3) Host `studio_decals.rs`: builds each request from the NPC's GPU-skinned draws (main-world mesh + joint GlobalTransforms x inverse binds), re-shoots along the shot onto the skin, spawns a decal mesh sharing the draw's `SkinnedMesh` joints (follows animation), tinted by the light state at the hit, hidden with the entity, 50 per model. Report `presentation.studio_decals`, `impacts.studio_created`. Fixtures bevy-studio-decal-cop, -bugbait-cop, -bugbait-citizen.
+
+**Why:** owner item 0b: NPCs must take decals like native studio decals (bug bait stains, blood, paint).
+
+**Tested how:** unit tests (clipped area and bind-space positions, UVs, weights across a bone seam, back faces/out of depth/degenerate rejected, ray front-face hit), workspace and owned tests, strict Clippy, fmt. Packaged (artifacts/s15): three pistol shots at posed terminal_side_cop: 2 blood decals on the belt/abdomen (sdecal3-zoom.png), one grazing hit builds nothing; before the skin re-shoot only 1/3 built (the hit lies on the convex trace shape). Bug bait at the posed cop from 200 units (80 units is inside the bait's non-solid grace period) builds a 1788-triangle stain over the torso; a tint-1 diagnostic showed the geometry and z-fighting (lift raised 0.05 -> 0.25). Native (oracle T160710Z: terminal_side_cop is behind a fence natively, bait hit the fence; T160814Z: bait at the queue citizen's back): no clearly visible stain on the dark clothing natively, nor in ours at the same views (ours hit a different citizen: the queue had progressed differently). Inconclusive; native blood on NPCs not captured.
+
+**Result:** bullets leave blood on NPCs that moves with them; bug bait stains NPCs.
+
+**Still broken or not tested:** native comparison of blood/bait decals on NPCs (needs an open, deterministic native NPC); shot direction is the reversed trace normal; TraceBleed blood on world surfaces behind NPCs; other game materials (antlion/alien/metal NPCs use flesh); per-vertex lighting of translucent model decals; ragdolls; thin seams at creases from the flat lift.
+
+**Next:** VPhysics constraints (owner item 0c; also needed for ragdoll gibs).
+## 2026-10-13 session 15 (continued): breakable prop gibs (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** DESIGN 13e steps 2-3. `hl2_simulation::gibs`: a broken prop (CBreakableProp::Break) records its pose and motion in `Scene::prop_breaks`; `Gibs::spawn` (PropBreakableCreateAll / BreakModelCreateSingle / BreakModelCreate_Prop) creates each non-ragdoll .phy break block as a runtime prop body (`Physics::add_prop_body`, new; the frag keeps `add_projectile_body`) at the parent's pose and offset with the parent's velocity at that point, its angular velocity and the default 100 u/s outward burst (`burst` key parsed); gibs get projectile-range entity ids (holdable). `Gibs::tick` follows SUB_StartFadeOut/SUB_FadeOut/SUB_AllowedToFade: after `fadetime`, 3 alpha per 15 ms tick while outside the player's 2D view cone (0.766) and not held, removed at 0; PerformanceMode 1 spawns none. Host: gib meshes preloaded with the projectile models (`PreparedEffects::load` takes the world), `effects::present_gibs` draws them with a per-gib material lit from the map light state and alpha-blended while fading; report `gameplay.gibs`, `gib_draws`. Fixture bevy-pallet-gibs-fade.
+
+**Why:** owner item 0a: breakable props must break into pieces like native. Owner question during the work: should gibs be newly spawned entities? Native: yes (BreakModelCreate_Prop CreateNoSpawn("prop_physics") at the break; models precached by PrecacheGibsForModel). Ours are created at the break too, as runtime bodies; full entities wait for DESIGN 14r.
+
+**Tested how:** unit tests (offset in parent model space, inherited velocity + burst, ragdoll gibs skipped and reported, entity binding; fade postponed while seen or held, 85-tick fade, removal, no-fadetime gib stays), workspace and owned tests, strict Clippy, fmt. Packaged (artifacts/s15): pallet #327 launched into the hall wall breaks into its 7 chunks (gibs1/gibcap.png), lit like the intact pallet at that spot (intact.png); after looking away all 7 fade and are removed by 20 s (two at 2 s, the rest at their 10 s fadetime). Owned check (scratch test, removed): cardboard_box001a/002a break into `ragdoll` gibs (6 solids); pallet chunk .phy hulls match their render bounds in model space.
+
+**Result:** wooden props break into physical pieces that fade like native.
+
+**Still broken or not tested:** native comparison of the pieces (counts/spread/fade timing) not done; cardboard boxes produce no pieces (ragdoll gibs need constraints, owner item c); parent skin, placementOrigin attachments, propdata chunk sets, gib health/DAMAGE_EVENTS_ONLY, gib visibility culling; gibs are runtime bodies, not map entities (DESIGN 14r).
+
+**Next:** NPC studio decals (owner item 0b), then constraints (0c, also unlocks ragdoll gibs).
+## 2026-10-13 session 15: stacked-prop margin, prop CCD frame drop (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Prop-on-prop contacts keep one VPhysics margin: Rapier adds both colliders' contact skins (narrow_phase: `contact.dist - skin1 - skin2`), so two props rested 1.0 apart while a prop rests 0.5 above the floor; dynamic prop colliders now run the solver-contact hook, which adds the shared skin back for pairs where both sides carry one. (2) Prop CCD gating: map props and runtime bodies (frag) no longer keep Rapier's hard CCD on permanently; each tick an awake body enables it only while its linear travel per step exceeds the body's own thickness (smallest extent of its pieces' union in the body frame). (3) Model-shaped hitboxes of hull-box NPCs are excluded in the contact-pair filter (Rapier enables a pair when either collider's active collision types allow it, so clearing the hitboxes' types alone did not stop props touching them: a pallet balanced on a plaza cop was pushed off by the animated hitboxes). (4) Movement-report sample field `step_ms` (whole fixed host step). Fixtures bevy-crate-on-box-stack, bevy-pallet-tips-off-plaza-cop, bevy-pallet-tips-off-npc-hull.
+
+**Why:** owner playtest: props stacked on each other rest visibly higher than native; dropping the pallet off-center onto a plaza cop so it tips over still drops 46 -> 17 fps.
+
+**Tested how:** unit tests (two stacked boxes: floor and stack gaps both 0.5 +- 0.1; hull-box test extended with a box across the hitbox face), workspace tests, owned tests with HL2_ROOT (all pass; frag replay bests lob 27.6, roll 15.6 (was 16.4), high 3.8, plaza 12.8, wall 44.1), strict Clippy, fmt. Packaged d1_trainstation_02 (artifacts/s15): Rapier profiler (temporary build, reverted) showed the cost was the CCD time-of-impact search (17-26 ms per step while the pallet rocked, 2-4.5 ms at idle; collision+solver ~2 ms); plaza cop #427 tip-off (`bevy-pallet-tips-off-plaza-cop.json`): worst physics step 2.5 ms over the run (before 20-40 ms for ~0.7 s while falling, 3-7 ms idle); crate #715 dropped on box #710 rests exactly 0.500 lower than with the old skin sum (crate-box 20.404 -> 19.904; box unchanged). Pallet street launch vs native T021822Z: identical to session 14 through the first bounces (y -4235/-4012/-3849 at f305/f320/f335), then diverges while tumbling: rest -3479 (session 14 -3495, native -3572). Rejected: Rapier soft CCD (speculative 8-unit prediction) for slow props: the launched pallet bounced to z 75 on its first ground hit and rested at -3467.
+
+**Result:** stacked props sit one margin apart; the pallet-on-cop frame drop is gone in the measured case.
+
+**Still broken or not tested:** native stack gap not measured numerically (pairwise 0.5 follows the floor measurement and the owner's visual comparison); tunneling of thin props moving less than their own thickness per tick through zero-thickness geometry is not tested; why ~7-38 props never sleep at idle (tic-tac-toe blocks without constraints and props near z -4) is open; owner's live gravity-gun drop not re-run by the owner.
+
+**Next:** owner item 0 (gibs, NPC decals, constraints, carried-bottle crouch).
+## 2026-10-13 session 14 (late): VPhysics contact margin, prop impact damage (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Dynamic prop colliders get a 0.5-unit Rapier contact skin (`VPHYSICS_CONTACT_MARGIN`): the maps' authored rest poses put .phy hull bottoms 0.497 (PlasticCrate01a) and 0.500 (a lying glass bottle) units above the floor, i.e. IVP's collision margin; without it props sat half a unit into floors (owner screenshot). The player shadow is now the hull at its sides/top with the bottom raised by the margin (replaces the +0.25 oversize). (2) Prop impact damage (DESIGN 13e step 0): CPhysicsProp::VPhysicsCollision -> CalculatePhysicsImpactDamage with allowStaticDamage (both bodies' lost speed, the other weighted by its mass, per kg of the prop), prop m_impactEnergyScale (0/absent -> 0.1, AddOutput override), x10 on the first collision after a gravity-gun launch (`Physics::launched`, set by the launch, cleared by any collision); prop_physics without health stay unbreakable (events only). (3) `prop_pose` gains `launched`. (4) Break sound: CBreakableProp::Break -> PhysBreakSound plays the surfaceprop break cue at the prop (all surface break cues preloaded); packaged: pallet #327 into the wall plays Wood.Break at the break. (5) Gib lists: `phy::break_models` (CBreakParser keys/defaults), `World::model_breaks` and gib physics preloaded at map load (owned test: wood_crate001a lists 7 chunk gibs, all present); spawning/rendering gibs not done. (6) SF_PHYSPROP_PREVENT_PICKUP (0x200) blocks +USE and gravity-gun pickup (SDK FVPHYSICS_NO_PLAYER_PICKUP / CanBePickedUpByPhyscannon; unit test). Found: the d1_trainstation_02 playground tic-tac-toe blocks (playgroundTick-tack-toe_block01a, authored z 46-62) fall to z ~-4 and jitter forever: native holds them with physics constraints (phys_hinge); constraints are not implemented. Fixtures bevy-pallet-launched-into-wall, bevy-crate-drop-rest.
+
+**Why:** owner: red plastic crate and bottles clip into the floor; crates/pallets must break like native (native, owner-verified: they break when launched into a close wall, not when launched far).
+
+**Tested how:** unit tests (launch bonus/energy scale/small-mass cap; a prop launched into a wall queues >= 50), owned tests (all pass, frag replay unchanged), packaged: crate #715 dropped on the hall floor rests at z 71.921 vs the native authored 71.957 (71.421 before); box push rest (-3359.4,-2607.4) vs native (-3358.3,-2607.4), stuck only 2/16 samples while pushing the pinned box; standing on a box and walking into boxes 0 stuck; pallet #327 (physdamagescale 0.1) fired at 1500 u/s into the hall wall with the launch flag breaks on impact, without it survives (3 hits); the native-compared street launch of pallet #882 does not break (its map physdamagescale is 0.0001), rest y -3495 vs native -3572 (-3521 before the margin). Regression batch artifacts/s14b-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01 only); finals vs s14-regression mean 0.00-0.48, Breen feeds identical.
+
+**Result:** props rest on floors like native; launched props break against close walls.
+
+**Still broken or not tested:** native comparison of the wall break (which pallet the owner broke: #882 has physdamagescale 0.0001 and cannot break by impacts per the SDK; #327/#349 have 0.1); a clean far-launch test of a breakable pallet (the hall run hit an obstacle); gibs, break sounds and propdata damage tables/modifiers (13e steps 1-4); bottle shoved into the floor with +USE not re-measured with a bottle; props near z -4 keep jittering (never sleep; possibly water) - not investigated; the margin is not applied to the thrown frag or prop-prop pairs are doubled (0.5 + 0.5, not verified vs native).
+
+**Next:** 13e gibs/break sounds, then the remaining owner items and 13b, then the merge.
+## 2026-10-13 session 14 (continued): NPC hull boxes, prop drag fractions, AddOutput keyvalues (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research input: Codex REA pass physics-research-20261013b/drag-axes (read-only).
+
+**Changed:** (1) NPC hull boxes (DESIGN 13d): SOLID_BBOX NPCs of HULL_HUMAN classes (metropolice, combine soldiers, player companions, Kleiner/Eli/Breen/Mossman/Magnusson/G-Man/Monk, zombies, stalkers, assassins) get an axis-aligned (-13,-13,0)-(13,13,72) box collider at the entity origin (follows set_entity, never rotates, disabled with the entity); player movement and physics props collide with it, traces (bullets, use, projectiles) and NPC navigation do not; the model-shaped NPC colliders stay as trace hitboxes with no contacts. (2) Drag: the VPHY header's stored orthographic fractions (retail copies them) are read (`Phy::drag_fractions`, `PhysicsSolid::drag_fractions`) and used for map prop bodies instead of the convex-silhouette estimate; the thrown frag keeps the estimate. (3) `AddOutput "key value"` (SDK keyvalue form) sets a per-entity keyvalue override; impact damage reads `physdamagescale` from it first. (4) Test fixture action `prop_pose` (teleport a map prop_physics body with a velocity; stands in for prop_physics_create until DESIGN 14r) and report fields `physics_ms`. Fixtures: bevy-player-on-box, bevy-player-walk-into-boxes, bevy-player-on-npc-hull, bevy-pallet-on-npc-hull, bevy-pallet-kills-cop-physdamagescale1, bevy-frag-use-pickup.
+
+**Why:** owner: in native you stand on a citizen's box-shaped collider above the shoulders; a pallet resting on a cop dropped the frame rate; the pallet launch drag was ~1.7x native (queued item 0); can we spawn a pallet like native; did the cop test set physdamagescale 1 (it had not: terminal_side_cop has map physdamagescale 0).
+
+**Tested how:** unit tests (player lands on the hull past the model, traces hit only the model, hull follows/disables, a thrown box strikes the hull with an NPC contact event; AddOutput keyvalue form), owned tests (pallet .phy fractions 0.9417/0.4026/0.9936; frag replay unchanged: lob 27.6, roll 16.4, high 3.8, plaza 12.8, wall 44.1), packaged d1_trainstation_02 (artifacts/s14): standing over terminal_side_cop's shoulder holds feet at 137 (hull top) while shuffling (before: slid off); pallet resting on a cop: physics step 4.7 ms mean / 9.4 max (model colliders: 25.5 / 62 ms and the pallet slid off); pallet launch at the owner's street spot vs native T021822Z: y -4235/-3899/-3673/rest -3521 at 0.08/0.45/0.9 s (native -4258/-3904 at 0.47/-3711 at 0.91/rest -3572; before -4246/-3999/-3843/-3769); pallet launched at the cop at 1500 u/s: dies with AddOutput physdamagescale 1, unhurt with the map's 0. Workspace tests, strict Clippy, fmt. Regression batch artifacts/s14-regression: weapons 17/17, attention 26/26, movement 25/26 (only the known doll01 PHY root-rotation warning); finals vs artifacts/s13-regression mean differences 0.00-1.07, Breen feeds identical, Kleiner feed 6 pixels.
+
+**Result:** standing on NPCs works like native boxes; the pallet-on-cop frame drop is gone; the pallet launch now tracks native within ~40 units (was ~200 short).
+
+**Still broken or not tested:** other NPC hull types (scanners, antlions, striders, vortigaunts...) keep model colliders; crouch/small hulls; NPC-vs-NPC navigation still uses model shapes; native comparison of standing on an NPC not captured (SDK only). Drag: the retail IVP-frame axis pairing (Source (vx, vz, vy)) was tried and rejected for now (pallet barely changed, frag roll replay 16 -> 65); stored fractions broke the frag's plaza replay (12.8 -> 40.1), so the frag keeps its estimate: an unmodelled object/core frame difference remains (drag-axes CONTINUATION). AddOutput output-connection form unsupported. No real prop spawn yet (14r).
+
+**Next:** regression review, then the remaining owner items (breakables/gibs, NPC studio decals), 13b leftovers and the merge.
+## 2026-10-13 session 14: thrown frag +USE pickup; player stuck on/against props (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** (1) Thrown frags get a projectile entity id (`physics::projectile_entity`) bound to their VPhysics body, so the +USE carry and the gravity gun can hold them (SDK CBaseGrenade: FCAP_IMPULSE_USE | FCAP_USE_IN_RADIUS, Use -> PickupObject; HL2 OnPhysGunPickup leaves the fuse running). FindUseEntity and the gravity gun's FindObject/punt traces use COLLISION_GROUP_NONE (`pick_ray`/`pick_hull` also hit weapon-group bodies); FindUseEntity now follows the SDK order (eye line returns at once, the last usable hull trace wins) and adds the PLAYER_USE_RADIUS sphere search (0.8 cone, nearest to the view line, occlusion trace). (2) Player stuck on props: `Player` ports CGameMovement::CheckStuck (stuck table, 0.2 s single-player interval, one offset per 0.05 s, move skipped while stuck) and exports `step_height` (m_outStepHeight). The VPhysics shadow: the explicit 85 kg weight impulse on movable ground is removed (not SDK/retail: the retail shadow has no gravity and light supports are not rideable; it sank a 5 kg box ~1.5 units into the floor and its rebound filled the player's hull); a step teleports the shadow (SetPosition/StepUp) instead of driving it through the prop; retail contact-plane limits (50 u/s into a pushable object, 0 into a heavy or blocked one), also applied ahead of contact by a sweep; the collider extends 0.25 past the hull's sides/top with its bottom raised 0.25. Report gains `hull_contacts`, `shadow` and `carrying`.
+
+**Why:** owner playtest: a thrown grenade cannot be picked up with E (native can); the player often gets stuck walking into or standing on physics props. Owner corrections this session: test by standing on top of a prop; a box pinned at a wall should not move.
+
+**Tested how:** unit tests (frag pickup until detonation; CheckStuck nudge; shadow pushes light not heavy, held object, no sinking of the prop stood on), owned tests with HL2_ROOT (44 pass), workspace tests (430), strict Clippy, fmt. Packaged d1_trainstation_02 runs (artifacts/s14): teleport onto cardboard box #710 and walk around (before: stuck on landing; after: 0/28 samples stuck, box unmoved); diagonal walk into boxes #710/#711 (before: stuck 230 ticks on #711; after 0/42); native-compared push into the wall (box rests (-3360.0,-2607.9), native (-3358.3,-2607.4), stays at the wall; momentary <0.01-unit contacts while pushing a pinned box); frag thrown at the feet then +USE: carried in front of the view until the fuse (capture fraguse-held.png).
+
+**Result:** frag pickup works with +USE (and the gravity gun path is enabled, not separately tested); the stuck-on-top and walk-into-box cases no longer stick.
+
+**Still broken or not tested:** native comparison of frag pickup (hold distance, timing) not done; gravity gun frag grab not tested; light props are no longer weighed down by the player (retail lead: controller support contacts, normal Z < -0.7); retail two/multi-normal controller constraints, bounded per-axis corrections and VPhysicsShadowUpdate (shadow pushing the player) not ported; props sinking into floors under load or when shoved with a held object (owner report: red crate, bottles) is Rapier contact softness, not fixed; NPC movement colliders are model-shaped where the SDK uses a HULL_HUMAN box (owner report, next).
+
+**Next:** NPC hull boxes (SOLID_BBOX HULL_HUMAN for player movement and physics), then the pallet-on-cop frame drop, prop floor penetration, then the queued owner items.
+## 2026-10-13 session 13 (continued): bug bait splat, player shadow, physdamagescale (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** bug bait BeerSplash decal (retail subrect of decals/decals_lit, lightmap-lit translucent decals through `Impacts::add_decal`) and the SporeExplosion emitter; the player's 85 kg VPhysics shadow (pushes movable props <= 350 kg, weighs down movable ground, skips the held object; `Player::wish_velocity`); NPC impact damage scaled by the entity's `physdamagescale`. Fixtures `test-inputs/bevy-bugbait-wall.json`, `test-inputs/bevy-player-push.json`. Private oracle gained `!keep` (no setpos), `!forward/!unforward`, `!name` (targetname the prop under the crosshair), `!spawn` (prop_physics_create, ORACLE_SPAWN) and `!second` (ent_text on ORACLE_TEXT2).
+
+**Why:** owner playtest reports (bug bait leaves no stain or particles; walking into props does not push them; a launched pallet barely hurt a cop).
+
+**Tested how:** unit tests (spore schedule/direction/decal request, shadow push light vs heavy, held object, weight; physdamagescale), owned tests (decal textures incl. the translucent subrect), packaged captures vs native oracle: bug bait at the spawn-room wall (T012846Z), cardboard box push (T012535Z), crate/oil drum/pallet vs plaza cop (T015556Z, T015900Z, T020048Z). Workspace tests, strict Clippy, fmt.
+
+**Result:** stain and push match native closely; the plaza cop's immunity is the map's physdamagescale 0, now honoured.
+
+**Still broken or not tested:** spores dimmer/sparser than native (11f); our pallet launch flight vs native not compared (needs a spawn command, 14r); NPC studio decals; breakables; push speed limit and the shadow pushing the player.
+
+**Next:** breakable props (propdata), NPC decals, a debug prop spawn for open-space launch tests, then the rest of 13b and the merge.
+
+## 2026-10-13 session 13: frag as a real w_grenade.phy rigid body (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** the thrown frag is a Rapier rigid body from w_grenade.phy by default (`--frag-swept-box` keeps the old fitted box): SDK spawn orientation (vec3_angle for throw/lob, (0, yaw, -90) for roll; ProjectileSpawn gained `angles`); the 12-sided .phy prism collides as a round cylinder; mass center and rotation inertia from the .phy IVP compact surface (source-assets phy.rs -> PhysicsSolid::compact_inertia); VPhysics performance-default speed limits (2000 u/s, 3600 deg/s) on every dynamic body. Owned test `owned_frag_throws_follow_native_samples` replays five native throws; unit test for the rolling prism; owned test for the frag .phy inertia; fixture `test-inputs/bevy-frag-wall.json`.
+
+**Why:** owner report: the frag floated above surfaces (4-unit swept box vs the 1.8-unit hull), rolled artificially, flopped at walls instead of bouncing; the session-12 rigid body stopped dead because it spawned aligned with the throw (SDK spawns it upright) and the faceted hull lost energy on every edge.
+
+**Tested how:** headless replay on d1_trainstation_02 collision vs native ent_text samples (best of seven spins, RMS units): lob 27.6, roll 16.4, overhand 3.8, plaza 12.8, wall 44.1 (old swept box 92.1/22.3/13.1/44.7/105.8). Three new native wall throws (oracle T000533Z, T002157Z, T002243Z). Packaged captures (artifacts/frag-s13): ground-level views of landed frags on the hall floor and on top of cardboard box #710 (rests at hull radius, no gap). Workspace tests, strict Clippy, fmt.
+
+**Result:** frag lies on its side on surfaces and rolls with real rotation; wall impacts pop it up and deflect it.
+
+**Still broken or not tested:** wall rebound for some spins is larger than the three native throws (in game, spin -0.5: lands ~90 units out vs native 18-60); IVP impact friction is not reproduced (retail friction product kept); packaged audio of the rigid frag vs native not rerun; two Bevy image `should_panic` tests fail in release builds only (debug assertions; pre-existing, unrelated).
+
+**Next:** bug bait splat (BeerSplash decal + SporeExplosion), player physics shadow (push props), pallet launch flop, breakables, rest of 13b.
+
+## 2026-10-12 session 12: local validation of the cloud arsenal + physics branches (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Validates work written by the cloud sessions (Claude Code cloud, `claude-opus-5-5`, SDK-only: crossbow, RPG, bug bait, gravity gun, viewmodel effects, sound stop/patch path, view punch, authored VPhysics props, surfaceprops, impact sounds, frag rigid body, +USE carry, ground surfaces, per-side world materials).
+
+**Changed (this session, local):** VFS searches VPKs before loose folders (gameinfo order); Weapon_Equip clip rule; retail facts in owned tests (no RPG reload sound, no crossbow unloaded activities); projectile models posed by sequence 0; viewmodel-attached sprites at world-FOV size; viewmodel FOV follows the zoom; RPG laser dot in glow mode (no depth test); crossbow skin-1 glowing bolt and CrossbowLoad sparks; per-object retail VPhysics drag (drag.rs) with native air density 2.00; held-object mass reduction and drag toggle; frag rigid body opt-in (`--frag-rigid-body`); fixtures bevy-physcannon-props.json and bevy-use-carry.json.
+
+**Why:** owner: validate the cloud branches locally and fix what the installation, private research and native HL2 show; owner reports during the session (zoom past the viewmodel, laser dot clipping, plain vs incandescent bolt).
+
+**Tested how:** Windows build, workspace unit tests, strict Clippy, fmt; owned tests with HL2_ROOT; packaged fixtures (frag x4, crossbow, RPG, bug bait, gravity gun at a prop spot, +USE carry; captures in artifacts/cloud-validate); native oracle (gravity gun hold/launch and air_density T191304Z, crossbow T192857Z); frag positions vs session-11 native samples; regression batch artifacts/cloud-regression(2).
+
+**Result:** owned tests pass; gravity gun glow matches native; rigid-body frag worse than the swept box on lob/trainstation landings (kept opt-in); batch weapons 17/17, attention 26/26, movement 25/26 (new doll01 collision warning, explained in STATUS).
+
+**Later in the session:** crossbow skin-1 glowing bolt + CrossbowLoad sparks, viewmodel FOV follows the zoom, RPG laser dot in glow mode, gravity gun DoEffectLaunch, physics impact damage to NPCs (SDK/retail NPC table; owner reports and requests). Native RPG missile path matches within ~3 units (T194927Z).
+
+**Still broken or not tested:** native trajectories of bolt/bait/launched props (two rejected attempts each for bolt and launch); weapon audio vs native; DoEffectLaunch beam, bolt motion-blur trail, ragdoll pinning; 11f gamma sprites; doll01 root-rotated .phy; the AI branch is not validated yet.
+
+**Next:** remaining 13b native checks, then fold into wip/arsenal-20261009 and the single 13b merge; then validate `wip/cloud-npc-ai-20261010` (step 14).
+
+## 2026-10-12 cloud session: ground surface movement and per-side world materials (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** player ground friction/acceleration/max speed/jump from the ground surfaceprop (CategorizeGroundSurface); surfaceprops parses jumpfactor/maxspeedfactor/thickness/dampening; restitution clamped to 0..1; BSP brush-side materials -> $surfaceprop -> per-contact friction/restitution for world brush colliders through a Rapier contact-modification hook.
+
+**Why:** owner: physics should use Source's materials (friction, bounciness) everywhere; the owner supplied the installed surfaceproperties scripts.
+
+**Tested how:** unit tests with synthetic data (surface factors on a floor, icy side vs default slide distance, parser quirks); temporary uncommitted parser check against the owner's uploaded scripts (91 entries); strict Clippy, fmt, workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** native stopping distances and prop slides; brush entities/displacements keep "default"; slipperyslime jump question (STATUS).
+
+**Next:** STATUS physics checklist items 7-9.
+
+## 2026-10-10 second cloud session: VPhysics props, frag rigid body, +USE carry (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** new branch from the arsenal branch (owner request mid-session to separate the physics work). .phy solid parameters and surfaceproperties (source-assets) into `World`; Rapier prop bodies with authored pieces, mass, inertia, damping and surfaceprop friction/elasticity; air drag and collision events in `Physics::tick`; PhysCollisionSound/AddImpactSound/PlayImpactSounds for props and frags; the thrown frag as a Rapier body from w_grenade.phy with VPhysicsUpdate's NPC reflection; `grab.rs` shared CGrabController; `player_pickup.rs` +USE carry; host wiring (frag .phy load, collision sounds, E/use routing, holstered viewmodel); merge of the arsenal branch's 13b 3-5.
+
+**Why:** owner, 2026-10-10: physics must follow Source/Havok (weights, bounciness, materials), the frag lacked a real physics object, and E should pick up small props.
+
+**Tested how:** unit tests on synthetic data (solid parsing defaults, surfaceprop inheritance and hard/soft choice, authored mass/inertia/damping/material on bodies, drag per tick and contact events, frag body landing/sound/release, carry pickup/hold/throw/deny/drop, alignment); hl2-bevy compiled/tested on Linux; strict Clippy (exit code, color off), fmt.
+
+**Result:** hl2-simulation 202 / 18 ignored, source-assets 92 / 19, modkit-core 53, hl2-ui 32 / 1, hl2-bevy 37 / 2.
+
+**Still broken or not tested:** nothing compared with native or run packaged; the frag body is not fitted (the swept box was); player does not push props; see STATUS physics handoff.
+
+**Next:** local validation per the physics checklist, decide frag body vs swept box, then merge after the arsenal branch.
+
+## 2026-10-10 second cloud session: 13b items 3-5 (`wip/cloud-arsenal-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** sound stop path and CSoundEnvelopeController patches for game cues (Missile.Ignite stop, gravity gun HoldSound); RPG lowered idle without rockets; gravity gun launch spin and carry max speed (new modkit-core `Input::max_speed`); ViewPunch/DecayPunchAngle for crossbow and gravity gun with the host camera; host drawing for stuck bolts, FX_ElectricSpark sparks and the SDK viewmodel sprites/beams (crossbow, RPG, gravity gun) on the viewmodel layer; viewmodel pose parameters ("active").
+
+**Why:** owner priority 0, DESIGN 13b items (3)-(5) of the cloud prompt.
+
+**Tested how:** unit tests (patch envelopes, missile stop request, motor patch sequence, lowered RPG, launch spin, carry speed, max-speed override, punch spring, sparks counts/expiry, viewmodel effect states and quads); hl2-bevy compiled and tested on Linux; strict Clippy (exit code, color off) and fmt.
+
+**Result:** hl2-simulation 196 passed / 18 ignored, hl2-bevy 37/2, modkit-core 53, source-assets 90/18, hl2-ui 32/1. Commit cc82bb8 alone failed strict Clippy (doc lint), fixed in 615d630.
+
+**Still broken or not tested:** nothing was run or compared with native (visual, audio, timing); viewmodel skin swap, CrossbowLoad effect and the launch beam are not done; punch does not affect aim/viewmodel; Windows build.
+
+**Next:** local validation per the STATUS checklist items 7-12; merge order with `wip/cloud-physics-20261010` (stacked on this branch).
+
+## 2026-10-10 cloud session: bug bait and gravity gun (13b d/e, `wip/cloud-arsenal-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** weapon_bugbait / npc_grenade_bugbait / point_bugbait (`weapon_bugbait.rs`, BugBaitEvent hook for step 14) and weapon_physcannon (`weapon_physcannon.rs`: punt, pull, pickup, hold controller, drop, launch, deny) on the Rapier props; host hooks; fixtures test-inputs/bevy-bugbait.json, bevy-physcannon.json. Clippy fixes for the RPG commit.
+
+**Why:** owner priority 0, DESIGN 13b (d) and (e).
+
+**Tested how:** unit tests (bug bait haul/throw/squeeze and splat + sensors; launch spline, punt impulse, pickup/hold/launch, deny, pull on synthetic Rapier bodies); hl2-bevy compiled/tested on Linux; strict Clippy/fmt (verified with color off).
+
+**Result:** builds; 190 hl2-simulation tests and 37 hl2-bevy tests pass on Linux.
+
+**Still broken or not tested:** prop masses are not the authored ones; hold controller approximates VPhysics; everything vs native; Windows build. An earlier claim in this session that Clippy was clean (crossbow/RPG commit) was wrong; fixed in ded5dcc.
+
+**Next:** local validation per the STATUS checklist; then step 14 (separate branch).
+
+## 2026-10-10 cloud session: crossbow and RPG (13b b/c, `wip/cloud-arsenal-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** weapon_crossbow + crossbow_bolt (`hl2-simulation/src/weapon_crossbow.rs`) and weapon_rpg + rpg_missile + env_laserdot (`weapon_rpg.rs`) from SDK 2013 weapon_crossbow.cpp / weapon_rpg.cpp; player FOV ramp (SetFOV/GetFOV); thin hooks in gameplay.rs/projectiles.rs; host wiring in hl2-bevy (models, cue preloads, FOV, impacts, suit updates, laser dot, missile events); fixtures test-inputs/bevy-crossbow.json, bevy-rpg.json. Details and SDK-vs-prompt differences in STATUS "Cloud session handoff".
+
+**Why:** owner priority 0, DESIGN 13b (b) and (c), prepared in the cloud for local validation.
+
+**Tested how:** unit tests only (state machines in 15 ms ticks, FOV spline, bolt flight/stick/reflect/NPC hit, missile ignition/homing/grace/blast, laser-dot line following); hl2-bevy compiled and its tests run on Linux; strict Clippy/fmt. Owned tests written but ignored (no game files).
+
+**Result:** builds and unit tests pass on Linux.
+
+**Still broken or not tested:** everything visual/audio/timing vs native; owned scripts/viewmodels; Windows build; stuck bolts/sparks/charger/beam not drawn; see STATUS.
+
+**Next:** bug bait, gravity gun, then local validation per the checklist.
+
+## 2026-10-10 session 11 (late): frag impact sounds, native fuse check
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed (branch `wip/arsenal-20261009`, not merged):** frag impacts play the grenade surfaceprop's impact sound per SDK PhysCollisionSound/PlayImpactSounds: normal speed >= 70 u/s, >= 0.05 s since the previous collision, volume min(1, (speed/320)^2), `Grenade.ImpactHard` (installed surfaceproperties.txt: grenade impacthard/impactsoft, hardness 1.0 and no hard thresholds, so hard is always chosen), positioned at the grenade; the cue is preloaded.
+
+**Why:** native physics objects sound on impact; ours were silent.
+
+**Tested how:** unit test (floor drop: one sound, SDK volume, friction impulse, no bounce); 385 workspace tests, strict Clippy/fmt; packaged lob `--audio-trace`: request 0.24 s after spawn at the sidewalk landing, started physics/metal/metal_grenade_impact_hard2.wav. Native fuse (timescale 0.1, T043539Z): detonation 2.94-3.15 s after spawn vs ours 3.045 s. Rejected: oracle timescale 0.05 (user command buffer overflow drops +attack, two runs).
+
+Hits on characters (npc_*) now use the SDK's VPhysicsUpdate ray reflection (0.2 restitution, spin x -0.5, no physics sound), since COLLISION_GROUP_WEAPON passes through characters in VPhysics; unit test added (386 tests).
+
+Per-process recordings: native blip onsets match ours (0, 1.057, 2.102, 2.415, 2.740 s); blip peaks match within ~1 dB; the impact is masked by the plaza ambient (two attempts; tentatively ours ~3 dB quieter).
+
+**Still broken or not tested:** impact sound level vs native (repeat at a quiet place); the 0.1 DMG_CRUSH "bonk" to NPCs (step 14); the player as a reflecting character; rotational dynamics; NPC reflection not compared with native.
+
+**Next:** see the 13b list (crossbow, RPG, bug bait, gravity gun; optional frag rigid body; DESIGN 11f).
+
+## 2026-10-10 session 11 (later): frag world contact, lob and roll vs native
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed (branch `wip/arsenal-20261009`, not merged):** frag world contacts follow VPhysics instead of the entity-only 0.2 reflection (SDK CGrenadeFrag::VPhysicsUpdate reflects only off entities its collision group skips): surfaceprops grenade (friction 0.9, elasticity 0.01) x default/concrete/tile (0.8, 0.2) give practically no bounce and a Coulomb friction impulse 0.72 x |normal speed| on impact; resting contacts keep their tangential motion (gravity carries the body off edges instead of snagging), floors add a constant 190 u/s^2 rolling resistance fitted to native. Fixtures `test-inputs/bevy-frag-lob.json` (secondary, standing) and `bevy-frag-roll.json` (secondary while crouched); both look 25 degrees down at release like the native captures.
+
+**Why:** owner priority 13b (lob/roll comparison; owner reminder: secondary fire standing and crouched).
+
+**Tested how:** native HDR lob and roll (oracle '!attack2'/'!release2', roll with '!duck'; sessions view-d1_trainstation_02-20261010T040222Z lob, T040313Z roll; 14 ent_text samples each at timescale 0.1). Native spawn ~0.09 s after the release command (fit from the first sample; ours spawns at the owned event, 0.105 s). Packaged comparison by time since spawn: roll RMS 22.4 units over 2.2 s (end 21.2; curb drop impulse ~530 -> 335 u/s as native); lob flight/landing 4.7 and 0.5 units; overhand monument throw in flight 10.9 and 8.3 units. 384 workspace tests, strict Clippy/fmt.
+
+**Still broken or not tested:** no rotational dynamics: native turns spin into rolling on contact and rolls along the grenade's own axis, so after landing the lob (ends 151 units off, native rolls straight to the curb at ~155 u/s) and the overhand throw (ends 70 units off; native rolls ~45 u/s off the monument ledge) differ. Swept 4-unit box instead of the w_grenade convex hull. Sprite gamma blending (DESIGN 11f). Regression batch (artifacts/arsenal-regression): 26/17/26, final captures unchanged vs damage-regression except known slate exposure and book-edge noise.
+
+**Next:** rigid-body frag (Rapier body from w_grenade.phy with the fitted drag and surface friction) if the owner wants post-landing fidelity; otherwise crossbow, RPG, bug bait, gravity gun.
+
+## 2026-10-10 session 11: frag flight drag, spin range, sprite-trail strip (arsenal WIP)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.
+
+**Changed (branch `wip/arsenal-20261009`, not merged):** npc_grenade_frag flight gets quadratic air drag dv/dt = -c|v|v, c = 6.4e-4 per unit, fitted to native (VPhysics drag lives in vphysics.dll, not the SDK; w_grenade.phy sets damping 0). The frag spin used a [-3, 1] random range (random() is already [-1, 1] and was remapped again); now RandomInt(-1200, 1200) as the SDK. The frag trail is one C_SpriteTrail/CBeamSegDraw strip (shared edge vertices, normal from neighbouring points, alpha and width 8->1 by each point's remaining life, u across the width, v = 0 because grenade_frag never sets a texture resolution) instead of separate per-segment quads with full alpha and a full texture per segment (owner report: wonky, less smooth than native). Fixtures `test-inputs/bevy-frag-native.json` (plaza, yaw 12, Bevy pitch 10) and `bevy-frag-high.json` (yaw -20, Bevy pitch 30). The private oracle gained per-view weapon input suffixes (`!attack`, `!release`, `!attack2`, `!release2`, `!duck`, `!unduck`, `!text` = ent_text on ORACLE_TEXT; positions need `developer 1`).
+
+**Why:** owner priority 13b (native frag comparison) and owner report on the trail.
+
+**Tested how:** native HDR captures (oracle sessions view-d1_trainstation_02-20261010T013831Z, T014922Z, T015224Z; ent_text positions at host_timescale 0.25/0.1). Drag fit: 8 in-flight samples, RMS 3.7 units (linear drag 10.3, none 195.6); the independent pitch -10/yaw 12 throw is predicted within 3 units. Packaged run after the change: 7-20 units from native over 1.3 s (before: up to ~370). Rest position after the monument bounce: ours (-2102.6,-1747.6,20.0) vs native (-2098.9,-1747.5,18.1). New unit tests (native drag samples, trail strip); 384 workspace tests, strict Clippy/fmt.
+
+**Result:** frag flight matches native closely; the trail is smooth and fades like native.
+
+**Still broken or not tested:** native draws Sprite-shader materials with `$nosrgb` 1 (SDK sprite_dx9.cpp default: no sRGB read/write, TONEMAP_SCALE_GAMMA), i.e. additive in gamma space into the integer-HDR framebuffer; ours adds in linear space, so the trail core is about half as bright (red excess ~50 vs ~100) and looks thinner. CBeamSegDraw geometry was checked against the SDK's compiled tier2.lib (half width per side, vertex colour = rgb + alpha). Gamma-space sprite blending is a renderer item for all sprites (planned, not started). Explosion timing vs native not measured (not in view); lob/roll not compared; regression batch not run; the remaining four weapons.
+
+**Next:** lob/roll native comparison, then crossbow, RPG, bug bait, gravity gun; gamma-space sprite blending as a separate renderer step (DESIGN 11f).
+
 ## 2026-10-09 session 10 (later): arsenal WIP (frag grenade), suit logon
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5` (session system context). No subagents.

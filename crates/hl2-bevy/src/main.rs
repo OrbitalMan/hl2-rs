@@ -15,6 +15,7 @@ mod movement;
 mod performance;
 mod rendering;
 mod sky;
+mod studio_decals;
 mod tonemap;
 mod visibility;
 use anyhow::{Context, Result, bail};
@@ -139,6 +140,9 @@ impl Options {
                 "--mute-ambient" => {
                     audio::MUTE_AMBIENT.store(true, std::sync::atomic::Ordering::Relaxed)
                 }
+                "--frag-swept-box" => {
+                    assets::FRAG_RIGID_BODY.store(false, std::sync::atomic::Ordering::Relaxed)
+                }
                 "--no-focus" => options.no_focus = true,
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
@@ -149,7 +153,7 @@ impl Options {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --frag-swept-box (legacy fitted frag instead of its w_grenade.phy body) --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -329,6 +333,7 @@ fn main() -> Result<()> {
         .insert_resource(simulation)
         .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
+        .init_resource::<studio_decals::StudioDecals>()
         .insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.1)))
         .add_plugins(
             DefaultPlugins
@@ -380,6 +385,8 @@ fn main() -> Result<()> {
                 rendering::present_entities,
                 rendering::present_weapons,
                 effects::present,
+                effects::present_gibs,
+                studio_decals::present,
                 sky::present,
                 monitors::present,
                 monitors::present_materials,
@@ -543,6 +550,7 @@ fn setup(
             ..default()
         },
         bevy::camera::visibility::RenderLayers::layer(1),
+        movement::ViewmodelCamera,
         Tonemapping::None,
         bevy::camera::Exposure::default(),
         tonemap::ToneMapped,
@@ -553,7 +561,10 @@ fn setup(
         },
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
-            fov: 2. * ((54f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
+            fov: 2.
+                * ((hl2_simulation::viewmodel_effects::VIEWMODEL_FOV.to_radians() / 2.).tan()
+                    / (4. / 3.))
+                    .atan(),
             near: 0.1,
             far: 1000.,
             ..default()
@@ -690,6 +701,13 @@ type RenderResources<'w> = (
     Res<'w, tonemap::Tonemap>,
     Res<'w, Assets<rendering::SourceMaterial>>,
 );
+/// Exit writer and optional diagnostics read by `monitor`.
+type ExitResources<'w> = (
+    MessageWriter<'w, AppExit>,
+    Option<Res<'w, performance::Performance>>,
+    Option<Res<'w, bevy::diagnostic::DiagnosticsStore>>,
+    Res<'w, studio_decals::StudioDecals>,
+);
 fn monitor(
     mut commands: Commands,
     (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
@@ -697,11 +715,7 @@ fn monitor(
     status: Res<Status>,
     (adapter, pvs, tonemap, source_materials): RenderResources,
     (cameras, draws, map_entities, all_cameras, meshes, images, geometry, two_textures): DiagnosticQueries,
-    (mut exit, performance, render_diagnostics): (
-        MessageWriter<AppExit>,
-        Option<Res<performance::Performance>>,
-        Option<Res<bevy::diagnostic::DiagnosticsStore>>,
-    ),
+    (mut exit, performance, render_diagnostics, studio): ExitResources,
 ) {
     let _timing = performance::scope(performance.as_deref(), "diagnostics");
     control.frames += 1;
@@ -741,7 +755,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         report.presentation["two_texture_materials"] = serde_json::json!(
             two_textures

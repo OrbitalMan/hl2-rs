@@ -13,6 +13,14 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct Phy {
     pub checksum: u32,
     pub pieces: Vec<ConvexPiece>,
+    /// IVP_Compact_Surface mass_center, Source units and axes.
+    pub mass_center: Vec3,
+    /// IVP_Compact_Surface rotation_inertia per kilogram of mass (m^2), on the
+    /// Source axes: the principal inertia VPhysics scales by mass and `inertia`.
+    pub rotation_inertia: Vec3,
+    /// VPHY header drag fractions (file offsets 32/36/40, the stored orthographic
+    /// area fractions retail vphysics copies for its drag bases, in stored order).
+    pub drag_fractions: Vec3,
     /// Preserves duplicate sections/keys; mass/material mapping is separate work.
     pub keyvalues: Vec<keyvalues::Entry>,
 }
@@ -49,7 +57,7 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
     {
         bail!("unsupported VPHY version/type/axis map");
     }
-    vec3(data, 32)?;
+    let drag_fractions = vec3(data, 32)?;
     let compact = data.get(48..end).context("truncated PHY compact solid")?;
     if compact.len() != u32le(data, 28)? as usize
         || compact.len() < 48
@@ -61,6 +69,11 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
     for at in (0..28).step_by(4) {
         f32le(compact, at)?;
     }
+    // IVP axes (x, y, z) are Source (x, -z, y) in meters.
+    let ivp = vec3(compact, 0)?;
+    let mass_center = Vec3::new(ivp.x, ivp.z, -ivp.y) / 0.0254;
+    let ivp = vec3(compact, 12)?;
+    let rotation_inertia = Vec3::new(ivp.x, ivp.z, ivp.y);
     let root = u32le(compact, 32)? as usize;
     if root < 48 {
         bail!("PHY tree overlaps compact header");
@@ -173,8 +186,154 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
     Ok(Phy {
         checksum,
         pieces,
+        mass_center,
+        rotation_inertia,
+        drag_fractions,
         keyvalues,
     })
+}
+
+/// The KeyValues text after every solid, for any solid count (ragdolls included),
+/// without reading collision geometry.
+pub fn read_keyvalues(data: &[u8]) -> Result<Vec<keyvalues::Entry>> {
+    if data.len() > 64 * 1024 * 1024 || u32le(data, 0)? != 16 {
+        bail!("unsupported PHY header");
+    }
+    let count = u32le(data, 8)?;
+    if count == 0 || count > 1024 {
+        bail!("unsupported PHY solid count");
+    }
+    let mut at = 16usize;
+    for _ in 0..count {
+        let size = usize::try_from(u32le(data, at)?)?;
+        at = at
+            .checked_add(4)
+            .and_then(|a| a.checked_add(size))
+            .context("PHY solid size overflow")?;
+        if at > data.len() {
+            bail!("truncated PHY solid");
+        }
+    }
+    let tail = &data[at..];
+    let nul = tail
+        .iter()
+        .take(1024 * 1024)
+        .position(|b| *b == 0)
+        .unwrap_or(tail.len().min(1024 * 1024));
+    if !tail[..nul].is_ascii() {
+        bail!("non-ASCII PHY KeyValues");
+    }
+    keyvalues::parse(std::str::from_utf8(&tail[..nul])?)
+}
+
+/// The "solid" blocks' VPhysics parameters, in file order. Keys are read in order,
+/// so a repeated key keeps its last value; absent keys keep the SDK defaults
+/// (g_PhysDefaultObjectParams). The key parser itself lives in vphysics.dll, so key
+/// names follow the shipped .phy text: index, mass, inertia, damping, rotdamping,
+/// surfaceprop, volume.
+pub fn solids(entries: &[keyvalues::Entry]) -> Vec<modkit_core::PhysicsSolid> {
+    entries
+        .iter()
+        .filter(|e| e.key.eq_ignore_ascii_case("solid"))
+        .map(|block| {
+            let mut solid = modkit_core::PhysicsSolid::default();
+            for child in block.children() {
+                let Some(value) = child.text() else {
+                    continue;
+                };
+                let number = value.trim().parse::<f32>().ok().filter(|v| v.is_finite());
+                match child.key.to_lowercase().as_str() {
+                    "index" => solid.index = value.trim().parse().unwrap_or(solid.index),
+                    "mass" => solid.mass = number.unwrap_or(solid.mass),
+                    "inertia" => solid.inertia = number.unwrap_or(solid.inertia),
+                    "damping" => solid.damping = number.unwrap_or(solid.damping),
+                    "rotdamping" => solid.rotdamping = number.unwrap_or(solid.rotdamping),
+                    "volume" => solid.volume = number.unwrap_or(solid.volume),
+                    "surfaceprop" => solid.surfaceprop = value.trim().to_lowercase(),
+                    _ => {}
+                }
+            }
+            solid
+        })
+        .collect()
+}
+
+/// CBreakParser (props_shared.cpp): the `break` blocks of the PHY KeyValues, in file
+/// order. Unknown keys (placement, multiplayer_break, velocity) are ignored.
+pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel> {
+    entries
+        .iter()
+        .filter(|e| e.key.eq_ignore_ascii_case("break"))
+        .filter_map(|block| {
+            let mut gib = modkit_core::BreakModel {
+                model: String::new(),
+                ragdoll: false,
+                offset: Vec3::ZERO,
+                health: 1.,
+                fade_time: 20.,
+                debris: None,
+                motion_disabled: false,
+                burst: None,
+            };
+            let mut wrote_collision_group = false;
+            for child in block.children() {
+                let Some(value) = child.text().map(str::trim) else {
+                    continue;
+                };
+                let number = value.parse::<f32>().ok().filter(|v| v.is_finite());
+                match child.key.to_lowercase().as_str() {
+                    "model" => gib.model = fixup_model_name(value),
+                    "ragdoll" => {
+                        gib.model = fixup_model_name(value);
+                        gib.ragdoll = true;
+                    }
+                    "motiondisabled" => gib.motion_disabled = true,
+                    "offset" => {
+                        let v: Vec<f32> = value
+                            .split_whitespace()
+                            .filter_map(|s| s.parse().ok())
+                            .collect();
+                        if let [x, y, z] = v[..] {
+                            gib.offset = Vec3::new(x, y, z);
+                        }
+                    }
+                    "health" => gib.health = number.unwrap_or(gib.health),
+                    // CBreakParser: a fade time makes the piece debris unless a "debris"
+                    // key came first; "debris" is atoi > 0 (else INTERACTIVE).
+                    "fadetime" => {
+                        gib.fade_time = number.unwrap_or(gib.fade_time);
+                        if !wrote_collision_group {
+                            gib.debris = Some(true);
+                        }
+                    }
+                    "debris" => {
+                        gib.debris = Some(value.parse::<f32>().map_or(0, |v| v as i32) > 0);
+                        wrote_collision_group = true;
+                    }
+                    "burst" => gib.burst = number,
+                    _ => {}
+                }
+            }
+            (!gib.model.is_empty()).then_some(gib)
+        })
+        .collect()
+}
+
+/// FixupModelName: lowercase forward-slash path with a "models/" prefix and ".mdl".
+pub(crate) fn fixup_model_name(name: &str) -> String {
+    let mut name = name.replace('\\', "/").to_lowercase();
+    if !name.starts_with("models/") {
+        name = format!("models/{name}");
+    }
+    if !name.ends_with(".mdl") {
+        name.push_str(".mdl");
+    }
+    name
+}
+
+/// PhysModelParseSolid with solidIndex -1 (physics_shared.cpp): the first solid block.
+pub fn first_solid(entries: &[keyvalues::Entry]) -> Option<modkit_core::PhysicsSolid> {
+    solids(entries).into_iter().next()
 }
 
 /// Narrow adapter guard: only a version-44 MDL with one identity root has
@@ -253,6 +412,34 @@ mod tests {
         put32(&mut b, 244, (-144i32) as u32);
         b.extend_from_slice(b"solid { \"index\" \"0\" \"mass\" \"1\" \"mass\" \"2\" }\0");
         b
+    }
+    #[test]
+    fn solid_parameters_use_sdk_defaults_and_last_repeated_key() {
+        let data = fixture();
+        let entries = read_keyvalues(&data).unwrap();
+        let solid = first_solid(&entries).unwrap();
+        assert_eq!(solid.mass, 2.);
+        assert_eq!(solid.damping, 0.1);
+        assert_eq!(solid.rotdamping, 0.1);
+        assert_eq!(solid.inertia, 1.);
+        assert_eq!(solid.surfaceprop, "default");
+        // Synthetic block with every key (not from a game file).
+        let entries = keyvalues::parse(
+            "solid { \"index\" \"0\" \"mass\" \"35.5\" \"surfaceprop\" \"Wood_Crate\" \"damping\" \"0\" \"rotdamping\" \"0.2\" \"inertia\" \"2\" \"volume\" \"300\" } editparams { \"totalmass\" \"35.5\" }",
+        )
+        .unwrap();
+        let solid = first_solid(&entries).unwrap();
+        assert_eq!(
+            (
+                solid.mass,
+                solid.damping,
+                solid.rotdamping,
+                solid.inertia,
+                solid.volume
+            ),
+            (35.5, 0., 0.2, 2., 300.)
+        );
+        assert_eq!(solid.surfaceprop, "wood_crate");
     }
     #[test]
     fn signed_pointers_handedness_and_duplicate_metadata() {

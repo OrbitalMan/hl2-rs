@@ -508,8 +508,41 @@ pub struct ModelReport {
     pub collision_pieces_loaded: usize,
     pub collision_models_missing: usize,
     pub collision_warnings: Vec<String>,
+    /// prop_physics models with authored .phy solid parameters.
+    pub physics_solids_loaded: usize,
+    pub surface_materials_loaded: usize,
 }
 pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
+    let mut physics_report = (0usize, Vec::new());
+    let prop_data = vfs
+        .read("scripts/propdata.txt")
+        .ok()
+        .flatten()
+        .and_then(|data| crate::keyvalues::parse(&String::from_utf8_lossy(&data)).ok())
+        .unwrap_or_default();
+    world.breakable_chunks = breakable_chunks(&prop_data);
+    match crate::surfaceprops::read(vfs) {
+        Ok(table) => world.surface_materials = table,
+        Err(error) => physics_report
+            .1
+            .push(format!("surfaceproperties: {error:#}")),
+    }
+    // VBSP gives each world collision triangle its brush side's $surfaceprop
+    // (ivp.cpp ConvertWorldBrushesToPhysCollide); resolve each side material once.
+    let side_materials: std::collections::BTreeSet<String> = world
+        .brush_side_materials
+        .iter()
+        .flatten()
+        .filter(|m| !m.is_empty())
+        .cloned()
+        .collect();
+    for material in side_materials {
+        if let Ok(Some(prop)) = vfs.material_value(&material, "$surfaceprop") {
+            world
+                .material_surfaceprops
+                .insert(material, prop.trim().to_lowercase());
+        }
+    }
     for (entity_id, entity) in world.entities.iter().enumerate() {
         if !entity.class().starts_with("npc_")
             && !entity.class().starts_with("weapon_")
@@ -653,6 +686,81 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 )),
             }
         }
+        // CAI_BaseNPC::SetupVPhysicsHull sets the shadow's mass from the studio header.
+        if instance.entity.is_some_and(|id| {
+            world
+                .entities
+                .get(id)
+                .is_some_and(|e| e.class().starts_with("npc_"))
+        }) && !world.model_mass.contains_key(&instance.asset_key())
+        {
+            if let Some(mass) = vfs
+                .read(&instance.model)
+                .ok()
+                .flatten()
+                .and_then(|mdl| studio_mass(&mdl).ok())
+            {
+                world.model_mass.insert(instance.asset_key(), mass);
+            }
+        }
+        // Breakable props: prop_data health from the MDL keyvalues.
+        if instance.kind.starts_with("prop_physics")
+            && !world.model_prop_health.contains_key(&instance.asset_key())
+        {
+            if let Some(data) = vfs
+                .read(&instance.model)
+                .ok()
+                .flatten()
+                .and_then(|mdl| studio_keyvalues(&mdl).ok().flatten())
+                .and_then(|text| resolve_prop_data(&prop_data, &text))
+            {
+                let health = data.health;
+                world.model_prop_health.insert(instance.asset_key(), health);
+                world.model_prop_data.insert(instance.asset_key(), data);
+                // PropBreakableCreateAll's gib list (BuildGibList: the .phy break
+                // blocks); `append_break_physics` preloads the gibs' physics.
+                if health > 0. {
+                    let phy = format!("{}.phy", instance.model.trim_end_matches(".mdl"));
+                    let gibs = vfs
+                        .read(&phy)
+                        .ok()
+                        .flatten()
+                        .and_then(|data| crate::phy::read_keyvalues(&data).ok())
+                        .map(|entries| crate::phy::break_models(&entries))
+                        .unwrap_or_default();
+                    if !gibs.is_empty() {
+                        world.model_breaks.insert(instance.asset_key(), gibs);
+                    }
+                }
+            }
+        }
+        // VPhysics props (CPhysicsProp::CreateVPhysics): authored solid parameters and,
+        // when the identity-root adapter applies, the authored convex pieces.
+        if instance.kind.starts_with("prop_physics")
+            && !world.model_physics.contains_key(&instance.asset_key())
+        {
+            match read_physics(vfs, &instance.model) {
+                Ok(Some((solid, pieces))) => {
+                    physics_report.0 += 1;
+                    world.model_physics.insert(instance.asset_key(), solid);
+                    match pieces {
+                        Ok(pieces) => {
+                            report.collision_models_loaded += 1;
+                            report.collision_pieces_loaded += pieces.len();
+                            world.model_collision.insert(instance.asset_key(), pieces);
+                        }
+                        Err(error) => physics_report.1.push(format!(
+                            "{}: {error:#}; dynamic prop uses its render hull",
+                            instance.model
+                        )),
+                    }
+                }
+                Ok(None) => report.collision_models_missing += 1,
+                Err(error) => physics_report
+                    .1
+                    .push(format!("{}: {error:#}", instance.model)),
+            }
+        }
         report.instances_loaded += 1;
         if instance.entity.is_some() && !world.rigs.contains_key(&instance.asset_key()) {
             let mut wanted = [
@@ -754,6 +862,9 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         }
     }
     world.surfaces = batches.into_values().collect();
+    report.physics_solids_loaded = physics_report.0;
+    report.surface_materials_loaded = world.surface_materials.len();
+    report.collision_warnings.extend(physics_report.1);
     report
 }
 /// Linear vertex lighting as a gamma-encoded byte color (the world shader
@@ -784,6 +895,238 @@ pub fn read_illumination(
         position: crate::vec3(&mdl, 92)?,
         flags: u32le(&mdl, 152)?,
     })
+}
+/// Preloads every listed gib model's .phy (skin-0 key) so breaking a prop reads nothing.
+/// Gibs the PHY adapter cannot read (e.g. the cardboard_box00*_gib01 non-identity roots)
+/// are left out without a load warning: they are only needed when a prop breaks, where
+/// the spawn falls back to the render hull. Returns the models left out.
+pub fn append_break_physics(world: &mut World, vfs: &Vfs) -> Vec<String> {
+    let mut skipped = Vec::new();
+    let models: std::collections::BTreeSet<String> = world
+        .model_breaks
+        .values()
+        .flatten()
+        .map(|gib| gib.model.clone())
+        .chain(used_chunk_models(world))
+        .collect();
+    for model in models {
+        if world.model_physics.contains_key(&format!("{model}#0")) {
+            continue;
+        }
+        if append_model_physics(world, vfs, &model).is_err() {
+            skipped.push(model);
+        }
+    }
+    skipped
+}
+/// Chunk models of the propdata chunk sets that breakable props without .phy gibs use
+/// (PropBreakableCreateAll's else-branch; ParsePropDataFile precaches every chunk model).
+pub fn used_chunk_models(world: &World) -> Vec<String> {
+    let mut models = Vec::new();
+    for (key, data) in &world.model_prop_data {
+        if data.health <= 0. || data.breakable_count <= 0 || world.model_breaks.contains_key(key) {
+            continue;
+        }
+        let Some(name) = &data.breakable_model else {
+            continue;
+        };
+        // GetRandomChunkModel: the first set whose name starts with the requested one.
+        if let Some((_, set)) = world
+            .breakable_chunks
+            .iter()
+            .find(|(set, _)| set.starts_with(name.as_str()))
+        {
+            models.extend(set.iter().cloned());
+        }
+    }
+    models
+}
+/// Adds a non-map model's .phy solid (and supported pieces) to the world under its
+/// skin-0 asset key, e.g. a thrown frag's w_grenade.phy. Returns the reason on failure.
+pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result<()> {
+    let key = format!("{}#0", model.to_lowercase());
+    let (solid, pieces) = read_physics(vfs, model)?.context("model has no .phy")?;
+    world.model_physics.insert(key.clone(), solid);
+    world.model_collision.insert(key, pieces?);
+    Ok(())
+}
+/// studiohdr_t keyvalueindex/keyvaluesize (offsets 312/316 in MDL 44-49): the model's
+/// $keyvalues text (prop_data, physgun_interactions, ...).
+pub fn studio_keyvalues(mdl: &[u8]) -> Result<Option<String>> {
+    if bytes(mdl, 0, 4)? != b"IDST" {
+        bail!("model magic mismatch");
+    }
+    let (index, size) = (u32le(mdl, 312)? as usize, u32le(mdl, 316)? as usize);
+    if index == 0 || size == 0 {
+        return Ok(None);
+    }
+    let text = bytes(mdl, index, size)?;
+    let end = text.iter().position(|b| *b == 0).unwrap_or(text.len());
+    Ok(Some(String::from_utf8_lossy(&text[..end]).into_owned()))
+}
+/// CPropData::ParsePropFromKV health: the "base" entry of scripts/propdata.txt first
+/// (recursively), then the block's own "health". None when the model has no prop_data.
+pub fn prop_data_health(
+    prop_data: &[crate::keyvalues::Entry],
+    model_keyvalues: &str,
+) -> Option<f32> {
+    resolve_prop_data(prop_data, model_keyvalues).map(|data| data.health)
+}
+/// CPropData::ParsePropFromKV: the model's prop_data block over its propdata.txt "base"
+/// chain (the base is parsed first, then the block's own keys override). None when the
+/// model has no prop_data.
+pub fn resolve_prop_data(
+    prop_data: &[crate::keyvalues::Entry],
+    model_keyvalues: &str,
+) -> Option<modkit_core::PropData> {
+    let entries = crate::keyvalues::parse(model_keyvalues).ok()?;
+    // The studio keyvalue text wraps its blocks in "mdlkeyvalue { ... }".
+    let block = entries
+        .iter()
+        .flat_map(|e| std::iter::once(e).chain(e.children()))
+        .find(|e| e.key.eq_ignore_ascii_case("prop_data"))?;
+    fn section<'a>(
+        entries: &'a [crate::keyvalues::Entry],
+        name: &str,
+    ) -> Option<&'a crate::keyvalues::Entry> {
+        entries.iter().find_map(|e| {
+            if e.key.eq_ignore_ascii_case(name) && !e.children().is_empty() {
+                Some(e)
+            } else if e.key.eq_ignore_ascii_case("BreakableModels") {
+                None
+            } else {
+                section(e.children(), name)
+            }
+        })
+    }
+    fn apply(
+        prop_data: &[crate::keyvalues::Entry],
+        block: &crate::keyvalues::Entry,
+        depth: usize,
+        data: &mut modkit_core::PropData,
+    ) {
+        if let Some(base) = block
+            .get("base")
+            .and_then(|b| b.text())
+            .filter(|_| depth < 8)
+            .and_then(|base| section(prop_data, base))
+        {
+            apply(prop_data, base, depth + 1, data);
+        }
+        let text = |key: &str| {
+            block
+                .children()
+                .iter()
+                .find(|e| e.key.eq_ignore_ascii_case(key))
+                .and_then(|e| e.text())
+                .map(str::trim)
+        };
+        let number = |key: &str| text(key).and_then(|v| v.parse::<f32>().ok());
+        if let Some(v) = number("health") {
+            data.health = v;
+        }
+        if let Some(v) = number("dmg.bullets") {
+            data.dmg_bullets = v;
+        }
+        if let Some(v) = number("dmg.club") {
+            data.dmg_club = v;
+        }
+        if let Some(v) = number("dmg.explosive") {
+            data.dmg_explosive = v;
+        }
+        if let Some(v) = number("explosive_damage") {
+            data.explosive_damage = Some(v);
+        }
+        if let Some(v) = number("explosive_radius") {
+            data.explosive_radius = Some(v);
+        }
+        if let Some(v) = text("damage_table") {
+            data.damage_table = (!v.is_empty()).then(|| v.to_string());
+        }
+        if let Some(v) = text("breakable_model") {
+            data.breakable_model = (!v.is_empty()).then(|| v.to_string());
+        }
+        // GetInt: atoi of the text.
+        if let Some(v) = number("breakable_count") {
+            data.breakable_count = v as i32;
+        }
+        if let Some(v) = number("breakable_skin") {
+            data.breakable_skin = v as i32;
+        }
+    }
+    let mut data = modkit_core::PropData::default();
+    apply(prop_data, block, 0, &mut data);
+    Some(data)
+}
+/// CPropData::ParsePropDataFile: the "BreakableModels" chunk sets in file order, model
+/// names normalized like gib models.
+pub fn breakable_chunks(prop_data: &[crate::keyvalues::Entry]) -> Vec<(String, Vec<String>)> {
+    fn find(entries: &[crate::keyvalues::Entry]) -> Option<&crate::keyvalues::Entry> {
+        entries.iter().find_map(|e| {
+            if e.key.eq_ignore_ascii_case("BreakableModels") {
+                Some(e)
+            } else {
+                find(e.children())
+            }
+        })
+    }
+    find(prop_data)
+        .map(|section| {
+            section
+                .children()
+                .iter()
+                .map(|set| {
+                    (
+                        set.key.clone(),
+                        set.children()
+                            .iter()
+                            .map(|model| crate::phy::fixup_model_name(&model.key))
+                            .collect(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+/// studiohdr_t::mass (offset 328 in MDL 44-49; owned police.mdl 90, combine_soldier
+/// 100, wood_crate001a 30).
+pub fn studio_mass(mdl: &[u8]) -> Result<f32> {
+    if bytes(mdl, 0, 4)? != b"IDST" {
+        bail!("model magic mismatch");
+    }
+    let mass = f32le(mdl, 328)?;
+    if !mass.is_finite() || mass < 0. {
+        bail!("invalid studio mass");
+    }
+    Ok(mass)
+}
+/// The first .phy solid's parameters, plus its convex pieces when the single-solid
+/// identity-root reader supports the file (the error otherwise).
+#[allow(clippy::type_complexity)]
+pub fn read_physics(
+    vfs: &Vfs,
+    model: &str,
+) -> Result<
+    Option<(
+        modkit_core::PhysicsSolid,
+        Result<Vec<modkit_core::ConvexPiece>>,
+    )>,
+> {
+    let stem = model.trim_end_matches(".mdl");
+    let Some(phy) = vfs.read(&format!("{stem}.phy"))? else {
+        return Ok(None);
+    };
+    let entries = crate::phy::read_keyvalues(&phy)?;
+    let mut solid = crate::phy::first_solid(&entries).context("PHY has no solid block")?;
+    let pieces = (|| {
+        let mdl = vfs.read(model)?.context("PHY companion MDL missing")?;
+        let checksum = crate::phy::identity_root_checksum(&mdl)?;
+        let read = crate::phy::read(&phy, checksum)?;
+        solid.compact_inertia = Some((read.mass_center, read.rotation_inertia));
+        solid.drag_fractions = Some(read.drag_fractions);
+        Ok(read.pieces)
+    })();
+    Ok(Some((solid, pieces)))
 }
 pub fn read_collision(vfs: &Vfs, model: &str) -> Result<Option<Vec<modkit_core::ConvexPiece>>> {
     let stem = model.trim_end_matches(".mdl");
@@ -963,6 +1306,51 @@ mod tests {
         }
     }
     #[test]
+    #[ignore = "requires an installed owned HL2 copy; reads prop_physics .phy solids"]
+    fn owned_prop_physics_masses_and_surface_materials_are_plausible() {
+        let game = crate::install::discover().unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let table = crate::surfaceprops::read(&vfs).unwrap();
+        for name in ["default", "metal", "wood_crate", "concrete", "grenade"] {
+            let m = table.get(name).unwrap_or_else(|| panic!("{name}"));
+            println!(
+                "{name}: friction {} elasticity {} density {} hard {:?} soft {:?}",
+                m.friction, m.elasticity, m.density, m.impact_hard, m.impact_soft
+            );
+            assert!(m.friction > 0. && m.density > 0.);
+        }
+        let mut checked = 0;
+        for map in ["d1_trainstation_02", "d1_trainstation_05", "d1_canals_01"] {
+            let data = std::fs::read(game.join(format!("hl2/maps/{map}.bsp"))).unwrap();
+            let bsp = crate::bsp::Bsp::parse(&data).unwrap();
+            let entities = crate::keyvalues::entities(bsp.lump(0)).unwrap();
+            let props: Vec<_> = entities
+                .into_iter()
+                .filter(|e| e.class().starts_with("prop_physics"))
+                .collect();
+            let mut world = World {
+                entities: props,
+                ..Default::default()
+            };
+            append_models(&mut world, &vfs);
+            for (key, solid) in &world.model_physics {
+                println!(
+                    "{map} {key}: mass {} surfaceprop {} damping {} rotdamping {} inertia {} pieces {}",
+                    solid.mass,
+                    solid.surfaceprop,
+                    solid.damping,
+                    solid.rotdamping,
+                    solid.inertia,
+                    world.model_collision.get(key).map_or(0, Vec::len)
+                );
+                assert!(solid.mass > 0. && solid.mass < 5000., "{key}");
+                assert!(table.contains_key(&solid.surfaceprop), "{key}");
+                checked += 1;
+            }
+        }
+        assert!(checked >= 3, "{checked}");
+    }
+    #[test]
     #[ignore = "requires an installed owned HL2 copy; reads installed Gman mesh only"]
     fn owned_cycler_actor_uses_installed_model_mesh() {
         let game = crate::install::discover().unwrap();
@@ -1063,5 +1451,132 @@ mod tests {
                 vec![false, true, true]
             );
         }
+    }
+}
+#[cfg(test)]
+mod owned_phy_inertia {
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_frag_phy_reads_its_ivp_inertia() {
+        let root = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&root).unwrap();
+        let (solid, pieces) = super::read_physics(&vfs, "models/weapons/w_grenade.mdl")
+            .unwrap()
+            .unwrap();
+        // One 12-sided prism (24 rim vertices + 2 cap tips), radius 1.808.
+        assert_eq!(pieces.unwrap()[0].vertices.len(), 26);
+        let (center, inertia) = solid.compact_inertia.unwrap();
+        assert!(center.length() < 0.1, "{center}");
+        // Long (Source z) axis 0.000711 m^2/kg, cross axes 0.00428.
+        assert!((inertia.z - 0.000711).abs() < 1e-5, "{inertia}");
+        assert!((inertia.x - 0.004283).abs() < 1e-5 && (inertia.y - 0.004283).abs() < 1e-5);
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_crate_phy_lists_its_gibs() {
+        let root = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&root).unwrap();
+        let phy = vfs
+            .read("models/props_junk/wood_crate001a.phy")
+            .unwrap()
+            .unwrap();
+        let gibs = crate::phy::break_models(&crate::phy::read_keyvalues(&phy).unwrap());
+        assert!(!gibs.is_empty());
+        assert!(gibs
+            .iter()
+            .all(|g| g.model.starts_with("models/") && g.model.ends_with(".mdl")));
+        for gib in &gibs {
+            assert!(vfs.read(&gib.model).unwrap().is_some(), "{}", gib.model);
+        }
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_pallet_phy_stores_its_drag_fractions() {
+        let root = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&root).unwrap();
+        let (solid, _) = super::read_physics(&vfs, "models/props_junk/wood_pallet001a.mdl")
+            .unwrap()
+            .unwrap();
+        // VPHY header words (private drag-axes research): the slatted pallet's gaps
+        // show in the middle fraction, unlike a convex silhouette (~1, 1, 1).
+        let f = solid.drag_fractions.unwrap();
+        let expected = glam::Vec3::new(0.941_666_6, 0.402_616_3, 0.993_643_4);
+        assert!((f - expected).abs().max_element() < 1e-6, "{f}");
+        assert_eq!(solid.mass, 20.);
+    }
+}
+#[cfg(test)]
+mod owned_prop_data {
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_prop_data_health_matches_native_ent_text() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let prop_data = crate::keyvalues::parse(&String::from_utf8_lossy(
+            &vfs.read("scripts/propdata.txt").unwrap().unwrap(),
+        ))
+        .unwrap();
+        // Native ent_text (oracle, session 13): Cardboard.small 10, Wooden.Large 50.
+        for (model, expected) in [
+            ("models/props_junk/cardboard_box001a.mdl", Some(10.)),
+            ("models/props_junk/wood_pallet001a.mdl", Some(50.)),
+        ] {
+            let mdl = vfs.read(model).unwrap().unwrap();
+            let text = super::studio_keyvalues(&mdl).unwrap().unwrap();
+            assert_eq!(
+                super::prop_data_health(&prop_data, &text),
+                expected,
+                "{model}"
+            );
+        }
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_prop_data_modifiers_tables_and_chunk_sets() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let prop_data = crate::keyvalues::parse(&String::from_utf8_lossy(
+            &vfs.read("scripts/propdata.txt").unwrap().unwrap(),
+        ))
+        .unwrap();
+        let data = |model: &str| {
+            let mdl = vfs.read(model).unwrap().unwrap();
+            let text = super::studio_keyvalues(&mdl).unwrap().unwrap();
+            super::resolve_prop_data(&prop_data, &text).unwrap()
+        };
+        // Wooden.Large over Wooden.Base: health 50, bullets 0.75, club 2, explosive 1.5,
+        // WoodChunks x 6 (used only without .phy gibs).
+        let pallet = data("models/props_junk/wood_pallet001a.mdl");
+        assert_eq!(
+            (
+                pallet.health,
+                pallet.dmg_bullets,
+                pallet.dmg_club,
+                pallet.dmg_explosive
+            ),
+            (50., 0.75, 2., 1.5)
+        );
+        assert_eq!(pallet.breakable_model.as_deref(), Some("WoodChunks"));
+        assert_eq!((pallet.breakable_count, pallet.breakable_skin), (6, 0));
+        assert_eq!(pallet.damage_table, None);
+        // Cardboard.small: bullets 0.5, no chunk set.
+        let box_ = data("models/props_junk/cardboard_box001a.mdl");
+        assert_eq!((box_.health, box_.dmg_bullets), (10., 0.5));
+        assert_eq!(box_.breakable_model, None);
+        // glass.Small bottles use the glass impact table.
+        let bottle = data("models/props_junk/garbage_glassbottle003a.mdl");
+        assert_eq!(bottle.damage_table.as_deref(), Some("glass"));
+        // The tic-tac-toe blocks override health 0 (unbreakable); furniture_couch01a
+        // (Wooden.Huge, no .phy gibs, tr03) breaks into 10 WoodChunks.
+        let block = data("models/props_c17/playgroundtick-tack-toe_block01a.mdl");
+        assert_eq!((block.health, block.breakable_count), (0., 2));
+        let couch = data("models/props_interiors/furniture_couch01a.mdl");
+        assert_eq!((couch.health, couch.breakable_count), (130., 10));
+        let chunks = super::breakable_chunks(&prop_data);
+        let names: Vec<&str> = chunks.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            ["WoodChunks", "GlassChunks", "ConcreteChunks", "MetalChunks"]
+        );
+        assert_eq!(chunks[0].1[0], "models/gibs/wood_gib01e.mdl");
+        assert_eq!(chunks[0].1.len(), 5);
     }
 }

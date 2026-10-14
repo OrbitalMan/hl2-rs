@@ -240,16 +240,58 @@ pub fn prepare_weapons(
         "swing",
         "misscenter1",
         "hitcenter1",
+        // weapon_frag (v_grenade.mdl)
+        "drawbackhigh",
+        "drawbacklow",
+        "throw",
+        "roll",
+        "lob",
     ]
     .into_iter()
     .map(String::from)
-    .collect();
+    .collect::<std::collections::BTreeSet<String>>();
+    // The remaining arsenal resolves its sequences from activities (SendWeaponAnim),
+    // so those viewmodels load every sequence carrying one of these activities.
+    let activities = [
+        "act_vm_draw",
+        "act_vm_idle",
+        "act_vm_fidget",
+        "act_vm_primaryattack",
+        "act_vm_secondaryattack",
+        "act_vm_reload",
+        "act_vm_holster",
+        "act_vm_haulback",
+        "act_vm_throw",
+        "act_vm_dryfire",
+        "act_vm_idle_lowered",
+        "act_vm_lowered_to_idle",
+        "act_vm_idle_to_lowered",
+        "act_crossbow_draw_unloaded",
+    ];
     for w in weapons.values() {
+        let mut wanted = wanted.clone();
+        if matches!(
+            w.class.as_str(),
+            "weapon_crossbow" | "weapon_rpg" | "weapon_bugbait" | "weapon_physcannon"
+        ) {
+            wanted.extend(activities.iter().map(|a| (*a).to_owned()));
+        }
         let key = format!("{}#0", w.viewmodel.to_lowercase());
-        world.model_assets.insert(
-            key.clone(),
-            source_assets::models::read_model(vfs, &w.viewmodel, 0)?,
-        );
+        let base = source_assets::models::read_model(vfs, &w.viewmodel, 0)?;
+        // Skin 1 (the crossbow's glowing bolt, CWeaponCrossbow::SetSkin): kept when any
+        // surface material differs; the host draws only the differing surfaces.
+        let alternate = source_assets::models::read_model(vfs, &w.viewmodel, 1)?;
+        if alternate.len() == base.len()
+            && alternate
+                .iter()
+                .zip(&base)
+                .any(|(a, b)| a.material != b.material)
+        {
+            world
+                .model_assets
+                .insert(format!("{}#1", w.viewmodel.to_lowercase()), alternate);
+        }
+        world.model_assets.insert(key.clone(), base);
         world.rigs.insert(
             key,
             source_assets::animation::load(vfs, &w.viewmodel, &wanted)?,

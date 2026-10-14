@@ -47,6 +47,20 @@ pub enum Action {
         #[serde(default)]
         parameter: String,
     },
+    /// Test only: teleport a map prop_physics body (entity id) to a pose with an
+    /// optional velocity, standing in for prop_physics_create until runtime entity
+    /// creation exists (DESIGN 14r); never called by ordinary campaign play.
+    PropPose {
+        entity: usize,
+        origin: [f32; 3],
+        #[serde(default)]
+        angles: [f32; 3],
+        #[serde(default)]
+        velocity: [f32; 3],
+        /// As if just launched by the gravity gun (m_bFirstCollisionAfterLaunch).
+        #[serde(default)]
+        launched: bool,
+    },
 }
 impl Action {
     pub fn valid(&self) -> bool {
@@ -61,6 +75,16 @@ impl Action {
                     && origin.iter().all(|v| v.is_finite())
                     && yaw.is_finite()
             }
+            Self::PropPose {
+                origin,
+                angles,
+                velocity,
+                ..
+            } => origin
+                .iter()
+                .chain(angles)
+                .chain(velocity)
+                .all(|v| v.is_finite() && v.abs() < 65536.),
             Self::Slot { slot } => *slot < 6,
             Self::Wheel { delta } => (-100..=100).contains(delta),
             Self::Send {
@@ -87,6 +111,9 @@ pub struct Gameplay {
     pub selection: Selection,
     pub npcs: Controller,
     pub projectiles: Projectiles,
+    /// Gibs of broken props (runtime prop bodies until DESIGN 14r entities).
+    pub gibs: hl2_simulation::gibs::Gibs,
+    pub phys_explosions: hl2_simulation::phys_explosion::PhysExplosions,
     pub impacts: hl2_simulation::impacts::Impacts,
     pub primary: bool,
     pub secondary: bool,
@@ -166,6 +193,10 @@ impl Gameplay {
             self.suit
                 .update(suit, update.sentence, update.no_repeat, now);
         }
+        // Weapon SetSuitUpdate requests (crossbow/RPG out of ammo).
+        for (sentence, no_repeat) in std::mem::take(&mut self.inventory.suit_updates) {
+            self.suit.update(suit, &sentence, no_repeat, now);
+        }
         let died = !player.dead && self.inventory.health <= 0.;
         if died {
             player.dead = true;
@@ -207,6 +238,24 @@ impl Gameplay {
             self.damage_messages.push(message);
         }
         died
+    }
+    /// CategorizeGroundSurface for the next movement step: the surfaceprop of the
+    /// face under the feet (the same lookup as the footsteps), or the defaults when
+    /// nothing is found or the surface table is not loaded.
+    pub fn ground_surface(
+        &self,
+        physics: &Physics,
+        feet: Vec3,
+    ) -> modkit_core::movement::GroundSurface {
+        self.impacts
+            .ground_property(&self.world, physics, &self.scene, feet, 4.)
+            .and_then(|prop| self.world.surface_materials.get(&prop.to_lowercase()))
+            .map(|m| modkit_core::movement::GroundSurface {
+                friction: m.friction,
+                max_speed_factor: m.max_speed_factor,
+                jump_factor: m.jump_factor,
+            })
+            .unwrap_or_default()
     }
     /// SDK step sounds for one movement tick: UpdateStepSound with the state before the move,
     /// then the jump or landing step the move produced.
@@ -252,6 +301,8 @@ impl Gameplay {
             selection: Selection::new(),
             npcs: Controller::new(None, Default::default()),
             projectiles: Projectiles::default(),
+            gibs: Default::default(),
+            phys_explosions: Default::default(),
             impacts: Default::default(),
             primary: false,
             secondary: false,
@@ -301,6 +352,8 @@ impl Gameplay {
             selection: Selection::new(),
             npcs,
             projectiles: Projectiles::default(),
+            gibs: Default::default(),
+            phys_explosions: Default::default(),
             primary: false,
             secondary: false,
             actions: vec![],
@@ -388,6 +441,20 @@ impl Gameplay {
                     continue;
                 }
                 Action::Use => {
+                    // CPlayerPickupController first (drop while carrying, pick up a
+                    // small prop), then the existing door/button use.
+                    if self.inventory.player_use(
+                        &self.weapons,
+                        &self.world,
+                        &mut self.scene,
+                        physics,
+                        eye,
+                        direction,
+                        player.feet,
+                        player.crouched,
+                    ) {
+                        continue;
+                    }
                     if let Some((id, _)) = physics.ray(eye, direction, 96.) {
                         self.scene.use_entity_at(&self.world, id, player.feet);
                     }
@@ -415,6 +482,31 @@ impl Gameplay {
                             .diagnostics
                             .unsupported
                             .entry(format!("fixture actor pose target missing: {target}"))
+                            .or_default() += 1;
+                    }
+                    continue;
+                }
+                Action::PropPose {
+                    entity,
+                    origin,
+                    angles,
+                    velocity,
+                    launched,
+                } => {
+                    if launched {
+                        physics.launched.insert(entity);
+                    }
+                    if !physics.place_body(
+                        entity,
+                        Vec3::from_array(origin),
+                        Vec3::from_array(angles),
+                        Vec3::from_array(velocity),
+                    ) {
+                        *self
+                            .scene
+                            .diagnostics
+                            .unsupported
+                            .entry(format!("fixture prop pose: no dynamic body {entity}"))
                             .or_default() += 1;
                     }
                     continue;
@@ -451,16 +543,41 @@ impl Gameplay {
             eye,
             direction,
         );
-        let allowed = self.selection.pending.is_none();
+        // CBasePlayer::PostThink -> CPlayerPickupController::Use(USE_SET): held attack
+        // throws, held attack2 drops; the holstered weapon does not fire meanwhile.
+        let carrying = self.inventory.carrying();
+        if carrying {
+            self.inventory.carry_tick(
+                &self.weapons,
+                &mut self.scene,
+                physics,
+                eye,
+                direction,
+                player.feet,
+                player.crouched,
+                self.primary,
+                self.secondary,
+            );
+            self.primary_consumed |= self.primary;
+            self.secondary_consumed |= self.secondary;
+        }
+        let allowed = self.selection.pending.is_none() && !carrying;
         let primary = allowed && (self.primary || self.queued_primary) && !self.primary_consumed;
         let secondary = allowed
             && (self.secondary || self.queued_secondary)
             && !self.secondary_consumed
             && matches!(
                 self.inventory.active.as_str(),
-                "weapon_shotgun" | "weapon_smg1" | "weapon_ar2"
+                "weapon_shotgun"
+                    | "weapon_smg1"
+                    | "weapon_ar2"
+                    | "weapon_frag"
+                    | "weapon_crossbow"
+                    | "weapon_bugbait"
+                    | "weapon_physcannon"
             );
         self.inventory.set_attack_input(primary, secondary);
+        self.inventory.ducking = player.crouched;
         let attacking = primary
             || secondary
             || allowed
@@ -496,14 +613,55 @@ impl Gameplay {
                 direction,
             );
         }
+        // weapon_physcannon: ItemPreFrame/ItemPostFrame on the Rapier props (weapons stage).
+        self.inventory.physcannon_frame(
+            &self.weapons,
+            &self.world,
+            &mut self.scene,
+            physics,
+            eye,
+            direction,
+            player.feet,
+            player.crouched,
+        );
         self.queued_primary = false;
         self.queued_secondary = false;
         for (id, state) in self.scene.states.iter().enumerate() {
             physics.set_entity(id, state.origin, state.rotation, state.collides());
         }
+        // weapon_frag throws from this tick's animation events.
+        if !self.inventory.frag.pending.is_empty() {
+            let ground = physics
+                .ground_ray(player.feet + glam::Vec3::Z * 4., -glam::Vec3::Z, 16.)
+                .map(|hit| hit.normal);
+            self.inventory.launch_frags(
+                &self.weapons,
+                physics,
+                eye,
+                direction,
+                player.velocity,
+                player.feet,
+                ground,
+                self.scene.time,
+            );
+        }
+        // weapon_bugbait ThrowGrenade from this tick's EVENT_WEAPON_THROW.
+        self.inventory
+            .launch_bugbait(physics, eye, direction, player.velocity, self.scene.time);
         for launch in self.inventory.projectile_spawns.drain(..) {
             self.projectiles.spawn(launch, &mut self.scene);
         }
+        // CWeaponRPG::UpdateLaserPosition after the weapon frame; missiles seek it.
+        self.inventory.rpg_aim(
+            physics,
+            &self.world,
+            eye,
+            direction,
+            player.feet + glam::Vec3::Z * if player.crouched { 18. } else { 36. },
+            player.feet,
+            self.scene.time,
+        );
+        self.projectiles.laser_dot = self.inventory.rpg.dot;
         physics.refresh_entity_queries();
         actors::tick_npcs(
             &mut self.npcs,
@@ -521,19 +679,96 @@ impl Gameplay {
             player.crouched,
             TICK,
         );
+        // Bug bait splats/squeezes are for step 14 (antlion reactions); not consumed yet.
+        self.inventory.bugbait_events.clear();
+        self.projectiles.bugbait_events.clear();
+        // CMissile::Explode -> CWeaponRPG::NotifyRocketDied.
+        for event in std::mem::take(&mut self.projectiles.missile_events) {
+            self.inventory
+                .rpg_missile_event(event, &self.weapons, &self.world, &mut self.scene);
+        }
+        // env_physexplosion pushes (and blast damage) from this tick's inputs.
+        self.phys_explosions
+            .apply(&self.world, &mut self.scene, physics);
         // trigger_hurt touchers from this tick's scene logic share the entity path.
         damage.append(&mut self.scene.entity_damage);
         self.inventory
             .apply_projectile_damage(damage, &self.world, &mut self.scene, physics);
+        // Explosive props broken by that damage explode before their gibs spawn; chains
+        // resolve within the tick (bounded).
+        for _ in 0..32 {
+            if self.scene.prop_explosions.is_empty() {
+                break;
+            }
+            let blast = self.projectiles.explode_props(
+                &self.world,
+                &mut self.scene,
+                physics,
+                player.feet,
+                player.crouched,
+            );
+            self.inventory
+                .apply_projectile_damage(blast, &self.world, &mut self.scene, physics);
+        }
+        // PropBreakableCreateAll for props broken by this tick's damage.
+        self.gibs.spawn(
+            std::mem::take(&mut self.scene.prop_breaks),
+            &self.world,
+            physics,
+            self.scene.time,
+        );
         physics.tick(TICK);
+        // VPhysicsShadowCollision impact damage to NPCs (queued for the next tick).
+        let held = |id: usize| {
+            self.inventory.physcannon.held == Some(id)
+                || self
+                    .inventory
+                    .carry
+                    .as_ref()
+                    .is_some_and(|c| c.entity == id)
+        };
+        hl2_simulation::impact_damage::queue_npc_damage(
+            &physics.resolved_collisions,
+            &self.world,
+            &mut self.scene,
+            &held,
+        );
+        hl2_simulation::impact_damage::queue_prop_damage(
+            &physics.resolved_collisions,
+            &self.world,
+            &mut self.scene,
+            &mut physics.launched,
+            &held,
+        );
+        // Gib poses and SUB_FadeOut (not while seen or held).
+        self.gibs
+            .tick(physics, self.scene.time, TICK, eye, direction, held);
+        // VPhysics impact sounds of props and thrown frags (PhysCollisionSound).
+        self.impacts
+            .physics_collision_sounds(physics, &self.world, &mut self.scene);
         for event in
             self.weapon_sounds
                 .events(&self.world, &self.inventory, &self.weapons, self.scene.time)
         {
             self.scene.sounds.push(event.options.into());
         }
-        for (hit, _melee) in self.inventory.impacts.drain(..) {
+        for (hit, _melee, direction) in self.inventory.impacts.drain(..) {
+            self.impacts
+                .add_shot(hit, direction, &self.world, physics, &mut self.scene);
+        }
+        // TraceBleed: blood on the world behind shot NPCs.
+        for (hit, color) in self.inventory.blood.drain(..) {
+            self.impacts
+                .add_blood(hit, color, &self.world, physics, &self.scene);
+        }
+        // Projectile UTIL_ImpactTrace (crossbow bolts in the world).
+        for hit in std::mem::take(&mut self.projectiles.impacts) {
             self.impacts.add(hit, &self.world, physics, &mut self.scene);
+        }
+        // Projectile UTIL_DecalTrace (the bug bait's BeerSplash).
+        for (hit, material) in std::mem::take(&mut self.projectiles.decals) {
+            self.impacts
+                .add_decal(hit, material, &self.world, physics, &self.scene);
         }
         for sound in self.scene.sounds.drain(..) {
             self.sound_cues.push(sound.name.clone());
@@ -580,10 +815,10 @@ impl Gameplay {
                     .then(|| (id, errors.iter().map(|e| format!("{e:?}")).collect()))
             })
             .collect();
-        serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"player_damage":self.player_damage,"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
+        serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

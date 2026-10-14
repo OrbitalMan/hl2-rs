@@ -242,6 +242,8 @@ pub struct SceneAnimationState {
 }
 pub struct Scene {
     pub states: Vec<State>,
+    /// KeyValues set at runtime by AddOutput, by (entity, lowercase key).
+    pub keyvalue_overrides: BTreeMap<(usize, String), String>,
     pub time: f64,
     sequence: u64,
     random: u64,
@@ -259,6 +261,13 @@ pub struct Scene {
     pub globals: crate::globals::Globals,
     /// Damage dealt to entities by scene logic (trigger_hurt) this tick.
     pub entity_damage: Vec<crate::projectiles::Damage>,
+    /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
+    pub prop_breaks: Vec<crate::gibs::PropBreak>,
+    /// Explosive props broken this tick (CBreakableProp::Break -> ExplosionCreate):
+    /// world-space center, integer magnitude and radius.
+    pub prop_explosions: Vec<(Vec3, f32, f32)>,
+    /// env_physexplosion entities whose Explode input arrived (phys_explosion).
+    pub phys_explosions: Vec<usize>,
     /// Set by the host: a dead player no longer takes damage (m_takedamage).
     pub player_dead: bool,
     /// ScreenFade messages for the local player (env_fade).
@@ -306,6 +315,10 @@ impl Scene {
             player_damage: Vec::new(),
             globals: crate::globals::Globals::spawn(world),
             entity_damage: Vec::new(),
+            prop_breaks: Vec::new(),
+            prop_explosions: Vec::new(),
+            phys_explosions: Vec::new(),
+            keyvalue_overrides: BTreeMap::new(),
             player_dead: false,
             screen_fades: Vec::new(),
             hurt: BTreeMap::new(),
@@ -750,6 +763,9 @@ impl Scene {
             ambient: None,
             volume: None,
             origin: None,
+            emitter: None,
+            stop: false,
+            patch: None,
             name: cue.into(),
             actor: Some(crate::sounds::SoundActor {
                 name: world.entities[actor].get("targetname").unwrap_or("").into(),
@@ -1896,6 +1912,7 @@ impl Scene {
             self.entity_damage.push(crate::projectiles::Damage {
                 target: crate::projectiles::DamageTarget::Entity(target),
                 amount,
+                kind,
                 dissolve: false,
                 direction: Vec3::ZERO,
                 origin: self.states[id].origin,
@@ -2041,6 +2058,17 @@ impl Scene {
             self.send(id, "Toggle", "");
         } else if entity.class() == "func_button" {
             self.fire(id, "OnPressed", usize::MAX);
+        } else {
+            self.prop_player_used(world, id);
+        }
+    }
+    /// CPhysicsProp::Use by the player: OnPlayerUse with SF_PHYSPROP_ENABLE_PICKUP_OUTPUT
+    /// (256), before the pickup attempt.
+    pub fn prop_player_used(&mut self, world: &World, id: usize) {
+        if world.entities.get(id).is_some_and(|e| {
+            e.class().starts_with("prop_physics") && number(e, "spawnflags", 0.) as u32 & 256 != 0
+        }) {
+            self.fire(id, "OnPlayerUse", usize::MAX);
         }
     }
     fn deliver(&mut self, world: &World, id: usize, p: &Pending, player_feet: Vec3) {
@@ -2070,6 +2098,21 @@ impl Scene {
             return;
         }
         match input.as_str() {
+            // CBaseEntity::InputAddOutput, keyvalue form ("key value"): KeyValue on the
+            // entity. Stored as an override that keyvalue readers consult first (only
+            // impact damage's physdamagescale reads it so far); the output-connection
+            // form ("Output target:input:param:delay:times") is not supported.
+            "addoutput" if !p.parameter.contains(':') => {
+                let mut parts = p.parameter.trim().splitn(2, char::is_whitespace);
+                match (parts.next(), parts.next()) {
+                    (Some(key), Some(v)) if !key.is_empty() => {
+                        self.keyvalue_overrides
+                            .insert((id, key.to_lowercase()), v.trim().to_string());
+                    }
+                    _ => self.unsupported_input(class, "AddOutput:malformed"),
+                }
+            }
+            "explode" if class == "env_physexplosion" => self.phys_explosions.push(id),
             // CEnvTonemapController: custom auto-exposure limits and the manual tonemap rate.
             "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
             "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,
@@ -2356,20 +2399,14 @@ impl Scene {
                     if play {
                         self.ambient_active.insert(id, looping);
                         self.sounds.push(crate::sounds::SoundRequest {
-                            name: sound.into(),
-                            actor: None,
                             ambient: Some(crate::sounds::AmbientControl::Play(id)),
-                            volume: None,
-                            origin: None,
+                            ..sound.into()
                         });
                     } else if active && input != "playsound" {
                         self.ambient_active.insert(id, false);
                         self.sounds.push(crate::sounds::SoundRequest {
-                            name: sound.into(),
-                            actor: None,
                             ambient: Some(crate::sounds::AmbientControl::Stop(id)),
-                            volume: None,
-                            origin: None,
+                            ..sound.into()
                         });
                     }
                 }
@@ -4787,5 +4824,30 @@ mod tests {
         s.send(0, "OpenAwayFrom", "!player");
         s.tick(&w, -Vec3::X * 64., 0.015);
         assert_eq!(s.states[0].angle.signum(), -1.);
+    }
+
+    #[test]
+    fn add_output_keyvalue_form_overrides_physdamagescale() {
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("physdamagescale".into(), "0".into()),
+                ],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        scene.send(0, "AddOutput", "physdamagescale 1");
+        scene.send(0, "AddOutput", "OnDeath relay:Trigger::0:-1");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert_eq!(
+            scene
+                .keyvalue_overrides
+                .get(&(0, "physdamagescale".to_string()))
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(scene.keyvalue_overrides.len(), 1);
     }
 }

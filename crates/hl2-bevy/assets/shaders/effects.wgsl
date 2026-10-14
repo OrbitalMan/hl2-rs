@@ -10,6 +10,12 @@ fn srgb_to_linear(color: vec3<f32>) -> vec3<f32> {
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     var color = textureSample(effect_texture, effect_sampler, mesh.uv);
     color.a = select(color.a, 1.0, parameters.y > 0.5);
+    // Lit decals (w = 1, DecalBaseTimesLightmapAlphaBlend): texture x the linear light
+    // of the surface beneath (vertex colour) x exposure, as the world is lit.
+    if parameters.w > 0.5 {
+        if color.a < parameters.x { discard; }
+        return vec4(srgb_to_linear(color.rgb) * mesh.color.rgb * view.exposure, color.a);
+    }
     color *= mesh.color;
     if color.a < parameters.x { discard; }
     // Source sprite shaders end in FinalOutput TONEMAP_SCALE_LINEAR (camera exposure).

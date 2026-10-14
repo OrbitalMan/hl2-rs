@@ -1,0 +1,113 @@
+[
+{
+"tick": 1,
+"label": "aim",
+"eye": [
+-4851,
+-3611,
+80
+],
+"yaw": 90,
+"pitch": -26.6,
+"actions": [
+{
+"action": "loadout"
+},
+{
+"action": "slot",
+"slot": 1
+}
+]
+},
+{
+"tick": 2,
+"actions": [
+{
+"action": "confirm"
+}
+]
+},
+{
+"tick": 4
+},
+{
+"tick": 50,
+"label": "look"
+},
+{
+"tick": 60,
+"label": "shot1",
+"primary": true
+},
+{
+"tick": 61
+},
+{
+"tick": 90,
+"label": "shot2",
+"primary": true
+},
+{
+"tick": 91
+},
+{
+"tick": 120,
+"label": "shot3",
+"primary": true
+},
+{
+"tick": 121
+},
+{
+"tick": 150,
+"label": "shot4",
+"primary": true
+},
+{
+"tick": 151
+},
+{
+"tick": 180,
+"label": "shot5",
+"primary": true
+},
+{
+"tick": 181
+},
+{
+"tick": 210,
+"label": "shot6",
+"primary": true
+},
+{
+"tick": 211
+},
+{
+"tick": 240,
+"label": "shot7",
+"primary": true
+},
+{
+"tick": 241
+},
+{
+"tick": 270,
+"label": "shot8",
+"primary": true
+},
+{
+"tick": 271
+},
+{
+"tick": 300,
+"label": "broken"
+},
+{
+"tick": 320,
+"label": "b20"
+},
+{
+"tick": 800,
+"label": "b500"
+}
+]

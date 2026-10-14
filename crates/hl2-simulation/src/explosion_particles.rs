@@ -20,6 +20,7 @@ pub const MATERIALS: &[&str] = &[
     "sprites/lgtning",
     "effects/fleck_cement1",
     "effects/fleck_cement2",
+    "particle/fire",
 ];
 const MAX_PARTICLES: usize = 4096;
 const STEP: f64 = 0.015;
@@ -33,11 +34,16 @@ pub enum Kind {
     Spark,
     Glow,
     Debris,
+    /// C_SporeExplosion spores and puffs.
+    Spore,
 }
 #[derive(Clone, Copy)]
 enum Motion {
     Explosion,
     Free,
+    /// SporeEffect::UpdateVelocity: speed loses 64 u/s per second and the direction
+    /// wanders by up to 0.5 per axis each update (seeded per particle).
+    Spore(u64),
     Trail {
         gravity: f32,
         drag: f32,
@@ -62,6 +68,8 @@ struct Particle {
     motion: Motion,
     trail: f32,
     near_clip: bool,
+    /// SporeEffect UpdateColor/UpdateAlpha: start alpha x sin(pi x age) on both.
+    sine: bool,
 }
 struct Ring {
     center: Vec3,
@@ -124,6 +132,7 @@ impl Particle {
             motion: Motion::Free,
             trail: 0.,
             near_clip: false,
+            sine: false,
         }
     }
     fn update(&mut self, dt: f32, physics: &Physics) -> bool {
@@ -145,6 +154,16 @@ impl Particle {
             Motion::Free => {
                 self.position += self.velocity * dt;
                 self.roll += self.roll_rate * dt;
+            }
+            Motion::Spore(ref mut seed) => {
+                self.position += self.velocity * dt;
+                self.roll += self.roll_rate * dt;
+                let speed = self.velocity.length() - 64. * dt;
+                let mut rng = Random(*seed);
+                let wander = rng.vector(-0.5, 0.5);
+                *seed = rng.0;
+                self.velocity =
+                    (self.velocity.normalize_or_zero() + wander).normalize_or_zero() * speed;
             }
             Motion::Trail {
                 gravity,
@@ -229,6 +248,9 @@ impl Particles {
                         self.diagnostics.rings_emitted += 1;
                     }
                 }
+                EffectKind::SporeExplosion => self.spores(effect, &mut rng),
+                // Sprite-only (projectile_visuals) or not drawn yet.
+                EffectKind::BoltGlow | EffectKind::Sparks => {}
             }
         }
         for particle in &mut self.particles {
@@ -254,6 +276,49 @@ impl Particles {
         self.diagnostics.rings_live = self.rings.len();
     }
 
+    /// C_SporeExplosion as BugBaitTouch configures it: spawn rate 8 events per second
+    /// for bugbait_distract_time (5 s), spawn radius 32, puff sizes 32 -> 64. Each
+    /// event adds four `particle/fire` spores (2 s, size 1-2 -> 1, 128-256 u/s along
+    /// the effect direction) and one noise-sphere puff (1 s, 64-128 u/s), colored
+    /// (225, 140, 64), faded in front of the view from 64 to 128 units (SetNearClip). The whole emission is scheduled here; particles appear at their
+    /// birth time. Not done: halving the rate beyond cl_sporeclipdistance 512.
+    fn spores(&mut self, e: &Effect, rng: &mut Random) {
+        let direction = e.normal.normalize_or_zero();
+        let color = Vec3::new(225., 140., 64.) / 255.;
+        let radius = e.radius;
+        let events = (crate::weapon_bugbait::DISTRACT_TIME * 8.) as usize;
+        for event in 0..events {
+            let born = e.at + event as f64 / 8.;
+            for _ in 0..4 {
+                let mut p = Particle::new(Kind::Spore, "particle/fire", e, 2.);
+                p.born = born;
+                p.updated = born;
+                p.position += rng.vector(-radius, radius);
+                p.color = color;
+                p.alpha = [rng.int(128, 255) as f32 / 255., 0.];
+                p.sizes = [rng.int(1, 2) as f32, 1.];
+                p.velocity = direction * rng.float(128., 256.);
+                p.motion = Motion::Spore(rng.0 ^ (event as u64) << 8);
+                p.sine = true;
+                p.near_clip = true;
+                self.add(p);
+            }
+            let mut p = Particle::new(Kind::Spore, "particle/particle_noisesphere", e, 1.);
+            p.born = born;
+            p.updated = born;
+            p.position += rng.vector(-radius * 0.5, radius * 0.5);
+            p.color = color;
+            p.alpha = [rng.int(32, 64) as f32 / 255., 0.];
+            p.sizes = [32., 64.];
+            p.roll = rng.float(0., 360.);
+            p.roll_rate = rng.float(-2., 2.);
+            p.velocity = direction * rng.float(64., 128.);
+            p.motion = Motion::Spore(rng.0 ^ 0x5bd1e995 ^ event as u64);
+            p.sine = true;
+            p.near_clip = true;
+            self.add(p);
+        }
+    }
     fn electric(&mut self, e: &Effect, magnitude: i32, rng: &mut Random) {
         let normal = e.normal.normalize_or_zero();
         let count = (magnitude * magnitude) as f32 * rng.float(2., 4.);
@@ -490,6 +555,9 @@ impl Particles {
                 .total_cmp(&(a.position - eye).dot(direction))
         });
         for p in sorted {
+            if time < p.born {
+                continue;
+            }
             let age = ((time - p.born).max(0.) as f32 / p.life).clamp(0., 1.);
             let size = p.sizes[0] + (p.sizes[1] - p.sizes[0]) * age;
             let near = if p.near_clip {
@@ -499,10 +567,12 @@ impl Particles {
             };
             let ramp = if matches!(p.motion, Motion::Explosion) {
                 (1. - age).powi(2)
+            } else if p.sine {
+                p.alpha[0] * (std::f32::consts::PI * age).sin()
             } else {
                 1.
             };
-            let alpha = if matches!(p.motion, Motion::Explosion) {
+            let alpha = if matches!(p.motion, Motion::Explosion) || p.sine {
                 ramp
             } else {
                 p.alpha[0] + (p.alpha[1] - p.alpha[0]) * age
