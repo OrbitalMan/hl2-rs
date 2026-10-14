@@ -230,6 +230,12 @@ impl Simulation {
                         .give("weapon_crowbar", &game.weapons, game.scene.time);
                     ui.source.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
                 }
+                Effect::AiEnable(value) => {
+                    let on = value.unwrap_or(!game.ai.enabled);
+                    game.ai.enabled = on;
+                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                    ui.source.log(format!("ai_enable {}", u8::from(on)));
+                }
                 Effect::Noclip(value) => {
                     self.fly = value.unwrap_or(!self.fly);
                     self.player = Player::new(self.eye);
@@ -275,9 +281,33 @@ impl Simulation {
                             .log(format!("Queued {target}.{input} after {delay} seconds."));
                     }
                 }
+                Effect::NpcCommand(line) => match game.spawn_console.parse(&line) {
+                    Ok(Some(hl2_simulation::ai::spawn::Command::Spawn(request))) => {
+                        let message = self.spawn_npc(game, request);
+                        ui.source.log(message);
+                    }
+                    Ok(Some(hl2_simulation::ai::spawn::Command::SetEquipment(value))) => {
+                        ui.source.log(format!("npc_create_equipment {value}"));
+                    }
+                    Ok(None) => {}
+                    Err(e) => ui.source.log(e),
+                },
                 Effect::Quit => ui.quit_requested = true,
             }
         }
+    }
+    /// npc_create placement from the player's eye along the aim (logged only).
+    pub fn spawn_npc(
+        &self,
+        game: &mut crate::gameplay::Gameplay,
+        request: hl2_simulation::ai::spawn::SpawnRequest,
+    ) -> String {
+        let forward = glam::Vec3::new(
+            self.pitch.cos() * self.yaw.cos(),
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+        );
+        game.request_spawn(request, &self.physics, self.eye, forward)
     }
     fn step(
         &mut self,
@@ -391,6 +421,10 @@ impl Simulation {
                     noclip: false,
                 };
                 let feet = self.player.feet;
+                // NPC hits push the player (ApplyAbsVelocityImpulse) before the move.
+                if let Some(game) = game.as_deref_mut() {
+                    self.player.velocity += std::mem::take(&mut game.player_impulse);
+                }
                 // SetMaxSpeed from the weapons stage (gravity gun load) for this step.
                 self.input.max_speed = game
                     .as_deref()
@@ -652,6 +686,47 @@ fn controls(
         {
             if keys.just_pressed(key) {
                 game.actions.push(Action::Slot { slot });
+            }
+        }
+        // F4 NPC spawn overlay (ours; not a native binding): Up/Down scroll the class
+        // list, Left/Right pick the weapon, Enter places.
+        if keys.just_pressed(KeyCode::F4) {
+            game.spawn_overlay.toggle();
+        }
+        if game.spawn_overlay.open {
+            for (key, class, equipment) in [
+                (KeyCode::ArrowUp, -1, 0),
+                (KeyCode::ArrowDown, 1, 0),
+                (KeyCode::ArrowLeft, 0, -1),
+                (KeyCode::ArrowRight, 0, 1),
+            ] {
+                if keys.just_pressed(key) {
+                    if class != 0 {
+                        game.spawn_overlay.next_class(class);
+                    } else {
+                        game.spawn_overlay.next_equipment(equipment);
+                    }
+                }
+            }
+            // Debug switches while the overlay is open: I AI on/off, O ignore the
+            // player, P stance toward the player.
+            if keys.just_pressed(KeyCode::KeyI) {
+                let on = !game.ai.enabled;
+                game.ai.enabled = on;
+                crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+            }
+            if keys.just_pressed(KeyCode::KeyO) {
+                game.ai.ignore_player = !game.ai.ignore_player;
+            }
+            if keys.just_pressed(KeyCode::KeyP) {
+                game.ai.cycle_player_disposition();
+            }
+            if keys.just_pressed(KeyCode::Enter) {
+                let request = game.spawn_overlay.request();
+                let message = sim.spawn_npc(game, request);
+                if let Some(ui) = ui.as_deref_mut() {
+                    ui.source.log(message);
+                }
             }
         }
         if let Some(scroll) = scroll.as_deref().filter(|s| s.delta.y != 0.) {

@@ -280,7 +280,11 @@ pub fn present(
                     .label
                     .strip_prefix('#')
                     .and_then(|s| s.parse::<usize>().ok());
-                if id.is_some_and(|id| game.world.entities[id].class().starts_with("npc_")) {
+                if id.is_some_and(|id| {
+                    game.scene
+                        .entity(&game.world, id)
+                        .is_some_and(|e| e.class().starts_with("npc_"))
+                }) {
                     eyes.tracking_npc += 1;
                 }
             }

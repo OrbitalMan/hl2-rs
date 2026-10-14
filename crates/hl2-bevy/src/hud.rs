@@ -339,9 +339,33 @@ pub fn present(
             format!("HL2-RS  /  Rust runtime  /  {}", game.world.name),
             format!("{} triangles  |  {} textures  |  {} entities  |  {}  |  {:.0} fps", stats.triangles, textures, game.world.entities.len(), if sim.flying() { "FLY" } else { "WALK" }, hud.timing.fps()),
             "WASD / click: mouse / Esc pause / tilde console / F2 fly / Space,Ctrl vertical in fly / G prop impulse".into(),
-            "E use / Ctrl crouch / Space jump / R reload / 1-6 / wheel: weapon menu / Q last / F3 dev loadout / F1 overlay".into(),
+            "E use / Ctrl crouch / Space jump / R reload / 1-6 / wheel: weapon menu / Q last / F3 dev loadout / F1 overlay / F4 NPC spawn".into(),
             format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
         ];
+    }
+    if game.spawn_overlay.open {
+        hud.debug_lines.extend(game.spawn_overlay.lines());
+        let stance = match game.ai.player_disposition {
+            None => "default",
+            Some(hl2_simulation::ai::relationships::Disposition::HT) => "hate",
+            Some(hl2_simulation::ai::relationships::Disposition::LI) => "like",
+            Some(hl2_simulation::ai::relationships::Disposition::FR) => "fear",
+            Some(_) => "neutral",
+        };
+        hud.debug_lines.push(format!(
+            "I: AI {}   O: ignore player {}   P: stance toward player: {stance}",
+            if game.ai.enabled { "ON" } else { "OFF (idle)" },
+            if game.ai.ignore_player { "ON" } else { "off" },
+        ));
+        if let Some(message) = game
+            .spawn_log
+            .last()
+            .and_then(|entry| entry["message"].as_str())
+        {
+            hud.debug_lines.push(format!("last: {message}"));
+        }
+    }
+    if !hud.debug_lines.is_empty() {
         ui.source.draw_debug(&hud.debug_lines);
     }
     ui.source.draw(clock.elapsed_secs_f64());

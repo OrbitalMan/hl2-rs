@@ -8,6 +8,7 @@ pub mod npc_probe;
 pub mod physics;
 
 pub mod actors;
+pub mod ai;
 pub mod entities;
 pub mod footsteps;
 pub mod gameplay;

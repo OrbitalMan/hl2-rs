@@ -372,6 +372,133 @@ Per-process recordings: native blip onsets match ours (0, 1.057, 2.102, 2.415, 2
 **Still broken or not tested:** native draws Sprite-shader materials with `$nosrgb` 1 (SDK sprite_dx9.cpp default: no sRGB read/write, TONEMAP_SCALE_GAMMA), i.e. additive in gamma space into the integer-HDR framebuffer; ours adds in linear space, so the trail core is about half as bright (red excess ~50 vs ~100) and looks thinner. CBeamSegDraw geometry was checked against the SDK's compiled tier2.lib (half width per side, vertex colour = rgb + alpha). Gamma-space sprite blending is a renderer item for all sprites (planned, not started). Explosion timing vs native not measured (not in view); lob/roll not compared; regression batch not run; the remaining four weapons.
 
 **Next:** lob/roll native comparison, then crossbow, RPG, bug bait, gravity gun; gamma-space sprite blending as a separate renderer step (DESIGN 11f).
+## 2026-10-12 cloud session: runtime entity creation steps 1-3 started (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `Scene::initial_state` factored out of Scene::new; `Scene::spawned` / `spawn_entity` / `entity` / `ent` (spawned entities leaked `&'static`); 23 runtime lookups in entities.rs plus AI speech and eye tracking safe for spawned ids; `AiRuntime::add_actor`.
+
+**Why:** owner decision: spawn like Source (DESIGN 14r) instead of the load-time pool.
+
+**Tested how:** unit tests (spawned entity state/lookup, 40 scene+physics ticks with a spawned cop and a Kill input, runtime-spawned cop gets an AI actor and thinks); workspace tests; strict Clippy (ca1a40b failed it: the command chain did not gate on Clippy; fixed next commit); fmt.
+
+**Result:** passes on Linux; the host does not call spawn_entity yet (F4 still uses the pool).
+
+**Still broken or not tested:** steps 3 (controller, colliders), 4 (async late precache), 5 (Bevy instancing), 6 (remove pool).
+
+**Next:** DESIGN 14r step 3 remainder.
+
+## 2026-10-12 cloud session: runtime entity creation plan (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** AGENTS.md asset-read rule clarified (no blocking reads in frame systems; runtime loads via asynchronous workers; entities may be created at runtime); DESIGN "14r" plan for runtime entity creation with late precache.
+
+**Why:** owner: spawning should work like HL2/Garry's Mod (Source's CC_NPC_Create creates entities and late-precaches at runtime).
+
+**Tested how:** documentation only (no code change).
+
+**Result:** plan recorded; the F4 pool stays until 14r steps land.
+
+**Still broken or not tested:** everything in 14r.
+
+**Next:** 14r step 1.
+
+## 2026-10-12 cloud session: F4 roster, scrolling list and AI debug switches (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** 41 HL2 NPC classes with SDK default models in the F4 pool; scrolling class list with weapon choices; F4 debug keys I (AI on/off, stopping NPCs to idle), O (ignore the player), P (stance toward the player).
+
+**Why:** owner: missing NPCs, a scrolling list, and debug switches to watch NPCs without the player or the AI interfering.
+
+**Tested how:** unit tests (pool covers every class, list scrolls, ignored player is not shoved, forced hate makes the player the enemy, AI off clears schedules); strict Clippy; fmt; workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** visuals, load time of ~30 extra models, AI only for metrocops, no console equivalents.
+
+**Next:** STATUS AI checklist item 6.
+
+## 2026-10-12 cloud session: F4 spawns real NPCs (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** load-time hidden spawn pool (3 per F4 class, SDK default models); F4 Enter / npc_create activate the next slot at the CC_NPC_Create placement; cop baton from the equipment; overlay shows the last result.
+
+**Why:** owner: F4 placed nothing ("why does F4 still not work").
+
+**Tested how:** unit tests (pool slots, hidden pooled cop does not think, placed cop thinks and warns); strict Clippy; fmt; workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** visual placement, weapon models in hands, AI for non-cop classes, names, load-time cost of the extra models.
+
+**Next:** STATUS AI checklist item 6.
+
+## 2026-10-10 cloud session: AI host wiring, npc_metropolice, F4 overlay (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `ai::host` (SceneMotor, PhysicsSight, PhysicsPlacement), `ai::runtime` (NPCThink loop, off by default, yields to scripts/scenes), `ai::metropolice` (npc_metropolice.cpp precriminal behavior: shove, warnings, baton, stunstick, AdministerJustice, PrecriminalUse, police goal via SetPoliceGoal), scene AI hooks (activity, yaw, anim events, inputs), npc_metropolice as AI-only ground actor; hl2-bevy AI tick in the NPC stage, player hits (damage/impulse/fade), `--ai` / console `ai_enable`, metrocop sentences, +USE on cops, F4 spawn overlay and `npc_create*` routing (placement logged only).
+
+**Why:** owner step 14: trainstation metrocops through their real AI logic; F4 developer spawns.
+
+**Tested how:** unit tests with synthetic worlds (motor yaw, sight, placement, think loop off/on, scripted yield, SetPoliceGoal warnings and outputs, +USE warnings, console routing); workspace `cargo test --locked`; strict Clippy (exit 0); fmt.
+
+**Result:** passes on Linux. Not run in the game: no owned files or native HL2 in the cloud.
+
+**Still broken or not tested:** everything visual/audio/timing (not tested (cloud: no owned files/native)); runtime NPC creation (plan in DESIGN 14); citizens/Combine; view punch on this branch; thrown-object hook; gameplay sound insertion into CSoundEnt; think throttling.
+
+**Next:** STATUS AI LOCAL VALIDATION CHECKLIST (plaza comparison with AI on, regression batch with AI off).
+
+## 2026-10-10 cloud session: policing behavior (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `ai::police` (ai_goal_police + CAI_PolicingBehavior from SDK 2013); Behavior::select_schedule takes the NPC mutably; TASK_WAIT_RANDOM; face tasks fall back to the remembered enemy position.
+
+**Why:** owner: trainstation metrocops must hold posts and escalate through the real logic (step 14).
+
+**Tested how:** unit tests (warning cadence/outputs/baton/hostility, suppress on crossing the radius, knock-out plane, return to post); strict Clippy/fmt; hl2-bevy cargo check.
+
+**Result:** passes on Linux; not wired into the game.
+
+**Still broken or not tested:** the npc_metropolice class, host wiring, sentences/gestures in game, native comparison.
+
+**Next:** STATUS handoff checklist step 3.
+
+## 2026-10-10 cloud session: AI schedules, senses, squads, spawn model (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `ai::schedule` (+ generated default schedule table), `ai::senses`, `ai::squad`, `ai::spawn` (npc_create commands, F4 overlay model).
+
+**Why:** step 14 core (owner priority 1).
+
+**Tested how:** unit tests (13 ai:: tests), strict Clippy/fmt on Linux.
+
+**Result:** builds/passes on Linux; no runtime change (not wired).
+
+**Still broken or not tested:** host adapters, per-class NPCs, F4 drawing; everything vs native.
+
+**Next:** see STATUS checklist step 3.
+
+## 2026-10-10 cloud session: step 14 AI core start (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** DESIGN step 14 plan; `hl2-simulation/src/ai/` conditions, NPC state selection, enemy memory, relationship table (SDK 2013).
+
+**Why:** owner priority 1 (step 14), prepared in the cloud.
+
+**Tested how:** unit tests; strict Clippy/fmt on Linux.
+
+**Result:** builds and passes on Linux; not wired into the game.
+
+**Still broken or not tested:** everything behavioral; see STATUS handoff.
+
+**Next:** schedules/tasks, senses, squads, F4/npc_create data model, metropolice.
 
 ## 2026-10-09 session 10 (later): arsenal WIP (frag grenade), suit logon
 

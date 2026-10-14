@@ -190,6 +190,8 @@ pub fn load_with_canvas(
     // Static infodecals land on world brush faces only, before static props are merged.
     let mut decal_errors = Vec::new();
     add_static_decals(&mut world, &vfs, &mut decal_errors);
+    // F4 / npc_create spawn pool: hidden NPCs every load-time system builds.
+    hl2_simulation::ai::spawn::append_pool(&mut world);
     let model_report = models::append_models(&mut world, &vfs);
     let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
     // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body

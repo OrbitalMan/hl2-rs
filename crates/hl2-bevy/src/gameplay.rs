@@ -102,6 +102,8 @@ impl Action {
         }
     }
 }
+/// The `ai_enable` switch across map loads (`--ai` sets it at startup).
+pub static AI_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[derive(Resource)]
 pub struct Gameplay {
     pub world: Arc<World>,
@@ -133,6 +135,19 @@ pub struct Gameplay {
     pub damage_messages: Vec<hl2_simulation::player_damage::DamageMessage>,
     /// HEV suit voice queue.
     pub suit: hl2_simulation::suit::Suit,
+    /// Step 14 NPC AI (off until `ai_enable 1` / `--ai`).
+    pub ai: hl2_simulation::ai::runtime::AiRuntime,
+    /// Velocity impulses on the player from NPC hits (ApplyAbsVelocityImpulse), applied
+    /// before the next player move.
+    pub player_impulse: glam::Vec3,
+    /// F4 developer NPC spawn overlay and the npc_create* console state.
+    pub spawn_overlay: hl2_simulation::ai::spawn::Overlay,
+    pub spawn_console: hl2_simulation::ai::spawn::Console,
+    /// Spawn requests and their CC_NPC_Create placement; runtime entity creation is not
+    /// implemented (DESIGN step 14 note), so nothing is created yet.
+    pub spawn_log: Vec<serde_json::Value>,
+    /// Pooled spawn entities already placed.
+    pub spawn_used: std::collections::BTreeSet<usize>,
 }
 impl Gameplay {
     /// After the player move: this tick's damage (trigger_hurt, blasts, then the
@@ -319,6 +334,12 @@ impl Gameplay {
             player_damage: Default::default(),
             damage_messages: Vec::new(),
             suit: Default::default(),
+            ai: hl2_simulation::ai::runtime::AiRuntime::new(&World::default(), None),
+            player_impulse: glam::Vec3::ZERO,
+            spawn_overlay: Default::default(),
+            spawn_console: Default::default(),
+            spawn_log: Vec::new(),
+            spawn_used: Default::default(),
         }
     }
     pub fn load_with_campaign(
@@ -340,7 +361,15 @@ impl Gameplay {
             .map(|b| String::from_utf8_lossy(&b).into_owned());
         let player_damage =
             hl2_simulation::player_damage::PlayerDamage::with_skill(2, skill.as_deref());
+        let mut ai = hl2_simulation::ai::runtime::AiRuntime::new(&world, Some(vfs));
+        ai.enabled = AI_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
+            ai,
+            player_impulse: glam::Vec3::ZERO,
+            spawn_overlay: Default::default(),
+            spawn_console: Default::default(),
+            spawn_log: Vec::new(),
+            spawn_used: Default::default(),
             player_damage,
             damage_messages: Vec::new(),
             suit: Default::default(),
@@ -367,6 +396,76 @@ impl Gameplay {
             weapon_sounds: Default::default(),
             footsteps: Default::default(),
         })
+    }
+    /// An npc_create request (F4 Enter or the console): CC_NPC_Create placement from
+    /// the eye along the aim, then the next hidden pooled entity of the class is
+    /// moved there and shown (runtime entity creation is not available; the pool is
+    /// appended at map load).
+    pub fn request_spawn(
+        &mut self,
+        request: hl2_simulation::ai::spawn::SpawnRequest,
+        physics: &Physics,
+        eye: Vec3,
+        forward: Vec3,
+    ) -> String {
+        use hl2_simulation::ai::spawn;
+        let placement = spawn::place(
+            &request,
+            eye,
+            forward,
+            &hl2_simulation::ai::host::PhysicsPlacement { physics },
+        );
+        let mut entity = None;
+        let message = match &placement {
+            Ok(p) => match spawn::free_slot(&self.world, &request.classname, &self.spawn_used) {
+                Some(id) => {
+                    self.spawn_used.insert(id);
+                    let state = &mut self.scene.states[id];
+                    state.origin = p.origin;
+                    state.visible = true;
+                    state.enabled = true;
+                    self.scene.ai_set_yaw(id, p.yaw);
+                    self.ai.set_equipment(id, &request.equipment);
+                    entity = Some(id);
+                    format!(
+                        "Created {} ({}) at {:.0} {:.0} {:.0} yaw {:.0} (entity {id})",
+                        request.classname,
+                        if request.equipment.is_empty() {
+                            "no weapon"
+                        } else {
+                            &request.equipment
+                        },
+                        p.origin.x,
+                        p.origin.y,
+                        p.origin.z,
+                        p.yaw
+                    )
+                }
+                None => format!(
+                    "Can't create {}: all {} pooled slots are in use",
+                    request.classname,
+                    spawn::pool_count(&request.classname)
+                ),
+            },
+            Err(e) => e.clone(),
+        };
+        self.spawn_log.push(serde_json::json!({"request":request,"placement":placement.ok(),"entity":entity,"message":message}));
+        message
+    }
+    fn ai_player_state(
+        &self,
+        player: &Player,
+        fly: bool,
+    ) -> hl2_simulation::ai::runtime::PlayerState {
+        hl2_simulation::ai::runtime::PlayerState {
+            feet: player.feet,
+            velocity: player.velocity,
+            crouched: player.crouched,
+            on_ground: player.grounded,
+            dead: player.dead,
+            suit: self.inventory.suit,
+            noclip: fly,
+        }
     }
     pub fn consume_attacks(&mut self) {
         self.primary_consumed = true;
@@ -456,7 +555,13 @@ impl Gameplay {
                         continue;
                     }
                     if let Some((id, _)) = physics.ray(eye, direction, 96.) {
-                        self.scene.use_entity_at(&self.world, id, player.feet);
+                        let state = self.ai_player_state(player, fly);
+                        if !self
+                            .ai
+                            .player_used(id, &self.world, &mut self.scene, physics, state)
+                        {
+                            self.scene.use_entity_at(&self.world, id, player.feet);
+                        }
                     }
                     continue;
                 }
@@ -663,6 +768,32 @@ impl Gameplay {
         );
         self.projectiles.laser_dot = self.inventory.rpg.dot;
         physics.refresh_entity_queries();
+        // NPC stage: the AI thinks (when enabled) before the movement controller tick.
+        let ai_player = self.ai_player_state(player, fly);
+        self.ai.tick(
+            &self.world,
+            &mut self.scene,
+            &mut self.npcs,
+            physics,
+            &[],
+            ai_player,
+        );
+        for hit in std::mem::take(&mut self.ai.player_hits) {
+            if hit.damage > 0. {
+                self.scene
+                    .player_damage
+                    .push(hl2_simulation::player_damage::DamageInfo {
+                        amount: hit.damage,
+                        kind: hl2_simulation::player_damage::DMG_CLUB,
+                        inflictor: self.scene.states[hit.attacker].origin,
+                    });
+            }
+            self.player_impulse += hit.impulse;
+            if let Some(fade) = hit.fade {
+                self.scene.screen_fades.push(fade);
+            }
+            // ViewPunch needs the punch-angle path of the arsenal branch (not here).
+        }
         actors::tick_npcs(
             &mut self.npcs,
             &mut self.scene,
@@ -818,7 +949,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "ai":serde_json::to_value(&self.ai).unwrap_or_default(),"npc_spawns":self.spawn_log,"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

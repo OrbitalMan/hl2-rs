@@ -1290,6 +1290,28 @@ impl Physics {
     pub fn awake_bodies(&self) -> usize {
         self.islands.active_dynamic_bodies().len()
     }
+    /// A runtime-spawned NPC's collider (DESIGN 14r step 3): an axis box from `mins`
+    /// to `maxs` (the class hull, e.g. HULL_HUMAN -13 -13 0 .. 13 13 72) that
+    /// set_entity then moves with the scene state, CONTENTS_MONSTER for NPC traces.
+    /// The model's own collision pieces replace it once the late precache supplies
+    /// them (step 4).
+    pub fn add_entity_hull(&mut self, id: usize, mins: Vec3, maxs: Vec3, origin: Vec3) {
+        let half = (maxs - mins) * 0.5 * SCALE;
+        let center = (maxs + mins) * 0.5 * SCALE;
+        let shape = SharedShape::compound(vec![(
+            Isometry::translation(center.x, center.y, center.z),
+            SharedShape::cuboid(half.x, half.y, half.z),
+        )]);
+        let collider = ColliderBuilder::new(shape)
+            .friction(0.7)
+            .restitution(0.05)
+            .user_data(id as u128 + 1)
+            .position(pose(origin, Quat::IDENTITY));
+        let handle = self.colliders.insert(collider);
+        self.entity_colliders.entry(id).or_default().push(handle);
+        self.npc_collider_contents.insert(handle, CONTENTS_MONSTER);
+        self.changed_entity_colliders.push(handle);
+    }
     pub fn set_entity(&mut self, id: usize, origin: Vec3, rotation: Quat, enabled: bool) {
         let dynamic = self.dynamic.get(&id);
         if dynamic
@@ -2856,6 +2878,29 @@ impl CollisionWorld for Physics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_spawned_npc_hull_blocks_rays_and_follows_its_state() {
+        let world = World::default();
+        let mut physics = Physics::new(&world);
+        physics.add_entity_hull(
+            7,
+            Vec3::new(-13., -13., 0.),
+            Vec3::new(13., 13., 72.),
+            Vec3::new(100., 0., 0.),
+        );
+        physics.refresh_entity_queries();
+        let hit = physics.projectile_ray(Vec3::new(0., 0., 36.), Vec3::new(200., 0., 36.), &[]);
+        assert_eq!(hit.map(|h| h.entity), Some(7));
+        assert!(
+            (hit.unwrap().position.x - 87.).abs() < 0.5,
+            "front face at 100 - 13"
+        );
+        physics.set_entity(7, Vec3::new(100., 200., 0.), Quat::IDENTITY, true);
+        physics.refresh_entity_queries();
+        assert!(physics
+            .projectile_ray(Vec3::new(0., 0., 36.), Vec3::new(200., 0., 36.), &[])
+            .is_none());
+    }
     use modkit_core::movement::{Input, Player, TICK};
     fn box_surface(min: Vec3, max: Vec3) -> Surface {
         let vertices = (0..8)

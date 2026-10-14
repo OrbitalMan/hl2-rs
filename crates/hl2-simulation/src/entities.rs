@@ -244,6 +244,11 @@ pub struct Scene {
     pub states: Vec<State>,
     /// KeyValues set at runtime by AddOutput, by (entity, lowercase key).
     pub keyvalue_overrides: BTreeMap<(usize, String), String>,
+    /// Entities created at runtime (DESIGN 14r): id = world.entities.len() + index,
+    /// so map entity ids never change; states[id] covers both. Leaked so lookups can
+    /// return references tied to `world` only (spawns are rare and small; a map
+    /// change drops the Scene but not these few hundred bytes each).
+    pub spawned: Vec<&'static Entity>,
     pub time: f64,
     sequence: u64,
     random: u64,
@@ -295,14 +300,181 @@ pub struct Scene {
     player_feet: Vec3,
     /// Duration of the latest tick (NPC movement turning runs after the scene tick).
     tick_dt: f32,
+    /// Inputs for the AI (step 14): (target entity, lowercase input, parameter,
+    /// activator). The AI runtime drains them; without it they are dropped.
+    pub ai_inputs: Vec<(usize, String, String, usize)>,
+    /// When the sequence the AI started last ends, per actor.
+    ai_sequence_end: BTreeMap<usize, f64>,
 }
 impl Scene {
+    /// The spawn state of one entity (map load and runtime spawns share this).
+    fn initial_state(world: &World, e: &Entity, diagnostics: &mut Diagnostics) -> State {
+        let base_rotation =
+            physics::angles(parse_vec3(e.get("angles").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO));
+        let flags = number(e, "spawnflags", 0.) as u32;
+        let model = e
+            .get("model")
+            .and_then(|m| m.strip_prefix('*'))
+            .and_then(|m| m.parse::<usize>().ok())
+            .and_then(|id| world.brush_models.iter().find(|m| m.id == id));
+        let bounds = model.map(|m| m.maxs - m.mins).unwrap_or(Vec3::splat(72.));
+        let direction = parse_vec3(e.get("movedir").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO);
+        let direction = if direction.x == -1. {
+            Vec3::Z
+        } else if direction.x == -2. {
+            -Vec3::Z
+        } else {
+            let p = direction.x.to_radians();
+            let y = direction.y.to_radians();
+            Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
+        };
+        let travel = number(
+            e,
+            "movedistance",
+            (bounds - Vec3::splat(2.))
+                .max(Vec3::ZERO)
+                .dot(direction.abs())
+                - number(e, "lip", 0.),
+        )
+        .max(0.01);
+        let rotating = matches!(e.class(), "func_door_rotating" | "prop_door_rotating");
+        let angle = if e.class() == "prop_door_rotating" {
+            let distance = number(e, "distance", 90.).abs();
+            (if distance == 0. { 90. } else { distance }).to_radians()
+                * if number(e, "opendir", 0.) as i32 == 2 {
+                    1.
+                } else {
+                    -1.
+                }
+        } else {
+            number(e, "distance", 90.).to_radians() * if flags & 2 != 0 { -1. } else { 1. }
+        };
+        let axis = if flags & 64 != 0 {
+            Vec3::X
+        } else if flags & 128 != 0 {
+            Vec3::Y
+        } else {
+            Vec3::Z
+        };
+        let fraction = if e.class() == "prop_door_rotating" {
+            number(e, "spawnpos", 0.).min(1.)
+        } else if matches!(e.class(), "func_door" | "func_door_rotating") && flags & 1 != 0 {
+            1.
+        } else {
+            0.
+        };
+        let speed = number(e, "speed", 100.).max(0.01);
+        let mut outputs = Vec::new();
+        for (k, v) in &e.properties {
+            if k.starts_with("On") || k == "OutValue" {
+                match output(k, v) {
+                    Some(o) => outputs.push(o),
+                    None => diagnostics.malformed_outputs += 1,
+                }
+            }
+        }
+        let enabled = e.get("StartDisabled") != Some("1") && e.get("startdisabled") != Some("1");
+        let mut s = State {
+            origin: e.origin(),
+            rotation: base_rotation,
+            // CDynamicProp::Spawn adds EF_NODRAW for StartDisabled.
+            visible: e.get("rendermode") != Some("10")
+                && e.get(crate::ai::spawn::POOL_KEY).is_none()
+                && (!matches!(
+                    e.class(),
+                    "func_brush" | "func_monitor" | "prop_dynamic" | "prop_dynamic_override"
+                ) || enabled),
+            enabled,
+            killed: false,
+            animation: e
+                .get("DefaultAnim")
+                .unwrap_or(if e.class() == "npc_metropolice" {
+                    "idle_baton"
+                } else if matches!(e.class(), "npc_citizen" | "npc_barney") {
+                    "idle_subtle"
+                } else {
+                    "idle"
+                })
+                .to_lowercase(),
+            animation_started: 0.,
+            default_animation: e.get("DefaultAnim").unwrap_or("").into(),
+            animation_done: None,
+            scene_animation: None,
+            movement_animation: None,
+            script_actor: None,
+            scripted_by: None,
+            script_finish: None,
+            post_idle_done: None,
+            shuffle: Vec::new(),
+            last_shuffle: None,
+            base_origin: e.origin(),
+            base_rotation,
+            translation: if rotating {
+                Vec3::ZERO
+            } else {
+                direction * travel
+            },
+            angle: if rotating { angle } else { 0. },
+            axis,
+            fraction,
+            target: fraction,
+            rate: if rotating {
+                speed.to_radians() / angle.abs().max(0.001)
+            } else {
+                speed / travel
+            },
+            locked: flags & 2048 != 0 || e.get("locked") == Some("1"),
+            return_at: None,
+            wait: number(
+                e,
+                if e.class() == "prop_door_rotating" {
+                    "returndelay"
+                } else {
+                    "wait"
+                },
+                -1.,
+            ) as f64,
+            touching: false,
+            last_trigger: -1e6,
+            value: number(e, "startvalue", 0.),
+            timer_at: number(e, "RefireTime", 1.).max(0.015) as f64,
+            outputs,
+            parent: None,
+        };
+        s.origin = s.base_origin + s.translation * s.fraction;
+        s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
+        s
+    }
+    /// CreateEntityByName + DispatchSpawn's state part: append a runtime entity and
+    /// its spawn state; returns its id (never reused; removal marks it killed).
+    /// Physics, actors, AI and the host register it separately (14r steps 3-5).
+    pub fn spawn_entity(&mut self, world: &World, entity: Entity) -> usize {
+        let state = Self::initial_state(world, &entity, &mut self.diagnostics);
+        let id = self.states.len();
+        debug_assert_eq!(id, world.entities.len() + self.spawned.len());
+        self.states.push(state);
+        self.spawned.push(Box::leak(Box::new(entity)));
+        id
+    }
+    /// A map or runtime entity by id.
+    pub fn entity<'a>(&self, world: &'a World, id: usize) -> Option<&'a Entity> {
+        world.entities.get(id).or_else(|| {
+            self.spawned
+                .get(id.checked_sub(world.entities.len())?)
+                .copied()
+        })
+    }
+    /// A map or runtime entity by a known-valid id (state indices).
+    fn ent<'a>(&self, world: &'a World, id: usize) -> &'a Entity {
+        self.entity(world, id).expect("entity id within states")
+    }
     pub fn new(world: &World) -> Self {
         Self::with_campaign(world, true)
     }
     pub fn with_campaign(world: &World, new_game: bool) -> Self {
         let mut scene = Self {
             states: Vec::new(),
+            spawned: Vec::new(),
             time: 0.,
             sequence: 0,
             random: 1,
@@ -326,6 +498,8 @@ impl Scene {
             choreography: BTreeMap::new(),
             movement_commands: Vec::new(),
             movement_ready: BTreeMap::new(),
+            ai_inputs: Vec::new(),
+            ai_sequence_end: BTreeMap::new(),
             look_targets: Default::default(),
             gestures: Default::default(),
             heads: BTreeMap::new(),
@@ -338,142 +512,8 @@ impl Scene {
             tick_dt: 0.,
         };
         for e in &world.entities {
-            let base_rotation = physics::angles(
-                parse_vec3(e.get("angles").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO),
-            );
-            let flags = number(e, "spawnflags", 0.) as u32;
-            let model = e
-                .get("model")
-                .and_then(|m| m.strip_prefix('*'))
-                .and_then(|m| m.parse::<usize>().ok())
-                .and_then(|id| world.brush_models.iter().find(|m| m.id == id));
-            let bounds = model.map(|m| m.maxs - m.mins).unwrap_or(Vec3::splat(72.));
-            let direction = parse_vec3(e.get("movedir").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO);
-            let direction = if direction.x == -1. {
-                Vec3::Z
-            } else if direction.x == -2. {
-                -Vec3::Z
-            } else {
-                let p = direction.x.to_radians();
-                let y = direction.y.to_radians();
-                Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
-            };
-            let travel = number(
-                e,
-                "movedistance",
-                (bounds - Vec3::splat(2.))
-                    .max(Vec3::ZERO)
-                    .dot(direction.abs())
-                    - number(e, "lip", 0.),
-            )
-            .max(0.01);
-            let rotating = matches!(e.class(), "func_door_rotating" | "prop_door_rotating");
-            let angle = if e.class() == "prop_door_rotating" {
-                let distance = number(e, "distance", 90.).abs();
-                (if distance == 0. { 90. } else { distance }).to_radians()
-                    * if number(e, "opendir", 0.) as i32 == 2 {
-                        1.
-                    } else {
-                        -1.
-                    }
-            } else {
-                number(e, "distance", 90.).to_radians() * if flags & 2 != 0 { -1. } else { 1. }
-            };
-            let axis = if flags & 64 != 0 {
-                Vec3::X
-            } else if flags & 128 != 0 {
-                Vec3::Y
-            } else {
-                Vec3::Z
-            };
-            let fraction = if e.class() == "prop_door_rotating" {
-                number(e, "spawnpos", 0.).min(1.)
-            } else if matches!(e.class(), "func_door" | "func_door_rotating") && flags & 1 != 0 {
-                1.
-            } else {
-                0.
-            };
-            let speed = number(e, "speed", 100.).max(0.01);
-            let mut outputs = Vec::new();
-            for (k, v) in &e.properties {
-                if k.starts_with("On") || k == "OutValue" {
-                    match output(k, v) {
-                        Some(o) => outputs.push(o),
-                        None => scene.diagnostics.malformed_outputs += 1,
-                    }
-                }
-            }
-            let enabled =
-                e.get("StartDisabled") != Some("1") && e.get("startdisabled") != Some("1");
-            let mut s = State {
-                origin: e.origin(),
-                rotation: base_rotation,
-                // CDynamicProp::Spawn adds EF_NODRAW for StartDisabled.
-                visible: e.get("rendermode") != Some("10")
-                    && (!matches!(
-                        e.class(),
-                        "func_brush" | "func_monitor" | "prop_dynamic" | "prop_dynamic_override"
-                    ) || enabled),
-                enabled,
-                killed: false,
-                animation: e
-                    .get("DefaultAnim")
-                    .unwrap_or(if e.class() == "npc_metropolice" {
-                        "idle_baton"
-                    } else if matches!(e.class(), "npc_citizen" | "npc_barney") {
-                        "idle_subtle"
-                    } else {
-                        "idle"
-                    })
-                    .to_lowercase(),
-                animation_started: 0.,
-                default_animation: e.get("DefaultAnim").unwrap_or("").into(),
-                animation_done: None,
-                scene_animation: None,
-                movement_animation: None,
-                script_actor: None,
-                scripted_by: None,
-                script_finish: None,
-                post_idle_done: None,
-                shuffle: Vec::new(),
-                last_shuffle: None,
-                base_origin: e.origin(),
-                base_rotation,
-                translation: if rotating {
-                    Vec3::ZERO
-                } else {
-                    direction * travel
-                },
-                angle: if rotating { angle } else { 0. },
-                axis,
-                fraction,
-                target: fraction,
-                rate: if rotating {
-                    speed.to_radians() / angle.abs().max(0.001)
-                } else {
-                    speed / travel
-                },
-                locked: flags & 2048 != 0 || e.get("locked") == Some("1"),
-                return_at: None,
-                wait: number(
-                    e,
-                    if e.class() == "prop_door_rotating" {
-                        "returndelay"
-                    } else {
-                        "wait"
-                    },
-                    -1.,
-                ) as f64,
-                touching: false,
-                last_trigger: -1e6,
-                value: number(e, "startvalue", 0.),
-                timer_at: number(e, "RefireTime", 1.).max(0.015) as f64,
-                outputs,
-                parent: None,
-            };
-            s.origin = s.base_origin + s.translation * s.fraction;
-            s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
-            scene.states.push(s);
+            let state = Self::initial_state(world, e, &mut scene.diagnostics);
+            scene.states.push(state);
         }
         // Preserve explicit/default labels and existing loaded poses. Unsupported
         // implicit NPC labels may resolve through the model-authored idle activity.
@@ -726,7 +766,7 @@ impl Scene {
             .and_then(|s| s.to_lowercase().strip_prefix("target").map(str::to_owned))
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|slot| (1..=8).contains(slot))
-            .and_then(|slot| world.entities[scene].get(&format!("target{slot}")))
+            .and_then(|slot| self.ent(world, scene).get(&format!("target{slot}")))
             .unwrap_or(name);
         if name.eq_ignore_ascii_case("!player") || name.eq_ignore_ascii_case("player") {
             return Some(Target::Player);
@@ -768,13 +808,17 @@ impl Scene {
             patch: None,
             name: cue.into(),
             actor: Some(crate::sounds::SoundActor {
-                name: world.entities[actor].get("targetname").unwrap_or("").into(),
+                name: self
+                    .ent(world, actor)
+                    .get("targetname")
+                    .unwrap_or("")
+                    .into(),
                 model: world
                     .model_instances
                     .iter()
                     .find(|i| i.entity == Some(actor))
                     .map(|i| i.model.as_str())
-                    .unwrap_or(world.entities[actor].get("model").unwrap_or(""))
+                    .unwrap_or(self.ent(world, actor).get("model").unwrap_or(""))
                     .into(),
                 entity: Some(actor),
             }),
@@ -898,7 +942,7 @@ impl Scene {
         keep_offset: bool,
     ) {
         let Some(frame) = self.parent_frame(world, parent, attachment.as_deref()) else {
-            self.unsupported_input(world.entities[id].class(), "SetParent:missing-attachment");
+            self.unsupported_input(self.ent(world, id).class(), "SetParent:missing-attachment");
             return;
         };
         let (origin, rotation) = if keep_offset {
@@ -1036,7 +1080,7 @@ impl Scene {
         actors.extend(self.heads.keys().copied());
         for actor in actors {
             let state = &self.states[actor];
-            if state.killed || !world.entities[actor].class().starts_with("npc_") {
+            if state.killed || !self.ent(world, actor).class().starts_with("npc_") {
                 self.heads.remove(&actor);
                 continue;
             }
@@ -1089,6 +1133,98 @@ impl Scene {
         }
         (self.time - state.animation_started).max(0.) as f32
     }
+    /// The actor belongs to a script: a scripted_sequence, a choreographed scene (as an
+    /// actor of a running playback or through its body animation) or a scene move.
+    /// The AI yields to it (NPC_STATE_SCRIPT / SCHED_AISCRIPT semantics).
+    pub fn ai_scripted(&self, id: usize) -> bool {
+        let Some(state) = self.states.get(id) else {
+            return true;
+        };
+        state.scripted_by.is_some()
+            || state.scene_animation.is_some()
+            || state
+                .movement_animation
+                .as_ref()
+                .is_some_and(|m| m.key.scene != crate::npc::AI_SCENE)
+            || self.choreography.values().any(|c| {
+                c.playback
+                    .as_ref()
+                    .is_some_and(|p| p.actors.contains(&Some(id)))
+            })
+            || self
+                .movement_ready
+                .keys()
+                .any(|k| k.actor == id && k.scene != crate::npc::AI_SCENE)
+    }
+    /// Play an activity or sequence on an actor for the AI (CAI_BaseNPC::SetActivity:
+    /// the model's weighted sequence for the activity). False when the rig has none.
+    pub fn ai_set_activity(&mut self, world: &World, id: usize, activity: &str) -> bool {
+        if !self.animate(world, id, activity, false) {
+            return false;
+        }
+        let duration = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|rig| rig.clips.get(&self.states[id].animation))
+            .map_or(0., |clip| clip.duration().max(0.015));
+        self.ai_sequence_end
+            .insert(id, self.time + f64::from(duration));
+        true
+    }
+    /// Animation events (name, id) of the actor's current sequence whose time falls in
+    /// (from, to] (studio events, played once per sequence start).
+    pub fn ai_events(&self, world: &World, id: usize, from: f64, to: f64) -> Vec<(String, i32)> {
+        let Some(state) = self.states.get(id) else {
+            return Vec::new();
+        };
+        let Some(clip) = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|rig| rig.clips.get(&state.animation))
+        else {
+            return Vec::new();
+        };
+        let duration = f64::from(clip.duration().max(0.015));
+        clip.events
+            .iter()
+            .filter(|e| {
+                let at = state.animation_started + f64::from(e.cycle) * duration;
+                at > from && at <= to
+            })
+            .map(|e| (e.name.clone(), e.id))
+            .collect()
+    }
+    /// The AI's current sequence has played once (m_fSequenceFinished).
+    pub fn ai_activity_finished(&self, id: usize) -> bool {
+        self.ai_sequence_end
+            .get(&id)
+            .is_none_or(|end| self.time >= *end)
+    }
+    /// Accept movement updates for an AI goal (apply_movement only follows known keys).
+    pub fn ai_register_move(&mut self, key: crate::npc::GoalKey) {
+        self.movement_ready.insert(key, false);
+    }
+    pub fn ai_forget_move(&mut self, key: crate::npc::GoalKey) {
+        self.movement_ready.remove(&key);
+        if self
+            .states
+            .get(key.actor)
+            .and_then(|s| s.movement_animation.as_ref())
+            .is_some_and(|m| m.key == key)
+        {
+            self.restore_movement_animation(key.actor);
+        }
+    }
+    /// The AI turned the actor (CAI_Motor::UpdateYaw) while standing.
+    pub fn ai_set_yaw(&mut self, id: usize, yaw_degrees: f32) {
+        if let Some(state) = self.states.get_mut(id) {
+            state.rotation = physics::angles(Vec3::new(0., yaw_degrees, 0.));
+        }
+    }
     pub fn body_sequence_owner(&self, id: usize) -> Option<usize> {
         self.states
             .get(id)?
@@ -1110,8 +1246,8 @@ impl Scene {
                 });
                 ChoreographyState {
                     entity: *id,
-                    targetname: world.entities[*id].get("targetname").unwrap_or("").into(),
-                    file: world.entities[*id].get("SceneFile").unwrap_or("").into(),
+                    targetname: self.ent(world, *id).get("targetname").unwrap_or("").into(),
+                    file: self.ent(world, *id).get("SceneFile").unwrap_or("").into(),
                     elapsed: play.map(|p| p.elapsed),
                     pause: pause_reason.is_some(),
                     pause_reason,
@@ -1555,7 +1691,7 @@ impl Scene {
                                 EventType::Face => {
                                     // StartFacingSceneEvent needs a target; NPCs turn in process_faces.
                                     if let Some(actor) = actor
-                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                        .filter(|a| self.ent(world, *a).class().starts_with("npc_"))
                                     {
                                         if let Some(target) = self.scene_look_target(
                                             world,
@@ -1575,7 +1711,7 @@ impl Scene {
                                 EventType::LookAt => {
                                     // CBaseFlex LOOKAT refreshes NPC interests; non-NPC flex actors are a no-op.
                                     if let Some(actor) = actor
-                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                        .filter(|a| self.ent(world, *a).class().starts_with("npc_"))
                                     {
                                         if let Some(target) = self.scene_look_target(
                                             world,
@@ -1837,7 +1973,7 @@ impl Scene {
     /// anyone (damagemodel 1 doubles up to damagecap and forgives after 3 s without a
     /// hit); EndTouch deals damage x 0.5 to a toucher the last think did not hurt.
     fn trigger_hurt(&mut self, world: &World, id: usize, touching: Vec<usize>) {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let base = number(e, "damage", 0.);
         let cap = number(e, "damagecap", 20.);
         let doubling = number(e, "damagemodel", 0.) as u32 == 1;
@@ -1888,7 +2024,7 @@ impl Scene {
     /// CTriggerHurt::HurtEntity: filters and m_takedamage, then TakeDamage (negative
     /// damage heals); the damage comes from the trigger's origin. OnHurtPlayer/OnHurt.
     fn hurt_entity(&mut self, world: &World, id: usize, target: usize, amount: f32) -> bool {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let flags = number(e, "spawnflags", 0.) as u32;
         let kind = number(e, "damagetype", 0.) as u32;
         let player = target == PLAYER;
@@ -2010,7 +2146,7 @@ impl Scene {
         if state.killed || state.locked || state.target != 0. {
             return;
         }
-        match world.entities[id].class() {
+        match self.ent(world, id).class() {
             "prop_door_rotating" => self.use_with_opener(world, id, Some(opener)),
             "func_door" | "func_door_rotating" => self.send(id, "Open", ""),
             _ => {}
@@ -2080,7 +2216,7 @@ impl Scene {
             return;
         }
         self.diagnostics.inputs_delivered += 1;
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let class = e.class();
         let input = p.input.to_lowercase();
         let value = p.parameter.parse::<f32>().unwrap_or(0.);
@@ -2095,6 +2231,20 @@ impl Scene {
             return;
         }
         if class == "env_global" && self.globals.input(e, &input, &p.parameter).0 {
+            return;
+        }
+        // AI inputs (step 14): npc_metropolice SetPoliceGoal / baton inputs and the
+        // ai_goal_police knock-out switches go to the AI runtime.
+        if (class == "npc_metropolice"
+            && matches!(
+                input.as_str(),
+                "setpolicegoal" | "activatebaton" | "enablemanhacktoss" | "disablemanhacktoss"
+            ))
+            || (class == "ai_goal_police"
+                && matches!(input.as_str(), "enableknockout" | "disableknockout"))
+        {
+            self.ai_inputs
+                .push((id, input, p.parameter.clone(), p.activator));
             return;
         }
         match input.as_str() {
@@ -2489,7 +2639,7 @@ impl Scene {
         });
         let clip = rig.zip(resolved).and_then(|(r, label)| r.clips.get(label));
         let Some((clip, resolved)) = clip.zip(resolved) else {
-            self.unsupported_input(world.entities[id].class(), &format!("animation:{name}"));
+            self.unsupported_input(self.ent(world, id).class(), &format!("animation:{name}"));
             return false;
         };
         self.states[id].animation = resolved.to_owned();
@@ -2513,7 +2663,7 @@ impl Scene {
         }
     }
     fn begin_sequence(&mut self, world: &World, id: usize) {
-        let script = &world.entities[id];
+        let script = self.ent(world, id);
         let name = script.get("m_iszEntity").unwrap_or("");
         let actor = world
             .entities
@@ -2621,12 +2771,13 @@ impl Scene {
         self.states[id].post_idle_done = None;
         if let Some(actor) = actor {
             self.states[actor].scripted_by = None;
-            let name = world.entities[id]
+            let name = self
+                .ent(world, id)
                 .get("m_iszPostIdle")
                 .filter(|s| !s.is_empty())
-                .or(world.entities[actor].get("DefaultAnim"))
+                .or(self.ent(world, actor).get("DefaultAnim"))
                 .unwrap_or_else(|| {
-                    let preferred = if world.entities[actor].class() == "npc_metropolice" {
+                    let preferred = if self.ent(world, actor).class() == "npc_metropolice" {
                         "idle_baton"
                     } else {
                         "idle_subtle"
@@ -2659,7 +2810,8 @@ impl Scene {
             );
             if !cancel {
                 let duration = if animated
-                    && world.entities[id]
+                    && self
+                        .ent(world, id)
                         .get("m_iszPostIdle")
                         .is_some_and(|n| !n.is_empty())
                 {
@@ -2720,7 +2872,7 @@ impl Scene {
             !values.is_empty()
         });
         for id in 0..world.entities.len() {
-            let e = &world.entities[id];
+            let e = self.ent(world, id);
             if self.states[id].killed {
                 continue;
             }
@@ -2795,7 +2947,7 @@ impl Scene {
                 let player = clients && self.player_inside(world, id, player_feet);
                 let npc = if npcs && !player {
                     (0..self.states.len()).find(|&n| {
-                        world.entities[n].class().starts_with("npc_")
+                        self.ent(world, n).class().starts_with("npc_")
                             && !self.states[n].killed
                             && self.states[n].visible
                             && self.player_inside(world, id, self.states[n].origin)
@@ -2828,7 +2980,7 @@ impl Scene {
                     // Every touching player/NPC, before the trigger filters (Touch).
                     let mut touching: Vec<usize> = (0..self.states.len())
                         .filter(|&n| {
-                            world.entities[n].class().starts_with("npc_")
+                            self.ent(world, n).class().starts_with("npc_")
                                 && !self.states[n].killed
                                 && self.player_inside(world, id, self.states[n].origin)
                         })
@@ -2884,7 +3036,7 @@ impl Scene {
         self.diagnostics.budget_exhaustions += 1;
     }
     fn player_inside(&self, world: &World, id: usize, feet: Vec3) -> bool {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let Some(model) = e
             .get("model")
             .and_then(|s| s.strip_prefix('*'))
@@ -2930,6 +3082,45 @@ fn glob(pattern: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn runtime_entities_append_after_map_entities() {
+        // Synthetic: one map entity, then a spawned cop.
+        let world = World {
+            entities: vec![Entity {
+                properties: vec![("classname".into(), "info_target".into())],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let id = scene.spawn_entity(
+            &world,
+            Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("origin".into(), "10 20 30".into()),
+                ],
+            },
+        );
+        assert_eq!(id, 1);
+        assert_eq!(scene.states.len(), 2);
+        assert_eq!(scene.states[id].origin, Vec3::new(10., 20., 30.));
+        assert!(scene.states[id].visible);
+        assert_eq!(scene.states[id].animation, "idle_baton");
+        assert_eq!(scene.entity(&world, id).unwrap().class(), "npc_metropolice");
+        assert_eq!(scene.entity(&world, 0).unwrap().class(), "info_target");
+        assert!(scene.entity(&world, 2).is_none());
+        // Runtime loops (I/O queue, heads, look targets, physics poses) tolerate the
+        // spawned id: tick a while with the player nearby and an input sent to it.
+        let mut physics = crate::physics::Physics::new(&world);
+        scene.send(id, "Kill", "");
+        for _ in 0..40 {
+            scene.tick(&world, Vec3::new(40., 20., 30.), 0.015);
+            for (index, state) in scene.states.iter().enumerate() {
+                physics.set_entity(index, state.origin, state.rotation, state.collides());
+            }
+        }
+        assert!(scene.states[id].killed);
+    }
     fn entity(class: &str, name: &str, values: &[(&str, &str)]) -> Entity {
         Entity {
             properties: [("classname", class), ("targetname", name)]

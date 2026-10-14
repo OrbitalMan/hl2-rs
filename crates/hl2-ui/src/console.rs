@@ -40,6 +40,22 @@ const COMMANDS: &[(&str, &str)] = &[
         "map",
         "map <name>: load an installed map and reset the player inventory",
     ),
+    (
+        "npc_create",
+        "npc_create <class> [name]: place an NPC at the crosshair (cheat; spawning not implemented yet)",
+    ),
+    (
+        "npc_create_aimed",
+        "npc_create_aimed <class> [name]: like npc_create, facing the aim (cheat)",
+    ),
+    (
+        "npc_create_equipment",
+        "npc_create_equipment <weapon>: weapon for the next npc_create",
+    ),
+    (
+        "ai_enable",
+        "ai_enable [0|1]: query or switch the NPC AI think loop (development, default 0)",
+    ),
     ("clear", "clear: clear console output"),
     ("ent_fire", "ent_fire <targetname> [input=Use] [parameter] [delay]: queue entity input; names/globs supported (cheat)"),
     ("echo", "echo <text>: print text"),
@@ -58,6 +74,10 @@ pub enum Mode {
 #[derive(Debug, PartialEq)]
 pub enum Effect {
     Loadout,
+    /// ai_enable: None toggles.
+    AiEnable(Option<bool>),
+    /// npc_create / npc_create_aimed / npc_create_equipment, the whole line.
+    NpcCommand(String),
     Noclip(Option<bool>),
     Getpos,
     Setpos {
@@ -610,6 +630,25 @@ impl Console {
                 };
                 cheat()?;
                 return Ok(Some(Effect::Noclip(value)));
+            }
+            "npc_create" | "npc_create_aimed" | "npc_create_equipment" => {
+                if name != "npc_create_equipment" {
+                    cheat()?;
+                }
+                return Ok(Some(Effect::NpcCommand(
+                    std::iter::once(name.as_str())
+                        .chain(args.iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )));
+            }
+            "ai_enable" => {
+                let value = match args {
+                    [] => None,
+                    [value] => Some(boolean(value).ok_or_else(usage)?),
+                    _ => return Err(usage()),
+                };
+                return Ok(Some(Effect::AiEnable(value)));
             }
             "getpos" => {
                 if !args.is_empty() {
@@ -1189,6 +1228,22 @@ mod tests {
         assert!(console.cheats);
         assert!(console.submit("sv_cheats 0; impulse 101").is_empty());
         assert!(!console.cheats);
+    }
+    #[test]
+    fn npc_create_is_a_cheat_but_its_equipment_cvar_is_not() {
+        let mut console = Console::default();
+        assert_eq!(
+            console.submit("npc_create npc_metropolice; npc_create_equipment weapon_stunstick"),
+            vec![Effect::NpcCommand(
+                "npc_create_equipment weapon_stunstick".into()
+            )]
+        );
+        assert_eq!(
+            console.submit("sv_cheats 1; npc_create_aimed npc_metropolice cop1"),
+            vec![Effect::NpcCommand(
+                "npc_create_aimed npc_metropolice cop1".into()
+            )]
+        );
     }
     #[test]
     fn quoted_separators_are_text_and_bad_quotes_execute_nothing() {
