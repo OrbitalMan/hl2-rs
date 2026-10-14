@@ -607,6 +607,13 @@ impl Console {
         crate::gameui::loading::reset_progress();
     }
 
+    /// Displays the non-blocking corner plaque for background map loading.
+    pub fn start_background_loading(&mut self, map: &str) {
+        self.pending_map = Some(map.to_owned());
+        self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
+        crate::gameui::loading::reset_progress();
+    }
+
     /// Updates loading progress from the latest background loader report.
     pub fn update_loading(&mut self) {
         if let Some(loading) = &mut self.loading_dialog {
@@ -639,18 +646,24 @@ impl Console {
     pub fn modal_dialog_open(&self) -> bool {
         self.mode == Mode::Options
             || self.confirm_box.is_some()
-            || self.loading_dialog.is_some()
+            || self
+                .loading_dialog
+                .as_ref()
+                .is_some_and(|l| !l.is_background())
             || self.mode == Mode::Console
     }
 
     /// Bounding rectangle in canvas pixels of the currently active modal dialog, if any.
     pub fn modal_bounds(&self) -> Option<Rect> {
-        if self.loading_dialog.is_some() {
-            let scale = Painter::scale_for(self.canvas.height());
-            let canvas = vec2(self.canvas.width(), self.canvas.height());
-            let (origin, _) = crate::gameui::loading::LoadingDialog::layout_geometry(canvas, scale);
-            let size = crate::gameui::loading::LOADING_DIALOG_SIZE * scale;
-            return Some(Rect::new(origin.x, origin.y, size.x, size.y));
+        if let Some(loading) = &self.loading_dialog {
+            if !loading.is_background() {
+                let scale = Painter::scale_for(self.canvas.height());
+                let canvas = vec2(self.canvas.width(), self.canvas.height());
+                let (origin, _) =
+                    crate::gameui::loading::LoadingDialog::layout_geometry(canvas, scale);
+                let size = crate::gameui::loading::LOADING_DIALOG_SIZE * scale;
+                return Some(Rect::new(origin.x, origin.y, size.x, size.y));
+            }
         }
         if let Some((confirm, _)) = &self.confirm_box {
             let (origin, scale, layout) = self.quit_geometry(confirm);
@@ -1082,7 +1095,7 @@ impl Console {
                 }
                 self.config.gameplay.background_map = Some(map.to_owned());
                 let _ = self.config.save();
-                self.start_loading(map);
+                self.start_background_loading(map);
                 return Ok(Some(Effect::MainMenuMap(map.to_owned())));
             }
             _ => return Err(usage()),
@@ -1428,7 +1441,7 @@ impl Console {
                     self.config.gameplay.background_map = Some(target_map.clone());
                     let _ = self.config.save();
                     if !self.background_level || self.loaded_map.as_deref() != Some(&target_map) {
-                        self.start_loading(&target_map);
+                        self.start_background_loading(&target_map);
                         return vec![Effect::MainMenuMap(target_map)];
                     }
                 }
@@ -1442,7 +1455,7 @@ impl Console {
                         let _ = self.config.save();
                         if !self.background_level || self.loaded_map.as_deref() != Some(&target_map)
                         {
-                            self.start_loading(&target_map);
+                            self.start_background_loading(&target_map);
                             return vec![Effect::MainMenuMap(target_map)];
                         }
                     }
@@ -1537,6 +1550,20 @@ impl Console {
             );
         };
         if menu_shown {
+            if self
+                .loading_dialog
+                .as_ref()
+                .is_some_and(|l| l.is_background())
+            {
+                // Soften and darken the backdrop behind the menu during background map loading
+                self.canvas.rectangle(
+                    0.,
+                    0.,
+                    self.canvas.width(),
+                    self.canvas.height(),
+                    Color::new(0.0, 0.0, 0.0, 0.45),
+                );
+            }
             let geometry = self.menu_layout.geometry(self.canvas.height());
             let title = self.current_title();
             if let Some(face) = &self.title_face {
@@ -2720,6 +2747,9 @@ mod tests {
             "single background-map state is updated to episode 1"
         );
         assert!(console.is_loading());
+        assert!(console.loading_dialog.as_ref().unwrap().is_background());
+        assert!(!console.modal_dialog_open());
+        assert!(console.modal_bounds().is_none());
         assert!(
             effects.contains(&Effect::MainMenuMap("ep1_background01".into())),
             "dispatches Effect::MainMenuMap for ep1_background01"
@@ -2750,6 +2780,8 @@ mod tests {
             "persisted background map updated to ep2"
         );
         assert!(console.is_loading());
+        assert!(console.loading_dialog.as_ref().unwrap().is_background());
+        assert!(!console.modal_dialog_open());
         assert!(effects.contains(&Effect::MainMenuMap("ep2_background01".into())));
 
         console.level_loaded(true);

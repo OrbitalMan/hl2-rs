@@ -131,7 +131,11 @@ pub fn poll(
             sim.loading_failed();
             return;
         }
-        ui.source.start_loading(&request.map);
+        if request.background {
+            ui.source.start_background_loading(&request.map);
+        } else {
+            ui.source.start_loading(&request.map);
+        }
         sim.loading = true;
         campaign.job = Some(Job { request, result });
     }
@@ -520,6 +524,119 @@ mod tests {
                 "ep1 scene entity despawned on lost coast load"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn headless_bevy_app_ep2_submenu_entry_switches_background_map() {
+        let game = source_assets::install::discover().expect("owned install");
+        let mut app = App::new();
+        let options =
+            crate::Options::parse_from(["--game".to_owned(), game.to_string_lossy().to_string()])
+                .expect("valid options");
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<crate::rendering::SourceMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<bevy::audio::AudioSource>>()
+            .init_resource::<Assets<crate::effects::EffectMaterial>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+            .init_resource::<crate::Status>()
+            .insert_resource(options)
+            .insert_resource(Campaign {
+                loaded_map: Some("background01".into()),
+                last_event: Some(MapLoaded {
+                    map: "background01".into(),
+                    background: true,
+                }),
+                ..default()
+            });
+
+        let vfs = source_assets::vpk::Vfs::mount(&game).expect("mount game");
+        let canvas = hl2_ui::canvas::Canvas::default();
+        let mut console = hl2_ui::console::Console::load(&vfs, canvas);
+        console.loaded_map = Some("background01".into());
+        console.level_loaded(true);
+
+        let sim = simulation::Simulation::new(
+            &modkit_core::World::default(),
+            glam::Vec3::ZERO,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let gameplay = crate::gameplay::Gameplay::synthetic(modkit_core::World::default());
+        let ui = ui_host::Console::new(console);
+
+        app.insert_resource(sim)
+            .insert_resource(gameplay)
+            .insert_resource(ui);
+
+        app.world_mut().spawn((
+            Window {
+                resolution: WindowResolution::new(1024, 768),
+                ..default()
+            },
+            CursorOptions::default(),
+            PrimaryWindow,
+        ));
+
+        let initial_scene_entity = app.world_mut().spawn(MapOwned).id();
+        app.add_systems(Update, poll);
+
+        // Enter Episode Two submenu (row 2: SwitchExpansion ep2)
+        let effects = {
+            let mut ui = app.world_mut().resource_mut::<ui_host::Console>();
+            ui.source.activate_menu(2)
+        };
+        assert!(
+            effects.contains(&hl2_ui::console::Effect::MainMenuMap(
+                "ep2_background01".into()
+            )),
+            "Effect::MainMenuMap emitted for ep2_background01"
+        );
+        let mut pending_effects = Some(effects);
+        app.world_mut()
+            .run_system_once(
+                move |mut sim: ResMut<simulation::Simulation>,
+                      mut ui: ResMut<ui_host::Console>,
+                      mut game: ResMut<crate::gameplay::Gameplay>| {
+                    if let Some(effects) = pending_effects.take() {
+                        sim.console_effects(&mut ui, &mut game, effects);
+                    }
+                },
+            )
+            .unwrap();
+
+        let mut completed = false;
+        for _ in 0..100 {
+            app.update();
+            let campaign = app.world().resource::<Campaign>();
+            if campaign.job.is_none() && campaign.loaded_map.as_deref() == Some("ep2_background01")
+            {
+                completed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            completed,
+            "ep2 background map load completed asynchronously in headless app"
+        );
+
+        let campaign = app.world().resource::<Campaign>();
+        assert_eq!(campaign.loaded_map.as_deref(), Some("ep2_background01"));
+        assert_eq!(
+            campaign.last_event,
+            Some(MapLoaded {
+                map: "ep2_background01".into(),
+                background: true,
+            })
+        );
+        assert!(
+            app.world().get_entity(initial_scene_entity).is_err(),
+            "initial scene entity despawned on ep2 background map load"
+        );
     }
 
     #[test]

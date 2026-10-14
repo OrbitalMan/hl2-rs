@@ -1,5 +1,33 @@
 # MODLOG
 
+## 2026-10-14 Episode Two background map and background loading UI/UX
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `source-assets::keyvalues`: `parse_resource` gracefully breaks when encountering `}` where a value was expected, mirroring Source SDK `KeyValues.cpp:2490` (`RecursiveLoadFromBuffer: got } in key`). This resolves parser failure on retail `ep2/ep2_pak_dir.vpk`'s `scripts/HudLayout.res` (where an unquoted `HudPoisonDamageIndicator` in `HudHealth [$DECK]` offset key-value pairs by 1, leaving `}` as value), allowing Episode Two's HUD and `ep2_background01` background scene to load cleanly. Added unit test `parse_resource_tolerates_trailing_key_before_closing_brace` and owned test `parse_ep2_hudlayout`.
+- `hl2-ui::gameui::loading`: added `LoadingKind` enum (`Gameplay` vs `Background`) and `BACKGROUND_LOADING_SIZE` (130 x 36) with `background_plaque_geometry` (24px scaled margin in the bottom-right corner). In `LoadingDialog::draw`, background map loads render a non-blocking corner plaque with translucent dark fill (`rgba(0, 0, 0, 0.65)`), raised bevel border, and centered localized `#GameUI_Loading` ("LOADING..."), without progress bars. Added unit test `background_loading_plaque_geometry_and_drawing`.
+- `hl2-ui::console`: added `start_background_loading`, gated `modal_dialog_open()` and `modal_bounds()` on `!loading.is_background()` so menu navigation buttons remain interactive, armed on hover, and clickable while background maps load. Added a softened backdrop scrim (`rgba(0, 0, 0, 0.45)`) rendered across the canvas during background map loading. Updated `SwitchExpansion`, `SwitchCategory`, and `map_background` to dispatch `start_background_loading`. Updated `submenu_entry_switches_background_map_and_persists` unit test.
+- `hl2-bevy::campaign`: updated `load_map` to dispatch `start_background_loading` when `request.background` is true. Added headless Bevy integration test `headless_bevy_app_ep2_submenu_entry_switches_background_map` verifying submenu entry into Episode Two, asynchronous loading, and active scene swap to `ep2_background01`.
+- `hl2-bevy::main`: updated startup loading to dispatch `start_background_loading` when `options.main_menu` is true.
+- `HL2RS/AGENTS.md`: documented the background vs gameplay loading UI/UX conventions and the KeyValues syntax tolerance rules.
+
+**Why:**
+- In retail Half-Life 2, background map loading does not display the modal centered progress dialog; it displays a small bottom-right corner frame with "Loading..." (`#GameUI_Loading`) and dims/softens the backdrop while allowing the user to continue interacting with menu buttons. Furthermore, switching to Episode Two failed to update the background map because retail `ep2/ep2_pak_dir.vpk` contains an authentic syntax error in `scripts/HudLayout.res`, which caused `ep2_background01` loading to fail. Graceful termination per Source SDK KeyValues rules fixes the parse failure.
+
+**Tested how:**
+- `cargo test --workspace --locked`: all workspace tests pass.
+- `cargo test --locked -p hl2-bevy -- --ignored headless_bevy_app`: passes (both `headless_bevy_app_ep2_submenu_entry_switches_background_map` and `headless_bevy_app_submenu_entry_switches_background_map_and_scene` pass with live owned installation).
+- `cargo test --locked -p hl2-ui -- --ignored`: passes (owned resources, options, HUD).
+- `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
+- `cargo fmt --all --check`: clean formatting.
+
+**Result:** Switching to Episode Two submenu loads `ep2_background01` and swaps the 3D scene cleanly. Background map loading displays a non-blocking corner plaque with "LOADING..." and softened backdrop, preserving menu interaction.
+
+**Still broken or not tested:** Physical display refresh check.
+
+**Next:** Ready for review and commit.
+
 ## 2026-10-13 Background map on submenu entry
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

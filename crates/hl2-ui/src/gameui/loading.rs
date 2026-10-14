@@ -47,10 +47,24 @@ pub fn reset_progress() {
     }
 }
 
+/// Kind of loading interface to display.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LoadingKind {
+    /// Modal progress dialog (380x112 centered) for gameplay maps.
+    #[default]
+    Gameplay,
+    /// Non-blocking bottom-right corner plaque with localized loading label for background maps.
+    Background,
+}
+
+/// Dimensions of the background loading plaque (130 x 36 per Source VGUI `CLoadingDiscPanel`).
+pub const BACKGROUND_LOADING_SIZE: Vec2 = Vec2::new(130., 36.);
+
 /// State of an active map loading dialog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadingDialog {
     pub map: String,
+    pub kind: LoadingKind,
     pub stage: Option<&'static str>,
     pub fraction: f32,
     pub status_override: Option<String>,
@@ -63,12 +77,31 @@ impl LoadingDialog {
     pub fn new(map: impl Into<String>) -> Self {
         Self {
             map: map.into(),
+            kind: LoadingKind::Gameplay,
             stage: None,
             fraction: 0.0,
             status_override: None,
             error: None,
             complete: false,
         }
+    }
+
+    /// Creates a new loading dialog for background map loading with a non-blocking corner plaque.
+    pub fn new_background(map: impl Into<String>) -> Self {
+        Self {
+            map: map.into(),
+            kind: LoadingKind::Background,
+            stage: None,
+            fraction: 0.0,
+            status_override: None,
+            error: None,
+            complete: false,
+        }
+    }
+
+    /// Whether this dialog is for a background map load.
+    pub fn is_background(&self) -> bool {
+        self.kind == LoadingKind::Background
     }
 
     /// Updates progress from the latest report. Ignored once failed or complete.
@@ -138,8 +171,54 @@ impl LoadingDialog {
         Self::layout_geometry_sized(canvas_size, scale, LOADING_DIALOG_SIZE)
     }
 
+    /// Returns the origin and scale for placing the background loading plaque in the bottom-right corner.
+    pub fn background_plaque_geometry(canvas_size: Vec2, scale: f32) -> (Vec2, f32) {
+        let scaled_size = BACKGROUND_LOADING_SIZE * scale;
+        let margin = 24.0 * scale;
+        let origin = Vec2::new(
+            (canvas_size.x - scaled_size.x - margin).max(0.0).round(),
+            (canvas_size.y - scaled_size.y - margin).max(0.0).round(),
+        );
+        (origin, scale)
+    }
+
+    /// Draws the non-blocking background loading plaque in the bottom-right corner.
+    fn draw_background_plaque(&self, painter: &Painter, loc: &Localization) {
+        let (origin, scale) = Self::background_plaque_geometry(
+            Vec2::new(painter.canvas.width(), painter.canvas.height()),
+            painter.scale,
+        );
+        let p = Painter {
+            canvas: painter.canvas,
+            fonts: painter.fonts,
+            theme: painter.theme,
+            origin: painter.origin + origin,
+            scale,
+        };
+        let rect = Rect::new(0., 0., BACKGROUND_LOADING_SIZE.x, BACKGROUND_LOADING_SIZE.y);
+        // Translucent dark plaque body matching Source VGUI CLoadingDiscPanel (Color(0, 0, 0, 140))
+        p.fill(rect, Color::new(0.0, 0.0, 0.0, 0.65));
+        p.raised(rect);
+
+        // Center localized `#GameUI_Loading` ("LOADING...") text within plaque
+        let title = loc.text("#GameUI_Loading");
+        let text_w = p.text_width(&title, false);
+        let font_tall = crate::gameui::widgets::FONT_TALL;
+        let text_x = ((BACKGROUND_LOADING_SIZE.x - text_w) * 0.5)
+            .max(4.0)
+            .round();
+        let text_y = ((BACKGROUND_LOADING_SIZE.y - font_tall) * 0.5)
+            .max(2.0)
+            .round();
+        p.text(&title, Vec2::new(text_x, text_y), p.theme.text, false);
+    }
+
     /// Draws the loading dialog centered within the painter's canvas bounds.
     pub fn draw(&self, painter: &Painter, loc: &Localization) {
+        if self.is_background() {
+            self.draw_background_plaque(painter, loc);
+            return;
+        }
         let label_text = self.status_text(loc);
         let text_color = if self.error.is_some() {
             Color::new(1.0, 0.35, 0.35, 1.0)
@@ -382,5 +461,51 @@ mod tests {
             "Expected dialog height to expand beyond 112px, got {}",
             frame_quad.destination.h
         );
+    }
+
+    #[test]
+    fn background_loading_plaque_geometry_and_drawing() {
+        use crate::canvas::Canvas;
+        use crate::gameui::widgets::{Fonts, Theme};
+
+        let mut loc = Localization::default();
+        loc.insert("#GameUI_Loading", "LOADING...");
+        let dialog = LoadingDialog::new_background("ep2_background01");
+        assert!(dialog.is_background());
+        assert_eq!(dialog.map, "ep2_background01");
+
+        // 720p base canvas (1280x720, scale = 1.0)
+        let (origin_720, scale_720) =
+            LoadingDialog::background_plaque_geometry(Vec2::new(1280., 720.), 1.0);
+        assert_eq!(scale_720, 1.0);
+        let expected_x = 1280. - BACKGROUND_LOADING_SIZE.x - 24.0;
+        let expected_y = 720. - BACKGROUND_LOADING_SIZE.y - 24.0;
+        assert_eq!(origin_720, Vec2::new(expected_x, expected_y));
+
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.0,
+        };
+
+        dialog.draw(&painter, &loc);
+        let quads = canvas.drain();
+
+        // Plaque background quad: width 130, height 36, at (expected_x, expected_y)
+        let plaque_quad = quads
+            .iter()
+            .find(|q| {
+                q.destination.w == BACKGROUND_LOADING_SIZE.x
+                    && q.destination.h == BACKGROUND_LOADING_SIZE.y
+                    && q.destination.x == expected_x
+                    && q.destination.y == expected_y
+            })
+            .expect("background loading plaque quad in bottom-right corner");
+        assert_eq!(plaque_quad.color, Color::new(0.0, 0.0, 0.0, 0.65));
     }
 }

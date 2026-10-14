@@ -226,10 +226,9 @@ pub fn parse_resource(data: &[u8]) -> Result<Vec<Entry>> {
                 }
                 *i += 1;
                 Value::Block(children)
+            } else if token.control("}") {
+                break;
             } else {
-                if token.control("}") {
-                    bail!("invalid KeyValues resource value");
-                }
                 *i += 1;
                 Value::Text(token.value.clone())
             };
@@ -253,6 +252,7 @@ pub fn parse_resource(data: &[u8]) -> Result<Vec<Entry>> {
     Ok(entries)
 }
 
+#[derive(Debug)]
 struct Token {
     value: String,
     quoted: bool,
@@ -526,8 +526,6 @@ mod tests {
     fn malformed_resources_fail_even_in_excluded_platform_blocks() {
         for text in [
             "Root { key value",
-            "Root { key }",
-            "Root [$DECK] { key }",
             "Root { key value [$WIN32 }",
             "Root { } }",
         ] {
@@ -535,5 +533,28 @@ mod tests {
         }
         let nested = "Root { ".repeat(66) + &"}".repeat(66);
         assert!(parse_resource(nested.as_bytes()).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires owned install"]
+    fn parse_ep2_hudlayout() {
+        let game = crate::install::discover().expect("game install");
+        let vfs = crate::vpk::Vfs::mount_expansion(&game, Some("ep2")).expect("vfs");
+        let bytes = vfs
+            .read("scripts/HudLayout.res")
+            .expect("read")
+            .expect("exists");
+        let entries = parse_resource(&bytes).expect("parse ep2 HudLayout.res");
+        assert!(!entries.is_empty());
+    }
+
+    #[test]
+    fn parse_resource_tolerates_trailing_key_before_closing_brace() {
+        let text = b"\"Root\" { \"entry\" { \"a\" \"1\" \"trailing_key\" } }";
+        let res = parse_resource(text).expect("parses with trailing key");
+        assert_eq!(
+            res[0].get("entry").unwrap().get("a").unwrap().text(),
+            Some("1")
+        );
     }
 }

@@ -649,7 +649,11 @@ fn setup(
     if let Some(map) = &options.map {
         console_ui.map_request = Some(map.clone());
         console_ui.background_request = options.main_menu;
-        console_ui.source.start_loading(map);
+        if options.main_menu {
+            console_ui.source.start_background_loading(map);
+        } else {
+            console_ui.source.start_loading(map);
+        }
     }
     commands.insert_resource(console_ui);
     // Every game camera below renders into the game frame (see `video::present_frame`).
