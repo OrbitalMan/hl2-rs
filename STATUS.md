@@ -12,6 +12,10 @@ Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-
 - **Owner report: NPCs stare with their eyes forever: fixed (DESIGN 14h).** SDK random look queue with head turns and PVS gating; native queue frames T071459Z show the same periodic glances. PVS includes the active monitor camera (player-only gating froze Kleiner's feed). Open: Breen's broadcast now shows random glances (unverified vs native).
 - **AI-on metrocop escalation works (owner note: walking up close provokes them).** First packaged AI-on runs found the cloud code never loaded the AI's sequences (tasks failed, schedules and BACK_UP sentences repeated every think), lacked weapon activity translation and sentence gating, and blanked its report on class conditions: all fixed. Plaza cop #427: walking into him -> shove, baton at warning 2, swing at 3 with knockback; +USE x3 at 50 units -> warnings, baton, swing.
 - **Owner notes (session 17, to do in step 14):** citizens answer +USE with a line (TLK_USE response rules: "We can't be seen talking", "I'm busy"): needs the response system.
+- Open on wip/npc-ai-20261014: AI checklist 5 (on the d1_trainstation_01 attention fixture at 21 s all 14 cop AI actors were skipped as not visible: rerun later in the map) and 6 (F4); terminal cop route; NPC weapon models; Breen broadcast glances vs native; citizen +USE speech.
+
+Next (session 18; full prompt work/publishing/next-session-prompt-20261014b.txt): finish step 14 on wip/npc-ai-20261014 (checklist, weapon models, citizen speech), merge it to main, then DESIGN 14r; deferred physics/arsenal leftovers afterwards.
+
 - **Owner decision (session 17): merge the arsenal + physics work to main now with the leftovers recorded (section "Deferred physics/arsenal leftovers"), then step 14.**
 - **Explosive props: done (not compared with native).** prop_data explosive_damage/radius: a broken barrel explodes before its gibs spawn and chains within the tick (d1_canals_01 barrels #635/#634: both explode, player 128-160 units away takes ~105 and dies). Open: fire (native barrels ignite at half health and burn before exploding), propane-tank variant.
 
