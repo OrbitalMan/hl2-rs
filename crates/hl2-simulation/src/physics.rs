@@ -2229,6 +2229,10 @@ impl Physics {
         let c = self.bodies.get(handle)?.center_of_mass();
         Some(Vec3::new(c.x, c.y, c.z) / SCALE)
     }
+    /// Mass (kg) of an entity's dynamic VPhysics body.
+    pub fn entity_mass(&self, id: usize) -> Option<f32> {
+        Some(self.bodies.get(*self.dynamic.get(&id)?)?.mass())
+    }
     pub fn entity_pose(&self, id: usize) -> Option<(Vec3, Quat)> {
         let b = self.bodies.get(*self.dynamic.get(&id)?)?;
         let p = b.position();
@@ -2378,6 +2382,15 @@ impl Physics {
     /// Solid-mask visibility used by local projectile damage, excluding the
     /// damage receiver. Player/NPC-only clip brushes do not block this trace.
     pub fn projectile_ray(&self, start: Vec3, end: Vec3, excluded: &[usize]) -> Option<RayHit> {
+        self.filtered_ray(start, end, &|entity| !excluded.contains(&entity))
+    }
+    /// `projectile_ray` that only tests colliders whose entity passes `keep`.
+    pub fn filtered_ray(
+        &self,
+        start: Vec3,
+        end: Vec3,
+        keep: &dyn Fn(usize) -> bool,
+    ) -> Option<RayHit> {
         let delta = end - start;
         let length = delta.length();
         if !length.is_finite() || length <= 1e-5 {
@@ -2387,7 +2400,7 @@ impl Physics {
         let predicate = |handle: ColliderHandle, collider: &Collider| {
             let entity = (collider.user_data as usize).wrapping_sub(1);
             collider.is_enabled()
-                && !excluded.contains(&entity)
+                && keep(entity)
                 && self
                     .world_brush_contents
                     .get(&handle)

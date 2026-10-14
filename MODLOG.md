@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-14 session 17: explosions break prop_data props; SDK blast blocking (`wip/cloud-physics-20261010`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `Projectiles::grenade_explosion` (frag, SMG grenade, RPG) now sends DMG_BLAST damage to every prop_physics (the entity damage dispatch resolves prop_data health and skips unbreakable props); before, only props with an explicit `health` keyvalue were damaged, so prop_data props (crates, pallets, bottles, boxes) were only pushed. Blast line of sight follows CGameRules::RadiusDamage: the world or a brush entity blocks; an interposing studio-model entity never shields fully (the CONTENTS_SOLID re-trace's StandardFilterRules skips non-brush models): a physics object absorbs mass/350 of the damage (all from 350 kg), others 25% (`blast_blocked_fraction`); before, any prop shielded completely. `Physics::filtered_ray`, `Physics::entity_mass`.
+
+**Why:** owner question (session 17): do explosives break props? They did not (owner saw bottle #702 untouched next to an RPG blast).
+
+**Tested how:** unit test `interposing_props_absorb_blast_by_mass_instead_of_shielding`, hl2-simulation tests 232 passed, strict Clippy, fmt. Packaged d1_trainstation_02, eye (-3490,-2110,128) fly, yaw 236: RPG (pitch -30, blast at (-3565,-2210,64)): before the fix bottle #701 broke only by impact, bottle #702 survived because box #700 blocked the ray 1.5 units before it; after: box #700 and bottles #701/#702 break (6 glass chunks). SMG grenade (pitch -20) and frag lob (pitch -60, blast (-3516,-2165)): the same three break. Native (original-oracle T060459Z, same eye, pitch 30, weapon_rpg): box and both bottles gone after the blast.
+
+**Result:** frag, SMG grenade and RPG blasts break prop_data props like native in the tested spot.
+
+**Still broken or not tested:** the cardboard box's gib is a ragdoll gib (skipped until ragdolls); our glass chunks flew ~300 units while native shards stayed near the spot (not investigated); no scorch decal; explosive props (prop_data explosive_damage/radius: barrels) do not explode; non-lethal blast damage does not ignite props (CBreakableProp::OnTakeDamage Ignite); robust NPC radius damage (edge spill) and BodyTarget points not modeled.
+
+**Next:** explosive props, then the session 16 open items.
 ## 2026-10-14 session 16 (continued): env_physexplosion, prop OnPlayerUse, TraceBleed, world-collision-disabled constraints (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

@@ -757,13 +757,11 @@ impl Projectiles {
             if state.killed || !state.enabled {
                 continue;
             }
+            // prop_physics health comes from prop_data or the health keyvalue; the
+            // entity damage dispatch resolves both and skips unbreakable props.
             let damageable = entity.class().starts_with("npc_")
                 || matches!(entity.class(), "func_breakable" | "func_physbox")
-                || entity.class().starts_with("prop_physics")
-                    && entity
-                        .get("health")
-                        .and_then(|s| s.parse::<f32>().ok())
-                        .is_some_and(|v| v > 0.);
+                || entity.class().starts_with("prop_physics");
             // BodyTarget, damage filters, water partition and blocked fraction
             // differ among native classes; supported collision shapes supply a
             // real closest point rather than an arbitrary origin-only radius.
@@ -776,13 +774,16 @@ impl Projectiles {
                     },
             );
             let delta = target - origin;
-            let amount = projectile.damage * (1. - delta.length() / projectile.radius);
+            let mut amount = projectile.damage * (1. - delta.length() / projectile.radius);
             if amount <= 0. {
                 continue;
             }
-            if physics.projectile_ray(origin, target, &[id]).is_some() {
-                self.diagnostics.occluded_blast_targets += 1;
-                continue;
+            match blast_blocked_fraction(world, physics, origin, target, id) {
+                Some(blocked) => amount -= amount * blocked,
+                None => {
+                    self.diagnostics.occluded_blast_targets += 1;
+                    continue;
+                }
             }
             physics.impulse(id, delta.normalize_or_zero(), amount);
             if damageable {
@@ -817,6 +818,45 @@ impl Projectiles {
                 origin,
             });
         }
+    }
+}
+/// CGameRules::RadiusDamage line of sight (MASK_RADIUS_DAMAGE, then the CONTENTS_SOLID
+/// re-trace): `None` when the world or a brush entity blocks the blast, else the
+/// fraction of the damage an interposing entity absorbs. The re-trace's
+/// StandardFilterRules skips every non-brush model (props, NPCs) without
+/// CONTENTS_MONSTER, so a prop in the way never shields fully: a physics object absorbs
+/// mass / 350 (all from 350 kg), anything else 25%. Not modeled: the robust NPC edge
+/// spill (sv_robust_explosions) and door classes beyond brush models; the target point
+/// is the closest collision point rather than BodyTarget.
+fn blast_blocked_fraction(
+    world: &World,
+    physics: &Physics,
+    origin: Vec3,
+    target: Vec3,
+    id: usize,
+) -> Option<f32> {
+    let Some(hit) = physics.projectile_ray(origin, target, &[id]) else {
+        return Some(0.);
+    };
+    let brush = |entity: usize| {
+        world
+            .entities
+            .get(entity)
+            .map_or(entity == usize::MAX, |e| {
+                e.get("model").is_some_and(|m| m.starts_with('*'))
+            })
+    };
+    if brush(hit.entity)
+        || physics
+            .filtered_ray(origin, target, &|entity| entity != id && brush(entity))
+            .is_some()
+    {
+        return None;
+    }
+    match physics.entity_mass(hit.entity) {
+        Some(mass) if mass >= 350. => None,
+        Some(mass) => Some(mass / 350.),
+        None => Some(0.25),
     }
 }
 /// Frag grenade motion. Native uses a VPhysics object (w_grenade.phy, surfaceprop
@@ -1051,6 +1091,52 @@ fn guide_ball(projectile: &mut Projectile, world: &World, scene: &Scene, physics
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn interposing_props_absorb_blast_by_mass_instead_of_shielding() {
+        // Synthetic: a 5 kg and a 400 kg prop between a blast at the origin and a target
+        // at x 100 (RadiusDamage: physics blockers absorb mass / 350, all from 350 kg).
+        let mut world = World::default();
+        for mass in [5., 400., 1.] {
+            world.model_physics.insert(
+                format!("models/m{mass}.mdl#0"),
+                modkit_core::PhysicsSolid {
+                    mass,
+                    ..Default::default()
+                },
+            );
+        }
+        world.entities = vec![modkit_core::Entity { properties: vec![] }; 3];
+        let mut physics = Physics::new(&world);
+        let mut add = |id: usize, mass: f32, x: f32, y: f32| {
+            let body = physics.add_prop_body(
+                &world,
+                &format!("models/m{mass}.mdl#0"),
+                Vec3::splat(4.),
+                Vec3::new(x, y, 0.),
+                glam::Quat::IDENTITY,
+                Vec3::ZERO,
+                Vec3::ZERO,
+            );
+            physics.bind_projectile_entity(body, id);
+        };
+        add(0, 5., 50., 0.);
+        add(1, 400., 50., 40.);
+        add(2, 1., 100., 0.);
+        physics.refresh_queries();
+        let target = Vec3::new(96., 0., 0.);
+        let light = blast_blocked_fraction(&world, &physics, Vec3::ZERO, target, 2).unwrap();
+        assert!((light - 5. / 350.).abs() < 1e-3, "{light}");
+        let heavy = Vec3::new(96., 80., 0.);
+        assert_eq!(
+            blast_blocked_fraction(&world, &physics, Vec3::ZERO, heavy, 2),
+            None
+        );
+        let clear = Vec3::new(0., -96., 0.);
+        assert_eq!(
+            blast_blocked_fraction(&world, &physics, Vec3::ZERO, clear, 2),
+            Some(0.)
+        );
+    }
     #[test]
     fn frag_fuse_blips_then_detonates_after_three_seconds() {
         let world = World::default();

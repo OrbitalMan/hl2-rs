@@ -2,6 +2,11 @@
 
 Checkpoint: 2026-10-14 session 16 (prop data, chunk gibs, displacement and clip collision, world hinges); 2026-10-13 session 15 (stacked-prop margin, prop CCD frame drop, gibs, NPC studio decals, hinges, debris props; branch head after b0dc562 + debris); session 14 (frag pickup, stuck-on-props fix, NPC hull boxes, prop drag fractions, VPhysics contact margin, prop impact damage/break sound; branch head 5e170d0+docs); session 13 (frag rigid body default); 2026-10-12 session 12 (Claude Code desktop, claude-opus-5-5): cloud arsenal + physics branches validated and fixed locally on `wip/cloud-physics-20261010` (not merged); 2026-10-10 session 11 (arsenal WIP); main unchanged since session 10 (dedeb19 README).
 
+## Current session 17 (2026-10-14)
+
+Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged.
+- **Owner question: do explosives break props? Not before; now yes for frag, SMG grenade and RPG.** The shared blast damaged only props with a health keyvalue, and any prop in the way shielded fully. Now prop_data props take blast damage and blockers follow SDK RadiusDamage (physics blockers absorb mass/350). RPG at the hall props: box #700 and bottles #701/#702 break like native T060459Z. Open: explosive barrels (explosive_damage/radius), blast ignition, ragdoll gibs, glass chunks fly farther than native shards, scorch decal.
+
 ## Current session 16 (2026-10-14)
 
 Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/cloud-physics-20261010` (checkout `local/validate-physics-20261012`), not merged.
