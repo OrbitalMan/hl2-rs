@@ -278,6 +278,16 @@ impl AiRuntime {
         }
     }
     /// A uniform value in [-1, 1) from the AI's stream (shot spread, blood noise).
+    /// NPCs whose current enemy or enemy memory is the player.
+    pub fn npcs_knowing_player(&self) -> std::collections::BTreeSet<usize> {
+        self.actors
+            .iter()
+            .filter(|(_, a)| {
+                a.npc.enemy == Some(PLAYER) || a.npc.enemies.find(Some(PLAYER)).is_some()
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
     pub fn uniform(&mut self) -> f32 {
         self.random() * 2. - 1.
     }

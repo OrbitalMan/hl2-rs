@@ -8,11 +8,22 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 #[path = "player_convex.rs"]
 mod player_convex;
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct RayHit {
     pub entity: usize,
     pub position: Vec3,
     pub normal: Vec3,
+    /// The studio hitbox's hitgroup when an NPC hitbox was hit (HITGROUP_GENERIC 0
+    /// otherwise).
+    pub hitgroup: i32,
+}
+/// An NPC's studio hitboxes (hitbox set 0) as trace colliders, posed from the
+/// animated skeleton every tick (DESIGN 14b).
+#[derive(Clone, Debug)]
+struct StudioHitboxSet {
+    /// (collider, bone, box center in bone space, bind-pose bone model matrix)
+    boxes: Vec<(ColliderHandle, usize, Vec3, Mat4)>,
+    asset_key: String,
 }
 #[derive(Clone, Copy)]
 pub enum ProjectileHull {
@@ -158,6 +169,11 @@ fn groups_filter(groups: InteractionGroups) -> QueryFilter<'static> {
 }
 fn vector(p: Vec3) -> Vector<Real> {
     vector![p.x * SCALE, p.y * SCALE, p.z * SCALE]
+}
+/// A rigid Mat4 (Source units) as a Rapier pose.
+fn mat4_pose(m: Mat4) -> Isometry<Real> {
+    let (_, rotation, translation) = m.to_scale_rotation_translation();
+    pose(translation, rotation.normalize())
 }
 fn pose(origin: Vec3, rotation: Quat) -> Isometry<Real> {
     Isometry::from_parts(
@@ -603,6 +619,9 @@ pub struct Physics {
     /// Model-shaped colliders of NPCs that have a hull box: hitboxes for traces only,
     /// not solid to player movement and without contacts.
     npc_hitboxes: std::collections::HashSet<ColliderHandle>,
+    /// NPCs whose traces use their animated studio hitboxes.
+    studio_hitboxes: BTreeMap<usize, StudioHitboxSet>,
+    collider_hitgroups: HashMap<ColliderHandle, i32>,
     /// Diagnostics: wall-clock milliseconds of the last tick.
     pub last_step_ms: f64,
     /// Props launched by the gravity gun whose first collision has not happened yet
@@ -1029,6 +1048,15 @@ impl Physics {
                     p.collider_materials.insert(hull, s.surfaceprop.clone());
                 }
                 p.npc_hulls.insert(id, (hull, mins, maxs));
+                // Bullets trace the studio hitboxes (CBaseAnimating::TestHitboxes),
+                // not the render mesh: one box per hitbox, posed per tick.
+                if let Some(rig) = world
+                    .rigs
+                    .get(&instance.asset_key())
+                    .filter(|rig| !rig.hitboxes.is_empty())
+                {
+                    p.use_studio_hitboxes(id, instance, rig);
+                }
             }
         }
         // Fold additional (authored) mass properties in before the first query.
@@ -1312,6 +1340,86 @@ impl Physics {
         self.npc_collider_contents.insert(handle, CONTENTS_MONSTER);
         self.changed_entity_colliders.push(handle);
     }
+    /// Replace an NPC's render-mesh trace collider with its studio hitboxes at the bind
+    /// pose (the hull box stays for movement and contacts).
+    fn use_studio_hitboxes(
+        &mut self,
+        id: usize,
+        instance: &modkit_core::ModelInstance,
+        rig: &modkit_core::animation::Rig,
+    ) {
+        for c in self.entity_colliders.remove(&id).unwrap_or_default() {
+            self.colliders
+                .remove(c, &mut self.islands, &mut self.bodies, false);
+            self.npc_hitboxes.remove(&c);
+            self.world_sides.hitboxes.remove(&c);
+            self.npc_collider_contents.remove(&c);
+            self.collider_materials.remove(&c);
+        }
+        let base = Mat4::from_rotation_translation(angles(instance.angles), instance.origin);
+        let mut boxes = Vec::new();
+        for hitbox in &rig.hitboxes {
+            let Some(bone) = rig.bones.get(hitbox.bone) else {
+                continue;
+            };
+            let half = ((hitbox.maxs - hitbox.mins) * 0.5).max(Vec3::splat(0.05));
+            let center = (hitbox.maxs + hitbox.mins) * 0.5;
+            let bind = bone.inverse_bind.inverse();
+            let collider = ColliderBuilder::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
+                .position(mat4_pose(base * bind * Mat4::from_translation(center)))
+                .user_data(id as u128 + 1)
+                .collision_groups(InteractionGroups::new(NPC_GROUP, Group::ALL))
+                .active_collision_types(ActiveCollisionTypes::empty())
+                .active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
+            let c = self.colliders.insert(collider);
+            self.npc_hitboxes.insert(c);
+            self.world_sides.hitboxes.insert(c);
+            self.npc_collider_contents.insert(c, CONTENTS_MONSTER);
+            self.collider_hitgroups.insert(c, hitbox.group);
+            boxes.push((c, hitbox.bone, center, bind));
+        }
+        self.studio_hitboxes.insert(
+            id,
+            StudioHitboxSet {
+                boxes,
+                asset_key: instance.asset_key(),
+            },
+        );
+    }
+    /// NPCs with studio hitbox colliders and their model asset keys.
+    pub fn studio_hitbox_entities(&self) -> Vec<(usize, String)> {
+        self.studio_hitboxes
+            .iter()
+            .map(|(id, set)| (*id, set.asset_key.clone()))
+            .collect()
+    }
+    /// Pose an NPC's hitboxes from its skinning matrices (bone pose x inverse bind, model
+    /// space) and entity frame; `enabled` follows the entity.
+    pub fn set_npc_hitboxes(&mut self, id: usize, frame: Mat4, skin: &[Mat4], enabled: bool) {
+        let Some(set) = self.studio_hitboxes.get(&id) else {
+            return;
+        };
+        for (c, bone, center, bind) in &set.boxes {
+            let Some(collider) = self.colliders.get_mut(*c) else {
+                continue;
+            };
+            if enabled {
+                let model = skin.get(*bone).map_or(*bind, |m| *m * *bind);
+                let at = mat4_pose(frame * model * Mat4::from_translation(*center));
+                if *collider.position() != at {
+                    collider.set_position(at);
+                    self.changed_entity_colliders.push(*c);
+                }
+            }
+            if collider.is_enabled() != enabled {
+                collider.set_enabled(enabled);
+                self.changed_entity_colliders.push(*c);
+            }
+        }
+    }
+    fn hitgroup(&self, handle: ColliderHandle) -> i32 {
+        self.collider_hitgroups.get(&handle).copied().unwrap_or(0)
+    }
     pub fn set_entity(&mut self, id: usize, origin: Vec3, rotation: Quat, enabled: bool) {
         let dynamic = self.dynamic.get(&id);
         if dynamic
@@ -1330,6 +1438,16 @@ impl Physics {
                     c.set_position(at);
                     c.set_enabled(enabled);
                     self.changed_entity_colliders.push(hull);
+                }
+            }
+        }
+        if let Some(set) = self.studio_hitboxes.get(&id) {
+            for (c, ..) in &set.boxes {
+                if let Some(collider) = self.colliders.get_mut(*c) {
+                    if collider.is_enabled() != enabled {
+                        collider.set_enabled(enabled);
+                        self.changed_entity_colliders.push(*c);
+                    }
                 }
             }
         }
@@ -2304,6 +2422,7 @@ impl Physics {
             entity: id.wrapping_sub(1),
             position: origin + direction * (hit.time_of_impact / SCALE),
             normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
+            hitgroup: self.hitgroup(h),
         })
     }
     /// Ground trace under the player (MASK_PLAYERSOLID: clip brushes count).
@@ -2352,6 +2471,7 @@ impl Physics {
             entity: id.wrapping_sub(1),
             position: origin + direction * (hit.time_of_impact / SCALE),
             normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
+            hitgroup: self.hitgroup(h),
         })
     }
     /// IPhysicsObject::ApplyForceOffset: an impulse (kg m/s, world) at a world point
@@ -2479,14 +2599,22 @@ impl Physics {
             entity: (self.colliders[handle].user_data as usize).wrapping_sub(1),
             position: start + direction * (hit.time_of_impact / SCALE),
             normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
+            hitgroup: self.hitgroup(handle),
         })
     }
     /// Closest collision point on an entity, for radius attenuation. Models
     /// without a collider are handled explicitly by the caller.
     pub fn entity_closest_point(&self, id: usize, point: Vec3) -> Option<Vec3> {
         let point = Point::from(vector(point));
+        let hitboxes: Vec<ColliderHandle> = self
+            .studio_hitboxes
+            .get(&id)
+            .map(|set| set.boxes.iter().map(|b| b.0).collect())
+            .unwrap_or_default();
         self.entity_colliders
-            .get(&id)?
+            .get(&id)
+            .filter(|c| !c.is_empty())
+            .or((!hitboxes.is_empty()).then_some(&hitboxes))?
             .iter()
             .filter_map(|handle| self.colliders.get(*handle))
             .filter(|collider| collider.is_enabled())
@@ -2548,6 +2676,7 @@ impl Physics {
             entity: (self.colliders[handle].user_data as usize).wrapping_sub(1),
             position: origin + direction * distance * hit.time_of_impact,
             normal: Vec3::new(hit.normal1.x, hit.normal1.y, hit.normal1.z),
+            hitgroup: self.hitgroup(handle),
         })
     }
 }
@@ -3002,6 +3131,7 @@ mod tests {
                     autoplay: Vec::new(),
                     attachments: Vec::new(),
                     activities: Default::default(),
+                    hitboxes: Vec::new(),
                     bones: vec![Bone {
                         name: "door".into(),
                         parent: None,

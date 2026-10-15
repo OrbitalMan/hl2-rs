@@ -157,6 +157,7 @@ mod tests {
             autoplay: Vec::new(),
             attachments: Vec::new(),
             activities: Default::default(),
+            hitboxes: Vec::new(),
             bones: vec![Bone {
                 name: "root".into(),
                 parent: None,

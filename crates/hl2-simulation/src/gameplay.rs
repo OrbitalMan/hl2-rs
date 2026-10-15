@@ -1186,7 +1186,7 @@ impl Inventory {
                     physics.impact_ray(eye, aim, f32::from_bits(0x475db3d7))
                 };
                 if let Some(hit) = hit {
-                    self.hit(world, scene, physics, w, hit, aim, melee);
+                    self.hit(world, scene, physics, w, hit, aim, melee, eye);
                 }
             }
         }
@@ -1249,7 +1249,7 @@ impl Inventory {
             let aim = self.spread(direction, cone(10.));
             self.bullets += 1;
             if let Some(hit) = physics.impact_ray(eye, aim, f32::from_bits(0x475db3d7)) {
-                self.hit(world, scene, physics, w, hit, aim, false);
+                self.hit(world, scene, physics, w, hit, aim, false, eye);
             }
         }
         if shells > 2 {
@@ -1399,6 +1399,7 @@ impl Inventory {
                     let Some(entity) = world.entities.get(id) else {
                         continue;
                     };
+                    let class_health = scene.skill.npc_health(entity.class());
                     let Some(state) = scene.states.get_mut(id) else {
                         continue;
                     };
@@ -1447,7 +1448,11 @@ impl Inventory {
                         state.value = 0.;
                     } else {
                         if state.value <= 0. {
-                            state.value = health.unwrap_or(40.);
+                            state.value = if npc {
+                                class_health.or(health).unwrap_or(40.)
+                            } else {
+                                health.unwrap_or(40.)
+                            };
                         }
                         // CBreakable (func_breakable, func_physbox) starts from the
                         // func_breakdmg_* convars instead of 1.
@@ -1565,6 +1570,7 @@ impl Inventory {
         hit: crate::physics::RayHit,
         direction: Vec3,
         melee: bool,
+        eye: Vec3,
     ) {
         // SDK UTIL_ImpactTrace: every bullet and player-crowbar hit plays the hit surface's
         // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
@@ -1584,6 +1590,11 @@ impl Inventory {
             &hit,
             direction,
             melee,
+            HitSource {
+                player: true,
+                // GetAbsOrigin: the eye minus the standing view offset.
+                origin: eye - Vec3::Z * 64.,
+            },
             &mut || self.random(),
             &mut blood,
         );
@@ -1815,6 +1826,7 @@ pub fn apply_hit(
     hit: &crate::physics::RayHit,
     direction: Vec3,
     melee: bool,
+    attacker: HitSource,
     uniform: &mut dyn FnMut() -> f32,
     blood: &mut Vec<(crate::physics::RayHit, BloodColor)>,
 ) -> bool {
@@ -1857,11 +1869,44 @@ pub fn apply_hit(
         }
         return false;
     }
-    trace_bleed(physics, world, id, hit, direction, damage, uniform, blood);
-    let explicit_health = e.get("health").and_then(|v| v.parse::<f32>().ok());
+    // CHalfLife2::GetAmmoDamage: the player's shots on NPCs scale by skill
+    // (AdjustPlayerDamageInflicted); CAI_BaseNPC::TraceAttack then scales by the
+    // hitbox's hitgroup before blood and TraceBleed.
+    let damage = if attacker.player {
+        damage * scene.skill.player_inflict_scale()
+    } else {
+        damage
+    };
+    let buckshot = !melee && ammo_type.eq_ignore_ascii_case("Buckshot");
+    let distance = (scene.states[id].origin - attacker.origin).length();
     if scene.states[id].value <= 0. {
-        scene.states[id].value = explicit_health.filter(|v| *v > 0.).unwrap_or(40.);
+        scene.states[id].value = npc_spawn_health(scene, e);
     }
+    // CAI_BaseHumanoid::TraceAttack: a player's headshot on a humanoid that never had
+    // the player as an enemy, within SNEAK_ATTACK_DIST 360, deals its full health
+    // (then the head multiplier). Native: idle cop 40 -> -80, alert 35 -> -70.
+    let sneak = attacker.player
+        && hit.hitgroup == crate::skill::HITGROUP_HEAD
+        && crate::skill::Skill::is_humanoid(e.class())
+        && !scene.npc_knows_player.contains(&id)
+        && distance <= 360.;
+    let damage = if sneak {
+        scene.states[id].value
+    } else {
+        damage
+    };
+    let damage = scene
+        .skill
+        .npc_hit_damage(e.class(), damage, hit.hitgroup, buckshot, distance);
+    trace_bleed(physics, world, id, hit, direction, damage, uniform, blood);
+    scene.last_npc_hit = Some(NpcHitReport {
+        entity: id,
+        hitgroup: hit.hitgroup,
+        damage,
+        health_after: scene.states[id].value - damage,
+        distance,
+        sneak_attack: sneak,
+    });
     scene.states[id].value -= damage;
     scene.fire(id, "OnDamaged", usize::MAX);
     if scene.states[id].value <= 0. {
@@ -1877,6 +1922,58 @@ pub fn apply_hit(
         return true;
     }
     false
+}
+/// Who fired a bullet or swung a club: the player's hits scale by skill
+/// (AdjustPlayerDamageInflicted); the origin feeds distance-dependent multipliers.
+#[derive(Clone, Copy, Debug)]
+pub struct HitSource {
+    pub player: bool,
+    pub origin: Vec3,
+}
+/// The last bullet/club hit on an NPC (diagnostics for native health comparisons).
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct NpcHitReport {
+    pub entity: usize,
+    pub hitgroup: i32,
+    pub damage: f32,
+    pub health_after: f32,
+    pub distance: f32,
+    pub sneak_attack: bool,
+}
+/// An NPC's health before its first damage: the class's Spawn value from skill.cfg
+/// (`Skill::npc_health`), else the map's health keyvalue, else 40.
+pub fn npc_spawn_health(scene: &Scene, e: &modkit_core::Entity) -> f32 {
+    scene.skill.npc_health(e.class()).unwrap_or_else(|| {
+        e.get("health")
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| *v > 0.)
+            .unwrap_or(40.)
+    })
+}
+/// Studio hitbox poses for this tick (the entity collider pose stage): every NPC with
+/// hitboxes takes its animated skeleton; dead/hidden ones are disabled.
+pub fn pose_npc_hitboxes(world: &World, scene: &Scene, physics: &mut Physics) {
+    for (id, key) in physics.studio_hitbox_entities() {
+        let Some(state) = scene.states.get(id) else {
+            continue;
+        };
+        let enabled = state.collides();
+        let skin = if enabled {
+            world
+                .rigs
+                .get(&key)
+                .map(|rig| scene.actor_matrices(rig, id))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        physics.set_npc_hitboxes(
+            id,
+            glam::Mat4::from_rotation_translation(state.rotation, state.origin),
+            &skin,
+            enabled,
+        );
+    }
 }
 /// CBaseEntity::TraceBleed for a bullet/club hit on an NPC: 1/2/4 traces (damage
 /// < 10 / < 25 / more) continuing the shot direction with +/-0.1/0.2/0.3 noise per
@@ -1990,6 +2087,10 @@ pub fn npc_fire_bullets(
                 &hit,
                 direction,
                 false,
+                HitSource {
+                    player: false,
+                    origin: shot.origin,
+                },
                 uniform,
                 &mut out.blood,
             );
@@ -2392,6 +2493,7 @@ mod tests {
             entity: 0,
             position: Vec3::ZERO,
             normal: -Vec3::X,
+            hitgroup: 0,
         };
         let mut inv = Inventory::default();
         let count = |inv: &mut Inventory, id: usize, damage: f32| {
@@ -2781,6 +2883,66 @@ mod tests {
         assert!(out.player_hits.is_empty());
         assert_eq!(out.impacts.len(), 1);
         assert!((out.impacts[0].0.position.x - 100.).abs() < 0.5);
+    }
+    #[test]
+    fn player_headshots_sneak_attack_unaware_humanoids_like_native() {
+        // Native (oracle T163611Z, cop #257 at ~80 units): chest 40 -> 35, then a
+        // headshot 35 -> -70 (full health x sk_npc_head 3).
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("origin".into(), "80 0 0".into()),
+                ],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut uniform = || 0.5;
+        let mut blood = Vec::new();
+        let player = HitSource {
+            player: true,
+            origin: Vec3::ZERO,
+        };
+        let mut shoot = |scene: &mut Scene, hitgroup: i32, attacker: HitSource| {
+            let hit = crate::physics::RayHit {
+                entity: 0,
+                position: Vec3::new(70., 0., 50.),
+                normal: -Vec3::X,
+                hitgroup,
+            };
+            apply_hit(
+                &world,
+                scene,
+                &mut physics,
+                5.,
+                "Pistol",
+                &hit,
+                Vec3::X,
+                false,
+                attacker,
+                &mut uniform,
+                &mut blood,
+            )
+        };
+        shoot(&mut scene, crate::skill::HITGROUP_CHEST, player);
+        assert_eq!(scene.states[0].value, 35.);
+        let killed = shoot(&mut scene, crate::skill::HITGROUP_HEAD, player);
+        assert!(killed);
+        assert_eq!(scene.states[0].value, -70.);
+        // An NPC that knows the player, or a shot from beyond 360 units: 5 x 3.
+        let mut scene = Scene::new(&world);
+        scene.npc_knows_player.insert(0);
+        shoot(&mut scene, crate::skill::HITGROUP_HEAD, player);
+        assert_eq!(scene.states[0].value, 25.);
+        let mut scene = Scene::new(&world);
+        let far = HitSource {
+            player: true,
+            origin: Vec3::new(-400., 0., 0.),
+        };
+        shoot(&mut scene, crate::skill::HITGROUP_HEAD, far);
+        assert_eq!(scene.states[0].value, 25.);
     }
     #[test]
     fn reload_transfers_only_available_ammunition() {

@@ -310,7 +310,43 @@ pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
         }
         Err(e) => rig.warnings.push(format!("{path}: attachments: {e:#}")),
     }
+    match hitboxes(&data) {
+        Ok(hitboxes) => rig.hitboxes = hitboxes,
+        Err(e) => rig.warnings.push(format!("{path}: hitboxes: {e:#}")),
+    }
     Ok(rig)
+}
+/// Hitbox set 0 (studiohdr_t numhitboxsets @172, hitboxsetindex @176; mstudiohitboxset_t
+/// name, numhitboxes, hitboxindex; mstudiobbox_t 68 bytes: bone, group, bbmin, bbmax).
+pub fn hitboxes(data: &[u8]) -> Result<Vec<modkit_core::animation::Hitbox>> {
+    let sets = offset(data, 172)?;
+    if sets == 0 {
+        return Ok(Vec::new());
+    }
+    let set = offset(data, 176)?;
+    bytes(data, set, 12)?;
+    let count = offset(data, set + 4)?;
+    if count > 512 {
+        bail!("MDL hitbox set exceeds 512 boxes");
+    }
+    let base = relative(data, set, set + 8)?;
+    bytes(data, base, count * 68)?;
+    let bones = offset(data, 156)?;
+    (0..count)
+        .map(|i| {
+            let at = base + i * 68;
+            let bone = offset(data, at)?;
+            if bone >= bones {
+                bail!("hitbox bone outside skeleton");
+            }
+            Ok(modkit_core::animation::Hitbox {
+                bone,
+                group: i32le(data, at + 4)?,
+                mins: vec3(data, at + 8)?,
+                maxs: vec3(data, at + 20)?,
+            })
+        })
+        .collect()
 }
 /// The model's own sequence names in index order (not included models).
 pub fn sequence_names(vfs: &Vfs, path: &str) -> Result<Vec<String>> {
@@ -1132,5 +1168,22 @@ mod owned_weapon_tests {
                 .any(|e| e.id == id && (e.cycle - cycle).abs() < 1e-4));
         }
         assert_eq!(rig.clips["draw"].frames.len(), 39);
+    }
+    #[test]
+    #[ignore = "requires owned installed HL2"]
+    fn owned_police_hitbox_set_has_head_chest_and_limbs() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let data = vfs.read("models/police.mdl").unwrap().unwrap();
+        let boxes = super::hitboxes(&data).unwrap();
+        let skeleton = super::bones(&data).unwrap();
+        let name = |b: usize| skeleton[b].bone.name.to_lowercase();
+        // HITGROUP_HEAD 1 on the head bone; chest/stomach/arms/legs present.
+        assert!(boxes
+            .iter()
+            .any(|h| h.group == 1 && name(h.bone).contains("head")));
+        for group in [2, 3, 4, 5, 6, 7] {
+            assert!(boxes.iter().any(|h| h.group == group), "group {group}");
+        }
+        assert!(boxes.iter().all(|h| h.mins.cmple(h.maxs).all()));
     }
 }

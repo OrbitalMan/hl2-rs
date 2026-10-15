@@ -406,6 +406,7 @@ impl Impacts {
             entity: entity.unwrap_or(usize::MAX),
             position: collision.position,
             normal: outward,
+            hitgroup: 0,
         };
         self.locate(&hit, world, physics, scene)
             .map(|l| l.prop)
@@ -891,6 +892,7 @@ mod tests {
                     entity: usize::MAX,
                     position: GVec3::ZERO,
                     normal: GVec3::Z,
+                    hitgroup: 0,
                 },
                 &world,
                 &physics,
@@ -913,6 +915,7 @@ mod tests {
                 entity: usize::MAX,
                 position: GVec3::Z * 10.,
                 normal: GVec3::Z,
+                hitgroup: 0,
             },
             &world,
             &physics,
@@ -976,6 +979,7 @@ mod tests {
                 entity: usize::MAX,
                 position: center,
                 normal,
+                hitgroup: 0,
             },
             &world,
             &physics,

@@ -326,6 +326,17 @@ pub struct Scene {
     /// Inputs for the AI (step 14): (target entity, lowercase input, parameter,
     /// activator). The AI runtime drains them; without it they are dropped.
     pub ai_inputs: Vec<(usize, String, String, usize)>,
+    /// npc_template_maker inputs for `npc_makers` (target, lowercase input, parameter).
+    pub maker_inputs: Vec<(usize, String, String)>,
+    /// Template NPCs and npc_template_makers (DESIGN 14s).
+    pub makers: crate::npc_makers::NpcMakers,
+    /// skill.cfg values (NPC health, hitgroup damage); SDK defaults when absent.
+    pub skill: crate::skill::Skill,
+    /// Diagnostics: the last bullet/club hit on an NPC.
+    pub last_npc_hit: Option<crate::gameplay::NpcHitReport>,
+    /// NPCs whose AI has the player as enemy or in enemy memory (CAI_BaseHumanoid
+    /// sneak attacks exclude them); refreshed by the host after each AI tick.
+    pub npc_knows_player: std::collections::BTreeSet<usize>,
     /// When the sequence the AI started last ends, per actor.
     ai_sequence_end: BTreeMap<usize, f64>,
 }
@@ -522,6 +533,11 @@ impl Scene {
             movement_commands: Vec::new(),
             movement_ready: BTreeMap::new(),
             ai_inputs: Vec::new(),
+            maker_inputs: Vec::new(),
+            makers: Default::default(),
+            skill: Default::default(),
+            last_npc_hit: None,
+            npc_knows_player: Default::default(),
             ai_sequence_end: BTreeMap::new(),
             look_targets: Default::default(),
             gestures: Default::default(),
@@ -576,6 +592,8 @@ impl Scene {
             }
         }
         scene.hold_template_children(world);
+        // MapEntity_ParseAllEntities removes SF_NPC_TEMPLATE NPCs (npc_template_maker).
+        scene.makers = crate::npc_makers::NpcMakers::new(world, &mut scene.states);
         // SetupParentsForSpawnList: `parentname` ("name" or "name,attachment") keeps the
         // spawn world pose. Parents still held by a point_template do not exist yet.
         for id in 0..world.entities.len() {
@@ -583,7 +601,7 @@ impl Scene {
             let Some(spec) = e.get("parentname").filter(|n| !n.is_empty()) else {
                 continue;
             };
-            if self_positioned(e.class()) || scene.template_pending(id) {
+            if self_positioned(e.class()) || scene.template_pending(id) || scene.makers.held(id) {
                 continue;
             }
             let (name, attachment) = match spec.split_once(',') {
@@ -596,7 +614,7 @@ impl Scene {
             }) else {
                 continue;
             };
-            if parent != id && !scene.template_pending(parent) {
+            if parent != id && !scene.template_pending(parent) && !scene.makers.held(parent) {
                 scene.set_parent(world, id, parent, attachment, true);
             }
         }
@@ -2296,6 +2314,10 @@ impl Scene {
         }
         // AI inputs (step 14): npc_metropolice SetPoliceGoal / baton inputs and the
         // ai_goal_police knock-out switches go to the AI runtime.
+        if class == "npc_template_maker" {
+            self.maker_inputs.push((id, input, p.parameter.clone()));
+            return;
+        }
         if (class == "npc_metropolice"
             && matches!(
                 input.as_str(),
@@ -2922,7 +2944,7 @@ impl Scene {
             p.parameter = value.to_string();
         }
     }
-    fn unsupported_input(&mut self, class: &str, input: &str) {
+    pub fn unsupported_input(&mut self, class: &str, input: &str) {
         let key = format!("{class}.{input}");
         *self.diagnostics.unsupported.entry(key.clone()).or_default() += 1;
         if self.unsupported.insert(key.clone()) {

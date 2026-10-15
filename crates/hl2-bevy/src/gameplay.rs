@@ -364,6 +364,9 @@ impl Gameplay {
             .map(|b| String::from_utf8_lossy(&b).into_owned());
         let player_damage =
             hl2_simulation::player_damage::PlayerDamage::with_skill(2, skill.as_deref());
+        if let Some(text) = skill.as_deref() {
+            scene.skill = hl2_simulation::skill::Skill::parse(text, 2);
+        }
         let mut ai = hl2_simulation::ai::runtime::AiRuntime::new(&world, Some(vfs));
         ai.enabled = AI_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
@@ -645,6 +648,20 @@ impl Gameplay {
             self.select(result);
         }
         self.scene.tick(&self.world, player.feet, TICK);
+        // npc_template_maker spawns and CAI_BaseNPC::StartNPC floor drops (DESIGN 14s).
+        hl2_simulation::npc_makers::tick(
+            &self.world,
+            &mut self.scene,
+            physics,
+            (!player.dead).then_some(hl2_simulation::npc_makers::Viewer {
+                eye,
+                forward: direction,
+                feet: player.feet,
+                crouched: player.crouched,
+                notarget: self.ai.ignore_player,
+            }),
+            TICK,
+        );
         self.inventory.advance_projectile_fire(
             &self.world,
             &mut self.scene,
@@ -738,6 +755,8 @@ impl Gameplay {
         for (id, state) in self.scene.states.iter().enumerate() {
             physics.set_entity(id, state.origin, state.rotation, state.collides());
         }
+        // Studio hitboxes follow each NPC's animated skeleton (bullet hitgroups).
+        hl2_simulation::gameplay::pose_npc_hitboxes(&self.world, &self.scene, physics);
         // weapon_frag throws from this tick's animation events.
         if !self.inventory.frag.pending.is_empty() {
             let ground = physics
@@ -782,6 +801,7 @@ impl Gameplay {
             &[],
             ai_player,
         );
+        self.scene.npc_knows_player = self.ai.npcs_knowing_player();
         for hit in std::mem::take(&mut self.ai.player_hits) {
             if hit.damage > 0. {
                 self.scene
@@ -997,7 +1017,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"random_look_targets":self.scene.look_targets.random_report(),"heads":self.scene.heads.iter().map(|(id,h)| (id.to_string(), h.goal.to_array())).collect::<std::collections::BTreeMap<_,_>>(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

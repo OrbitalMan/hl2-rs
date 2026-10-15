@@ -19,6 +19,14 @@ pub struct Attachment {
     pub bone: usize,
     pub local: Mat4,
 }
+/// Studio hitbox (mstudiobbox_t of hitbox set 0): a bone-local box and its hitgroup.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Hitbox {
+    pub bone: usize,
+    pub group: i32,
+    pub mins: Vec3,
+    pub maxs: Vec3,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bone {
     pub name: String,
@@ -631,6 +639,9 @@ pub struct Rig {
     /// loaded or not: SelectWeightedSequence availability (Weapon_CanUse).
     #[serde(default)]
     pub activities: std::collections::BTreeSet<String>,
+    /// Hitbox set 0 of the root model (bullet traces and hitgroups).
+    #[serde(default)]
+    pub hitboxes: Vec<Hitbox>,
 }
 impl Rig {
     pub fn attachment(&self, name: &str) -> Option<&Attachment> {
