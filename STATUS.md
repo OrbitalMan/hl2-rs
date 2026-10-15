@@ -20,6 +20,8 @@ Claude Code desktop, claude-opus-5-5. Owner list of nine items; plan decisions: 
 
 - **Scroll bars with arrow buttons and live dragging.** Shared `widgets::ScrollBarState`/`ScrollBarLayout` per SDK `ScrollBar` and the scheme (17 px wide, square arrow buttons stepping on press and repeating after 400 ms every 50 ms, live nob drag, track paging once, transparent nob with raised border). Key list and popup lists use it; scroll gestures own the pointer until release. Tests `scroll_bar_layout_has_square_end_buttons_and_a_minimum_nob`, `scroll_bar_arrows_step_on_press_and_repeat_while_held`, `scroll_bar_nob_drags_live_and_track_pages_once`, `popup_scroll_bar_scrolls_without_selecting_or_closing`, `key_list_scroll_bar_scrolls_while_held_and_blocks_row_clicks`. Unverified, needs manual check: Options > Keyboard and the Resolution list: arrows step and repeat when held, dragging the nob scrolls live, clicking the track pages.
 
+- **Capture action cell more transparent.** Half of the scheme's dim selection alpha (`CAPTURE_ACTION_FADE = 0.5`, owner tuning) with the normal text color; the key cell stays fully orange. Unverified, needs manual check.
+
 ## Previous session: GameUI widget interaction pass (2026-10-15, branch `orbitalman/main-menu`)
 
 Claude Code desktop, claude-opus-5-5.

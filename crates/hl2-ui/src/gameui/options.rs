@@ -46,6 +46,11 @@ const GAMMA_SIZE: Vec2 = Vec2::new(290., 396.);
 const CREDITS_SIZE: Vec2 = Vec2::new(500., 210.);
 /// Key list header and row heights.
 const KEY_HEADER: f32 = 20.;
+/// Share of the scheme's dim selection alpha (`SectionedListPanel.OutOfFocusSelectedBgColor`,
+/// 128) kept on the action cell while a key is captured, so the orange key cell stands out
+/// (owner tuning, 2026-10-15; not a retail value). The action text uses the normal row color,
+/// since dark selection text would not read on the fainter fill.
+const CAPTURE_ACTION_FADE: f32 = 0.5;
 /// Rows scrolled per wheel step in lists.
 const WHEEL_ROWS: usize = 3;
 
@@ -1636,11 +1641,15 @@ impl OptionsDialog {
                     }
                     let color = if capturing {
                         // The action stays identifiable with the scheme's dimmer selection.
+                        let fill = theme.selection_bg_dim;
                         p.fill(
                             Rect::new(header.x, y, action_w, MENU_ROW),
-                            theme.selection_bg_dim,
+                            crate::canvas::Color {
+                                a: fill.a * CAPTURE_ACTION_FADE,
+                                ..fill
+                            },
                         );
-                        theme.selection_text_dim
+                        theme.text
                     } else if selected {
                         p.fill(
                             Rect::new(header.x, y, inner_w, MENU_ROW),
@@ -2062,7 +2071,13 @@ mod tests {
         let quads = drawn(&h);
         let dim: Vec<_> = quads
             .iter()
-            .filter(|q| q.color == theme.selection_bg_dim)
+            .filter(|q| {
+                q.color
+                    == crate::canvas::Color {
+                        a: theme.selection_bg_dim.a * CAPTURE_ACTION_FADE,
+                        ..theme.selection_bg_dim
+                    }
+            })
             .map(|q| q.destination)
             .collect();
         let cell = orange(&quads);

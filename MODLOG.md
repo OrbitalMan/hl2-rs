@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: fainter action cell while capturing a key
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `CAPTURE_ACTION_FADE` (0.5) on the action cell's dim selection, normal text color. Docs: `docs/gameui.md` §6, `STATUS.md`.
+
+**Why:** Owner request: more transparency on the action portion so the key cell is relatively brighter.
+
+**Tested how:** `cargo test -p hl2-ui` (189), `cargo test -p hl2-bevy` (74), clippy, fmt.
+
+**Result:** Action cell at 64/255 orange, key cell fully orange.
+
+**Still broken or not tested:** Not checked by eye.
+
+**Next:** Brightness dialog.
+
 ## 2026-10-15 GameUI: scroll bars with arrow buttons and live dragging
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

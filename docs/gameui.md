@@ -186,7 +186,9 @@ Semantics:
   its inline edit panel; the retail colors of that panel are not verified, orange is the owner's
   choice); the action cell keeps a dimmer selection
   (`SectionedListPanel.OutOfFocusSelectedBgColor` `255 155 0 128` with
-  `OutOfFocusSelectedTextColor`) so the row stays identifiable (owner preference, 2026-10-15).
+  `OutOfFocusSelectedTextColor`) so the row stays identifiable (owner preference, 2026-10-15),
+  faded further to half that alpha with the normal text color (`CAPTURE_ACTION_FADE`, owner
+  tuning) so the key cell reads brighter.
 - Mouse: on macOS Raw input and Acceleration are disabled, per the `[$OSX]` conditions in the
   installed `.res` file.
 - High Dynamic Range is shown on macOS too, although the retail `.res` hides it there.
