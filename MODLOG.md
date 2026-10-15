@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15/16 session 20: F4 overlay redesign, AI on by default + ai_disable, citizen heads, DX-level VMT blocks, RPG launch flash, grate fences/gates, combine ball rules (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013, private Ghidra pass project (retail client.dll MuzzleFlash switch and MuzzleFlash_AR2_Player), installed-map scans (read-only), native oracle captures/recordings.
+
+**Changed:** `ai/spawn.rs` overlay data model (columns, keys, panel, allegiance, citizen variants, campaign loadouts + Weapon_CanUse); `hl2-bevy/spawn_panel.rs` (new: setup-rasterized ProggyClean panel); AI runtime held weapons, per-actor player disposition, usable weapons; host Weapon_Equip/idle translation, NpcWeaponDraw gating, overlay keys and script actions; AI default on, `--no-ai`, `ai_disable` (hl2-ui console, owner go-ahead); `citizens.rs` (new: SelectModel); `npc_weapons::CAMPAIGN_LOADOUTS`; VMT DX-level blocks; `muzzle_effects` obsolete CL_EVENT_MUZZLEFLASH events + retail AR2 player flash + NPC RPG flash; `Physics::bullet_ray` (MASK_SHOT); BSP loader keeps grate/window world brushes; combine ball SDK hit/dissolve/homing rules.
+
+**Why:** owner notes in session 20 (F4 overlay; non-human NPCs use natural attacks; rebels and model cycling; queue citizens identical; citizen SMG pose; AI should be on by default with ai_disable; RPG flash missing; flash on every shot; combine ball bouncing; shooting through fences; walking through the can-cop gate).
+
+**Tested how:** unit tests (overlay, held weapons/allegiance, citizen heads, DX blocks, obsolete muzzle events, grate bullets, ball rules, ai_disable), owned tests with HL2_ROOT (new owned weapon-column test), workspace tests (two known release-only should_panic failures), strict Clippy, fmt. Packaged (artifacts/s20): F4 panel and spawns (pistol cop, SMG1 soldier, SMG1 citizen), queue heads, RPG launch flash, scissor gate walk, forcefield/fence walks, combine ball vs plaza and F4 cops. Native: oracle T212223Z (SMG1 citizen stance), T213147Z + 60 fps recording (RPG launch and ignition).
+
+**Result:** see STATUS session 20.
+
+**Still broken or not tested:** pistol flash on every shot (native skips most; retail cause open); grate bullets not checked in a packaged canals run; DX-block material changes not reviewed map-wide; NPC-vs-NPC; F4 allegiance not used by the combine ball; natural attacks/bugbait/medics (DESIGN 14n); regression batch not run (AI now on by default); main 6226ae7 not merged into the branch.
+
+**Next:** STATUS session 20 "Open".
+
 ## 2026-10-15 session 19: template makers + StartNPC floor drop, NPC health/hitgroups/sneak attacks, NPC weapons in hands, muzzle flashes/tracers, stunstick glow (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. Continued in a side session handed off from the main session (same conversation, same model). No subagents. Research input: Codex Desktop REA npc-ai-research-20261015b (spawn-floor) and 20261015c (metrocop StartNPC bypass via IsWaitingToRappel).
