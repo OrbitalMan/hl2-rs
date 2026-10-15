@@ -16,6 +16,8 @@ Claude Code desktop, claude-opus-5-5. Owner list of nine items; plan decisions: 
 - **Regression fix: resolution and display mode changes did nothing (5384402).** Root cause: the console stores the new config before emitting `ApplyConfig`, so the new check compared the new settings with themselves. Now compared against `Simulation::applied_window` (seeded from startup options, updated per apply and by the macOS sync). Test `only_window_setting_changes_queue_a_window_apply` now follows the real order and fails on the old code.
 - **Open Options dialog follows macOS green-button mode changes live** (`OptionsDialog::sync_display_mode`, `Console::set_display_mode_external`; test `external_display_mode_changes_reach_an_open_dialog`). Before, the mode showed only after reopening the dialog.
 
+- **Capture look: dim action cell.** While capturing, the action cell uses the scheme's `SectionedListPanel.OutOfFocusSelectedBgColor`/`TextColor` and the key cell stays orange (owner preferred this variant). Test updated. Unverified, needs manual check: Edit Key shows a half-transparent orange action cell next to the orange key cell.
+
 ## Previous session: GameUI widget interaction pass (2026-10-15, branch `orbitalman/main-menu`)
 
 Claude Code desktop, claude-opus-5-5.

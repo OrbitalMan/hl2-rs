@@ -95,6 +95,10 @@ pub struct Theme {
     pub close_disabled: Color,
     /// Line under a sectioned list's section header (`SectionedListPanel.DividerColor`).
     pub list_divider: Color,
+    /// Dimmer selection of a list row whose list is busy elsewhere
+    /// (`SectionedListPanel.OutOfFocusSelectedBgColor` / `OutOfFocusSelectedTextColor`).
+    pub selection_bg_dim: Color,
+    pub selection_text_dim: Color,
 }
 
 impl Default for Theme {
@@ -137,6 +141,8 @@ impl Default for Theme {
             close_fg: rgba(200, 200, 200, 196),
             close_disabled: rgba(255, 255, 255, 192),
             list_divider: rgba(0, 0, 0, 255),
+            selection_bg_dim: rgba(255, 155, 0, 128),
+            selection_text_dim: rgba(0, 0, 0, 255),
         }
     }
 }
@@ -145,7 +151,7 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 32] = [
+        let fields: [(&str, &mut Color); 34] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
@@ -184,6 +190,14 @@ impl Theme {
                 &mut theme.close_disabled,
             ),
             ("SectionedListPanel.DividerColor", &mut theme.list_divider),
+            (
+                "SectionedListPanel.OutOfFocusSelectedBgColor",
+                &mut theme.selection_bg_dim,
+            ),
+            (
+                "SectionedListPanel.OutOfFocusSelectedTextColor",
+                &mut theme.selection_text_dim,
+            ),
         ];
         for (name, slot) in fields {
             if let Some(color) = scheme_color(root, name) {

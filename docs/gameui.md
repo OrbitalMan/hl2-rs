@@ -184,7 +184,9 @@ Semantics:
   pixels above the row bottom, like SDK `SectionedListPanelHeader`. While a key is being captured
   only the key cell is filled with the selection color (retail edits the key column in place via
   its inline edit panel; the retail colors of that panel are not verified, orange is the owner's
-  choice); the action name drops back to the normal row look.
+  choice); the action cell keeps a dimmer selection
+  (`SectionedListPanel.OutOfFocusSelectedBgColor` `255 155 0 128` with
+  `OutOfFocusSelectedTextColor`) so the row stays identifiable (owner preference, 2026-10-15).
 - Mouse: on macOS Raw input and Acceleration are disabled, per the `[$OSX]` conditions in the
   installed `.res` file.
 - High Dynamic Range is shown on macOS too, although the retail `.res` hides it there.

@@ -1573,7 +1573,14 @@ impl OptionsDialog {
                             theme.selection_bg,
                         );
                     }
-                    let color = if selected {
+                    let color = if capturing {
+                        // The action stays identifiable with the scheme's dimmer selection.
+                        p.fill(
+                            Rect::new(header.x, y, action_w, MENU_ROW),
+                            theme.selection_bg_dim,
+                        );
+                        theme.selection_text_dim
+                    } else if selected {
                         p.fill(
                             Rect::new(header.x, y, inner_w, MENU_ROW),
                             theme.selection_bg,
@@ -1992,10 +1999,23 @@ mod tests {
         };
         let row = orange(&drawn(&h));
         assert_eq!(row.len(), 1);
-        // Capturing: only the key column cell is orange.
+        // Capturing: the key cell is orange and the action cell keeps a dimmer selection.
         h.click(page(280., 280.));
         assert_eq!(h.dialog.keys.capture, Some(1));
-        let cell = orange(&drawn(&h));
+        let quads = drawn(&h);
+        let dim: Vec<_> = quads
+            .iter()
+            .filter(|q| q.color == theme.selection_bg_dim)
+            .map(|q| q.destination)
+            .collect();
+        let cell = orange(&quads);
+        assert_eq!(dim.len(), 1);
+        assert_eq!((dim[0].x, dim[0].y), (row[0].x, row[0].y));
+        assert_eq!(
+            dim[0].x + dim[0].w,
+            cell[0].x,
+            "action cell meets the key cell"
+        );
         assert_eq!(cell.len(), 1);
         assert_eq!(cell[0].y, row[0].y);
         assert!(cell[0].x > row[0].x && cell[0].w < row[0].w);

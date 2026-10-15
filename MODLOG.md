@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: keep the action cell dimly selected while capturing
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Theme::selection_bg_dim`/`selection_text_dim` from `SectionedListPanel.OutOfFocusSelected{Bg,Text}Color`; `draw_key_list` fills the action cell with them during capture. Docs: `docs/gameui.md` §6, `STATUS.md`.
+
+**Why:** Owner preferred the capture variant that keeps the action portion slightly highlighted.
+
+**Tested how:** `cargo test -p hl2-ui` (184), `cargo test -p hl2-bevy` (73), clippy, fmt.
+
+**Result:** Dim action cell plus orange key cell while listening for a key.
+
+**Still broken or not tested:** Not checked by hand.
+
+**Next:** Scroll bar arrows and live drag.
+
 ## 2026-10-15 Host: fix resolution/mode apply regression; live mode in an open Options dialog
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
