@@ -1186,4 +1186,35 @@ mod owned_weapon_tests {
         }
         assert!(boxes.iter().all(|h| h.mins.cmple(h.maxs).all()));
     }
+    #[test]
+    #[ignore = "requires owned installed HL2"]
+    fn owned_npc_weapon_world_models_bone_merge_onto_actor_skeletons() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let names = |model: &str| -> Vec<String> {
+            let data = vfs.read(model).unwrap().unwrap();
+            super::bones(&data)
+                .unwrap()
+                .into_iter()
+                .map(|b| b.bone.name)
+                .collect()
+        };
+        for actor in ["models/police.mdl", "models/humans/group01/male_07.mdl"] {
+            let skeleton = names(actor);
+            for weapon in [
+                "models/weapons/w_pistol.mdl",
+                "models/weapons/w_smg1.mdl",
+                "models/weapons/w_stunbaton.mdl",
+            ] {
+                let bones = names(weapon);
+                eprintln!("{weapon}: {bones:?}");
+                // EF_BONEMERGE: at least one weapon bone matches an actor bone by name.
+                assert!(
+                    bones
+                        .iter()
+                        .any(|b| skeleton.iter().any(|s| s.eq_ignore_ascii_case(b))),
+                    "{weapon} on {actor}"
+                );
+            }
+        }
+    }
 }

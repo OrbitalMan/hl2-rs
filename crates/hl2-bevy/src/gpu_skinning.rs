@@ -86,6 +86,56 @@ impl Skeleton {
             inverse_bindposes: assets.add(SkinnedMeshInverseBindposes::from(binds)),
         }
     }
+    /// CBoneMergeCache: a followed model's bones take the owner's same-named joints; an
+    /// unmatched bone keeps its bind offset from its nearest matched ancestor (the
+    /// ancestor's joint with that ancestor's inverse bind), and a chain without any match
+    /// stays at the owner's origin in its bind pose (the owner's identity joint).
+    pub fn merged(
+        assets: &mut Assets<SkinnedMeshInverseBindposes>,
+        rig: &Rig,
+        owner_rig: &Rig,
+        owner: &Skeleton,
+        scale: f32,
+    ) -> Self {
+        let identity = *owner
+            .joints
+            .last()
+            .expect("skeletons end with an identity joint");
+        let mut joints = Vec::with_capacity(rig.bones.len() + 1);
+        let mut binds = Vec::with_capacity(rig.bones.len() + 1);
+        for (index, _) in rig.bones.iter().enumerate() {
+            let mut bone = Some(index);
+            let mut found = None;
+            while let Some(b) = bone {
+                if let Some(j) = owner_rig
+                    .bones
+                    .iter()
+                    .position(|o| o.name.eq_ignore_ascii_case(&rig.bones[b].name))
+                    .and_then(|j| owner.joints.get(j))
+                {
+                    found = Some((*j, b));
+                    break;
+                }
+                bone = rig.bones[b].parent;
+            }
+            match found {
+                Some((joint, b)) => {
+                    joints.push(joint);
+                    binds.push(convert(rig.bones[b].inverse_bind, scale));
+                }
+                None => {
+                    joints.push(identity);
+                    binds.push(Mat4::IDENTITY);
+                }
+            }
+        }
+        joints.push(identity);
+        binds.push(Mat4::IDENTITY);
+        Self {
+            joints,
+            inverse_bindposes: assets.add(SkinnedMeshInverseBindposes::from(binds)),
+        }
+    }
     pub fn component(&self) -> SkinnedMesh {
         SkinnedMesh {
             joints: self.joints.clone(),

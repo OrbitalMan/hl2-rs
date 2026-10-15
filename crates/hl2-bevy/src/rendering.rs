@@ -491,6 +491,9 @@ pub fn present_entities(
     let mut updated_joints = std::collections::BTreeSet::new();
     let mut poses: BTreeMap<(String, String, u32, u64), Vec<glam::Mat4>> = BTreeMap::new();
     for (mut animation, handle, aabb) in &mut animations {
+        if animation.entity.is_some() && animation.weapon.is_some() {
+            continue;
+        }
         let Some(rig) = game.world.rigs.get(&animation.key) else {
             continue;
         };
@@ -789,13 +792,14 @@ enum Owner {
     SkyWorld,
     Entity(usize),
     Weapon(String),
+    /// An NPC's weapon world model, bone-merged onto the NPC (EF_BONEMERGE).
+    NpcWeapon(usize, String),
 }
 impl Owner {
     fn entity(&self) -> Option<usize> {
-        if let Self::Entity(id) = self {
-            Some(*id)
-        } else {
-            None
+        match self {
+            Self::Entity(id) | Self::NpcWeapon(id, _) => Some(*id),
+            _ => None,
         }
     }
 }
@@ -1017,6 +1021,22 @@ pub fn spawn_map(
             }
         }
     }
+    // NPC weapons: the active weapon's world model follows its owner (DESIGN 14w step 4).
+    for instance in &world.model_instances {
+        let Some(id) = instance.entity.filter(|id| visible_entity(world, *id)) else {
+            continue;
+        };
+        let Some(model) = loaded.gameplay.ai.weapon_world_model(id) else {
+            continue;
+        };
+        let key = format!("{model}#0");
+        if let Some(surfaces) = world.model_assets.get(&key) {
+            let transform = Mat4::from_scale(Vec3::splat(instance.scale));
+            for surface in surfaces {
+                append(surface, transform, Owner::NpcWeapon(id, key.clone()));
+            }
+        }
+    }
     // Skin-only materials per weapon: (skin 0 set, skin 1 set).
     let mut weapon_skins: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
     for (name, weapon) in &loaded.gameplay.weapons {
@@ -1073,7 +1093,10 @@ pub fn spawn_map(
             .map_or(Vec4::ONE, |id| entity_modulation(world, id));
         // Studio models carry per-entity light state, so their materials are not shared.
         let lit = batch.model
-            && matches!(owner, Owner::Entity(_) | Owner::Weapon(_))
+            && matches!(
+                owner,
+                Owner::Entity(_) | Owner::Weapon(_) | Owner::NpcWeapon(..)
+            )
             && !definition.unlit
             && !definition.camera;
         let material = material_handles
@@ -1141,6 +1164,25 @@ pub fn spawn_map(
                         flex: std::mem::take(&mut batch.flex),
                         flex_signature: 0,
                     }),
+                // `weapon` with an entity marks a bone-merged mesh: its joints are the
+                // owner's, posed by the owner's own AnimatedMesh.
+                Owner::NpcWeapon(id, key) => Some(AnimatedMesh {
+                    sampled: None,
+                    gpu: None,
+                    entity: Some(*id),
+                    weapon: Some(key.clone()),
+                    key: key.clone(),
+                    scale: world
+                        .model_instances
+                        .iter()
+                        .find(|i| i.entity == Some(*id))
+                        .map_or(1., |i| i.scale),
+                    normals: batch.normals.clone(),
+                    bind: std::mem::take(&mut batch.skin),
+                    flex: Vec::new(),
+                    flex_base: Vec::new(),
+                    flex_signature: 0,
+                }),
                 Owner::Weapon(name) => Some(AnimatedMesh {
                     sampled: None,
                     gpu: None,
@@ -1162,7 +1204,32 @@ pub fn spawn_map(
         } else {
             None
         };
+        // Bone merge: the weapon's bones follow the owner's same-named joints.
+        let mut merged = false;
+        if let (Owner::NpcWeapon(id, key), Some(animation)) = (&owner, &mut animation) {
+            merged = true;
+            let npc = skeletons.get(&Owner::Entity(*id)).cloned();
+            let npc_rig = world
+                .model_instances
+                .iter()
+                .find(|i| i.entity == Some(*id))
+                .and_then(|i| world.rigs.get(&i.asset_key()));
+            match (cpu_skinning, npc, npc_rig, world.rigs.get(key)) {
+                (false, Some(npc), Some(npc_rig), Some(rig)) => {
+                    animation.gpu = Some(crate::gpu_skinning::Skeleton::merged(
+                        inverse_binds,
+                        rig,
+                        npc_rig,
+                        &npc,
+                        animation.scale,
+                    ));
+                }
+                // CPU skinning or a missing skeleton: not drawn.
+                _ => continue,
+            }
+        }
         if !cpu_skinning
+            && !merged
             && let Some(animation) = &mut animation
             && let Some(rig) = world
                 .rigs
@@ -1224,10 +1291,12 @@ pub fn spawn_map(
         {
             draw.insert(bevy::camera::visibility::RenderLayers::layer(4));
         }
-        if matches!(&owner, Owner::World | Owner::Entity(_))
-            && !owner
-                .entity()
-                .is_some_and(|id| world.background_entities.contains(&id))
+        if matches!(
+            &owner,
+            Owner::World | Owner::Entity(_) | Owner::NpcWeapon(..)
+        ) && !owner
+            .entity()
+            .is_some_and(|id| world.background_entities.contains(&id))
         {
             draw.insert((
                 crate::visibility::PvsDraw::default(),
@@ -1311,6 +1380,15 @@ pub fn spawn_map(
                     ),
                     1.,
                 ),
+                // The weapon is lit at its owner (bone-merged entities share the light state).
+                Owner::NpcWeapon(id, _) => {
+                    let instance = world.model_instances.iter().find(|i| i.entity == Some(*id));
+                    (
+                        Some(*id),
+                        instance.map(|i| i.asset_key()).unwrap_or_default(),
+                        instance.map_or(1., |i| i.scale),
+                    )
+                }
                 Owner::World | Owner::SkyWorld => unreachable!("lit draws are model owned"),
             };
             draw.insert(ModelLit {

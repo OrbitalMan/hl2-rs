@@ -278,6 +278,15 @@ impl AiRuntime {
         }
     }
     /// A uniform value in [-1, 1) from the AI's stream (shot spread, blood noise).
+    /// The world model of an NPC's active weapon (CBaseCombatWeapon::Equip follows the
+    /// owner bone-merged), lowercase; None when unarmed.
+    pub fn weapon_world_model(&self, id: usize) -> Option<String> {
+        let class = &self.actors.get(&id)?.weapon.as_ref()?.class;
+        self.weapon_defs
+            .get(class)
+            .map(|d| d.world_model.to_lowercase())
+            .filter(|m| !m.is_empty())
+    }
     /// NPCs whose current enemy or enemy memory is the player.
     pub fn npcs_knowing_player(&self) -> std::collections::BTreeSet<usize> {
         self.actors

@@ -206,6 +206,19 @@ pub fn load_with_canvas(
     for failure in models::append_rigs(&mut world, &vfs, &weapon_models) {
         world.warnings.push(failure);
     }
+    // ... and drawn bone-merged in their owners' hands (CBaseCombatWeapon::Equip).
+    for model in &weapon_models {
+        let key = format!("{}#0", model.to_lowercase());
+        if world.model_assets.contains_key(&key) {
+            continue;
+        }
+        match models::read_model(&vfs, model, 0) {
+            Ok(surfaces) => {
+                world.model_assets.insert(key, surfaces);
+            }
+            Err(error) => world.warnings.push(format!("{model}: {error:#}")),
+        }
+    }
     // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body
     // from w_grenade.phy (12-sided prism as a round cylinder, the .phy's IVP inertia) and
     // SDK spawn orientation. Session 13 replay against five native throws (lob, roll,
@@ -231,6 +244,14 @@ pub fn load_with_canvas(
             .flatten()
             .map(|s| s.material.clone()),
     );
+    for model in &weapon_models {
+        if let Some(surfaces) = world
+            .model_assets
+            .get(&format!("{}#0", model.to_lowercase()))
+        {
+            names.extend(surfaces.iter().map(|s| s.material.clone()));
+        }
+    }
     for weapon in gameplay.weapons.values() {
         for skin in 0..2 {
             if let Some(surfaces) = world
