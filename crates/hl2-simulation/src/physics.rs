@@ -60,6 +60,9 @@ const HULL_GROUP: Group = Group::GROUP_5;
 /// MASK_SOLID (CONTENTS_SOLID | MOVEABLE | WINDOW | MONSTER | GRATE): what physics
 /// objects collide with (CBaseEntity::PhysicsSolidMaskForEntity).
 const MASK_SOLID: u32 = 0x1 | 0x4000 | 0x2 | 0x2000000 | 0x8;
+/// MASK_SHOT (CONTENTS_SOLID | MOVEABLE | MONSTER | WINDOW | DEBRIS | HITBOX): bullets
+/// pass CONTENTS_GRATE brushes (chain-link fences) that block players and props.
+pub const MASK_SHOT: u32 = 0x1 | 0x4000 | 0x2000000 | 0x2 | 0x4000000 | 0x4000_0000;
 /// prop_physics with SF_PHYSPROP_DEBRIS (4): COLLISION_GROUP_DEBRIS collides only with
 /// COLLISION_GROUP_NONE (CGameRules::ShouldCollide): the world and ordinary props, not
 /// the player (movement or shadow), NPCs, thrown frags or other debris. Traces (bullets,
@@ -2425,6 +2428,44 @@ impl Physics {
             hitgroup: self.hitgroup(h),
         })
     }
+    /// A bullet trace (FireBullets, MASK_SHOT): `shot_ray` that also passes brushes
+    /// without MASK_SHOT contents (CONTENTS_GRATE fences).
+    pub fn bullet_ray(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        distance: f32,
+        excluded: &[usize],
+    ) -> Option<RayHit> {
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            collider.is_enabled()
+                && !self.world_sides.clip_brushes.contains(&handle)
+                && !excluded.contains(&(collider.user_data as usize).wrapping_sub(1))
+                && self
+                    .npc_collider_contents
+                    .get(&handle)
+                    .is_none_or(|contents| contents & MASK_SHOT != 0)
+        };
+        let ray = Ray::new(
+            Point::from(vector(origin)),
+            vector![direction.x, direction.y, direction.z],
+        );
+        let (h, hit) = self.query.cast_ray_and_get_normal(
+            &self.bodies,
+            &self.colliders,
+            &ray,
+            distance * SCALE,
+            true,
+            groups_filter(QUERY_GROUPS).predicate(&predicate),
+        )?;
+        let id = self.colliders[h].user_data as usize;
+        Some(RayHit {
+            entity: id.wrapping_sub(1),
+            position: origin + direction * (hit.time_of_impact / SCALE),
+            normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
+            hitgroup: self.hitgroup(h),
+        })
+    }
     /// Ground trace under the player (MASK_PLAYERSOLID: clip brushes count).
     pub fn ground_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
         self.ray_with(origin, direction, distance, QUERY_GROUPS, true)
@@ -4306,6 +4347,38 @@ mod tests {
         );
         assert!(inside.trace.start_solid && inside.trace.all_solid);
         assert_eq!(inside.entity, Some(7));
+    }
+    #[test]
+    fn bullets_pass_grate_fences_that_other_traces_hit() {
+        // A func_brush chain-link fence (d1_canals_01 *21: CONTENTS_GRATE | TRANSLUCENT).
+        let mut fence = bounds_brush(Vec3::new(0., -100., 0.), Vec3::new(4., 100., 100.));
+        fence.contents = 0x1000_0008;
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "func_brush".into()),
+                    ("model".into(), "*1".into()),
+                ],
+            }],
+            brush_models: vec![modkit_core::BrushModel {
+                id: 1,
+                brushes: vec![fence],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let physics = Physics::new(&world);
+        let start = Vec3::new(-40., 0., 50.);
+        assert_eq!(
+            physics.impact_ray(start, Vec3::X, 80.).map(|h| h.entity),
+            Some(0)
+        );
+        assert!(physics.bullet_ray(start, Vec3::X, 80., &[]).is_none());
+        // A solid brush entity still stops bullets.
+        let mut world = world;
+        world.brush_models[0].brushes[0].contents = 1;
+        let physics = Physics::new(&world);
+        assert!(physics.bullet_ray(start, Vec3::X, 80., &[]).is_some());
     }
     #[test]
     fn npc_brush_door_hits_have_entity_and_follow_pose_before_simulation_tick() {

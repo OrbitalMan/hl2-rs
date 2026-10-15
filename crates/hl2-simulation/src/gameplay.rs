@@ -1192,7 +1192,7 @@ impl Inventory {
                 let hit = if melee {
                     melee_trace(physics, scene, eye, aim)
                 } else {
-                    physics.impact_ray(eye, aim, f32::from_bits(0x475db3d7))
+                    physics.bullet_ray(eye, aim, f32::from_bits(0x475db3d7), &[])
                 };
                 if !melee
                     && matches!(
@@ -1273,7 +1273,7 @@ impl Inventory {
         for _ in 0..12 {
             let aim = self.spread(direction, cone(10.));
             self.bullets += 1;
-            if let Some(hit) = physics.impact_ray(eye, aim, f32::from_bits(0x475db3d7)) {
+            if let Some(hit) = physics.bullet_ray(eye, aim, f32::from_bits(0x475db3d7), &[]) {
                 self.hit(world, scene, physics, w, hit, aim, false, eye);
             }
         }
@@ -2075,7 +2075,7 @@ pub fn npc_fire_bullets(
     out: &mut NpcBullets,
 ) {
     for &direction in &shot.directions {
-        let hit = physics.shot_ray(shot.origin, direction, MAX_TRACE_LENGTH, &[shot.attacker]);
+        let hit = physics.bullet_ray(shot.origin, direction, MAX_TRACE_LENGTH, &[shot.attacker]);
         let world_distance = hit
             .as_ref()
             .map_or(MAX_TRACE_LENGTH, |h| (h.position - shot.origin).length());

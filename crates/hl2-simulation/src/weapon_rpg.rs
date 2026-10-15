@@ -257,7 +257,9 @@ impl Inventory {
             return;
         }
         let forward = forward.normalize_or_zero();
-        let hit = physics.impact_ray(eye, forward, MAX_TRACE_LENGTH);
+        // CWeaponRPG::UpdateLaserPosition: UTIL_TraceLine(MASK_SHOT & ~CONTENTS_WINDOW)
+        // (passing windows is not modeled).
+        let hit = physics.bullet_ray(eye, forward, MAX_TRACE_LENGTH, &[]);
         let mut random = self.random();
         let Some(dot) = &mut self.rpg.dot else {
             return;
