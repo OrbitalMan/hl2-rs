@@ -22,6 +22,8 @@ Claude Code desktop, claude-opus-5-5. Owner list of nine items; plan decisions: 
 
 - **Capture action cell more transparent.** Half of the scheme's dim selection alpha (`CAPTURE_ACTION_FADE = 0.5`, owner tuning) with the normal text color; the key cell stays fully orange. Unverified, needs manual check.
 
+- **Brightness dialog unlocked and implemented.** The button is enabled in every display mode (retail: full screen only, hardware ramp). `mat_monitorgamma` is now applied by the presentation shader (`video::PresentMaterial`, `present.wgsl`, ramp v^(gamma/2.2) on display-encoded values, neutral at 2.2) over the whole composed picture; the dialog previews live and Cancel restores. Tests `monitor_gamma_ramp_is_neutral_at_2_2_and_lighter_below`, extended `placeholders_log_and_gamma_dialog_restores_on_cancel`; window capture `AntigravityPlayground/runtime_capture.sh` shows the frame presented unchanged at 2.2. Exact retail ramp formula not verified. Unverified, needs manual check: open Options > Video > Adjust brightness levels in windowed mode, drag the slider: the whole picture brightens toward Light and darkens toward Dark live; Cancel restores; OK + Apply keeps it after restart.
+
 ## Previous session: GameUI widget interaction pass (2026-10-15, branch `orbitalman/main-menu`)
 
 Claude Code desktop, claude-opus-5-5.

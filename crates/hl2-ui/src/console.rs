@@ -898,6 +898,15 @@ impl Console {
         self.modal_bounds().is_some_and(|b| b.contains(point))
     }
 
+    /// The `mat_monitorgamma` to display: the brightness dialog's live value while it is open,
+    /// otherwise the applied setting.
+    pub fn display_gamma(&self) -> f32 {
+        let preview = (self.mode == Mode::Options)
+            .then(|| self.options.preview_gamma())
+            .flatten();
+        preview.unwrap_or(self.config.video.gamma)
+    }
+
     /// The window's display mode changed outside the game's settings (macOS native full screen):
     /// the applied configuration and an open Options dialog follow it.
     pub fn set_display_mode_external(&mut self, mode: crate::config::DisplayMode) {

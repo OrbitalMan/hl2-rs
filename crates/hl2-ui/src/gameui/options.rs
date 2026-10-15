@@ -432,6 +432,12 @@ impl OptionsDialog {
         &self.draft.config
     }
 
+    /// The brightness being previewed: the draft's gamma while the brightness sub-dialog is
+    /// open (retail applies the slider immediately; Cancel restores the saved value).
+    pub fn preview_gamma(&self) -> Option<f32> {
+        matches!(self.sub, Some(Sub::Gamma { .. })).then_some(self.draft.config.video.gamma)
+    }
+
     /// The window's display mode changed outside the dialog (for example macOS native full
     /// screen entered with the green button): the applied state follows it, and so does the
     /// draft unless the user already picked a different mode there.
@@ -2263,8 +2269,10 @@ mod tests {
         let gamma = vec2(495., 162.);
         h.click(gamma + vec2(17. + 4., 122.));
         assert_eq!(h.dialog.draft().video.gamma, 1.6);
+        assert_eq!(h.dialog.preview_gamma(), Some(1.6), "previewed live");
         h.click(gamma + vec2(200., 360.));
         assert!(h.dialog.sub.is_none());
+        assert_eq!(h.dialog.preview_gamma(), None, "no preview once closed");
         assert_eq!(
             h.dialog.draft().video.gamma,
             2.2,
@@ -2277,6 +2285,20 @@ mod tests {
             h.dialog.draft().video.gamma,
             1.6,
             "OK keeps it in the draft"
+        );
+        // Unlocked in every display mode (retail: full screen only).
+        h.dialog.open(Config {
+            video: crate::config::VideoSettings {
+                display_mode: crate::config::DisplayMode::Windowed,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        h.tab(Tab::Video);
+        h.click(page(300., 125.));
+        assert!(
+            matches!(h.dialog.sub, Some(Sub::Gamma { .. })),
+            "opens in windowed mode"
         );
     }
 

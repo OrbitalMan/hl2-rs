@@ -448,14 +448,15 @@ pub fn force_visible(panel: Panel, name: &str) -> bool {
 ///
 /// * acceleration amount follows its check box;
 /// * Aim-Assist Sensitivity is enabled only while aim assist is on (the layout disables it);
-/// * the brightness button is enabled in full screen only, judged by the applied mode (retail
-///   gamma ramps only work in full screen; the layout disables it);
+/// * the brightness button is enabled in every display mode: retail enables it in full screen
+///   only (its hardware gamma ramp needs full screen; the layout ships it disabled), but the
+///   ramp is applied by the presentation shader here (owner decision, 2026-10-15);
 /// * placeholders are always disabled.
 pub fn enabled(
     binding: Option<Binding>,
     layout_enabled: bool,
     draft: &Draft,
-    applied: &Config,
+    _applied: &Config,
 ) -> bool {
     match binding {
         Some(Binding::Slider(Value::AccelExponent) | Binding::Entry(Value::AccelExponent)) => {
@@ -464,9 +465,7 @@ pub fn enabled(
         Some(Binding::Slider(Value::AimAssistScale)) => {
             draft.config.mouse.aim_assist != AimAssist::Off
         }
-        Some(Binding::Command(Command::GammaDialog)) => {
-            applied.video.display_mode.effective() == DisplayMode::Fullscreen
-        }
+        Some(Binding::Command(Command::GammaDialog)) => true,
         Some(Binding::Command(command)) if command.placeholder().is_some() => false,
         _ => layout_enabled,
     }
@@ -639,7 +638,10 @@ mod tests {
         assert!(enabled(gamma, false, &draft, &applied));
         let mut windowed = applied.clone();
         windowed.video.display_mode = DisplayMode::Windowed;
-        assert!(!enabled(gamma, false, &draft, &windowed));
+        assert!(
+            enabled(gamma, false, &draft, &windowed),
+            "unlocked in windowed mode"
+        );
         let advanced = Some(Binding::Command(Command::VideoAdvanced));
         assert!(!enabled(advanced, true, &draft, &applied));
         assert_eq!(

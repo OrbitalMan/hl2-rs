@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI/host: brightness (mat_monitorgamma) applied, dialog unlocked
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `video::PresentMaterial` + `assets/shaders/present.wgsl` replace the present sprite (unit quad scaled by `present_frame`); `video::monitor_gamma_exponent`, `video::update_present_gamma`; `install_frame` takes mesh/material assets. hl2-ui: `OptionsDialog::preview_gamma`, `Console::display_gamma`; `settings::enabled` always enables the brightness button. New playground script `runtime_capture.sh`. Docs: `docs/gameui.md` §6/§8, `README.md`, `STATUS.md`.
+
+**Why:** Owner request: unlock "Adjust brightness levels..." and finish it; gamma was stored but never applied.
+
+**Tested how:** `cargo test -p hl2-ui` (189), `cargo test -p hl2-bevy` (75 incl. the ramp test), owned-install (4), strict clippy, fmt; windowed window capture (frame presented, unchanged at 2.2).
+
+**Result:** Brightness works in every display mode with live preview.
+
+**Still broken or not tested:** Visual ramp at other gamma values not checked by eye; exact retail ramp formula not verified.
+
+**Next:** Owner manual checks.
+
 ## 2026-10-15 GameUI: fainter action cell while capturing a key
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

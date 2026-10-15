@@ -171,8 +171,16 @@ Semantics:
 - Display mode offers Fullscreen / Windowed / Windowed (No Border). No Border is hidden only on
   macOS (as in the retail macOS build); a stored No Border value is kept in the file and treated as
   Fullscreen there (`DisplayMode::effective`). Windows and Linux keep borderless.
-- Brightness ("Adjust brightness levels...") is enabled only in Fullscreen, following retail. It
-  edits the draft and Cancel restores the previous value (retail applies immediately).
+- Brightness ("Adjust brightness levels...") is enabled in every display mode (2026-10-15, owner
+  decision; retail enables it in full screen only because its hardware gamma ramp needs full
+  screen). The slider previews live, as in retail (`OptionsDialog::preview_gamma`,
+  `Console::display_gamma`); Cancel restores the previous value, OK keeps it in the draft for
+  OK/Apply. `mat_monitorgamma` is applied by the presentation shader
+  (`video::PresentMaterial`, `assets/shaders/present.wgsl`) over the whole composed picture
+  (3D view, HUD and menus all render into the game frame): each display-encoded value v becomes
+  v^(gamma / 2.2) (`video::monitor_gamma_exponent`), so 2.2 is neutral and the slider's "Light"
+  end (1.6) brightens. The exact retail ramp formula is not verified; the direction follows the
+  installed dialog's `#GameUI_LIGHT`/`#GameUI_DARK` slider labels.
 - Keyboard: rows and sections come from `hl2/scripts/kb_act.lst`, defaults from
   `hl2/cfg/config_default.cfg`. Edit Key, Enter on a selected row, or a double click on a row
   (SDK `VControlsListPanel::OnMouseDoublePressed` starts capture) captures the next key or mouse
@@ -397,8 +405,8 @@ Steps (one commit):
 
 Limitations:
 
-- Stored only, no effect yet: gamma, HDR mode, speaker setup, sound quality, captions, spoken
-  language, aim assist.
+- Stored only, no effect yet: HDR mode, speaker setup, sound quality, captions, spoken
+  language, aim assist. (Gamma is applied since 2026-10-15, see section 6.)
 - Raw input has no separate effect: Bevy's accumulated mouse motion is already the raw device delta.
 - The retail engine's smoothed music factor (ducking) is not modeled; only `snd_musicvolume`.
 - The game pauses all sounds while it is paused or unfocused, so mute-when-unfocused is mostly

@@ -186,6 +186,34 @@ pub struct PresentCamera;
 #[derive(Component)]
 pub struct PresentQuad;
 
+/// `mat_monitorgamma` at which the presented frame is unchanged (the SDK's 2.2 display gamma).
+pub const NEUTRAL_MONITOR_GAMMA: f32 = 2.2;
+
+/// Exponent of the monitor gamma ramp applied to display-encoded values: `v^(gamma / 2.2)`.
+/// The Options slider runs from 1.6 ("Light") to 2.6 ("Dark") in the installed
+/// `OptionsSubVideoGammaDlg.res`, so lower values brighten. Retail sets a hardware gamma ramp,
+/// which only works in full screen; the presentation shader applies it in every display mode.
+pub fn monitor_gamma_exponent(gamma: f32) -> f32 {
+    gamma.clamp(1.6, 2.6) / NEUTRAL_MONITOR_GAMMA
+}
+
+/// Draws the game frame (3D view, HUD and menus) in the window through the monitor gamma ramp.
+#[derive(Asset, TypePath, bevy::render::render_resource::AsBindGroup, Debug, Clone)]
+pub struct PresentMaterial {
+    /// x: [`monitor_gamma_exponent`].
+    #[uniform(0)]
+    pub params: Vec4,
+    #[texture(1)]
+    #[sampler(2)]
+    pub frame: Handle<Image>,
+}
+
+impl bevy::sprite_render::Material2d for PresentMaterial {
+    fn fragment_shader() -> bevy::shader::ShaderRef {
+        "shaders/present.wgsl".into()
+    }
+}
+
 /// A game-frame camera stopped during a frame resize, with its `is_active` before.
 #[derive(Component)]
 pub struct SuspendedCamera(bool);
@@ -203,6 +231,8 @@ pub fn frame_image(resolution: UVec2) -> Image {
 pub(crate) fn install_frame(
     commands: &mut Commands,
     images: &mut Assets<Image>,
+    meshes: &mut Assets<Mesh>,
+    present: &mut Assets<PresentMaterial>,
     resolution: UVec2,
     windowed: bool,
 ) {
@@ -227,16 +257,38 @@ pub(crate) fn install_frame(
         Msaa::Off,
         RenderLayers::layer(PRESENT_LAYER),
     ));
+    // A unit square scaled to the presented size by `present_frame`.
     commands.spawn((
         PresentQuad,
-        Sprite {
-            image,
-            custom_size: Some(resolution.as_vec2()),
-            ..default()
-        },
-        Transform::IDENTITY,
+        Mesh2d(meshes.add(Rectangle::new(1., 1.))),
+        bevy::sprite_render::MeshMaterial2d(present.add(PresentMaterial {
+            params: Vec4::new(monitor_gamma_exponent(NEUTRAL_MONITOR_GAMMA), 0., 0., 0.),
+            frame: image,
+        })),
+        Transform::from_scale(resolution.as_vec2().extend(1.)),
         RenderLayers::layer(PRESENT_LAYER),
     ));
+}
+
+/// Keeps the present material's gamma ramp on the displayed `mat_monitorgamma`: the applied
+/// setting, or the brightness dialog's value while it is open (live preview, as in retail).
+pub(crate) fn update_present_gamma(
+    ui: Option<Res<crate::ui_host::Console>>,
+    quads: Query<&bevy::sprite_render::MeshMaterial2d<PresentMaterial>, With<PresentQuad>>,
+    mut materials: ResMut<Assets<PresentMaterial>>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let exponent = monitor_gamma_exponent(ui.source.display_gamma());
+    for handle in &quads {
+        let current = materials.get(&handle.0).map(|m| m.params.x);
+        if current.is_some_and(|x| x != exponent)
+            && let Some(mut material) = materials.get_mut(&handle.0)
+        {
+            material.params.x = exponent;
+        }
+    }
 }
 
 /// Placement of the presented game frame in the window.
@@ -578,7 +630,7 @@ pub(crate) fn present_frame(
     mut video_viewport: ResMut<VideoViewport>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: FrameCameras,
-    mut quads: Query<(&mut Sprite, &mut Visibility), With<PresentQuad>>,
+    mut quads: Query<(&mut Transform, &mut Visibility), With<PresentQuad>>,
 ) {
     let Some(frame) = frame else {
         return;
@@ -617,8 +669,9 @@ pub(crate) fn present_frame(
         Visibility::Inherited
     };
     for (mut quad, mut shown) in &mut quads {
-        if quad.custom_size != Some(video_viewport.logical_size) {
-            quad.custom_size = Some(video_viewport.logical_size);
+        let scale = video_viewport.logical_size.extend(1.);
+        if quad.scale != scale {
+            quad.scale = scale;
         }
         if *shown != visibility {
             *shown = visibility;
@@ -766,6 +819,19 @@ mod tests {
         );
         // The OS window frame is not resized for full-screen modes.
         assert_eq!(window.resolution.physical_width(), 1920);
+    }
+
+    #[test]
+    fn monitor_gamma_ramp_is_neutral_at_2_2_and_lighter_below() {
+        assert_eq!(monitor_gamma_exponent(2.2), 1.);
+        assert!(monitor_gamma_exponent(1.6) < 1., "1.6 is the Light end");
+        assert!(monitor_gamma_exponent(2.6) > 1., "2.6 is the Dark end");
+        // Mid grey under the ramp: lighter below 2.2, darker above.
+        let v: f32 = 0.5;
+        assert!(v.powf(monitor_gamma_exponent(1.6)) > v);
+        assert!(v.powf(monitor_gamma_exponent(2.6)) < v);
+        // Out-of-range stored values clamp to the slider range.
+        assert_eq!(monitor_gamma_exponent(0.5), monitor_gamma_exponent(1.6));
     }
 
     #[test]
@@ -1047,7 +1113,7 @@ mod tests {
             .id();
         let quad = app
             .world_mut()
-            .spawn((PresentQuad, Sprite::default(), Visibility::default()))
+            .spawn((PresentQuad, Transform::default(), Visibility::default()))
             .id();
 
         app.world_mut().run_system_once(present_frame).unwrap();
@@ -1073,8 +1139,8 @@ mod tests {
         let vp = app.world().resource::<VideoViewport>().clone();
         assert_eq!(vp.target_resolution, UVec2::new(1280, 720));
         assert_eq!(vp.physical_rect.physical_size, UVec2::new(3024, 1701));
-        let sprite = app.world().get::<Sprite>(quad).unwrap();
-        assert_eq!(sprite.custom_size, Some(vp.logical_size));
+        let placed = app.world().get::<Transform>(quad).unwrap();
+        assert_eq!(placed.scale.truncate(), vp.logical_size);
 
         // The resize: cameras stop first, the image changes only while they are stopped, and
         // they resume with their previous activity once the new size has had time to arrive.

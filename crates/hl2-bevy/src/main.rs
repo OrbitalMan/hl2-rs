@@ -468,6 +468,9 @@ fn main() -> Result<()> {
                 }),
         )
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
+        .add_plugins(bevy::sprite_render::Material2dPlugin::<
+            video::PresentMaterial,
+        >::default())
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
         .add_plugins(bloom::SourceBloomPlugin)
         .add_plugins(bevy::sprite_render::Material2dPlugin::<
@@ -476,6 +479,7 @@ fn main() -> Result<()> {
         .add_plugins(ui_system::UiPlugin)
         .add_plugins(simulation::MovementPlugin)
         .add_systems(PreUpdate, crate::video::present_frame)
+        .add_systems(PostUpdate, crate::video::update_present_gamma)
         .add_systems(
             Update,
             (
@@ -627,6 +631,7 @@ fn setup(
     options: Res<Options>,
     status: Res<Status>,
     (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
+    mut present_materials: ResMut<Assets<video::PresentMaterial>>,
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
     let map_name = loaded.world.name.clone();
@@ -671,6 +676,8 @@ fn setup(
     video::install_frame(
         &mut commands,
         &mut images,
+        &mut meshes,
+        &mut present_materials,
         UVec2::new(options.width, options.height),
         options.display_mode.effective() == hl2_ui::config::DisplayMode::Windowed,
     );
