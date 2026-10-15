@@ -515,10 +515,9 @@ impl Console {
                 console.lostcoast_title_font.as_ref().map(FontFace::face);
         }
         // Installed desktop GameUI colors. Layout/window controls remain an initial implementation.
-        if let Some(root) = vfs
+        let scheme_reader = crate::gameui::resources::Reader::new(vfs);
+        if let Some(root) = scheme_reader
             .read("resource/SourceSchemeBase.res")
-            .ok()
-            .flatten()
             .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
             .and_then(|roots| roots.into_iter().next())
         {
@@ -533,10 +532,8 @@ impl Console {
             };
             console.menu_layout.apply_source_scheme(&root);
         }
-        if let Some(root) = vfs
+        if let Some(root) = scheme_reader
             .read("resource/ClientScheme.res")
-            .ok()
-            .flatten()
             .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
             .and_then(|roots| roots.into_iter().next())
         {

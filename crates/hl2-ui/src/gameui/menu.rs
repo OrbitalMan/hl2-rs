@@ -663,6 +663,18 @@ impl MenuLayout {
                 *target = value;
             }
         }
+        // In the original 2004 HL2 ClientScheme.res, Title2.X was 291 and Title2.Y was 207 (the
+        // numeral '2' logo suffix next to 'HALF-LIFE'). In the 20th Anniversary combined launcher
+        // and episode submenus, Title2 is an expansion subtitle (e.g. '== episode one ==') that
+        // aligns horizontally with the menu button column (Title2.X == Menu.X == 76, Title2.Y == 172
+        // in hl2_complete ClientScheme.res). If a legacy scheme supplies the old logo-suffix coordinate
+        // (>= 200 or significantly divergent from menu_x), normalize it to align with the menu column.
+        if self.title2_x >= 200.0 || (self.title2_x - self.menu_x).abs() > 50.0 {
+            self.title2_x = self.menu_x;
+            if self.title2_y > 200.0 {
+                self.title2_y = DEFAULT_TITLE2_Y;
+            }
+        }
         if let Some(fonts) = resource_font(root, "ClientTitleFont") {
             self.title_tall = fonts[0].0;
         }
@@ -1303,5 +1315,118 @@ mod tests {
             !main_entries[3].has_rollover_sound(),
             "spacer has no rollover sound"
         );
+    }
+
+    #[test]
+    fn test_menu_title_and_subtitle_layout_alignment_across_scales_and_resolutions() {
+        let layout = MenuLayout::default();
+
+        // 1. Scale factor 1.0 (480p reference height)
+        let geom_1x = layout.geometry_scaled(480., 1.0);
+        assert_eq!(geom_1x.title.x, DEFAULT_TITLE_X);
+        assert_eq!(geom_1x.title2.x, DEFAULT_TITLE2_X);
+        assert_eq!(geom_1x.menu.x, DEFAULT_MENU_X);
+        assert_eq!(
+            geom_1x.title2.x, geom_1x.menu.x,
+            "subtitle must align horizontally with menu button column at 1.0x"
+        );
+        assert_eq!(
+            geom_1x.title.x, geom_1x.title2.x,
+            "title and subtitle must align on x at 1.0x"
+        );
+        assert!(
+            geom_1x.title.y < geom_1x.title2.y && geom_1x.title2.y < geom_1x.menu.y,
+            "vertical ordering must be Title1 -> Title2 (subtitle) -> Menu"
+        );
+
+        // 2. Scale factor 2.0 (960p effective height)
+        let geom_2x = layout.geometry_scaled(480., 2.0);
+        assert_eq!(geom_2x.title.x, DEFAULT_TITLE_X * 2.0);
+        assert_eq!(geom_2x.title2.x, DEFAULT_TITLE2_X * 2.0);
+        assert_eq!(geom_2x.menu.x, DEFAULT_MENU_X * 2.0);
+        assert_eq!(
+            geom_2x.title2.x, geom_2x.menu.x,
+            "subtitle must align horizontally with menu button column at 2.0x"
+        );
+        assert_eq!(
+            geom_2x.title.x, geom_2x.title2.x,
+            "title and subtitle must align on x at 2.0x"
+        );
+        assert!(
+            geom_2x.title.y < geom_2x.title2.y && geom_2x.title2.y < geom_2x.menu.y,
+            "vertical ordering must be Title1 -> Title2 -> Menu at 2.0x"
+        );
+
+        // 3. 1280x800 reference resolution (scale = 800 / 480 = 5/3)
+        let geom_800p = layout.geometry(800.);
+        let expected_x = (DEFAULT_TITLE2_X * (800. / BASE_SCREEN_HEIGHT)).trunc();
+        assert_eq!(geom_800p.title2.x, expected_x);
+        assert_eq!(geom_800p.menu.x, expected_x);
+        assert_eq!(
+            geom_800p.title2.x, geom_800p.menu.x,
+            "subtitle must align horizontally with menu buttons at 1280x800"
+        );
+        assert_eq!(
+            geom_800p.title.x, geom_800p.title2.x,
+            "title and subtitle must align on x at 1280x800"
+        );
+        assert!(
+            geom_800p.title.y < geom_800p.title2.y && geom_800p.title2.y < geom_800p.menu.y,
+            "vertical ordering must be Title1 -> Title2 -> Menu at 800p"
+        );
+
+        // 4. Test scheme parsing: legacy 2004 HL2 ClientScheme with Title2.X = 291 must normalize to menu_x (76)
+        let legacy_kv_text = r#"
+            "Scheme"
+            {
+                "BaseSettings"
+                {
+                    "Main.Title1.X" "76"
+                    "Main.Title1.Y" "145"
+                    "Main.Title2.X" "291"
+                    "Main.Title2.Y" "207"
+                    "Main.Menu.X"   "76"
+                    "Main.Menu.Y"   "240"
+                }
+            }
+        "#;
+        let legacy_entries = source_assets::keyvalues::parse_resource(legacy_kv_text.as_bytes())
+            .expect("parse legacy kv");
+        let mut legacy_layout = MenuLayout::default();
+        legacy_layout.apply_client_scheme(&legacy_entries[0]);
+        assert_eq!(
+            legacy_layout.title2_x, legacy_layout.menu_x,
+            "legacy Title2.X (291) must be normalized to menu_x (76)"
+        );
+        assert_eq!(legacy_layout.title2_y, DEFAULT_TITLE2_Y);
+        let legacy_800p = legacy_layout.geometry(800.);
+        assert_eq!(
+            legacy_800p.title2.x, legacy_800p.menu.x,
+            "geometry under legacy scheme must still align title2 with menu buttons"
+        );
+
+        // 5. Anniversary ClientScheme with Title2.X = 76 and Title2.Y = 172
+        let anniv_kv_text = r#"
+            "Scheme"
+            {
+                "BaseSettings"
+                {
+                    "Main.Title1.X" "76"
+                    "Main.Title1.Y" "145"
+                    "Main.Title2.X" "76"
+                    "Main.Title2.Y" "172"
+                    "Main.Menu.X"   "76"
+                    "Main.Menu.Y"   "240"
+                }
+            }
+        "#;
+        let anniv_entries = source_assets::keyvalues::parse_resource(anniv_kv_text.as_bytes())
+            .expect("parse anniv kv");
+        let mut anniv_layout = MenuLayout::default();
+        anniv_layout.apply_client_scheme(&anniv_entries[0]);
+        assert_eq!(anniv_layout.title2_x, 76.);
+        assert_eq!(anniv_layout.title2_y, 172.);
+        let anniv_800p = anniv_layout.geometry(800.);
+        assert_eq!(anniv_800p.title2.x, anniv_800p.menu.x);
     }
 }

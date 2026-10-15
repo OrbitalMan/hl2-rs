@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-15 Submenu subtitle placement and alignment with menu button column
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::menu`:
+  - Investigated subtitle placement root cause: in the 2004 base game ClientScheme, `Main.Title2.X` was 291 and `Main.Title2.Y` was 207 (for the numeral '2' logo suffix next to 'HALF-LIFE'). In the 20th Anniversary combined launcher (`hl2_complete/resource/clientscheme.res`), Valve updated `Main.Title2.X` to 76 and `Main.Title2.Y` to 172 so the expansion subtitle aligns horizontally with `Main.Menu.X` (76) and `Main.Title1.X` (76).
+  - Updated `MenuLayout::apply_client_scheme` to normalize legacy logo-suffix coordinates (`title2_x >= 200.0` or diverging from `menu_x`) to `self.menu_x` (and `title2_y` to `DEFAULT_TITLE2_Y = 172.0`) so subtitles always align with the menu button column regardless of which scheme is loaded.
+  - Added unit test `test_menu_title_and_subtitle_layout_alignment_across_scales_and_resolutions` verifying horizontal alignment (`title2.x == menu.x`) across scale factor 1.0 (480p, x=76), scale factor 2.0 (960p, x=152), and 1280x800 resolution (x=126), and verifying normalization of legacy schemes.
+- `hl2-ui::console`:
+  - Updated `Console::new` to load `SourceSchemeBase.res` and `ClientScheme.res` via `Reader::new(vfs)` instead of direct `vfs.read` calls, ensuring the `hl2_complete` anniversary scheme overlay takes precedence over base `hl2`.
+- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented subtitle layout alignment and legacy coordinate normalization.
+- `HL2RS/STATUS.md`: updated status to record submenu subtitle placement resolution.
+
+**Why:**
+- Submenu subtitles (e.g. `== episode one ==`, `== episode two ==`, `lost coasT`) were shifted far to the right across the screen (~485px at 1280x800) because `console.rs` bypassed the `hl2_complete` overlay and read the legacy 2004 HL2 `ClientScheme.res` where `Title2.X` was 291. Loading schemes via `Reader` and normalizing legacy `Title2.X` in `MenuLayout::apply_client_scheme` ensures subtitles cleanly align with the menu button column across all display modes, resolutions, and scale factors.
+
+**Tested how:**
+- `cargo test -p hl2-ui --lib`: 161 tests passed (including `test_menu_title_and_subtitle_layout_alignment_across_scales_and_resolutions`).
+- `cargo test -p hl2-bevy --bin hl2-bevy`: 70 tests passed.
+- `cargo clippy -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+**Result:** Subtitles for Episode One, Episode Two, and Lost Coast align horizontally with the menu button column across all scales and resolutions.
+
+**Still broken or not tested:** Visual match of the rendered subtitle position on screen is unverified and needs manual check (launch game via `/build-run`, navigate to Episode One, Episode Two, and Lost Coast submenus, verify subtitle starts at the exact same horizontal position as the menu buttons).
+
+**Next:** Task 4 (Apply the subtitle after background loading finishes).
+
 ## 2026-10-15 Background loading plaque styling routed through shared dialog frame
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

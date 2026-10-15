@@ -2,7 +2,17 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-+## Current session: Background loading plaque styling routed through shared dialog frame (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Submenu subtitle placement and alignment with menu button column (2026-10-15, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Submenu subtitle placement & alignment with menu button column:**
+  - Resolved root cause of subtitles shifted across the screen: in 2004 HL2 ClientScheme, `Main.Title2.X` was 291 and `Main.Title2.Y` was 207 (for the numeral '2' logo suffix). In the 20th Anniversary combined launcher (`hl2_complete/resource/clientscheme.res`), `Main.Title2.X` was set to 76 and `Main.Title2.Y` to 172, matching `Main.Menu.X = 76` and `Main.Title1.X = 76`.
+  - Updated `MenuLayout::apply_client_scheme` in `hl2-ui::gameui::menu` to normalize legacy logo-suffix coordinates (`title2_x >= 200.0` or diverging from `menu_x`) to `self.menu_x` (and `title2_y` to `DEFAULT_TITLE2_Y = 172.0`).
+  - Updated `Console::new` in `hl2-ui::console` to load schemes using `Reader::new(vfs)` so the `hl2_complete` anniversary scheme overlay is prioritized over base `hl2`.
+  - Added unit test `test_menu_title_and_subtitle_layout_alignment_across_scales_and_resolutions` in `menu.rs` verifying subtitle horizontal alignment (`title2.x == menu.x`) across 1.0x (x=76), 2.0x (x=152), and 1280x800 resolution (x=126), and verifying legacy scheme normalization.
+- **Validation:** 161 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Background loading plaque styling routed through shared dialog frame (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Background loading plaque styling routed through shared dialog frame:**
