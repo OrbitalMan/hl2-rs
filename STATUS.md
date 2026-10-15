@@ -2,7 +2,15 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: Code cleanup: derive blur from map names and load backgrounds directly from game resources (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: GameUI widget interaction pass (2026-10-15, branch `orbitalman/main-menu`)
+
+Claude Code desktop, claude-opus-5-5.
+- **Task 1 (dialog button and tab hover): done, with a retail finding.** Push buttons now resolve their look through the shared `Theme::button_style(ButtonState)` (scheme `Button.{,Armed,Depressed}{Text,Bg}Color`, SDK `Button` precedence: pressed overrides hover, disabled never hovers). With the installed desktop scheme the armed colors equal the normal ones and bordered buttons have no armed border, so **retail desktop push buttons show no visible hover**; HL2-RS now matches that by data, not by omission. Tabs never arm in the SDK (`PageTab`), selected or not, so tabs are unchanged (`Theme::tab_style`). Dialog controls follow SDK mouse capture on drag-off (`ButtonTracker::capturing`: stays pressed while off, release over activates, no other control arms); menu items keep cancel-on-drag-off. No keyboard focus state exists for dialog controls. Tests: `desktop_scheme_push_buttons_have_no_visible_hover`, `button_style_resolves_hover_pressed_and_disabled_from_scheme_colors`, `tabs_ignore_hover_and_press_whether_selected_or_not`, `hover_look_draws_through_the_shared_button_path`, `capturing_tracker_keeps_press_through_drag_off_and_activates_on_return`; updated drag-off cases in `options_dialog_buttons_follow_press_cancel_and_release_activation` and the message box test.
+  - Known gap found: `hl2_complete/resource/SourceSchemeBase.res` is 0 bytes, so `Theme` runs on its defaults (docs/gameui.md 6a).
+  - Unverified, needs manual check: hover over OK/Cancel/Apply and tabs looks unchanged; press OK, drag off (stays sunken), drag back and release (closes the dialog); press OK, drag off and release (nothing happens).
+- **Validation (task 1):** 171 `hl2-ui` tests, 71 `hl2-bevy` tests pass; strict clippy and fmt clean; packaged build ran 300 main-menu frames and exited 0 (`AntigravityPlayground/runtime_check.sh`).
+
+## Previous session: Code cleanup: derive blur from map names and load backgrounds directly from game resources (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Code cleanup: derive blur from map names and load backgrounds directly from game resources:**

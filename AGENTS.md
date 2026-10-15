@@ -82,6 +82,8 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Only main menu and submenu navigation buttons play the button rollover sound (`ui/buttonrollover.wav`).
   - Dialog push buttons, radio buttons, dropdowns, check boxes, and text input fields do NOT play rollover sounds on hover. Restrict rollover audio at the widget model level via `WidgetKind::has_rollover_sound()`, never through per-dialog ad-hoc exclusions.
   - Dialog push buttons DO play the release-click sound (`ui/buttonclickrelease.wav`) when activated.
+  - Push button looks resolve only through `Theme::button_style(ButtonState)` (depressed > armed > normal colors from `Button.{,Armed,Depressed}{Text,Bg}Color`; depressed > default/key-focus > raised border; disabled never armed). The installed desktop scheme makes armed identical to normal, so retail desktop push buttons show no visible hover; do not invent hover colors. Tabs never arm (`Theme::tab_style` ignores hover/press), per SDK `PageTab`.
+  - Dialog controls use `ButtonTracker::capturing()`: a press stays pressed while dragged off and back, activates only on release over the control, and no other control arms meanwhile (`ButtonTracker::armable`). Menu items keep `ButtonTracker::new()` (drag-off cancels). See `docs/gameui.md` section 6a.
 
 - **Dialog Sizing & Content Containment**:
   - Sizing for fixed-content dialogs (such as 3rd-party technology credits) must be flexible and derived from wrapped content layout plus title/button margins, rather than using an arbitrary scroll view.

@@ -1,7 +1,10 @@
 //! VGUI-style widget drawing and the small pieces of widget logic shared by the menus and dialogs.
 //!
 //! Colors come from the installed `SourceSchemeBase.res` (`BaseSettings` names resolved through
-//! `Colors`); the defaults below are only used when the scheme cannot be read. Geometry is in
+//! `Colors`); the defaults below are only used when the scheme cannot be read. They mirror the
+//! desktop (`[$WIN32]`) values of the installed `SourceScheme.res`, because the 20th-anniversary
+//! `hl2_complete/resource/SourceSchemeBase.res` is an empty file and the defaults are what the
+//! game currently runs with on that layout (known gap, see `docs/gameui.md` 6a). Geometry is in
 //! VGUI layout pixels; a [`Painter`] maps it to canvas pixels with an origin and a uniform scale.
 //! The scale is `max(1, canvas_height / 720)`: retail draws these non-proportional dialogs at
 //! 1:1 screen pixels, which becomes unreadably small on high-resolution canvases (documented
@@ -77,6 +80,15 @@ pub struct Theme {
     pub tooltip_bg: Color,
     pub tooltip_text: Color,
     pub tooltip_border: Color,
+    /// Push button colors per interaction state (`Button.TextColor` / `Button.BgColor`,
+    /// `Button.ArmedTextColor` / `Button.ArmedBgColor`, `Button.DepressedTextColor` /
+    /// `Button.DepressedBgColor`).
+    pub button_text: Color,
+    pub button_bg: Color,
+    pub button_armed_text: Color,
+    pub button_armed_bg: Color,
+    pub button_depressed_text: Color,
+    pub button_depressed_bg: Color,
 }
 
 impl Default for Theme {
@@ -108,6 +120,14 @@ impl Default for Theme {
             tooltip_bg: rgba(255, 155, 0, 240),
             tooltip_text: rgba(0, 0, 0, 255),
             tooltip_border: rgba(40, 40, 40, 255),
+            // The desktop scheme (`[$WIN32]`) keeps armed and depressed identical to the
+            // normal colors: White text over Blank.
+            button_text: rgba(255, 255, 255, 255),
+            button_bg: rgba(0, 0, 0, 0),
+            button_armed_text: rgba(255, 255, 255, 255),
+            button_armed_bg: rgba(0, 0, 0, 0),
+            button_depressed_text: rgba(255, 255, 255, 255),
+            button_depressed_bg: rgba(0, 0, 0, 0),
         }
     }
 }
@@ -116,7 +136,7 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 23] = [
+        let fields: [(&str, &mut Color); 29] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
@@ -140,6 +160,15 @@ impl Theme {
             ("ScrollBarSlider.BgColor", &mut theme.scrollbar_bg),
             ("Tooltip.BgColor", &mut theme.tooltip_bg),
             ("Tooltip.TextColor", &mut theme.tooltip_text),
+            ("Button.TextColor", &mut theme.button_text),
+            ("Button.BgColor", &mut theme.button_bg),
+            ("Button.ArmedTextColor", &mut theme.button_armed_text),
+            ("Button.ArmedBgColor", &mut theme.button_armed_bg),
+            (
+                "Button.DepressedTextColor",
+                &mut theme.button_depressed_text,
+            ),
+            ("Button.DepressedBgColor", &mut theme.button_depressed_bg),
         ];
         for (name, slot) in fields {
             if let Some(color) = scheme_color(root, name) {
@@ -148,6 +177,74 @@ impl Theme {
         }
         theme
     }
+
+    /// Resolves the look of a bordered push button for an interaction state.
+    ///
+    /// Follows the SDK `Button` precedence: colors are depressed, then armed, then normal;
+    /// the border is depressed, then key focus (the default button), then raised. Bordered
+    /// buttons have no armed border, so hover only shows through the scheme's armed colors.
+    /// Disabled buttons are never armed or depressed.
+    pub fn button_style(&self, state: ButtonState) -> ButtonStyle {
+        let (text, bg) = if state.depressed() {
+            (self.button_depressed_text, self.button_depressed_bg)
+        } else if state.hovered() {
+            (self.button_armed_text, self.button_armed_bg)
+        } else {
+            (self.button_text, self.button_bg)
+        };
+        let border = if state.depressed() {
+            ButtonBorder::Depressed
+        } else if state.default && state.enabled {
+            ButtonBorder::KeyFocus
+        } else {
+            ButtonBorder::Raised
+        };
+        ButtonStyle {
+            border,
+            text,
+            bg,
+            text_offset: if state.depressed() { 1. } else { 0. },
+        }
+    }
+
+    /// Resolves the look of a property-sheet tab.
+    ///
+    /// Tabs (SDK `PageTab`) never enter the armed state and pick their border and text color
+    /// from the active flag alone, so hover and press leave a tab's look unchanged, whether
+    /// it is the active tab or not.
+    pub fn tab_style(&self, active: bool, _state: ButtonState) -> TabStyle {
+        TabStyle {
+            text: if active { self.text } else { self.text_dull },
+            open_bottom: active,
+        }
+    }
+}
+
+/// Border of a bordered push button (`ButtonBorder`, `ButtonDepressedBorder`,
+/// `ButtonKeyFocusBorder`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonBorder {
+    Raised,
+    Depressed,
+    KeyFocus,
+}
+
+/// Resolved push button look; see [`Theme::button_style`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ButtonStyle {
+    pub border: ButtonBorder,
+    pub text: Color,
+    pub bg: Color,
+    /// Label shift while depressed, in layout pixels.
+    pub text_offset: f32,
+}
+
+/// Resolved tab look; see [`Theme::tab_style`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TabStyle {
+    pub text: Color,
+    /// The active tab has no bottom edge, so it opens into its page.
+    pub open_bottom: bool,
 }
 
 /// Resolves a scheme color: a literal `"r g b a"` or a name in `BaseSettings`/`Colors`.
@@ -619,13 +716,30 @@ impl ButtonState {
             default: false,
         }
     }
+
+    /// Drawn pushed in: pressed and enabled. Pressing overrides hover.
+    pub const fn depressed(self) -> bool {
+        self.pressed && self.enabled
+    }
+
+    /// Drawn with the hover (armed) look: armed, enabled and not depressed.
+    pub const fn hovered(self) -> bool {
+        self.armed && self.enabled && !self.depressed()
+    }
 }
 
 /// Tracks pointer button press, hold, cancellation and release activation for interactive controls.
+///
+/// Two drag-off policies exist. The default ([`ButtonTracker::new`]) cancels the press when the
+/// pointer leaves the control while held, as for menu items, which do not capture the mouse.
+/// [`ButtonTracker::capturing`] follows the SDK `Button` default for dialog controls: a press
+/// captures the mouse, the control stays pressed while the pointer is dragged off and back,
+/// and the release activates it only while the pointer is over it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ButtonTracker<T: Copy + PartialEq> {
     pressed: Option<T>,
     was_down: bool,
+    capture: bool,
 }
 
 impl<T: Copy + PartialEq> ButtonTracker<T> {
@@ -633,6 +747,16 @@ impl<T: Copy + PartialEq> ButtonTracker<T> {
         Self {
             pressed: None,
             was_down: false,
+            capture: false,
+        }
+    }
+
+    /// A tracker whose presses capture the mouse until release (dialog controls).
+    pub const fn capturing() -> Self {
+        Self {
+            pressed: None,
+            was_down: false,
+            capture: true,
         }
     }
 
@@ -644,6 +768,15 @@ impl<T: Copy + PartialEq> ButtonTracker<T> {
     /// Whether the given control is currently pressed.
     pub fn is_pressed(&self, target: T) -> bool {
         self.pressed == Some(target)
+    }
+
+    /// The control that may show its hover look: while a capturing press is held only the
+    /// pressed control can be armed, since the captured mouse reaches no other control.
+    pub fn armable(&self, hovered: Option<T>) -> Option<T> {
+        match self.pressed {
+            Some(target) if self.capture => hovered.filter(|h| *h == target),
+            _ => hovered,
+        }
     }
 
     /// Resets the tracker.
@@ -660,8 +793,9 @@ impl<T: Copy + PartialEq> ButtonTracker<T> {
     /// - `released`: Whether the mouse button was released this frame.
     ///
     /// Returns `Some(T)` only on release while the cursor is still over the control.
-    /// If the cursor moves away while the mouse button is held, the pressed state is
-    /// cancelled and subsequent release does not trigger the action.
+    /// If the cursor moves away while the mouse button is held, a non-capturing tracker
+    /// cancels the press, so a later release does not trigger the action; a capturing
+    /// tracker keeps it, so releasing after moving back over the control still does.
     pub fn update(
         &mut self,
         hovered: Option<T>,
@@ -684,7 +818,7 @@ impl<T: Copy + PartialEq> ButtonTracker<T> {
             self.pressed = hovered;
         } else if down {
             // Mouse button is being held down.
-            if let Some(target) = self.pressed {
+            if let Some(target) = self.pressed.filter(|_| !self.capture) {
                 if hovered != Some(target) {
                     // Cursor moved away while mouse button is held -> cancel pressed state.
                     self.pressed = None;
@@ -819,30 +953,30 @@ impl Painter<'_> {
         self.text_in("×", text_rect, Align::Center, color, false);
     }
 
-    /// A push button: raised border, sunken while pressed, selection border when default.
+    /// A push button drawn from [`Theme::button_style`]: raised border, sunken while pressed,
+    /// selection border when default, and the scheme's armed colors while hovered.
     pub fn button(&self, rect: Rect, label: &str, state: ButtonState) {
-        if state.pressed && state.enabled {
-            self.sunken(rect);
-        } else {
-            self.raised(rect);
+        let style = self.theme.button_style(state);
+        if style.bg.a > 0. {
+            self.fill(rect, style.bg);
         }
-        if state.default && state.enabled {
-            let outer = Rect::new(rect.x - 1., rect.y - 1., rect.w + 2., rect.h + 2.);
-            self.border(
-                outer,
-                self.theme.border_selection,
-                self.theme.border_selection,
-            );
+        match style.border {
+            ButtonBorder::Depressed => self.sunken(rect),
+            ButtonBorder::Raised => self.raised(rect),
+            ButtonBorder::KeyFocus => {
+                self.raised(rect);
+                let outer = Rect::new(rect.x - 1., rect.y - 1., rect.w + 2., rect.h + 2.);
+                self.border(
+                    outer,
+                    self.theme.border_selection,
+                    self.theme.border_selection,
+                );
+            }
         }
-        let offset = if state.pressed && state.enabled {
-            1.
-        } else {
-            0.
-        };
+        let offset = style.text_offset;
         let text_rect = Rect::new(rect.x + 6. + offset, rect.y + offset, rect.w - 12., rect.h);
         if state.enabled {
-            // Button.TextColor and Button.ArmedTextColor are both White in the scheme.
-            self.text_in(label, text_rect, Align::Left, self.theme.text, false);
+            self.text_in(label, text_rect, Align::Left, style.text, false);
         } else {
             self.label(label, text_rect, Align::Left, false);
         }
@@ -1076,13 +1210,11 @@ impl Painter<'_> {
         self.fill(Rect::new(target_rect.x, y.round(), width, 1.), color);
     }
 
-    /// A property-sheet tab; the active tab is taller and open towards its page.
-    pub fn tab(&self, rect: Rect, label: &str, active: bool) {
-        let color = if active {
-            self.theme.text
-        } else {
-            self.theme.text_dull
-        };
+    /// A property-sheet tab drawn from [`Theme::tab_style`]; the active tab is open towards
+    /// its page.
+    pub fn tab(&self, rect: Rect, label: &str, active: bool, state: ButtonState) {
+        let style = self.theme.tab_style(active, state);
+        let color = style.text;
         self.fill(rect, self.theme.frame_bg);
         let r = self.map(rect);
         let t = self.scale.round().max(1.);
@@ -1092,7 +1224,7 @@ impl Painter<'_> {
             .rectangle(r.x, r.y, t, r.h, self.theme.border_bright);
         self.canvas
             .rectangle(r.x + r.w - t, r.y, t, r.h, self.theme.border_dark);
-        if !active {
+        if !style.open_bottom {
             self.canvas
                 .rectangle(r.x, r.y + r.h - t, r.w, t, self.theme.border_bright);
         }
@@ -1385,6 +1517,168 @@ mod tests {
         assert_eq!(theme.frame_bg, Color::from_rgba(1, 2, 3, 4));
         assert_eq!(theme.selection_bg, Color::from_rgba(255, 155, 0, 255));
         assert_eq!(theme.slider_nob, Theme::default().slider_nob);
+    }
+
+    /// The desktop scheme's push button entries, with the console-only armed color.
+    const BUTTON_SCHEME: &[u8] = br#"Scheme { Colors { White "255 255 255 255" Blank "0 0 0 0" }
+        BaseSettings {
+            Button.TextColor "White"
+            Button.BgColor "Blank"
+            Button.ArmedTextColor "White"
+            Button.ArmedBgColor "Blank" [$WIN32]
+            Button.ArmedBgColor "190 115 0 255" [$X360]
+            Button.DepressedTextColor "White"
+            Button.DepressedBgColor "Blank"
+        } }"#;
+
+    fn button_states() -> [(ButtonState, &'static str); 6] {
+        [
+            (ButtonState::active(true, false, false), "normal"),
+            (ButtonState::active(true, true, false), "hover"),
+            (ButtonState::active(true, true, true), "pressed over"),
+            (
+                ButtonState::active(true, false, true),
+                "pressed, dragged off",
+            ),
+            (ButtonState::active(false, true, false), "disabled hover"),
+            (ButtonState::active(false, true, true), "disabled pressed"),
+        ]
+    }
+
+    #[test]
+    fn desktop_scheme_push_buttons_have_no_visible_hover() {
+        let roots = source_assets::keyvalues::parse_resource(BUTTON_SCHEME).unwrap();
+        let theme = Theme::from_scheme(&roots[0]);
+        assert_eq!(
+            theme,
+            Theme::default(),
+            "defaults mirror the desktop scheme"
+        );
+        assert_eq!(theme.button_armed_bg, Color::from_rgba(0, 0, 0, 0));
+        let normal = theme.button_style(ButtonState::new(true));
+        let hover = theme.button_style(ButtonState::active(true, true, false));
+        assert_eq!(
+            normal, hover,
+            "armed colors equal the normal colors on the desktop"
+        );
+    }
+
+    #[test]
+    fn button_style_resolves_hover_pressed_and_disabled_from_scheme_colors() {
+        let rgba = Color::from_rgba;
+        let theme = Theme {
+            button_text: rgba(1, 1, 1, 255),
+            button_bg: rgba(2, 2, 2, 0),
+            button_armed_text: rgba(3, 3, 3, 255),
+            button_armed_bg: rgba(4, 4, 4, 255),
+            button_depressed_text: rgba(5, 5, 5, 255),
+            button_depressed_bg: rgba(6, 6, 6, 255),
+            ..Theme::default()
+        };
+        let normal = (ButtonBorder::Raised, theme.button_text, theme.button_bg, 0.);
+        let hover = (
+            ButtonBorder::Raised,
+            theme.button_armed_text,
+            theme.button_armed_bg,
+            0.,
+        );
+        let pressed = (
+            ButtonBorder::Depressed,
+            theme.button_depressed_text,
+            theme.button_depressed_bg,
+            1.,
+        );
+        let expected = [normal, hover, pressed, pressed, normal, normal];
+        for ((state, name), want) in button_states().into_iter().zip(expected) {
+            let style = theme.button_style(state);
+            assert_eq!(
+                (style.border, style.text, style.bg, style.text_offset),
+                want,
+                "{name}"
+            );
+        }
+        // The default button keeps its selection border while hovered; pressing replaces it
+        // with the depressed border, and a disabled default button shows neither.
+        let mut default = ButtonState::active(true, true, false);
+        default.default = true;
+        assert_eq!(theme.button_style(default).border, ButtonBorder::KeyFocus);
+        assert_eq!(theme.button_style(default).text, theme.button_armed_text);
+        default.pressed = true;
+        assert_eq!(theme.button_style(default).border, ButtonBorder::Depressed);
+        default.enabled = false;
+        assert_eq!(theme.button_style(default).border, ButtonBorder::Raised);
+    }
+
+    #[test]
+    fn tabs_ignore_hover_and_press_whether_selected_or_not() {
+        let theme = Theme::default();
+        for active in [false, true] {
+            let normal = theme.tab_style(active, ButtonState::new(true));
+            for (state, name) in button_states() {
+                assert_eq!(theme.tab_style(active, state), normal, "{name}, {active}");
+            }
+        }
+        assert_eq!(
+            theme.tab_style(true, ButtonState::new(true)).text,
+            theme.text
+        );
+        assert_eq!(
+            theme.tab_style(false, ButtonState::new(true)).text,
+            theme.text_dull
+        );
+    }
+
+    #[test]
+    fn hover_look_draws_through_the_shared_button_path() {
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme {
+            button_armed_bg: Color::from_rgba(4, 4, 4, 255),
+            ..Theme::default()
+        };
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        let rect = Rect::new(10., 10., 80., 24.);
+        painter.button(rect, "", ButtonState::new(true));
+        let normal = canvas.drain();
+        painter.button(rect, "", ButtonState::active(true, true, false));
+        let hover = canvas.drain();
+        assert_eq!(hover.len(), normal.len() + 1, "armed background fill");
+        painter.button(rect, "", ButtonState::active(false, true, false));
+        assert_eq!(canvas.drain().len(), normal.len(), "disabled: no hover");
+    }
+
+    #[test]
+    fn capturing_tracker_keeps_press_through_drag_off_and_activates_on_return() {
+        let mut tracker = ButtonTracker::<usize>::capturing();
+        tracker.update(Some(0), true, true, false);
+        // Dragged off (nothing or another control under the pointer): still pressed, and
+        // the other control cannot arm while the mouse is captured.
+        assert_eq!(tracker.update(None, true, false, false), None);
+        assert_eq!(tracker.pressed(), Some(0));
+        assert_eq!(tracker.update(Some(1), true, false, false), None);
+        assert_eq!(tracker.pressed(), Some(0));
+        assert_eq!(tracker.armable(Some(1)), None);
+        assert_eq!(tracker.armable(Some(0)), Some(0));
+        // Back on and released over it: activates.
+        tracker.update(Some(0), true, false, false);
+        assert_eq!(tracker.update(Some(0), false, false, true), Some(0));
+        assert_eq!(tracker.pressed(), None);
+        assert_eq!(tracker.armable(Some(1)), Some(1), "capture ends on release");
+        // Released while off: no activation.
+        tracker.update(Some(0), true, true, false);
+        tracker.update(Some(1), true, false, false);
+        assert_eq!(tracker.update(Some(1), false, false, true), None);
+        assert_eq!(tracker.pressed(), None);
+        // A press that starts on nothing captures nothing.
+        tracker.update(None, true, true, false);
+        tracker.update(Some(2), true, false, false);
+        assert_eq!(tracker.update(Some(2), false, false, true), None);
     }
 
     #[test]

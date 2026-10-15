@@ -337,7 +337,7 @@ impl MessageBox {
             has_close: false,
             last_armed: None,
             sounds: Vec::new(),
-            tracker: ButtonTracker::new(),
+            tracker: ButtonTracker::capturing(),
         }
     }
 
@@ -448,10 +448,10 @@ impl MessageBox {
                         .and_then(|c| c.contains(p).then_some(layout.buttons.len()))
                 })
         });
-        self.armed = hovered;
-        self.last_armed = hovered;
         let activated = self.tracker.update(hovered, down, click, released);
         self.pressed = self.tracker.pressed();
+        self.armed = self.tracker.armable(hovered);
+        self.last_armed = self.armed;
         let enter_activated = enter.then_some(0);
         let final_activated = activated.or(enter_activated);
         if final_activated.is_some() {
@@ -1038,17 +1038,49 @@ mod tests {
         );
         assert_eq!(quit.pressed, None);
 
-        // 3. Cancel on move away:
+        // 3. Drag off: the press captures the mouse, so the button stays pressed while the
+        // pointer is away, and releasing away does not trigger.
         assert_eq!(
             quit.input(&layout, center(layout.buttons[0]), true, true, false, false),
             None
         );
         assert_eq!(quit.pressed, Some(0));
-        // Move pointer away while button is held
         assert_eq!(quit.input(&layout, None, true, false, false, false), None);
-        assert_eq!(quit.pressed, None, "moving away cancels pressed state");
-        // Release after move away does not trigger
+        assert_eq!(quit.pressed, Some(0), "captured press survives drag-off");
         assert_eq!(quit.input(&layout, None, false, false, true, false), None);
+        assert_eq!(quit.pressed, None);
+        // Dragging off onto the other button neither arms it nor moves the press; dragging
+        // back and releasing over the pressed button activates it.
+        quit.input(&layout, center(layout.buttons[0]), true, true, false, false);
+        quit.input(
+            &layout,
+            center(layout.buttons[1]),
+            true,
+            false,
+            false,
+            false,
+        );
+        assert_eq!((quit.armed, quit.pressed), (None, Some(0)));
+        quit.input(
+            &layout,
+            center(layout.buttons[0]),
+            true,
+            false,
+            false,
+            false,
+        );
+        assert_eq!((quit.armed, quit.pressed), (Some(0), Some(0)));
+        assert_eq!(
+            quit.input(
+                &layout,
+                center(layout.buttons[0]),
+                false,
+                false,
+                true,
+                false
+            ),
+            Some(true)
+        );
 
         // 4. Enter accepts immediately
         assert_eq!(

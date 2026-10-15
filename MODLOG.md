@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-15 GameUI: shared push button style, tab hover decision and drag-off capture
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`: `Theme` reads `Button.{,Armed,Depressed}{Text,Bg}Color`; new `Theme::button_style(ButtonState) -> ButtonStyle` (SDK `Button` precedence) used by `Painter::button`; `Theme::tab_style(active, state)` used by `Painter::tab`, which now takes a `ButtonState`; `ButtonState::depressed/hovered`; `ButtonTracker::capturing()` and `ButtonTracker::armable()`.
+- `hl2-ui::gameui::options` and `menu::MessageBox`: capturing trackers; tabs pass their state to the shared tab style.
+- Docs: `docs/gameui.md` 6a, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Dialog buttons and tabs had no hover look. The installed desktop scheme and the SDK show that retail has none either: armed colors equal normal ones on `[$WIN32]`, bordered buttons ignore the armed border, and tabs never arm. The look is now resolved from scheme data in one shared place, so a scheme with armed colors would show them. Drag-off previously cancelled presses on dialog buttons; SDK buttons capture the mouse and activate on release over the button after returning.
+
+**Tested how:** `cargo test -p hl2-ui` (171 passed), `cargo test -p hl2-bevy` (71 passed), strict clippy, `cargo fmt --check`; packaged release run of 300 main-menu frames (exit 0).
+
+**Result:** Unit-tested style resolution for normal, hover, pressed, dragged-off, disabled, default and selected/unselected tab states; capturing tracker drag-off/return.
+
+**Still broken or not tested:** Visual hover and drag-off in the packaged build are not checked by hand. `hl2_complete/resource/SourceSchemeBase.res` is empty, so the theme runs on its defaults. No keyboard focus state for dialog controls. Tabs select on release, retail selects on press.
+
+**Next:** Dropdown input layering.
+
 ## 2026-10-15 Code cleanup: derive blur from map names and load backgrounds directly from game resources
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

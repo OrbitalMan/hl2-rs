@@ -293,7 +293,7 @@ impl Default for OptionsDialog {
             pressed: None,
             last_armed: None,
             sounds: Vec::new(),
-            tracker: widgets::ButtonTracker::new(),
+            tracker: widgets::ButtonTracker::capturing(),
             drag: None,
             combo: None,
             editing: None,
@@ -743,6 +743,7 @@ impl OptionsDialog {
             .tracker
             .update(hit, input.held, input.click, input.released);
         self.pressed = self.tracker.pressed();
+        self.armed = self.tracker.armable(hit);
         activated
     }
 
@@ -1299,10 +1300,22 @@ impl OptionsDialog {
         let active = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
         for (i, rect) in tabs.iter().enumerate() {
             if i != active {
-                p.tab(*rect, &self.tab_label(Tab::ALL[i]), false);
+                let (armed, pressed) = state(Target::Tab(i));
+                p.tab(
+                    *rect,
+                    &self.tab_label(Tab::ALL[i]),
+                    false,
+                    ButtonState::active(!modal, armed, pressed),
+                );
             }
         }
-        p.tab(tabs[active], &self.tab_label(self.tab), true);
+        let (armed, pressed) = state(Target::Tab(active));
+        p.tab(
+            tabs[active],
+            &self.tab_label(self.tab),
+            true,
+            ButtonState::active(!modal, armed, pressed),
+        );
         if let Some(panel) = self.tab.panel() {
             let list = layout_widgets(&self.res, panel, page, &self.draft, &self.applied);
             for (i, widget) in list.iter().enumerate() {
@@ -2185,13 +2198,14 @@ mod tests {
         assert_eq!(outcome, OptionsOutcome::None, "no action on press down");
         assert_eq!(h.dialog.pressed, Some(Target::Ok));
 
-        // Move away while held: pressed state is cancelled
+        // Move away while held: the press captured the mouse, so OK stays pressed
         h.frame(Input {
             pointer: Some(away_pos),
             held: true,
             ..Default::default()
         });
-        assert_eq!(h.dialog.pressed, None, "cancelled on move away");
+        assert_eq!(h.dialog.pressed, Some(Target::Ok), "captured on move away");
+        assert_eq!(h.dialog.armed, None);
 
         // Release away: does not activate
         let outcome = h.frame(Input {
@@ -2200,6 +2214,26 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(outcome, OptionsOutcome::None, "no action on release away");
+        assert_eq!(h.dialog.pressed, None);
+
+        // Press, drag off and back on, release over OK: activates (release-while-over)
+        for (pointer, click) in [(ok_pos, true), (away_pos, false), (ok_pos, false)] {
+            h.frame(Input {
+                pointer: Some(pointer),
+                click,
+                held: true,
+                ..Default::default()
+            });
+        }
+        assert_eq!(h.dialog.pressed, Some(Target::Ok));
+        let outcome = h.frame(Input {
+            pointer: Some(ok_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert_eq!(outcome, OptionsOutcome::Close(None));
+        h.dialog.open(Config::default());
+        h.tab(Tab::Mouse);
 
         // Click on OK properly (press then release over button)
         h.frame(Input {
@@ -2232,13 +2266,13 @@ mod tests {
         assert!(!h.dialog.draft().mouse.invert, "not toggled on press down");
         assert!(h.dialog.pressed.is_some());
 
-        // Move away while held
+        // Move away while held: still captured
         h.frame(Input {
             pointer: Some(away_pos),
             held: true,
             ..Default::default()
         });
-        assert_eq!(h.dialog.pressed, None);
+        assert!(h.dialog.pressed.is_some());
 
         // Release away
         h.frame(Input {

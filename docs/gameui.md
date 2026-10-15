@@ -183,6 +183,40 @@ Semantics:
 - Placeholders are shown disabled and log `"<label>: not implemented in HL2-RS yet."`: Gamepad tab
   (empty page), Keyboard Advanced..., Video Advanced....
 
+### 6a. Widget interaction states (2026-10-15)
+
+Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and the installed
+`hl2_complete/resource/sourcescheme.res`.
+
+- Push buttons resolve their look in one place, `Theme::button_style(ButtonState)`, used by
+  `Painter::button` for every dialog and message box button. Precedence follows SDK `Button`:
+  colors are depressed > armed (hover) > normal, the border is depressed > key focus (the default
+  button) > raised. Disabled buttons are never armed or depressed. Colors come from
+  `Button.{,Armed,Depressed}{Text,Bg}Color`.
+- **Retail has no visible push-button hover on the desktop.** The scheme sets
+  `Button.ArmedTextColor` = `Button.TextColor` = White and `Button.ArmedBgColor` = Blank
+  `[$WIN32]` (`"190 115 0 255"` is `[$X360]` only), and SDK `Button::GetBorder` ignores the armed
+  flag for bordered buttons. The armed path is therefore wired and unit-tested with a synthetic
+  scheme, but draws exactly like the normal state with the installed scheme. Showing a visible
+  hover would be a deliberate deviation that needs an owner decision.
+- **Tabs have no hover.** SDK `PageTab` overrides cursor enter/exit without arming and takes its
+  border and text color from the active flag only, so the generic `Button.Armed*` values never
+  apply to tabs, selected or not. `Theme::tab_style(active, state)` ignores the state.
+- **Drag-off.** SDK buttons capture the mouse on press and do not disarm while selected, so a
+  pressed control stays pressed while the pointer is dragged off and back, and the release
+  activates it only while the pointer is over it. `ButtonTracker::capturing` implements this for
+  the Options dialog and message boxes; while captured, no other control can arm
+  (`ButtonTracker::armable`). Main and pause menu items keep `ButtonTracker::new` (press cancelled
+  on drag-off), since SDK `MenuItem` disables mouse capture. Not observed in the retail binary.
+- **Focus.** There is no keyboard focus state for dialog controls yet (no Tab-key focus
+  traversal), so no focus border is drawn; the default button keeps its selection border.
+- Hover never plays the rollover sound for these controls (`WidgetKind::has_rollover_sound`).
+- Retail `PageTab` selects on press; HL2-RS tabs still select on release (unchanged).
+- Known gap: `hl2_complete/resource/SourceSchemeBase.res` is a 0-byte file in the
+  20th-anniversary layout, and `Console::new` reads that name first, so the `Theme` currently runs
+  on its defaults (which mirror the desktop scheme values). Reading `SourceScheme.res` instead also
+  changes main menu metrics read from the same file, so it is left for a separate change.
+
 Limitations (as of milestone 5; section 8 supersedes the first four items):
 
 - Stored but not yet used by the host: HDR mode, gamma, mouse filter/acceleration/invert, skill,
