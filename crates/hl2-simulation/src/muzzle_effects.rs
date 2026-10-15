@@ -18,6 +18,9 @@ pub enum MuzzleKind {
     Shotgun,
     Revolver,
     Rpg,
+    /// MUZZLEFLASH_AR2 (type 0) of the obsolete CL_EVENT_MUZZLEFLASH0-3 events: the RPG
+    /// viewmodel's fire event (v_rpg.mdl "fire", event 5001, no options).
+    Ar2,
 }
 /// DispatchMuzzleEffect: "<type> <attachment>".
 pub fn parse(options: &str) -> Option<(MuzzleKind, String)> {
@@ -32,6 +35,31 @@ pub fn parse(options: &str) -> Option<(MuzzleKind, String)> {
         _ => return None,
     };
     Some((kind, tokens.next()?.to_owned()))
+}
+
+/// The obsolete CL_EVENT_MUZZLEFLASH0-3 (5001-5004) first-person events
+/// (C_BaseAnimating::FireObsoleteEvent -> CTempEnts::MuzzleFlash(pos, angles, atoi(options),
+/// ...)) as (kind, 0-based attachment index). The type switch follows retail client.dll
+/// (FUN_10249460, build 19307283): 0 AR2 player, 1 shotgun, 2 SMG1, 3/4 pistol,
+/// 5 combine; SDK 2013 has no AR2 case.
+pub fn parse_obsolete(event: i32, options: &str) -> Option<(MuzzleKind, usize)> {
+    if !(5001..=5004).contains(&event) {
+        return None;
+    }
+    let digits: String = options
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let kind = match digits.parse::<i32>().unwrap_or(0) {
+        0 => MuzzleKind::Ar2,
+        1 => MuzzleKind::Shotgun,
+        2 => MuzzleKind::Smg1,
+        3 | 4 => MuzzleKind::Pistol,
+        5 => MuzzleKind::Combine,
+        _ => return None,
+    };
+    Some((kind, (event - 5001) as usize))
 }
 
 /// One SimpleParticle: position/velocity in the emitter frame (x forward).
@@ -80,7 +108,10 @@ pub const MATERIALS: &[&str] = &[
     "effects/combinemuzzle2_noz",
     "effects/combinemuzzle1",
     "effects/combinemuzzle2",
+    AR2_CORE,
 ];
+/// m_pSpriteMuzzleFlash[0] (CTempEnts::LevelInit).
+const AR2_CORE: &str = "sprites/ar2_muzzle1";
 
 /// A [0, 1) source.
 pub trait Random {
@@ -276,8 +307,62 @@ pub fn particles(kind: MuzzleKind, first_person: bool, r: &mut impl Random) -> V
                 out.push(p);
             }
         }
-        // The RPG has no first-person flash; its NPC flash is not modeled.
-        (MuzzleKind::Rpg, _) => {}
+        // Retail MuzzleFlash_AR2_Player (client.dll FUN_10249b90; declared but not
+        // defined in SDK 2013): temp-entity sprites (kRenderTransAdd, FTENT_PERSIST, die
+        // 0.025 s): eight m_pSpriteAR2Flash[0-3] (sprites/ar2_muzzle1b-4b = effects/
+        // muzzleflash1-4, 256 px) at i * 8 * s along the barrel, s = U(1.25, 1.5), scale
+        // U(6, 8) * (12 - i) / 9 * s / 32, color (164, 164, 164-228), random roll; then
+        // m_pSpriteMuzzleFlash[0] (sprites/ar2_muzzle1) at the muzzle, white, scale
+        // U(0.05, 0.1). Sizes here are half widths (128 px x scale).
+        (MuzzleKind::Ar2, true) => {
+            let s = r.float(1.25, 1.5).max(0.5);
+            for i in 1..9 {
+                let material = NPC_FLASH[r.int(0, 3) as usize];
+                let blue = (164 + r.int(0, 64)) as u8;
+                let scale = r.float(6., 8.) * (12 - i) as f32 / 9. * s / 32.;
+                let roll = r.int(0, 360) as f32;
+                out.push(flash(
+                    material,
+                    i as f32 * 8. * s,
+                    0.025,
+                    128. * scale,
+                    [164, 164, blue],
+                    255.,
+                    roll,
+                ));
+            }
+            let scale = r.float(0.05, 0.1);
+            let roll = r.int(0, 360) as f32;
+            out.push(flash(
+                AR2_CORE,
+                0.,
+                0.025,
+                128. * scale,
+                [255; 3],
+                255.,
+                roll,
+            ));
+        }
+        // MuzzleFlash_RPG_NPC: FX_MuzzleEffectAttached(1.5) (0.1 s); the player's RPG
+        // flash comes from its viewmodel's obsolete event (Ar2 above).
+        (MuzzleKind::Rpg, false) => {
+            let flash_scale = r.float(1.25, 1.75).clamp(0.5, 8.);
+            for i in 1..9 {
+                let material = NPC_FLASH[r.int(0, 3) as usize];
+                let size = r.float(6., 9.) * (12 - i) as f32 / 9. * flash_scale;
+                let roll = r.int(0, 360) as f32;
+                out.push(flash(
+                    material,
+                    i as f32 * 3.,
+                    0.1,
+                    size,
+                    [255; 3],
+                    128.,
+                    roll,
+                ));
+            }
+        }
+        (MuzzleKind::Rpg | MuzzleKind::Ar2, _) => {}
     }
     out
 }
@@ -563,6 +648,18 @@ mod tests {
         assert_eq!(revolver.len(), 6);
         assert_eq!(revolver[0].material, DUST);
         assert!(particles(MuzzleKind::Rpg, true, &mut half).is_empty());
+        // v_rpg.mdl's event 5001 with no options: retail type 0, the AR2 player flash:
+        // eight barrel sprites and the core, 0.025 s, the first one ~47 units half-width.
+        assert_eq!(parse_obsolete(5001, ""), Some((MuzzleKind::Ar2, 0)));
+        assert_eq!(parse_obsolete(5002, "4"), Some((MuzzleKind::Pistol, 1)));
+        assert_eq!(parse_obsolete(3014, ""), None);
+        let rpg = particles(MuzzleKind::Ar2, true, &mut half);
+        assert_eq!(rpg.len(), 9);
+        assert!(rpg.iter().all(|p| p.life == 0.025));
+        assert!((rpg[0].size.0 - 128. * 7. * 11. / 9. * 1.375 / 32.).abs() < 1e-3);
+        assert!((rpg[7].offset.x - 8. * 8. * 1.375).abs() < 1e-3);
+        assert_eq!(rpg[8].material, AR2_CORE);
+        assert_eq!(particles(MuzzleKind::Rpg, false, &mut half).len(), 8);
     }
     #[test]
     fn tracers_skip_short_shots_and_npc_lines_travel_at_tracer_speed() {

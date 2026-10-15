@@ -533,13 +533,20 @@ fn viewmodel_quads(
                         .rigs
                         .get(&format!("{}#0", w.viewmodel.to_lowercase()))
                 })
-                .and_then(|rig| rig.clips.get(&game.inventory.animation))
-                .and_then(|clip| {
+                .and_then(|rig| {
+                    let clip = rig.clips.get(&game.inventory.animation)?;
                     clip.events
                         .iter()
-                        .find(|e| e.name.eq_ignore_ascii_case("AE_MUZZLEFLASH"))
                         .filter(|e| e.cycle * clip.duration() <= elapsed_fire)
-                        .and_then(|e| hl2_simulation::muzzle_effects::parse(&e.options))
+                        .find_map(|e| {
+                            use hl2_simulation::muzzle_effects as fx;
+                            if e.name.eq_ignore_ascii_case("AE_MUZZLEFLASH") {
+                                return fx::parse(&e.options);
+                            }
+                            // Obsolete CL_EVENT_MUZZLEFLASH0-3 (the RPG): attachment n.
+                            let (kind, index) = fx::parse_obsolete(e.id, &e.options)?;
+                            Some((kind, rig.attachments.get(index)?.name.clone()))
+                        })
                 })
         });
     let first_person_live = effects
