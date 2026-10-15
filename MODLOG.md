@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: keep a captured press while crossing a slider
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `OptionsDialog::track` takes its slider shortcut only when no press is captured; test added to `options_dialog_buttons_follow_press_cancel_and_release_activation`. `README.md` Options paragraph, `STATUS.md`.
+
+**Why:** Pressing OK and dragging over the sensitivity slider reset the captured press and armed the slider, so returning to OK and releasing did nothing, contrary to the capture behavior.
+
+**Tested how:** `cargo test -p hl2-ui` (176 passed; the new assertions fail without the fix), owned-install `-- --ignored` (4 passed), `cargo test -p hl2-bevy` (71 passed), strict clippy, fmt.
+
+**Result:** Captured presses survive crossing any control.
+
+**Still broken or not tested:** Not checked by hand in the packaged build.
+
+**Next:** As in the previous entry.
+
 ## 2026-10-15 GameUI: dropdown header toggle in the release phase
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

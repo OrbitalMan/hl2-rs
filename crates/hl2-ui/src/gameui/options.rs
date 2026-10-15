@@ -704,7 +704,8 @@ impl OptionsDialog {
             hit,
             Some(Target::Control(i)) if matches!(widgets.get(i), Some(w) if matches!(w.binding, Some(Binding::Slider(_))))
         );
-        if is_slider {
+        // A press captured by another control keeps the mouse while it crosses a slider.
+        if is_slider && self.tracker.pressed().is_none() {
             self.tracker.reset();
             self.pressed = hit.filter(|_| input.held || input.click);
             if input.click {
@@ -2396,6 +2397,30 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(outcome, OptionsOutcome::Close(None));
+
+        // Dragging a captured press across the sensitivity slider neither arms nor moves the
+        // slider, and returning to OK still activates it.
+        let slider_pos = page(300., 40. + SLIDER_TRACK_Y);
+        let sensitivity = h.dialog.draft().mouse.sensitivity;
+        for (pointer, click) in [(ok_pos, true), (slider_pos, false), (ok_pos, false)] {
+            h.frame(Input {
+                pointer: Some(pointer),
+                click,
+                held: true,
+                ..Default::default()
+            });
+            assert_eq!(h.dialog.pressed, Some(Target::Ok));
+            assert!(h.dialog.armed.is_none() || h.dialog.armed == Some(Target::Ok));
+        }
+        assert_eq!(h.dialog.draft().mouse.sensitivity, sensitivity);
+        let outcome = h.frame(Input {
+            pointer: Some(ok_pos),
+            released: true,
+            ..Default::default()
+        });
+        assert_eq!(outcome, OptionsOutcome::Close(None));
+        h.dialog.open(Config::default());
+        h.tab(Tab::Mouse);
 
         // 2. CheckBox interaction (Invert mouse at page(30., 20.))
         h.dialog.open(Config::default());
