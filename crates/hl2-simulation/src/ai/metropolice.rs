@@ -133,6 +133,9 @@ pub struct Metropolice {
     pub policing: Option<Policing>,
     /// The policing behavior selected the current schedule (IsRunningBehavior).
     pub running_behavior: bool,
+    /// NPC_TranslateActivity's angry idle (weapon drawn, in combat or baton on) as
+    /// last applied to the idle activity.
+    pub idle_angry: bool,
     /// The cop's own pre-translated activity for TASK_METROPOLICE_ACTIVATE_BATON.
     baton_task: Option<bool>,
     #[serde(skip)]
@@ -184,6 +187,16 @@ impl Metropolice {
         if !self.player_too_close {
             npc.conditions.clear(COND_METROPOLICE_PLAYER_TOO_CLOSE);
         }
+        // The policing behavior's own conditions and its baton requests. They read the
+        // goal's target directly (CAI_PoliceGoal::GetTarget), not the cop's senses, so
+        // they hold for a notarget player too (native ent_text harasses a noclip player).
+        if let Some(policing) = &mut self.policing {
+            policing.harass_due = policing.next_harass < ctx.now;
+            policing.origin = ctx.origin;
+            policing.gather_conditions(npc);
+            let want = policing.baton;
+            self.set_baton_state(npc, want);
+        }
         let Some(player) = self.player else {
             return;
         };
@@ -222,12 +235,6 @@ impl Metropolice {
                 }
                 self.keep_facing_player = false;
             }
-        }
-        // The policing behavior's own conditions and its baton requests.
-        if let Some(policing) = &self.policing {
-            policing.gather_conditions(npc);
-            let want = policing.baton;
-            self.set_baton_state(npc, want);
         }
     }
     /// IncrementPlayerCriminalStatus.
@@ -307,7 +314,9 @@ impl Metropolice {
             (AE_BATON_ON, _) => self.baton_active = true,
             (AE_BATON_OFF, _) => self.baton_active = false,
             (AE_SHOVE, _) => self.shove(ctx),
-            (_, EVENT_WEAPON_MELEE_HIT) => self.stunstick_hit(ctx, knock_out),
+            // The melee hit reaches a handler only through the active weapon
+            // (Weapon Operator_HandleAnimEvent); an unarmed cop swings at the air.
+            (_, EVENT_WEAPON_MELEE_HIT) if self.has_baton => self.stunstick_hit(ctx, knock_out),
             _ => {}
         }
     }
@@ -496,7 +505,12 @@ impl Metropolice {
         if let Some(policing) = &mut self.policing {
             if policing.goal.target.is_some() {
                 self.running_behavior = true;
-                return policing.select(npc, ctx).into();
+                let schedule = policing.select(npc, ctx);
+                // HostSetBatonState during the selection (SetBatonState raises the
+                // change condition now; the new schedule then clears it).
+                let want = policing.baton;
+                self.set_baton_state(npc, want);
+                return schedule.into();
             }
         }
         if self.keep_facing_player && !self.player_is_criminal() {
@@ -564,6 +578,18 @@ impl Behavior for Metropolice {
     fn select_schedule(&mut self, npc: &mut AiNpc, ctx: &Context) -> String {
         self.select(npc, ctx)
     }
+    fn select_fail_schedule(&mut self, npc: &AiNpc, failed: &str) -> String {
+        if self.running_behavior {
+            if let Some(policing) = &mut self.policing {
+                if let Some(schedule) = policing.fail_schedule_for(failed) {
+                    return schedule.into();
+                }
+            }
+        }
+        npc.fail_schedule
+            .clone()
+            .unwrap_or_else(|| "SCHED_FAIL".into())
+    }
     /// TranslateSchedule.
     fn translate_schedule(&mut self, name: &str) -> String {
         match name {
@@ -602,6 +628,11 @@ impl Behavior for Metropolice {
         ) {
             c.set(COND_METROPOLICE_CHANGE_BATON_STATE);
         }
+        if self.running_behavior {
+            if let Some(policing) = &self.policing {
+                c = c.union(policing.custom_interrupts(npc));
+            }
+        }
         c
     }
     fn start_task(
@@ -634,11 +665,13 @@ impl Behavior for Metropolice {
                 } else {
                     "METROPOLICE_DEACTIVATE_BATON"
                 }));
-                motor.set_activity(if activate {
+                let activity = if activate {
                     "ACT_ACTIVATE_BATON"
                 } else {
                     "ACT_DEACTIVATE_BATON"
-                });
+                };
+                npc.activity = activity.into();
+                motor.set_activity(activity);
                 self.baton_task = Some(activate);
                 npc.conditions.clear(COND_METROPOLICE_CHANGE_BATON_STATE);
                 TaskStatus::Running
@@ -656,15 +689,18 @@ impl Behavior for Metropolice {
             // warning.
             "TASK_PLAY_SEQUENCE" if matches!(arg, TaskArg::Activity(a) if a == "ACT_PUSH_PLAYER") =>
             {
-                motor.set_activity(if self.warnings >= METROPOLICE_MAX_WARNINGS {
+                let activity = if self.warnings >= METROPOLICE_MAX_WARNINGS {
                     "ACT_MELEE_ATTACK1"
                 } else {
                     "ACT_PUSH_PLAYER"
-                });
+                };
+                npc.activity = activity.into();
+                motor.set_activity(activity);
                 TaskStatus::Running
             }
             "TASK_MELEE_ATTACK1" => {
                 self.last_attack = ctx.now;
+                npc.activity = "ACT_MELEE_ATTACK1".into();
                 motor.set_activity("ACT_MELEE_ATTACK1");
                 TaskStatus::Running
             }
@@ -811,6 +847,23 @@ mod tests {
             .requests
             .iter()
             .any(|r| matches!(r, CopRequest::PlayerHit { damage, .. } if *damage == 15.)));
+    }
+
+    #[test]
+    fn only_a_cop_with_a_stunstick_hits_on_the_melee_event() {
+        // EVENT_WEAPON_MELEE_HIT goes to the active weapon; without one the swing
+        // animation plays but nothing is hit (owner report: unarmed cops hurt).
+        let (mut c, _, _) = cop(0);
+        c.precriminal = false;
+        c.has_baton = false;
+        c.anim_event("", EVENT_WEAPON_MELEE_HIT, &ctx(0.), false);
+        assert!(c.requests.is_empty(), "{:?}", c.requests);
+        c.has_baton = true;
+        c.anim_event("", EVENT_WEAPON_MELEE_HIT, &ctx(0.), false);
+        assert!(c
+            .requests
+            .iter()
+            .any(|r| matches!(r, CopRequest::PlayerHit { .. })));
     }
 
     #[test]

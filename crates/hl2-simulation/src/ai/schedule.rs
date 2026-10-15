@@ -277,6 +277,8 @@ pub struct AiNpc {
     /// Diagnostics: tasks no implementation knew (failed).
     pub unsupported_tasks: BTreeMap<String, u32>,
     pub schedule_changes: u32,
+    /// Diagnostics: the last task that failed, as "SCHEDULE/TASK".
+    pub last_failed_task: Option<String>,
 }
 
 /// Up to this many tasks may complete in one think (MaintainSchedule's loop limit).
@@ -299,13 +301,28 @@ impl AiNpc {
                 .map(|m| m.last_known)
         })
     }
+    /// ACT_IDLE as the ideal activity: CAI_BaseNPC::SetTurnActivity when a face task
+    /// starts unfaced (turn activities ACT_90_LEFT/RIGHT, ACT_180_LEFT are not modeled)
+    /// and GetStoppedActivity when movement stops (no arrival activities modeled). It
+    /// also ends a finished gesture such as a harass wave.
+    pub fn set_turn_activity(&mut self, motor: &mut dyn Motor) {
+        if self.activity != "ACT_IDLE" {
+            self.activity = "ACT_IDLE".into();
+            motor.set_activity("ACT_IDLE");
+        }
+    }
     fn set_schedule(&mut self, name: String) {
         self.schedule = Some(name);
         self.task = 0;
         self.task_started = false;
         self.fail_schedule = None;
-        self.conditions.clear(COND_TASK_FAILED);
-        self.conditions.clear(COND_SCHEDULE_DONE);
+        // CAI_BaseNPC::SetSchedule: m_Conditions.ClearAll() except COND_IN_PVS (so a
+        // condition raised while selecting, e.g. a baton change, does not interrupt it).
+        let in_pvs = self.conditions.has(COND_IN_PVS);
+        self.conditions = Conditions::default();
+        if in_pvs {
+            self.conditions.set(COND_IN_PVS);
+        }
         self.schedule_changes += 1;
     }
     /// CAI_BaseNPC::MaintainSchedule for one think.
@@ -374,6 +391,10 @@ impl AiNpc {
                 }
                 TaskStatus::Failed => {
                     self.conditions.set(COND_TASK_FAILED);
+                    self.last_failed_task = Some(format!(
+                        "{}/{task}",
+                        self.schedule.as_deref().unwrap_or_default()
+                    ));
                 }
             }
         }
@@ -389,6 +410,24 @@ impl AiNpc {
         if let Some(status) = behavior.start_task(self, task, arg, ctx, motor) {
             return status;
         }
+        let status = self.start_generic_task(behavior, task, arg, ctx, motor);
+        // StartTask TASK_FACE_TARGET always calls SetTurnActivity; the other face tasks
+        // when not facing yet.
+        if task == "TASK_FACE_TARGET" && status != TaskStatus::Failed
+            || task.starts_with("TASK_FACE_") && status == TaskStatus::Running
+        {
+            self.set_turn_activity(motor);
+        }
+        status
+    }
+    fn start_generic_task(
+        &mut self,
+        behavior: &mut dyn Behavior,
+        task: &str,
+        arg: &TaskArg,
+        ctx: &Context,
+        motor: &mut dyn Motor,
+    ) -> TaskStatus {
         use TaskStatus::*;
         let face = |motor: &mut dyn Motor, goal: Option<Vec3>| match goal {
             Some(p) => {
@@ -430,6 +469,9 @@ impl AiNpc {
             }
             "TASK_STOP_MOVING" => {
                 if motor.stop_moving() {
+                    // SetIdealActivity(GetStoppedActivity()): ACT_IDLE (no arrival
+                    // activities are modeled).
+                    self.set_turn_activity(motor);
                     Complete
                 } else {
                     Running
@@ -596,6 +638,9 @@ impl AiNpc {
             "TASK_WAIT_INDEFINITE" => Running,
             "TASK_STOP_MOVING" => {
                 if motor.stop_moving() {
+                    // SetIdealActivity(GetStoppedActivity()): ACT_IDLE (no arrival
+                    // activities are modeled).
+                    self.set_turn_activity(motor);
                     Complete
                 } else {
                     Running
@@ -630,7 +675,11 @@ impl AiNpc {
             "TASK_WAIT_FOR_MOVEMENT" => match motor.movement() {
                 MoveStatus::Moving => Running,
                 MoveStatus::Failed => Failed,
-                MoveStatus::Arrived | MoveStatus::Idle => Complete,
+                MoveStatus::Arrived | MoveStatus::Idle => {
+                    // The goal ended: SetIdealActivity(GetStoppedActivity()).
+                    self.set_turn_activity(motor);
+                    Complete
+                }
             },
             "TASK_PLAY_SEQUENCE" | "TASK_RANGE_ATTACK1" | "TASK_RANGE_ATTACK2"
             | "TASK_MELEE_ATTACK1" | "TASK_MELEE_ATTACK2" | "TASK_RELOAD" | "TASK_BIG_FLINCH"

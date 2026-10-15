@@ -27,6 +27,11 @@ pub struct SceneMotor<'a> {
     pub dt: f32,
     /// MaxYawSpeed for the current activity (the motor turns at 10x it per second).
     pub yaw_speed: f32,
+    /// CNPC_MetroPolice::NPC_TranslateActivity: ACT_IDLE becomes ACT_IDLE_ANGRY while
+    /// the weapon is drawn and the cop is in combat or has the baton on.
+    pub idle_angry: bool,
+    /// Diagnostics: refused move requests by reason.
+    pub blocked_moves: &'a mut std::collections::BTreeMap<String, u32>,
 }
 /// SDK weapon acttables (weapon_stunstick.cpp, weapon_pistol.cpp, weapon_smg1.cpp
 /// m_acttable) for the NPC weapons the trainstation cops carry.
@@ -139,6 +144,11 @@ impl Motor for SceneMotor<'_> {
             .and_then(|e| e.get("additionalequipment"))
             .unwrap_or("")
             .to_ascii_lowercase();
+        let activity = if self.idle_angry && activity == "ACT_IDLE" {
+            "ACT_IDLE_ANGRY"
+        } else {
+            activity
+        };
         let translated = weapon_translate_activity(&weapon, activity)
             .filter(|t| self.scene.actor_has_activity(self.world, self.entity, t));
         self.scene
@@ -201,6 +211,11 @@ impl Motor for SceneMotor<'_> {
             self.transients,
         );
         *self.goal = Some(key);
+        if let GoalState::Blocked(reason) = &status {
+            let reason = format!("{reason:?}");
+            let reason: String = reason.chars().take(160).collect();
+            *self.blocked_moves.entry(reason).or_default() += 1;
+        }
         !matches!(status, GoalState::Blocked(_) | GoalState::Canceled)
     }
     fn movement(&self) -> MoveStatus {

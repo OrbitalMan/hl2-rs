@@ -123,6 +123,10 @@ pub struct Policing {
     /// The target's world-space center and whether the cop sees it (set each think).
     pub target_center: Option<Vec3>,
     pub target_visible: bool,
+    /// m_flNextHarassTime < curtime at this think (set with the conditions).
+    pub harass_due: bool,
+    /// The cop's origin at this think (for MaintainGoalPosition in fail selection).
+    pub origin: Vec3,
 }
 impl Policing {
     pub fn new(goal: PoliceGoal) -> Self {
@@ -138,10 +142,40 @@ impl Policing {
             harass_activity: "ACT_POLICE_HARASS1",
             target_center: None,
             target_visible: false,
+            harass_due: true,
+            origin: Vec3::ZERO,
         }
     }
+    /// CAI_PolicingBehavior::SelectFailSchedule: a failed chase returns to the post,
+    /// or warns again from it.
+    pub fn fail_schedule_for(&self, failed: &str) -> Option<&'static str> {
+        (failed == "SCHED_CHASE_ENEMY").then(|| {
+            if self.maintain_goal_position(self.origin) {
+                "SCHED_POLICE_RETURN_FROM_HARASS"
+            } else {
+                "SCHED_POLICE_WARN_TARGET"
+            }
+        })
+    }
+    /// CAI_PolicingBehavior::BuildScheduleTestBits: while standing idle or alert the
+    /// cop is interrupted by a too-close target (harass only once the next harass time
+    /// has passed).
+    pub fn custom_interrupts(&self, npc: &AiNpc) -> Conditions {
+        let mut c = Conditions::default();
+        if matches!(
+            npc.schedule.as_deref(),
+            Some("SCHED_IDLE_STAND" | "SCHED_ALERT_STAND")
+        ) {
+            if self.harass_due {
+                c.set(COND_POLICE_TARGET_TOO_CLOSE_HARASS);
+            }
+            c.set(COND_POLICE_TARGET_TOO_CLOSE_SUPPRESS);
+        }
+        c
+    }
     /// GatherConditions: HARASS within twice the radius (and 32 units of height),
-    /// SUPPRESS within the radius or for a knock-out.
+    /// SUPPRESS within the radius or for a knock-out. Distances are measured from the
+    /// goal's WorldSpaceCenter, which is its origin (ai_goal_police is a point entity).
     pub fn gather_conditions(&self, npc: &mut AiNpc) {
         npc.conditions.clear(COND_POLICE_TARGET_TOO_CLOSE_HARASS);
         npc.conditions.clear(COND_POLICE_TARGET_TOO_CLOSE_SUPPRESS);
@@ -151,7 +185,7 @@ impl Policing {
         if self.goal.should_knock_out(target, self.target_visible) {
             npc.conditions.set(COND_POLICE_TARGET_TOO_CLOSE_SUPPRESS);
         }
-        let center = self.goal.origin + Vec3::Z * 36.;
+        let center = self.goal.origin;
         let distance = (center - target).truncate().length_squared();
         let radius = self.goal.radius * PATROL_RADIUS_RATIO;
         if distance < radius * radius && (center.z - target.z).abs() < 32. {
@@ -256,9 +290,21 @@ impl Behavior for Policing {
     fn translate_schedule(&mut self, name: &str) -> String {
         name.to_owned()
     }
+    fn custom_interrupts(&self, npc: &AiNpc) -> Conditions {
+        Policing::custom_interrupts(self, npc)
+    }
+    fn select_fail_schedule(&mut self, npc: &AiNpc, failed: &str) -> String {
+        match self.fail_schedule_for(failed) {
+            Some(schedule) => schedule.into(),
+            None => npc
+                .fail_schedule
+                .clone()
+                .unwrap_or_else(|| "SCHED_FAIL".into()),
+        }
+    }
     fn start_task(
         &mut self,
-        _npc: &mut AiNpc,
+        npc: &mut AiNpc,
         task: &str,
         arg: &TaskArg,
         ctx: &Context,
@@ -306,6 +352,11 @@ impl Behavior for Policing {
                         harass = on_radius;
                     }
                 }
+                // The SDK navigator builds a ground route to the point (the center-to-center
+                // ray can put it a few units under the floor); our controller needs a
+                // standable goal, so it keeps the cop's floor height (native walks ~20 units
+                // at the same z toward a player 85 units away).
+                harass.z = ctx.origin.z;
                 if motor.path_to(harass, false) {
                     motor.set_activity("ACT_WALK_ANGRY");
                     TaskStatus::Complete
@@ -317,11 +368,14 @@ impl Behavior for Policing {
                 if motor.face(Goal::Yaw(self.goal.yaw)) {
                     TaskStatus::Complete
                 } else {
+                    // SetTurnActivity (no turn activities modeled: ACT_IDLE).
+                    npc.set_turn_activity(motor);
                     TaskStatus::Running
                 }
             }
             "TASK_PLAY_SEQUENCE" if matches!(arg, TaskArg::Activity(a) if a == "ACT_POLICE_HARASS1") =>
             {
+                npc.activity = self.harass_activity.into();
                 motor.set_activity(self.harass_activity);
                 TaskStatus::Running
             }
@@ -391,6 +445,8 @@ impl Policing {
         ctx: &Context,
         motor: &mut dyn Motor,
     ) {
+        self.harass_due = self.next_harass < ctx.now;
+        self.origin = ctx.origin;
         self.gather_conditions(npc);
         npc.maintain(schedules, self, ctx, motor);
     }
@@ -415,9 +471,10 @@ mod tests {
     fn cop() -> (Policing, AiNpc, Schedules) {
         let mut schedules = Schedules::default();
         add_schedules(&mut schedules);
+        // Like the d1_trainstation_02 posts: the goal point sits a few units above the floor.
         let goal = PoliceGoal {
             entity: 10,
-            origin: Vec3::ZERO,
+            origin: Vec3::new(0., 0., 9.),
             yaw: 0.,
             radius: 64.,
             target: Some(0),
@@ -484,8 +541,9 @@ mod tests {
             target: police.target_center,
             ..Default::default()
         };
-        police.think(&mut npc, &schedules, &ctx, &mut motor);
+        police.gather_conditions(&mut npc);
         assert!(npc.conditions.has(COND_POLICE_TARGET_TOO_CLOSE_SUPPRESS));
+        police.think(&mut npc, &schedules, &ctx, &mut motor);
         assert_eq!(npc.schedule.as_deref(), Some("SCHED_COMBAT_FACE"));
         assert!(police.hostile && police.baton && police.warnings == POLICE_MAX_WARNINGS);
     }
@@ -514,7 +572,24 @@ mod tests {
             npc.schedule.as_deref(),
             Some("SCHED_POLICE_RETURN_FROM_HARASS")
         );
-        assert_eq!(motor.path, Some(Vec3::ZERO));
+        assert_eq!(motor.path, Some(Vec3::new(0., 0., 9.)));
         assert_eq!(motor.activity, "ACT_WALK");
+    }
+
+    #[test]
+    fn harass_is_measured_from_the_goal_point_not_a_hull_center() {
+        // terminal_side_cop's goal 674 (d1_trainstation_02): origin z 73, PoliceRadius 48.
+        // Native (ent_text) harasses a player whose center is 84 units away at z 72.
+        let (mut police, mut npc, _) = cop();
+        police.goal.origin = Vec3::new(-3744., -2604., 73.);
+        police.goal.radius = 48.;
+        police.target_center = Some(Vec3::new(-3660., -2608., 72.));
+        police.gather_conditions(&mut npc);
+        assert!(npc.conditions.has(COND_POLICE_TARGET_TOO_CLOSE_HARASS));
+        assert!(!npc.conditions.has(COND_POLICE_TARGET_TOO_CLOSE_SUPPRESS));
+        // More than 32 units of height apart: nothing.
+        police.target_center = Some(Vec3::new(-3660., -2608., 30.));
+        police.gather_conditions(&mut npc);
+        assert!(!npc.conditions.has(COND_POLICE_TARGET_TOO_CLOSE_HARASS));
     }
 }

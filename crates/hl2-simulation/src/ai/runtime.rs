@@ -103,6 +103,8 @@ pub struct Diagnostics {
     pub culled_sentences: u64,
     pub player_hits: u64,
     pub unknown_goals: BTreeMap<String, u32>,
+    /// AI move requests the npc Controller refused, by reason.
+    pub blocked_moves: BTreeMap<String, u32>,
 }
 #[derive(Serialize)]
 pub struct AiRuntime {
@@ -566,6 +568,11 @@ impl AiRuntime {
             } else {
                 true
             };
+            // CAI_PolicingBehavior: SetTarget(goal->GetTarget()), the player even when
+            // notarget (his senses ignore him; the policing tasks still face him).
+            if target.is_some_and(|t| t.0 == PLAYER) {
+                ctx.target = Some(player.feet);
+            }
         }
         if actor.npc.state == NpcState::Script || actor.npc.state == NpcState::None {
             actor.npc.state = NpcState::Idle;
@@ -591,6 +598,11 @@ impl AiRuntime {
             }
         }
         if !hates && actor.npc.enemy == Some(PLAYER) && cop.chase_until <= now {
+            actor.npc.enemy = None;
+        }
+        // ChooseEnemy rejects a notarget player (BestEnemy), e.g. one the policing
+        // behavior made its enemy with SetEnemy (native: the cop falls back to alert).
+        if player.noclip && actor.npc.enemy == Some(PLAYER) {
             actor.npc.enemy = None;
         }
         actor.npc.enemies.refresh(
@@ -650,13 +662,17 @@ impl AiRuntime {
                             != 0,
                     )
                 }),
-                go_idle: actor.npc.enemy.is_none(),
+                // CAI_BaseNPC::ShouldGoToIdleState is false for cops: alert returns to
+                // idle only through TASK_SUGGEST_STATE (SCHED_ALERT_STAND).
+                go_idle: false,
                 ideal: match actor.npc.ideal_state {
                     NpcState::None | NpcState::Script => NpcState::Idle,
                     other => other,
                 },
             },
         );
+        // SetIdealState(SelectIdealState()): later thinks fall back to this ideal.
+        actor.npc.ideal_state = ideal;
         if ideal != actor.npc.state {
             actor.npc.state = ideal;
             actor.npc.schedule = None;
@@ -682,6 +698,11 @@ impl AiRuntime {
         } else {
             45.
         };
+        let weapon_drawn = scene
+            .entity(world, id)
+            .and_then(|e| e.get("additionalequipment"))
+            .is_some_and(|w| !w.is_empty());
+        let idle_angry = weapon_drawn && (actor.npc.state == NpcState::Combat || cop.baton_active);
         let mut motor = SceneMotor {
             entity: id,
             world,
@@ -693,10 +714,20 @@ impl AiRuntime {
             serial: &mut self.serial,
             dt: if dt > 0. { dt } else { THINK_INTERVAL as f32 },
             yaw_speed,
+            idle_angry,
+            blocked_moves: &mut self.diagnostics.blocked_moves,
         };
         actor
             .npc
             .maintain(&self.schedules, cop.as_mut(), &ctx, &mut motor);
+        // The idle activity is translated again when the angry-idle inputs change
+        // (MaintainActivity re-translates the ideal ACT_IDLE).
+        if idle_angry != cop.idle_angry {
+            cop.idle_angry = idle_angry;
+            if actor.npc.activity == "ACT_IDLE" {
+                super::schedule::Motor::set_activity(&mut motor, "ACT_IDLE");
+            }
+        }
         self.diagnostics.thinks += 1;
         // Policing outputs on the goal entity.
         if let Some(policing) = &mut cop.policing {
@@ -943,7 +974,7 @@ mod tests {
                 entity(&[
                     ("classname", "ai_goal_police"),
                     ("targetname", "post"),
-                    ("origin", "0 0 0"),
+                    ("origin", "0 0 9"),
                     ("angles", "0 0 0"),
                     ("PoliceRadius", "100"),
                     ("PoliceTarget", "!player"),
@@ -1134,6 +1165,36 @@ mod tests {
         r.scene.states[0].scripted_by = None;
         run(&mut r, 10, player_at(30.));
         assert_ne!(r.ai.actors[&0].npc.state, NpcState::Script);
+    }
+
+    #[test]
+    fn policing_warns_a_noclip_player_like_native_notarget() {
+        // The oracle runs noclip + notarget, and native still harasses at 80 units: the
+        // policing conditions read the goal target, not the cop's senses.
+        let mut r = rig();
+        r.scene
+            .ai_inputs
+            .push((0, "setpolicegoal".into(), "post".into(), usize::MAX));
+        r.ai.enabled = true;
+        let player = PlayerState {
+            noclip: true,
+            ..player_at(150.)
+        };
+        run(&mut r, 40, player);
+        let AiClass::Metropolice(cop) = &r.ai.actors[&0].class;
+        let policing = cop.policing.as_ref().unwrap();
+        assert!(policing.warnings >= 1, "{:?}", r.ai.actors[&0].npc.schedule);
+        // One warning per 4-6 s: the warn schedule does not fail and re-warn at once.
+        run(&mut r, 150, player);
+        let AiClass::Metropolice(cop) = &r.ai.actors[&0].class;
+        let policing = cop.policing.as_ref().unwrap();
+        assert_eq!(policing.warnings, 1, "{:?}", r.ai.actors[&0].npc.schedule);
+        assert!(!policing.hostile);
+        // The idle stand is interrupted once the next harass time passes (4-6 s), not
+        // only when its own wait ends.
+        run(&mut r, 300, player);
+        let AiClass::Metropolice(cop) = &r.ai.actors[&0].class;
+        assert_eq!(cop.policing.as_ref().unwrap().warnings, 2);
     }
 
     #[test]
