@@ -336,6 +336,13 @@ pub fn fall_damage(fall_speed: f32) -> f32 {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Inventory {
+    /// Player tracers this tick (start, end, view right): FireBullets m_iTracerFreq 2 for
+    /// the pistol, SMG1 and AR2 (CBaseCombatWeapon / CHLMachineGun::PrimaryAttack),
+    /// none for the 357 and shotgun; ComputeTracerStartPosition's player offset.
+    #[serde(skip)]
+    pub tracer_requests: Vec<(Vec3, Vec3, Vec3)>,
+    #[serde(skip)]
+    tracer_count: u32,
     #[serde(skip)]
     /// Bullet/melee hits with whether melee and the shot direction.
     pub impacts: Vec<(crate::physics::RayHit, bool, Vec3)>,
@@ -429,6 +436,8 @@ pub struct Inventory {
 impl Default for Inventory {
     fn default() -> Self {
         Self {
+            tracer_requests: Vec::new(),
+            tracer_count: 0,
             impacts: Vec::new(),
             blood: Vec::new(),
             projectile_spawns: Vec::new(),
@@ -1185,6 +1194,22 @@ impl Inventory {
                 } else {
                     physics.impact_ray(eye, aim, f32::from_bits(0x475db3d7))
                 };
+                if !melee
+                    && matches!(
+                        w.class.as_str(),
+                        "weapon_pistol" | "weapon_smg1" | "weapon_ar2"
+                    )
+                {
+                    if self.tracer_count.is_multiple_of(2) {
+                        let right = direction.cross(Vec3::Z).normalize_or(Vec3::NEG_Y);
+                        let start = eye + Vec3::new(0., 0., -4.) + right * 2. + direction * 16.;
+                        let end = hit
+                            .as_ref()
+                            .map_or(eye + aim * MAX_TRACE_LENGTH, |h| h.position);
+                        self.tracer_requests.push((start, end, right));
+                    }
+                    self.tracer_count = self.tracer_count.wrapping_add(1);
+                }
                 if let Some(hit) = hit {
                     self.hit(world, scene, physics, w, hit, aim, melee, eye);
                 }
@@ -2031,8 +2056,8 @@ pub struct NpcBullets {
     pub blood: Vec<(crate::physics::RayHit, BloodColor)>,
     /// (attacker origin, damage) per pellet that struck the player.
     pub player_hits: Vec<(Vec3, f32)>,
-    /// Tracer segments (start, end).
-    pub tracers: Vec<(Vec3, Vec3)>,
+    /// Tracer segments (shooter, start, end).
+    pub tracers: Vec<(usize, Vec3, Vec3)>,
 }
 /// MAX_TRACE_LENGTH.
 pub const MAX_TRACE_LENGTH: f32 = 56755.84;
@@ -2066,12 +2091,14 @@ pub fn npc_fire_bullets(
         if let Some(t) = player_distance.filter(|t| *t < world_distance) {
             out.player_hits.push((shot.origin, shot.damage));
             if shot.tracer {
-                out.tracers.push((shot.origin, shot.origin + direction * t));
+                out.tracers
+                    .push((shot.attacker, shot.origin, shot.origin + direction * t));
             }
             continue;
         }
         if shot.tracer {
             out.tracers.push((
+                shot.attacker,
                 shot.origin,
                 shot.origin + direction * world_distance.min(8192.),
             ));
@@ -2868,7 +2895,7 @@ mod tests {
         );
         assert_eq!(out.player_hits.len(), 1);
         assert!(out.impacts.is_empty());
-        assert!((out.tracers[0].1.x - 44.).abs() < 1e-3, "{:?}", out.tracers);
+        assert!((out.tracers[0].2.x - 44.).abs() < 1e-3, "{:?}", out.tracers);
         // A player behind the wall (or ducked below the line) is not hit.
         let mut out = NpcBullets::default();
         npc_fire_bullets(

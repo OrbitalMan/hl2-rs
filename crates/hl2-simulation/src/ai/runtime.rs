@@ -132,6 +132,9 @@ pub struct AiRuntime {
     weapon_defs: BTreeMap<String, NpcWeaponDef>,
     /// FireBullets requests from NPC weapons this tick, for the host's bullet path.
     pub shots: Vec<NpcShot>,
+    /// AE_NPC_MUZZLEFLASH events (NPC, options) for the host's effects.
+    #[serde(skip)]
+    pub muzzle_flashes: Vec<(usize, String)>,
     /// Hits on the player for the host to apply.
     pub player_hits: Vec<PlayerHit>,
     pub diagnostics: Diagnostics,
@@ -272,6 +275,7 @@ impl AiRuntime {
             stunstick_sounds,
             weapon_defs,
             shots: Vec::new(),
+            muzzle_flashes: Vec::new(),
             player_hits: Vec::new(),
             diagnostics: Diagnostics::default(),
             random: 0x9e37_79b9_7f4a_7c15,
@@ -540,7 +544,14 @@ impl AiRuntime {
                     .get(&weapon.class)
                     .and_then(|d| world.rigs.get(&npc_weapons::rig_key(&d.world_model)))
                 {
-                    events.extend(weapon.due_events(rig, now));
+                    for (name, event, options) in weapon.due_events(rig, now) {
+                        // AE_NPC_MUZZLEFLASH is a client event (DispatchMuzzleEffect).
+                        if name.eq_ignore_ascii_case("AE_NPC_MUZZLEFLASH") {
+                            self.muzzle_flashes.push((id, options));
+                        } else {
+                            events.push((name, event));
+                        }
+                    }
                 }
             }
             if !events.is_empty() {

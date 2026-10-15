@@ -16,6 +16,7 @@ pub mod gibs;
 pub mod globals;
 pub mod grab;
 pub mod impact_damage;
+pub mod muzzle_effects;
 pub mod npc;
 mod npc_acttables;
 pub mod npc_makers;

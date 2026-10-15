@@ -400,7 +400,7 @@ impl NpcWeapon {
         &mut self,
         rig: &modkit_core::animation::Rig,
         now: f64,
-    ) -> Vec<(String, i32)> {
+    ) -> Vec<(String, i32, String)> {
         let Some(sequence) = self.sequence.as_mut() else {
             return Vec::new();
         };
@@ -421,7 +421,7 @@ impl NpcWeapon {
                 let at = sequence.started + f64::from(e.cycle * span);
                 at > from && at <= now
             })
-            .map(|e| (e.name.clone(), e.id))
+            .map(|e| (e.name.clone(), e.id, e.options.clone()))
             .collect()
     }
 }

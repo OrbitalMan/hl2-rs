@@ -1217,4 +1217,35 @@ mod owned_weapon_tests {
             }
         }
     }
+    #[test]
+    #[ignore = "requires owned installed HL2"]
+    fn owned_muzzle_flash_events_dump() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        for model in [
+            "models/weapons/v_pistol.mdl",
+            "models/weapons/v_smg1.mdl",
+            "models/weapons/v_357.mdl",
+            "models/weapons/v_shotgun.mdl",
+            "models/weapons/v_irifle.mdl",
+            "models/weapons/w_pistol.mdl",
+            "models/weapons/w_smg1.mdl",
+            "models/weapons/w_shotgun.mdl",
+            "models/weapons/w_irifle.mdl",
+            "models/police.mdl",
+        ] {
+            let first = super::load(&vfs, model, &Default::default()).unwrap();
+            let wanted = first.activities.iter().map(|a| a.to_lowercase()).collect();
+            let rig = super::load(&vfs, model, &wanted).unwrap();
+            for (name, clip) in &rig.clips {
+                for e in &clip.events {
+                    if (5000..6000).contains(&e.id) || e.name.contains("MUZZLE") {
+                        eprintln!(
+                            "{model} {name} {} {:?} {:?} {}",
+                            e.id, e.name, e.options, e.cycle
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

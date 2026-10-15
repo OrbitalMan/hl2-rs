@@ -245,6 +245,10 @@ pub struct Effects {
     load_sparks: f64,
     /// The newest gravity gun EFFECT_LAUNCH already given its GaussExplosion.
     launch_sparks: f64,
+    /// The newest shot effect consumed (Gameplay::shot_effects) and the start time of the
+    /// newest viewmodel fire animation given its AE_MUZZLEFLASH.
+    shot_serial: u64,
+    player_flash: f64,
     model_errors: Vec<String>,
     draws: usize,
     grenade_draws: usize,
@@ -262,6 +266,7 @@ impl Effects {
         serde_json::json!({"sprite_draws":self.draws,"pooled_quads":self.quads.len(),
             "viewmodel_sprite_draws":self.viewmodel_draws,"stuck_bolt_draws":self.stuck.len(),
             "grenade_draws":self.grenade_draws,"gib_draws":self.gib_draws,"decal_draws":self.mark_draws,"pose_mismatches":self.pose_mismatches, "observed_decals":self.observed_decals,"observed_grenades":self.observed_grenades,
+            "muzzle_flashes":self.source.muzzle.flashes,"tracers":self.source.muzzle.tracers_made,
             "ball_frames":self.source.ball_frames,"effect_frames":self.source.effect_frames,
             "particle_emitters":self.source.particles.diagnostics,"missing_particle_draws":self.source.missing_particle_draws,
             "sprite_errors":self.source.errors,"model_errors":self.model_errors,
@@ -389,6 +394,8 @@ pub fn install(
         rng: 0x2545_f491_4f6c_dd1d,
         load_sparks: f64::NEG_INFINITY,
         launch_sparks: f64::NEG_INFINITY,
+        shot_serial: 0,
+        player_flash: f64::NEG_INFINITY,
         model_errors: loaded.effects.model_errors.clone(),
         draws: 0,
         grenade_draws: 0,
@@ -514,7 +521,39 @@ fn viewmodel_quads(
                 .fold(f64::NEG_INFINITY, f64::max)
         })
         .filter(|at| *at > effects.load_sparks);
-    if described.sprites.is_empty() && described.beams.is_empty() && new_load.is_none() {
+    // AE_MUZZLEFLASH on the viewmodel's fire sequence (cycle 0 in the owned models).
+    let elapsed_fire = (game.scene.time - game.inventory.animation_at).max(0.) as f32;
+    let flash_due = (game.inventory.animation_at > effects.player_flash)
+        .then_some(())
+        .and_then(|()| {
+            game.weapons
+                .get(&game.inventory.active)
+                .and_then(|w| {
+                    game.world
+                        .rigs
+                        .get(&format!("{}#0", w.viewmodel.to_lowercase()))
+                })
+                .and_then(|rig| rig.clips.get(&game.inventory.animation))
+                .and_then(|clip| {
+                    clip.events
+                        .iter()
+                        .find(|e| e.name.eq_ignore_ascii_case("AE_MUZZLEFLASH"))
+                        .filter(|e| e.cycle * clip.duration() <= elapsed_fire)
+                        .and_then(|e| hl2_simulation::muzzle_effects::parse(&e.options))
+                })
+        });
+    let first_person_live = effects
+        .source
+        .muzzle
+        .emitters
+        .iter()
+        .any(|e| e.first_person);
+    if described.sprites.is_empty()
+        && described.beams.is_empty()
+        && new_load.is_none()
+        && flash_due.is_none()
+        && !first_person_live
+    {
         return Vec::new();
     }
     let Some(rig) = game.weapons.get(&game.inventory.active).and_then(|w| {
@@ -596,6 +635,37 @@ fn viewmodel_quads(
             });
         }
     }
+    if let Some((kind, attachment)) = flash_due {
+        effects.player_flash = game.inventory.animation_at;
+        if let Some(frame) = rig
+            .attachment(&attachment)
+            .and_then(|a| rig.attachment_matrix(&matrices, a))
+        {
+            let rng = &mut effects.rng;
+            let mut random = || {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                (*rng >> 40) as f32 / (1u32 << 24) as f32
+            };
+            effects.source.muzzle.flash(
+                kind,
+                true,
+                frame,
+                game.inventory.animation_at,
+                &mut random,
+            );
+        }
+    }
+    // First-person flashes draw in viewmodel space at the viewmodel camera's scale.
+    let mut flashes = effects.source.muzzle.particle_quads(
+        true,
+        game.scene.time,
+        -glam::Vec3::Y,
+        glam::Vec3::Z,
+        vm::attachment_size_factor(viewmodel_fov, fov),
+    );
+    flashes.retain(|q| effects.source.sprites.contains_key(&q.material));
     let sprites = &effects.source.sprites;
     let rng = &mut effects.rng;
     let mut random = || {
@@ -604,13 +674,53 @@ fn viewmodel_quads(
         *rng ^= *rng << 17;
         (*rng >> 40) as f32 / (1u32 << 24) as f32
     };
-    vm::viewmodel_quads(
+    let mut quads = vm::viewmodel_quads(
         &described,
         &|anchor| vm::anchor_position(rig, &matrices, anchor),
         &|material| sprites.get(material).map(|s| f32::from(s.image.width)),
         &mut random,
         vm::attachment_size_factor(viewmodel_fov, fov),
-    )
+    );
+    quads.extend(flashes);
+    quads
+}
+/// New muzzle flashes and tracers from the simulation's shot effect log.
+fn shot_effects(game: &Gameplay, effects: &mut Effects) {
+    use crate::gameplay::ShotEffect;
+    use hl2_simulation::muzzle_effects as fx;
+    let Effects {
+        source,
+        rng,
+        shot_serial,
+        ..
+    } = effects;
+    let mut random = || {
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        (*rng >> 40) as f32 / (1u32 << 24) as f32
+    };
+    for (serial, at, effect) in &game.shot_effects {
+        if *serial <= *shot_serial {
+            continue;
+        }
+        *shot_serial = *serial;
+        match effect {
+            ShotEffect::NpcFlash(kind, frame) => {
+                source.muzzle.flash(*kind, false, *frame, *at, &mut random)
+            }
+            ShotEffect::NpcTracer(start, end) => {
+                source
+                    .muzzle
+                    .tracer(fx::npc_tracer(*start, *end, *at, &mut random))
+            }
+            ShotEffect::PlayerTracer(start, end, right) => {
+                source
+                    .muzzle
+                    .tracer(fx::player_tracer(*start, *end, *right, *at, &mut random))
+            }
+        }
+    }
 }
 pub fn present(
     mut commands: Commands,
@@ -621,6 +731,7 @@ pub fn present(
     mut draws: Query<(&mut Transform, &mut Visibility)>,
 ) {
     let direction = glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
+    shot_effects(&game, &mut effects);
     effects.source.frame(
         &game.projectiles,
         glam::Vec3::from_array(sim.eye().to_array()),

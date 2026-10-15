@@ -979,6 +979,56 @@ impl Scene {
             })
             .collect()
     }
+    /// The world frame of an attachment on a bone-merged weapon model (`weapon_key` in
+    /// `World::rigs`) carried by NPC `id`: CBoneMergeCache gives the weapon bone its
+    /// owner's same-named bone (or keeps its bind offset from the nearest merged
+    /// ancestor). `index` is 1-based (GetAttachment) when `name` is None.
+    pub fn merged_attachment_frame(
+        &self,
+        world: &World,
+        id: usize,
+        weapon_key: &str,
+        name: Option<&str>,
+        index: usize,
+    ) -> Option<Mat4> {
+        let state = self.states.get(id)?;
+        let instance = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))?;
+        let rig = world.rigs.get(&instance.asset_key())?;
+        let weapon = world.rigs.get(weapon_key)?;
+        let attachment = match name {
+            Some(n) => weapon.attachment(n)?,
+            None => weapon.attachments.get(index.checked_sub(1)?)?,
+        };
+        let mut bone = Some(attachment.bone);
+        let (merged, owner) = loop {
+            let b = bone?;
+            if let Some(j) = rig
+                .bones
+                .iter()
+                .position(|o| o.name.eq_ignore_ascii_case(&weapon.bones[b].name))
+            {
+                break (b, j);
+            }
+            bone = weapon.bones[b].parent;
+        };
+        let skin = self.actor_matrices(rig, id);
+        let owner_bone = *skin.get(owner)? * rig.bones[owner].inverse_bind.inverse();
+        let model = owner_bone
+            * weapon.bones[merged].inverse_bind
+            * weapon.bones[attachment.bone].inverse_bind.inverse()
+            * attachment.local;
+        let (_, rotation, translation) = model.to_scale_rotation_translation();
+        Some(
+            Mat4::from_rotation_translation(state.rotation, state.origin)
+                * Mat4::from_rotation_translation(
+                    rotation.normalize(),
+                    translation * instance.scale,
+                ),
+        )
+    }
     /// SetParent/SetParentAttachment: keep the current world pose as a local offset, or
     /// snap onto the parent frame.
     fn set_parent(

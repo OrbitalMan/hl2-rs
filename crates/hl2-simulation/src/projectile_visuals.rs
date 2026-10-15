@@ -74,6 +74,8 @@ pub struct ProjectileVisuals {
     spark_frame: f64,
     /// Viewmodel-space sprite/beam quads for the viewmodel camera (viewmodel_effects.rs).
     pub viewmodel_quads: Vec<Quad>,
+    /// Live muzzle flashes and bullet tracers (muzzle_effects.rs).
+    pub muzzle: crate::muzzle_effects::MuzzleEffects,
 }
 /// One CTrailParticles TrailParticle of FX_ElectricSpark.
 #[derive(Clone, Debug)]
@@ -202,6 +204,7 @@ impl ProjectileVisuals {
             sparks_seen: std::collections::HashSet::new(),
             spark_frame: 0.,
             viewmodel_quads: Vec::new(),
+            muzzle: Default::default(),
         }
     }
     fn range(&mut self, low: f32, high: f32) -> f32 {
@@ -336,6 +339,7 @@ impl ProjectileVisuals {
         for name in SPRITES
             .iter()
             .chain(crate::explosion_particles::MATERIALS)
+            .chain(crate::muzzle_effects::MATERIALS)
             .collect::<std::collections::BTreeSet<_>>()
         {
             match load_sprite(vfs, name) {
@@ -545,6 +549,12 @@ impl ProjectileVisuals {
     ) {
         self.quads.clear();
         let axes = basis(direction);
+        // NPC muzzle flashes and every tracer are world draws.
+        self.muzzle.retain(time);
+        let mut shots = self.muzzle.particle_quads(false, time, axes.0, axes.1, 1.);
+        shots.extend(self.muzzle.tracer_quads(time, eye));
+        shots.retain(|q| self.sprites.contains_key(&q.material));
+        self.quads.extend(shots);
         self.previous
             .retain(|id, _| projectiles.active.iter().any(|p| p.id == *id));
         for ball in projectiles

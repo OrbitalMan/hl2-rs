@@ -19,6 +19,14 @@ use serde::Deserialize;
 use source_assets::vpk::Vfs;
 use std::{collections::BTreeMap, sync::Arc};
 
+/// A muzzle flash or tracer for the effects system (muzzle_effects.rs).
+#[derive(Clone, Debug)]
+pub enum ShotEffect {
+    NpcFlash(hl2_simulation::muzzle_effects::MuzzleKind, glam::Mat4),
+    NpcTracer(Vec3, Vec3),
+    /// Start (ComputeTracerStartPosition), end and the view's right axis.
+    PlayerTracer(Vec3, Vec3, Vec3),
+}
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
@@ -146,8 +154,10 @@ pub struct Gameplay {
     /// Spawn requests and their CC_NPC_Create placement; runtime entity creation is not
     /// implemented (DESIGN step 14 note), so nothing is created yet.
     pub spawn_log: Vec<serde_json::Value>,
-    /// NPC bullet tracer segments of the last tick that fired (DESIGN 14w).
-    pub npc_tracers: Vec<(Vec3, Vec3)>,
+    /// Muzzle flashes and tracers made by recent ticks, numbered for the effects system
+    /// (which keeps the newest number it consumed); entries older than 0.5 s are dropped.
+    pub shot_effects: Vec<(u64, f64, ShotEffect)>,
+    pub shot_serial: u64,
     /// Pooled spawn entities already placed.
     pub spawn_used: std::collections::BTreeSet<usize>,
 }
@@ -341,7 +351,8 @@ impl Gameplay {
             spawn_overlay: Default::default(),
             spawn_console: Default::default(),
             spawn_log: Vec::new(),
-            npc_tracers: Vec::new(),
+            shot_effects: Vec::new(),
+            shot_serial: 0,
             spawn_used: Default::default(),
         }
     }
@@ -375,7 +386,8 @@ impl Gameplay {
             spawn_overlay: Default::default(),
             spawn_console: Default::default(),
             spawn_log: Vec::new(),
-            npc_tracers: Vec::new(),
+            shot_effects: Vec::new(),
+            shot_serial: 0,
             spawn_used: Default::default(),
             player_damage,
             damage_messages: Vec::new(),
@@ -458,6 +470,11 @@ impl Gameplay {
         };
         self.spawn_log.push(serde_json::json!({"request":request,"placement":placement.ok(),"entity":entity,"message":message}));
         message
+    }
+    fn push_shot_effect(&mut self, effect: ShotEffect) {
+        self.shot_serial += 1;
+        self.shot_effects
+            .push((self.shot_serial, self.scene.time, effect));
     }
     fn ai_player_state(
         &self,
@@ -853,8 +870,47 @@ impl Gameplay {
                 self.impacts
                     .add_blood(hit, color, &self.world, physics, &self.scene);
             }
-            self.npc_tracers = bullets.tracers;
+            // ComputeTracerStartPosition: an NPC's tracer starts at its weapon's first
+            // attachment (the muzzle), else at the shoot position.
+            for (attacker, start, end) in bullets.tracers {
+                let start = self
+                    .ai
+                    .weapon_world_model(attacker)
+                    .and_then(|model| {
+                        self.scene.merged_attachment_frame(
+                            &self.world,
+                            attacker,
+                            &format!("{model}#0"),
+                            None,
+                            1,
+                        )
+                    })
+                    .map_or(start, |frame| frame.w_axis.truncate());
+                self.push_shot_effect(ShotEffect::NpcTracer(start, end));
+            }
         }
+        // AE_NPC_MUZZLEFLASH: the weapon world model's named attachment on its owner.
+        for (npc, options) in std::mem::take(&mut self.ai.muzzle_flashes) {
+            let Some((kind, attachment)) = hl2_simulation::muzzle_effects::parse(&options) else {
+                continue;
+            };
+            if let Some(frame) = self.ai.weapon_world_model(npc).and_then(|model| {
+                self.scene.merged_attachment_frame(
+                    &self.world,
+                    npc,
+                    &format!("{model}#0"),
+                    Some(&attachment),
+                    1,
+                )
+            }) {
+                self.push_shot_effect(ShotEffect::NpcFlash(kind, frame));
+            }
+        }
+        for (start, end, right) in std::mem::take(&mut self.inventory.tracer_requests) {
+            self.push_shot_effect(ShotEffect::PlayerTracer(start, end, right));
+        }
+        let horizon = self.scene.time - 0.5;
+        self.shot_effects.retain(|(_, at, _)| *at >= horizon);
         actors::tick_npcs(
             &mut self.npcs,
             &mut self.scene,
