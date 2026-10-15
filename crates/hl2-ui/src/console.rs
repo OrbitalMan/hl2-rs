@@ -3149,15 +3149,26 @@ mod tests {
 
         let scale = Painter::scale_for(1080.);
         let expected_plaque_w = (crate::gameui::loading::BACKGROUND_LOADING_SIZE.x * scale).round();
-        let expected_plaque_h = (crate::gameui::loading::BACKGROUND_LOADING_SIZE.y * scale).round();
-        let plaque_quad = quads
+        let margin = (24.0 * scale).round();
+        let expected_x = (1920.0 - expected_plaque_w - margin).max(0.0).round();
+
+        // Plaque is drawn via shared rounded dialog frame (no outer 3D border)
+        let middle_bar = quads
             .iter()
             .find(|q| {
-                (q.destination.w - expected_plaque_w).abs() < 0.1
-                    && (q.destination.h - expected_plaque_h).abs() < 0.1
+                (q.destination.w - expected_plaque_w).abs() < 1.0
+                    && (q.destination.x - expected_x).abs() < 1.0
+                    && q.vertices.is_none()
+                    && !q.blur
             })
-            .expect("bottom-right corner plaque quad");
-        assert!(!plaque_quad.blur);
+            .expect("bottom-right corner plaque middle bar");
+        assert_eq!(middle_bar.color, Color::new(0.0, 0.0, 0.0, 0.65));
+
+        let corner_polygons = quads
+            .iter()
+            .filter(|q| q.vertices.is_some() && q.destination.x >= expected_x - 1.0)
+            .count();
+        assert_eq!(corner_polygons, 4);
     }
 
     #[test]

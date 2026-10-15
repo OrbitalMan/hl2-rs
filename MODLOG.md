@@ -1,6 +1,40 @@
 # MODLOG
 
-## 2026-10-15 Unified pointer coordinate conversion and window client alignment
+## 2026-10-15 Background loading plaque styling routed through shared dialog frame
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`:
+  - Added `bg_color: Option<Color>` field to `FrameSpec` with builder method `with_bg_color`.
+  - Updated `Painter::frame_spec` to use `spec.bg_color.unwrap_or(self.theme.frame_bg)` and gate title drawing on `!spec.title.is_empty()`.
+- `hl2-ui::gameui::loading`:
+  - Routed `draw_background_plaque` through `Painter::frame_spec(FrameSpec::new(BACKGROUND_LOADING_SIZE, "").without_close().with_bg_color(Color::new(0.0, 0.0, 0.0, 0.65)), None)` instead of manual rectangular fill and `p.raised` 3D border.
+  - Added unit test `test_background_loading_plaque_styled_with_shared_frame_rounded_corners_no_3d_border` verifying corner polygon quads are emitted (rounded corners), translucent dark fill color is preserved, and no outer 3D raised border rectangles are drawn.
+  - Added unit test `test_gameplay_loading_dialog_uses_shared_frame_rounded_corners_no_3d_border` asserting gameplay loading dialog routes through shared frame with rounded corners and no outer 3D border.
+  - Updated existing plaque drawing tests in `loading.rs` and `console.rs` to assert rounded frame structure instead of single square quads.
+- Audited all dialog-like surfaces:
+  - `MessageBox` (Quit confirmation, ReturnToMainMenu confirmation, KeyDefaults confirmation): uses `p.frame_with_close` -> shared `FrameSpec` with rounded corners and no outer 3D border.
+  - `OptionsDialog` (main dialog, subdialogs Gamma and Credits): uses `p.frame_with_close` / `sp.frame_with_close` -> shared `FrameSpec` with rounded corners and no outer 3D border.
+  - `LoadingDialog` (gameplay map loading): uses `p.frame_with_close` -> shared `FrameSpec` with rounded corners and no outer 3D border.
+  - Developer console (`Console` in `console.rs`): developer terminal panel using custom retained border lines, confirmed as developer tool surface rather than GameUI dialog.
+- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented shared frame routing for all dialog-like surfaces.
+- `HL2RS/STATUS.md`: updated status to record background loading plaque styling.
+
+**Why:**
+- The bottom-right loading plaque shown during background loading bypassed `Painter::frame_spec`, drawing a hardcoded rectangular quad and calling `p.raised` (Windows 95 outer 3D raised border). Routing it through `FrameSpec` with `FrameStyle::DEFAULT` applies the authentic rounded corners (`FRAME_CORNER_RADIUS: 5.0`) and eliminates the 3D raised border, matching the other GameUI dialogs.
+
+**Tested how:**
+- `cargo test -p hl2-ui --lib`: 160 tests passed (including `test_background_loading_plaque_styled_with_shared_frame_rounded_corners_no_3d_border`).
+- `cargo test -p hl2-bevy --bin hl2-bevy`: 70 tests passed.
+- `cargo clippy -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: clean.
+- `cargo fmt --check`: clean.
+
+**Result:** Background loading plaque styling matches other GameUI dialogs (rounded corners, no outer 3D border).
+
+**Still broken or not tested:** Visual appearance of rounded corner arcs on the background loading plaque is unverified and needs manual check (launch game, click Episode One/Two/Lost Coast submenu, observe bottom-right "LOADING..." plaque has rounded corners and no 3D border).
+
+**Next:** Task 3 (Submenu subtitle placement).
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
 

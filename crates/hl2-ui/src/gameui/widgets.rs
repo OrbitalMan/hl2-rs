@@ -548,6 +548,8 @@ pub struct FrameSpec<'a> {
     pub has_close: bool,
     /// Style configuration for this frame (corners, borders, clipping).
     pub style: FrameStyle,
+    /// Optional background fill color override. When `None`, defaults to `theme.frame_bg`.
+    pub bg_color: Option<Color>,
 }
 
 impl<'a> FrameSpec<'a> {
@@ -557,6 +559,7 @@ impl<'a> FrameSpec<'a> {
             title,
             has_close: true,
             style: FrameStyle::DEFAULT,
+            bg_color: None,
         }
     }
 
@@ -567,6 +570,11 @@ impl<'a> FrameSpec<'a> {
 
     pub const fn with_style(mut self, style: FrameStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    pub const fn with_bg_color(mut self, color: Color) -> Self {
+        self.bg_color = Some(color);
         self
     }
 
@@ -763,20 +771,23 @@ impl Painter<'_> {
     /// Renders a titled VGUI frame according to the declarative [`FrameSpec`].
     pub fn frame_spec(&self, spec: FrameSpec, close: Option<ButtonState>) {
         let rect = Rect::new(0., 0., spec.size.x, spec.size.y);
+        let bg = spec.bg_color.unwrap_or(self.theme.frame_bg);
         if spec.style.rounded {
-            self.rounded_fill(rect, self.theme.frame_bg, spec.style.corner_radius);
+            self.rounded_fill(rect, bg, spec.style.corner_radius);
         } else {
-            self.fill(rect, self.theme.frame_bg);
+            self.fill(rect, bg);
         }
         if spec.style.outer_3d_border {
             self.raised(rect);
         }
-        self.text(
-            spec.title,
-            vec2(TITLE_INSET_X, 8.),
-            self.theme.title_text,
-            true,
-        );
+        if !spec.title.is_empty() {
+            self.text(
+                spec.title,
+                vec2(TITLE_INSET_X, 8.),
+                self.theme.title_text,
+                true,
+            );
+        }
         if let Some(state) = close {
             if spec.has_close {
                 let close_rect = spec

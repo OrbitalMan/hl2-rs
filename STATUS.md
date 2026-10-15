@@ -2,7 +2,25 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-+## Current session: Unified pointer coordinate conversion and window client alignment (2026-10-15, branch `orbitalman/main-menu`)
++## Current session: Background loading plaque styling routed through shared dialog frame (2026-10-15, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Background loading plaque styling routed through shared dialog frame:**
+  - Added `bg_color: Option<Color>` to `FrameSpec` with builder method `with_bg_color`.
+  - Updated `Painter::frame_spec` to use `spec.bg_color.unwrap_or(self.theme.frame_bg)` and gate title text drawing on `!spec.title.is_empty()`.
+  - Routed `LoadingDialog::draw_background_plaque` through `Painter::frame_spec(FrameSpec::new(BACKGROUND_LOADING_SIZE, "").without_close().with_bg_color(Color::new(0.0, 0.0, 0.0, 0.65)), None)`, eliminating hardcoded square fill and 3D raised border.
+  - Audited all dialog-like surfaces across GameUI:
+    - `MessageBox` (Quit, ReturnToMainMenu, KeyDefaults): uses `p.frame_with_close` -> shared `FrameSpec` (rounded corners, no outer 3D border).
+    - `OptionsDialog` (main dialog and subdialogs Gamma/Credits): uses `p.frame_with_close` / `sp.frame_with_close` -> shared `FrameSpec` (rounded corners, no outer 3D border).
+    - `LoadingDialog` (gameplay map loading): uses `p.frame_with_close` -> shared `FrameSpec` (rounded corners, no outer 3D border).
+    - Developer console (`Console` in `console.rs`): confirmed developer tool window using custom retained border lines rather than GameUI dialog frame.
+  - Added unit test `test_background_loading_plaque_styled_with_shared_frame_rounded_corners_no_3d_border` in `loading.rs` verifying 4 corner polygon quads (rounded corners), translucent dark fill color, and zero outer 3D raised border rectangles.
+  - Added unit test `test_gameplay_loading_dialog_uses_shared_frame_rounded_corners_no_3d_border` asserting gameplay loading dialog routes through shared frame with rounded corners and no outer 3D border.
+  - Updated existing tests in `loading.rs` and `console.rs` to reflect rounded corner frame geometry.
+  - Documented findings in `HL2RS/AGENTS.md` and `RustLife2/AGENTS.md`.
+- **Validation:** 160 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Unified pointer coordinate conversion and window client alignment (2026-10-15, branch `orbitalman/main-menu`)
 +
 +Antigravity, Gemini 3.8 Flash model family.
 +- **Unified pointer coordinate conversion & window client alignment:** Extracted pointer-to-canvas coordinate mapping into a pure function `hl2_ui::viewport::pointer_to_canvas`, verifying scale factors 1.0 and 2.0 (Retina), inner client coordinate mapping directly, outer coordinates with macOS title-bar delta subtraction, and unified behavior across windowed, borderless windowed, and fullscreen modes.

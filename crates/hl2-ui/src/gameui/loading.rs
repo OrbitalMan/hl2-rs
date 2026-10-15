@@ -8,7 +8,10 @@
 
 use crate::{
     canvas::{Color, Rect},
-    gameui::{localize::Localization, widgets::Painter},
+    gameui::{
+        localize::Localization,
+        widgets::{FrameSpec, Painter},
+    },
 };
 use glam::Vec2;
 use std::sync::Mutex;
@@ -318,10 +321,12 @@ impl LoadingDialog {
             origin: painter.origin + origin,
             scale,
         };
-        let rect = Rect::new(0., 0., BACKGROUND_LOADING_SIZE.x, BACKGROUND_LOADING_SIZE.y);
+        // Routed through the shared dialog frame (FrameSpec with FrameStyle::DEFAULT: rounded corners, no outer 3D border)
         // Translucent dark plaque body matching Source VGUI CLoadingDiscPanel (Color(0, 0, 0, 140))
-        p.fill(rect, Color::new(0.0, 0.0, 0.0, 0.65));
-        p.raised(rect);
+        let plaque_spec = FrameSpec::new(BACKGROUND_LOADING_SIZE, "")
+            .without_close()
+            .with_bg_color(Color::new(0.0, 0.0, 0.0, 0.65));
+        p.frame_spec(plaque_spec, None);
 
         // Center localized `#GameUI_Loading` ("LOADING...") text within plaque
         let title = loc.text("#GameUI_Loading");
@@ -640,18 +645,24 @@ mod tests {
         dialog.draw(&painter, &loc);
         let quads = canvas.drain();
 
-        // Plaque background quad: width 130, height 36, at (expected_x, expected_y)
-        let plaque_quad = quads
+        // Plaque is drawn via the shared dialog frame (rounded corners, no outer 3D border)
+        let middle_bar = quads
             .iter()
             .find(|q| {
                 q.destination.w == BACKGROUND_LOADING_SIZE.x
-                    && q.destination.h == BACKGROUND_LOADING_SIZE.y
                     && q.destination.x == expected_x
-                    && q.destination.y == expected_y
+                    && q.vertices.is_none()
             })
-            .expect("background loading plaque quad in bottom-right corner");
-        assert_eq!(plaque_quad.color, Color::new(0.0, 0.0, 0.0, 0.65));
-        assert!(!plaque_quad.blur);
+            .expect("background loading plaque middle bar in bottom-right corner");
+        assert_eq!(middle_bar.color, Color::new(0.0, 0.0, 0.0, 0.65));
+        assert!(!middle_bar.blur);
+
+        // Verify corner polygon quads exist (4 rounded corner arcs from FrameSpec rounded_fill)
+        let corner_polygons = quads
+            .iter()
+            .filter(|q| q.vertices.is_some() && q.destination.x >= expected_x)
+            .count();
+        assert_eq!(corner_polygons, 4);
     }
 
     #[test]
@@ -836,5 +847,107 @@ mod tests {
             plaque_quads.is_empty(),
             "failed background map load must suppress corner plaque"
         );
+    }
+
+    #[test]
+    fn test_background_loading_plaque_styled_with_shared_frame_rounded_corners_no_3d_border() {
+        use crate::canvas::Canvas;
+        use crate::gameui::widgets::{Fonts, Theme};
+
+        let canvas = Canvas::default();
+        canvas.resize(1920., 1080.);
+        let dialog = LoadingDialog::new_background("episodic_background01");
+        assert!(dialog.is_background());
+        assert!(dialog.transition.is_active());
+
+        let mut loc = Localization::default();
+        loc.insert("#GameUI_Loading", "LOADING...");
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.0,
+        };
+
+        // Draw the background loading plaque
+        dialog.draw(&painter, &loc);
+        let quads = canvas.drain();
+        assert!(!quads.is_empty());
+
+        // 1. Verify corner polygon quads are emitted (4 corner arcs from FrameSpec rounded_fill)
+        let polygon_quads: Vec<_> = quads.iter().filter(|q| q.vertices.is_some()).collect();
+        assert_eq!(
+            polygon_quads.len(),
+            4,
+            "background loading plaque must use rounded corners (4 corner polygons)"
+        );
+
+        // 2. Verify all background fill quads use the translucent plaque color (alpha ~0.65)
+        let fill_color = Color::new(0.0, 0.0, 0.0, 0.65);
+        for poly in &polygon_quads {
+            if let Some(verts) = &poly.vertices {
+                for (_, c) in verts {
+                    assert_eq!(*c, fill_color);
+                }
+            }
+        }
+
+        // 3. Verify NO 3D raised border quads are emitted
+        // (raised border draws 4 rectangles with theme.border_bright and theme.border_dark)
+        let has_3d_border = quads.iter().any(|q| {
+            q.vertices.is_none()
+                && (q.color == theme.border_bright || q.color == theme.border_dark)
+                && (q.destination.w <= 2.0 || q.destination.h <= 2.0)
+        });
+        assert!(
+            !has_3d_border,
+            "background loading plaque must NOT draw outer 3D raised border"
+        );
+    }
+
+    #[test]
+    fn test_gameplay_loading_dialog_uses_shared_frame_rounded_corners_no_3d_border() {
+        use crate::canvas::Canvas;
+        use crate::gameui::widgets::{Fonts, Theme};
+
+        let canvas = Canvas::default();
+        canvas.resize(1920., 1080.);
+        let dialog = LoadingDialog::new("d1_trainstation_01");
+        assert!(!dialog.is_background());
+
+        let mut loc = Localization::default();
+        loc.insert("#GameUI_Loading", "LOADING...");
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.0,
+        };
+
+        dialog.draw(&painter, &loc);
+        let quads = canvas.drain();
+
+        // Corner polygon quads emitted by FrameSpec rounded_fill
+        let polygon_quads: Vec<_> = quads.iter().filter(|q| q.vertices.is_some()).collect();
+        assert_eq!(
+            polygon_quads.len(),
+            4,
+            "gameplay loading dialog must use rounded corners"
+        );
+
+        // Frame background color
+        for poly in &polygon_quads {
+            if let Some(verts) = &poly.vertices {
+                for (_, c) in verts {
+                    assert_eq!(*c, theme.frame_bg);
+                }
+            }
+        }
     }
 }
