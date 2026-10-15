@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 Host: fix resolution/mode apply regression; live mode in an open Options dialog
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Simulation::applied_window` (`WindowSettings`), seeded in `main.rs` from the startup options; `ApplyConfig` compares against it. `OptionsDialog::sync_display_mode`, `Console::set_display_mode_external`; `video::sync_native_fullscreen` uses them and updates `applied_window`. Docs: `docs/gameui.md` §10, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Owner report: after 5384402 resolution and window mode changes never did anything (the console had already stored the new config, so the check compared it with itself). Owner report: the macOS full screen/window mode showed in Options only after reopening the dialog.
+
+**Tested how:** `cargo test -p hl2-ui` (184), `cargo test -p hl2-bevy` (73), strict clippy, fmt. The apply test now uses the real order and fails on the previous code.
+
+**Result:** Resolution/mode changes apply again; unrelated settings still leave the window alone; an open dialog shows external mode changes immediately.
+
+**Still broken or not tested:** Not tested by hand.
+
+**Next:** macOS display modes like Windows.
+
 ## 2026-10-15 Host: recognize macOS native full screen as the Full screen mode
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

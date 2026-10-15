@@ -407,6 +407,11 @@ fn main() -> Result<()> {
         movement_commands,
     );
     simulation.fov = loaded.console.config.video.fov;
+    simulation.applied_window = Some(simulation::WindowSettings::new(
+        options.width,
+        options.height,
+        options.display_mode,
+    ));
     simulation.run_after_script = options.capture_live;
     if options.map.is_some() {
         simulation.loading = true;

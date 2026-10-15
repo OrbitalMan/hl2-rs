@@ -898,6 +898,13 @@ impl Console {
         self.modal_bounds().is_some_and(|b| b.contains(point))
     }
 
+    /// The window's display mode changed outside the game's settings (macOS native full screen):
+    /// the applied configuration and an open Options dialog follow it.
+    pub fn set_display_mode_external(&mut self, mode: crate::config::DisplayMode) {
+        self.config.video.display_mode = mode;
+        self.options.sync_display_mode(mode);
+    }
+
     /// Clears hovered and selected state on both main and pause menus so underlying buttons
     /// are not armed while or immediately after a modal dialog is displayed.
     pub fn clear_menu_hover(&mut self) {

@@ -440,7 +440,11 @@ Design (`crates/hl2-bevy/src/video.rs`):
   `ViewportBounds::cursor_to_canvas` maps a logical window cursor position through the presented
   rect into frame pixels and rejects positions on the black bars.
 - **Windowed resize.** Only an OK/Apply (or console command) that changes the resolution or
-  display mode touches the window (`simulation::window_settings_changed`, 2026-10-15); applying
+  display mode touches the window (2026-10-15): `Simulation::applied_window` holds what the window
+  was last given (startup values after command-line overrides, then each queued apply) and an
+  `ApplyConfig` is compared against it, not against the console's configuration, which already
+  holds the new values when the effect arrives (that comparison broke every resolution and mode
+  change in 5384402); applying
   mouse, audio, FOV or gamma settings never resizes, re-centres or re-modes it, so a manually
   resized window keeps its size. Such an OK/Apply in windowed mode stores the resolution in `GameFrame` and starts a
   bounded resize (`resize_window`, up to 120 frames). The window's client area is set to the
@@ -473,7 +477,10 @@ Design (`crates/hl2-bevy/src/video.rs`):
   learned about green-button transitions, so choosing Full screen while already in native full
   screen did nothing (bevy_winit saw no difference) and leaving it left a stale Full screen state;
   every OK/Apply also re-requested the windowed size (fixed for all platforms in
-  `simulation::window_settings_changed`). Windows and Linux are unchanged.
+  `Simulation::applied_window`, which the sync also updates). An open Options dialog follows the
+  change at once (`OptionsDialog::sync_display_mode` via
+  `Console::set_display_mode_external`), instead of only after reopening. Windows and Linux are
+  unchanged.
 - A launch `--width/--height` sets the initial frame and window size for that session; the stored
   setting takes over after the next OK/Apply.
 

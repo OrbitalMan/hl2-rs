@@ -517,6 +517,7 @@ pub(crate) fn sync_native_fullscreen(
     mut last: Local<Option<bool>>,
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut ui: ResMut<crate::ui_host::Console>,
+    mut sim: ResMut<crate::simulation::Simulation>,
     frame: Option<ResMut<GameFrame>>,
 ) {
     let Ok((entity, mut window)) = windows.single_mut() else {
@@ -549,10 +550,13 @@ pub(crate) fn sync_native_fullscreen(
     } else {
         hl2_ui::config::DisplayMode::Windowed
     };
-    let config = &mut ui.source.config;
-    if config.video.display_mode.effective() != display_mode {
-        config.video.display_mode = display_mode;
-        if let Err(error) = config.save() {
+    // The window now carries this mode, so a later unrelated OK/Apply must not re-mode it.
+    if let Some(applied) = sim.applied_window.as_mut() {
+        applied.display_mode = display_mode;
+    }
+    if ui.source.config.video.display_mode.effective() != display_mode {
+        ui.source.set_display_mode_external(display_mode);
+        if let Err(error) = ui.source.config.save() {
             ui.source.log(format!("Could not save settings: {error}"));
         }
     }

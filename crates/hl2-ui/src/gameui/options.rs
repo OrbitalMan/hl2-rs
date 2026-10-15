@@ -415,6 +415,16 @@ impl OptionsDialog {
         &self.draft.config
     }
 
+    /// The window's display mode changed outside the dialog (for example macOS native full
+    /// screen entered with the green button): the applied state follows it, and so does the
+    /// draft unless the user already picked a different mode there.
+    pub fn sync_display_mode(&mut self, mode: crate::config::DisplayMode) {
+        if self.draft.config.video.display_mode == self.applied.video.display_mode {
+            self.draft.config.video.display_mode = mode;
+        }
+        self.applied.video.display_mode = mode;
+    }
+
     /// Whether Apply would change anything.
     pub fn changed(&self) -> bool {
         self.draft.config != self.applied
@@ -1994,6 +2004,27 @@ mod tests {
             row[0].x + row[0].w,
             "ends at the row edge"
         );
+    }
+
+    #[test]
+    fn external_display_mode_changes_reach_an_open_dialog() {
+        use crate::config::DisplayMode;
+        let mut h = Harness::new();
+        h.dialog.open(Config {
+            video: crate::config::VideoSettings {
+                display_mode: DisplayMode::Windowed,
+                ..Default::default()
+            },
+            ..Config::default()
+        });
+        h.dialog.sync_display_mode(DisplayMode::Fullscreen);
+        assert_eq!(h.dialog.draft().video.display_mode, DisplayMode::Fullscreen);
+        assert!(!h.dialog.changed(), "nothing left to apply");
+        // A mode the user already chose in the draft is kept.
+        h.dialog.draft.config.video.display_mode = DisplayMode::Windowed;
+        h.dialog.sync_display_mode(DisplayMode::Fullscreen);
+        assert_eq!(h.dialog.draft().video.display_mode, DisplayMode::Windowed);
+        assert!(h.dialog.changed());
     }
 
     #[test]

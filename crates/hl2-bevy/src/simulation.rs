@@ -113,6 +113,9 @@ pub struct Simulation {
     pub run_after_script: bool,
     pub dev_overlay: bool,
     pub pending_video_config: Option<hl2_ui::config::VideoSettings>,
+    /// Window settings last given to the window: startup values (after command-line overrides)
+    /// or the last queued apply. `None` applies the next configuration unconditionally.
+    pub applied_window: Option<WindowSettings>,
     /// PlayerDeathThink: every button must be released before one press respawns.
     death_buttons_released: bool,
 }
@@ -147,6 +150,7 @@ impl Simulation {
             run_after_script: false,
             dev_overlay: false,
             pending_video_config: None,
+            applied_window: None,
             death_buttons_released: true,
         }
     }
@@ -273,8 +277,12 @@ impl Simulation {
                 Effect::ApplyConfig(cfg) => {
                     self.fov = cfg.video.fov;
                     // Only a resolution or display mode change touches the window, so applying
-                    // a mouse or audio setting never resizes, re-centres or re-modes it.
-                    if window_settings_changed(&ui.source.config.video, &cfg.video) {
+                    // a mouse or audio setting never resizes, re-centres or re-modes it. The
+                    // comparison is against what the window was last given: the console has
+                    // already stored the new configuration when this effect arrives.
+                    let target = WindowSettings::of(&cfg.video);
+                    if self.applied_window != Some(target) {
+                        self.applied_window = Some(target);
                         self.pending_video_config = Some(cfg.video.clone());
                     }
                     ui.source.config = *cfg;
@@ -490,12 +498,26 @@ fn fixed_step(
         exit.write(AppExit::Success);
     }
 }
-/// Whether applying `new` must change the window: its resolution or display mode differs.
-pub(crate) fn window_settings_changed(
-    old: &hl2_ui::config::VideoSettings,
-    new: &hl2_ui::config::VideoSettings,
-) -> bool {
-    (old.width, old.height, old.display_mode) != (new.width, new.height, new.display_mode)
+/// The part of the video settings that the window carries: resolution and display mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowSettings {
+    pub width: u32,
+    pub height: u32,
+    pub display_mode: hl2_ui::config::DisplayMode,
+}
+
+impl WindowSettings {
+    pub fn new(width: u32, height: u32, display_mode: hl2_ui::config::DisplayMode) -> Self {
+        Self {
+            width,
+            height,
+            display_mode: display_mode.effective(),
+        }
+    }
+
+    pub fn of(video: &hl2_ui::config::VideoSettings) -> Self {
+        Self::new(video.width, video.height, video.display_mode)
+    }
 }
 
 #[cfg(test)]
@@ -813,7 +835,13 @@ mod tests {
         );
         let mut game = crate::gameplay::Gameplay::synthetic(World::default());
         let mut ui = crate::ui_host::Console::new(Default::default());
-        let mut apply = |sim: &mut Simulation, ui: &mut crate::ui_host::Console, cfg| {
+        sim.applied_window = Some(WindowSettings::of(&ui.source.config.video));
+        let mut apply = |sim: &mut Simulation,
+                         ui: &mut crate::ui_host::Console,
+                         cfg: hl2_ui::config::Config| {
+            // As in the real path: the console stores the new configuration before the
+            // effect reaches the simulation.
+            ui.source.config = cfg.clone();
             sim.console_effects(
                 ui,
                 &mut game,
