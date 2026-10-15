@@ -439,7 +439,10 @@ Design (`crates/hl2-bevy/src/video.rs`):
 - **HUD/menu and pointer.** The canvas is laid out in frame pixels (`ViewportBounds::resize_canvas`).
   `ViewportBounds::cursor_to_canvas` maps a logical window cursor position through the presented
   rect into frame pixels and rejects positions on the black bars.
-- **Windowed resize.** OK/Apply in windowed mode stores the resolution in `GameFrame` and starts a
+- **Windowed resize.** Only an OK/Apply (or console command) that changes the resolution or
+  display mode touches the window (`simulation::window_settings_changed`, 2026-10-15); applying
+  mouse, audio, FOV or gamma settings never resizes, re-centres or re-modes it, so a manually
+  resized window keeps its size. Such an OK/Apply in windowed mode stores the resolution in `GameFrame` and starts a
   bounded resize (`resize_window`, up to 120 frames). The window's client area is set to the
   resolution in physical pixels (`hl2_ui::viewport::windowed_size` against the monitor's pixel
   size), so the frame is shown 1:1 without scaling, also on high-DPI displays: on a 2x Retina panel

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 Host: apply window settings only when they change
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Simulation::console_effects` queues `pending_video_config` only if `window_settings_changed` (width, height, display mode). Docs: `docs/gameui.md` section 10, `STATUS.md`.
+
+**Why:** Every OK/Apply re-requested the windowed size even for unrelated settings: a manually resized window snapped back, and on macOS in native full screen the picture was drawn small in the top-left corner (no `Resized` follows the request there).
+
+**Tested how:** `cargo test -p hl2-ui` (183), `cargo test -p hl2-bevy` (72 passed), strict clippy, fmt.
+
+**Result:** Non-video settings never touch the window.
+
+**Still broken or not tested:** Not checked by hand; the native full screen state itself is handled in the next change.
+
+**Next:** macOS native full screen recognition.
+
 ## 2026-10-15 GameUI: platform-specific list scrolling
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

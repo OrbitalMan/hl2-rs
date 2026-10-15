@@ -272,7 +272,11 @@ impl Simulation {
                 Effect::Quit => ui.quit_requested = true,
                 Effect::ApplyConfig(cfg) => {
                     self.fov = cfg.video.fov;
-                    self.pending_video_config = Some(cfg.video.clone());
+                    // Only a resolution or display mode change touches the window, so applying
+                    // a mouse or audio setting never resizes, re-centres or re-modes it.
+                    if window_settings_changed(&ui.source.config.video, &cfg.video) {
+                        self.pending_video_config = Some(cfg.video.clone());
+                    }
                     ui.source.config = *cfg;
                 }
                 Effect::PlaySound(sound) => {
@@ -486,6 +490,14 @@ fn fixed_step(
         exit.write(AppExit::Success);
     }
 }
+/// Whether applying `new` must change the window: its resolution or display mode differs.
+pub(crate) fn window_settings_changed(
+    old: &hl2_ui::config::VideoSettings,
+    new: &hl2_ui::config::VideoSettings,
+) -> bool {
+    (old.width, old.height, old.display_mode) != (new.width, new.height, new.display_mode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,6 +801,45 @@ mod tests {
         assert!((sim.yaw - (-0.1152)).abs() < 1e-4);
         assert!((sim.pitch - 0.1152).abs() < 1e-4);
     }
+    #[test]
+    fn only_window_setting_changes_queue_a_window_apply() {
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            vec![],
+        );
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
+        let mut apply = |sim: &mut Simulation, ui: &mut crate::ui_host::Console, cfg| {
+            sim.console_effects(
+                ui,
+                &mut game,
+                vec![hl2_ui::console::Effect::ApplyConfig(Box::new(cfg))],
+            );
+            sim.pending_video_config.take().is_some()
+        };
+        let mut cfg = ui.source.config.clone();
+        cfg.mouse.sensitivity += 1.;
+        cfg.audio.volume = 0.3;
+        cfg.video.fov = 80.;
+        cfg.video.gamma = 2.0;
+        assert!(
+            !apply(&mut sim, &mut ui, cfg.clone()),
+            "non-window settings"
+        );
+        cfg.video.width += 16;
+        assert!(apply(&mut sim, &mut ui, cfg.clone()), "resolution");
+        cfg.video.display_mode = match cfg.video.display_mode {
+            hl2_ui::config::DisplayMode::Windowed => hl2_ui::config::DisplayMode::Fullscreen,
+            _ => hl2_ui::config::DisplayMode::Windowed,
+        };
+        assert!(apply(&mut sim, &mut ui, cfg.clone()), "display mode");
+        assert!(!apply(&mut sim, &mut ui, cfg), "same settings again");
+    }
+
     #[test]
     fn config_effect_updates_simulation_fov_and_console_config() {
         let mut sim = Simulation::new(
