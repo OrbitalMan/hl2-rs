@@ -2,20 +2,19 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: Authored pre-blurred background texture display and MainMenu.Backdrop overlay (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Code cleanup: derive blur from map names and load backgrounds directly from game resources (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
-- **Authored pre-blurred background texture display & MainMenu.Backdrop overlay:**
-  - Resolved the blur visual mechanism: retail Source does not perform dynamic GPU blur shaders or live post-processing during background transitions. Instead, Valve authored dedicated pre-blurred 512x512 DXT1 textures in `materials/console/` (`background01.vtf` through `07.vtf`, `ep1_background01.vtf`, `ep2_background01.vtf`, `lostcoast/background01.vtf`, plus widescreen counterparts) and rendered them with `MainMenu.Backdrop` (`rgba(0, 0, 0, 156)` per `sourcescheme.res`) behind menu elements while loading background maps.
-  - Added background texture loading in `hl2-ui::gameui::resources` via `load_vtf_file` decoding standard and widescreen background textures across `hl2`, `episodic`, `ep2`, and `lostcoast`.
-  - Added `Console::background_textures: BTreeMap<String, Texture2D>` populated in `set_resources` from `GameUiResources::background_images`, with resolution helper `Console::background_texture(&self, category: &str, widescreen: bool) -> Option<&Texture2D>`.
-  - Updated `Console::draw` and `LoadingDialog::draw_background_overlay` to draw the pre-blurred background texture quad full-screen followed by the authentic `MainMenu.Backdrop` rectangle overlay during active background transitions (`BackgroundTransitionState::is_active()`).
-  - When background map loading finishes or fails, the pre-blurred texture, backdrop rectangle, and loading plaque are immediately dismissed.
-  - Removed obsolete synthetic blur code (`Quad.blur`, `Canvas::blur`, `HudMaterial.blur`, `HudMaterialKey.blur`, 32x32 synthetic diffusion generation, and outdated blur tests).
-  - Added unit test `test_console_background_texture_resolution` in `console.rs` verifying canonical expansions, category aliases (`hl2ep1`, `hl2ep2`, `hl2lc`), and aspect ratio fallback.
-  - Added unit test `test_background_overlay_drawing_with_and_without_texture` in `loading.rs`.
-  - Added unit test `backdrop_quad_mesh_geometry` in `canvas_renderer.rs`.
-- **Validation:** 165 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; 8 owned-install tests pass (`cargo test -- --ignored`); clippy clean (0 warnings), fmt clean.
+- **Code cleanup: derive blur from map names and load backgrounds directly from game resources:**
+  - Removed static `BackgroundMapReference` struct, `BACKGROUND_MAP_REFERENCES` hardcoded array, and redundant lookup functions (`background_reference_for_map`, `background_reference_for_category`, `background_reference_for_map_and_category`, `background_image_for_map_and_category`, `background_texture_for_map_and_category`).
+  - Implemented `blur(map: &str) -> &str` returning `map.trim_end_matches(".bsp")`, matching the authentic Source engine convention where console blur textures in `materials/console/` share the exact map name.
+  - Implemented `chapter_background_maps(text: &str) -> Vec<String>` to extract all unique chapter background maps directly from mounted `scripts/chapterbackgrounds.txt` resources.
+  - Updated `GameUiResources::load` to discover background maps and blur VTF textures dynamically from the game's `chapterbackgrounds.txt` files for all expansions, with automatic fallback to initial background maps.
+  - Simplified `Console::expansion_category_for_map` to derive category from `source_assets::vpk::expansion_for_map(blur(map))`.
+  - Simplified `Console::background_texture` and `GameUiResources::background_image` to look up textures directly via `blur(key)` and category aliases.
+  - Updated `Console::draw` to call `self.background_texture(upcoming_map, is_widescreen)`.
+  - Added unit tests: `test_blur_and_chapter_background_maps` in `resources.rs`, and updated `test_console_background_texture_resolution` in `console.rs`.
+- **Validation:** 166 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; 4 owned-install tests pass (`cargo test -- --ignored`); clippy clean (0 warnings), fmt clean. Packaged release binary `bin/hl2-bevy`.
 
 ## Previous session: Submenu subtitle application timed to background map loading completion (2026-10-15, branch `orbitalman/main-menu`)
 

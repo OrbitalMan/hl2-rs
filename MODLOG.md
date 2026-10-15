@@ -1,5 +1,77 @@
 # MODLOG
 
+## 2026-10-15 Code cleanup: derive blur from map names and load backgrounds directly from game resources
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::resources`:
+  - Removed static `BackgroundMapReference` struct, `BACKGROUND_MAP_REFERENCES` hardcoded array, and lookup functions `background_reference_for_map`, `background_reference_for_category`, and `background_reference_for_map_and_category`.
+  - Added pure function `blur(map: &str) -> &str` returning `map.trim_end_matches(".bsp")`, matching the authentic Source engine convention where console blur textures in `materials/console/` share the exact map name.
+  - Added `chapter_background_maps(text: &str) -> Vec<String>` to extract all unique chapter background maps directly from mounted `scripts/chapterbackgrounds.txt` resources.
+  - Updated `GameUiResources::load` to populate background maps and blur VTF textures dynamically from the game's `chapterbackgrounds.txt` files for all expansions, with automatic fallback to initial background maps.
+  - Simplified `GameUiResources::background_image` to look up via `blur(key)` and category aliases; removed `background_image_for_map_and_category`.
+  - Updated unit tests to verify `blur` and `chapter_background_maps`.
+- `hl2-ui::console`:
+  - Simplified `Console::expansion_category_for_map` to derive category from `source_assets::vpk::expansion_for_map(blur(map))`.
+  - Simplified `Console::background_texture` to look up textures directly via `blur(key)` and category aliases.
+  - Removed `Console::background_texture_for_map_and_category` and updated `Console::draw` to call `self.background_texture(upcoming_map, is_widescreen)`.
+  - Updated unit tests to verify `background_texture` map and category lookups.
+- `HL2RS/AGENTS.md`, `RustLife2/AGENTS.md`, `HL2RS/STATUS.md`:
+  - Updated documentation to reflect `blur(map)` resolution and dynamic resource-based background map loading.
+
+**Why:**
+- Eliminated redundant intermediate data structures and hardcoded map reference tables by reading chapter background maps directly from authentic game resources (`chapterbackgrounds.txt`) and deriving blur image names via `blur(map)`.
+
+**Tested how:**
+- `bash AntigravityPlayground/validate.sh`: 166 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
+- `cargo test --locked -p hl2-ui -- --ignored`: 4 owned-install tests pass.
+- Release binary built via `bash AntigravityPlayground/build_release.sh`.
+
+**Result:** Clean, idiomatic, dynamic background map and blur image resolution directly from game resources with zero hardcoded reference arrays.
+
+**Still broken or not tested:** Live rendering appearance during transition is unverified headless and requires manual check.
+
+**Next:** Await owner review or testing.
+
+## 2026-10-15 Background blur texture matching upcoming background map and expansion archive priority
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::resources`:
+  - Defined `BackgroundMapReference` and `BACKGROUND_MAP_REFERENCES` mapping all 15 background maps across `hl2`, `episodic`, `ep2`, and `lostcoast` to their authentic console VTFs, menu categories, and source expansions.
+  - Added helpers `background_reference_for_map`, `background_reference_for_category`, and `background_reference_for_map_and_category`.
+  - Isolated expansion VTF loading in `load_vtf_file` so each expansion strictly queries its dedicated archive and loose hierarchy (`lostcoast` searches `lostcoast_pak_dir.vpk`, `episodic` searches `ep1_pak_dir.vpk`, `ep2` searches `ep2_pak_dir.vpk`, and `hl2`/`main` strictly search `hl2_complete` and `hl2` textures/misc archives). Base `hl2` never falls through to `vfs.read()` where it could be shadowed by `search_paths[0]` if an expansion like `lostcoast` is mounted.
+  - Updated `GameUiResources::load` to iterate over `BACKGROUND_MAP_REFERENCES` and load both standard and widescreen background textures for every map, populating map keys and category aliases into `res.background_images`.
+  - Updated `GameUiResources::background_image` and added `background_image_for_map_and_category` supporting map name lookups.
+  - Added unit test `test_background_map_references` and owned-install regression test `test_lostcoast_vfs_does_not_shadow_hl2_background`.
+- `hl2-ui::console`:
+  - Added `Console::expansion_category_for_map` deriving category directly from map references.
+  - Added `Console::background_texture_for_map_and_category` to disambiguate shared map names (such as `background01` in HL2 vs Lost Coast) using the target category context.
+  - Updated `Console::start_background_loading` to infer expansion category via `expansion_category_for_map(map)` instead of defaulting to `main_menu.category()`.
+  - Updated `Console::background_texture` to look up by map name (with or without `.bsp`) as well as category name.
+  - Updated `Console::draw` to look up the background texture using `upcoming_map` (`target_map` -> `pending_map` -> `loaded_map` -> category) and `target_cat`, guaranteeing the pre-blurred image always matches the upcoming background.
+  - Extended `test_console_background_texture_resolution` to verify map name lookups, `expansion_category_for_map`, and category-context disambiguation.
+- `HL2RS/AGENTS.md`, `RustLife2/AGENTS.md`, `HL2RS/STATUS.md`:
+  - Documented `BackgroundMapReference`, expansion archive priority, and upcoming map blur texture selection.
+
+**Why:**
+- When switching submenus or loading background maps, the blur texture occasionally defaulted to the base HL2 train station image because texture lookup used the menu category instead of the upcoming map name, and Lost Coast's unique monastery cliff image was shadowed by `hl2_complete`. Furthermore, when running under a mounted Lost Coast VFS, `vfs.read` prioritizing `search_paths[0]` caused base HL2 `background01.vtf` lookups to be overwritten by Lost Coast's cliff texture. Resolving these root causes ensures the blur overlay always accurately matches the upcoming background level.
+
+**Tested how:**
+- `cargo test -p hl2-ui --lib`: 170 tests passed.
+- `cargo test -p hl2-bevy --bin hl2-bevy`: 70 tests passed.
+- `cargo test -p hl2-ui -- --ignored`: 4 owned-install tests passed (verifying `test_background_map_references`, distinct Lost Coast monastery image, and `test_lostcoast_vfs_does_not_shadow_hl2_background`).
+- `cargo clippy -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: clean (0 warnings).
+- `cargo fmt --check`: clean.
+
+**Result:** Background transition blur texture consistently and authentically matches the upcoming background map being loaded across all expansions.
+
+**Still broken or not tested:** Live rendering appearance during transition is unverified headless and requires manual check.
+
+**Next:** Await owner review or testing.
+
 ## 2026-10-15 Authored pre-blurred background texture display and MainMenu.Backdrop overlay
  
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

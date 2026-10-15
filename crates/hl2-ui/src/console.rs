@@ -570,9 +570,22 @@ impl Console {
         self.options.set_resources(self.gameui.clone());
     }
 
-    /// Returns the pre-blurred background texture for the category and aspect ratio, if loaded.
-    pub fn background_texture(&self, category: &str, widescreen: bool) -> Option<&Texture2D> {
-        let canonical = match category {
+    /// Returns the menu expansion category associated with the background map.
+    pub fn expansion_category_for_map(map: &str) -> Option<&'static str> {
+        let clean = crate::gameui::resources::blur(map);
+        if let Some(exp) = source_assets::vpk::expansion_for_map(clean) {
+            Some(exp)
+        } else if clean.starts_with("background") || clean.starts_with("d1_") {
+            Some("hl2")
+        } else {
+            None
+        }
+    }
+
+    /// Returns the pre-blurred background texture for the map name or category and aspect ratio, if loaded.
+    pub fn background_texture(&self, key: &str, widescreen: bool) -> Option<&Texture2D> {
+        let name = crate::gameui::resources::blur(key);
+        let canonical = match name {
             "hl2ep1" => "episodic",
             "hl2ep2" => "ep2",
             "hl2lc" => "lostcoast",
@@ -733,7 +746,9 @@ impl Console {
 
     /// Displays the non-blocking corner plaque for background map loading.
     pub fn start_background_loading(&mut self, map: &str) {
-        let category = self.main_menu.category().to_owned();
+        let category = Self::expansion_category_for_map(map)
+            .unwrap_or_else(|| self.main_menu.category())
+            .to_owned();
         self.start_background_loading_expansion(map, &category);
     }
 
@@ -1758,7 +1773,13 @@ impl Console {
                 .background_transition
                 .target_category()
                 .unwrap_or(menu_cat);
-            let bg_tex = self.background_texture(target_cat, is_widescreen);
+            let upcoming_map = self
+                .background_transition
+                .target_map()
+                .or(self.pending_map.as_deref())
+                .or(self.loaded_map.as_deref())
+                .unwrap_or(target_cat);
+            let bg_tex = self.background_texture(upcoming_map, is_widescreen);
             if let Some(loading) = &self.loading_dialog {
                 if loading.is_background() {
                     loading.draw_background_overlay(&self.canvas, bg_tex);
@@ -3417,7 +3438,7 @@ mod tests {
             console.background_transition_state(),
             &crate::gameui::loading::BackgroundTransitionState::Failed {
                 map: "lostcoast_background01".into(),
-                displayed_category: "main".into(),
+                displayed_category: "lostcoast".into(),
                 reason: "Failed to open BSP file".into(),
             }
         );
@@ -4025,13 +4046,89 @@ mod tests {
         assert!(console.background_texture("hl2lc", false).is_some());
         assert!(console.background_texture("lostcoast", false).is_some());
 
-        // Missing widescreen falls back to 4:3 standard
+        console
+            .background_textures
+            .insert("ep2_background01".into(), dummy_tex.clone());
+        console
+            .background_textures
+            .insert("ep2_background01_widescreen".into(), wide_tex.clone());
+        console
+            .background_textures
+            .insert("background05".into(), dummy_tex.clone());
+        console
+            .background_textures
+            .insert("lostcoast_background01".into(), dummy_tex.clone());
+
+        // Map name lookups (with and without .bsp extension)
+        assert!(console
+            .background_texture("ep2_background01", false)
+            .is_some());
         assert_eq!(
             console
-                .background_texture("episodic", true)
+                .background_texture("ep2_background01.bsp", true)
                 .unwrap()
                 .width(),
-            2.0
+            4.0
         );
+        assert!(console.background_texture("background05", false).is_some());
+        assert!(console
+            .background_texture("lostcoast_background01", false)
+            .is_some());
+
+        // Verify expansion_category_for_map
+        assert_eq!(
+            Console::expansion_category_for_map("ep2_background01"),
+            Some("ep2")
+        );
+        assert_eq!(
+            Console::expansion_category_for_map("background01"),
+            Some("hl2")
+        );
+        assert_eq!(
+            Console::expansion_category_for_map("ep1_background01"),
+            Some("episodic")
+        );
+        assert_eq!(
+            Console::expansion_category_for_map("lostcoast_background01"),
+            Some("lostcoast")
+        );
+
+        // Verify background_texture disambiguates shared map names and categories
+        let hl2_tex = Texture2D::from_rgba8(10, 10, &vec![255; 10 * 10 * 4]);
+        let lc_tex = Texture2D::from_rgba8(20, 20, &vec![200; 20 * 20 * 4]);
+        console
+            .background_textures
+            .insert("background01".into(), hl2_tex.clone());
+        console.background_textures.insert("hl2".into(), hl2_tex);
+        console
+            .background_textures
+            .insert("lostcoast_background01".into(), lc_tex.clone());
+        console
+            .background_textures
+            .insert("lostcoast".into(), lc_tex);
+
+        // Map "background01" resolves to HL2 texture
+        let tex_hl2 = console
+            .background_texture("background01", false)
+            .expect("hl2 background texture");
+        assert_eq!(tex_hl2.width(), 10.0);
+
+        // Canonical lostcoast map name resolves to Lost Coast texture
+        let tex_lc = console
+            .background_texture("lostcoast_background01", false)
+            .expect("lostcoast background texture");
+        assert_eq!(tex_lc.width(), 20.0);
+
+        // Category "hl2" resolves to HL2 texture
+        let tex_cat_hl2 = console
+            .background_texture("hl2", false)
+            .expect("hl2 category texture");
+        assert_eq!(tex_cat_hl2.width(), 10.0);
+
+        // Category "lostcoast" resolves to Lost Coast texture
+        let tex_cat_lc = console
+            .background_texture("lostcoast", false)
+            .expect("lostcoast category texture");
+        assert_eq!(tex_cat_lc.width(), 20.0);
     }
 }
