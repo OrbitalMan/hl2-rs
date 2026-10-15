@@ -516,6 +516,24 @@ impl Metropolice {
         if self.keep_facing_player && !self.player_is_criminal() {
             return "SCHED_TARGET_FACE".into();
         }
+        if npc.state == NpcState::Combat && npc.shot_regulator.is_some() {
+            // SelectCombatSchedule with a gun: reload an empty clip (SCHED_RELOAD while
+            // healthy), face the enemy during the shot regulator's rest, else the base
+            // combat selection (SCHED_RANGE_ATTACK1 on COND_CAN_RANGE_ATTACK1).
+            // npc_metropolice's own pistol/SMG schedules (burst attack, manhacks) are not
+            // reconstructed yet.
+            if npc.conditions.has(COND_NO_PRIMARY_AMMO) {
+                return "SCHED_RELOAD".into();
+            }
+            if npc
+                .shot_regulator
+                .as_ref()
+                .is_some_and(|r| r.is_in_rest_interval(ctx.now))
+                && npc.conditions.has(COND_CAN_RANGE_ATTACK1)
+            {
+                return "SCHED_COMBAT_FACE".into();
+            }
+        }
         if npc.state == NpcState::Combat {
             // SelectCombatSchedule (stunstick cops): the baton first, then melee when
             // the swing timer allows, else face/chase.

@@ -627,6 +627,10 @@ pub struct Rig {
     /// Attachments of the root model, in model order.
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// Every sequence activity of the model and its included models (upper case),
+    /// loaded or not: SelectWeightedSequence availability (Weapon_CanUse).
+    #[serde(default)]
+    pub activities: std::collections::BTreeSet<String>,
 }
 impl Rig {
     pub fn attachment(&self, name: &str) -> Option<&Attachment> {

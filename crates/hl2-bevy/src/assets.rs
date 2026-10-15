@@ -194,6 +194,18 @@ pub fn load_with_canvas(
     hl2_simulation::ai::spawn::append_pool(&mut world);
     let model_report = models::append_models(&mut world, &vfs);
     let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
+    // NPC weapon world models: their sequence events fire NPC weapons (DESIGN 14w).
+    let weapon_models: Vec<String> = hl2_simulation::npc_weapons::definitions(&vfs)
+        .map(|defs| {
+            defs.into_values()
+                .map(|d| d.world_model)
+                .filter(|m| !m.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    for failure in models::append_rigs(&mut world, &vfs, &weapon_models) {
+        world.warnings.push(failure);
+    }
     // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body
     // from w_grenade.phy (12-sided prism as a round cylinder, the .phy's IVP inertia) and
     // SDK spawn orientation. Session 13 replay against five native throws (lob, roll,

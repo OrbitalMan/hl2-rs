@@ -955,6 +955,29 @@ pub fn used_chunk_models(world: &World) -> Vec<String> {
 }
 /// Adds a non-map model's .phy solid (and supported pieces) to the world under its
 /// skin-0 asset key, e.g. a thrown frag's w_grenade.phy. Returns the reason on failure.
+/// Rigs of models that have no map instance (NPC weapon world models: their sequences'
+/// events drive NPC firing, DESIGN 14w), with every activity's sequence, keyed like
+/// instances (`model#0`). Returns the models that failed to load.
+pub fn append_rigs(world: &mut World, vfs: &Vfs, models: &[String]) -> Vec<String> {
+    let mut failed = Vec::new();
+    for model in models {
+        let key = format!("{}#0", model.to_lowercase());
+        if world.rigs.contains_key(&key) {
+            continue;
+        }
+        let loaded = crate::animation::load(vfs, model, &Default::default()).and_then(|first| {
+            let wanted = first.activities.iter().map(|a| a.to_lowercase()).collect();
+            crate::animation::load(vfs, model, &wanted)
+        });
+        match loaded {
+            Ok(rig) => {
+                world.rigs.insert(key, rig);
+            }
+            Err(e) => failed.push(format!("{model}: {e:#}")),
+        }
+    }
+    failed
+}
 pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result<()> {
     let key = format!("{}#0", model.to_lowercase());
     let (solid, pieces) = read_physics(vfs, model)?.context("model has no .phy")?;
@@ -966,6 +989,7 @@ pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result
 /// $keyvalues text (prop_data, physgun_interactions, ...).
 /// Activities the metrocop AI sets (class schedules, policing, flinches, melee) and
 /// their stunstick/pistol/SMG1 acttable translations.
+/// (DESIGN 14w adds the pistol, SMG1 and stunstick acttable results.)
 pub const METROPOLICE_AI_ACTIVITIES: &[&str] = &[
     "ACT_PUSH_PLAYER",
     "ACT_MELEE_ATTACK1",
@@ -997,6 +1021,33 @@ pub const METROPOLICE_AI_ACTIVITIES: &[&str] = &[
     "ACT_RELOAD_SMG1",
     "ACT_DUCK_DODGE",
     "ACT_TO_COMBAT_SOUND",
+    "ACT_COVER_PISTOL_LOW",
+    "ACT_COVER_SMG1_LOW",
+    "ACT_GESTURE_RELOAD_PISTOL",
+    "ACT_GESTURE_RELOAD_SMG1",
+    "ACT_IDLE_PISTOL",
+    "ACT_IDLE_SMG1",
+    "ACT_IDLE_SMG1_RELAXED",
+    "ACT_IDLE_SMG1_STIMULATED",
+    "ACT_RANGE_AIM_PISTOL_LOW",
+    "ACT_RANGE_AIM_SMG1_LOW",
+    "ACT_RANGE_ATTACK1",
+    "ACT_RANGE_ATTACK_SMG1_LOW",
+    "ACT_RELOAD",
+    "ACT_RELOAD_PISTOL_LOW",
+    "ACT_RELOAD_SMG1_LOW",
+    "ACT_RUN_AIM_PISTOL",
+    "ACT_RUN_AIM_RIFLE",
+    "ACT_RUN_CROUCH_AIM_RIFLE",
+    "ACT_RUN_CROUCH_RIFLE",
+    "ACT_RUN_RIFLE_RELAXED",
+    "ACT_RUN_RIFLE_STIMULATED",
+    "ACT_WALK_AIM_PISTOL",
+    "ACT_WALK_AIM_RIFLE",
+    "ACT_WALK_CROUCH_AIM_RIFLE",
+    "ACT_WALK_CROUCH_RIFLE",
+    "ACT_WALK_RIFLE_RELAXED",
+    "ACT_WALK_RIFLE_STIMULATED",
 ];
 pub fn studio_keyvalues(mdl: &[u8]) -> Result<Option<String>> {
     if bytes(mdl, 0, 4)? != b"IDST" {

@@ -2273,6 +2273,39 @@ impl Physics {
     pub fn impact_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
         self.ray_with(origin, direction, distance, QUERY_GROUPS, false)
     }
+    /// `impact_ray` that skips the shooter's own colliders (an NPC's FireBullets
+    /// ignores its owner: CTraceFilterSkipTwoEntities).
+    pub fn shot_ray(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        distance: f32,
+        excluded: &[usize],
+    ) -> Option<RayHit> {
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            collider.is_enabled()
+                && !self.world_sides.clip_brushes.contains(&handle)
+                && !excluded.contains(&(collider.user_data as usize).wrapping_sub(1))
+        };
+        let ray = Ray::new(
+            Point::from(vector(origin)),
+            vector![direction.x, direction.y, direction.z],
+        );
+        let (h, hit) = self.query.cast_ray_and_get_normal(
+            &self.bodies,
+            &self.colliders,
+            &ray,
+            distance * SCALE,
+            true,
+            groups_filter(QUERY_GROUPS).predicate(&predicate),
+        )?;
+        let id = self.colliders[h].user_data as usize;
+        Some(RayHit {
+            entity: id.wrapping_sub(1),
+            position: origin + direction * (hit.time_of_impact / SCALE),
+            normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
+        })
+    }
     /// Ground trace under the player (MASK_PLAYERSOLID: clip brushes count).
     pub fn ground_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
         self.ray_with(origin, direction, distance, QUERY_GROUPS, true)
@@ -2968,6 +3001,7 @@ mod tests {
                     pose_parameters: Vec::new(),
                     autoplay: Vec::new(),
                     attachments: Vec::new(),
+                    activities: Default::default(),
                     bones: vec![Bone {
                         name: "door".into(),
                         parent: None,

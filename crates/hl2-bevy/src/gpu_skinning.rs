@@ -156,6 +156,7 @@ mod tests {
             pose_parameters: Vec::new(),
             autoplay: Vec::new(),
             attachments: Vec::new(),
+            activities: Default::default(),
             bones: vec![Bone {
                 name: "root".into(),
                 parent: None,

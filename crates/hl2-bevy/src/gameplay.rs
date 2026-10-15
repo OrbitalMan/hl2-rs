@@ -146,6 +146,8 @@ pub struct Gameplay {
     /// Spawn requests and their CC_NPC_Create placement; runtime entity creation is not
     /// implemented (DESIGN step 14 note), so nothing is created yet.
     pub spawn_log: Vec<serde_json::Value>,
+    /// NPC bullet tracer segments of the last tick that fired (DESIGN 14w).
+    pub npc_tracers: Vec<(Vec3, Vec3)>,
     /// Pooled spawn entities already placed.
     pub spawn_used: std::collections::BTreeSet<usize>,
 }
@@ -339,6 +341,7 @@ impl Gameplay {
             spawn_overlay: Default::default(),
             spawn_console: Default::default(),
             spawn_log: Vec::new(),
+            npc_tracers: Vec::new(),
             spawn_used: Default::default(),
         }
     }
@@ -369,6 +372,7 @@ impl Gameplay {
             spawn_overlay: Default::default(),
             spawn_console: Default::default(),
             spawn_log: Vec::new(),
+            npc_tracers: Vec::new(),
             spawn_used: Default::default(),
             player_damage,
             damage_messages: Vec::new(),
@@ -793,6 +797,43 @@ impl Gameplay {
                 self.scene.screen_fades.push(fade);
             }
             // ViewPunch needs the punch-angle path of the arsenal branch (not here).
+        }
+        // NPC weapons' FireBullets (DESIGN 14w): the shared hit path, the player's hull,
+        // impacts and blood like the player's own shots.
+        let shots = std::mem::take(&mut self.ai.shots);
+        if !shots.is_empty() {
+            let target = (!player.dead).then_some((player.feet, player.crouched));
+            let mut bullets = hl2_simulation::gameplay::NpcBullets::default();
+            for shot in &shots {
+                hl2_simulation::gameplay::npc_fire_bullets(
+                    &self.world,
+                    &mut self.scene,
+                    physics,
+                    shot,
+                    target,
+                    &mut || self.ai.uniform(),
+                    &mut bullets,
+                );
+            }
+            for (inflictor, amount) in bullets.player_hits {
+                self.ai.diagnostics.bullet_hits_on_player += 1;
+                self.scene
+                    .player_damage
+                    .push(hl2_simulation::player_damage::DamageInfo {
+                        amount,
+                        kind: hl2_simulation::player_damage::DMG_BULLET,
+                        inflictor,
+                    });
+            }
+            for (hit, direction) in bullets.impacts {
+                self.impacts
+                    .add_shot(hit, direction, &self.world, physics, &mut self.scene);
+            }
+            for (hit, color) in bullets.blood {
+                self.impacts
+                    .add_blood(hit, color, &self.world, physics, &self.scene);
+            }
+            self.npc_tracers = bullets.tracers;
         }
         actors::tick_npcs(
             &mut self.npcs,

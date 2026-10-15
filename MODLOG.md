@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-15 session 18: terminal-cop policing like native, NPC weapons (DESIGN 14w steps 1-3) (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research input: Codex Desktop REA topics npc-ai-research-20261015a (weapon-activity: retail stunstick acttable 63->295 required; hull initialization) and 20261014a (owned animation events: shootp1 has no events).
+
+**Changed:** merged main 31b0f57 (owner's friendly setup) into the branch. Policing: ai_goal_police distances from the goal point; policing conditions/target independent of notarget; policing BuildScheduleTestBits and SelectFailSchedule; SetSchedule clears conditions (keeps COND_IN_PVS); baton request synced at selection; SetIdealState(SelectIdealState()) and no forced alert->idle; NPC_TranslateActivity angry idle; SetTurnActivity/GetStoppedActivity ACT_IDLE; harass point at the cop's floor height; diagnostics last_failed_task/blocked_moves. NPC weapons: `npc_weapons.rs` + generated `npc_acttables.rs`, Weapon_Equip/CanUse/TranslateActivity, shot regulator, humanoid TASK_RANGE_ATTACK1, attack conditions, CheckAmmo/SCHED_RELOAD, reload events, weapon world-model sequences and their events (Weapon_SetActivity/Operator_FrameUpdate), shot trajectory with proficiency spread, NPC FireBullets through the shared hit path (`gameplay::apply_hit`, `npc_fire_bullets`, `Physics::shot_ray`), weapon rigs loaded at map load (`models::append_rigs`), rig `activities`, metrocop preloads for pistol/SMG1. Unarmed NPCs' melee events hit nothing. F4/npc_create hull fit no longer start-solid on the floor.
+
+**Why:** owner checklist (terminal cop warnings) and owner reports/direction (unarmed cops hit; real NPC weapon system wired to F4).
+
+**Tested how:** hl2-simulation 278 (new: police goal point, noclip policing with 4-6 s spacing, unarmed melee, weapon CanUse/spread/fire/reload/shotgun, NPC bullets vs player hull), workspace tests (two known release-only should_panic failures), owned tests (HL2_ROOT) all pass, strict Clippy, fmt. Native oracle T020836Z (terminal cop ent_text, 13 frames) vs packaged artifacts/s18/ai-terminal-cop-80m: same schedule/state/animation order. Packaged d1_canals_01 artifacts/s18/ai-pistol-cop-yard6: map pistol cop fires bursts, reloads, 46 shots/35 hits on a suitless player.
+
+**Result:** policing matches native's observed sequence; armed metrocops shoot and reload through SDK-shaped weapon code.
+
+**Still broken or not tested:** NPC pistol fire not compared with native (cadence, hit rate; our player target is the hull, not hitboxes); weapons not drawn in NPC hands, no muzzle flash/tracer rendering; NPC per-class health and hitgroups (owner: native cops die faster); NPCs not dropped to the floor (StartNPC) or falling; F4 overlay redesign; npc_metropolice's own ranged schedules; the plaza walk-up escalation got faster (native timing unknown).
+
+**Next:** STATUS session 18 "Open".
 ## 2026-10-15: friendly game installation setup on main
 
 **Agent/model:** Codex Desktop, GPT-6 family (exact model identifier not exposed). No subagents.

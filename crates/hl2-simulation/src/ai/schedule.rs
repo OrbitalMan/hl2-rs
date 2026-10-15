@@ -279,6 +279,8 @@ pub struct AiNpc {
     pub schedule_changes: u32,
     /// Diagnostics: the last task that failed, as "SCHEDULE/TASK".
     pub last_failed_task: Option<String>,
+    /// CAI_ShotRegulator of the active gun (bits_CAP_USE_SHOT_REGULATOR humanoids).
+    pub shot_regulator: Option<crate::npc_weapons::ShotRegulator>,
 }
 
 /// Up to this many tasks may complete in one think (MaintainSchedule's loop limit).
@@ -310,6 +312,51 @@ impl AiNpc {
             self.activity = "ACT_IDLE".into();
             motor.set_activity("ACT_IDLE");
         }
+    }
+    /// CAI_BaseHumanoid::StartTaskRangeAttack1: fail in the rest interval, else one
+    /// shot (OnRangeAttack1 + ACT_RANGE_ATTACK1 restarted) or the angry idle mid-burst.
+    fn start_regulated_attack(
+        &mut self,
+        ctx: &Context,
+        motor: &mut dyn Motor,
+    ) -> Option<TaskStatus> {
+        let regulator = self.shot_regulator.as_mut()?;
+        if regulator.is_in_rest_interval(ctx.now) {
+            return Some(TaskStatus::Failed);
+        }
+        let activity = if regulator.should_shoot(ctx.now) {
+            regulator.on_fired(ctx.now);
+            "ACT_RANGE_ATTACK1"
+        } else {
+            "ACT_IDLE_ANGRY"
+        };
+        self.activity = activity.into();
+        motor.set_activity(activity);
+        Some(TaskStatus::Running)
+    }
+    /// CAI_BaseHumanoid::RunTaskRangeAttack1: keep facing the enemy; when the shot's
+    /// activity ends, shoot again within the burst, else complete at the rest.
+    fn run_regulated_attack(&mut self, ctx: &Context, motor: &mut dyn Motor) -> Option<TaskStatus> {
+        self.shot_regulator.as_ref()?;
+        if let Some(p) = self.enemy_position(ctx) {
+            motor.face(Goal::Position(p));
+        }
+        if !motor.activity_finished() {
+            return Some(TaskStatus::Running);
+        }
+        if self.enemy.is_none() {
+            return Some(TaskStatus::Complete);
+        }
+        let regulator = self.shot_regulator.as_mut()?;
+        if !regulator.is_in_rest_interval(ctx.now) {
+            if regulator.should_shoot(ctx.now) {
+                regulator.on_fired(ctx.now);
+                self.activity = "ACT_RANGE_ATTACK1".into();
+                motor.set_activity("ACT_RANGE_ATTACK1");
+            }
+            return Some(TaskStatus::Running);
+        }
+        Some(TaskStatus::Complete)
     }
     fn set_schedule(&mut self, name: String) {
         self.schedule = Some(name);
@@ -409,6 +456,11 @@ impl AiNpc {
     ) -> TaskStatus {
         if let Some(status) = behavior.start_task(self, task, arg, ctx, motor) {
             return status;
+        }
+        if task == "TASK_RANGE_ATTACK1" {
+            if let Some(status) = self.start_regulated_attack(ctx, motor) {
+                return status;
+            }
         }
         let status = self.start_generic_task(behavior, task, arg, ctx, motor);
         // StartTask TASK_FACE_TARGET always calls SetTurnActivity; the other face tasks
@@ -681,6 +733,9 @@ impl AiNpc {
                     Complete
                 }
             },
+            "TASK_RANGE_ATTACK1" if self.shot_regulator.is_some() => {
+                self.run_regulated_attack(ctx, motor).unwrap_or(Complete)
+            }
             "TASK_PLAY_SEQUENCE" | "TASK_RANGE_ATTACK1" | "TASK_RANGE_ATTACK2"
             | "TASK_MELEE_ATTACK1" | "TASK_MELEE_ATTACK2" | "TASK_RELOAD" | "TASK_BIG_FLINCH"
             | "TASK_SMALL_FLINCH" => {

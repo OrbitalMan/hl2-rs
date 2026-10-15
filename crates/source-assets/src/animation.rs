@@ -640,6 +640,9 @@ fn load_sequences(
     let mut selected = BTreeSet::new();
     for id in 0..sequences {
         let metadata = sequence_metadata(data, base + id * 212)?;
+        if !metadata.activity.is_empty() {
+            rig.activities.insert(metadata.activity.to_uppercase());
+        }
         let autoplay = u32le(data, base + id * 212 + 12)? & sequence_flags::AUTOPLAY != 0;
         if autoplay
             || wanted.contains(&metadata.name)

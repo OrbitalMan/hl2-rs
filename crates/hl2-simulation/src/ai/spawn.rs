@@ -293,9 +293,10 @@ pub fn place(
             .unwrap_or(raised)
     };
     if !world.hull_fits(&request.classname, origin) {
+        // The SDK message, then our diagnostics (aim end and the tested origin).
         return Err(format!(
-            "Can't create {}.  Bad Position!",
-            request.classname
+            "Can't create {}.  Bad Position! (aim end {:.1} {:.1} {:.1}, origin {:.1} {:.1} {:.1})",
+            request.classname, end.x, end.y, end.z, origin.x, origin.y, origin.z
         ));
     }
     Ok(Placement { origin, yaw })

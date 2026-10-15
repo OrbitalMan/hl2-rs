@@ -18,6 +18,7 @@ use crate::{
     entities::Scene,
     npc::{Controller, GoalKey},
     npc_probe::ActorHull,
+    npc_weapons::{self, NpcShot, NpcWeapon, NpcWeaponDef, WeaponEvent},
     physics::Physics,
 };
 use glam::Vec3;
@@ -89,6 +90,8 @@ pub struct AiActor {
     pub class: AiClass,
     pub next_think: f64,
     pub last_think: f64,
+    /// The active weapon (Weapon_Equip of `additionalequipment`; DESIGN 14w).
+    pub weapon: Option<NpcWeapon>,
     #[serde(skip)]
     goal: Option<GoalKey>,
     /// Animation events up to this time were handled.
@@ -105,6 +108,9 @@ pub struct Diagnostics {
     pub unknown_goals: BTreeMap<String, u32>,
     /// AI move requests the npc Controller refused, by reason.
     pub blocked_moves: BTreeMap<String, u32>,
+    /// NPC weapon shots fired and pellets that struck the player (host-counted).
+    pub shots_fired: u64,
+    pub bullet_hits_on_player: u64,
 }
 #[derive(Serialize)]
 pub struct AiRuntime {
@@ -121,6 +127,11 @@ pub struct AiRuntime {
     serial: usize,
     /// weapon_stunstick script SoundData (melee_hit, melee_miss).
     stunstick_sounds: (Option<String>, Option<String>),
+    /// NPC weapon definitions (installed scripts and skill.cfg).
+    #[serde(skip)]
+    weapon_defs: BTreeMap<String, NpcWeaponDef>,
+    /// FireBullets requests from NPC weapons this tick, for the host's bullet path.
+    pub shots: Vec<NpcShot>,
     /// Hits on the player for the host to apply.
     pub player_hits: Vec<PlayerHit>,
     pub diagnostics: Diagnostics,
@@ -209,10 +220,13 @@ impl AiRuntime {
                 }
             }
         }
+        let weapon_defs = vfs
+            .and_then(|vfs| npc_weapons::definitions(vfs).ok())
+            .unwrap_or_default();
         let mut actors = BTreeMap::new();
         let mut goals = BTreeMap::new();
         for (id, e) in world.entities.iter().enumerate() {
-            if let Some(actor) = Self::actor_for(id, e) {
+            if let Some(actor) = Self::actor_for(id, e, &weapon_defs) {
                 actors.insert(id, actor);
                 continue;
             }
@@ -256,10 +270,16 @@ impl AiRuntime {
             goals,
             serial: 0,
             stunstick_sounds,
+            weapon_defs,
+            shots: Vec::new(),
             player_hits: Vec::new(),
             diagnostics: Diagnostics::default(),
             random: 0x9e37_79b9_7f4a_7c15,
         }
+    }
+    /// A uniform value in [-1, 1) from the AI's stream (shot spread, blood noise).
+    pub fn uniform(&mut self) -> f32 {
+        self.random() * 2. - 1.
     }
     fn random(&mut self) -> f32 {
         self.random ^= self.random << 13;
@@ -328,7 +348,11 @@ impl AiRuntime {
         })
     }
     /// The AI actor of an entity whose class has a behavior (npc_metropolice).
-    fn actor_for(id: usize, e: &modkit_core::Entity) -> Option<AiActor> {
+    fn actor_for(
+        id: usize,
+        e: &modkit_core::Entity,
+        defs: &BTreeMap<String, NpcWeaponDef>,
+    ) -> Option<AiActor> {
         if e.class() != "npc_metropolice" {
             return None;
         }
@@ -336,22 +360,94 @@ impl AiRuntime {
             .get("spawnflags")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
-        let baton = e
-            .get("additionalequipment")
-            .is_some_and(|w| w.eq_ignore_ascii_case("weapon_stunstick"));
+        let weapon = Self::equip(e.class(), e.get("additionalequipment").unwrap_or(""), defs);
+        let baton = weapon
+            .as_ref()
+            .is_some_and(|w| w.class == "weapon_stunstick");
+        let mut npc = AiNpc::new(id);
+        npc.shot_regulator = Self::regulator(weapon.as_ref(), defs, id);
         Some(AiActor {
-            npc: AiNpc::new(id),
+            npc,
             class: AiClass::Metropolice(Box::new(Metropolice::new(flags, baton))),
             next_think: 0.,
             last_think: 0.,
+            weapon,
             goal: None,
             events_until: 0.,
         })
     }
+    /// CAI_BaseNPC::Spawn: `additionalequipment` (not empty or "0") becomes the active
+    /// weapon for classes with bits_CAP_USE_WEAPONS (Weapon_Equip; Spawn does not run
+    /// Weapon_CanUse).
+    fn equip(
+        class: &str,
+        equipment: &str,
+        defs: &BTreeMap<String, NpcWeaponDef>,
+    ) -> Option<NpcWeapon> {
+        let equipment = equipment.trim().to_ascii_lowercase();
+        if equipment.is_empty() || equipment == "0" || !npc_weapons::uses_weapons(class) {
+            return None;
+        }
+        let def = defs
+            .get(&equipment)
+            .cloned()
+            .or_else(|| npc_weapons::builtin(&equipment))?;
+        Some(NpcWeapon::equip(&def))
+    }
+    /// OnUpdateShotRegulator for a gun (Reset(true) at equip).
+    fn regulator(
+        weapon: Option<&NpcWeapon>,
+        defs: &BTreeMap<String, NpcWeaponDef>,
+        id: usize,
+    ) -> Option<npc_weapons::ShotRegulator> {
+        let class = &weapon?.class;
+        let spec = defs
+            .get(class)
+            .cloned()
+            .or_else(|| npc_weapons::builtin(class))?
+            .fire?;
+        Some(npc_weapons::ShotRegulator::for_weapon(
+            &spec,
+            0.,
+            0x2545_f491_4f6c_dd1d ^ id as u64,
+        ))
+    }
+    fn weapon_def(&self, class: &str) -> Option<NpcWeaponDef> {
+        self.weapon_defs
+            .get(class)
+            .cloned()
+            .or_else(|| npc_weapons::builtin(class))
+    }
+    /// Weapon_ShootPosition (m_HackedGunPos (0, 0, 55) of npc_metropolice) and the
+    /// GetActualShootPosition target: the enemy's last known position plus its noisy
+    /// BodyTarget offset (player: view offset x U(0.7, 1); NPC: the bell curve from the
+    /// low body point to the eyes), and the seconds since the enemy became valid.
+    fn weapon_aim(
+        &mut self,
+        id: usize,
+        scene: &Scene,
+        player: PlayerState,
+        now: f64,
+    ) -> Option<(Vec3, Vec3, f32)> {
+        let actor = &self.actors[&id];
+        let enemy = actor.npc.enemy?;
+        let memory = actor.npc.enemies.find(Some(enemy)).cloned();
+        let shoot = scene.states[id].origin + Vec3::Z * 55.;
+        let since_valid = memory.as_ref().map_or(0., |m| (now - m.time_valid) as f32);
+        let target = if enemy == PLAYER {
+            let feet = memory.map_or(player.feet, |m| m.last_known);
+            let view = if player.crouched { 28. } else { 64. };
+            feet + Vec3::Z * view * (0.7 + 0.3 * self.random())
+        } else {
+            let feet = memory.map_or(scene.states.get(enemy)?.origin, |m| m.last_known);
+            feet + Vec3::Z * (27. + 37. * (0.5 * self.random() + 0.5 * self.random()))
+        };
+        Some((shoot, target, since_valid))
+    }
     /// A runtime-spawned entity (DESIGN 14r step 3): give it an AI actor when its
     /// class has a behavior. True when one was added.
     pub fn add_actor(&mut self, id: usize, e: &modkit_core::Entity) -> bool {
-        match Self::actor_for(id, e) {
+        match Self::actor_for(id, e, &self.weapon_defs) {
             Some(actor) => {
                 self.actors.insert(id, actor);
                 true
@@ -417,14 +513,79 @@ impl AiRuntime {
             // Animation events of the AI's sequence since the last tick.
             let since = self.actors[&id].events_until.min(now);
             self.actors.get_mut(&id).expect("actor").events_until = now;
-            let events = scene.ai_events(world, id, since, now);
+            let mut events = scene.ai_events(world, id, since, now);
+            // Operator_FrameUpdate: the weapon world model's events go to its operator.
+            if let Some(weapon) = self.actors.get_mut(&id).and_then(|a| a.weapon.as_mut()) {
+                if let Some(rig) = self
+                    .weapon_defs
+                    .get(&weapon.class)
+                    .and_then(|d| world.rigs.get(&npc_weapons::rig_key(&d.world_model)))
+                {
+                    events.extend(weapon.due_events(rig, now));
+                }
+            }
             if !events.is_empty() {
                 let knock_out = self.knock_out_player(id, world, scene, physics, player);
                 let ctx = self.context(id, world, scene, player, now, 0.);
+                let aim = self.weapon_aim(id, scene, player, now);
+                let def = self.actors[&id]
+                    .weapon
+                    .as_ref()
+                    .and_then(|w| self.weapon_def(&w.class));
+                let mut state = self.random;
+                let mut uniform = move || {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    (state >> 40) as f32 / (1u32 << 23) as f32 - 1.
+                };
                 let actor = self.actors.get_mut(&id).expect("actor");
-                let AiClass::Metropolice(cop) = &mut actor.class;
+                let AiActor { class, weapon, .. } = actor;
+                let AiClass::Metropolice(cop) = class;
+                let mut fired = false;
+                let mut reloaded = false;
                 for (name, event) in events {
-                    cop.anim_event(&name, event, &ctx, knock_out);
+                    if !(3000..4000).contains(&event) {
+                        cop.anim_event(&name, event, &ctx, knock_out);
+                        continue;
+                    }
+                    // Weapon events reach only the active weapon (Operator_HandleAnimEvent);
+                    // without one they are dropped (an unarmed cop swings at the air).
+                    let outcome = match (weapon.as_mut(), def.as_ref()) {
+                        (Some(w), Some(d)) => w.handle_event(
+                            event,
+                            d,
+                            id,
+                            "npc_metropolice",
+                            aim,
+                            &mut uniform,
+                            &mut self.shots,
+                        ),
+                        _ => WeaponEvent::None,
+                    };
+                    match outcome {
+                        WeaponEvent::MeleeHit => cop.anim_event(&name, event, &ctx, knock_out),
+                        WeaponEvent::Reloaded | WeaponEvent::ReloadSound => reloaded = true,
+                        WeaponEvent::Fired => {
+                            fired = true;
+                            self.diagnostics.shots_fired += 1;
+                        }
+                        _ => {}
+                    }
+                }
+                self.random = self.random.wrapping_add(0x9e37_79b9_7f4a_7c15) | 1;
+                // WeaponSound(SINGLE_NPC / RELOAD_NPC) at the operator.
+                for (played, key) in [(fired, "single_shot_npc"), (reloaded, "reload_npc")] {
+                    if let Some(cue) = def
+                        .as_ref()
+                        .and_then(|d| d.sounds.get(key))
+                        .filter(|_| played)
+                    {
+                        scene.sounds.push(crate::sounds::SoundRequest {
+                            origin: Some(scene.states[id].origin + Vec3::Z * 55.),
+                            ..cue.clone().into()
+                        });
+                    }
                 }
                 self.apply_requests(id, world, scene, physics, player);
             }
@@ -509,6 +670,12 @@ impl AiRuntime {
         let now = scene.time;
         let mut ctx = self.context(id, world, scene, player, now, 0.);
         let origin = ctx.origin;
+        // The active gun's firing data and clip (GatherAttackConditions, CheckAmmo).
+        let gun = self.actors[&id].weapon.as_ref().and_then(|w| {
+            self.weapon_def(&w.class)
+                .and_then(|d| d.fire)
+                .map(|f| (f, w.clip1))
+        });
         let eye = origin + Vec3::Z * 64.;
         let facing = scene.states[id].rotation * Vec3::X;
         let sight = PhysicsSight { physics, world };
@@ -546,6 +713,10 @@ impl AiRuntime {
             == Disposition::HT;
         let actor = self.actors.get_mut(&id).expect("actor");
         actor.npc.conditions = Conditions::default();
+        // CheckAmmo: an empty clip (NPCs have unlimited reserve ammunition).
+        if gun.is_some_and(|(_, clip)| clip == 0) {
+            actor.npc.conditions.set(COND_NO_PRIMARY_AMMO);
+        }
         let AiClass::Metropolice(cop) = &mut actor.class;
         cop.scripted = false;
         cop.precriminal = precriminal;
@@ -632,6 +803,33 @@ impl AiRuntime {
                     } else {
                         actor.npc.conditions.set(COND_TOO_FAR_TO_ATTACK);
                     }
+                } else if let Some((spec, clip)) = gun {
+                    // GatherAttackConditions: the weapon's LOS from Weapon_ShootPosition to
+                    // the enemy's eyes, else its BodyTarget, and
+                    // CBaseCombatWeapon::WeaponRangeAttack1Condition(flDot, flDist).
+                    let shoot = origin + Vec3::Z * 55.;
+                    let los = sight.visible(shoot, player.eye(), &[id])
+                        || sight.visible(shoot, player.center(), &[id]);
+                    if los {
+                        actor.npc.conditions.set(COND_WEAPON_HAS_LOS);
+                    }
+                    let to = player.feet - origin;
+                    let dot = to.truncate().normalize_or_zero().dot(forward);
+                    let distance = to.length();
+                    let condition = if clip == 0 {
+                        COND_NO_PRIMARY_AMMO
+                    } else if distance < spec.min_range {
+                        COND_TOO_CLOSE_TO_ATTACK
+                    } else if distance > spec.max_range {
+                        COND_TOO_FAR_TO_ATTACK
+                    } else if dot < 0.5 {
+                        COND_NOT_FACING_ATTACK
+                    } else {
+                        COND_CAN_RANGE_ATTACK1
+                    };
+                    if condition != COND_CAN_RANGE_ATTACK1 || los {
+                        actor.npc.conditions.set(condition);
+                    }
                 }
             } else {
                 actor.npc.conditions.set(COND_ENEMY_OCCLUDED);
@@ -698,10 +896,7 @@ impl AiRuntime {
         } else {
             45.
         };
-        let weapon_drawn = scene
-            .entity(world, id)
-            .and_then(|e| e.get("additionalequipment"))
-            .is_some_and(|w| !w.is_empty());
+        let weapon_drawn = actor.weapon.is_some();
         let idle_angry = weapon_drawn && (actor.npc.state == NpcState::Combat || cop.baton_active);
         let mut motor = SceneMotor {
             entity: id,
@@ -715,6 +910,8 @@ impl AiRuntime {
             dt: if dt > 0. { dt } else { THINK_INTERVAL as f32 },
             yaw_speed,
             idle_angry,
+            weapon: actor.weapon.as_ref().map(|w| w.class.clone()),
+            weapon_activity: None,
             blocked_moves: &mut self.diagnostics.blocked_moves,
         };
         actor
@@ -726,6 +923,18 @@ impl AiRuntime {
             cop.idle_angry = idle_angry;
             if actor.npc.activity == "ACT_IDLE" {
                 super::schedule::Motor::set_activity(&mut motor, "ACT_IDLE");
+            }
+        }
+        // Weapon_SetActivity on the weapon's world model for this think's activities.
+        if let (Some((activity, duration)), Some(weapon)) =
+            (motor.weapon_activity.take(), actor.weapon.as_mut())
+        {
+            let rig = self
+                .weapon_defs
+                .get(&weapon.class)
+                .and_then(|d| world.rigs.get(&npc_weapons::rig_key(&d.world_model)));
+            if let Some(rig) = rig {
+                weapon.set_activity(rig, &activity, duration, now);
             }
         }
         self.diagnostics.thinks += 1;
@@ -910,9 +1119,15 @@ impl AiRuntime {
     /// A spawned NPC's additionalequipment (F4 / npc_create_equipment): the cop's
     /// baton exists only with weapon_stunstick.
     pub fn set_equipment(&mut self, id: usize, equipment: &str) {
+        let weapon = Self::equip("npc_metropolice", equipment, &self.weapon_defs);
+        let regulator = Self::regulator(weapon.as_ref(), &self.weapon_defs, id);
         if let Some(actor) = self.actors.get_mut(&id) {
             let AiClass::Metropolice(cop) = &mut actor.class;
-            cop.has_baton = equipment.eq_ignore_ascii_case("weapon_stunstick");
+            cop.has_baton = weapon
+                .as_ref()
+                .is_some_and(|w| w.class == "weapon_stunstick");
+            actor.weapon = weapon;
+            actor.npc.shot_regulator = regulator;
         }
     }
     /// Switching the AI off (debug): every AI NPC drops its schedule, enemy and

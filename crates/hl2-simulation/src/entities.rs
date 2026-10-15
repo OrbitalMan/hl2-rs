@@ -1252,6 +1252,12 @@ impl Scene {
             .map(|e| (e.name.clone(), e.id))
             .collect()
     }
+    /// Seconds until the AI's current sequence has played once.
+    pub fn ai_sequence_remaining(&self, id: usize) -> f64 {
+        self.ai_sequence_end
+            .get(&id)
+            .map_or(0., |end| (end - self.time).max(0.))
+    }
     /// The AI's current sequence has played once (m_fSequenceFinished).
     pub fn ai_activity_finished(&self, id: usize) -> bool {
         self.ai_sequence_end
