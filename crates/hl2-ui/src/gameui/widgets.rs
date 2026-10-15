@@ -182,13 +182,23 @@ impl Theme {
     ///
     /// Follows the SDK `Button` precedence: colors are depressed, then armed, then normal;
     /// the border is depressed, then key focus (the default button), then raised. Bordered
-    /// buttons have no armed border, so hover only shows through the scheme's armed colors.
+    /// buttons have no armed border, so hover only shows through the armed colors.
     /// Disabled buttons are never armed or depressed.
+    ///
+    /// Deliberate deviation (owner decision): the desktop scheme's armed background equals the
+    /// normal one, so retail shows no hover. When that is the case the hover background is the
+    /// scheme's `Menu.BgColor`, the translucent fill of menus and drop-down lists, which lightens
+    /// the button slightly. A scheme with its own armed background keeps it.
     pub fn button_style(&self, state: ButtonState) -> ButtonStyle {
         let (text, bg) = if state.depressed() {
             (self.button_depressed_text, self.button_depressed_bg)
         } else if state.hovered() {
-            (self.button_armed_text, self.button_armed_bg)
+            let bg = if self.button_armed_bg == self.button_bg {
+                self.menu_bg
+            } else {
+                self.button_armed_bg
+            };
+            (self.button_armed_text, bg)
         } else {
             (self.button_text, self.button_bg)
         };
@@ -1697,7 +1707,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_scheme_push_buttons_have_no_visible_hover() {
+    fn desktop_scheme_push_buttons_hover_with_the_menu_fill() {
         let roots = source_assets::keyvalues::parse_resource(BUTTON_SCHEME).unwrap();
         let theme = Theme::from_scheme(&roots[0]);
         assert_eq!(
@@ -1705,13 +1715,23 @@ mod tests {
             Theme::default(),
             "defaults mirror the desktop scheme"
         );
-        assert_eq!(theme.button_armed_bg, Color::from_rgba(0, 0, 0, 0));
+        assert_eq!(
+            theme.button_armed_bg, theme.button_bg,
+            "retail: no armed background"
+        );
         let normal = theme.button_style(ButtonState::new(true));
         let hover = theme.button_style(ButtonState::active(true, true, false));
         assert_eq!(
-            normal, hover,
-            "armed colors equal the normal colors on the desktop"
+            hover.bg, theme.menu_bg,
+            "slight hover fill from Menu.BgColor"
         );
+        assert_eq!((hover.border, hover.text), (normal.border, normal.text));
+        assert_ne!(hover, normal);
+        // Pressed and disabled keep their own look.
+        let pressed = theme.button_style(ButtonState::active(true, true, true));
+        assert_eq!(pressed.bg, theme.button_depressed_bg);
+        let disabled = theme.button_style(ButtonState::active(false, true, false));
+        assert_eq!(disabled, theme.button_style(ButtonState::new(false)));
     }
 
     #[test]

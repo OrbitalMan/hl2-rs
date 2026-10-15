@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: slight visible hover on dialog push buttons (owner-approved deviation)
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Theme::button_style` uses the scheme's `Menu.BgColor` as the hover background when the armed background equals the normal one; test `desktop_scheme_push_buttons_hover_with_the_menu_fill` replaces the no-hover test. Docs: `docs/gameui.md` 6a, `AGENTS.md`, `README.md`, `STATUS.md`.
+
+**Why:** The owner asked for a visible hover for better usability, accepting a slight difference from retail, which shows none on desktop. The fill reuses an existing scheme color for interactive lists instead of an invented one.
+
+**Tested how:** `cargo test -p hl2-ui` (176 passed), `cargo test -p hl2-bevy` (71 passed), strict clippy, fmt; packaged 300-frame main-menu run exit 0 on the second launch (first was SIGKILLed at launch with an empty log).
+
+**Result:** Hovered enabled push buttons lighten slightly; pressed, disabled and tab looks are unchanged.
+
+**Still broken or not tested:** Hover look not checked by hand in the packaged build.
+
+**Next:** Theme loading from the non-empty `SourceScheme.res` (proposed separately).
+
 ## 2026-10-15 GameUI: keep a captured press while crossing a slider
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

@@ -17,6 +17,8 @@ Claude Code desktop, claude-opus-5-5.
 - **Validation (task 3):** 176 `hl2-ui`, 71 `hl2-bevy` tests pass; strict clippy and fmt clean; packaged 300-frame main-menu run exit 0.
 - **Follow-up fix:** a captured dialog press dragged across a slider was reset by the slider shortcut in `OptionsDialog::track`, so returning to the button did not activate it and the slider armed. The shortcut now applies only when no press is captured; covered in `options_dialog_buttons_follow_press_cancel_and_release_activation`. Owned-install tests (`cargo test --locked -p hl2-ui -- --ignored`): 4 passed.
 - **Runtime scope:** the packaged runs only exercised the main menu for 300 frames; they did not open the Options dialog, so hover, drag-off and dropdown behavior are covered by unit tests only.
+- **Owner decision: visible push button hover (deviation).** When the scheme's armed background equals the normal one (desktop), `Theme::button_style` fills a hovered button with the scheme's `Menu.BgColor` (`160 160 160 64`, the menu/drop-down fill): a slight lightening, text and border unchanged, pressed/disabled unaffected, tabs unchanged. Test: `desktop_scheme_push_buttons_hover_with_the_menu_fill`. 176 `hl2-ui`, 71 `hl2-bevy` tests pass, strict clippy/fmt clean, packaged 300-frame run exit 0 (first launch after rebuild was SIGKILLed with an empty log; rerun passed).
+  - Unverified, needs manual check: hover OK/Cancel/Apply and a message box button; the button should lighten slightly and return on leave; pressing shows the sunken border without the fill; disabled buttons (Brightness while windowed) do not change.
 
 ## Previous session: Code cleanup: derive blur from map names and load backgrounds directly from game resources (2026-10-15, branch `orbitalman/main-menu`)
 

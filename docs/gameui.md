@@ -196,9 +196,14 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
 - **Retail has no visible push-button hover on the desktop.** The scheme sets
   `Button.ArmedTextColor` = `Button.TextColor` = White and `Button.ArmedBgColor` = Blank
   `[$WIN32]` (`"190 115 0 255"` is `[$X360]` only), and SDK `Button::GetBorder` ignores the armed
-  flag for bordered buttons. The armed path is therefore wired and unit-tested with a synthetic
-  scheme, but draws exactly like the normal state with the installed scheme. Showing a visible
-  hover would be a deliberate deviation that needs an owner decision.
+  flag for bordered buttons.
+- **Deliberate deviation (owner decision, 2026-10-15): a slight visible hover.** When the scheme's
+  armed background equals the normal one (the desktop case), a hovered push button is filled with
+  the scheme's `Menu.BgColor` (`160 160 160 64`), the translucent fill of menus and drop-down
+  lists, which lightens it slightly. Text and border are unchanged; pressed and disabled buttons
+  are unaffected; a scheme with its own `Button.ArmedBgColor` keeps it. The color is a scheme
+  value, but using it for button hover is an HL2-RS choice, not retail behavior. Tabs keep the
+  retail look (no hover).
 - **Tabs have no hover.** SDK `PageTab` overrides cursor enter/exit without arming and takes its
   border and text color from the active flag only, so the generic `Button.Armed*` values never
   apply to tabs, selected or not. `Theme::tab_style(active, state)` ignores the state.
