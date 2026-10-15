@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: scroll bars with arrow buttons and live dragging
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `widgets::{ScrollPart, ScrollBarLayout, ScrollBarState}`, `SCROLLBAR_WIDTH` 14 -> 17 (`ScrollBar.Wide`), `SCROLL_REPEAT_DELAY`/`INTERVAL`, `Painter::scroll_bar` (arrow buttons, scheme nob), `Painter::arrow_up`, theme `scrollbar_nob`/`scrollbar_arrow`; `PopupList` embeds the bar (`pointer` takes the frame time); `OptionsDialog::key_list_bar`. Docs: `docs/gameui.md` 6c, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Owner report: the scroll strip had no up/down arrows and the view only moved after releasing a press on it.
+
+**Tested how:** `cargo test -p hl2-ui` (189), `cargo test -p hl2-bevy` (73), strict clippy, fmt; owned-install tests; packaged 300-frame run.
+
+**Result:** SDK-like scroll bars in the key list and all popup lists.
+
+**Still broken or not tested:** Not checked by hand; Marlett glyphs are approximated by drawn triangles.
+
+**Next:** Owner manual checks (STATUS.md).
+
 ## 2026-10-15 GameUI: keep the action cell dimly selected while capturing
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

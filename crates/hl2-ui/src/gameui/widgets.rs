@@ -99,6 +99,10 @@ pub struct Theme {
     /// (`SectionedListPanel.OutOfFocusSelectedBgColor` / `OutOfFocusSelectedTextColor`).
     pub selection_bg_dim: Color,
     pub selection_text_dim: Color,
+    /// Scroll bar nob fill (`ScrollBarSlider.FgColor`, Blank: only its border shows) and arrow
+    /// glyph color (`ScrollBarButton.FgColor`).
+    pub scrollbar_nob: Color,
+    pub scrollbar_arrow: Color,
 }
 
 impl Default for Theme {
@@ -143,6 +147,8 @@ impl Default for Theme {
             list_divider: rgba(0, 0, 0, 255),
             selection_bg_dim: rgba(255, 155, 0, 128),
             selection_text_dim: rgba(0, 0, 0, 255),
+            scrollbar_nob: rgba(0, 0, 0, 0),
+            scrollbar_arrow: rgba(255, 255, 255, 255),
         }
     }
 }
@@ -151,7 +157,7 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 34] = [
+        let fields: [(&str, &mut Color); 36] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
@@ -173,6 +179,8 @@ impl Theme {
             ("ComboBoxButton.ArrowColor", &mut theme.arrow),
             ("ComboBoxButton.ArmedArrowColor", &mut theme.arrow_armed),
             ("ScrollBarSlider.BgColor", &mut theme.scrollbar_bg),
+            ("ScrollBarSlider.FgColor", &mut theme.scrollbar_nob),
+            ("ScrollBarButton.FgColor", &mut theme.scrollbar_arrow),
             ("Tooltip.BgColor", &mut theme.tooltip_bg),
             ("Tooltip.TextColor", &mut theme.tooltip_text),
             ("Button.TextColor", &mut theme.button_text),
@@ -515,6 +523,23 @@ impl Painter<'_> {
             self.canvas.rectangle(
                 (c.x - half).round(),
                 (c.y - w * 0.5 + row as f32).round(),
+                (2. * half).round().max(1.),
+                1.,
+                color,
+            );
+        }
+    }
+
+    /// An upward triangle, the mirror of [`Painter::arrow_down`].
+    pub fn arrow_up(&self, center: Vec2, half_width: f32, color: Color) {
+        let c = self.origin + center * self.scale;
+        let w = half_width * self.scale;
+        let rows = w.ceil() as i32;
+        for row in 0..rows {
+            let half = w - row as f32;
+            self.canvas.rectangle(
+                (c.x - half).round(),
+                (c.y + w * 0.5 - 1. - row as f32).round(),
                 (2. * half).round().max(1.),
                 1.,
                 color,
@@ -1196,7 +1221,14 @@ impl Painter<'_> {
     ///
     /// The list is fully opaque (owner decision): the frame color is laid down at full alpha
     /// before the translucent `Menu.BgColor` tint, so nothing behind the list shows through.
-    pub fn menu_list(&self, rect: Rect, items: &[String], first: usize, highlight: Option<usize>) {
+    pub fn menu_list(
+        &self,
+        rect: Rect,
+        items: &[String],
+        first: usize,
+        highlight: Option<usize>,
+        bar: Option<ScrollPart>,
+    ) {
         self.fill(
             rect,
             Color {
@@ -1234,22 +1266,52 @@ impl Painter<'_> {
                 first,
                 rows,
                 items.len(),
+                bar,
             );
         }
     }
 
     /// A vertical scroll bar showing `visible` of `total` rows starting at `first`.
-    pub fn scroll_bar(&self, rect: Rect, first: usize, visible: usize, total: usize) {
-        self.fill(rect, self.theme.scrollbar_bg);
-        if total == 0 {
+    ///
+    /// SDK `ScrollBar` layout ([`ScrollBarLayout`]): square arrow buttons at both ends (raised,
+    /// sunken while `pressed`), the track (`ScrollBarSlider.BgColor`) between them and the nob
+    /// (`ScrollBarSlider.FgColor` fill with a raised border).
+    pub fn scroll_bar(
+        &self,
+        rect: Rect,
+        first: usize,
+        visible: usize,
+        total: usize,
+        pressed: Option<ScrollPart>,
+    ) {
+        let layout = ScrollBarLayout::new(rect, first, visible, total);
+        self.fill(layout.track, self.theme.scrollbar_bg);
+        for (button, part) in [(layout.up, ScrollPart::Up), (layout.down, ScrollPart::Down)] {
+            let down = pressed == Some(part);
+            if down {
+                self.sunken(button);
+            } else {
+                self.raised(button);
+            }
+            let offset = if down { 1. } else { 0. };
+            let center = vec2(
+                button.x + button.w * 0.5 + offset,
+                button.y + button.h * 0.5 + offset,
+            );
+            let half = (button.w * 0.25).round().max(2.);
+            if part == ScrollPart::Up {
+                self.arrow_up(center, half, self.theme.scrollbar_arrow);
+            } else {
+                self.arrow_down(center, half, self.theme.scrollbar_arrow);
+            }
+        }
+        if layout.max_first == 0 {
             return;
         }
-        let tall = (rect.h * visible as f32 / total as f32).clamp(8., rect.h);
-        let top =
-            rect.y + (rect.h - tall) * first as f32 / (total - visible.min(total)).max(1) as f32;
-        let thumb = Rect::new(rect.x + 1., top, rect.w - 2., tall);
-        self.fill(thumb, self.theme.slider_nob);
-        self.raised(thumb);
+        if self.theme.scrollbar_nob.a > 0. {
+            self.fill(layout.nob, self.theme.scrollbar_nob);
+        }
+        self.raised(layout.nob);
     }
 
     /// `Divider`: a sunken two-pixel line.
@@ -1402,7 +1464,191 @@ pub const SLIDER_HIT_TALL: f32 = 22.;
 /// Drop-down menu row height and the maximum rows shown before scrolling.
 pub const MENU_ROW: f32 = 20.;
 pub const MENU_MAX_ROWS: usize = 12;
-pub const SCROLLBAR_WIDTH: f32 = 14.;
+/// Scroll bar width (`ScrollBar.Wide` in the installed scheme); the arrow buttons are squares of
+/// this size.
+pub const SCROLLBAR_WIDTH: f32 = 17.;
+/// SDK `ScrollBar` auto-repeat while an arrow button is held: first repeat after this delay,
+/// then one step per interval (seconds).
+pub const SCROLL_REPEAT_DELAY: f64 = 0.4;
+pub const SCROLL_REPEAT_INTERVAL: f64 = 0.05;
+
+/// A part of a vertical scroll bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollPart {
+    Up,
+    Down,
+    Nob,
+    /// The track above the nob.
+    PageUp,
+    /// The track below the nob.
+    PageDown,
+}
+
+/// Geometry of a vertical scroll bar (SDK `ScrollBar::PerformLayout` / `ScrollBarSlider`):
+/// square arrow buttons at the ends, the track between them, and the nob sized to the visible
+/// share of the rows but never shorter than the bar is wide.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollBarLayout {
+    pub up: Rect,
+    pub down: Rect,
+    pub track: Rect,
+    pub nob: Rect,
+    pub max_first: usize,
+}
+
+impl ScrollBarLayout {
+    pub fn new(rect: Rect, first: usize, visible: usize, total: usize) -> Self {
+        let button = rect.w.min(rect.h * 0.5);
+        let up = Rect::new(rect.x, rect.y, rect.w, button);
+        let down = Rect::new(rect.x, rect.y + rect.h - button, rect.w, button);
+        let track = Rect::new(
+            rect.x,
+            rect.y + button,
+            rect.w,
+            (rect.h - 2. * button).max(0.),
+        );
+        let max_first = total.saturating_sub(visible);
+        let nob_h = if total == 0 {
+            track.h
+        } else {
+            (track.h * visible as f32 / total as f32).clamp(rect.w.min(track.h), track.h)
+        };
+        let fraction = first.min(max_first) as f32 / max_first.max(1) as f32;
+        let nob = Rect::new(
+            track.x,
+            track.y + (track.h - nob_h) * fraction,
+            track.w,
+            nob_h,
+        );
+        Self {
+            up,
+            down,
+            track,
+            nob,
+            max_first,
+        }
+    }
+
+    /// The part under `point`, if it is on the bar.
+    pub fn part_at(&self, point: Vec2) -> Option<ScrollPart> {
+        if self.up.contains(point) {
+            Some(ScrollPart::Up)
+        } else if self.down.contains(point) {
+            Some(ScrollPart::Down)
+        } else if self.nob.contains(point) {
+            Some(ScrollPart::Nob)
+        } else if self.track.contains(point) {
+            Some(if point.y < self.nob.y {
+                ScrollPart::PageUp
+            } else {
+                ScrollPart::PageDown
+            })
+        } else {
+            None
+        }
+    }
+
+    /// The first row for a nob whose top edge is at `top`.
+    pub fn first_for_nob_top(&self, top: f32) -> usize {
+        let travel = self.track.h - self.nob.h;
+        if travel <= 0. {
+            return 0;
+        }
+        let fraction = ((top - self.track.y) / travel).clamp(0., 1.);
+        (fraction * self.max_first as f32).round() as usize
+    }
+}
+
+/// Pointer gesture on a scroll bar, following SDK `ScrollBar`: an arrow button steps one row on
+/// press and repeats while held ([`SCROLL_REPEAT_DELAY`], then every
+/// [`SCROLL_REPEAT_INTERVAL`]); the nob follows the pointer while dragged; a press on the track
+/// pages once by the visible rows. The bar owns the pointer until the release.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ScrollBarState {
+    pressed: Option<ScrollPart>,
+    /// Pointer offset from the nob's top edge when the drag started.
+    grab: f32,
+    /// When the held arrow button repeats next.
+    repeat_at: Option<f64>,
+}
+
+impl ScrollBarState {
+    /// Whether a gesture that started on the bar is in progress.
+    pub fn active(&self) -> bool {
+        self.pressed.is_some()
+    }
+
+    /// The part being pressed, for drawing.
+    pub fn pressed(&self) -> Option<ScrollPart> {
+        self.pressed
+    }
+
+    /// Whether this frame belongs to the bar: a gesture is in progress, or a press lands on it.
+    pub fn wants(&self, layout: &ScrollBarLayout, point: Option<Vec2>, click: bool) -> bool {
+        self.active() || (click && point.and_then(|p| layout.part_at(p)).is_some())
+    }
+
+    /// Feeds one frame of pointer state; returns the new first row when it changes.
+    /// Without a frame time (`now`) a held arrow button does not repeat.
+    #[allow(clippy::too_many_arguments)]
+    pub fn pointer(
+        &mut self,
+        layout: &ScrollBarLayout,
+        point: Option<Vec2>,
+        down: bool,
+        click: bool,
+        now: Option<f64>,
+        first: usize,
+        page: usize,
+    ) -> Option<usize> {
+        let max = layout.max_first;
+        let step = |part: ScrollPart| match part {
+            ScrollPart::Up => first.saturating_sub(1),
+            ScrollPart::Down => (first + 1).min(max),
+            ScrollPart::PageUp => first.saturating_sub(page.max(1)),
+            ScrollPart::PageDown => (first + page.max(1)).min(max),
+            ScrollPart::Nob => first,
+        };
+        let target = if click {
+            let part = point.and_then(|p| layout.part_at(p));
+            self.pressed = part;
+            self.repeat_at = None;
+            match (part, point) {
+                (Some(ScrollPart::Nob), Some(p)) => {
+                    self.grab = p.y - layout.nob.y;
+                    None
+                }
+                (Some(part @ (ScrollPart::Up | ScrollPart::Down)), _) => {
+                    self.repeat_at = now.map(|t| t + SCROLL_REPEAT_DELAY);
+                    Some(step(part))
+                }
+                (Some(part), _) => Some(step(part)),
+                (None, _) => None,
+            }
+        } else if down {
+            match (self.pressed, point) {
+                (Some(ScrollPart::Nob), Some(p)) => Some(layout.first_for_nob_top(p.y - self.grab)),
+                (Some(part @ (ScrollPart::Up | ScrollPart::Down)), _) => {
+                    match (now, self.repeat_at) {
+                        (Some(t), Some(at)) if t >= at => {
+                            self.repeat_at = Some(at + SCROLL_REPEAT_INTERVAL);
+                            Some(step(part))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if !down {
+            self.pressed = None;
+            self.repeat_at = None;
+        }
+        target.filter(|t| *t != first)
+    }
+}
 
 /// Rectangle of a combo box's open list below the combo.
 pub fn menu_list_rect(combo: Rect, items: usize) -> Rect {
@@ -1541,6 +1787,7 @@ pub struct PopupList {
     pressed: Option<PopupHit>,
     was_down: bool,
     wheel: ScrollAccumulator,
+    bar: ScrollBarState,
 }
 
 impl PopupList {
@@ -1555,6 +1802,7 @@ impl PopupList {
             pressed: None,
             was_down: false,
             wheel: ScrollAccumulator::default(),
+            bar: ScrollBarState::default(),
         };
         if let Some(index) = selected {
             popup.reveal(index);
@@ -1618,15 +1866,55 @@ impl PopupList {
         })
     }
 
+    /// The scroll bar along the right edge when the entries do not all fit.
+    pub fn bar_layout(&self) -> Option<ScrollBarLayout> {
+        (self.items > self.rows()).then(|| {
+            ScrollBarLayout::new(
+                Rect::new(
+                    self.list.x + self.list.w - SCROLLBAR_WIDTH,
+                    self.list.y,
+                    SCROLLBAR_WIDTH,
+                    self.list.h,
+                ),
+                self.first,
+                self.rows(),
+                self.items,
+            )
+        })
+    }
+
+    /// The scroll bar part being pressed, for drawing.
+    pub fn bar_pressed(&self) -> Option<ScrollPart> {
+        self.bar.pressed()
+    }
+
     /// Feeds one frame of pointer state. Hovering an entry highlights it; see the type docs
-    /// for when a gesture selects or closes.
+    /// for when a gesture selects or closes. A gesture that starts on the scroll bar scrolls
+    /// (live, with arrow repeat at `now`) and never selects or closes.
     pub fn pointer(
         &mut self,
         point: Option<Vec2>,
         down: bool,
         click: bool,
         released: bool,
+        now: Option<f64>,
     ) -> Option<PopupEvent> {
+        let bar = self
+            .bar_layout()
+            .filter(|layout| self.bar.wants(layout, point, click));
+        if let Some(layout) = bar {
+            let rows = self.rows();
+            let held = down && !released;
+            if let Some(first) = self
+                .bar
+                .pointer(&layout, point, held, click, now, self.first, rows)
+            {
+                self.first = first;
+            }
+            self.pressed = None;
+            self.was_down = held;
+            return None;
+        }
         let hit = self.hit(point);
         if let Some(PopupHit::Item(index)) = hit {
             self.highlight = Some(index);
@@ -2024,9 +2312,9 @@ mod tests {
         let header = Some(vec2(10., 10.));
         let outside = Some(vec2(300., 300.));
         let gesture = |popup: &mut PopupList, press, release| {
-            let mut events = vec![popup.pointer(press, true, true, false)];
-            events.push(popup.pointer(press, true, false, false));
-            events.push(popup.pointer(release, false, false, true));
+            let mut events = vec![popup.pointer(press, true, true, false, None)];
+            events.push(popup.pointer(press, true, false, false, None));
+            events.push(popup.pointer(release, false, false, true, None));
             events
         };
         assert_eq!(popup.hit(entry(2)), Some(PopupHit::Item(2)));
@@ -2055,7 +2343,7 @@ mod tests {
         assert_eq!(gesture(&mut popup, entry(0), header)[2], None);
         // A release without an observed press (the opening click) does nothing.
         let mut fresh = PopupList::below(anchor, 3, None);
-        assert_eq!(fresh.pointer(header, false, false, true), None);
+        assert_eq!(fresh.pointer(header, false, false, true, None), None);
         // Keyboard stepping clamps and scrolls into view.
         fresh.step(-1);
         assert_eq!(fresh.highlight, Some(0));
@@ -2365,7 +2653,7 @@ mod tests {
             origin: Vec2::ZERO,
             scale: 1.,
         };
-        painter.menu_list(Rect::new(0., 0., 100., 60.), &[], 0, None);
+        painter.menu_list(Rect::new(0., 0., 100., 60.), &[], 0, None, None);
         let quads = canvas.drain();
         assert_eq!(quads[0].destination.w, 100.);
         assert_eq!(quads[0].color.a, 1., "base layer is opaque");
@@ -2445,6 +2733,108 @@ mod tests {
         );
         popup.wheel(-1., ScrollMode::Notched);
         assert_eq!(popup.first, start);
+    }
+
+    #[test]
+    fn scroll_bar_layout_has_square_end_buttons_and_a_minimum_nob() {
+        let rect = Rect::new(0., 0., SCROLLBAR_WIDTH, 200.);
+        let top = ScrollBarLayout::new(rect, 0, 10, 100);
+        assert_eq!(top.up, Rect::new(0., 0., 17., 17.));
+        assert_eq!(top.down, Rect::new(0., 183., 17., 17.));
+        assert_eq!(top.track, Rect::new(0., 17., 17., 166.));
+        assert_eq!(top.nob.h, 17., "10% of 166 is below the bar width");
+        assert_eq!(top.nob.y, top.track.y);
+        let bottom = ScrollBarLayout::new(rect, 90, 10, 100);
+        assert_eq!(bottom.nob.y + bottom.nob.h, bottom.track.y + bottom.track.h);
+        assert_eq!(bottom.first_for_nob_top(bottom.nob.y), 90);
+        assert_eq!(bottom.part_at(vec2(5., 5.)), Some(ScrollPart::Up));
+        assert_eq!(bottom.part_at(vec2(5., 190.)), Some(ScrollPart::Down));
+        assert_eq!(bottom.part_at(vec2(5., 40.)), Some(ScrollPart::PageUp));
+        assert_eq!(bottom.part_at(vec2(5., 175.)), Some(ScrollPart::Nob));
+    }
+
+    #[test]
+    fn scroll_bar_arrows_step_on_press_and_repeat_while_held() {
+        let rect = Rect::new(0., 0., SCROLLBAR_WIDTH, 200.);
+        let mut first = 5;
+        let mut bar = ScrollBarState::default();
+        let up = Some(vec2(5., 5.));
+        let frame = |bar: &mut ScrollBarState, first: &mut usize, down, click, now| {
+            let layout = ScrollBarLayout::new(rect, *first, 10, 100);
+            if let Some(f) = bar.pointer(&layout, up, down, click, now, *first, 10) {
+                *first = f;
+            }
+        };
+        frame(&mut bar, &mut first, true, true, Some(1.0));
+        assert_eq!(first, 4, "steps on press");
+        assert_eq!(bar.pressed(), Some(ScrollPart::Up));
+        frame(&mut bar, &mut first, true, false, Some(1.3));
+        assert_eq!(first, 4, "no repeat before the delay");
+        frame(&mut bar, &mut first, true, false, Some(1.4));
+        assert_eq!(first, 3, "first repeat after 400 ms");
+        frame(&mut bar, &mut first, true, false, Some(1.42));
+        assert_eq!(first, 3);
+        frame(&mut bar, &mut first, true, false, Some(1.45));
+        assert_eq!(first, 2, "then every 50 ms");
+        frame(&mut bar, &mut first, false, false, Some(1.5));
+        assert!(!bar.active(), "release ends the gesture");
+        // Without frame times there is no repeat.
+        frame(&mut bar, &mut first, true, true, None);
+        frame(&mut bar, &mut first, true, false, None);
+        assert_eq!(first, 1);
+    }
+
+    #[test]
+    fn scroll_bar_nob_drags_live_and_track_pages_once() {
+        let rect = Rect::new(0., 0., SCROLLBAR_WIDTH, 200.);
+        let mut bar = ScrollBarState::default();
+        let layout = ScrollBarLayout::new(rect, 0, 10, 100);
+        let grab = vec2(5., layout.nob.y + 5.);
+        assert_eq!(
+            bar.pointer(&layout, Some(grab), true, true, None, 0, 10),
+            None
+        );
+        // Moving while held scrolls before any release.
+        let moved = bar.pointer(
+            &layout,
+            Some(grab + vec2(0., 74.5)),
+            true,
+            false,
+            None,
+            0,
+            10,
+        );
+        assert_eq!(moved, Some(45), "half the travel of 149 px");
+        bar.pointer(&layout, Some(grab), false, false, None, 45, 10);
+        assert!(!bar.active());
+        // A press on the track below the nob pages once, holding adds nothing.
+        let below = Some(vec2(5., 150.));
+        assert_eq!(
+            bar.pointer(&layout, below, true, true, None, 0, 10),
+            Some(10)
+        );
+        assert_eq!(bar.pointer(&layout, below, true, false, None, 10, 10), None);
+    }
+
+    #[test]
+    fn popup_scroll_bar_scrolls_without_selecting_or_closing() {
+        let anchor = Rect::new(0., 0., 100., 24.);
+        let mut popup = PopupList::below(anchor, 30, None);
+        let layout = popup.bar_layout().expect("30 entries do not fit");
+        let down_button = Some(vec2(layout.down.x + 5., layout.down.y + 5.));
+        assert_eq!(popup.pointer(down_button, true, true, false, None), None);
+        assert_eq!(popup.first, 1, "the arrow scrolls on press");
+        assert_eq!(popup.bar_pressed(), Some(ScrollPart::Down));
+        assert_eq!(popup.pointer(down_button, false, false, true, None), None);
+        assert_eq!(popup.bar_pressed(), None);
+        assert_eq!(popup.highlight, None, "nothing selected");
+        // An entry click still selects afterwards.
+        let entry = Some(vec2(10., popup.list.y + MENU_ROW * 0.5));
+        popup.pointer(entry, true, true, false, None);
+        assert_eq!(
+            popup.pointer(entry, false, false, true, None),
+            Some(PopupEvent::Select(1))
+        );
     }
 
     #[test]

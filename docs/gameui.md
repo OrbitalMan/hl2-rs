@@ -252,6 +252,17 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
     longer gets lost. Lists still move row by row; pixel-smooth scrolling would need clipping
     support in the canvas and was not requested.
 - Gameplay weapon selection and `MWHEELUP`/`MWHEELDOWN` key capture are unchanged.
+- **Scroll bars (2026-10-15)** follow SDK `ScrollBar`/`ScrollBarSlider` and the installed scheme:
+  width `ScrollBar.Wide` (17, `SCROLLBAR_WIDTH`); square arrow buttons at both ends
+  (`ScrollBarButtonBorder`, sunken while pressed, `ScrollBarButton.FgColor` arrows) that step one
+  row on press and repeat after 400 ms every 50 ms while held (needs `Input::time`); the nob
+  (`ScrollBarSlider.FgColor`, Blank, so only its raised border shows; at least as tall as the bar
+  is wide) follows the pointer live while dragged; a press on the track pages once by the
+  visible rows. The bar owns the pointer from press to release (`widgets::ScrollBarState`,
+  `ScrollBarLayout`), so a scroll gesture never selects a row, closes a popup or activates
+  anything underneath. Used by the Options key list (`OptionsDialog::key_list_bar`) and every
+  popup list (`PopupList::bar_layout`). Before, the bar had no arrows and the key list only
+  jumped on release.
 
 ### 6b. Popup lists as the topmost input layer (2026-10-15)
 

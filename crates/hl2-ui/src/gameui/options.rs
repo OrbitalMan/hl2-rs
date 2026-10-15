@@ -264,6 +264,7 @@ pub struct OptionsDialog {
     /// Wheel handling for lists: notched on Windows/Linux, accumulated on macOS.
     scroll_mode: widgets::ScrollMode,
     key_wheel: widgets::ScrollAccumulator,
+    key_bar: widgets::ScrollBarState,
 }
 
 impl Default for OptionsDialog {
@@ -294,6 +295,7 @@ impl Default for OptionsDialog {
             key_clicks: widgets::DoubleClick::default(),
             scroll_mode: widgets::ScrollMode::platform(),
             key_wheel: widgets::ScrollAccumulator::default(),
+            key_bar: widgets::ScrollBarState::default(),
         }
     }
 }
@@ -368,6 +370,16 @@ fn layout_widgets<'a>(
 }
 
 /// Visible key-list rows below the header.
+/// The key list's scroll bar: along the right edge, below the header.
+fn key_bar_rect(list: Rect) -> Rect {
+    Rect::new(
+        list.x + list.w - 1. - SCROLLBAR_WIDTH,
+        list.y + KEY_HEADER,
+        SCROLLBAR_WIDTH,
+        list.h - KEY_HEADER - 1.,
+    )
+}
+
 fn key_rows_visible(list: Rect) -> usize {
     (((list.h - KEY_HEADER) / MENU_ROW).floor() as usize).max(1)
 }
@@ -632,7 +644,7 @@ impl OptionsDialog {
         if input.pressed(Key::Up) || input.pressed(Key::Down) {
             popup.step(if input.pressed(Key::Up) { -1 } else { 1 });
         }
-        let event = popup.pointer(pointer, input.held, input.click, input.released);
+        let event = popup.pointer(pointer, input.held, input.click, input.released, self.now);
         let pick = match event {
             Some(widgets::PopupEvent::Select(index)) => Some(Some(index)),
             Some(widgets::PopupEvent::Close) => Some(None),
@@ -768,6 +780,9 @@ impl OptionsDialog {
         let was_editing = self.editing.is_some();
         if self.tab == Tab::Keyboard {
             self.key_list_keys(input, &list);
+            if self.key_list_bar(input, pointer, &list) {
+                return OptionsOutcome::None;
+            }
         }
         let clicked = self.track(&list, &extra, pointer, input);
         self.active_tooltip = if !input.click && !input.held {
@@ -957,6 +972,48 @@ impl OptionsDialog {
         }
     }
 
+    /// The key list's scroll bar while it has more rows than fit.
+    fn key_bar_layout(&self, rect: Rect) -> Option<widgets::ScrollBarLayout> {
+        let total = self.res.key_rows.len();
+        key_list_scrollable(rect, total).then(|| {
+            widgets::ScrollBarLayout::new(
+                key_bar_rect(rect),
+                self.keys.first,
+                key_rows_visible(rect),
+                total,
+            )
+        })
+    }
+
+    /// A gesture on the key list's scroll bar owns the pointer from press to release and
+    /// scrolls live; the rest of the page is occluded meanwhile. Returns whether it took the
+    /// frame.
+    fn key_list_bar(&mut self, input: &Input, pointer: Option<Vec2>, list: &[Widget]) -> bool {
+        let Some(rect) = Self::key_list_rect(list) else {
+            return false;
+        };
+        let Some(layout) = self.key_bar_layout(rect) else {
+            return false;
+        };
+        if !self.key_bar.wants(&layout, pointer, input.click) {
+            return false;
+        }
+        let page = key_rows_visible(rect);
+        if let Some(first) = self.key_bar.pointer(
+            &layout,
+            pointer,
+            input.held,
+            input.click,
+            self.now,
+            self.keys.first,
+            page,
+        ) {
+            self.keys.first = first;
+        }
+        self.occlude(input);
+        true
+    }
+
     fn key_list_rect(list: &[Widget]) -> Option<Rect> {
         list.iter()
             .find(|w| w.binding == Some(Binding::KeyList))
@@ -1017,14 +1074,12 @@ impl OptionsDialog {
 
     fn key_list_click(&mut self, rect: Rect, p: Vec2) {
         let total = self.res.key_rows.len();
-        let visible = key_rows_visible(rect);
         let body = Rect::new(rect.x, rect.y + KEY_HEADER, rect.w, rect.h - KEY_HEADER);
         if !body.contains(p) {
             return;
         }
-        if key_list_scrollable(rect, total) && p.x >= rect.x + rect.w - SCROLLBAR_WIDTH {
-            let fraction = ((p.y - body.y) / body.h).clamp(0., 1.);
-            self.keys.first = ((total - visible) as f32 * fraction).round() as usize;
+        // The scroll bar handles its own presses (`key_list_bar`).
+        if key_list_scrollable(rect, total) && key_bar_rect(rect).contains(p) {
             return;
         }
         let index = self.keys.first + ((p.y - body.y) / MENU_ROW).floor() as usize;
@@ -1331,7 +1386,13 @@ impl OptionsDialog {
             );
         }
         if let Some(OpenCombo { items, popup, .. }) = &self.combo {
-            p.menu_list(popup.list, items, popup.first, popup.highlight);
+            p.menu_list(
+                popup.list,
+                items,
+                popup.first,
+                popup.highlight,
+                popup.bar_pressed(),
+            );
         }
         if let Some(sub) = self.sub {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
@@ -1618,15 +1679,11 @@ impl OptionsDialog {
         }
         if scroll {
             p.scroll_bar(
-                Rect::new(
-                    rect.x + rect.w - 1. - SCROLLBAR_WIDTH,
-                    top,
-                    SCROLLBAR_WIDTH,
-                    rect.h - KEY_HEADER - 1.,
-                ),
+                key_bar_rect(rect),
                 self.keys.first,
                 visible,
                 rows.len(),
+                self.key_bar.pressed(),
             );
         }
     }
@@ -2045,6 +2102,51 @@ mod tests {
         h.dialog.sync_display_mode(DisplayMode::Fullscreen);
         assert_eq!(h.dialog.draft().video.display_mode, DisplayMode::Windowed);
         assert!(h.dialog.changed());
+    }
+
+    #[test]
+    fn key_list_scroll_bar_scrolls_while_held_and_blocks_row_clicks() {
+        let mut h = Harness::new();
+        let mut res = (*resources()).clone();
+        res.key_rows = (0..40)
+            .map(|i| KeyRow::Action {
+                command: format!("+cmd{i}"),
+                label: "#Valve_Jump".into(),
+            })
+            .collect();
+        h.dialog.set_resources(Arc::new(res));
+        h.dialog.open(Config::default());
+        h.tab(Tab::Keyboard);
+        let list = Rect::new(8., 10., 480., 258.);
+        let bar = key_bar_rect(list);
+        let layout = widgets::ScrollBarLayout::new(bar, 0, key_rows_visible(list), 40);
+        let at = |p: Vec2| page(p.x, p.y);
+        let nob = vec2(layout.nob.x + 5., layout.nob.y + 5.);
+        // Press on the nob and drag: the list scrolls before the release.
+        h.frame(Input {
+            pointer: Some(at(nob)),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        h.frame(Input {
+            pointer: Some(at(nob + vec2(0., 60.))),
+            held: true,
+            ..Default::default()
+        });
+        let dragged = h.dialog.keys.first;
+        assert!(dragged > 0, "live drag");
+        h.frame(Input {
+            pointer: Some(at(nob + vec2(0., 60.))),
+            released: true,
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.keys.first, dragged);
+        assert_eq!(h.dialog.keys.selected, None, "the bar never selects a row");
+        // The down arrow steps on press.
+        let down = vec2(layout.down.x + 5., layout.down.y + 5.);
+        h.click(at(down));
+        assert_eq!(h.dialog.keys.first, dragged + 1);
     }
 
     #[test]
