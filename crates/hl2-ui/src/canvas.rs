@@ -117,8 +117,6 @@ pub struct Quad {
     pub additive: bool,
     /// Multiplies the frame by the color (a modulate ScreenFade).
     pub modulate: bool,
-    /// Applies blur to the background content behind this quad.
-    pub blur: bool,
     /// Per-vertex destination corners and colors, in the order top-left, bottom-left,
     /// bottom-right, top-right of `destination` (the damage indicator's trapezoids).
     pub vertices: Option<[(Vec2, Color); 4]>,
@@ -168,7 +166,6 @@ impl Canvas {
             color,
             additive,
             modulate: false,
-            blur: false,
             vertices: None,
         });
     }
@@ -188,7 +185,6 @@ impl Canvas {
             color: Color::new(1., 1., 1., 1.),
             additive,
             modulate: false,
-            blur: false,
             vertices: Some(vertices),
         });
     }
@@ -203,7 +199,6 @@ impl Canvas {
             color,
             additive: false,
             modulate: true,
-            blur: false,
             vertices: None,
         });
     }
@@ -214,24 +209,6 @@ impl Canvas {
             Rect::new(x, y, w, h),
             color,
         );
-    }
-    /// A quad that applies a blur effect with optional color tint to the content behind it.
-    pub fn blur(&self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w <= 0. || h <= 0. {
-            return;
-        }
-        let mut state = self.0.lock().expect("HUD canvas");
-        let additive = state.additive;
-        state.commands.push(Quad {
-            texture: None,
-            source: Rect::new(0., 0., 1., 1.),
-            destination: Rect::new(x, y, w, h),
-            color,
-            additive,
-            modulate: false,
-            blur: true,
-            vertices: None,
-        });
     }
 }
 pub fn draw_texture(canvas: &Canvas, texture: &Texture2D, x: f32, y: f32, color: Color) {

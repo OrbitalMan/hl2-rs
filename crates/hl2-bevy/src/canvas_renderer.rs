@@ -29,20 +29,17 @@ pub struct HudMaterial {
     texture: Handle<Image>,
     additive: bool,
     modulate: bool,
-    blur: bool,
 }
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct HudMaterialKey {
     additive: bool,
     modulate: bool,
-    blur: bool,
 }
 impl From<&HudMaterial> for HudMaterialKey {
     fn from(material: &HudMaterial) -> Self {
         Self {
             additive: material.additive,
             modulate: material.modulate,
-            blur: material.blur,
         }
     }
 }
@@ -145,7 +142,6 @@ pub struct Hud {
     textures: HashMap<usize, GpuTexture>,
     white: Option<(Handle<HudMaterial>, Handle<HudMaterial>)>,
     modulate: Option<Handle<HudMaterial>>,
-    blur: Option<Handle<HudMaterial>>,
     pool: Vec<(Entity, Handle<Mesh>)>,
     pub quads: usize,
     timing: FrameTiming,
@@ -161,7 +157,6 @@ impl Hud {
             textures: HashMap::new(),
             white: None,
             modulate: None,
-            blur: None,
             pool: vec![],
             quads: 0,
             timing: FrameTiming::default(),
@@ -200,46 +195,13 @@ impl Hud {
                     texture: handle.clone(),
                     additive: false,
                     modulate: false,
-                    blur: false,
                 }),
                 materials.add(HudMaterial {
                     texture: handle,
                     additive: true,
                     modulate: false,
-                    blur: false,
                 }),
             )
-        }
-        if quad.blur {
-            return self
-                .blur
-                .get_or_insert_with(|| {
-                    let size = 32usize;
-                    let mut rgba = Vec::with_capacity(size * size * 4);
-                    let center = (size as f32 - 1.) * 0.5;
-                    let sigma = size as f32 * 0.4;
-                    for y in 0..size {
-                        for x in 0..size {
-                            let dx = (x as f32 - center) / sigma;
-                            let dy = (y as f32 - center) / sigma;
-                            let dist_sq = dx * dx + dy * dy;
-                            let val = (-0.5 * dist_sq).exp();
-                            let byte = ((0.8 + 0.2 * val).clamp(0.0, 1.0) * 255.0).round() as u8;
-                            rgba.extend_from_slice(&[byte, byte, byte, 255]);
-                        }
-                    }
-                    let blur_tex = Texture2D::from_rgba8(size as u16, size as u16, &rgba);
-                    blur_tex.set_filter(FilterMode::Linear);
-                    let (normal, _) = upload(&blur_tex, images, materials);
-                    let texture_handle = materials.get(&normal).unwrap().texture.clone();
-                    materials.add(HudMaterial {
-                        texture: texture_handle,
-                        additive: false,
-                        modulate: false,
-                        blur: true,
-                    })
-                })
-                .clone();
         }
         if quad.modulate {
             return self
@@ -262,7 +224,6 @@ impl Hud {
                         texture: images.add(image),
                         additive: false,
                         modulate: true,
-                        blur: false,
                     })
                 })
                 .clone();
@@ -489,7 +450,6 @@ mod tests {
             color: Color::from_rgba(255, 255, 255, 255),
             additive: true,
             modulate: false,
-            blur: false,
             vertices: None,
         };
         let mesh = quad_mesh(&quad, Vec2::new(1920., 1080.));
@@ -517,15 +477,14 @@ mod tests {
     }
 
     #[test]
-    fn blur_quad_mesh_geometry() {
+    fn backdrop_quad_mesh_geometry() {
         let quad = Quad {
             texture: None,
             source: Rect::new(0., 0., 1., 1.),
             destination: Rect::new(0., 0., 1920., 1080.),
-            color: Color::new(0., 0., 0., 0.45),
+            color: Color::from_rgba(0, 0, 0, 156),
             additive: false,
             modulate: false,
-            blur: true,
             vertices: None,
         };
         let mesh = quad_mesh(&quad, Vec2::new(1920., 1080.));
@@ -548,20 +507,6 @@ mod tests {
         else {
             panic!("HUD colors");
         };
-        assert_eq!(colors[0], [0., 0., 0., 0.45]);
-    }
-
-    #[test]
-    fn blur_material_key_preserves_blur_flag() {
-        let material = HudMaterial {
-            texture: Handle::default(),
-            additive: false,
-            modulate: false,
-            blur: true,
-        };
-        let key = HudMaterialKey::from(&material);
-        assert!(key.blur);
-        assert!(!key.additive);
-        assert!(!key.modulate);
+        assert_eq!(colors[0], [0., 0., 0., 156.0 / 255.0]);
     }
 }

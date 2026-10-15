@@ -353,10 +353,14 @@ impl BackgroundTransitionState {
         }
     }
 
-    /// Transition overlay dimming alpha (0.0..=0.45).
+    /// Authentic dimming overlay color (`rgba(0, 0, 0, 156)` per `sourcescheme.res` `MainMenu.Backdrop`).
+    pub const MAIN_MENU_BACKDROP: Color = Color::from_rgba(0, 0, 0, 156);
+    pub const BACKDROP_ALPHA: f32 = 156.0 / 255.0;
+
+    /// Transition overlay dimming alpha (0.0 or 156/255 ~= 0.61 per `sourcescheme.res`).
     pub fn overlay_alpha(&self) -> f32 {
         if self.is_active() {
-            0.45
+            Self::BACKDROP_ALPHA
         } else {
             0.0
         }
@@ -536,23 +540,33 @@ impl LoadingDialog {
         p.text(&title, Vec2::new(text_x, text_y), p.theme.text, false);
     }
 
-    /// Draws the backdrop blur overlay for background map loading across the canvas.
-    /// This softens and blurs the underlying 3D background behind the main menu.
+    /// Draws the backdrop overlay for background map loading across the canvas.
+    /// In retail Source, this displays the pre-blurred background texture for the target expansion
+    /// combined with the authentic `MainMenu.Backdrop` dimming (`rgba(0, 0, 0, 156)` per `sourcescheme.res`).
     /// Never applies to gameplay map loading.
-    pub fn draw_background_overlay(&self, canvas: &crate::canvas::Canvas) {
+    pub fn draw_background_overlay(
+        &self,
+        canvas: &crate::canvas::Canvas,
+        bg_texture: Option<&crate::canvas::Texture2D>,
+    ) {
         if !self.is_background() || !self.transition.is_active() {
             return;
         }
-        let alpha = self.transition.overlay_alpha();
-        if alpha > 0.0 {
-            canvas.blur(
+        let (w, h) = (canvas.width(), canvas.height());
+        if let Some(tex) = bg_texture {
+            crate::canvas::draw_texture_ex(
+                canvas,
+                tex,
                 0.,
                 0.,
-                canvas.width(),
-                canvas.height(),
-                Color::new(0.0, 0.0, 0.0, alpha),
+                crate::canvas::WHITE,
+                crate::canvas::DrawTextureParams {
+                    dest_size: Some(glam::vec2(w, h)),
+                    ..Default::default()
+                },
             );
         }
+        canvas.rectangle(0., 0., w, h, BackgroundTransitionState::MAIN_MENU_BACKDROP);
     }
 
     /// Draws the loading dialog centered within the painter's canvas bounds.
@@ -850,7 +864,6 @@ mod tests {
             })
             .expect("background loading plaque middle bar in bottom-right corner");
         assert_eq!(middle_bar.color, Color::new(0.0, 0.0, 0.0, 0.65));
-        assert!(!middle_bar.blur);
 
         // Verify corner polygon quads exist (4 rounded corner arcs from FrameSpec rounded_fill)
         let corner_polygons = quads
@@ -861,7 +874,7 @@ mod tests {
     }
 
     #[test]
-    fn background_loading_overlay_emits_blur_quad() {
+    fn background_loading_overlay_emits_backdrop_quad() {
         use crate::canvas::Canvas;
 
         let canvas = Canvas::default();
@@ -869,18 +882,17 @@ mod tests {
         let dialog = LoadingDialog::new_background("ep2_background01");
         assert!(dialog.is_background());
 
-        dialog.draw_background_overlay(&canvas);
+        dialog.draw_background_overlay(&canvas, None);
         let quads = canvas.drain();
         assert_eq!(quads.len(), 1, "expected exactly 1 overlay quad");
         let overlay = &quads[0];
-        assert!(overlay.blur, "overlay quad must have blur set");
         assert_eq!(overlay.destination.w, 1920.);
         assert_eq!(overlay.destination.h, 1080.);
-        assert_eq!(overlay.color, Color::new(0.0, 0.0, 0.0, 0.45));
+        assert_eq!(overlay.color, BackgroundTransitionState::MAIN_MENU_BACKDROP);
     }
 
     #[test]
-    fn gameplay_loading_overlay_does_not_emit_blur_quad() {
+    fn gameplay_loading_overlay_does_not_emit_backdrop_quad() {
         use crate::canvas::Canvas;
         use crate::gameui::widgets::{Fonts, Theme};
 
@@ -890,14 +902,14 @@ mod tests {
         assert!(!dialog.is_background());
 
         // Background overlay call must be a complete no-op for gameplay loading
-        dialog.draw_background_overlay(&canvas);
+        dialog.draw_background_overlay(&canvas, None);
         let overlay_quads = canvas.drain();
         assert!(
             overlay_quads.is_empty(),
             "gameplay loading dialog must not emit any background overlay"
         );
 
-        // Standard draw must only produce normal dialog quads, never a blur quad
+        // Standard draw must only produce normal dialog quads
         let loc = Localization::default();
         let fonts = Fonts::default();
         let theme = Theme::default();
@@ -912,10 +924,6 @@ mod tests {
         dialog.draw(&painter, &loc);
         let draw_quads = canvas.drain();
         assert!(!draw_quads.is_empty());
-        assert!(
-            draw_quads.iter().all(|q| !q.blur),
-            "no quad in gameplay loading dialog may have blur enabled"
-        );
     }
 
     #[test]
@@ -940,7 +948,10 @@ mod tests {
         assert_eq!(state.target_map(), Some("ep1_background01"));
         assert_eq!(state.target_category(), Some("episodic"));
         assert_eq!(state.displayed_category("episodic"), "main");
-        assert_eq!(state.overlay_alpha(), 0.45);
+        assert_eq!(
+            state.overlay_alpha(),
+            BackgroundTransitionState::BACKDROP_ALPHA
+        );
 
         state.update(0.1);
         assert_eq!(
@@ -954,7 +965,10 @@ mod tests {
         );
         assert!(state.is_active());
         assert_eq!(state.displayed_category("episodic"), "main");
-        assert_eq!(state.overlay_alpha(), 0.45);
+        assert_eq!(
+            state.overlay_alpha(),
+            BackgroundTransitionState::BACKDROP_ALPHA
+        );
 
         state.update(0.05);
         if let BackgroundTransitionState::Loading { elapsed, .. } = &state {
@@ -1051,7 +1065,7 @@ mod tests {
         assert!(dialog.transition.is_active());
 
         // Overlay is drawn when active
-        dialog.draw_background_overlay(&canvas);
+        dialog.draw_background_overlay(&canvas, None);
         let quads = canvas.drain();
         assert_eq!(quads.len(), 1);
 
@@ -1063,7 +1077,7 @@ mod tests {
         assert!(dialog.transition.is_terminal());
 
         // Once failed, background overlay and plaque must NOT be drawn
-        dialog.draw_background_overlay(&canvas);
+        dialog.draw_background_overlay(&canvas, None);
         let overlay_quads = canvas.drain();
         assert!(
             overlay_quads.is_empty(),
@@ -1188,5 +1202,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_background_overlay_drawing_with_and_without_texture() {
+        let canvas = crate::canvas::Canvas::default();
+        let mut dialog = LoadingDialog::new_background("background01");
+        assert!(dialog.is_background());
+        assert!(dialog.transition.is_active());
+
+        // Without background texture: queues only the backdrop dimming rectangle
+        dialog.draw_background_overlay(&canvas, None);
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1);
+        assert_eq!(
+            quads[0].color,
+            BackgroundTransitionState::MAIN_MENU_BACKDROP
+        );
+        assert!(quads[0].texture.is_none());
+
+        // With background texture: queues the textured background quad then the backdrop rectangle
+        let bg_tex = crate::canvas::Texture2D::from_rgba8(2, 2, &[200; 16]);
+        dialog.draw_background_overlay(&canvas, Some(&bg_tex));
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 2);
+        assert!(quads[0].texture.is_some());
+        assert_eq!(quads[0].color, crate::canvas::WHITE);
+        assert_eq!(
+            quads[1].color,
+            BackgroundTransitionState::MAIN_MENU_BACKDROP
+        );
+        assert!(quads[1].texture.is_none());
+
+        // When transition is inactive: nothing drawn
+        dialog.transition.finish();
+        dialog.draw_background_overlay(&canvas, Some(&bg_tex));
+        assert!(canvas.drain().is_empty());
     }
 }

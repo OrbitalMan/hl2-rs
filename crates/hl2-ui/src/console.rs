@@ -162,6 +162,7 @@ pub struct Console {
     pub options: OptionsDialog,
     /// The menu the options dialog was opened from (drawn behind it and restored on close).
     options_return: Mode,
+    pub background_textures: BTreeMap<String, Texture2D>,
     pub config: crate::config::Config,
 }
 
@@ -378,6 +379,7 @@ impl Default for Console {
             last_menu_hover: None,
             options: OptionsDialog::default(),
             options_return: Mode::MainMenu,
+            background_textures: BTreeMap::new(),
             config,
         };
         console.set_resources(gameui);
@@ -557,8 +559,33 @@ impl Console {
         );
         self.pause_menu.set_in_game(true, loc);
         self.category_titles = resources.category_titles.clone();
+        self.background_textures.clear();
+        for (key, img) in &resources.background_images {
+            self.background_textures.insert(
+                key.clone(),
+                Texture2D::from_rgba8(img.width, img.height, &img.rgba),
+            );
+        }
         self.gameui = Arc::new(resources);
         self.options.set_resources(self.gameui.clone());
+    }
+
+    /// Returns the pre-blurred background texture for the category and aspect ratio, if loaded.
+    pub fn background_texture(&self, category: &str, widescreen: bool) -> Option<&Texture2D> {
+        let canonical = match category {
+            "hl2ep1" => "episodic",
+            "hl2ep2" => "ep2",
+            "hl2lc" => "lostcoast",
+            "main" => "hl2",
+            other => other,
+        };
+        if widescreen {
+            let key = format!("{canonical}_widescreen");
+            if let Some(tex) = self.background_textures.get(&key) {
+                return Some(tex);
+            }
+        }
+        self.background_textures.get(canonical)
     }
 
     /// Checks whether the primary title font contains glyphs for all non-whitespace characters in `line`.
@@ -1721,21 +1748,43 @@ impl Console {
             );
         };
         if menu_shown {
+            let menu_cat = if shown == Mode::Pause {
+                self.pause_menu.category()
+            } else {
+                self.main_menu.category()
+            };
+            let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
+            let target_cat = self
+                .background_transition
+                .target_category()
+                .unwrap_or(menu_cat);
+            let bg_tex = self.background_texture(target_cat, is_widescreen);
             if let Some(loading) = &self.loading_dialog {
                 if loading.is_background() {
-                    loading.draw_background_overlay(&self.canvas);
+                    loading.draw_background_overlay(&self.canvas, bg_tex);
                 }
             } else if self.background_transition.is_active() {
-                let alpha = self.background_transition.overlay_alpha();
-                if alpha > 0.0 {
-                    self.canvas.blur(
+                let (w, h) = (self.canvas.width(), self.canvas.height());
+                if let Some(tex) = bg_tex {
+                    draw_texture_ex(
+                        &self.canvas,
+                        tex,
                         0.,
                         0.,
-                        self.canvas.width(),
-                        self.canvas.height(),
-                        Color::new(0.0, 0.0, 0.0, alpha),
+                        WHITE,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(w, h)),
+                            ..Default::default()
+                        },
                     );
                 }
+                self.canvas.rectangle(
+                    0.,
+                    0.,
+                    w,
+                    h,
+                    crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
+                );
             }
             let geometry = self.menu_layout.geometry(self.canvas.height());
             let title = self.current_title();
@@ -3180,19 +3229,38 @@ mod tests {
         console.draw(0.0);
         let quads = console.canvas.drain();
 
-        // Must emit exactly one blur quad representing the full-canvas background blur overlay
-        let blur_quads: Vec<_> = quads.iter().filter(|q| q.blur).collect();
-        assert_eq!(blur_quads.len(), 1, "expected exactly 1 blur overlay quad");
-        let overlay = blur_quads[0];
+        // Must emit the full-canvas background backdrop overlay quad
+        let backdrop_quads: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.destination.w == 1920.
+                    && q.destination.h == 1080.
+                    && q.color
+                        == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP
+            })
+            .collect();
+        assert_eq!(
+            backdrop_quads.len(),
+            1,
+            "expected exactly 1 backdrop overlay quad"
+        );
+        let overlay = backdrop_quads[0];
         assert_eq!(overlay.destination.w, 1920.);
         assert_eq!(overlay.destination.h, 1080.);
-        assert_eq!(overlay.color, Color::new(0.0, 0.0, 0.0, 0.45));
 
-        // The blur overlay must be drawn BEFORE the menu items so text is sharp over the blur
-        let blur_index = quads.iter().position(|q| q.blur).unwrap();
+        // The backdrop overlay must be drawn BEFORE the menu items so text is sharp over the backdrop
+        let backdrop_index = quads
+            .iter()
+            .position(|q| {
+                q.destination.w == 1920.
+                    && q.destination.h == 1080.
+                    && q.color
+                        == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP
+            })
+            .unwrap();
         assert_eq!(
-            blur_index, 0,
-            "blur overlay must be the first quad drawn behind the menu"
+            backdrop_index, 0,
+            "backdrop overlay must be the first quad drawn behind the menu"
         );
 
         let scale = Painter::scale_for(1080.);
@@ -3207,7 +3275,6 @@ mod tests {
                 (q.destination.w - expected_plaque_w).abs() < 1.0
                     && (q.destination.x - expected_x).abs() < 1.0
                     && q.vertices.is_none()
-                    && !q.blur
             })
             .expect("bottom-right corner plaque middle bar");
         assert_eq!(middle_bar.color, Color::new(0.0, 0.0, 0.0, 0.65));
@@ -3233,21 +3300,28 @@ mod tests {
         console.draw(0.0);
         let quads = console.canvas.drain();
 
-        // Gameplay map loading must NEVER emit a blur quad
-        let blur_quads: Vec<_> = quads.iter().filter(|q| q.blur).collect();
+        // Gameplay map loading must NEVER emit a backdrop overlay quad
+        let backdrop_quads: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.destination.w == 1920.
+                    && q.destination.h == 1080.
+                    && q.color
+                        == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP
+            })
+            .collect();
         assert!(
-            blur_quads.is_empty(),
-            "gameplay map loading must not emit any blur overlay quads"
+            backdrop_quads.is_empty(),
+            "gameplay map loading must not emit any backdrop overlay quads"
         );
 
         // Frame and progress bar quads must be present
         let scale = Painter::scale_for(1080.);
         let expected_frame_w = (crate::gameui::loading::LOADING_DIALOG_SIZE.x * scale).round();
-        let frame_quad = quads
+        let _frame_quad = quads
             .iter()
             .find(|q| (q.destination.w - expected_frame_w).abs() < 0.1)
             .expect("centered gameplay loading dialog frame");
-        assert!(!frame_quad.blur);
     }
 
     #[test]
@@ -3266,10 +3340,18 @@ mod tests {
 
         console.draw(0.0);
         let quads = console.canvas.drain();
-        let blur_quads: Vec<_> = quads.iter().filter(|q| q.blur).collect();
+        let backdrop_quads: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.destination.w == 1920.
+                    && q.destination.h == 1080.
+                    && q.color
+                        == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP
+            })
+            .collect();
         assert!(
-            blur_quads.is_empty(),
-            "no blur overlay quads once background map loading is complete"
+            backdrop_quads.is_empty(),
+            "no backdrop overlay quads once background map loading is complete"
         );
     }
 
@@ -3313,7 +3395,9 @@ mod tests {
 
         console.draw(0.0);
         let quads = console.canvas.drain();
-        assert!(quads.iter().all(|q| !q.blur));
+        assert!(quads.iter().all(|q| !(q.destination.w == 1920.
+            && q.destination.h == 1080.
+            && q.color == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP)));
     }
 
     #[test]
@@ -3343,8 +3427,11 @@ mod tests {
         console.draw(0.0);
         let quads = console.canvas.drain();
         assert!(
-            quads.iter().all(|q| !q.blur),
-            "no blur overlay quads after background load failure"
+            quads.iter().all(|q| !(q.destination.w == 1920.
+                && q.destination.h == 1080.
+                && q.color
+                    == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP)),
+            "no backdrop overlay quads after background load failure"
         );
     }
 
@@ -3367,7 +3454,9 @@ mod tests {
 
         console.draw(0.0);
         let quads = console.canvas.drain();
-        assert!(quads.iter().all(|q| !q.blur));
+        assert!(quads.iter().all(|q| !(q.destination.w == 1920.
+            && q.destination.h == 1080.
+            && q.color == crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP)));
     }
 
     #[test]
@@ -3892,6 +3981,57 @@ mod tests {
             console.current_title(),
             "Half-Life 2\nlost coasT",
             "Lost Coast subtitle must be applied (latest wins)"
+        );
+    }
+
+    #[test]
+    fn test_console_background_texture_resolution() {
+        let mut console = Console::default();
+        let dummy_tex = Texture2D::from_rgba8(2, 2, &[255; 16]);
+        let wide_tex = Texture2D::from_rgba8(4, 2, &[200; 32]);
+
+        console
+            .background_textures
+            .insert("hl2".into(), dummy_tex.clone());
+        console
+            .background_textures
+            .insert("hl2_widescreen".into(), wide_tex.clone());
+        console
+            .background_textures
+            .insert("episodic".into(), dummy_tex.clone());
+        console
+            .background_textures
+            .insert("ep2".into(), dummy_tex.clone());
+        console
+            .background_textures
+            .insert("lostcoast".into(), dummy_tex.clone());
+
+        // Canonical and alias lookups
+        assert!(console.background_texture("main", false).is_some());
+        assert_eq!(
+            console.background_texture("main", true).unwrap().width(),
+            4.0
+        );
+        assert_eq!(
+            console.background_texture("main", false).unwrap().width(),
+            2.0
+        );
+
+        // Submenu aliases map to canonical expansions
+        assert!(console.background_texture("hl2ep1", false).is_some());
+        assert!(console.background_texture("episodic", false).is_some());
+        assert!(console.background_texture("hl2ep2", false).is_some());
+        assert!(console.background_texture("ep2", false).is_some());
+        assert!(console.background_texture("hl2lc", false).is_some());
+        assert!(console.background_texture("lostcoast", false).is_some());
+
+        // Missing widescreen falls back to 4:3 standard
+        assert_eq!(
+            console
+                .background_texture("episodic", true)
+                .unwrap()
+                .width(),
+            2.0
         );
     }
 }

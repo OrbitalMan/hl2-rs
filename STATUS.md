@@ -2,16 +2,20 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: Background change scene blur diagnosis and architectural limitation analysis (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Authored pre-blurred background texture display and MainMenu.Backdrop overlay (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
-- **Background change scene blur diagnosis & architectural limitation:**
-  - Traced full rendering pipeline for background transitions: `BackgroundTransitionState` entering `Starting`/`Loading` sets `overlay_alpha()` to 0.45; `Console::draw` emits `Quad` with `color: (0, 0, 0, 0.45)` and `blur: true`; `Hud::material` assigns `HudMaterial` with `blur: true`.
-  - Identified root cause of lack of blur: `HudMaterial` is a 2D mesh material (`Material2d`) rendered on layer 2 by `Camera2d` directly into `GameFrame.image`. In modern graphics APIs (wgpu/Metal/Vulkan), drawing into a render target cannot simultaneously bind that same render target as a readable sampled texture (read-write hazard). Its fragment shader `hud.wgsl` only samples a static procedural vignette texture and multiplies it by `mesh.color = (0, 0, 0, 0.45)`, resulting in a flat 45% alpha black overlay that dims the 3D scene but does not blur it.
-  - Verified retail Source ground truth: inspected retail `GameUI.dll`, `engine.dll`, and `SourceSDK` (`vgui_loadingdiscpanel.cpp`). Retail Half-Life 2 (Source 2004 / 20th Anniversary) never performed a 3D scene blur during background map loading; GameUI strictly displays a 2D VGUI dimming overlay and `CLoadingDiscPanel` (`PaintBackgroundType 2`, `Color(0, 0, 0, 128)`).
-  - Added unit test `blur_material_key_preserves_blur_flag` in `canvas_renderer.rs`.
-  - Documented findings and architectural limitations in `AGENTS.md` and `MODLOG.md`.
-- **Validation:** 163 `hl2-ui` tests pass, 71 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
+- **Authored pre-blurred background texture display & MainMenu.Backdrop overlay:**
+  - Resolved the blur visual mechanism: retail Source does not perform dynamic GPU blur shaders or live post-processing during background transitions. Instead, Valve authored dedicated pre-blurred 512x512 DXT1 textures in `materials/console/` (`background01.vtf` through `07.vtf`, `ep1_background01.vtf`, `ep2_background01.vtf`, `lostcoast/background01.vtf`, plus widescreen counterparts) and rendered them with `MainMenu.Backdrop` (`rgba(0, 0, 0, 156)` per `sourcescheme.res`) behind menu elements while loading background maps.
+  - Added background texture loading in `hl2-ui::gameui::resources` via `load_vtf_file` decoding standard and widescreen background textures across `hl2`, `episodic`, `ep2`, and `lostcoast`.
+  - Added `Console::background_textures: BTreeMap<String, Texture2D>` populated in `set_resources` from `GameUiResources::background_images`, with resolution helper `Console::background_texture(&self, category: &str, widescreen: bool) -> Option<&Texture2D>`.
+  - Updated `Console::draw` and `LoadingDialog::draw_background_overlay` to draw the pre-blurred background texture quad full-screen followed by the authentic `MainMenu.Backdrop` rectangle overlay during active background transitions (`BackgroundTransitionState::is_active()`).
+  - When background map loading finishes or fails, the pre-blurred texture, backdrop rectangle, and loading plaque are immediately dismissed.
+  - Removed obsolete synthetic blur code (`Quad.blur`, `Canvas::blur`, `HudMaterial.blur`, `HudMaterialKey.blur`, 32x32 synthetic diffusion generation, and outdated blur tests).
+  - Added unit test `test_console_background_texture_resolution` in `console.rs` verifying canonical expansions, category aliases (`hl2ep1`, `hl2ep2`, `hl2lc`), and aspect ratio fallback.
+  - Added unit test `test_background_overlay_drawing_with_and_without_texture` in `loading.rs`.
+  - Added unit test `backdrop_quad_mesh_geometry` in `canvas_renderer.rs`.
+- **Validation:** 165 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; 8 owned-install tests pass (`cargo test -- --ignored`); clippy clean (0 warnings), fmt clean.
 
 ## Previous session: Submenu subtitle application timed to background map loading completion (2026-10-15, branch `orbitalman/main-menu`)
 

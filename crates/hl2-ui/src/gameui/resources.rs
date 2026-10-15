@@ -357,6 +357,8 @@ pub struct GameUiResources {
     pub background_map: Option<String>,
     /// Category / expansion -> chapter 1 background map (`scripts/chapterbackgrounds.txt`).
     pub background_maps: BTreeMap<String, String>,
+    /// Pre-blurred background images for each category (`"hl2"`, `"episodic"`, `"ep2"`, `"lostcoast"`).
+    pub background_images: BTreeMap<String, Image>,
     /// Game -> first chapter map (`cfg/chapter1.cfg` of each mounted game).
     pub new_game_maps: BTreeMap<String, String>,
     /// Category -> menu title (two lines for episodes, e.g. "Half-Life 2\n--- Episode One ---").
@@ -378,6 +380,24 @@ impl GameUiResources {
             .get(canonical)
             .or_else(|| self.background_maps.get(category))
             .map(String::as_str)
+    }
+
+    /// Returns the pre-blurred background image for the category, if loaded.
+    pub fn background_image(&self, category: &str, widescreen: bool) -> Option<&Image> {
+        let canonical = match category {
+            "hl2ep1" => "episodic",
+            "hl2ep2" => "ep2",
+            "hl2lc" => "lostcoast",
+            "main" => "hl2",
+            other => other,
+        };
+        if widescreen {
+            let key = format!("{canonical}_widescreen");
+            if let Some(img) = self.background_images.get(&key) {
+                return Some(img);
+            }
+        }
+        self.background_images.get(canonical)
     }
 }
 
@@ -512,6 +532,39 @@ impl GameUiResources {
                 res.category_titles.insert(alias.to_owned(), title);
             }
         }
+        for (category, vtf_base, expansion) in [
+            ("hl2", "background01", "hl2"),
+            ("episodic", "ep1_background01", "episodic"),
+            ("ep2", "ep2_background01", "ep2"),
+            ("lostcoast", "background01", "lostcoast"),
+        ] {
+            if let Some(img) = load_vtf_file(&reader, vfs, expansion, vtf_base) {
+                res.background_images.insert(category.to_owned(), img);
+            }
+            let wide_name = format!("{vtf_base}_widescreen");
+            if let Some(img) = load_vtf_file(&reader, vfs, expansion, &wide_name) {
+                res.background_images
+                    .insert(format!("{category}_widescreen"), img);
+            }
+        }
+        for (alias, canonical) in [
+            ("main", "hl2"),
+            ("hl2ep1", "episodic"),
+            ("hl2ep2", "ep2"),
+            ("hl2lc", "lostcoast"),
+        ] {
+            if let Some(img) = res.background_images.get(canonical).cloned() {
+                res.background_images.insert(alias.to_owned(), img);
+            }
+            if let Some(img) = res
+                .background_images
+                .get(&format!("{canonical}_widescreen"))
+                .cloned()
+            {
+                res.background_images
+                    .insert(format!("{alias}_widescreen"), img);
+            }
+        }
         res
     }
 
@@ -556,6 +609,48 @@ fn image(vfs: &Vfs, material: &str) -> Option<Image> {
             .trim_end_matches(".vtf")
     );
     let decoded = source_assets::vtf::decode(&vfs.read(&file).ok()??, 512).ok()?;
+    Some(Image {
+        width: decoded.width,
+        height: decoded.height,
+        rgba: decoded.rgba,
+    })
+}
+
+fn load_vtf_file(reader: &Reader, vfs: &Vfs, expansion: &str, vtf_filename: &str) -> Option<Image> {
+    let rel_path = format!("materials/console/{vtf_filename}.vtf");
+    let bytes = reader
+        .read(&rel_path)
+        .or_else(|| vfs.read(&rel_path).ok().flatten())
+        .or_else(|| {
+            vfs.game_root().and_then(|root| {
+                let vpk_candidate = match expansion {
+                    "episodic" => root.join("episodic/ep1_pak_dir.vpk"),
+                    "ep2" => root.join("ep2/ep2_pak_dir.vpk"),
+                    "lostcoast" => root.join("lostcoast/lostcoast_pak_dir.vpk"),
+                    _ => root.join("hl2_complete/hl2_complete_misc_dir.vpk"),
+                };
+                if vpk_candidate.exists() {
+                    source_assets::vpk::Vpk::open(&vpk_candidate)
+                        .ok()
+                        .and_then(|vpk| vpk.read(&rel_path).ok().flatten())
+                } else {
+                    None
+                }
+            })
+        })
+        .or_else(|| {
+            vfs.game_root().and_then(|root| {
+                let complete = root.join("hl2_complete/hl2_complete_misc_dir.vpk");
+                if complete.exists() {
+                    source_assets::vpk::Vpk::open(&complete)
+                        .ok()
+                        .and_then(|vpk| vpk.read(&rel_path).ok().flatten())
+                } else {
+                    None
+                }
+            })
+        })?;
+    let decoded = source_assets::vtf::decode(&bytes, 512).ok()?;
     Some(Image {
         width: decoded.width,
         height: decoded.height,
@@ -1130,6 +1225,11 @@ mod tests {
             res.category_titles.get("lostcoast").map(String::as_str),
             Some("HALF-LIFE'\nlost coasT")
         );
+        assert!(res.background_image("hl2", false).is_some());
+        assert!(res.background_image("hl2", true).is_some());
+        assert!(res.background_image("episodic", false).is_some());
+        assert!(res.background_image("ep2", false).is_some());
+        assert!(res.background_image("lostcoast", false).is_some());
         println!("missing: {:?}", res.missing);
     }
 }
