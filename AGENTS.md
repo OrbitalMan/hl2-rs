@@ -14,6 +14,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 6. No FAL, replacement assets, crossovers or unsolicited Discord messages. This phase reconstructs HL2. Mods and crossovers with other Rust game rewrites are the long-term goal after 1:1 fidelity (owner, 2026-10-07); keep `modkit-core::ModPlugin` and shared crates mod-friendly. There is no single-player/offline-only project restriction; multiplayer/netcode fidelity is not implemented or tested.
 7. Fonts and UI typography must come strictly from the owned game installation VFS (in-place reading of installed `resource/*.ttf`, `platform/resource/linux_fonts/*.ttf`) or permissively licensed project assets (MIT `ProggyClean.ttf`). Never probe, read, bundle, or depend on proprietary host OS font files (`C:/Windows/Fonts`, `/System/Library/Fonts`, `/Library/Fonts`). Everything must be 100% legally clean and safe.
 8. User-visible UI strings must come strictly from localized game resources (`resource/gameui_english.txt`, `resource/valve_english.txt`, `resource/vgui_english.txt`, `hl2_complete/resource/merged_loc_all.txt`, etc.). Never hardcode user-visible English literals in UI or HUD drawing routines. Authentic English fallback values are permitted only when game resources are missing or the key cannot be resolved, and must be defined as named constants in the centralized fallback table (`hl2-ui::gameui::localize::FALLBACK_STRINGS`), never as inline literals.
+9. Third-Party Dependencies (Bevy, Winit, etc.): It is strictly forbidden to attempt fixing 3rd party dependencies like Bevy and Winit from their end (patching/modifying upstream crate sources). You can analyze their code, but only after failing to find any helpful information about said 3rd party dependency (from both documentation/web and our codebase). All adaptations, translations, and coordinate corrections must be implemented cleanly on the HL2RS side.
 
 ## How to work
 
@@ -115,6 +116,11 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Dialog windows (options dialog, confirmation boxes for quit/main menu, map loading dialog, third-party technology credits, brightness/gamma, and all frames rendered via `Painter::frame` / `Painter::frame_with_close` / `Painter::frame_spec`) use rounded corners (`FRAME_CORNER_RADIUS: f32 = 5.0`) and omit Windows 95-style outer 3D raised borders (`FrameStyle::DEFAULT.outer_3d_border == false`), matching Source SDK `sourcescheme.res` `FrameBorder` (`backgroundtype 2`).
   - Non-dialog widgets (push buttons, close button, sliders, tabs, scrollbars, text entries, checkboxes) strictly retain their 3D raised/sunken borders.
   - Dialog frames enforce overflow clipping and corner containment (`FrameStyle::clip_overflow` and `FrameStyle::clip_rect`), ensuring child controls, title text, and the title bar close button never poke outside the rounded frame boundaries.
+
+- **Cursor Coordinate Conversion & Window Client Alignment**:
+  - Pointer/cursor coordinates for UI hit-testing are converted via `hl2_ui::viewport::pointer_to_canvas`.
+  - Window cursor positions come from `Window::cursor_position()` in logical inner client coordinates (where `(0, 0)` is the top-left of the client content area, below any OS window title bar).
+  - Any outer-vs-inner window origin delta (such as a macOS window title bar height offset) is strictly accounted for so UI hit-testing operates identically across windowed, borderless windowed, and fullscreen modes, at both 1.0 and 2.0 (Retina) display scale factors.
 
 ## Runtime invariants to preserve
 

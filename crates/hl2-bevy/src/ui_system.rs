@@ -244,6 +244,33 @@ mod tests {
     }
 
     #[test]
+    fn cursor_to_canvas_consistent_across_window_modes_and_scale() {
+        let mut window = Window {
+            resolution: bevy::window::WindowResolution::new(1280, 720),
+            ..default()
+        };
+        let viewport = VideoViewport {
+            target_resolution: UVec2::new(1280, 720),
+            physical_rect: bevy::camera::Viewport {
+                physical_position: UVec2::ZERO,
+                physical_size: UVec2::new(1280, 720),
+                depth: 0.0..1.0,
+            },
+            logical_offset: Vec2::ZERO,
+            logical_size: Vec2::new(1280.0, 720.0),
+        };
+
+        // Inner client coordinates directly at (100, 200) -> (100, 200)
+        let p = cursor_to_canvas(Some(Vec2::new(100.0, 200.0)), Some(&viewport), &window);
+        assert_eq!(p, Some(glam::Vec2::new(100.0, 200.0)));
+
+        // Scale factor 2.0 (Retina high-DPI)
+        window.resolution.set_scale_factor(2.0);
+        let p_retina = cursor_to_canvas(Some(Vec2::new(100.0, 200.0)), Some(&viewport), &window);
+        assert_eq!(p_retina, Some(glam::Vec2::new(100.0, 200.0)));
+    }
+
+    #[test]
     fn resize_canvas_resizes_to_viewport_logical_size() {
         let canvas = hl2_ui::canvas::Canvas::default();
         let window = Window {

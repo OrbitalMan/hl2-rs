@@ -1,8 +1,17 @@
 # STATUS
-
-Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
-
-## Current session: Background map transition state sequence and dimming effect (2026-10-15, branch `orbitalman/main-menu`)
+ 
+ Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
+ 
++## Current session: Unified pointer coordinate conversion and window client alignment (2026-10-15, branch `orbitalman/main-menu`)
++
++Antigravity, Gemini 3.8 Flash model family.
++- **Unified pointer coordinate conversion & window client alignment:** Extracted pointer-to-canvas coordinate mapping into a pure function `hl2_ui::viewport::pointer_to_canvas`, verifying scale factors 1.0 and 2.0 (Retina), inner client coordinate mapping directly, outer coordinates with macOS title-bar delta subtraction, and unified behavior across windowed, borderless windowed, and fullscreen modes.
++- Routed `hl2-bevy::ui_system::cursor_to_canvas` through `pointer_to_canvas`.
++- Documented 3rd-party dependency rule (no upstream source modification) and cursor conversion invariants in `HL2RS/AGENTS.md` and root `AGENTS.md`.
++- Unit tests added: `pointer_to_canvas_handles_scale_factors_and_outer_inner_delta` in `hl2-ui` and `cursor_to_canvas_consistent_across_window_modes_and_scale` in `hl2-bevy`.
++- **Validation:** 158 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
++
+ ## Previous session: Background map transition state sequence and dimming effect (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Background map transition state sequence & dimming effect:** Modeled background map loading as an explicit state sequence and hardened failure cleanup:

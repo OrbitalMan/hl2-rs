@@ -151,15 +151,32 @@ pub fn cursor_to_canvas(
     viewport: Option<&ViewportBounds>,
     window_logical_size: Vec2,
 ) -> Option<Vec2> {
+    pointer_to_canvas(cursor_pos, viewport, window_logical_size, Vec2::ZERO)
+}
+
+/// Pure function converting pointer coordinates to UI canvas coordinates.
+///
+/// Ensures consistent hit-testing across window modes (windowed, borderless windowed, fullscreen).
+/// Coordinates from `window.cursor_position()` are inner client coordinates where (0, 0) is
+/// the top-left of the content area (below any OS title bar). If outer window coordinates are
+/// provided along with an outer-vs-inner window origin delta (such as a macOS window title bar
+/// height offset), the delta is subtracted so hit testing strictly operates in inner client coordinates.
+pub fn pointer_to_canvas(
+    cursor_pos: Option<Vec2>,
+    viewport: Option<&ViewportBounds>,
+    window_logical_size: Vec2,
+    outer_to_inner_delta: Vec2,
+) -> Option<Vec2> {
     let pos = cursor_pos?;
+    let inner_pos = pos - outer_to_inner_delta;
     if let Some(vp) = viewport {
-        vp.cursor_to_canvas(pos)
-    } else if pos.x >= 0.0
-        && pos.x <= window_logical_size.x
-        && pos.y >= 0.0
-        && pos.y <= window_logical_size.y
+        vp.cursor_to_canvas(inner_pos)
+    } else if inner_pos.x >= 0.0
+        && inner_pos.x <= window_logical_size.x
+        && inner_pos.y >= 0.0
+        && inner_pos.y <= window_logical_size.y
     {
-        Some(pos)
+        Some(inner_pos)
     } else {
         None
     }
@@ -339,5 +356,74 @@ mod tests {
         let wide = windowed_size(UVec2::new(2560, 1080), monitor);
         assert!(wide.x <= 1512.0 && wide.y <= 982.0);
         assert!((wide.x / wide.y - 2560.0 / 1080.0).abs() < 0.01, "{wide}");
+    }
+
+    #[test]
+    fn pointer_to_canvas_handles_scale_factors_and_outer_inner_delta() {
+        // Test scale factor 1.0 (standard DPI) at 1280x720 window and 1280x720 frame
+        let vp_1x = ViewportBounds::compute(UVec2::new(1280, 720), UVec2::new(1280, 720), 1.0);
+        let win_size_1x = Vec2::new(1280.0, 720.0);
+
+        // Inner client coordinates directly: point at (100, 200) maps to canvas (100, 200)
+        let inner_pos = Vec2::new(100.0, 200.0);
+        let p1 = pointer_to_canvas(Some(inner_pos), Some(&vp_1x), win_size_1x, Vec2::ZERO);
+        assert_eq!(p1, Some(Vec2::new(100.0, 200.0)));
+
+        // Outer window coordinates with a macOS title-bar height delta of 28pt:
+        // Outer point is at (100, 228), delta is (0, 28)
+        let outer_pos = Vec2::new(100.0, 228.0);
+        let title_bar_delta = Vec2::new(0.0, 28.0);
+        let p1_outer =
+            pointer_to_canvas(Some(outer_pos), Some(&vp_1x), win_size_1x, title_bar_delta);
+        assert_eq!(p1_outer, Some(Vec2::new(100.0, 200.0)));
+        assert_eq!(
+            p1, p1_outer,
+            "outer delta properly subtracted to match inner client position"
+        );
+
+        // Test scale factor 2.0 (Retina high-DPI): 2560x1440 physical pixels, 1280x720 logical points
+        let vp_2x = ViewportBounds::compute(UVec2::new(1280, 720), UVec2::new(2560, 1440), 2.0);
+        let win_size_2x = Vec2::new(1280.0, 720.0); // logical points
+
+        let p2 = pointer_to_canvas(Some(inner_pos), Some(&vp_2x), win_size_2x, Vec2::ZERO);
+        assert_eq!(p2, Some(Vec2::new(100.0, 200.0)));
+
+        let p2_outer =
+            pointer_to_canvas(Some(outer_pos), Some(&vp_2x), win_size_2x, title_bar_delta);
+        assert_eq!(p2_outer, Some(Vec2::new(100.0, 200.0)));
+        assert_eq!(p2, p2_outer);
+
+        // Verify corner hit-testing on the active frame (0,0) and (1280, 720)
+        let top_left = pointer_to_canvas(Some(Vec2::ZERO), Some(&vp_2x), win_size_2x, Vec2::ZERO);
+        assert_eq!(top_left, Some(Vec2::new(0.0, 0.0)));
+
+        let bottom_right = pointer_to_canvas(
+            Some(Vec2::new(1280.0, 720.0)),
+            Some(&vp_2x),
+            win_size_2x,
+            Vec2::ZERO,
+        );
+        assert_eq!(bottom_right, Some(Vec2::new(1280.0, 720.0)));
+
+        // Outer coordinates at top-left with title bar: outer position is (0, 28), delta is (0, 28) -> (0, 0)
+        let top_left_outer = pointer_to_canvas(
+            Some(Vec2::new(0.0, 28.0)),
+            Some(&vp_2x),
+            win_size_2x,
+            title_bar_delta,
+        );
+        assert_eq!(top_left_outer, Some(Vec2::new(0.0, 0.0)));
+
+        // Windowed, borderless windowed, and fullscreen all use the exact same conversion
+        // In fullscreen / borderless, title bar delta is ZERO (no window decorations)
+        let fs_vp = ViewportBounds::compute(UVec2::new(1280, 720), UVec2::new(1920, 1080), 1.0);
+        let fs_win_size = Vec2::new(1920.0, 1080.0);
+        let fs_p = pointer_to_canvas(
+            Some(Vec2::new(960.0, 540.0)),
+            Some(&fs_vp),
+            fs_win_size,
+            Vec2::ZERO,
+        );
+        assert_eq!(fs_p, Some(Vec2::new(640.0, 360.0)));
     }
 }

@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-15 Unified pointer coordinate conversion and window client alignment
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::viewport`:
+  - Added pure function `pointer_to_canvas(cursor_pos, viewport, window_logical_size, outer_to_inner_delta) -> Option<Vec2>`.
+  - Documented coordinate origin invariants: `Window::cursor_position()` provides inner client coordinates (where `(0, 0)` is the top-left of the client view, below any native OS window title bar). When outer coordinates are supplied with an `outer_to_inner_delta` (e.g. macOS title bar height), the delta is subtracted to ensure hit testing strictly occurs in client coordinates.
+  - Added unit test `pointer_to_canvas_handles_scale_factors_and_outer_inner_delta` verifying 1.0 (standard DPI) and 2.0 (Retina) scaling, inner coordinates directly, outer coordinates with title-bar delta subtraction, corner hit testing, and identical conversion across windowed, borderless, and fullscreen modes.
+- `hl2-bevy::ui_system`:
+  - Routed `cursor_to_canvas` through `hl2_ui::viewport::pointer_to_canvas`.
+  - Added unit test `cursor_to_canvas_consistent_across_window_modes_and_scale` asserting consistency across window modes and scale factors.
+- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented 3rd-party dependency rules and cursor coordinate conversion invariants.
+- `HL2RS/STATUS.md`: updated status to record unified pointer coordinate conversion and window client alignment.
+
+**Why:**
+- In macOS windowed mode, investigated cursor coordinate origin and hit testing. Verified that `winit`'s `WindowEvent::CursorMoved` and Bevy's `Window::cursor_position()` provide logical coordinates relative to the inner client view. Extracted the pointer-to-canvas coordinate mapping into a pure shared function in `hl2-ui::viewport` that handles display scale factors (1.0 and 2.0) and guarantees that any outer-to-inner window origin delta (such as a macOS window title bar) is properly normalized so UI hit-testing operates identically across windowed, borderless, and fullscreen modes.
+
+**Tested how:**
+- `cargo test -p hl2-ui --lib`: 158 tests passed (including `pointer_to_canvas_handles_scale_factors_and_outer_inner_delta`).
+- `cargo test -p hl2-bevy --bin hl2-bevy`: 70 tests passed (including `cursor_to_canvas_consistent_across_window_modes_and_scale`).
+- `cargo fmt --all -- --check` & `cargo clippy`: clean.
+
+**Result:** UI pointer hit-testing operates on a unified, pure coordinate conversion across window modes and scale factors.
+
+**Still broken or not tested:** Manual hit-testing on macOS in windowed mode (hovering and clicking all 4 corners of menu buttons) is unverified and requires manual check.
+
+**Next:** Task 2 (Loading plaque styling).
+
 ## 2026-10-15 Background map transition state sequence and dimming effect
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
