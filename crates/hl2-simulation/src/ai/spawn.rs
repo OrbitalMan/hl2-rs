@@ -8,74 +8,99 @@
 use glam::Vec3;
 use serde::Serialize;
 
-/// Classes offered by the overlay with their additionalequipment choices ("" = none).
-pub const SPAWN_CLASSES: &[(&str, &[&str])] = &[
-    (
-        "npc_metropolice",
-        &["weapon_stunstick", "weapon_pistol", "weapon_smg1", ""],
-    ),
-    (
-        "npc_combine_s",
-        &["weapon_smg1", "weapon_ar2", "weapon_shotgun"],
-    ),
-    (
-        "npc_citizen",
-        &[
-            "",
-            "weapon_pistol",
-            "weapon_smg1",
-            "weapon_ar2",
-            "weapon_shotgun",
-            "weapon_rpg",
-        ],
-    ),
-    (
-        "npc_barney",
-        &[
-            "weapon_pistol",
-            "weapon_smg1",
-            "weapon_ar2",
-            "weapon_shotgun",
-        ],
-    ),
-    ("npc_alyx", &["weapon_alyxgun", "weapon_shotgun", ""]),
-    ("npc_vortigaunt", &[""]),
-    ("npc_dog", &[""]),
-    ("npc_kleiner", &[""]),
-    ("npc_eli", &[""]),
-    ("npc_mossman", &[""]),
-    ("npc_breen", &[""]),
-    ("npc_gman", &[""]),
-    ("npc_monk", &["weapon_annabelle", ""]),
-    ("npc_zombie", &[""]),
-    ("npc_zombie_torso", &[""]),
-    ("npc_fastzombie", &[""]),
-    ("npc_poisonzombie", &[""]),
-    ("npc_headcrab", &[""]),
-    ("npc_headcrab_fast", &[""]),
-    ("npc_headcrab_black", &[""]),
-    ("npc_headcrab_poison", &[""]),
-    ("npc_barnacle", &[""]),
-    ("npc_antlion", &[""]),
-    ("npc_antlionguard", &[""]),
-    ("npc_ichthyosaur", &[""]),
-    ("npc_crow", &[""]),
-    ("npc_pigeon", &[""]),
-    ("npc_seagull", &[""]),
-    ("npc_stalker", &[""]),
-    ("npc_manhack", &[""]),
-    ("npc_cscanner", &[""]),
-    ("npc_clawscanner", &[""]),
-    ("npc_rollermine", &[""]),
-    ("npc_turret_floor", &[""]),
-    ("npc_turret_ceiling", &[""]),
-    ("npc_combine_camera", &[""]),
-    ("npc_sniper", &[""]),
-    ("npc_strider", &[""]),
-    ("npc_combinegunship", &[""]),
-    ("npc_helicopter", &[""]),
-    ("npc_combinedropship", &[""]),
+/// Classes offered by the overlay (developer choice, not SDK data). The weapon column
+/// comes from the SDK rules instead (bits_CAP_USE_WEAPONS + Weapon_CanUse on the
+/// loaded model; `Overlay::set_usable`).
+pub const SPAWN_CLASSES: &[&str] = &[
+    "npc_metropolice",
+    "npc_combine_s",
+    "npc_citizen",
+    "npc_citizen_rebel",
+    "npc_citizen_refugee",
+    "npc_citizen_medic",
+    "npc_barney",
+    "npc_alyx",
+    "npc_vortigaunt",
+    "npc_dog",
+    "npc_kleiner",
+    "npc_eli",
+    "npc_mossman",
+    "npc_breen",
+    "npc_gman",
+    "npc_monk",
+    "npc_zombie",
+    "npc_zombie_torso",
+    "npc_fastzombie",
+    "npc_poisonzombie",
+    "npc_headcrab",
+    "npc_headcrab_fast",
+    "npc_headcrab_black",
+    "npc_headcrab_poison",
+    "npc_barnacle",
+    "npc_antlion",
+    "npc_antlionguard",
+    "npc_ichthyosaur",
+    "npc_crow",
+    "npc_pigeon",
+    "npc_seagull",
+    "npc_stalker",
+    "npc_manhack",
+    "npc_cscanner",
+    "npc_clawscanner",
+    "npc_rollermine",
+    "npc_turret_floor",
+    "npc_turret_ceiling",
+    "npc_combine_camera",
+    "npc_sniper",
+    "npc_strider",
+    "npc_combinegunship",
+    "npc_helicopter",
+    "npc_combinedropship",
 ];
+/// An overlay entry's entity class and extra keyvalues: citizen variants are npc_citizen
+/// with a `citizentype` (CT_REFUGEE 2, CT_REBEL 3) and the medic spawnflag; every pooled
+/// citizen has SF_CITIZEN_RANDOM_HEAD, so CNPC_Citizen::SelectModel gives each slot its
+/// own least-used head (`citizens::select_models`). Plain npc_citizen takes the map's
+/// citizen type like native npc_create.
+pub fn spawn_class(label: &str) -> (&str, Vec<(&'static str, String)>) {
+    use crate::citizens::{SF_CITIZEN_MEDIC, SF_CITIZEN_RANDOM_HEAD};
+    let head = SF_CITIZEN_RANDOM_HEAD.to_string();
+    match label {
+        "npc_citizen" => ("npc_citizen", vec![("spawnflags", head)]),
+        "npc_citizen_rebel" => (
+            "npc_citizen",
+            vec![("citizentype", "3".into()), ("spawnflags", head)],
+        ),
+        "npc_citizen_refugee" => (
+            "npc_citizen",
+            vec![("citizentype", "2".into()), ("spawnflags", head)],
+        ),
+        "npc_citizen_medic" => (
+            "npc_citizen",
+            vec![
+                ("citizentype", "3".into()),
+                (
+                    "spawnflags",
+                    (SF_CITIZEN_RANDOM_HEAD | SF_CITIZEN_MEDIC).to_string(),
+                ),
+            ],
+        ),
+        class => (class, Vec::new()),
+    }
+}
+/// The weapon the overlay preselects for an entry (developer choice; native npc_create
+/// gives none unless npc_create_equipment is set). Used only when the class can use it.
+pub fn default_weapon(label: &str) -> &'static str {
+    match label {
+        "npc_citizen_rebel" | "npc_citizen_medic" => "weapon_smg1",
+        "npc_metropolice" => "weapon_stunstick",
+        "npc_combine_s" => "weapon_smg1",
+        "npc_barney" => "weapon_pistol",
+        "npc_alyx" => "weapon_alyxgun",
+        "npc_monk" => "weapon_annabelle",
+        _ => "",
+    }
+}
 /// Hidden pooled entities per overlay class (appended at map load).
 pub const POOL_PER_CLASS: usize = 3;
 /// Keyvalue marking a pooled spawn entity (not a Source key).
@@ -143,36 +168,43 @@ pub fn pool_count(class: &str) -> usize {
 /// Append the hidden spawn pool to a freshly loaded map's entities (before models
 /// load). Existing entity ids are unchanged; the pool goes at the end.
 pub fn append_pool(world: &mut modkit_core::World) {
-    for (class, _) in SPAWN_CLASSES {
+    for label in SPAWN_CLASSES {
+        let (class, keyvalues) = spawn_class(label);
         let Some(model) = default_model(class) else {
             continue;
         };
         for _ in 0..pool_count(class) {
             let mut properties: Vec<(String, String)> = vec![
-                ("classname".into(), (*class).into()),
-                ("model".into(), model.into()),
+                ("classname".into(), class.into()),
                 (
                     "origin".into(),
                     format!("{} {} {}", POOL_ORIGIN.x, POOL_ORIGIN.y, POOL_ORIGIN.z),
                 ),
-                (POOL_KEY.into(), "1".into()),
+                (POOL_KEY.into(), (*label).into()),
             ];
-            if *class == "npc_metropolice" {
+            // Citizens get their head from SelectModel (citizens::select_models).
+            if class != "npc_citizen" {
+                properties.push(("model".into(), model.into()));
+            }
+            properties.extend(keyvalues.iter().map(|(k, v)| ((*k).into(), v.clone())));
+            if class == "npc_metropolice" {
                 properties.push(("additionalequipment".into(), "weapon_stunstick".into()));
             }
             world.entities.push(modkit_core::Entity { properties });
         }
     }
 }
-/// The first unused pooled entity of `class`.
+/// The first unused pooled entity of an overlay entry (a class or citizen variant).
 pub fn free_slot(
     world: &modkit_core::World,
-    class: &str,
+    label: &str,
     used: &std::collections::BTreeSet<usize>,
 ) -> Option<usize> {
-    world.entities.iter().enumerate().find_map(|(id, e)| {
-        (e.get(POOL_KEY).is_some() && e.class() == class && !used.contains(&id)).then_some(id)
-    })
+    world
+        .entities
+        .iter()
+        .enumerate()
+        .find_map(|(id, e)| (e.get(POOL_KEY) == Some(label) && !used.contains(&id)).then_some(id))
 }
 /// Flying classes (bits_CAP_MOVE_FLY) are placed 36 units back along the aim.
 fn flies(class: &str) -> bool {
@@ -189,13 +221,62 @@ fn flies(class: &str) -> bool {
 /// MAX_TRACE_LENGTH.
 pub const MAX_TRACE_LENGTH: f32 = 56755.84;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct SpawnRequest {
     pub classname: String,
     pub name: Option<String>,
     pub equipment: String,
     /// npc_create_aimed: face the player's aim yaw (pitch and roll 0).
     pub aimed: bool,
+    /// The F4 overlay's per-spawn side (npc_create: the class default).
+    pub allegiance: Allegiance,
+    /// The overlay entry (citizen variants); empty: `classname`.
+    pub variant: String,
+}
+impl SpawnRequest {
+    /// The pool entry this request draws from.
+    pub fn pool_label(&self) -> &str {
+        if self.variant.is_empty() {
+            &self.classname
+        } else {
+            &self.variant
+        }
+    }
+}
+/// The F4 overlay's per-spawn side toward the player, like an ai_relationship entity
+/// aimed at the spawned NPC (Foe: D_HT, Friend: D_LI; Default: the class relationship
+/// table). The opposite side (friends hating foes) needs NPC-vs-NPC enemies, which the
+/// AI does not choose yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub enum Allegiance {
+    #[default]
+    Default,
+    Foe,
+    Friend,
+}
+impl Allegiance {
+    pub fn disposition(self) -> Option<super::relationships::Disposition> {
+        use super::relationships::Disposition;
+        match self {
+            Self::Default => None,
+            Self::Foe => Some(Disposition::HT),
+            Self::Friend => Some(Disposition::LI),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Default => "class default",
+            Self::Foe => "foe (hates the player)",
+            Self::Friend => "friend (likes the player)",
+        }
+    }
+    fn next(self) -> Self {
+        match self {
+            Self::Default => Self::Foe,
+            Self::Foe => Self::Friend,
+            Self::Friend => Self::Default,
+        }
+    }
 }
 
 /// Console state: the npc_create_equipment cvar.
@@ -235,12 +316,22 @@ impl Console {
                     // CreateEntityByName succeeds only for CAI_BaseNPC classes.
                     return Err(format!("{c}: {class} is not an NPC class"));
                 }
+                // Our citizen variants (npc_citizen_rebel ...) are npc_citizen with
+                // keyvalues; native npc_create has only npc_citizen.
+                let (classname, _) = spawn_class(class);
+                let variant = if classname != *class {
+                    (*class).to_owned()
+                } else {
+                    String::new()
+                };
                 Ok(Some(Command::Spawn(SpawnRequest {
-                    classname: (*class).to_owned(),
+                    classname: classname.to_owned(),
                     // CC_NPC_Create names the NPC when given exactly two arguments.
                     name: (args.len() == 3).then(|| args[2].to_owned()),
                     equipment: self.equipment.clone(),
                     aimed: c == "npc_create_aimed",
+                    allegiance: Allegiance::Default,
+                    variant,
                 })))
             }
             _ => Ok(None),
@@ -302,77 +393,254 @@ pub fn place(
     Ok(Placement { origin, yaw })
 }
 
-/// The F4 overlay: open state and the selected class/weapon.
+/// F4 overlay keys (keyboard or movement-script `spawn_overlay` actions).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayKey {
+    Toggle,
+    Up,
+    Down,
+    Left,
+    Right,
+    Enter,
+}
+/// What an overlay key asks the host to do.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub enum OverlayCommand {
+    Spawn(SpawnRequest),
+    /// Toggle notarget (the AI does not sense the player).
+    ToggleNotarget,
+    /// Toggle the AI think loop (ai_enable).
+    ToggleAi,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub enum Column {
+    #[default]
+    Classes,
+    Options,
+}
+/// One option row of the right column.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum OptionRow {
+    /// A weapon ("" = none).
+    Weapon(String),
+    Allegiance,
+    Notarget,
+    Ai,
+}
+/// A drawn panel row: text, selected (the current choice), under the cursor.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PanelRow {
+    pub text: String,
+    pub selected: bool,
+    pub cursor: bool,
+}
+/// The overlay as the host draws it: a title and two columns.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Panel {
+    pub title: String,
+    pub classes: Vec<PanelRow>,
+    pub options: Vec<PanelRow>,
+}
+/// Class rows shown at once; the list scrolls to keep the selection visible.
+pub const VISIBLE_CLASSES: usize = 14;
+
+/// The F4 overlay: a scrolling class column and an options column with the weapons the
+/// selected class can use (`set_usable`), its allegiance, notarget and the AI switch.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Overlay {
     pub open: bool,
     pub class: usize,
-    pub equipment: usize,
+    pub column: Column,
+    /// Cursor row in the options column.
+    pub row: usize,
+    /// The chosen weapon ("" = none).
+    pub weapon: String,
+    pub allegiance: Allegiance,
+    /// Usable weapons per class (bits_CAP_USE_WEAPONS + Weapon_CanUse on the model the
+    /// spawn uses); classes missing here have none.
+    usable: std::collections::BTreeMap<String, Vec<String>>,
 }
 impl Overlay {
+    /// The weapons each class can be given, from the loaded models (host, map load).
+    pub fn set_usable(&mut self, usable: std::collections::BTreeMap<String, Vec<String>>) {
+        self.usable = usable;
+        self.select_class(self.class);
+    }
+    pub fn usable(&self, class: &str) -> &[String] {
+        self.usable.get(class).map_or(&[], Vec::as_slice)
+    }
+    fn label(&self) -> &'static str {
+        SPAWN_CLASSES[self.class]
+    }
+    fn class_name(&self) -> &'static str {
+        spawn_class(self.label()).0
+    }
+    fn rows(&self) -> Vec<OptionRow> {
+        let mut rows = vec![OptionRow::Weapon(String::new())];
+        rows.extend(
+            self.usable(self.label())
+                .iter()
+                .cloned()
+                .map(OptionRow::Weapon),
+        );
+        rows.extend([OptionRow::Allegiance, OptionRow::Notarget, OptionRow::Ai]);
+        rows
+    }
+    fn select_class(&mut self, class: usize) {
+        self.class = class;
+        let label = self.label();
+        let default = default_weapon(label);
+        self.weapon = if self.usable(label).iter().any(|w| w == default) {
+            default.into()
+        } else {
+            String::new()
+        };
+        let weapon = OptionRow::Weapon(self.weapon.clone());
+        self.row = self.rows().iter().position(|r| *r == weapon).unwrap_or(0);
+    }
     pub fn toggle(&mut self) {
         self.open = !self.open;
     }
-    pub fn next_class(&mut self, step: isize) {
-        self.class = (self.class as isize + step).rem_euclid(SPAWN_CLASSES.len() as isize) as usize;
-        self.equipment = 0;
-    }
-    pub fn next_equipment(&mut self, step: isize) {
-        let n = SPAWN_CLASSES[self.class].1.len() as isize;
-        self.equipment = (self.equipment as isize + step).rem_euclid(n) as usize;
+    /// Apply one key: Up/Down move in the focused column (classes wrap; moving onto a
+    /// weapon row chooses it), Left/Right switch columns, Enter toggles the option under
+    /// the cursor (allegiance, notarget, AI) or else spawns.
+    pub fn key(&mut self, key: OverlayKey) -> Option<OverlayCommand> {
+        if key == OverlayKey::Toggle {
+            self.toggle();
+            return None;
+        }
+        if !self.open {
+            return None;
+        }
+        let step = if key == OverlayKey::Up { -1 } else { 1 };
+        match key {
+            OverlayKey::Left => self.column = Column::Classes,
+            OverlayKey::Right => self.column = Column::Options,
+            OverlayKey::Up | OverlayKey::Down => match self.column {
+                Column::Classes => {
+                    let n = SPAWN_CLASSES.len() as isize;
+                    self.select_class((self.class as isize + step).rem_euclid(n) as usize);
+                }
+                Column::Options => {
+                    let rows = self.rows();
+                    self.row = (self.row as isize + step).rem_euclid(rows.len() as isize) as usize;
+                    if let OptionRow::Weapon(weapon) = &rows[self.row] {
+                        self.weapon = weapon.clone();
+                    }
+                }
+            },
+            OverlayKey::Enter => {
+                if self.column == Column::Options {
+                    match self.rows()[self.row] {
+                        OptionRow::Allegiance => {
+                            self.allegiance = self.allegiance.next();
+                            return None;
+                        }
+                        OptionRow::Notarget => return Some(OverlayCommand::ToggleNotarget),
+                        OptionRow::Ai => return Some(OverlayCommand::ToggleAi),
+                        OptionRow::Weapon(_) => {}
+                    }
+                }
+                return Some(OverlayCommand::Spawn(self.request()));
+            }
+            OverlayKey::Toggle => {}
+        }
+        None
     }
     /// The overlay spawns at the crosshair like npc_create_aimed (facing the aim).
     pub fn request(&self) -> SpawnRequest {
-        let (class, equipment) = SPAWN_CLASSES[self.class];
         SpawnRequest {
-            classname: class.into(),
+            classname: self.class_name().into(),
             name: None,
-            equipment: equipment[self.equipment].into(),
+            equipment: self.weapon.clone(),
             aimed: true,
+            allegiance: self.allegiance,
+            variant: self.label().into(),
         }
     }
-    /// Lines for the host to draw: a scrolling class list (VISIBLE_CLASSES rows
-    /// around the selection, ">" marks it) and the selected class's weapons.
-    pub fn lines(&self) -> Vec<String> {
-        const VISIBLE_CLASSES: usize = 9;
+    /// The panel to draw; `ai` and `notarget` are the host's live switches.
+    pub fn panel(&self, ai: bool, notarget: bool) -> Panel {
         let total = SPAWN_CLASSES.len();
         let first = self
             .class
             .saturating_sub(VISIBLE_CLASSES / 2)
             .min(total.saturating_sub(VISIBLE_CLASSES));
         let last = (first + VISIBLE_CLASSES).min(total);
-        let mut lines = vec![format!(
-            "F4 NPC spawn: Left/Right weapon, Up/Down class, Enter spawn at crosshair  ({}/{total})",
-            self.class + 1
-        )];
+        let classes_focused = self.column == Column::Classes;
+        let note = |text: String| PanelRow {
+            text,
+            selected: false,
+            cursor: false,
+        };
+        let mut classes = Vec::new();
         if first > 0 {
-            lines.push(format!("   ... {first} more above"));
+            classes.push(note(format!("({first} more above)")));
         }
-        for (index, (class, _)) in SPAWN_CLASSES.iter().enumerate().take(last).skip(first) {
-            let marker = if index == self.class { ">" } else { " " };
-            lines.push(format!(" {marker} {class}"));
+        for (index, class) in SPAWN_CLASSES.iter().enumerate().take(last).skip(first) {
+            classes.push(PanelRow {
+                text: (*class).into(),
+                selected: index == self.class,
+                cursor: classes_focused && index == self.class,
+            });
         }
         if last < total {
-            lines.push(format!("   ... {} more below", total - last));
+            classes.push(note(format!("({} more below)", total - last)));
         }
-        let weapons = SPAWN_CLASSES[self.class].1;
-        lines.push(format!(
-            "weapon: {}",
-            weapons
-                .iter()
-                .enumerate()
-                .map(|(i, w)| {
-                    let name = if w.is_empty() { "none" } else { w };
-                    if i == self.equipment {
-                        format!("[{name}]")
-                    } else {
-                        name.to_string()
+        let natural = !crate::npc_weapons::uses_weapons(self.class_name());
+        let options = self
+            .rows()
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let (text, selected) = match &row {
+                    OptionRow::Weapon(w) if w.is_empty() => (
+                        if natural {
+                            "no weapons (natural attacks)".into()
+                        } else {
+                            "no weapon".into()
+                        },
+                        self.weapon.is_empty(),
+                    ),
+                    // Where the choice comes from: the class's HL2 map loadouts or
+                    // Weapon_CanUse on its model.
+                    OptionRow::Weapon(w) => (
+                        if crate::npc_weapons::campaign_loadout(self.class_name())
+                            .contains(&w.as_str())
+                        {
+                            format!("{w} (HL2 maps)")
+                        } else {
+                            format!("{w} (can use)")
+                        },
+                        *w == self.weapon,
+                    ),
+                    OptionRow::Allegiance => {
+                        (format!("allegiance: {}", self.allegiance.label()), false)
                     }
-                })
-                .collect::<Vec<_>>()
-                .join("  ")
-        ));
-        lines
+                    OptionRow::Notarget => (
+                        format!("notarget: {}", if notarget { "ON" } else { "off" }),
+                        false,
+                    ),
+                    OptionRow::Ai => (
+                        format!("AI: {}", if ai { "ON" } else { "OFF (idle)" }),
+                        false,
+                    ),
+                };
+                PanelRow {
+                    text,
+                    selected,
+                    cursor: !classes_focused && index == self.row,
+                }
+            })
+            .collect();
+        Panel {
+            title: format!(
+                "F4 NPC spawn ({}/{total}): Up/Down move, Left/Right column, Enter spawn / toggle",
+                self.class + 1
+            ),
+            classes,
+            options,
+        }
     }
 }
 
@@ -385,30 +653,16 @@ mod tests {
         append_pool(&mut world);
         assert_eq!(
             world.entities.len(),
-            SPAWN_CLASSES
-                .iter()
-                .map(|(c, _)| pool_count(c))
-                .sum::<usize>()
+            SPAWN_CLASSES.iter().map(|c| pool_count(c)).sum::<usize>()
         );
         assert!(SPAWN_CLASSES
             .iter()
-            .all(|(c, _)| default_model(c).is_some()));
-        // The overlay list scrolls: at most 9 class rows plus header/more/weapon lines.
-        let mut overlay = Overlay::default();
-        overlay.next_class(-1);
-        let lines = overlay.lines();
-        assert!(lines.len() <= 13, "{lines:?}");
-        assert!(lines
-            .iter()
-            .any(|l| l.starts_with(" > npc_combinedropship")));
-        assert!(lines.iter().any(|l| l.contains("more above")));
-        overlay.next_class(1);
-        assert!(overlay.lines()[1].starts_with(" > npc_metropolice"));
-        assert!(overlay
-            .lines()
-            .last()
-            .unwrap()
-            .contains("[weapon_stunstick]"));
+            .all(|c| default_model(spawn_class(c).0).is_some()));
+        // Citizen variants: rebel slots carry CT_REBEL and a random head, no model.
+        let rebel = free_slot(&world, "npc_citizen_rebel", &Default::default()).unwrap();
+        assert_eq!(world.entities[rebel].class(), "npc_citizen");
+        assert_eq!(world.entities[rebel].get("citizentype"), Some("3"));
+        assert_eq!(world.entities[rebel].get("model"), None);
         let mut used = std::collections::BTreeSet::new();
         for _ in 0..POOL_PER_CLASS {
             used.insert(free_slot(&world, "npc_combine_s", &used).unwrap());
@@ -468,6 +722,13 @@ mod tests {
             panic!()
         };
         assert!(r.aimed && r.name.is_none());
+        let Some(Command::Spawn(r)) = console.parse("npc_create npc_citizen_rebel").unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            (r.classname.as_str(), r.pool_label()),
+            ("npc_citizen", "npc_citizen_rebel")
+        );
         assert!(console.parse("npc_create prop_physics").is_err());
         assert!(console.parse("npc_create").is_err());
         assert_eq!(console.parse("sv_cheats 1").unwrap(), None);
@@ -480,6 +741,7 @@ mod tests {
             name: None,
             equipment: String::new(),
             aimed,
+            ..Default::default()
         };
         let down = Vec3::new(1., 0., -0.25).normalize();
         let p = place(&request("npc_metropolice", true), eye, down, &Floor).unwrap();
@@ -508,18 +770,113 @@ mod tests {
             Vec3::ZERO
         );
     }
+    fn usable() -> std::collections::BTreeMap<String, Vec<String>> {
+        [
+            (
+                "npc_metropolice",
+                &["weapon_stunstick", "weapon_pistol", "weapon_smg1"][..],
+            ),
+            ("npc_combine_s", &["weapon_smg1", "weapon_ar2"][..]),
+        ]
+        .into_iter()
+        .map(|(c, w)| (c.to_owned(), w.iter().map(|w| (*w).to_owned()).collect()))
+        .collect()
+    }
     #[test]
-    fn overlay_cycles_classes_and_weapons() {
+    fn overlay_columns_offer_only_usable_weapons_and_keep_the_selection_visible() {
         let mut o = Overlay::default();
-        o.toggle();
-        o.next_equipment(1);
+        o.set_usable(usable());
+        assert_eq!(o.key(OverlayKey::Up), None, "closed: keys do nothing");
+        o.key(OverlayKey::Toggle);
+        // The cop starts with its default weapon; the column lists none + usable + rows.
+        assert_eq!(o.request().equipment, "weapon_stunstick");
+        let panel = o.panel(false, false);
+        let texts: Vec<&str> = panel.options.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "no weapon",
+                "weapon_stunstick (HL2 maps)",
+                "weapon_pistol (HL2 maps)",
+                "weapon_smg1 (HL2 maps)",
+                "allegiance: class default",
+                "notarget: off",
+                "AI: OFF (idle)"
+            ]
+        );
+        assert!(panel
+            .classes
+            .iter()
+            .any(|r| r.cursor && r.text == "npc_metropolice"));
+        // Options column: Down moves onto the pistol and chooses it.
+        o.key(OverlayKey::Right);
+        o.key(OverlayKey::Down);
         assert_eq!(o.request().equipment, "weapon_pistol");
-        o.next_class(-1);
+        // Enter on allegiance cycles it; on notarget/AI it asks the host.
+        o.key(OverlayKey::Down);
+        o.key(OverlayKey::Down);
+        assert_eq!(o.key(OverlayKey::Enter), None);
+        assert_eq!(o.allegiance, Allegiance::Foe);
+        o.key(OverlayKey::Down);
+        assert_eq!(
+            o.key(OverlayKey::Enter),
+            Some(OverlayCommand::ToggleNotarget)
+        );
+        o.key(OverlayKey::Down);
+        assert_eq!(o.key(OverlayKey::Enter), Some(OverlayCommand::ToggleAi));
+        // On a weapon row (wrapping down to "no weapon"), Enter spawns with the choices.
+        o.key(OverlayKey::Down);
+        let Some(OverlayCommand::Spawn(r)) = o.key(OverlayKey::Enter) else {
+            panic!()
+        };
+        assert_eq!(
+            (
+                r.classname.as_str(),
+                r.equipment.as_str(),
+                r.allegiance,
+                r.aimed
+            ),
+            ("npc_metropolice", "", Allegiance::Foe, true)
+        );
+        // A zombie: no weapon column, natural attacks only.
+        o.key(OverlayKey::Left);
+        let zombie = SPAWN_CLASSES
+            .iter()
+            .position(|c| *c == "npc_zombie")
+            .unwrap();
+        for _ in 0..zombie {
+            o.key(OverlayKey::Down);
+        }
+        let panel = o.panel(true, true);
+        assert_eq!(panel.options[0].text, "no weapons (natural attacks)");
+        assert_eq!(panel.options.len(), 4);
+        assert_eq!(o.request().equipment, "");
+        // The class list scrolls: the selection is always one of the drawn rows.
+        o.key(OverlayKey::Up);
+        for _ in 0..SPAWN_CLASSES.len() {
+            o.key(OverlayKey::Down);
+            let panel = o.panel(true, false);
+            assert!(panel.classes.len() <= VISIBLE_CLASSES + 2);
+            assert!(
+                panel
+                    .classes
+                    .iter()
+                    .any(|r| r.selected && r.text == SPAWN_CLASSES[o.class]),
+                "{panel:?}"
+            );
+        }
+        // Wrapping up from the first class reaches the last, with "more above".
+        while o.class != 0 {
+            o.key(OverlayKey::Down);
+        }
+        o.key(OverlayKey::Up);
+        let panel = o.panel(false, false);
+        assert!(panel.classes[0].text.contains("more above"));
         assert_eq!(o.request().classname, "npc_combinedropship");
-        assert_eq!(o.equipment, 0);
-        o.next_class(1);
-        o.next_class(1);
-        assert_eq!(o.request().classname, "npc_combine_s");
-        assert!(o.lines().iter().any(|l| l == " > npc_combine_s"));
+        // Combine soldiers have no stunstick: their default SMG1 is preselected.
+        while SPAWN_CLASSES[o.class] != "npc_combine_s" {
+            o.key(OverlayKey::Down);
+        }
+        assert_eq!(o.request().equipment, "weapon_smg1");
     }
 }

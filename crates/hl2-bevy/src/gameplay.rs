@@ -110,8 +110,9 @@ impl Action {
         }
     }
 }
-/// The `ai_enable` switch across map loads (`--ai` sets it at startup).
-pub static AI_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The `ai_enable` switch across map loads: on like Source (ai_disabled 0); `--no-ai`
+/// turns it off at startup, the console and the F4 overlay switch it.
+pub static AI_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 #[derive(Resource)]
 pub struct Gameplay {
     pub world: Arc<World>,
@@ -143,7 +144,7 @@ pub struct Gameplay {
     pub damage_messages: Vec<hl2_simulation::player_damage::DamageMessage>,
     /// HEV suit voice queue.
     pub suit: hl2_simulation::suit::Suit,
-    /// Step 14 NPC AI (off until `ai_enable 1` / `--ai`).
+    /// Step 14 NPC AI (on unless `--no-ai` / `ai_enable 0`).
     pub ai: hl2_simulation::ai::runtime::AiRuntime,
     /// Velocity impulses on the player from NPC hits (ApplyAbsVelocityImpulse), applied
     /// before the next player move.
@@ -162,6 +163,30 @@ pub struct Gameplay {
     pub stunstick_glows: Vec<glam::Mat4>,
     /// Pooled spawn entities already placed.
     pub spawn_used: std::collections::BTreeSet<usize>,
+}
+/// The weapons each F4 class can be given: Weapon_CanUse on its pooled spawn's
+/// loaded model (every activity of the model, loaded or not).
+pub fn spawn_usable_weapons(
+    world: &World,
+    ai: &hl2_simulation::ai::runtime::AiRuntime,
+) -> BTreeMap<String, Vec<String>> {
+    use hl2_simulation::ai::spawn;
+    spawn::SPAWN_CLASSES
+        .iter()
+        .filter_map(|class| {
+            let id = spawn::free_slot(world, class, &Default::default())?;
+            let class_name = spawn::spawn_class(class).0;
+            let instance = world
+                .model_instances
+                .iter()
+                .find(|i| i.entity == Some(id))?;
+            let rig = world.rigs.get(&instance.asset_key())?;
+            Some((
+                (*class).to_owned(),
+                ai.usable_weapons(class_name, &rig.activities),
+            ))
+        })
+        .collect()
 }
 impl Gameplay {
     /// After the player move: this tick's damage (trigger_hurt, blasts, then the
@@ -383,10 +408,12 @@ impl Gameplay {
         }
         let mut ai = hl2_simulation::ai::runtime::AiRuntime::new(&world, Some(vfs));
         ai.enabled = AI_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
+        let mut spawn_overlay = hl2_simulation::ai::spawn::Overlay::default();
+        spawn_overlay.set_usable(spawn_usable_weapons(&world, &ai));
         Ok(Self {
             ai,
             player_impulse: glam::Vec3::ZERO,
-            spawn_overlay: Default::default(),
+            spawn_overlay,
             spawn_console: Default::default(),
             spawn_log: Vec::new(),
             shot_effects: Vec::new(),
@@ -440,7 +467,7 @@ impl Gameplay {
         );
         let mut entity = None;
         let message = match &placement {
-            Ok(p) => match spawn::free_slot(&self.world, &request.classname, &self.spawn_used) {
+            Ok(p) => match spawn::free_slot(&self.world, request.pool_label(), &self.spawn_used) {
                 Some(id) => {
                     self.spawn_used.insert(id);
                     let state = &mut self.scene.states[id];
@@ -448,7 +475,15 @@ impl Gameplay {
                     state.visible = true;
                     state.enabled = true;
                     self.scene.ai_set_yaw(id, p.yaw);
-                    self.ai.set_equipment(id, &request.equipment);
+                    self.ai
+                        .set_equipment(id, &request.classname, &request.equipment);
+                    self.ai
+                        .set_player_disposition(id, request.allegiance.disposition());
+                    // The new weapon's idle (Weapon_TranslateActivity of ACT_IDLE); the AI
+                    // picks its own activities from here when it runs this class.
+                    let idle = hl2_simulation::entities::weapon_idle_activity(&request.equipment);
+                    let world = self.world.clone();
+                    self.scene.ai_set_activity(&world, id, idle);
                     entity = Some(id);
                     format!(
                         "Created {} ({}) at {:.0} {:.0} {:.0} yaw {:.0} (entity {id})",
@@ -1093,7 +1128,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"random_look_targets":self.scene.look_targets.random_report(),"heads":self.scene.heads.iter().map(|(id,h)| (id.to_string(), h.goal.to_array())).collect::<std::collections::BTreeMap<_,_>>(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"spawn_overlay":self.spawn_overlay,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

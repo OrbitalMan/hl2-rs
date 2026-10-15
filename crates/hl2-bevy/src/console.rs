@@ -26,8 +26,16 @@ pub enum Action {
     Escape,
     ToggleConsole,
     Resume,
-    Command { command: String },
-    Input { input: hl2_ui::console::Input },
+    Command {
+        command: String,
+    },
+    Input {
+        input: hl2_ui::console::Input,
+    },
+    /// One F4 overlay key, as if pressed (Toggle, Up, Down, Left, Right, Enter).
+    SpawnOverlay {
+        key: hl2_simulation::ai::spawn::OverlayKey,
+    },
 }
 impl Action {
     pub fn valid(&self) -> bool {
@@ -66,6 +74,12 @@ impl crate::movement::Simulation {
             }
             Action::Command { command } => ui.source.submit(command),
             Action::Input { input } => ui.source.input(input),
+            Action::SpawnOverlay { key } => {
+                if let Some(message) = self.spawn_overlay_key(game, *key) {
+                    ui.source.log(message);
+                }
+                vec![]
+            }
         };
         self.console_effects(ui, game, effects);
     }

@@ -453,12 +453,37 @@ pub(crate) fn entity_transform(origin: glam::Vec3, rotation: glam::Quat) -> Tran
         ),
     )
 }
+/// A bone-merged NPC weapon mesh ("<world model>#0"): drawn only while it is its
+/// owner's active weapon.
+#[derive(Component)]
+pub struct NpcWeaponDraw(pub String);
+/// Whether an entity's draw is hidden this frame: its entity is hidden or killed, or it
+/// is an NPC weapon its owner does not hold now.
+pub(crate) fn draw_hidden(
+    game: &crate::gameplay::Gameplay,
+    id: usize,
+    weapon: Option<&NpcWeaponDraw>,
+) -> bool {
+    let s = &game.scene.states[id];
+    !s.visible
+        || s.killed
+        || weapon.is_some_and(|w| {
+            game.ai
+                .weapon_world_model(id)
+                .is_none_or(|m| w.0.strip_suffix("#0") != Some(m.as_str()))
+        })
+}
 #[allow(clippy::too_many_arguments)]
 pub fn present_entities(
     game: Res<crate::gameplay::Gameplay>,
     sim: Res<crate::movement::Simulation>,
     mut entities: Query<
-        (&SourceEntity, &mut Transform, &mut Visibility),
+        (
+            &SourceEntity,
+            &mut Transform,
+            &mut Visibility,
+            Option<&NpcWeaponDraw>,
+        ),
         Without<crate::gpu_skinning::Joint>,
     >,
     mut joints: Query<&mut Transform, (With<crate::gpu_skinning::Joint>, Without<SourceEntity>)>,
@@ -469,7 +494,7 @@ pub fn present_entities(
     eyes: Option<Res<crate::eyes::Eyes>>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "animation");
-    for (owner, mut transform, mut visibility) in &mut entities {
+    for (owner, mut transform, mut visibility, weapon) in &mut entities {
         let state = &game.scene.states[owner.0];
         let (origin, rotation) = sim
             .physics
@@ -479,7 +504,7 @@ pub fn present_entities(
         if *transform != pose {
             *transform = pose;
         }
-        let visible = if state.visible && !state.killed {
+        let visible = if !draw_hidden(&game, owner.0, weapon) {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -1022,18 +1047,32 @@ pub fn spawn_map(
         }
     }
     // NPC weapons: the active weapon's world model follows its owner (DESIGN 14w step 4).
+    // A pooled F4 spawn gets one per weapon its class can use, shown only while it is
+    // the active one (NpcWeaponDraw); the pool and this goes with DESIGN 14r.
     for instance in &world.model_instances {
         let Some(id) = instance.entity.filter(|id| visible_entity(world, *id)) else {
             continue;
         };
-        let Some(model) = loaded.gameplay.ai.weapon_world_model(id) else {
-            continue;
-        };
-        let key = format!("{model}#0");
-        if let Some(surfaces) = world.model_assets.get(&key) {
-            let transform = Mat4::from_scale(Vec3::splat(instance.scale));
-            for surface in surfaces {
-                append(surface, transform, Owner::NpcWeapon(id, key.clone()));
+        let ai = &loaded.gameplay.ai;
+        let mut models: BTreeSet<String> = ai.weapon_world_model(id).into_iter().collect();
+        let entity = &world.entities[id];
+        if let Some(label) = entity.get(hl2_simulation::ai::spawn::POOL_KEY) {
+            models.extend(
+                loaded
+                    .gameplay
+                    .spawn_overlay
+                    .usable(label)
+                    .iter()
+                    .filter_map(|w| ai.weapon_model(w)),
+            );
+        }
+        for model in models {
+            let key = format!("{model}#0");
+            if let Some(surfaces) = world.model_assets.get(&key) {
+                let transform = Mat4::from_scale(Vec3::splat(instance.scale));
+                for surface in surfaces {
+                    append(surface, transform, Owner::NpcWeapon(id, key.clone()));
+                }
             }
         }
     }
@@ -1331,6 +1370,9 @@ pub fn spawn_map(
                 base: base.clone(),
                 second: second.clone(),
             });
+        }
+        if let Owner::NpcWeapon(_, key) = &owner {
+            draw.insert(NpcWeaponDraw(key.clone()));
         }
         if let Some(id) = owner.entity() {
             draw.insert(SourceEntity(id));

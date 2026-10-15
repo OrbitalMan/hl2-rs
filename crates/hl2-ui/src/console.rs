@@ -53,8 +53,12 @@ const COMMANDS: &[(&str, &str)] = &[
         "npc_create_equipment <weapon>: weapon for the next npc_create",
     ),
     (
+        "ai_disable",
+        "ai_disable: toggle all NPC AI off/on; disabled NPCs idle (cheat, Source command)",
+    ),
+    (
         "ai_enable",
-        "ai_enable [0|1]: query or switch the NPC AI think loop (development, default 0)",
+        "ai_enable [0|1]: switch the NPC AI think loop (ours, default 1; Source uses ai_disable)",
     ),
     ("clear", "clear: clear console output"),
     ("ent_fire", "ent_fire <targetname> [input=Use] [parameter] [delay]: queue entity input; names/globs supported (cheat)"),
@@ -76,6 +80,8 @@ pub enum Effect {
     Loadout,
     /// ai_enable: None toggles.
     AiEnable(Option<bool>),
+    /// ai_disable (CC_AI_Disable): toggle the AI, Source's messages.
+    AiDisable,
     /// npc_create / npc_create_aimed / npc_create_equipment, the whole line.
     NpcCommand(String),
     Noclip(Option<bool>),
@@ -641,6 +647,13 @@ impl Console {
                         .collect::<Vec<_>>()
                         .join(" "),
                 )));
+            }
+            "ai_disable" => {
+                if !args.is_empty() {
+                    return Err(usage());
+                }
+                cheat()?;
+                return Ok(Some(Effect::AiDisable));
             }
             "ai_enable" => {
                 let value = match args {
@@ -1243,6 +1256,15 @@ mod tests {
             vec![Effect::NpcCommand(
                 "npc_create_aimed npc_metropolice cop1".into()
             )]
+        );
+    }
+    #[test]
+    fn ai_disable_is_a_cheat_toggle_without_arguments() {
+        let mut console = Console::default();
+        assert_eq!(console.submit("ai_disable"), vec![]);
+        assert_eq!(
+            console.submit("sv_cheats 1; ai_disable; ai_disable 1"),
+            vec![Effect::AiDisable]
         );
     }
     #[test]

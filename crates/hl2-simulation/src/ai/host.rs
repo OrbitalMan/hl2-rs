@@ -292,6 +292,7 @@ mod tests {
             name: None,
             equipment: String::new(),
             aimed: true,
+            ..Default::default()
         };
         let placement = PhysicsPlacement { physics: &physics };
         let eye = Vec3::new(0., 0., 64.);

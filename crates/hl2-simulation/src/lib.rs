@@ -9,6 +9,7 @@ pub mod physics;
 
 pub mod actors;
 pub mod ai;
+pub mod citizens;
 pub mod entities;
 pub mod footsteps;
 pub mod gameplay;

@@ -252,16 +252,15 @@ pub struct SceneAnimationState {
 /// every cop without DefaultAnim played "Idle_Baton", a sequence without an activity
 /// that leans forward with an arm across the chest (owner report, session 17).
 pub fn metropolice_idle_activity(entity: &Entity) -> &'static str {
-    match entity
-        .get("additionalequipment")
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "weapon_pistol" => "ACT_IDLE_PISTOL",
-        "weapon_smg1" | "weapon_ar2" | "weapon_shotgun" => "ACT_IDLE_SMG1",
-        _ => "ACT_IDLE",
-    }
+    weapon_idle_activity(entity.get("additionalequipment").unwrap_or(""))
+}
+/// ACT_IDLE through a held weapon's acttable (CAI_BaseNPC::TranslateActivity:
+/// NPC_TranslateActivity, identity at idle outside combat and the player's squad, then
+/// Weapon_TranslateActivity): weapon_pistol -> ACT_IDLE_PISTOL, weapon_smg1 ->
+/// ACT_IDLE_SMG1 ...; unarmed or a weapon without an ACT_IDLE row: ACT_IDLE.
+pub fn weapon_idle_activity(weapon: &str) -> &'static str {
+    crate::npc_weapons::translate(&weapon.trim().to_ascii_lowercase(), "ACT_IDLE")
+        .unwrap_or("ACT_IDLE")
 }
 pub struct Scene {
     pub states: Vec<State>,
@@ -584,11 +583,16 @@ impl Scene {
                 scene.camera_activity(world, id, false);
             }
         }
-        // Metrocops without a DefaultAnim start on their (weapon-translated) idle activity.
+        // Metrocops without a DefaultAnim start on their (weapon-translated) idle activity,
+        // as do other weapon users given a weapon (a citizen's SMG1: ACT_IDLE_SMG1).
         for id in 0..world.entities.len() {
             let e = &world.entities[id];
-            if e.class() == "npc_metropolice" && e.get("DefaultAnim").is_none() {
-                scene.animate_activity_if_present(world, id, metropolice_idle_activity(e));
+            if e.get("DefaultAnim").is_some() || !crate::npc_weapons::uses_weapons(e.class()) {
+                continue;
+            }
+            let weapon = e.get("additionalequipment").unwrap_or("");
+            if e.class() == "npc_metropolice" || !matches!(weapon.trim(), "" | "0") {
+                scene.animate_activity_if_present(world, id, weapon_idle_activity(weapon));
             }
         }
         scene.hold_template_children(world);

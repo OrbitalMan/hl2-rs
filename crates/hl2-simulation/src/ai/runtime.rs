@@ -1,8 +1,8 @@
 //! The AI think loop in the NPC stage (CAI_BaseNPC::NPCThink every 0.1 s): per-NPC
 //! GatherConditions (sight of the player and hated NPCs, hearing, enemy memory and
 //! COND_NEW_ENEMY/SEE_ENEMY/ENEMY_OCCLUDED/LOST_ENEMY), SelectIdealState and
-//! MaintainSchedule through the class behavior. Off by default (`enabled`; the host's
-//! `ai_enable` switch) until validated against native. NPCs owned by a
+//! MaintainSchedule through the class behavior. Switched by `enabled` (the host's
+//! `ai_enable`, on by default like Source's ai_disabled 0). NPCs owned by a
 //! scripted_sequence or a choreographed scene are NPC_STATE_SCRIPT and the AI leaves
 //! them alone. Simplified from the SDK: every NPC thinks every 0.1 s (no PVS/efficiency
 //! throttling, no think staggering), only npc_metropolice has a class behavior.
@@ -92,6 +92,9 @@ pub struct AiActor {
     pub last_think: f64,
     /// The active weapon (Weapon_Equip of `additionalequipment`; DESIGN 14w).
     pub weapon: Option<NpcWeapon>,
+    /// The F4 per-spawn disposition toward the player (an ai_relationship aimed at
+    /// this NPC); None: the class rules.
+    pub player_disposition: Option<Disposition>,
     #[serde(skip)]
     goal: Option<GoalKey>,
     /// Animation events up to this time were handled.
@@ -114,7 +117,7 @@ pub struct Diagnostics {
 }
 #[derive(Serialize)]
 pub struct AiRuntime {
-    /// The `ai_enable` switch (off by default on this branch).
+    /// The `ai_enable` switch (the host turns it on by default, like Source).
     pub enabled: bool,
     #[serde(skip)]
     schedules: Schedules,
@@ -141,9 +144,9 @@ pub struct AiRuntime {
     random: u64,
     /// Debug (F4): the AI does not sense the player (ai_ignoreplayers / notarget).
     pub ignore_player: bool,
-    /// Debug (F4): every AI NPC's disposition toward the player (None: the
-    /// relationship table and class rules).
-    pub player_disposition: Option<Disposition>,
+    /// Active weapons of NPCs whose class has no AI behavior here (Weapon_Equip from
+    /// additionalequipment or F4): held and drawn, never fired.
+    pub held_weapons: BTreeMap<usize, NpcWeapon>,
     /// The AI ran last tick (switching it off returns NPCs to idle once).
     #[serde(skip)]
     was_enabled: bool,
@@ -228,10 +231,18 @@ impl AiRuntime {
             .unwrap_or_default();
         let mut actors = BTreeMap::new();
         let mut goals = BTreeMap::new();
+        let mut held_weapons = BTreeMap::new();
         for (id, e) in world.entities.iter().enumerate() {
             if let Some(actor) = Self::actor_for(id, e, &weapon_defs) {
                 actors.insert(id, actor);
                 continue;
+            }
+            if let Some(weapon) = Self::equip(
+                e.class(),
+                e.get("additionalequipment").unwrap_or(""),
+                &weapon_defs,
+            ) {
+                held_weapons.insert(id, weapon);
             }
             if e.class() == "ai_goal_police" {
                 {
@@ -263,7 +274,7 @@ impl AiRuntime {
         Self {
             enabled: false,
             ignore_player: false,
-            player_disposition: None,
+            held_weapons,
             was_enabled: false,
             sound_wait: BTreeMap::new(),
             schedules,
@@ -285,7 +296,16 @@ impl AiRuntime {
     /// The world model of an NPC's active weapon (CBaseCombatWeapon::Equip follows the
     /// owner bone-merged), lowercase; None when unarmed.
     pub fn weapon_world_model(&self, id: usize) -> Option<String> {
-        let class = &self.actors.get(&id)?.weapon.as_ref()?.class;
+        let class = &self
+            .actors
+            .get(&id)
+            .and_then(|a| a.weapon.as_ref())
+            .or_else(|| self.held_weapons.get(&id))?
+            .class;
+        self.weapon_model(class)
+    }
+    /// A weapon class's world model, lowercase.
+    pub fn weapon_model(&self, class: &str) -> Option<String> {
         self.weapon_defs
             .get(class)
             .map(|d| d.world_model.to_lowercase())
@@ -410,6 +430,7 @@ impl AiRuntime {
             next_think: 0.,
             last_think: 0.,
             weapon,
+            player_disposition: None,
             goal: None,
             events_until: 0.,
         })
@@ -798,7 +819,7 @@ impl AiRuntime {
         if player_visible {
             actor.npc.conditions.set(COND_SEE_PLAYER);
         }
-        let hates = match self.player_disposition {
+        let hates = match actor.player_disposition {
             Some(disposition) => disposition == Disposition::HT,
             None => cop.hates_player(precriminal_hate || !precriminal, now),
         };
@@ -1161,10 +1182,11 @@ impl AiRuntime {
         }
         true
     }
-    /// A spawned NPC's additionalequipment (F4 / npc_create_equipment): the cop's
-    /// baton exists only with weapon_stunstick.
-    pub fn set_equipment(&mut self, id: usize, equipment: &str) {
-        let weapon = Self::equip("npc_metropolice", equipment, &self.weapon_defs);
+    /// A spawned NPC's additionalequipment (F4 / npc_create_equipment) through
+    /// Weapon_Equip (classes without bits_CAP_USE_WEAPONS get nothing). The cop's baton
+    /// exists only with weapon_stunstick; classes without AI here just hold it.
+    pub fn set_equipment(&mut self, id: usize, class: &str, equipment: &str) {
+        let weapon = Self::equip(class, equipment, &self.weapon_defs);
         let regulator = Self::regulator(weapon.as_ref(), &self.weapon_defs, id);
         if let Some(actor) = self.actors.get_mut(&id) {
             let AiClass::Metropolice(cop) = &mut actor.class;
@@ -1173,7 +1195,26 @@ impl AiRuntime {
                 .is_some_and(|w| w.class == "weapon_stunstick");
             actor.weapon = weapon;
             actor.npc.shot_regulator = regulator;
+        } else if let Some(weapon) = weapon {
+            self.held_weapons.insert(id, weapon);
+        } else {
+            self.held_weapons.remove(&id);
         }
+    }
+    /// A spawn's disposition toward the player (F4 allegiance).
+    pub fn set_player_disposition(&mut self, id: usize, disposition: Option<Disposition>) {
+        if let Some(actor) = self.actors.get_mut(&id) {
+            actor.player_disposition = disposition;
+        }
+    }
+    /// The weapons `class` can be given on a model with `activities` (upper case):
+    /// bits_CAP_USE_WEAPONS and Weapon_CanUse over the installed weapon definitions.
+    pub fn usable_weapons(
+        &self,
+        class: &str,
+        activities: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
+        npc_weapons::usable_weapons(class, activities, &self.weapon_defs)
     }
     /// Switching the AI off (debug): every AI NPC drops its schedule, enemy and
     /// movement goal and returns to its idle activity.
@@ -1190,15 +1231,6 @@ impl AiRuntime {
                 scene.ai_set_activity(world, id, "ACT_IDLE");
             }
         }
-    }
-    /// The F4 debug stance toward the player: default -> hate -> neutral -> like.
-    pub fn cycle_player_disposition(&mut self) {
-        self.player_disposition = match self.player_disposition {
-            None => Some(Disposition::HT),
-            Some(Disposition::HT) => Some(Disposition::NU),
-            Some(Disposition::NU) => Some(Disposition::LI),
-            _ => None,
-        };
     }
     /// CSoundEnt::InsertSound from gameplay (gunfire, impacts, explosions, footsteps).
     pub fn insert_sound(&mut self, kind: u32, origin: Vec3, volume: f32, duration: f64, now: f64) {
@@ -1360,7 +1392,7 @@ mod tests {
         assert_eq!(r.ai.diagnostics.thinks, 0, "hidden slots do not think");
         r.scene.states[id].origin = Vec3::ZERO;
         r.scene.states[id].visible = true;
-        r.ai.set_equipment(id, "weapon_stunstick");
+        r.ai.set_equipment(id, "npc_metropolice", "weapon_stunstick");
         run(&mut r, 20, player_at(30.));
         let AiClass::Metropolice(cop) = &r.ai.actors[&id].class;
         assert!(cop.has_baton && cop.warnings >= 1);
@@ -1375,18 +1407,46 @@ mod tests {
         let AiClass::Metropolice(cop) = &r.ai.actors[&0].class;
         assert_eq!(cop.warnings, 0, "an ignored player is not shoved");
         r.ai.ignore_player = false;
-        r.ai.cycle_player_disposition();
-        assert_eq!(r.ai.player_disposition, Some(Disposition::HT));
+        // F4 allegiance: a foe spawn hates the player, a friend never makes him its enemy.
+        r.ai.set_player_disposition(0, Some(Disposition::HT));
         run(&mut r, 20, player_at(30.));
         assert_eq!(r.ai.actors[&0].npc.enemy, Some(PLAYER), "forced hate");
         r.ai.enabled = false;
         run(&mut r, 1, player_at(30.));
         assert!(r.ai.actors[&0].npc.schedule.is_none());
         assert!(r.ai.actors[&0].npc.enemy.is_none());
-        for _ in 0..3 {
-            r.ai.cycle_player_disposition();
-        }
-        assert_eq!(r.ai.player_disposition, None);
+        r.ai.enabled = true;
+        r.ai.set_player_disposition(0, Some(Disposition::LI));
+        run(&mut r, 20, player_at(30.));
+        assert_ne!(r.ai.actors[&0].npc.enemy, Some(PLAYER), "a friend");
+    }
+
+    #[test]
+    fn weapon_equip_goes_to_any_weapon_user_and_never_to_natural_attackers() {
+        let world = World {
+            entities: vec![
+                entity(&[
+                    ("classname", "npc_citizen"),
+                    ("additionalequipment", "weapon_smg1"),
+                ]),
+                entity(&[
+                    ("classname", "npc_zombie"),
+                    ("additionalequipment", "weapon_smg1"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let mut ai = AiRuntime::new(&world, None);
+        // Map additionalequipment: the citizen holds it (no AI behavior here), the zombie
+        // has no bits_CAP_USE_WEAPONS.
+        assert_eq!(ai.held_weapons[&0].class, "weapon_smg1");
+        assert!(!ai.held_weapons.contains_key(&1));
+        ai.set_equipment(1, "npc_zombie", "weapon_pistol");
+        assert!(!ai.held_weapons.contains_key(&1));
+        ai.set_equipment(0, "npc_citizen", "");
+        assert!(!ai.held_weapons.contains_key(&0), "unequipped");
+        ai.set_equipment(0, "npc_citizen", "weapon_ar2");
+        assert_eq!(ai.held_weapons[&0].class, "weapon_ar2");
     }
 
     #[test]

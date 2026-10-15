@@ -16,6 +16,7 @@ mod performance;
 mod rendering;
 mod setup;
 mod sky;
+mod spawn_panel;
 mod studio_decals;
 mod tonemap;
 mod visibility;
@@ -151,8 +152,11 @@ impl Options {
                     assets::FRAG_RIGID_BODY.store(false, std::sync::atomic::Ordering::Relaxed)
                 }
                 "--no-focus" => options.no_focus = true,
-                // Step 14 AI think loop on from the start (default off; console ai_enable).
+                // Step 14 AI think loop (default on like Source's ai_disabled 0; console ai_enable).
                 "--ai" => gameplay::AI_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed),
+                "--no-ai" => {
+                    gameplay::AI_ENABLED.store(false, std::sync::atomic::Ordering::Relaxed)
+                }
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
                     if !(scale.is_finite() && scale > 0.) {
@@ -165,7 +169,7 @@ impl Options {
                         "Installation: auto-detect Steam or use the remembered folder.\n--setup: choose/remember the game folder; --no-setup: fail without opening setup.\n--game PATH and HL2_ROOT override the remembered folder.\n--setup-preview PNG: capture setup and exit without loading a map."
                     );
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --ai (NPC AI on) --frag-swept-box (legacy fitted frag instead of its w_grenade.phy body) --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-ai (NPC AI off; on by default like Source) --frag-swept-box (legacy fitted frag instead of its w_grenade.phy body) --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }

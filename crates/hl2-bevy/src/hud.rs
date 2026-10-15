@@ -146,10 +146,14 @@ pub struct Hud {
     pub quads: usize,
     timing: FrameTiming,
     debug_lines: Vec<String>,
+    /// F4 overlay font (rasterized at setup).
+    spawn_font: Option<crate::spawn_panel::PanelFont>,
+    /// The F4 panel drawn last frame (report).
+    spawn_panel: Option<hl2_simulation::ai::spawn::Panel>,
 }
 impl Hud {
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines}})
+        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"spawn_overlay":self.spawn_panel})
     }
     pub fn new(source: hl2_ui::hud::WeaponHud) -> Self {
         Self {
@@ -161,6 +165,8 @@ impl Hud {
             quads: 0,
             timing: FrameTiming::default(),
             debug_lines: vec![],
+            spawn_font: crate::spawn_panel::PanelFont::load(18.),
+            spawn_panel: None,
         }
     }
     fn material(
@@ -343,30 +349,33 @@ pub fn present(
             format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
         ];
     }
-    if game.spawn_overlay.open {
-        hud.debug_lines.extend(game.spawn_overlay.lines());
-        let stance = match game.ai.player_disposition {
-            None => "default",
-            Some(hl2_simulation::ai::relationships::Disposition::HT) => "hate",
-            Some(hl2_simulation::ai::relationships::Disposition::LI) => "like",
-            Some(hl2_simulation::ai::relationships::Disposition::FR) => "fear",
-            Some(_) => "neutral",
-        };
-        hud.debug_lines.push(format!(
-            "I: AI {}   O: ignore player {}   P: stance toward player: {stance}",
-            if game.ai.enabled { "ON" } else { "OFF (idle)" },
-            if game.ai.ignore_player { "ON" } else { "off" },
-        ));
-        if let Some(message) = game
-            .spawn_log
-            .last()
-            .and_then(|entry| entry["message"].as_str())
-        {
-            hud.debug_lines.push(format!("last: {message}"));
-        }
-    }
     if !hud.debug_lines.is_empty() {
         ui.source.draw_debug(&hud.debug_lines);
+    }
+    // F4 NPC spawn panel (ours, outside the hl2-ui menus).
+    hud.spawn_panel = game.spawn_overlay.open.then(|| {
+        game.spawn_overlay
+            .panel(game.ai.enabled, game.ai.ignore_player)
+    });
+    // CAI_BaseNPC::PreThink: "A.I. Disabled..." at (0.7, 0.65) while ai_disable is on
+    // (HUD message font not reproduced: the developer font).
+    if !game.ai.enabled
+        && let Some(font) = &hud.spawn_font
+    {
+        font.text(
+            &hud.source.canvas,
+            "A.I. Disabled...",
+            width * 0.7,
+            height * 0.65,
+            hl2_ui::canvas::WHITE,
+        );
+    }
+    if let (Some(font), Some(panel)) = (&hud.spawn_font, &hud.spawn_panel) {
+        let message = game
+            .spawn_log
+            .last()
+            .and_then(|entry| entry["message"].as_str());
+        font.draw(&hud.source.canvas, panel, message);
     }
     ui.source.draw(clock.elapsed_secs_f64());
     game.scene

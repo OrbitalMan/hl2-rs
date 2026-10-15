@@ -236,6 +236,17 @@ impl Simulation {
                     crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
                     ui.source.log(format!("ai_enable {}", u8::from(on)));
                 }
+                // CC_AI_Disable: a toggle; DevMsg "AI Disabled." / "AI Enabled.".
+                Effect::AiDisable => {
+                    let on = !game.ai.enabled;
+                    game.ai.enabled = on;
+                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                    ui.source.log(String::from(if on {
+                        "AI Enabled."
+                    } else {
+                        "AI Disabled."
+                    }));
+                }
                 Effect::Noclip(value) => {
                     self.fly = value.unwrap_or(!self.fly);
                     self.player = Player::new(self.eye);
@@ -293,6 +304,27 @@ impl Simulation {
                     Err(e) => ui.source.log(e),
                 },
                 Effect::Quit => ui.quit_requested = true,
+            }
+        }
+    }
+    /// One F4 overlay key; a spawn returns its console message.
+    pub fn spawn_overlay_key(
+        &self,
+        game: &mut crate::gameplay::Gameplay,
+        key: hl2_simulation::ai::spawn::OverlayKey,
+    ) -> Option<String> {
+        use hl2_simulation::ai::spawn::OverlayCommand;
+        match game.spawn_overlay.key(key)? {
+            OverlayCommand::Spawn(request) => Some(self.spawn_npc(game, request)),
+            OverlayCommand::ToggleNotarget => {
+                game.ai.ignore_player = !game.ai.ignore_player;
+                None
+            }
+            OverlayCommand::ToggleAi => {
+                let on = !game.ai.enabled;
+                game.ai.enabled = on;
+                crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                None
             }
         }
     }
@@ -688,43 +720,21 @@ fn controls(
                 game.actions.push(Action::Slot { slot });
             }
         }
-        // F4 NPC spawn overlay (ours; not a native binding): Up/Down scroll the class
-        // list, Left/Right pick the weapon, Enter places.
-        if keys.just_pressed(KeyCode::F4) {
-            game.spawn_overlay.toggle();
-        }
-        if game.spawn_overlay.open {
-            for (key, class, equipment) in [
-                (KeyCode::ArrowUp, -1, 0),
-                (KeyCode::ArrowDown, 1, 0),
-                (KeyCode::ArrowLeft, 0, -1),
-                (KeyCode::ArrowRight, 0, 1),
-            ] {
-                if keys.just_pressed(key) {
-                    if class != 0 {
-                        game.spawn_overlay.next_class(class);
-                    } else {
-                        game.spawn_overlay.next_equipment(equipment);
-                    }
-                }
-            }
-            // Debug switches while the overlay is open: I AI on/off, O ignore the
-            // player, P stance toward the player.
-            if keys.just_pressed(KeyCode::KeyI) {
-                let on = !game.ai.enabled;
-                game.ai.enabled = on;
-                crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
-            }
-            if keys.just_pressed(KeyCode::KeyO) {
-                game.ai.ignore_player = !game.ai.ignore_player;
-            }
-            if keys.just_pressed(KeyCode::KeyP) {
-                game.ai.cycle_player_disposition();
-            }
-            if keys.just_pressed(KeyCode::Enter) {
-                let request = game.spawn_overlay.request();
-                let message = sim.spawn_npc(game, request);
-                if let Some(ui) = ui.as_deref_mut() {
+        // F4 NPC spawn overlay (ours; not a native binding): Up/Down move in the focused
+        // column, Left/Right switch columns, Enter spawns at the crosshair or toggles the
+        // option under the cursor.
+        use hl2_simulation::ai::spawn::OverlayKey;
+        for (key, overlay) in [
+            (KeyCode::F4, OverlayKey::Toggle),
+            (KeyCode::ArrowUp, OverlayKey::Up),
+            (KeyCode::ArrowDown, OverlayKey::Down),
+            (KeyCode::ArrowLeft, OverlayKey::Left),
+            (KeyCode::ArrowRight, OverlayKey::Right),
+            (KeyCode::Enter, OverlayKey::Enter),
+        ] {
+            if keys.just_pressed(key) {
+                let message = sim.spawn_overlay_key(game, overlay);
+                if let (Some(ui), Some(message)) = (ui.as_deref_mut(), message) {
                     ui.source.log(message);
                 }
             }

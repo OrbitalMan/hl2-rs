@@ -192,6 +192,8 @@ pub fn load_with_canvas(
     add_static_decals(&mut world, &vfs, &mut decal_errors);
     // F4 / npc_create spawn pool: hidden NPCs every load-time system builds.
     hl2_simulation::ai::spawn::append_pool(&mut world);
+    // CNPC_Citizen::SelectModel (citizen types, random heads), before models load.
+    hl2_simulation::citizens::select_models(&mut world, hl2_simulation::ai::spawn::POOL_KEY);
     let model_report = models::append_models(&mut world, &vfs);
     let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
     // NPC weapon world models: their sequence events fire NPC weapons (DESIGN 14w).
@@ -537,8 +539,45 @@ fn material_condition(test: &str) -> bool {
     value != negate
 }
 
+/// DirectX-level blocks inside a material (`">=dx90_20b" { ... }`, `"<dx90" { ... }`):
+/// whether the block applies on a DX level 95 renderer (SM3 HDR, the owner's native
+/// setting). `dx90_20b` (ps2.0b) sits between levels 90 and 95. Other keys are not
+/// DX-level blocks (None).
+fn dx_level_block(key: &str) -> Option<bool> {
+    const LEVEL: f32 = 95.;
+    let key = key.to_ascii_lowercase();
+    let (op, rest) = ["<=", ">=", "<", ">"]
+        .into_iter()
+        .find_map(|op| key.strip_prefix(op).map(|rest| (op, rest)))
+        .unwrap_or(("=", key.as_str()));
+    let digits = rest.strip_prefix("dx")?;
+    let (number, b20) = digits
+        .strip_suffix("_20b")
+        .map_or((digits, false), |n| (n, true));
+    let level = number.parse::<f32>().ok()? + if b20 { 0.5 } else { 0. };
+    Some(match op {
+        "<=" => LEVEL <= level,
+        ">=" => LEVEL >= level,
+        "<" => LEVEL < level,
+        ">" => LEVEL > level,
+        _ => LEVEL == level,
+    })
+}
+/// Direct material vars plus the DX-level blocks that apply (their vars win).
+fn material_properties(entries: &[Entry]) -> BTreeMap<String, String> {
+    let mut properties = direct_properties(entries);
+    for entry in entries {
+        if matches!(entry.value, Value::Block(_)) && dx_level_block(&entry.key) == Some(true) {
+            properties.extend(direct_properties(entry.children()));
+        }
+    }
+    properties
+}
+
 // Reuse the bounded KeyValues decoder, preserving direct material parameters and
-// Patch insert/replace semantics. Only the authored Eyes_dx8 fallback for EyeRefract is selected; other DX blocks/proxies remain unsupported.
+// Patch insert/replace semantics. DX-level blocks are evaluated for level 95; the authored
+// Eyes_dx8 fallback is selected for EyeRefract; other shader fallbacks/proxies remain
+// unsupported.
 fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
     if depth > 8 {
         bail!("VMT include cycle/depth limit");
@@ -569,7 +608,7 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
     if !root.key.eq_ignore_ascii_case("patch") {
         return Ok(Definition {
             shader: root.key.clone(),
-            properties: direct_properties(root.children()),
+            properties: material_properties(root.children()),
             proxies: root
                 .get("Proxies")
                 .map_or(vec![], |p| p.children().to_vec()),
@@ -1055,6 +1094,20 @@ fn cached_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dx_level_blocks_apply_like_a_dx95_renderer() {
+        assert_eq!(dx_level_block(">=dx90_20b"), Some(true));
+        assert_eq!(dx_level_block("<dx90_20b"), Some(false));
+        assert_eq!(dx_level_block("<dx90"), Some(false));
+        assert_eq!(dx_level_block(">dx90"), Some(true));
+        assert_eq!(dx_level_block("dx95"), Some(true));
+        assert_eq!(dx_level_block("Proxies"), None);
+        // combine_soldier/combinesoldiersheet.vmt: the base texture lives only there.
+        let text = "\"VertexLitGeneric\" { \"$model\" 1 \">=dx90_20b\" { \"$baseTexture\" \"a\" } \"<dx90_20b\" { \"$baseTexture\" \"b\" } }";
+        let entries = keyvalues::parse(text).unwrap();
+        let p = material_properties(entries[0].children());
+        assert_eq!(p.get("$basetexture").map(String::as_str), Some("a"));
+    }
 
     #[test]
     fn self_illum_needs_a_translucent_base() {

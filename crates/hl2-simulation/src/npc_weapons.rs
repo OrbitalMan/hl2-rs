@@ -311,8 +311,43 @@ pub fn can_use(weapon: &str, has_activity: &dyn Fn(&str) -> bool) -> bool {
             .filter(|(_, _, required)| *required)
             .all(|(_, to, _)| has_activity(to))
 }
-/// The weapons an NPC class can be given: bits_CAP_USE_WEAPONS and Weapon_CanUse
-/// against its model's activities (upper case).
+/// The `additionalequipment` each class carries in the installed HL2 campaign maps
+/// (read-only scan of the 79 maps of build 19307283, session 20; npc_maker children
+/// not split by class). CAI_BaseNPC::Spawn equips these without Weapon_CanUse, which
+/// rejects several of them on the retail models (police.mdl has no crouch-walk rifle
+/// activities for weapon_smg1; combine_soldier.mdl has no ACT_RELOAD_SMG1).
+pub const CAMPAIGN_LOADOUTS: &[(&str, &[&str])] = &[
+    (
+        "npc_metropolice",
+        &["weapon_stunstick", "weapon_pistol", "weapon_smg1"],
+    ),
+    (
+        "npc_combine_s",
+        &["weapon_smg1", "weapon_ar2", "weapon_shotgun"],
+    ),
+    (
+        "npc_citizen",
+        &[
+            "weapon_smg1",
+            "weapon_ar2",
+            "weapon_shotgun",
+            "weapon_rpg",
+            "weapon_alyxgun",
+        ],
+    ),
+    ("npc_barney", &["weapon_smg1", "weapon_ar2"]),
+    ("npc_alyx", &["weapon_alyxgun"]),
+    ("npc_monk", &["weapon_annabelle"]),
+];
+pub fn campaign_loadout(npc_class: &str) -> &'static [&'static str] {
+    CAMPAIGN_LOADOUTS
+        .iter()
+        .find(|(c, _)| c.eq_ignore_ascii_case(npc_class))
+        .map_or(&[], |(_, w)| *w)
+}
+/// The weapons an NPC class can be given, for bits_CAP_USE_WEAPONS classes: its
+/// campaign loadout (equipped at spawn without Weapon_CanUse) first, then the other
+/// weapons Weapon_CanUse accepts on its model's activities (upper case; NPC pickups).
 pub fn usable_weapons(
     npc_class: &str,
     activities: &std::collections::BTreeSet<String>,
@@ -321,11 +356,15 @@ pub fn usable_weapons(
     if !uses_weapons(npc_class) {
         return Vec::new();
     }
-    NPC_WEAPONS
+    let campaign = campaign_loadout(npc_class);
+    campaign
         .iter()
-        .filter(|w| definitions.contains_key(**w))
-        .filter(|w| can_use(w, &|a| activities.contains(&a.to_uppercase())))
-        .map(|w| (*w).to_owned())
+        .copied()
+        .chain(NPC_WEAPONS.iter().copied().filter(|w| {
+            !campaign.contains(w) && can_use(w, &|a| activities.contains(&a.to_uppercase()))
+        }))
+        .filter(|w| definitions.contains_key(*w))
+        .map(str::to_owned)
         .collect()
 }
 /// Activities to preload on an NPC model for a weapon (its acttable results).
@@ -694,14 +733,19 @@ mod tests {
                 )
             })
             .collect();
-        // A cop model with only the baton activities can use the stunstick (and the
-        // crowbar, whose required rows are the same), not the pistol.
-        let usable = usable_weapons("npc_metropolice", &activities, &defs);
-        assert!(
-            usable.contains(&"weapon_stunstick".to_owned()),
-            "{usable:?}"
+        // A Barney model with only the baton activities: his campaign loadout (SMG1,
+        // AR2) first, then the stunstick and crowbar (same required rows) by
+        // Weapon_CanUse, not the pistol.
+        let usable = usable_weapons("npc_barney", &activities, &defs);
+        assert_eq!(
+            usable,
+            [
+                "weapon_smg1",
+                "weapon_ar2",
+                "weapon_stunstick",
+                "weapon_crowbar"
+            ]
         );
-        assert!(!usable.contains(&"weapon_pistol".to_owned()));
         // A zombie has no bits_CAP_USE_WEAPONS: nothing, whatever its model has.
         assert!(usable_weapons("npc_zombie", &activities, &defs).is_empty());
         assert_eq!(
@@ -811,5 +855,40 @@ mod tests {
         );
         assert_eq!(d.len(), 8);
         assert!(d.windows(2).any(|p| p[0] != p[1]));
+    }
+    #[test]
+    #[ignore = "requires owned installed HL2"]
+    fn owned_weapon_columns_follow_campaign_loadouts_then_weapon_can_use() {
+        let vfs =
+            source_assets::vpk::Vfs::mount(&source_assets::install::discover().unwrap()).unwrap();
+        let defs = definitions(&vfs).unwrap();
+        let usable = |class: &str, model: &str| {
+            let rig = source_assets::animation::load(&vfs, model, &Default::default()).unwrap();
+            usable_weapons(class, &rig.activities, &defs)
+        };
+        // Retail police.mdl fails Weapon_CanUse for the SMG1 its maps give it; the
+        // campaign loadout keeps it, CanUse adds the crowbar and the alyxgun.
+        assert_eq!(
+            usable("npc_metropolice", "models/police.mdl"),
+            [
+                "weapon_stunstick",
+                "weapon_pistol",
+                "weapon_smg1",
+                "weapon_crowbar",
+                "weapon_alyxgun"
+            ]
+        );
+        // combine_soldier.mdl passes CanUse for nothing (no ACT_RELOAD_SMG1).
+        assert_eq!(
+            usable("npc_combine_s", "models/combine_soldier.mdl"),
+            ["weapon_smg1", "weapon_ar2", "weapon_shotgun"]
+        );
+        let citizen = usable("npc_citizen", "models/humans/group01/male_07.mdl");
+        assert!(
+            !citizen.contains(&"weapon_pistol".to_owned()),
+            "{citizen:?}"
+        );
+        assert!(citizen.starts_with(&["weapon_smg1".to_owned()]));
+        assert!(usable("npc_zombie", "models/zombie/classic.mdl").is_empty());
     }
 }
