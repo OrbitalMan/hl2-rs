@@ -118,7 +118,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 
 - **Dialog Frames, Rounded Corners & Overflow Clipping**:
   - All dialog windows and dialog-like surfaces (options dialog, confirmation boxes for quit/main menu, gameplay map loading dialog, background loading plaque, third-party technology credits, brightness/gamma, and all frames rendered via `Painter::frame` / `Painter::frame_with_close` / `Painter::frame_spec`) route through `Painter::frame_spec` with rounded corners (`FRAME_CORNER_RADIUS: f32 = 5.0`) and omit Windows 95-style outer 3D raised borders (`FrameStyle::DEFAULT.outer_3d_border == false`), matching Source SDK `sourcescheme.res` `FrameBorder` (`backgroundtype 2`). Background fills default to `theme.frame_bg` and support custom color overrides via `FrameSpec::with_bg_color`.
-  - Non-dialog widgets (push buttons, close button, sliders, tabs, scrollbars, text entries, checkboxes) strictly retain their 3D raised/sunken borders.
+  - Non-dialog widgets (push buttons, sliders, tabs, scrollbars, text entries, checkboxes) strictly retain their 3D raised/sunken borders. The title bar close button is the exception (owner decision, 2026-10-15): a plain × glyph without border or fill, colored by `Theme::close_style` (`FrameTitleButton.FgColor`, lightened to `FrameTitleBar.TextColor` on hover/press, `FrameTitleButton.DisabledFgColor` when disabled).
   - Dialog frames enforce overflow clipping and corner containment (`FrameStyle::clip_overflow` and `FrameStyle::clip_rect`), ensuring child controls, title text, and the title bar close button never poke outside the rounded frame boundaries.
 
 - **Cursor Coordinate Conversion & Window Client Alignment**:

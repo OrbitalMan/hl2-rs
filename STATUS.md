@@ -2,7 +2,12 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: GameUI widget interaction pass (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: GameUI polish and macOS window pass (2026-10-15, branch `orbitalman/main-menu`)
+
+Claude Code desktop, claude-opus-5-5. Owner list of nine items; plan decisions: macOS scrolling uses accumulated row steps, macOS native full screen is recognized as the game's Full screen mode (mac-only), tab hover only on inactive tabs, key capture highlights only the key cell.
+- **Close button: done.** Plain × glyph, no border or fill; lightens to the title text color on hover/press (`Theme::close_style`, scheme `FrameTitleButton.*`). Test `close_cross_lightens_on_hover_and_press`; frame tests updated. Unverified, needs manual check: hover the × of the Options dialog and of the Quit box.
+
+## Previous session: GameUI widget interaction pass (2026-10-15, branch `orbitalman/main-menu`)
 
 Claude Code desktop, claude-opus-5-5.
 - **Task 1 (dialog button and tab hover): done, with a retail finding.** Push buttons now resolve their look through the shared `Theme::button_style(ButtonState)` (scheme `Button.{,Armed,Depressed}{Text,Bg}Color`, SDK `Button` precedence: pressed overrides hover, disabled never hovers). With the installed desktop scheme the armed colors equal the normal ones and bordered buttons have no armed border, so **retail desktop push buttons show no visible hover**. HL2-RS matches that through `Theme` defaults that mirror the scheme values until the empty `SourceSchemeBase.res` read is fixed; a scheme with armed colors would show them. Tabs never arm in the SDK (`PageTab`), selected or not, so tabs are unchanged (`Theme::tab_style`). Dialog controls follow SDK mouse capture on drag-off (`ButtonTracker::capturing`: stays pressed while off, release over activates, no other control arms); menu items keep cancel-on-drag-off. No keyboard focus state exists for dialog controls. Tests: `desktop_scheme_push_buttons_have_no_visible_hover`, `button_style_resolves_hover_pressed_and_disabled_from_scheme_colors`, `tabs_ignore_hover_and_press_whether_selected_or_not`, `hover_look_draws_through_the_shared_button_path`, `capturing_tracker_keeps_press_through_drag_off_and_activates_on_return`; updated drag-off cases in `options_dialog_buttons_follow_press_cancel_and_release_activation` and the message box test.

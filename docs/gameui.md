@@ -215,6 +215,10 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
   on drag-off), since SDK `MenuItem` disables mouse capture. Not observed in the retail binary.
 - **Focus.** There is no keyboard focus state for dialog controls yet (no Tab-key focus
   traversal), so no focus border is drawn; the default button keeps its selection border.
+- **Close button (owner decision, 2026-10-15):** the title bar × has no 3D border or fill. The
+  glyph uses `FrameTitleButton.FgColor` (`200 200 200 196`), lightens to `FrameTitleBar.TextColor`
+  (White) on hover and press, shifts 1px while pressed, and uses `FrameTitleButton.DisabledFgColor`
+  when disabled (`Theme::close_style`). Retail draws a bordered title button; this is a deviation.
 - Hover never plays the rollover sound for these controls (`WidgetKind::has_rollover_sound`).
 - Retail `PageTab` selects on press; HL2-RS tabs still select on release (unchanged).
 - Known gap: `hl2_complete/resource/SourceSchemeBase.res` is a 0-byte file in the

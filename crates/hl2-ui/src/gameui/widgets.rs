@@ -89,6 +89,10 @@ pub struct Theme {
     pub button_armed_bg: Color,
     pub button_depressed_text: Color,
     pub button_depressed_bg: Color,
+    /// Title bar close (×) glyph colors (`FrameTitleButton.FgColor` /
+    /// `FrameTitleButton.DisabledFgColor`); hover and press use `title_text`.
+    pub close_fg: Color,
+    pub close_disabled: Color,
 }
 
 impl Default for Theme {
@@ -128,6 +132,8 @@ impl Default for Theme {
             button_armed_bg: rgba(0, 0, 0, 0),
             button_depressed_text: rgba(255, 255, 255, 255),
             button_depressed_bg: rgba(0, 0, 0, 0),
+            close_fg: rgba(200, 200, 200, 196),
+            close_disabled: rgba(255, 255, 255, 192),
         }
     }
 }
@@ -136,7 +142,7 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 29] = [
+        let fields: [(&str, &mut Color); 31] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
@@ -169,6 +175,11 @@ impl Theme {
                 &mut theme.button_depressed_text,
             ),
             ("Button.DepressedBgColor", &mut theme.button_depressed_bg),
+            ("FrameTitleButton.FgColor", &mut theme.close_fg),
+            (
+                "FrameTitleButton.DisabledFgColor",
+                &mut theme.close_disabled,
+            ),
         ];
         for (name, slot) in fields {
             if let Some(color) = scheme_color(root, name) {
@@ -214,6 +225,18 @@ impl Theme {
             text,
             bg,
             text_offset: if state.depressed() { 1. } else { 0. },
+        }
+    }
+
+    /// Color of the title bar close (×) glyph. The button has no border or fill; hovering or
+    /// pressing lightens the glyph to the title text color (owner decision, not retail).
+    pub fn close_style(&self, state: ButtonState) -> Color {
+        if !state.enabled {
+            self.close_disabled
+        } else if state.armed || state.pressed {
+            self.title_text
+        } else {
+            self.close_fg
         }
     }
 
@@ -953,24 +976,17 @@ impl Painter<'_> {
     }
 
     /// The close (X) button in a frame title bar.
+    /// Drawn as a plain cross from [`Theme::close_style`], shifted by a pixel while pressed.
     pub fn close_button(&self, rect: Rect, state: ButtonState) {
-        if state.pressed && state.enabled {
-            self.sunken(rect);
-        } else {
-            self.raised(rect);
-        }
-        let offset = if state.pressed && state.enabled {
-            1.
-        } else {
-            0.
-        };
+        let offset = if state.depressed() { 1. } else { 0. };
         let text_rect = Rect::new(rect.x + offset, rect.y - 1. + offset, rect.w, rect.h);
-        let color = if state.enabled {
-            self.theme.title_text
-        } else {
-            self.theme.text_disabled
-        };
-        self.text_in("×", text_rect, Align::Center, color, false);
+        self.text_in(
+            "×",
+            text_rect,
+            Align::Center,
+            self.theme.close_style(state),
+            false,
+        );
     }
 
     /// A push button drawn from [`Theme::button_style`]: raised border, sunken while pressed,
@@ -2068,10 +2084,10 @@ mod tests {
         let quads_no_close = canvas.drain();
         assert!(!quads_no_close.is_empty());
 
-        // Frame with close button
+        // Frame with close button: the cross is a glyph only (no border quads; no font here)
         painter.frame_with_close(size, "With Close", Some(ButtonState::new(true)));
         let quads_with_close = canvas.drain();
-        assert!(quads_with_close.len() > quads_no_close.len());
+        assert_eq!(quads_with_close.len(), quads_no_close.len());
 
         // Frame with close button pressed
         painter.frame_with_close(
@@ -2177,7 +2193,7 @@ mod tests {
         let legacy_polygons = quads_legacy.iter().filter(|q| q.vertices.is_some()).count();
         assert_eq!(legacy_polygons, 0);
 
-        // 6. Non-dialog widgets unchanged: button and close button still draw 3D borders
+        // 6. Push buttons keep their 3D border; the close button is a plain glyph
         let btn_rect = Rect::new(10., 10., 80., 24.);
         painter.button(btn_rect, "OK", ButtonState::new(true));
         let btn_quads = canvas.drain();
@@ -2187,8 +2203,26 @@ mod tests {
         let close_btn_rect = Rect::new(50., 10., 18., 16.);
         painter.close_button(close_btn_rect, ButtonState::new(true));
         let close_quads = canvas.drain();
-        // Close button draws 4 border quads (raised 3D border)
-        assert_eq!(close_quads.len(), 4);
+        assert!(close_quads.is_empty(), "no border around the cross");
+    }
+
+    #[test]
+    fn close_cross_lightens_on_hover_and_press() {
+        let theme = Theme::default();
+        assert_eq!(theme.close_style(ButtonState::new(true)), theme.close_fg);
+        assert_eq!(
+            theme.close_style(ButtonState::active(true, true, false)),
+            theme.title_text
+        );
+        assert_eq!(
+            theme.close_style(ButtonState::active(true, false, true)),
+            theme.title_text
+        );
+        assert_eq!(
+            theme.close_style(ButtonState::active(false, true, true)),
+            theme.close_disabled
+        );
+        assert_ne!(theme.close_fg, theme.title_text, "hover must be visible");
     }
 
     #[test]

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: plain close cross with hover
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Painter::close_button` draws only the × glyph; new `Theme::close_style` and theme fields `close_fg`/`close_disabled` from `FrameTitleButton.FgColor`/`DisabledFgColor`. Docs: `docs/gameui.md` 6a, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Owner request: no 3D border on the dialog close button, lighten the cross on hover.
+
+**Tested how:** `cargo test -p hl2-ui` (177 passed), `cargo test -p hl2-bevy`, clippy, fmt.
+
+**Result:** Close buttons in all frames (Options, sub-dialogs, message boxes) use the plain cross.
+
+**Still broken or not tested:** Hover look not checked by hand.
+
+**Next:** Opaque drop-down lists.
+
 ## 2026-10-15 GameUI: slight visible hover on dialog push buttons (owner-approved deviation)
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
