@@ -177,6 +177,11 @@ Semantics:
   `hl2/cfg/config_default.cfg`. Edit Key (or Enter on a selected row) captures the next
   key or mouse button (double-clicking a row is not implemented), Escape cancels capture, assigning a key removes it from any other action,
   Clear Key unbinds, Use Defaults asks for confirmation and resets only the listed actions.
+  Each section header row ends in a one-pixel `SectionedListPanel.DividerColor` (Black) line, two
+  pixels above the row bottom, like SDK `SectionedListPanelHeader`. While a key is being captured
+  only the key cell is filled with the selection color (retail edits the key column in place via
+  its inline edit panel; the retail colors of that panel are not verified, orange is the owner's
+  choice); the action name drops back to the normal row look.
 - Mouse: on macOS Raw input and Acceleration are disabled, per the `[$OSX]` conditions in the
   installed `.res` file.
 - High Dynamic Range is shown on macOS too, although the retail `.res` hides it there.

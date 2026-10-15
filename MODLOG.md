@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: key list group separators and key-cell capture highlight
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `OptionsDialog::draw_key_list` draws a divider under each section header (new `Theme::list_divider` from `SectionedListPanel.DividerColor`) and, while capturing, fills only the key cell. Docs: `docs/gameui.md` section 6, `STATUS.md`.
+
+**Why:** Owner requests matching the original: separators between action groups; only the key portion highlighted while listening for a key.
+
+**Tested how:** `cargo test -p hl2-ui` (179 passed), `cargo test -p hl2-bevy`, clippy, fmt.
+
+**Result:** Groups are separated by a black line; capture highlights the key cell only.
+
+**Still broken or not tested:** Not checked by hand; retail inline edit panel colors not verified.
+
+**Next:** Double-click to edit a key.
+
 ## 2026-10-15 GameUI: opaque drop-down lists and inactive tab hover
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

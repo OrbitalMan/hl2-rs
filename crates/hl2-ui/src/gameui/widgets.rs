@@ -93,6 +93,8 @@ pub struct Theme {
     /// `FrameTitleButton.DisabledFgColor`); hover and press use `title_text`.
     pub close_fg: Color,
     pub close_disabled: Color,
+    /// Line under a sectioned list's section header (`SectionedListPanel.DividerColor`).
+    pub list_divider: Color,
 }
 
 impl Default for Theme {
@@ -134,6 +136,7 @@ impl Default for Theme {
             button_depressed_bg: rgba(0, 0, 0, 0),
             close_fg: rgba(200, 200, 200, 196),
             close_disabled: rgba(255, 255, 255, 192),
+            list_divider: rgba(0, 0, 0, 255),
         }
     }
 }
@@ -142,7 +145,7 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 31] = [
+        let fields: [(&str, &mut Color); 32] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
@@ -180,6 +183,7 @@ impl Theme {
                 "FrameTitleButton.DisabledFgColor",
                 &mut theme.close_disabled,
             ),
+            ("SectionedListPanel.DividerColor", &mut theme.list_divider),
         ];
         for (name, slot) in fields {
             if let Some(color) = scheme_color(root, name) {

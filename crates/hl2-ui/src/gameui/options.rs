@@ -1530,9 +1530,25 @@ impl OptionsDialog {
                         theme.text,
                         true,
                     );
+                    // SDK `SectionedListPanelHeader`: a one-pixel divider two pixels above the
+                    // bottom of the header row, inset by one pixel on the left and two on the
+                    // right, separating action groups.
+                    p.fill(
+                        Rect::new(header.x + 1., y + MENU_ROW - 2., inner_w - 3., 1.),
+                        theme.list_divider,
+                    );
                 }
                 KeyRow::Action { command, label } => {
-                    let selected = self.keys.selected == Some(index);
+                    // While capturing, only the key cell is highlighted (the retail list edits
+                    // the key column in place); the action name keeps the normal row look.
+                    let capturing = self.keys.capture == Some(index);
+                    let selected = self.keys.selected == Some(index) && !capturing;
+                    if capturing {
+                        p.fill(
+                            Rect::new(header.x + action_w, y, inner_w - action_w, MENU_ROW),
+                            theme.selection_bg,
+                        );
+                    }
                     let color = if selected {
                         p.fill(
                             Rect::new(header.x, y, inner_w, MENU_ROW),
@@ -1549,7 +1565,7 @@ impl OptionsDialog {
                         color,
                         false,
                     );
-                    let key = if self.keys.capture == Some(index) {
+                    let key = if capturing {
                         String::new()
                     } else {
                         self.draft
@@ -1908,6 +1924,62 @@ mod tests {
         h.click(page(450., 300.));
         assert!(h.dialog.combo.is_none(), "clicking outside closes the list");
         assert_eq!(h.dialog.draft.aspect, AspectRatio::Normal);
+    }
+
+    /// Quads of the dialog drawn on its own (no fonts, so no glyph quads).
+    fn drawn(h: &Harness) -> Vec<crate::canvas::Quad> {
+        let painter = Painter {
+            canvas: &h.canvas,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        h.dialog.draw(&painter);
+        h.canvas.drain()
+    }
+
+    #[test]
+    fn key_list_separates_groups_and_capture_highlights_only_the_key_cell() {
+        let mut h = Harness::new();
+        h.tab(Tab::Keyboard);
+        let theme = h.theme.clone();
+        // Group separator under the section header row (row 0): one pixel high.
+        let quads = drawn(&h);
+        let dividers: Vec<_> = quads
+            .iter()
+            .filter(|q| q.color == theme.list_divider && q.destination.h == 1.)
+            .collect();
+        assert_eq!(dividers.len(), 1, "one section, one separator");
+        let list = page(8., 10.);
+        assert_eq!(
+            dividers[0].destination.y,
+            list.y + KEY_HEADER + MENU_ROW - 2.
+        );
+
+        // Selected row: the whole row is orange.
+        h.click(page(30., 10. + KEY_HEADER + MENU_ROW * 1.5));
+        let orange = |quads: &[crate::canvas::Quad]| {
+            quads
+                .iter()
+                .filter(|q| q.color == theme.selection_bg)
+                .map(|q| q.destination)
+                .collect::<Vec<_>>()
+        };
+        let row = orange(&drawn(&h));
+        assert_eq!(row.len(), 1);
+        // Capturing: only the key column cell is orange.
+        h.click(page(280., 280.));
+        assert_eq!(h.dialog.keys.capture, Some(1));
+        let cell = orange(&drawn(&h));
+        assert_eq!(cell.len(), 1);
+        assert_eq!(cell[0].y, row[0].y);
+        assert!(cell[0].x > row[0].x && cell[0].w < row[0].w);
+        assert_eq!(
+            cell[0].x + cell[0].w,
+            row[0].x + row[0].w,
+            "ends at the row edge"
+        );
     }
 
     #[test]
