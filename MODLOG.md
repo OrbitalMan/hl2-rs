@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: dropdown header toggle in the release phase
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::gameui::options` test `dropdown_open_state_toggles_on_header_and_closes_in_the_release_phase`; `docs/gameui.md` 6b, `STATUS.md`. The behavior itself is the `PopupHit::Anchor` close path of `widgets::PopupList` (previous entry).
+
+**Why:** Clicking the header of an open dropdown must close it without a selection change and without reopening it from the same click.
+
+**Tested how:** `cargo test -p hl2-ui` (176 passed), `cargo test -p hl2-bevy` (71 passed), strict clippy, fmt; packaged 300-frame main-menu run (exit 0).
+
+**Result:** Open/close state machine covered: open on click, close on header, entry and outside clicks, all on release.
+
+**Still broken or not tested:** Not checked by hand in the packaged build. SDK `ComboBox` toggles on press; release-phase toggling is the requested behavior.
+
+**Next:** Owner decision on a visible push button hover (deviation); reading `SourceScheme.res` instead of the empty `SourceSchemeBase.res`.
+
 ## 2026-10-15 GameUI: popup lists as the topmost input layer
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

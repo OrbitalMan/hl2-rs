@@ -2189,6 +2189,83 @@ mod tests {
     }
 
     #[test]
+    fn dropdown_open_state_toggles_on_header_and_closes_in_the_release_phase() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        let header = page(AUTOAIM.0, AUTOAIM.1);
+        let initial = h.dialog.draft().mouse.aim_assist;
+        let press = |h: &mut Harness, at: Vec2, click: bool| {
+            h.frame(Input {
+                pointer: Some(at),
+                click,
+                held: true,
+                ..Default::default()
+            });
+        };
+        let release = |h: &mut Harness, at: Vec2| {
+            h.frame(Input {
+                pointer: Some(at),
+                released: true,
+                ..Default::default()
+            });
+        };
+
+        // Closed -> open on a click, opening on release over the header.
+        press(&mut h, header, true);
+        assert!(h.dialog.combo.is_none(), "opens on release, not press");
+        release(&mut h, header);
+        assert!(h.dialog.combo.is_some());
+
+        // Open -> closed on a header click: still open on press and hold, closed on release,
+        // and it stays closed (one full press-release never closes and reopens).
+        press(&mut h, header, true);
+        press(&mut h, header, false);
+        assert!(h.dialog.combo.is_some(), "header press does not close yet");
+        release(&mut h, header);
+        assert!(h.dialog.combo.is_none(), "header release closes the list");
+        h.hover(header);
+        assert!(
+            h.dialog.combo.is_none(),
+            "the same click does not reopen it"
+        );
+        assert_eq!(
+            h.dialog.draft().mouse.aim_assist,
+            initial,
+            "no selection change"
+        );
+        // A quick two-frame header click toggles the same way.
+        h.click(header);
+        assert!(h.dialog.combo.is_some());
+        h.click(header);
+        assert!(h.dialog.combo.is_none());
+        assert_eq!(h.dialog.draft().mouse.aim_assist, initial);
+
+        // Open -> closed on entry selection, in the release phase.
+        h.slow_click(header);
+        let entry = page(BASIC_OVER_FILTER.0, BASIC_OVER_FILTER.1);
+        press(&mut h, entry, true);
+        assert!(h.dialog.combo.is_some(), "entry press does not select yet");
+        release(&mut h, entry);
+        assert!(h.dialog.combo.is_none());
+        assert_eq!(h.dialog.draft().mouse.aim_assist, AimAssist::Basic);
+
+        // Open -> closed on an outside click, in the release phase.
+        h.slow_click(header);
+        let outside = page(REVERSE_MOUSE.0, REVERSE_MOUSE.1);
+        press(&mut h, outside, true);
+        assert!(h.dialog.combo.is_some(), "outside press does not close yet");
+        release(&mut h, outside);
+        assert!(h.dialog.combo.is_none());
+        assert!(!h.dialog.draft().mouse.invert);
+
+        // Pressing the header and releasing elsewhere leaves the list open.
+        h.slow_click(header);
+        press(&mut h, header, true);
+        release(&mut h, outside);
+        assert!(h.dialog.combo.is_some());
+    }
+
+    #[test]
     fn escape_closes_layers_innermost_first() {
         let mut h = Harness::new();
         h.tab(Tab::Video);

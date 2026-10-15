@@ -240,6 +240,13 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
   requested behavior. The SDK closes the menu when it loses focus on the press and does not
   capture the mouse, so retail may also deliver that click to the control underneath (not
   verified in the retail binary).
+- Open/close state (`OptionsDialog::combo`: `None` closed, `Some(PopupList)` open): a click on a
+  closed combo opens it on release over the combo; while open, a press and release on its own
+  header (`PopupHit::Anchor`) closes it without changing the selection. Header, entry and outside
+  closes all act on the release, and the page below stays occluded through the whole gesture, so
+  one header click can never close the list and reopen it. Deviation: SDK `ComboBox` toggles on
+  the press (`OnMousePressed` -> `DoClick` -> `HideMenu`); release-phase toggling is the
+  requested behavior. Test: `dropdown_open_state_toggles_on_header_and_closes_in_the_release_phase`.
 
 Limitations (as of milestone 5; section 8 supersedes the first four items):
 
