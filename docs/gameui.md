@@ -174,8 +174,11 @@ Semantics:
 - Brightness ("Adjust brightness levels...") is enabled only in Fullscreen, following retail. It
   edits the draft and Cancel restores the previous value (retail applies immediately).
 - Keyboard: rows and sections come from `hl2/scripts/kb_act.lst`, defaults from
-  `hl2/cfg/config_default.cfg`. Edit Key (or Enter on a selected row) captures the next
-  key or mouse button (double-clicking a row is not implemented), Escape cancels capture, assigning a key removes it from any other action,
+  `hl2/cfg/config_default.cfg`. Edit Key, Enter on a selected row, or a double click on a row
+  (SDK `VControlsListPanel::OnMouseDoublePressed` starts capture) captures the next key or mouse
+  button; double clicks use `widgets::DoubleClick` with `DOUBLE_CLICK_SECONDS = 0.5` (a common
+  desktop default, the retail interval is the OS setting) and the frame time in `Input::time`
+  (scripted input without times never double-clicks). Escape cancels capture, assigning a key removes it from any other action,
   Clear Key unbinds, Use Defaults asks for confirmation and resets only the listed actions.
   Each section header row ends in a one-pixel `SectionedListPanel.DividerColor` (Black) line, two
   pixels above the row bottom, like SDK `SectionedListPanelHeader`. While a key is being captured

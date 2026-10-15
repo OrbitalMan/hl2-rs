@@ -57,6 +57,7 @@ type UiInputDevices<'w, 's> = (
     Res<'w, ButtonInput<MouseButton>>,
     MessageReader<'w, 's, bevy::input::keyboard::KeyboardInput>,
     MessageReader<'w, 's, bevy::input::mouse::MouseWheel>,
+    Option<Res<'w, Time<Real>>>,
 );
 
 type UiDisplayDevices<'w, 's> = (
@@ -66,7 +67,7 @@ type UiDisplayDevices<'w, 's> = (
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_ui(
-    (keys, buttons, mut characters, mut wheels): UiInputDevices,
+    (keys, buttons, mut characters, mut wheels, real_time): UiInputDevices,
     (mut windows, monitors): UiDisplayDevices,
     video_viewport: Option<Res<VideoViewport>>,
     mut sim: ResMut<crate::simulation::Simulation>,
@@ -141,6 +142,7 @@ pub fn update_ui(
                 released: buttons.just_released(MouseButton::Left),
                 wheel,
                 binding_keys: crate::ui_host::binding_keys(&keys, &buttons, wheel),
+                time: real_time.as_deref().map(Time::elapsed_secs_f64),
             });
             let has_apply = effects
                 .iter()

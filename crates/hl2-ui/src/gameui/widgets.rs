@@ -1396,6 +1396,35 @@ pub fn menu_list_rect(combo: Rect, items: usize) -> Rect {
     Rect::new(combo.x, combo.y + combo.h, combo.w, rows as f32 * MENU_ROW)
 }
 
+/// Longest gap between two clicks on the same target that counts as a double click. This is the
+/// common desktop default; the retail interval comes from the operating system and is not
+/// reproduced exactly.
+pub const DOUBLE_CLICK_SECONDS: f64 = 0.5;
+
+/// Detects double clicks: two clicks on the same target within [`DOUBLE_CLICK_SECONDS`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DoubleClick<T: Copy + PartialEq> {
+    last: Option<(T, f64)>,
+}
+
+impl<T: Copy + PartialEq> DoubleClick<T> {
+    /// Records a click on `target` at `time` and returns whether it completes a double click.
+    /// A double click is consumed, so a third quick click starts a new pair. Without a time
+    /// nothing is a double click.
+    pub fn register(&mut self, target: T, time: Option<f64>) -> bool {
+        let Some(time) = time else {
+            self.last = None;
+            return false;
+        };
+        let double = matches!(
+            self.last,
+            Some((previous, at)) if previous == target && (0. ..=DOUBLE_CLICK_SECONDS).contains(&(time - at))
+        );
+        self.last = (!double).then_some((target, time));
+        double
+    }
+}
+
 /// What the pointer is over while a popup list is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupHit {
@@ -2257,6 +2286,23 @@ mod tests {
         let quads = canvas.drain();
         assert_eq!(quads[0].destination.w, 100.);
         assert_eq!(quads[0].color.a, 1., "base layer is opaque");
+    }
+
+    #[test]
+    fn double_click_needs_the_same_target_within_the_interval() {
+        let mut clicks = DoubleClick::default();
+        assert!(!clicks.register(1, Some(10.)));
+        assert!(clicks.register(1, Some(10.3)), "second click in time");
+        assert!(
+            !clicks.register(1, Some(10.4)),
+            "a third click starts a new pair"
+        );
+        assert!(clicks.register(1, Some(10.6)));
+        assert!(!clicks.register(1, Some(20.)));
+        assert!(!clicks.register(1, Some(20.6)), "too slow");
+        assert!(!clicks.register(2, Some(20.7)), "different target");
+        assert!(!clicks.register(2, None), "no time, no double click");
+        assert!(!clicks.register(2, None));
     }
 
     #[test]

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: double click on a key row edits the key
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `console::Input::time` (filled from `Time<Real>` in `hl2-bevy` `update_ui`; optional, scripts unaffected); `widgets::DoubleClick` and `DOUBLE_CLICK_SECONDS`; `OptionsDialog::key_list_click` starts capture on a double click. Docs: `docs/gameui.md` section 6, `STATUS.md`.
+
+**Why:** Owner request; the SDK key list also starts capture on a double press.
+
+**Tested how:** `cargo test -p hl2-ui` (181 passed), `cargo test -p hl2-bevy` (71 passed), clippy, fmt.
+
+**Result:** Double click = Edit Key; slow clicks only select.
+
+**Still broken or not tested:** Not checked by hand; interval is a fixed 0.5 s, not the OS setting.
+
+**Next:** Platform-specific scrolling.
+
 ## 2026-10-15 GameUI: key list group separators and key-cell capture highlight
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

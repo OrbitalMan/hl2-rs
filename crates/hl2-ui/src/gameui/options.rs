@@ -258,6 +258,9 @@ pub struct OptionsDialog {
     bink_texture: Option<Texture2D>,
     log: Vec<String>,
     pub(crate) active_tooltip: Option<ActiveTooltip>,
+    /// Time of the current input frame, for double clicks.
+    now: Option<f64>,
+    key_clicks: widgets::DoubleClick<usize>,
 }
 
 impl Default for OptionsDialog {
@@ -284,6 +287,8 @@ impl Default for OptionsDialog {
             bink_texture: None,
             log: Vec::new(),
             active_tooltip: None,
+            now: None,
+            key_clicks: widgets::DoubleClick::default(),
         }
     }
 }
@@ -531,6 +536,7 @@ impl OptionsDialog {
 
     /// One input frame. `measure` supplies the canvas size and text metrics.
     pub fn input(&mut self, input: &Input, measure: &Painter) -> OptionsOutcome {
+        self.now = input.time;
         let canvas = vec2(measure.canvas.width(), measure.canvas.height());
         let scale = Painter::scale_for(canvas.y);
         let local = |origin: Vec2| input.pointer.map(|p| (p - origin) / scale);
@@ -1010,6 +1016,10 @@ impl OptionsDialog {
         let index = self.keys.first + ((p.y - body.y) / MENU_ROW).floor() as usize;
         if matches!(self.res.key_rows.get(index), Some(KeyRow::Action { .. })) {
             self.keys.selected = Some(index);
+            // A double click on an action row edits its key, like the Edit Key button.
+            if self.key_clicks.register(index, self.now) {
+                self.keys.capture = Some(index);
+            }
         }
     }
 
@@ -1980,6 +1990,46 @@ mod tests {
             row[0].x + row[0].w,
             "ends at the row edge"
         );
+    }
+
+    #[test]
+    fn double_click_on_a_key_row_starts_capture() {
+        let mut h = Harness::new();
+        h.tab(Tab::Keyboard);
+        let row = page(30., 10. + KEY_HEADER + MENU_ROW * 1.5);
+        let click_at = |h: &mut Harness, time: f64| {
+            for (click, held, released) in [(true, true, false), (false, false, true)] {
+                h.frame(Input {
+                    pointer: Some(row),
+                    click,
+                    held,
+                    released,
+                    time: Some(time),
+                    ..Default::default()
+                });
+            }
+        };
+        click_at(&mut h, 1.);
+        assert_eq!(
+            (h.dialog.keys.selected, h.dialog.keys.capture),
+            (Some(1), None)
+        );
+        click_at(&mut h, 1.8);
+        assert_eq!(
+            h.dialog.keys.capture, None,
+            "slow second click only selects"
+        );
+        click_at(&mut h, 2.1);
+        assert_eq!(h.dialog.keys.capture, Some(1), "double click edits the key");
+        h.frame(Input {
+            binding_keys: vec!["MOUSE2".into()],
+            ..Default::default()
+        });
+        assert_eq!(h.dialog.draft().keys.get("+forward").unwrap(), "MOUSE2");
+        // Without frame times (scripted input) repeated clicks never start capture.
+        h.click(row);
+        h.click(row);
+        assert_eq!(h.dialog.keys.capture, None);
     }
 
     #[test]

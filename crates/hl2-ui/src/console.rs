@@ -303,6 +303,9 @@ pub struct Input {
     /// Keys and buttons pressed this frame as persisted binding names (`KeyW`, `SuperLeft`,
     /// `MOUSE1`, `MWHEELUP`), used when the keyboard page captures a new key.
     pub binding_keys: Vec<String>,
+    /// Monotonic real time of this frame in seconds, used for double clicks. `None` (scripted
+    /// input without times) disables double-click detection.
+    pub time: Option<f64>,
 }
 impl Input {
     pub(crate) fn pressed(&self, key: Key) -> bool {
