@@ -291,6 +291,21 @@ impl AiRuntime {
             .map(|d| d.world_model.to_lowercase())
             .filter(|m| !m.is_empty())
     }
+    /// CWeaponStunStick::m_bActive of each NPC whose active weapon is a stunstick turned
+    /// on (npc_metropolice SetBatonState).
+    pub fn active_stunsticks(&self) -> Vec<usize> {
+        self.actors
+            .iter()
+            .filter(|(_, a)| {
+                let AiClass::Metropolice(cop) = &a.class;
+                cop.baton_active
+                    && a.weapon
+                        .as_ref()
+                        .is_some_and(|w| w.class == "weapon_stunstick")
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
     /// NPCs whose current enemy or enemy memory is the player.
     pub fn npcs_knowing_player(&self) -> std::collections::BTreeSet<usize> {
         self.actors

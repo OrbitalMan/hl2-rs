@@ -63,8 +63,11 @@ const COMBINE_PLAYER: [&str; 2] = ["effects/combinemuzzle1_noz", "effects/combin
 const COMBINE_NPC: [&str; 2] = ["effects/combinemuzzle1", "effects/combinemuzzle2"];
 const DUST: &str = "particle/particle_smokegrenade";
 pub const TRACER_MATERIAL: &str = "effects/spark";
+/// C_WeaponStunStick::DrawModel halo material.
+pub const STUNSTICK_GLOW: &str = "effects/stunstick";
 /// Every sprite material these effects draw (preloaded with the projectile sprites).
 pub const MATERIALS: &[&str] = &[
+    STUNSTICK_GLOW,
     "effects/muzzleflash1_noz",
     "effects/muzzleflash2_noz",
     "effects/muzzleflash3_noz",
@@ -473,6 +476,19 @@ impl MuzzleEffects {
             })
             .collect()
     }
+}
+/// C_WeaponStunStick::DrawModel while active: two DrawHalo sprites 1 unit behind
+/// attachment 1 (radius 4-6 at grey 0.1-0.2, then 2-3 at 0.9-1.0), redrawn with new random
+/// sizes every frame. The 1-in-6 TE_BEAMTESLA arcs of ClientThink are not modeled.
+pub fn stunstick_glow(attachment: Mat4, right: Vec3, up: Vec3, r: &mut impl Random) -> [Quad; 2] {
+    let center = attachment.transform_point3(Vec3::NEG_X);
+    let grey = |v: f32| [(v * 255.).round() as u8; 3];
+    let (outer, outer_size) = (grey(r.float(0.1, 0.2)), r.float(4., 6.));
+    let (inner, inner_size) = (grey(r.float(0.9, 1.)), r.float(2., 3.));
+    [
+        billboard(STUNSTICK_GLOW, center, right, up, outer_size, 0., outer, 1.),
+        billboard(STUNSTICK_GLOW, center, right, up, inner_size, 0., inner, 1.),
+    ]
 }
 /// An additive sprite quad (rgb x alpha) or, for the dust puff, a blended one.
 #[allow(clippy::too_many_arguments)]

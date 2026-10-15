@@ -740,6 +740,32 @@ pub fn present(
         sim.paused(),
         &sim.physics,
     );
+    // Active stunsticks' halos (C_WeaponStunStick::DrawModel), new sizes every frame.
+    if effects
+        .source
+        .sprites
+        .contains_key(hl2_simulation::muzzle_effects::STUNSTICK_GLOW)
+    {
+        let right = direction.cross(glam::Vec3::Z).normalize_or(glam::Vec3::Y);
+        let up = right.cross(direction).normalize_or(glam::Vec3::Z);
+        let Effects { source, rng, .. } = &mut *effects;
+        let mut random = || {
+            *rng ^= *rng << 13;
+            *rng ^= *rng >> 7;
+            *rng ^= *rng << 17;
+            (*rng >> 40) as f32 / (1u32 << 24) as f32
+        };
+        for frame in &game.stunstick_glows {
+            source
+                .quads
+                .extend(hl2_simulation::muzzle_effects::stunstick_glow(
+                    *frame,
+                    right,
+                    up,
+                    &mut random,
+                ));
+        }
+    }
     effects.draws = effects.source.quads.len();
     let quads = std::mem::take(&mut effects.source.quads);
     let Effects {

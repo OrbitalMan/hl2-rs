@@ -158,6 +158,8 @@ pub struct Gameplay {
     /// (which keeps the newest number it consumed); entries older than 0.5 s are dropped.
     pub shot_effects: Vec<(u64, f64, ShotEffect)>,
     pub shot_serial: u64,
+    /// Active stunsticks' attachment-1 frames this tick (C_WeaponStunStick glow).
+    pub stunstick_glows: Vec<glam::Mat4>,
     /// Pooled spawn entities already placed.
     pub spawn_used: std::collections::BTreeSet<usize>,
 }
@@ -353,6 +355,7 @@ impl Gameplay {
             spawn_log: Vec::new(),
             shot_effects: Vec::new(),
             shot_serial: 0,
+            stunstick_glows: Vec::new(),
             spawn_used: Default::default(),
         }
     }
@@ -388,6 +391,7 @@ impl Gameplay {
             spawn_log: Vec::new(),
             shot_effects: Vec::new(),
             shot_serial: 0,
+            stunstick_glows: Vec::new(),
             spawn_used: Default::default(),
             player_damage,
             damage_messages: Vec::new(),
@@ -909,6 +913,22 @@ impl Gameplay {
         for (start, end, right) in std::mem::take(&mut self.inventory.tracer_requests) {
             self.push_shot_effect(ShotEffect::PlayerTracer(start, end, right));
         }
+        self.stunstick_glows = self
+            .ai
+            .active_stunsticks()
+            .into_iter()
+            .filter(|id| {
+                self.scene
+                    .states
+                    .get(*id)
+                    .is_some_and(|s| s.visible && !s.killed)
+            })
+            .filter_map(|id| {
+                let model = self.ai.weapon_world_model(id)?;
+                self.scene
+                    .merged_attachment_frame(&self.world, id, &format!("{model}#0"), None, 1)
+            })
+            .collect();
         let horizon = self.scene.time - 0.5;
         self.shot_effects.retain(|(_, at, _)| *at >= horizon);
         actors::tick_npcs(
