@@ -1425,6 +1425,67 @@ impl<T: Copy + PartialEq> DoubleClick<T> {
     }
 }
 
+/// How wheel input scrolls lists on this platform.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollMode {
+    /// Mouse wheel notches (Windows, Linux): each frame's wheel value is rounded to whole
+    /// notches, and each notch scrolls a fixed number of rows.
+    Notched,
+    /// Trackpad (macOS): small deltas accumulate across frames and scroll one row per whole
+    /// step, so slow two-finger motion is not lost.
+    Smooth,
+}
+
+impl ScrollMode {
+    /// The scroll mode of the platform this build targets.
+    pub const fn platform() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Smooth
+        } else {
+            Self::Notched
+        }
+    }
+
+    /// Rows scrolled per step: `notch_rows` per wheel notch, one row per trackpad step.
+    pub const fn rows_per_step(self, notch_rows: usize) -> usize {
+        match self {
+            Self::Notched => notch_rows,
+            Self::Smooth => 1,
+        }
+    }
+}
+
+/// Turns per-frame wheel values (positive up) into whole scroll steps for a [`ScrollMode`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ScrollAccumulator {
+    carry: f32,
+}
+
+impl ScrollAccumulator {
+    /// Whole steps for this frame. Smooth mode keeps the remainder for later frames and drops
+    /// it when the direction changes; notched mode rounds each frame on its own.
+    pub fn steps(&mut self, wheel: f32, mode: ScrollMode) -> i32 {
+        match mode {
+            ScrollMode::Notched => {
+                self.carry = 0.;
+                wheel.round() as i32
+            }
+            ScrollMode::Smooth => {
+                if wheel == 0. {
+                    return 0;
+                }
+                if self.carry != 0. && self.carry.signum() != wheel.signum() {
+                    self.carry = 0.;
+                }
+                self.carry += wheel;
+                let steps = self.carry.trunc();
+                self.carry -= steps;
+                steps as i32
+            }
+        }
+    }
+}
+
 /// What the pointer is over while a popup list is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupHit {
@@ -1465,6 +1526,7 @@ pub struct PopupList {
     pub highlight: Option<usize>,
     pressed: Option<PopupHit>,
     was_down: bool,
+    wheel: ScrollAccumulator,
 }
 
 impl PopupList {
@@ -1478,6 +1540,7 @@ impl PopupList {
             highlight: selected,
             pressed: None,
             was_down: false,
+            wheel: ScrollAccumulator::default(),
         };
         if let Some(index) = selected {
             popup.reveal(index);
@@ -1500,7 +1563,13 @@ impl PopupList {
         }
     }
 
-    /// Scrolls by wheel steps; positive scrolls up.
+    /// Scrolls by one frame of wheel input (positive up), one row per step.
+    pub fn wheel(&mut self, wheel: f32, mode: ScrollMode) {
+        let steps = self.wheel.steps(wheel, mode);
+        self.scroll(steps);
+    }
+
+    /// Scrolls by whole steps; positive scrolls up.
     pub fn scroll(&mut self, steps: i32) {
         let max = self.items.saturating_sub(self.rows()) as i32;
         self.first = (self.first as i32 - steps).clamp(0, max) as usize;
@@ -2303,6 +2372,65 @@ mod tests {
         assert!(!clicks.register(2, Some(20.7)), "different target");
         assert!(!clicks.register(2, None), "no time, no double click");
         assert!(!clicks.register(2, None));
+    }
+
+    #[test]
+    fn scroll_steps_follow_the_platform_mode() {
+        let mut notched = ScrollAccumulator::default();
+        let mut smooth = ScrollAccumulator::default();
+        // Small trackpad deltas: lost when notched, accumulated when smooth.
+        let small: Vec<i32> = (0..5)
+            .map(|_| notched.steps(0.3, ScrollMode::Notched))
+            .collect();
+        assert_eq!(small, vec![0; 5]);
+        let small: i32 = (0..5).map(|_| smooth.steps(0.3, ScrollMode::Smooth)).sum();
+        assert_eq!(small, 1, "1.5 accumulated: one step, half kept");
+        assert_eq!(
+            smooth.steps(0.6, ScrollMode::Smooth),
+            1,
+            "0.5 + 0.6 crosses a step"
+        );
+        // A direction change drops the remainder.
+        assert_eq!(smooth.steps(-0.5, ScrollMode::Smooth), 0);
+        assert_eq!(smooth.steps(-0.6, ScrollMode::Smooth), -1);
+        // Whole notches behave the same in both modes.
+        assert_eq!(notched.steps(2., ScrollMode::Notched), 2);
+        assert_eq!(
+            ScrollAccumulator::default().steps(2., ScrollMode::Smooth),
+            2
+        );
+        assert_eq!(ScrollMode::Notched.rows_per_step(3), 3);
+        assert_eq!(ScrollMode::Smooth.rows_per_step(3), 1);
+        assert_eq!(
+            ScrollMode::platform(),
+            if cfg!(target_os = "macos") {
+                ScrollMode::Smooth
+            } else {
+                ScrollMode::Notched
+            }
+        );
+    }
+
+    #[test]
+    fn popup_list_wheel_accumulates_trackpad_deltas_only_on_smooth() {
+        let anchor = Rect::new(0., 0., 100., 24.);
+        let mut popup = PopupList::below(anchor, 30, Some(29));
+        assert_eq!(popup.first, 30 - MENU_MAX_ROWS);
+        let start = popup.first;
+        for _ in 0..4 {
+            popup.wheel(0.25, ScrollMode::Notched);
+        }
+        assert_eq!(popup.first, start, "sub-notch deltas are dropped");
+        for _ in 0..4 {
+            popup.wheel(0.25, ScrollMode::Smooth);
+        }
+        assert_eq!(
+            popup.first,
+            start - 1,
+            "four quarter steps scroll one row up"
+        );
+        popup.wheel(-1., ScrollMode::Notched);
+        assert_eq!(popup.first, start);
     }
 
     #[test]

@@ -238,6 +238,19 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
   on its defaults (which mirror the desktop scheme values). Reading `SourceScheme.res` instead also
   changes main menu metrics read from the same file, so it is left for a separate change.
 
+### 6c. Platform-specific list scrolling (2026-10-15)
+
+- The host turns mouse wheel events into `Input::wheel` (line units as notches, pixel units / 40).
+  Lists (key list, popup lists) turn that into whole rows through `widgets::ScrollAccumulator`
+  with `widgets::ScrollMode::platform()`:
+  - `Notched` (Windows, Linux): each frame is rounded to whole notches; a notch scrolls 3 rows in
+    the key list (`WHEEL_ROWS`) and 1 row in popup lists. This is the previous behavior.
+  - `Smooth` (macOS, owner decision): trackpad deltas accumulate across frames, one row per whole
+    step and the remainder kept (dropped on a direction change), so slow two-finger scrolling no
+    longer gets lost. Lists still move row by row; pixel-smooth scrolling would need clipping
+    support in the canvas and was not requested.
+- Gameplay weapon selection and `MWHEELUP`/`MWHEELDOWN` key capture are unchanged.
+
 ### 6b. Popup lists as the topmost input layer (2026-10-15)
 
 - Root cause of clicks reaching controls behind an open combo list: the list closed (or selected)

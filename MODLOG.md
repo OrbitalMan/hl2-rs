@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: platform-specific list scrolling
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `widgets::ScrollMode`, `widgets::ScrollAccumulator`, `PopupList::wheel`; the Options key list and popup lists scroll through them. Docs: `docs/gameui.md` 6c, `STATUS.md`.
+
+**Why:** Owner request: wheel-based scrolling on Windows, smooth trackpad scrolling on macOS. Sub-notch trackpad deltas were rounded away every frame.
+
+**Tested how:** `cargo test -p hl2-ui` (183 passed), `cargo test -p hl2-bevy` (71 passed), clippy, fmt.
+
+**Result:** macOS accumulates trackpad motion (row steps, owner choice over pixel-smooth); Windows/Linux keep notched scrolling.
+
+**Still broken or not tested:** Not checked by hand on either platform; pixel-smooth scrolling not implemented.
+
+**Next:** Skip window re-apply on non-video changes; macOS native full screen.
+
 ## 2026-10-15 GameUI: double click on a key row edits the key
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

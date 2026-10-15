@@ -261,6 +261,9 @@ pub struct OptionsDialog {
     /// Time of the current input frame, for double clicks.
     now: Option<f64>,
     key_clicks: widgets::DoubleClick<usize>,
+    /// Wheel handling for lists: notched on Windows/Linux, accumulated on macOS.
+    scroll_mode: widgets::ScrollMode,
+    key_wheel: widgets::ScrollAccumulator,
 }
 
 impl Default for OptionsDialog {
@@ -289,6 +292,8 @@ impl Default for OptionsDialog {
             active_tooltip: None,
             now: None,
             key_clicks: widgets::DoubleClick::default(),
+            scroll_mode: widgets::ScrollMode::platform(),
+            key_wheel: widgets::ScrollAccumulator::default(),
         }
     }
 }
@@ -613,9 +618,7 @@ impl OptionsDialog {
 
     fn combo_input(&mut self, mut combo: OpenCombo, input: &Input, pointer: Option<Vec2>) {
         let popup = &mut combo.popup;
-        if input.wheel != 0. {
-            popup.scroll(input.wheel.round() as i32);
-        }
+        popup.wheel(input.wheel, self.scroll_mode);
         if input.pressed(Key::Up) || input.pressed(Key::Down) {
             popup.step(if input.pressed(Key::Up) { -1 } else { 1 });
         }
@@ -958,8 +961,9 @@ impl OptionsDialog {
         let rows = &self.res.key_rows;
         let visible = key_rows_visible(rect);
         let max_first = rows.len().saturating_sub(visible);
-        if input.wheel != 0. && self.combo.is_none() {
-            let steps = input.wheel.round() as i32 * WHEEL_ROWS as i32;
+        if self.combo.is_none() {
+            let rows = self.scroll_mode.rows_per_step(WHEEL_ROWS) as i32;
+            let steps = self.key_wheel.steps(input.wheel, self.scroll_mode) * rows;
             self.keys.first = (self.keys.first as i32 - steps).clamp(0, max_first as i32) as usize;
         }
         let step = if input.pressed(Key::Up) {
