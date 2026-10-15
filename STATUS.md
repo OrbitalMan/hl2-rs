@@ -2,7 +2,19 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: Submenu subtitle placement and alignment with menu button column (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Submenu subtitle application timed to background map loading completion (2026-10-15, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Submenu subtitle application timed to background map loading completion:**
+  - Extended `BackgroundTransitionState` in `hl2-ui::gameui::loading` to track `target_category` and `displayed_category`.
+  - Derived `Console::current_title` in `hl2-ui::console` strictly from `BackgroundTransitionState::displayed_category`, preserving the previous subtitle during `Starting` and `Loading` stages.
+  - Applied the target subtitle upon reaching `Finished` or `Failed`, ensuring failures do not leave subtitles stuck on previous expansions.
+  - Guarded completion and failure reporting with `level_loaded_for_map` and `background_load_failed_for_map` so rapid switching ignores stale load events and honors the latest selection.
+  - Updated `hl2-bevy::campaign::step_map_load` to route background map results through map-validated completion methods.
+  - Added unit tests: `test_subtitle_applied_after_background_loading_finishes_or_fails` in `console.rs` and `test_background_transition_stale_completion_ignored_and_latest_wins` in `loading.rs`.
+- **Validation:** 163 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Submenu subtitle placement and alignment with menu button column (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Submenu subtitle placement & alignment with menu button column:**

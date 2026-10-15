@@ -595,11 +595,12 @@ impl Console {
         } else {
             self.mode
         };
-        let category = if shown == Mode::Pause {
+        let menu_cat = if shown == Mode::Pause {
             self.pause_menu.category()
         } else {
             self.main_menu.category()
         };
+        let category = self.background_transition.displayed_category(menu_cat);
         self.category_title(category)
     }
 
@@ -650,7 +651,17 @@ impl Console {
     /// any other map starts gameplay.
     pub fn level_loaded(&mut self, background: bool) {
         if background && self.background_transition.is_active() {
-            self.background_transition.finish();
+            if let Some(pending) = self.pending_map.as_deref() {
+                if !self.background_transition.finish_map(pending) {
+                    return;
+                }
+            } else if let Some(loaded) = self.loaded_map.as_deref() {
+                if !self.background_transition.finish_map(loaded) {
+                    return;
+                }
+            } else {
+                self.background_transition.finish();
+            }
         }
         self.loading_dialog = None;
         crate::gameui::loading::reset_progress();
@@ -673,6 +684,18 @@ impl Console {
         self.previous = self.mode;
     }
 
+    /// Completes background loading for a specific map. Ignores stale map completions.
+    pub fn level_loaded_for_map(&mut self, map: &str, background: bool) {
+        if background
+            && self.background_transition.is_active()
+            && !self.background_transition.finish_map(map)
+        {
+            return;
+        }
+        self.loaded_map = Some(map.to_owned());
+        self.level_loaded(background);
+    }
+
     /// Displays the modal loading dialog for the given map.
     pub fn start_loading(&mut self, map: &str) {
         self.pending_map = Some(map.to_owned());
@@ -683,8 +706,14 @@ impl Console {
 
     /// Displays the non-blocking corner plaque for background map loading.
     pub fn start_background_loading(&mut self, map: &str) {
+        let category = self.main_menu.category().to_owned();
+        self.start_background_loading_expansion(map, &category);
+    }
+
+    /// Displays the non-blocking corner plaque for background map loading into a specific expansion category.
+    pub fn start_background_loading_expansion(&mut self, map: &str, category: &str) {
         self.pending_map = Some(map.to_owned());
-        self.background_transition.start(map);
+        self.background_transition.start(map, category);
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
         crate::gameui::loading::reset_progress();
     }
@@ -704,6 +733,18 @@ impl Console {
         self.background_transition.fail(reason);
         if let Some(loading) = &mut self.loading_dialog {
             loading.set_error(reason);
+        }
+        self.loading_dialog = None;
+        self.pending_map = None;
+        crate::gameui::loading::reset_progress();
+    }
+
+    /// Ends the background transition if `map` matches the target map, ignoring stale failures.
+    pub fn background_load_failed_for_map(&mut self, map: &str, reason: &str) {
+        if self.background_transition.is_active()
+            && !self.background_transition.fail_map(map, reason)
+        {
+            return;
         }
         self.loading_dialog = None;
         self.pending_map = None;
@@ -1561,9 +1602,13 @@ impl Console {
                     self.config.gameplay.background_map = Some(target_map.clone());
                     let _ = self.config.save();
                     if !self.background_level || self.loaded_map.as_deref() != Some(&target_map) {
-                        self.start_background_loading(&target_map);
+                        self.start_background_loading_expansion(&target_map, &game);
                         return vec![Effect::MainMenuMap(target_map)];
+                    } else {
+                        self.background_transition.set_displayed_category(&game);
                     }
+                } else {
+                    self.background_transition.set_displayed_category(&game);
                 }
             }
             MenuOutcome::SwitchCategory(category) => {
@@ -1575,10 +1620,16 @@ impl Console {
                         let _ = self.config.save();
                         if !self.background_level || self.loaded_map.as_deref() != Some(&target_map)
                         {
-                            self.start_background_loading(&target_map);
+                            self.start_background_loading_expansion(&target_map, &category);
                             return vec![Effect::MainMenuMap(target_map)];
+                        } else {
+                            self.background_transition.set_displayed_category(&category);
                         }
+                    } else {
+                        self.background_transition.set_displayed_category(&category);
                     }
+                } else if category == "main" {
+                    self.background_transition.set_displayed_category("main");
                 }
             }
             MenuOutcome::Placeholder(label) => {
@@ -3282,6 +3333,7 @@ mod tests {
             console.background_transition_state(),
             &crate::gameui::loading::BackgroundTransitionState::Failed {
                 map: "lostcoast_background01".into(),
+                displayed_category: "main".into(),
                 reason: "Failed to open BSP file".into(),
             }
         );
@@ -3709,6 +3761,137 @@ mod tests {
         assert!(
             !lc_subtitle_quads.is_empty(),
             "lost coast subtitle must emit quads for 'lost coasT'"
+        );
+    }
+
+    #[test]
+    fn test_subtitle_applied_after_background_loading_finishes_or_fails() {
+        let mut console = installed_console();
+        let mut loc = Localization::default();
+        loc.insert("GameUI_HalfLife2", "Half-Life 2");
+        loc.insert("GameUI_EpisodeOne", "Episode One");
+        loc.insert("GameUI_EpisodeTwo", "Episode Two");
+        loc.insert("GameUI_LostCoast", "Lost Coast");
+        console.category_titles = resources::fallback_category_titles(&loc);
+        console.mode = Mode::MainMenu;
+        console.canvas.resize(1920., 1080.);
+
+        // Initial default title state
+        assert_eq!(console.current_title(), "Half-Life 2");
+        assert_eq!(
+            console.background_transition_state(),
+            &crate::gameui::loading::BackgroundTransitionState::Idle
+        );
+
+        // --- Sequence 1: Select Episode One -> loading (old title shown) -> finished (new title shown) ---
+        // Row 1 in fallback_game_menu() is Episode One ("SwitchExpansion episodic")
+        click_row(&mut console, 1);
+        assert_eq!(console.main_menu.category(), "episodic");
+        assert!(console.is_background_loading());
+        assert!(console.background_transition_state().is_active());
+        assert_eq!(
+            console.background_transition_state().target_map(),
+            Some("ep1_background01")
+        );
+        // While in Starting / Loading, the old title MUST still be shown
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2",
+            "old title must remain visible while background map is starting"
+        );
+
+        console.update_loading();
+        assert!(console.is_background_loading());
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2",
+            "old title must remain visible while background map is loading"
+        );
+
+        // Finish background loading for Episode One
+        console.level_loaded_for_map("ep1_background01", true);
+        assert!(!console.is_background_loading());
+        assert!(console.background_transition_state().is_finished());
+        // Now new title is applied!
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2\n== episode one==",
+            "new subtitle must be applied after background loading finishes"
+        );
+
+        // --- Sequence 2: Select Episode Two -> load failure (new title still applied) ---
+        // Enter Episode Two ("SwitchExpansion ep2")
+        console.start_background_loading_expansion("ep2_background01", "ep2");
+        assert!(console.is_background_loading());
+        assert!(console.background_transition_state().is_active());
+        // While loading Episode Two, previously displayed title (Episode One) remains visible
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2\n== episode one==",
+            "previous subtitle must remain visible while new background map is loading"
+        );
+
+        // Fail Episode Two load
+        console.background_load_failed("BSP corrupted or missing");
+        assert!(!console.is_background_loading());
+        assert!(console.background_transition_state().is_failed());
+        // Failure must still apply the new title so it does not remain stuck on the old title
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2\n== episode two ==",
+            "new title must still be applied when background load fails"
+        );
+
+        // --- Sequence 3: Fast double switch (latest wins, stale completion ignored) ---
+        // Switch to Episode One first
+        console.start_background_loading_expansion("ep1_background01", "episodic");
+        assert_eq!(
+            console.background_transition_state().target_map(),
+            Some("ep1_background01")
+        );
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2\n== episode two ==",
+            "Episode Two title remains visible while Episode One starts loading"
+        );
+
+        // User fast double switches to Lost Coast before Episode One finishes
+        console.start_background_loading_expansion("lostcoast_background01", "lostcoast");
+        assert_eq!(
+            console.background_transition_state().target_map(),
+            Some("lostcoast_background01")
+        );
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2\n== episode two ==",
+            "Episode Two title still visible while Lost Coast is loading"
+        );
+
+        // Stale completion arrives for Episode One
+        console.level_loaded_for_map("ep1_background01", true);
+        // Stale completion must be ignored; transition must still be active for Lost Coast
+        assert!(
+            console.is_background_loading(),
+            "stale Episode One completion must not end active Lost Coast transition"
+        );
+        assert_eq!(
+            console.background_transition_state().target_map(),
+            Some("lostcoast_background01")
+        );
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2\n== episode two ==",
+            "stale completion must not apply Episode One title"
+        );
+
+        // Lost Coast finishes
+        console.level_loaded_for_map("lostcoast_background01", true);
+        assert!(!console.is_background_loading());
+        assert!(console.background_transition_state().is_finished());
+        assert_eq!(
+            console.current_title(),
+            "Half-Life 2\nlost coasT",
+            "Lost Coast subtitle must be applied (latest wins)"
         );
     }
 }

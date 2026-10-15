@@ -1,5 +1,43 @@
 # MODLOG
 
+## 2026-10-15 Submenu subtitle application timed to background map loading completion
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-ui::gameui::loading`:
+  - Extended `BackgroundTransitionState` to track `target_category: String` and `displayed_category: String` across states (`Starting { map, target_category, displayed_category }`, `Loading { map, target_category, displayed_category, elapsed }`, `Finished { map, displayed_category }`, `Failed { map, displayed_category, reason }`).
+  - Added methods `start(map, category)`, `finish_map(map) -> bool`, `fail_map(map, reason) -> bool`, `target_category() -> Option<&str>`, `displayed_category(menu_category) -> &str`, and `set_displayed_category(category)`.
+  - Added unit test `test_background_transition_stale_completion_ignored_and_latest_wins` verifying state tracking during sequential and rapid switches.
+- `hl2-ui::console`:
+  - Derived `Console::current_title()` strictly from `self.background_transition.displayed_category(menu_cat)`, establishing a single source of truth for menu subtitle state.
+  - Added `Console::start_background_loading_expansion(map, category)`.
+  - Added `Console::level_loaded_for_map(map, background)` and `Console::background_load_failed_for_map(map, reason)` which validate map names against the active transition target, discarding stale background events.
+  - Updated menu activation outcomes (`SwitchExpansion` and `SwitchCategory`) to initiate background loading with target categories or update displayed categories immediately if no background map transition is needed.
+  - Added unit test `test_subtitle_applied_after_background_loading_finishes_or_fails` verifying:
+    1. Select Episode One: during loading, old title is shown; upon completion, new subtitle is applied.
+    2. Select Episode Two: upon load failure, new subtitle is still applied (preventing stuck titles).
+    3. Rapid double switch (Episode One then Lost Coast): stale completion for Episode One is ignored; Lost Coast subtitle applies when finished.
+- `hl2-bevy::campaign`:
+  - Updated `step_map_load` to invoke `ui.source.level_loaded_for_map(&loaded.world.name, job.request.background)` and `ui.source.background_load_failed_for_map(&job.request.map, &error.to_string())`.
+- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented transition-state subtitle derivation and timing rules.
+- `HL2RS/STATUS.md`: updated status to record submenu subtitle timing resolution.
+
+**Why:**
+- Displayed menu subtitles were previously updated immediately when a submenu entry was clicked, before the corresponding background map finished loading. Deriving displayed subtitles from `BackgroundTransitionState` ensures the previous subtitle remains visible during map loading, transitions cleanly upon success or failure, and ignores stale load events from superseded transitions during rapid switching.
+
+**Tested how:**
+- `cargo test -p hl2-ui --lib`: 163 tests passed (including `test_subtitle_applied_after_background_loading_finishes_or_fails` and `test_background_transition_stale_completion_ignored_and_latest_wins`).
+- `cargo test -p hl2-bevy --bin hl2-bevy`: 70 tests passed.
+- `cargo clippy -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: clean (0 warnings).
+- `cargo fmt --check`: clean.
+
+**Result:** Submenu subtitles transition only after background map loading completes or fails, with complete resilience against rapid switching and stale completion events.
+
+**Still broken or not tested:** Visual transition timing in interactive gameplay is unverified and needs manual check (launch game via `/build-run`, select Episode One, confirm old title stays while loading plaque is shown, confirm Episode One subtitle appears exactly when the map finishes loading).
+
+**Next:** Task 5 (Blur during background change).
+
 ## 2026-10-15 Submenu subtitle placement and alignment with menu button column
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

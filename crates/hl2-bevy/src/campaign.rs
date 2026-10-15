@@ -160,7 +160,8 @@ pub fn poll(
                 ui.source.log(&warning);
                 campaign.failures.push(warning);
                 sim.loading_failed();
-                ui.source.background_load_failed(&error.to_string());
+                ui.source
+                    .background_load_failed_for_map(&job.request.map, &error.to_string());
                 return;
             }
             let error = format!("Map transition failed for {}: {error}", job.request.map);
@@ -226,8 +227,8 @@ pub fn poll(
         if options.fly {
             sim.fly = true;
         }
-        ui.source.loaded_map = Some(loaded.world.name.clone());
-        ui.source.level_loaded(job.request.background);
+        ui.source
+            .level_loaded_for_map(&loaded.world.name, job.request.background);
         if !job.request.background
             && let Ok(mut cursor) = windows.single_mut()
         {
@@ -235,8 +236,7 @@ pub fn poll(
             cursor.visible = false;
         }
     } else {
-        ui.source.loaded_map = Some(loaded.world.name.clone());
-        ui.source.level_loaded(false);
+        ui.source.level_loaded_for_map(&loaded.world.name, false);
     }
     ui.source.log(format!("Loaded {}", loaded.world.name));
     let _unused_new_console = crate::install_map(

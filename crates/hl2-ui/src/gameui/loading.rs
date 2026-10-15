@@ -69,28 +69,60 @@ pub enum BackgroundTransitionState {
     /// No background transition is active.
     #[default]
     Idle,
-    /// Background transition initiated for the target map.
-    Starting { map: String },
+    /// Background transition initiated for the target map and category.
+    Starting {
+        map: String,
+        target_category: String,
+        displayed_category: String,
+    },
     /// Background loader is actively streaming/processing the target map.
-    Loading { map: String, elapsed: f32 },
+    Loading {
+        map: String,
+        target_category: String,
+        displayed_category: String,
+        elapsed: f32,
+    },
     /// Background map has successfully loaded; transition completed.
-    Finished { map: String },
+    Finished {
+        map: String,
+        displayed_category: String,
+    },
     /// Background map loading failed; transition ended with error.
-    Failed { map: String, reason: String },
+    Failed {
+        map: String,
+        displayed_category: String,
+        reason: String,
+    },
 }
 
 impl BackgroundTransitionState {
-    /// Initiates a background map transition to the given map.
-    pub fn start(&mut self, map: impl Into<String>) {
-        *self = Self::Starting { map: map.into() };
+    /// Initiates a background map transition to the given map and category.
+    pub fn start(&mut self, map: impl Into<String>, target_category: impl Into<String>) {
+        let prev = self.current_displayed().to_owned();
+        *self = Self::Starting {
+            map: map.into(),
+            target_category: target_category.into(),
+            displayed_category: prev,
+        };
+    }
+
+    /// Convenience starter when category is omitted.
+    pub fn start_map(&mut self, map: impl Into<String>) {
+        self.start(map, "");
     }
 
     /// Advances the transition state over time (dt in seconds).
     pub fn update(&mut self, dt: f32) {
         match self {
-            Self::Starting { map } => {
+            Self::Starting {
+                map,
+                target_category,
+                displayed_category,
+            } => {
                 *self = Self::Loading {
                     map: std::mem::take(map),
+                    target_category: std::mem::take(target_category),
+                    displayed_category: std::mem::take(displayed_category),
                     elapsed: dt.max(0.0),
                 };
             }
@@ -101,29 +133,79 @@ impl BackgroundTransitionState {
         }
     }
 
-    /// Completes the transition successfully.
+    /// Completes the transition successfully, applying the target category as displayed.
     pub fn finish(&mut self) {
         match self {
-            Self::Starting { map } | Self::Loading { map, .. } => {
+            Self::Starting {
+                map,
+                target_category,
+                ..
+            }
+            | Self::Loading {
+                map,
+                target_category,
+                ..
+            } => {
+                let map = std::mem::take(map);
+                let target = std::mem::take(target_category);
                 *self = Self::Finished {
-                    map: std::mem::take(map),
+                    map,
+                    displayed_category: target,
                 };
             }
             _ => *self = Self::Idle,
         }
     }
 
-    /// Ends the transition due to a loading failure.
+    /// Completes the transition if `map` matches the target map. Returns false if stale.
+    pub fn finish_map(&mut self, map: &str) -> bool {
+        if self.target_map() == Some(map) {
+            self.finish();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Ends the transition due to a loading failure, still applying the target category.
     pub fn fail(&mut self, reason: impl Into<String>) {
-        let map = match self {
-            Self::Starting { map } | Self::Loading { map, .. } => std::mem::take(map),
-            Self::Finished { map } | Self::Failed { map, .. } => std::mem::take(map),
-            Self::Idle => String::new(),
+        let (map, target) = match self {
+            Self::Starting {
+                map,
+                target_category,
+                ..
+            }
+            | Self::Loading {
+                map,
+                target_category,
+                ..
+            } => (std::mem::take(map), std::mem::take(target_category)),
+            Self::Finished {
+                map,
+                displayed_category,
+            }
+            | Self::Failed {
+                map,
+                displayed_category,
+                ..
+            } => (std::mem::take(map), std::mem::take(displayed_category)),
+            Self::Idle => (String::new(), "main".to_string()),
         };
         *self = Self::Failed {
             map,
+            displayed_category: target,
             reason: reason.into(),
         };
+    }
+
+    /// Fails the transition if `map` matches the target map. Returns false if stale.
+    pub fn fail_map(&mut self, map: &str, reason: impl Into<String>) -> bool {
+        if self.target_map() == Some(map) {
+            self.fail(reason);
+            true
+        } else {
+            false
+        }
     }
 
     /// Resets the transition to idle.
@@ -154,11 +236,120 @@ impl BackgroundTransitionState {
     /// Target map name if a transition is active or completed/failed.
     pub fn target_map(&self) -> Option<&str> {
         match self {
-            Self::Starting { map }
+            Self::Starting { map, .. }
             | Self::Loading { map, .. }
-            | Self::Finished { map }
-            | Self::Failed { map, .. } => Some(map.as_str()),
+            | Self::Finished { map, .. }
+            | Self::Failed { map, .. } => Some(map.as_str()).filter(|s| !s.is_empty()),
             Self::Idle => None,
+        }
+    }
+
+    /// Target expansion/submenu category being loaded.
+    pub fn target_category(&self) -> Option<&str> {
+        match self {
+            Self::Starting {
+                target_category, ..
+            }
+            | Self::Loading {
+                target_category, ..
+            } => Some(target_category.as_str()).filter(|s| !s.is_empty()),
+            Self::Finished {
+                displayed_category, ..
+            }
+            | Self::Failed {
+                displayed_category, ..
+            } => Some(displayed_category.as_str()).filter(|s| !s.is_empty()),
+            Self::Idle => None,
+        }
+    }
+
+    /// Returns the currently displayed category recorded in this transition state.
+    pub fn current_displayed(&self) -> &str {
+        match self {
+            Self::Idle => "main",
+            Self::Starting {
+                displayed_category, ..
+            }
+            | Self::Loading {
+                displayed_category, ..
+            }
+            | Self::Finished {
+                displayed_category, ..
+            }
+            | Self::Failed {
+                displayed_category, ..
+            } => {
+                if displayed_category.is_empty() {
+                    "main"
+                } else {
+                    displayed_category.as_str()
+                }
+            }
+        }
+    }
+
+    /// Returns the category to display for the given menu category.
+    ///
+    /// If the menu is at root `main`, "main" is always returned.
+    /// While a transition is active, the previously displayed category is preserved so the
+    /// old subtitle remains visible until the background load finishes or fails.
+    /// When terminal (Finished or Failed), the target category is returned.
+    /// If Idle, the requested menu_category is returned.
+    pub fn displayed_category<'a>(&'a self, menu_category: &'a str) -> &'a str {
+        if menu_category == "main" {
+            return "main";
+        }
+        match self {
+            Self::Starting {
+                displayed_category, ..
+            }
+            | Self::Loading {
+                displayed_category, ..
+            } => {
+                if displayed_category.is_empty() {
+                    menu_category
+                } else {
+                    displayed_category.as_str()
+                }
+            }
+            Self::Finished {
+                displayed_category, ..
+            }
+            | Self::Failed {
+                displayed_category, ..
+            } => {
+                if displayed_category.is_empty() {
+                    menu_category
+                } else {
+                    displayed_category.as_str()
+                }
+            }
+            Self::Idle => menu_category,
+        }
+    }
+
+    /// Manually sets the displayed category (e.g. when an expansion background map was already loaded).
+    pub fn set_displayed_category(&mut self, category: impl Into<String>) {
+        let cat = category.into();
+        match self {
+            Self::Finished {
+                displayed_category, ..
+            } => *displayed_category = cat,
+            Self::Failed {
+                displayed_category, ..
+            } => *displayed_category = cat,
+            Self::Starting {
+                displayed_category, ..
+            }
+            | Self::Loading {
+                displayed_category, ..
+            } => *displayed_category = cat,
+            Self::Idle => {
+                *self = Self::Finished {
+                    map: String::new(),
+                    displayed_category: cat,
+                };
+            }
         }
     }
 
@@ -211,7 +402,11 @@ impl LoadingDialog {
             status_override: None,
             error: None,
             complete: false,
-            transition: BackgroundTransitionState::Starting { map: map_str },
+            transition: BackgroundTransitionState::Starting {
+                map: map_str,
+                target_category: String::new(),
+                displayed_category: String::new(),
+            },
         }
     }
 
@@ -731,16 +926,20 @@ mod tests {
         assert!(!state.is_terminal());
         assert_eq!(state.overlay_alpha(), 0.0);
 
-        state.start("ep1_background01");
+        state.start("ep1_background01", "episodic");
         assert_eq!(
             state,
             BackgroundTransitionState::Starting {
-                map: "ep1_background01".into()
+                map: "ep1_background01".into(),
+                target_category: "episodic".into(),
+                displayed_category: "main".into(),
             }
         );
         assert!(state.is_active());
         assert!(!state.is_terminal());
         assert_eq!(state.target_map(), Some("ep1_background01"));
+        assert_eq!(state.target_category(), Some("episodic"));
+        assert_eq!(state.displayed_category("episodic"), "main");
         assert_eq!(state.overlay_alpha(), 0.45);
 
         state.update(0.1);
@@ -748,10 +947,13 @@ mod tests {
             state,
             BackgroundTransitionState::Loading {
                 map: "ep1_background01".into(),
+                target_category: "episodic".into(),
+                displayed_category: "main".into(),
                 elapsed: 0.1,
             }
         );
         assert!(state.is_active());
+        assert_eq!(state.displayed_category("episodic"), "main");
         assert_eq!(state.overlay_alpha(), 0.45);
 
         state.update(0.05);
@@ -765,21 +967,24 @@ mod tests {
         assert_eq!(
             state,
             BackgroundTransitionState::Finished {
-                map: "ep1_background01".into()
+                map: "ep1_background01".into(),
+                displayed_category: "episodic".into(),
             }
         );
         assert!(!state.is_active());
         assert!(state.is_terminal());
         assert!(state.is_finished());
         assert!(!state.is_failed());
+        assert_eq!(state.displayed_category("episodic"), "episodic");
         assert_eq!(state.overlay_alpha(), 0.0);
     }
 
     #[test]
     fn test_background_transition_failure_sequence() {
         let mut state = BackgroundTransitionState::default();
-        state.start("ep2_background01");
+        state.start("ep2_background01", "ep2");
         assert!(state.is_active());
+        assert_eq!(state.displayed_category("ep2"), "main");
 
         state.update(0.05);
         assert!(matches!(state, BackgroundTransitionState::Loading { .. }));
@@ -789,6 +994,7 @@ mod tests {
             state,
             BackgroundTransitionState::Failed {
                 map: "ep2_background01".into(),
+                displayed_category: "ep2".into(),
                 reason: "BSP file missing or corrupted".into(),
             }
         );
@@ -796,8 +1002,41 @@ mod tests {
         assert!(state.is_terminal());
         assert!(state.is_failed());
         assert!(!state.is_finished());
+        assert_eq!(state.displayed_category("ep2"), "ep2");
         assert_eq!(state.overlay_alpha(), 0.0);
         assert_eq!(state.target_map(), Some("ep2_background01"));
+    }
+
+    #[test]
+    fn test_background_transition_stale_completion_ignored_and_latest_wins() {
+        let mut state = BackgroundTransitionState::default();
+        // 1. Select Episode One
+        state.start("ep1_background01", "episodic");
+        assert_eq!(state.target_map(), Some("ep1_background01"));
+        assert_eq!(state.displayed_category("episodic"), "main");
+
+        // 2. Fast double switch to Episode Two before Episode One finishes
+        state.start("ep2_background01", "ep2");
+        assert_eq!(state.target_map(), Some("ep2_background01"));
+        assert_eq!(state.displayed_category("ep2"), "main");
+
+        // 3. Stale completion arrives for Episode One
+        assert!(
+            !state.finish_map("ep1_background01"),
+            "stale finish must return false"
+        );
+        assert!(state.is_active(), "state must remain active for ep2");
+        assert_eq!(state.target_map(), Some("ep2_background01"));
+        assert_eq!(state.displayed_category("ep2"), "main");
+
+        // 4. Stale failure for Episode One also ignored
+        assert!(!state.fail_map("ep1_background01", "stale error"));
+        assert!(state.is_active());
+
+        // 5. Episode Two finishes
+        assert!(state.finish_map("ep2_background01"));
+        assert!(state.is_finished());
+        assert_eq!(state.displayed_category("ep2"), "ep2");
     }
 
     #[test]

@@ -100,6 +100,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Menu navigation buttons remain interactive, armed on hover, and clickable while a background map is loading.
   - A full-canvas transition backdrop overlay (`Quad::blur` with `rgba(0, 0, 0, 0.45)`) is drawn behind menu text and buttons during background map loading to soften and dim the underlying 3D scene.
   - When background map loading finishes or fails, the transition cleanly transitions to `Finished` or `Failed`, and the corner plaque and blur overlay disappear immediately.
+  - Displayed menu subtitles are derived strictly from `BackgroundTransitionState`: while in `Starting` or `Loading`, the previously displayed subtitle remains visible; when reaching `Finished` or `Failed`, the target subtitle is applied (so a failed load never leaves the subtitle stuck). Rapid consecutive switches update the target map and category, and stale load events for older maps are safely ignored.
   - Technical note on scene blur: in retail Source, GameUI uses a 2D VGUI dimming overlay and corner loading plaque; full live 3D post-processing blur requires offscreen framebuffer render targets (`BlurFilterX/Y`), which is part of the 3D pipeline rather than 2D VGUI. In Bevy, 2D HUD material quads do not read the active 3D framebuffer, so the transition combines the authentic dimming overlay and non-blocking plaque.
 
 - **KeyValues Syntax Quirks & Parser Tolerance**:
