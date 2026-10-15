@@ -51,9 +51,18 @@ pub mod display {
         /// Detects if a window currently in `WindowMode::Windowed` is actually occupying the full
         /// display (such as macOS native workspace fullscreen via the green zoom button).
         pub fn is_workspace_fullscreen(&self, window: &Window) -> bool {
+            let tolerance = (window.scale_factor().max(1.0).ceil() as u32).max(2);
             window.mode == WindowMode::Windowed
-                && window.resolution.physical_width() == self.physical_width
-                && window.resolution.physical_height() >= self.physical_height.saturating_sub(100)
+                && window
+                    .resolution
+                    .physical_width()
+                    .abs_diff(self.physical_width)
+                    <= tolerance
+                && window
+                    .resolution
+                    .physical_height()
+                    .abs_diff(self.physical_height)
+                    <= tolerance
         }
     }
 
@@ -135,6 +144,13 @@ const PRESENT_ORDER: isize = 100;
 const WINDOW_RESIZE_FRAMES: u32 = 120;
 /// Room kept around a windowed window that would not fit the monitor (title bar, menu bar,
 /// task bar), in logical points (scaled to pixels by the display's scale factor).
+///
+/// On macOS, system chrome includes the menu bar (~33-37 pt), title bar (~28-32 pt), and
+/// dock (~65-80 pt). An oversized window must be clamped with at least 160 pt vertically so it
+/// fits within `NSScreen.visibleFrame` without OS clamping/desync.
+#[cfg(target_os = "macos")]
+const WINDOW_MARGIN: Vec2 = Vec2::new(48.0, 160.0);
+#[cfg(not(target_os = "macos"))]
 const WINDOW_MARGIN: Vec2 = Vec2::new(32.0, 96.0);
 
 /// Frames during which game-frame rendering is suspended around a frame resize.
@@ -504,6 +520,17 @@ pub(crate) fn present_frame(
     }
     let computed = VideoViewport::compute(frame.resolution.x, frame.resolution.y, window);
     if *video_viewport != computed {
+        debug!(
+            "[video] viewport updated: target={}x{} window={}x{} px (scale {}) -> physical_rect={:?} logical_offset={:?} logical_size={:?}",
+            frame.resolution.x,
+            frame.resolution.y,
+            window.resolution.physical_width(),
+            window.resolution.physical_height(),
+            window.scale_factor(),
+            computed.physical_rect,
+            computed.logical_offset,
+            computed.logical_size
+        );
         *video_viewport = computed;
     }
     // The frame holds no complete picture while it is being resized: show black.
@@ -754,6 +781,38 @@ mod tests {
         assert!(
             (size.x as f32 / size.y as f32 - 3024.0 / 1964.0).abs() < 0.01,
             "{size}"
+        );
+    }
+
+    #[test]
+    fn oversized_retina_windowed_resolution_clamps_cleanly_on_macos() {
+        let window = window(1000, 600, 2.0, WindowMode::Windowed);
+        let retina = monitor(3456, 2234, 2.0);
+
+        // 3456x2160 (16:10) is not falsely detected as workspace fullscreen.
+        let metrics = display::DisplayMetrics::of(&retina);
+        let win_2160 = self::window(3456, 2160, 2.0, WindowMode::Windowed);
+        assert!(!metrics.is_workspace_fullscreen(&win_2160));
+
+        // Clamps cleanly to fit within macOS visibleFrame.
+        let WindowResize::Resize(size_2160) =
+            window_resize(&window, Some(&retina), UVec2::new(3456, 2160))
+        else {
+            panic!("expected a resize");
+        };
+        assert!(
+            size_2160.y <= 1978,
+            "must fit inside macOS visible frame: {size_2160}"
+        );
+
+        let WindowResize::Resize(size_2234) =
+            window_resize(&window, Some(&retina), UVec2::new(3456, 2234))
+        else {
+            panic!("expected a resize");
+        };
+        assert!(
+            size_2234.y <= 1978,
+            "must fit inside macOS visible frame: {size_2234}"
         );
     }
 
