@@ -1,5 +1,20 @@
 # MODLOG
 
+## 2026-10-15 session 19: template makers + StartNPC floor drop, NPC health/hitgroups/sneak attacks, NPC weapons in hands, muzzle flashes/tracers, stunstick glow (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. Continued in a side session handed off from the main session (same conversation, same model). No subagents. Research input: Codex Desktop REA npc-ai-research-20261015b (spawn-floor) and 20261015c (metrocop StartNPC bypass via IsWaitingToRappel).
+
+**Changed:** `npc_makers.rs` (DESIGN 14s): SF_NPC_TEMPLATE NPCs held at load (MapEntity_ParseAllEntities), npc_template_maker inputs/MakerThink/CanMakeNPC/destinations/radius/outputs/DeathNotice (first spawn uses the held entity; repeats counted unsupported until 14r), CAI_BaseNPC::StartNPC FloorPoint drop, SF_NPC_FALL_TO_GROUND step gravity. `skill.rs`: skill.cfg table, per-class Spawn health, GetHitgroupDamageMultiplier (+combine_s/zombie head overrides, gear 0.01), CAI_BaseHumanoid sneak attack. MDL hitbox set 0 parsed into `Rig::hitboxes`; NPC trace colliders are animated hitbox boxes (`RayHit::hitgroup`, `pose_npc_hitboxes`). NPC weapon world models drawn bone-merged (GPU skin reusing the owner's joints). `muzzle_effects.rs`: SDK MuzzleFlash_* particle sets from AE_MUZZLEFLASH/AE_NPC_MUZZLEFLASH, player FX_PlayerTracer and NPC FX_Tracer lines, stunstick halos. Owned tests: police hitboxes, bone merge names, muzzle events.
+
+**Why:** owner session-18 notes (floating NPCs, SDK health/damage, native cops die faster, weapons not drawn, flashes/tracers for NPCs and the player arsenal).
+
+**Tested how:** hl2-simulation 285 (new: makers incl. shared template, FloorPoint, falling, skill/hitgroups, sneak attack, muzzle/tracer), workspace (two known release-only should_panic failures), owned tests (HL2_ROOT) all pass, strict Clippy, fmt. Packaged (artifacts/s19): canals barrelpush makers (cop1 z 288 -> 256, fires, 29 hits on a suited player), tr02 plaza makers (citizens at npc_exit_point), headshots vs native ent_text (chest 40->35; sneak headshot 35->-70 and 40->-80 like native T163611Z/T164806Z; far 586 u front-facing 40->25 like native T165923Z), baton in hand, pistol/SMG1 first-person flashes, canals NPC pistol flash, stunstick ring vs native T020836Z. Native pistol hold recorded at 60 fps (work/hl2-decompiled/muzzle-20261015): flashes on about 1 in 2-3 shots at ~30 rendered fps.
+
+**Result:** floating template NPCs are gone (they appear where makers spawn them, on the floor); cops die to one close headshot like native; NPCs hold their weapons and show muzzle flashes; the player's bullet weapons have flashes and tracers.
+
+**Still broken or not tested:** repeat maker spawns (DESIGN 14r); actbusy (ForceThisNPCToLeave/ActBusy) so maker citizens stand at exit points; NPC flinch (native flinch_head on hits); player hitgroups (hull still); our flash shows on every shot (native depends on frame timing, 0.01 s life); muzzle dynamic lights, tracer whiz sounds, combine NPC side burst/embers, stunstick tesla arcs; F4 overlay redesign; native NPC pistol cadence comparison; regression batch; merge to main.
+
+**Next:** STATUS session 19 "Open".
 ## 2026-10-15 session 18: terminal-cop policing like native, NPC weapons (DESIGN 14w steps 1-3) (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research input: Codex Desktop REA topics npc-ai-research-20261015a (weapon-activity: retail stunstick acttable 63->295 required; hull initialization) and 20261014a (owned animation events: shootp1 has no events).
