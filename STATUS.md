@@ -2,7 +2,18 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: Submenu subtitle application timed to background map loading completion (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Background change scene blur diagnosis and architectural limitation analysis (2026-10-15, branch `orbitalman/main-menu`)
+
+Antigravity, Gemini 3.8 Flash model family.
+- **Background change scene blur diagnosis & architectural limitation:**
+  - Traced full rendering pipeline for background transitions: `BackgroundTransitionState` entering `Starting`/`Loading` sets `overlay_alpha()` to 0.45; `Console::draw` emits `Quad` with `color: (0, 0, 0, 0.45)` and `blur: true`; `Hud::material` assigns `HudMaterial` with `blur: true`.
+  - Identified root cause of lack of blur: `HudMaterial` is a 2D mesh material (`Material2d`) rendered on layer 2 by `Camera2d` directly into `GameFrame.image`. In modern graphics APIs (wgpu/Metal/Vulkan), drawing into a render target cannot simultaneously bind that same render target as a readable sampled texture (read-write hazard). Its fragment shader `hud.wgsl` only samples a static procedural vignette texture and multiplies it by `mesh.color = (0, 0, 0, 0.45)`, resulting in a flat 45% alpha black overlay that dims the 3D scene but does not blur it.
+  - Verified retail Source ground truth: inspected retail `GameUI.dll`, `engine.dll`, and `SourceSDK` (`vgui_loadingdiscpanel.cpp`). Retail Half-Life 2 (Source 2004 / 20th Anniversary) never performed a 3D scene blur during background map loading; GameUI strictly displays a 2D VGUI dimming overlay and `CLoadingDiscPanel` (`PaintBackgroundType 2`, `Color(0, 0, 0, 128)`).
+  - Added unit test `blur_material_key_preserves_blur_flag` in `canvas_renderer.rs`.
+  - Documented findings and architectural limitations in `AGENTS.md` and `MODLOG.md`.
+- **Validation:** 163 `hl2-ui` tests pass, 71 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
+
+## Previous session: Submenu subtitle application timed to background map loading completion (2026-10-15, branch `orbitalman/main-menu`)
 
 Antigravity, Gemini 3.8 Flash model family.
 - **Submenu subtitle application timed to background map loading completion:**

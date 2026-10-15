@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-15 Background change scene blur diagnosis and architectural limitation analysis
+
+**Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
+
+**Changed:**
+- `hl2-bevy::canvas_renderer`:
+  - Added unit test `blur_material_key_preserves_blur_flag` verifying `HudMaterialKey` preserves the `blur` flag from `HudMaterial`.
+  - Traced full background transition rendering chain: `BackgroundTransitionState` -> `Console::draw` (`canvas.blur`) -> `Quad { blur: true, color: rgba(0, 0, 0, 0.45) }` -> `Hud::material` (`HudMaterial { blur: true }`) -> `hud.wgsl` -> `GameFrame.image`.
+  - Diagnosed why no blur is visible: `HudMaterial` is a 2D mesh material (`Material2d`) rendered on layer 2 by `Camera2d` directly into `GameFrame.image`. Under modern graphics APIs (wgpu/Metal/Vulkan), drawing into a render target cannot simultaneously bind that same render target as a readable sampled texture (read-write hazard / feedback loop). `hud.wgsl` only samples a static procedural vignette texture and multiplies it by `mesh.color = vec4(0.0, 0.0, 0.0, 0.45)`, outputting pure darkened black pixels (`vec4(0.0, 0.0, 0.0, 0.45)`). Thus, the overlay darkens/dims the underlying 3D scene but does not blur it.
+  - Investigated retail Half-Life 2 / Source SDK ground truth: inspected retail `GameUI.dll`, `engine.dll`, and `SourceSDK` (`vgui_loadingdiscpanel.cpp`, `BlurFilterX.cpp`). Confirmed that retail Half-Life 2 (Source 2004 and 20th Anniversary) never performed a 3D scene blur during background map loading: GameUI strictly displays a 2D VGUI dimming overlay (`Color(0, 0, 0, 128)`) and `CLoadingDiscPanel` (`PaintBackgroundType 2`).
+  - Documented architectural limitation in `STATUS.md`, `MODLOG.md`, `HL2RS/AGENTS.md`, and `RustLife2/AGENTS.md`: a true 3D scene blur in Bevy would require a new multi-pass intermediate offscreen render target pipeline between `Camera3d` and `Camera2d`. Per task instructions, the authentic dimming overlay and non-blocking corner plaque are retained as the correct implementation matching retail Half-Life 2.
+
+**Why:**
+- Background map loading visibly dims the screen but exhibits no blur. A thorough investigation was required to trace whether a blur pass was broken or unplumbed, or whether an in-place 2D blur is fundamentally unsupported within the current Bevy/wgpu rendering architecture and retail Source GameUI behavior.
+
+**Tested how:**
+- `cargo test -p hl2-ui --lib`: 163 tests passed.
+- `cargo test -p hl2-bevy --bin hl2-bevy`: 71 tests passed (including `blur_material_key_preserves_blur_flag` and `blur_quad_mesh_geometry`).
+- `cargo clippy -p hl2-ui -p hl2-bevy --all-targets -- -D warnings`: clean (0 warnings).
+- `cargo fmt --check`: clean.
+
+**Result:** Complete diagnostic trace and architectural documentation established; authentic dimming overlay and corner loading plaque verified and retained.
+
+**Still broken or not tested:** Live post-processing blur of the 3D scene is not implemented due to lack of an intermediate offscreen render target pass in Bevy's 2D/3D camera setup, matching the authentic retail Half-Life 2 GameUI behavior which also relies on a 2D dimming overlay.
+
+**Next:** Visual bug-fix pass tasks 1-5 complete.
+
 ## 2026-10-15 Submenu subtitle application timed to background map loading completion
 
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.

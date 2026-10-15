@@ -550,4 +550,18 @@ mod tests {
         };
         assert_eq!(colors[0], [0., 0., 0., 0.45]);
     }
+
+    #[test]
+    fn blur_material_key_preserves_blur_flag() {
+        let material = HudMaterial {
+            texture: Handle::default(),
+            additive: false,
+            modulate: false,
+            blur: true,
+        };
+        let key = HudMaterialKey::from(&material);
+        assert!(key.blur);
+        assert!(!key.additive);
+        assert!(!key.modulate);
+    }
 }
