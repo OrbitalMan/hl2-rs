@@ -544,6 +544,7 @@ pub(crate) fn resize_window(
 /// ([`mode::desired_mode`] maps it to `BorderlessFullscreen`), so entering native full screen
 /// from a windowed game means Full screen, and leaving it from a full-screen game means
 /// Windowed.
+#[cfg(any(target_os = "macos", test))]
 pub fn native_fullscreen_sync(mode: WindowMode, native_fullscreen: bool) -> Option<WindowMode> {
     match (mode, native_fullscreen) {
         (WindowMode::Windowed, true) => {
