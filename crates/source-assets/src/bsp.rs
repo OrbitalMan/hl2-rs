@@ -598,7 +598,10 @@ impl Bsp {
         for id in world_brushes {
             let b = brushes.get(id).context("brush index")?;
             let contents = u32le(b, 8)?;
-            if model_index == 0 && contents & (1 | 0x10000 | 0x20000) == 0 {
+            // World brushes that block anything (MASK_PLAYERSOLID / MASK_NPCSOLID /
+            // MASK_SOLID): solid, window (0x2), grate (0x8: chain-link and scissor gates)
+            // and player/monster clips; water, ladders and the like stay out.
+            if model_index == 0 && contents & (1 | 0x2 | 0x8 | 0x10000 | 0x20000) == 0 {
                 continue;
             }
             let start = usize::try_from(i32le(b, 0)?)?;
