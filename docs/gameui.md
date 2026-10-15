@@ -461,6 +461,19 @@ Design (`crates/hl2-bevy/src/video.rs`):
   full-screen window over the desktop mode (`BorderlessFullscreen`). An exclusive mode set there can
   select an unscaled (1x) panel mode, which shrinks the desktop scaling, and so the mouse cursor,
   for the session. Stored settings are not rewritten.
+- **macOS native full screen recognition (owner decision, 2026-10-15).** On macOS the game's Full
+  screen mode is the native full-screen Space, so the green title-bar button is treated as a mode
+  switch: `video::sync_native_fullscreen` (macOS only, PreUpdate) reads winit's real full-screen
+  state from the main-thread `bevy::winit::WINIT_WINDOWS` (read-only) and, only when that state
+  changes, maps it with `native_fullscreen_sync`: entering native full screen from Windowed sets
+  `Window::mode` to `BorderlessFullscreen` and the display mode to Full screen; leaving it sets
+  Windowed. The applied configuration is updated and saved, any pending windowed resize is
+  dropped, and Options shows the real mode. Transitions the game starts itself reach winit later
+  and then agree with `Window::mode`, so they are not reverted. Root causes fixed: the game never
+  learned about green-button transitions, so choosing Full screen while already in native full
+  screen did nothing (bevy_winit saw no difference) and leaving it left a stale Full screen state;
+  every OK/Apply also re-requested the windowed size (fixed for all platforms in
+  `simulation::window_settings_changed`). Windows and Linux are unchanged.
 - A launch `--width/--height` sets the initial frame and window size for that session; the stored
   setting takes over after the next OK/Apply.
 
@@ -480,7 +493,7 @@ Verified (2026-10-11, macOS M1 Pro, 3456x2234 at 2x):
   - `--windowed --width 3456 --height 2234`: the startup clamp resized the window to 1579x1021
     points (a 3158x2042 capture), as computed.
 
-Not tested: the green-button OS full screen, the cursor size in macOS full screen, real mouse input
+Not tested: the green-button OS full screen by hand (the recognition is unit-tested only), the cursor size in macOS full screen, real mouse input
 through the scaled frame, Windows and Linux. Resolution changes at runtime are covered in section 10a.
 
 ### 10a. Safe resolution change (2026-10-11)

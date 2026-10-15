@@ -542,6 +542,12 @@ fn main() -> Result<()> {
     if options.profile {
         performance::install(&mut app);
     }
+    // macOS native full screen (green button) is the game's Full screen mode there.
+    #[cfg(target_os = "macos")]
+    app.add_systems(
+        PreUpdate,
+        crate::video::sync_native_fullscreen.before(crate::video::present_frame),
+    );
     let exit = app.run();
     let mut status = status
         .0

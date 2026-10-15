@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 Host: recognize macOS native full screen as the Full screen mode
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `video::native_fullscreen_sync` (pure) and macOS-only `video::sync_native_fullscreen` (PreUpdate, registered under `cfg(target_os = "macos")` in `main.rs`). Docs: `docs/gameui.md` section 10, `AGENTS.md`, `README.md`, `STATUS.md`, HL2Wiki `video_modes_and_resolution.md`.
+
+**Why:** Owner reports: with a Windowed setting in green-button full screen, choosing Full screen did nothing, and after leaving with the green button the game still believed it was full screen. The game never learned about OS transitions; bevy_winit only compares against winit's cached state. Owner decision: the native full-screen Space is the macOS Full screen mode, recognized both ways, mac-only.
+
+**Tested how:** `cargo test -p hl2-ui` (183), `cargo test -p hl2-bevy` (73 passed), strict clippy, fmt; packaged 300-frame windowed main-menu run (exit 0, no transition).
+
+**Result:** Green-button transitions update the window mode and the saved display mode; game-initiated transitions are not reverted (edge-triggered on winit state changes).
+
+**Still broken or not tested:** Not tested by hand on macOS; Windows/Linux unaffected but not re-checked.
+
+**Next:** Owner manual check of the macOS scenarios in STATUS.md.
+
 ## 2026-10-15 Host: apply window settings only when they change
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

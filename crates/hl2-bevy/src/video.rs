@@ -485,6 +485,79 @@ pub(crate) fn resize_window(
     }
 }
 
+/// The window mode matching an OS full-screen state the user changed outside the game (macOS
+/// green button), or `None` when the window mode already agrees.
+///
+/// On macOS the game's Full screen mode is the native full-screen Space
+/// ([`mode::desired_mode`] maps it to `BorderlessFullscreen`), so entering native full screen
+/// from a windowed game means Full screen, and leaving it from a full-screen game means
+/// Windowed.
+pub fn native_fullscreen_sync(mode: WindowMode, native_fullscreen: bool) -> Option<WindowMode> {
+    match (mode, native_fullscreen) {
+        (WindowMode::Windowed, true) => {
+            Some(WindowMode::BorderlessFullscreen(MonitorSelection::Current))
+        }
+        (WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(..), false) => {
+            Some(WindowMode::Windowed)
+        }
+        _ => None,
+    }
+}
+
+/// Recognizes macOS native full screen entered or left with the window's green button.
+///
+/// Reads winit's real full-screen state (main thread only, read-only) and reacts only when that
+/// state changes: transitions the game starts itself reach winit asynchronously and then agree
+/// with `Window::mode`, so they are never reverted. A user transition updates the window mode,
+/// the applied configuration's display mode (saved, so the next launch uses it) and drops any
+/// pending windowed resize.
+#[cfg(target_os = "macos")]
+pub(crate) fn sync_native_fullscreen(
+    _main_thread: bevy::ecs::system::NonSendMarker,
+    mut last: Local<Option<bool>>,
+    mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
+    mut ui: ResMut<crate::ui_host::Console>,
+    frame: Option<ResMut<GameFrame>>,
+) {
+    let Ok((entity, mut window)) = windows.single_mut() else {
+        return;
+    };
+    let Some(native) = bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
+        windows
+            .get_window(entity)
+            .map(|winit| winit.fullscreen().is_some())
+    }) else {
+        return;
+    };
+    // Act only on a change after the first observation.
+    if last.replace(native) != Some(!native) {
+        return;
+    }
+    let Some(mode) = native_fullscreen_sync(window.mode, native) else {
+        return;
+    };
+    debug!(
+        "[video] native full screen {native}: window mode {:?} -> {mode:?}",
+        window.mode
+    );
+    window.mode = mode;
+    if let Some(mut frame) = frame {
+        frame.pending_window = None;
+    }
+    let display_mode = if native {
+        hl2_ui::config::DisplayMode::Fullscreen
+    } else {
+        hl2_ui::config::DisplayMode::Windowed
+    };
+    let config = &mut ui.source.config;
+    if config.video.display_mode.effective() != display_mode {
+        config.video.display_mode = display_mode;
+        if let Err(error) = config.save() {
+            ui.source.log(format!("Could not save settings: {error}"));
+        }
+    }
+}
+
 type FrameCameras<'w, 's> = Query<
     'w,
     's,
@@ -814,6 +887,34 @@ mod tests {
             size_2234.y <= 1978,
             "must fit inside macOS visible frame: {size_2234}"
         );
+    }
+
+    #[test]
+    fn native_full_screen_changes_map_to_the_game_modes() {
+        let full = WindowMode::BorderlessFullscreen(MonitorSelection::Current);
+        // Green button on a windowed game: Full screen.
+        assert_eq!(
+            native_fullscreen_sync(WindowMode::Windowed, true),
+            Some(full)
+        );
+        // Green button out of a full-screen game: Windowed.
+        assert_eq!(
+            native_fullscreen_sync(full, false),
+            Some(WindowMode::Windowed)
+        );
+        assert_eq!(
+            native_fullscreen_sync(
+                WindowMode::Fullscreen(
+                    MonitorSelection::Current,
+                    bevy::window::VideoModeSelection::Current
+                ),
+                false
+            ),
+            Some(WindowMode::Windowed)
+        );
+        // Already agreeing: nothing to do.
+        assert_eq!(native_fullscreen_sync(full, true), None);
+        assert_eq!(native_fullscreen_sync(WindowMode::Windowed, false), None);
     }
 
     #[test]
