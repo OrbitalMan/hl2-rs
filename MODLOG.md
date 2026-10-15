@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15: main CI fix (impact table address identity)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `impact_damage::NPC_TABLE` and `GLASS_TABLE` are `static` instead of `const`. No behavior change: both were only used by reference.
+
+**Why:** GitHub "Rust checks" on main failed since 675c9df (runs 38523057505, 38659681714): `glass_table_breaks_bottles_on_light_drops_and_keeps_its_row_order` asserts `std::ptr::eq(table_named(Some("glass")), &GLASS_TABLE)`. Each `&CONST` is a separately promoted value with no guaranteed shared address; release builds merged them (local `--release` passed), CI's debug `cargo test` did not. A `static` has exactly one address.
+
+**Tested how:** in a clean origin/main worktree, the CI commands: `cargo +stable fmt --all --check`, `cargo +stable test --workspace --locked` (all pass; hl2-simulation 233 passed / 18 ignored, including the glass test), `cargo +stable clippy --workspace --all-targets --locked -- -D warnings` (clean).
+
+**Result:** the CI failure is fixed locally; the GitHub run on this push is the confirmation.
+
+**Still broken or not tested:** owned-file (`--ignored`) tests and packaged runs not rerun (no runtime change).
+
+**Next:** none for CI.
+
 ## 2026-10-15: friendly game installation setup on main
 
 **Agent/model:** Codex Desktop, GPT-6 family (exact model identifier not exposed). No subagents.

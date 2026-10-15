@@ -167,7 +167,7 @@ pub struct ImpactTable {
     pub large_mass_scale: f32,
     pub large_mass_falling_scale: f32,
 }
-pub const NPC_TABLE: ImpactTable = ImpactTable {
+pub static NPC_TABLE: ImpactTable = ImpactTable {
     linear: &NPC_LINEAR,
     small_mass_max: SMALL_MASS_MAX,
     small_mass_cap: SMALL_MASS_CAP,
@@ -188,7 +188,7 @@ const GLASS_LINEAR: [(f32, f32); 6] = [
     (500. * 500., 100.),
     (250. * 250., 500.),
 ];
-pub const GLASS_TABLE: ImpactTable = ImpactTable {
+pub static GLASS_TABLE: ImpactTable = ImpactTable {
     linear: &GLASS_LINEAR,
     small_mass_max: 1.,
     small_mass_cap: 10.,
