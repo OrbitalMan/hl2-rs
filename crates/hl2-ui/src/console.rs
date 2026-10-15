@@ -1328,6 +1328,11 @@ impl Console {
     }
     /// Called before gameplay input collection. Opening characters are drained by the host.
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
+        if self.modal_dialog_open() {
+            // The menus are occluded: keep their tracker on the physical button so the rest of
+            // a click that closes the modal layer is not read as a new menu press.
+            self.menu_tracker.occlude(input.click || input.held);
+        }
         if let Some(loading) = &self.loading_dialog {
             if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {
                 self.loading_dialog = None;
@@ -2884,6 +2889,38 @@ mod tests {
         assert_eq!(console.main_menu.category(), "ep2");
         assert_eq!(console.current_title(), "Half-Life 2\n== episode two ==");
         assert_eq!(console.current_title().lines().count(), 2);
+    }
+
+    #[test]
+    fn click_that_dismisses_a_modal_layer_does_not_reach_the_menu_below() {
+        let mut console = installed_console();
+        console.mode = Mode::MainMenu;
+        console.canvas.resize(1280., 720.);
+        console.start_loading("invalid_map");
+        console.loading_failed("Map invalid_map not found");
+        let at = row(&console, 0);
+        // The press dismisses the failed loading dialog; the held and release frames of the
+        // same click land on a menu row and must not activate it.
+        let mut effects = Vec::new();
+        for (click, held, released) in [
+            (true, true, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            effects.extend(console.input(&Input {
+                pointer: at,
+                click,
+                held,
+                released,
+                ..Default::default()
+            }));
+        }
+        assert!(console.loading_dialog.is_none());
+        assert_eq!(console.mode, Mode::MainMenu);
+        assert!(
+            !effects.contains(&Effect::PlaySound("ui/buttonclickrelease.wav".into())),
+            "no menu activation from the dismissing click: {effects:?}"
+        );
     }
 
     #[test]

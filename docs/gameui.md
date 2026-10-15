@@ -217,6 +217,30 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
   on its defaults (which mirror the desktop scheme values). Reading `SourceScheme.res` instead also
   changes main menu metrics read from the same file, so it is left for a separate change.
 
+### 6b. Popup lists as the topmost input layer (2026-10-15)
+
+- Root cause of clicks reaching controls behind an open combo list: the list closed (or selected)
+  on the press and returned, and the dialog's `ButtonTracker`, which had not been updated while
+  the list owned input, read the next held frame as a new press on whatever lay underneath, so
+  the release activated it. The same path reopened a list closed by a click on its own header.
+  Any modal layer that closes on a press had the same problem (for example the failed loading
+  dialog over the main menu).
+- Fix, in the existing layer routing rather than a second layer system: `OptionsDialog::input`
+  already routes input innermost first (confirmation box, key capture, open combo list, then the
+  page); the layers above the page now call `OptionsDialog::occlude`, and `Console::input` does
+  the same for the menus while `modal_dialog_open()`. Occluding clears hover, press and tooltip
+  and calls `ButtonTracker::occlude(down)`, which keeps the tracker on the physical button state.
+  `ButtonTracker::reset` no longer forgets that state either.
+- `widgets::PopupList` is the shared open-list state for any popup list: geometry, scrolling,
+  keyboard stepping, hit testing (`PopupHit::{Item, List, Anchor, Outside}`) and the pointer
+  gesture (`PopupEvent::{Select, Close}`). While a list is open nothing else in the dialog is
+  hovered, armed, pressed, activated or given a tooltip, inside or outside the list area.
+- Selection happens on release over an entry after a press in the list (SDK `MenuItem` activates
+  on release). Clicking outside closes the list on release and activates nothing; this is the
+  requested behavior. The SDK closes the menu when it loses focus on the press and does not
+  capture the mouse, so retail may also deliver that click to the control underneath (not
+  verified in the retail binary).
+
 Limitations (as of milestone 5; section 8 supersedes the first four items):
 
 - Stored but not yet used by the host: HDR mode, gamma, mouse filter/acceleration/invert, skill,

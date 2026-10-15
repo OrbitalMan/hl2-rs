@@ -779,10 +779,20 @@ impl<T: Copy + PartialEq> ButtonTracker<T> {
         }
     }
 
-    /// Resets the tracker.
+    /// Drops any press. The button edge state is kept: it describes the physical button, and
+    /// clearing it would make a button still held from another layer's click read as a new
+    /// press on the next frame.
     pub fn reset(&mut self) {
         self.pressed = None;
-        self.was_down = false;
+    }
+
+    /// Advances the tracker on a frame when a layer above owns the pointer (an open popup
+    /// list or a modal dialog): nothing is pressed or activated here, but the button edge
+    /// state stays current, so the rest of a gesture the upper layer consumed is never read
+    /// as a new press when this layer gets the pointer back.
+    pub fn occlude(&mut self, down: bool) {
+        self.pressed = None;
+        self.was_down = down;
     }
 
     /// Updates the state machine for the current frame.
@@ -1340,6 +1350,147 @@ pub fn menu_list_rect(combo: Rect, items: usize) -> Rect {
     Rect::new(combo.x, combo.y + combo.h, combo.w, rows as f32 * MENU_ROW)
 }
 
+/// What the pointer is over while a popup list is open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupHit {
+    /// A list entry.
+    Item(usize),
+    /// Inside the list but not on an entry (scroll bar, empty rows).
+    List,
+    /// The control that opened the list (a combo box header).
+    Anchor,
+    /// Anywhere else.
+    Outside,
+}
+
+/// Result of a pointer gesture on an open popup list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupEvent {
+    /// An entry was chosen; the list closes.
+    Select(usize),
+    /// The list closes without a selection (anchor or outside click).
+    Close,
+}
+
+/// An open popup list (a combo box drop-down, or any future popup menu) anchored to a control.
+///
+/// While open it is the topmost input layer: its owner routes all pointer input here and
+/// occludes the layers below ([`ButtonTracker::occlude`]). Every close path acts on the release
+/// of a gesture that started on the same kind of target, so one click never closes the list
+/// and lets its remainder reach, or reopen from, the control underneath: releasing on an entry
+/// after pressing in the list selects it (SDK `MenuItem` activates on release), releasing on
+/// the anchor after pressing it closes the list, and releasing outside after pressing outside
+/// closes it without activating anything.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopupList {
+    pub anchor: Rect,
+    pub list: Rect,
+    pub items: usize,
+    pub first: usize,
+    pub highlight: Option<usize>,
+    pressed: Option<PopupHit>,
+    was_down: bool,
+}
+
+impl PopupList {
+    /// Opens below `anchor` with the `selected` entry highlighted and scrolled into view.
+    pub fn below(anchor: Rect, items: usize, selected: Option<usize>) -> Self {
+        let mut popup = Self {
+            anchor,
+            list: menu_list_rect(anchor, items),
+            items,
+            first: 0,
+            highlight: selected,
+            pressed: None,
+            was_down: false,
+        };
+        if let Some(index) = selected {
+            popup.reveal(index);
+        }
+        popup
+    }
+
+    /// Visible rows.
+    pub fn rows(&self) -> usize {
+        ((self.list.h / MENU_ROW).floor() as usize).max(1)
+    }
+
+    /// Scrolls so that `index` is visible.
+    pub fn reveal(&mut self, index: usize) {
+        let rows = self.rows();
+        if index < self.first {
+            self.first = index;
+        } else if index >= self.first + rows {
+            self.first = index + 1 - rows;
+        }
+    }
+
+    /// Scrolls by wheel steps; positive scrolls up.
+    pub fn scroll(&mut self, steps: i32) {
+        let max = self.items.saturating_sub(self.rows()) as i32;
+        self.first = (self.first as i32 - steps).clamp(0, max) as usize;
+    }
+
+    /// Moves the highlight by `delta` entries (arrow keys).
+    pub fn step(&mut self, delta: i32) {
+        if self.items == 0 {
+            return;
+        }
+        let current = self.highlight.map_or(-1, |i| i as i32);
+        let next = (current + delta).clamp(0, self.items as i32 - 1) as usize;
+        self.highlight = Some(next);
+        self.reveal(next);
+    }
+
+    /// What lies under `point`; `None` when the pointer is not over the canvas.
+    pub fn hit(&self, point: Option<Vec2>) -> Option<PopupHit> {
+        let p = point?;
+        if self.list.contains(p) {
+            let on_scroll_bar =
+                self.items > self.rows() && p.x >= self.list.x + self.list.w - SCROLLBAR_WIDTH;
+            let item = (!on_scroll_bar)
+                .then(|| menu_list_hit(self.list, self.first, self.items, p))
+                .flatten();
+            return Some(item.map_or(PopupHit::List, PopupHit::Item));
+        }
+        Some(if self.anchor.contains(p) {
+            PopupHit::Anchor
+        } else {
+            PopupHit::Outside
+        })
+    }
+
+    /// Feeds one frame of pointer state. Hovering an entry highlights it; see the type docs
+    /// for when a gesture selects or closes.
+    pub fn pointer(
+        &mut self,
+        point: Option<Vec2>,
+        down: bool,
+        click: bool,
+        released: bool,
+    ) -> Option<PopupEvent> {
+        let hit = self.hit(point);
+        if let Some(PopupHit::Item(index)) = hit {
+            self.highlight = Some(index);
+        }
+        let mut event = None;
+        if released || (self.was_down && !down) {
+            event = match (self.pressed.take(), hit) {
+                (Some(PopupHit::Item(_) | PopupHit::List), Some(PopupHit::Item(index))) => {
+                    Some(PopupEvent::Select(index))
+                }
+                (Some(PopupHit::Anchor), Some(PopupHit::Anchor))
+                | (Some(PopupHit::Outside), Some(PopupHit::Outside)) => Some(PopupEvent::Close),
+                _ => None,
+            };
+        } else if click || (down && !self.was_down) {
+            self.pressed = hit;
+        }
+        self.was_down = down;
+        event
+    }
+}
+
 /// Item index under a point in an open list, if any.
 pub fn menu_list_hit(list: Rect, first: usize, items: usize, point: Vec2) -> Option<usize> {
     if !list.contains(point) {
@@ -1679,6 +1830,77 @@ mod tests {
         tracker.update(None, true, true, false);
         tracker.update(Some(2), true, false, false);
         assert_eq!(tracker.update(Some(2), false, false, true), None);
+    }
+
+    #[test]
+    fn popup_list_closes_and_selects_only_on_release_of_its_own_gesture() {
+        let anchor = Rect::new(0., 0., 100., 24.);
+        let mut popup = PopupList::below(anchor, 3, Some(1));
+        assert_eq!(popup.list, Rect::new(0., 24., 100., 60.));
+        assert_eq!(popup.highlight, Some(1));
+        let entry = |i: usize| Some(vec2(10., 24. + MENU_ROW * (i as f32 + 0.5)));
+        let header = Some(vec2(10., 10.));
+        let outside = Some(vec2(300., 300.));
+        let gesture = |popup: &mut PopupList, press, release| {
+            let mut events = vec![popup.pointer(press, true, true, false)];
+            events.push(popup.pointer(press, true, false, false));
+            events.push(popup.pointer(release, false, false, true));
+            events
+        };
+        assert_eq!(popup.hit(entry(2)), Some(PopupHit::Item(2)));
+        assert_eq!(popup.hit(header), Some(PopupHit::Anchor));
+        assert_eq!(popup.hit(outside), Some(PopupHit::Outside));
+        assert_eq!(popup.hit(None), None);
+        // Entry: nothing on press or hold, selection on release; hover moves the highlight.
+        let events = gesture(&mut popup, entry(2), entry(2));
+        assert_eq!(events, vec![None, None, Some(PopupEvent::Select(2))]);
+        assert_eq!(popup.highlight, Some(2));
+        // Press on one entry, release on another: the released entry is chosen.
+        let events = gesture(&mut popup, entry(0), entry(1));
+        assert_eq!(events[2], Some(PopupEvent::Select(1)));
+        // Header and outside: close on release only.
+        assert_eq!(
+            gesture(&mut popup, header, header),
+            vec![None, None, Some(PopupEvent::Close)]
+        );
+        assert_eq!(
+            gesture(&mut popup, outside, outside),
+            vec![None, None, Some(PopupEvent::Close)]
+        );
+        // Mixed gestures do nothing: the list stays open.
+        assert_eq!(gesture(&mut popup, outside, entry(0))[2], None);
+        assert_eq!(gesture(&mut popup, header, outside)[2], None);
+        assert_eq!(gesture(&mut popup, entry(0), header)[2], None);
+        // A release without an observed press (the opening click) does nothing.
+        let mut fresh = PopupList::below(anchor, 3, None);
+        assert_eq!(fresh.pointer(header, false, false, true), None);
+        // Keyboard stepping clamps and scrolls into view.
+        fresh.step(-1);
+        assert_eq!(fresh.highlight, Some(0));
+        fresh.step(5);
+        assert_eq!(fresh.highlight, Some(2));
+    }
+
+    #[test]
+    fn occluded_tracker_never_reads_a_consumed_click_as_a_new_press() {
+        let mut tracker = ButtonTracker::<usize>::capturing();
+        // A layer above consumes the press and closes on it; the button is still held.
+        tracker.occlude(true);
+        assert_eq!(tracker.update(Some(0), true, false, false), None);
+        assert_eq!(
+            tracker.pressed(),
+            None,
+            "held after an occluded press is no press"
+        );
+        assert_eq!(tracker.update(Some(0), false, false, true), None);
+        // reset() keeps the physical button state for the same reason.
+        tracker.update(Some(0), true, true, false);
+        tracker.reset();
+        assert_eq!(tracker.update(Some(0), true, false, false), None);
+        assert_eq!(tracker.update(Some(0), false, false, true), None);
+        // The next real click works.
+        tracker.update(Some(0), true, true, false);
+        assert_eq!(tracker.update(Some(0), false, false, true), Some(0));
     }
 
     #[test]

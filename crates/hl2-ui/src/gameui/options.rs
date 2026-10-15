@@ -9,7 +9,10 @@
 //!
 //! Interaction is modal and layered, innermost first: key capture, open combo list, text entry,
 //! confirmation box, sub-dialog (brightness / credits), then the dialog itself. Escape closes the
-//! innermost layer; on the dialog it acts as Cancel.
+//! innermost layer; on the dialog it acts as Cancel. While the confirmation box, key capture or an
+//! open combo list owns the pointer, the layer below is occluded: it arms, presses, activates and
+//! shows tooltips for nothing, and its button tracker only follows the physical button state.
+//! An open combo list is a [`widgets::PopupList`]: clicks anywhere close or select through it.
 
 use super::{
     display::DisplayModes,
@@ -170,31 +173,8 @@ impl Target {
 #[derive(Clone, Debug, PartialEq)]
 struct OpenCombo {
     choice: Choice,
-    combo: Rect,
-    list: Rect,
     items: Vec<String>,
-    first: usize,
-    highlight: Option<usize>,
-}
-
-impl OpenCombo {
-    fn rows(&self) -> usize {
-        ((self.list.h / MENU_ROW).floor() as usize).max(1)
-    }
-
-    fn reveal(&mut self, index: usize) {
-        let rows = self.rows();
-        if index < self.first {
-            self.first = index;
-        } else if index >= self.first + rows {
-            self.first = index + 1 - rows;
-        }
-    }
-
-    fn scroll(&mut self, steps: i32) {
-        let max = self.items.len().saturating_sub(self.rows()) as i32;
-        self.first = (self.first as i32 - steps).clamp(0, max) as usize;
-    }
+    popup: widgets::PopupList,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -555,7 +535,7 @@ impl OptionsDialog {
         let scale = Painter::scale_for(canvas.y);
         let local = |origin: Vec2| input.pointer.map(|p| (p - origin) / scale);
         if let Some(mut confirm) = self.confirm.take() {
-            self.active_tooltip = None;
+            self.occlude(input);
             let layout = confirm.layout(|t| measure.text_width(t, false));
             let pointer = local(centered(canvas, layout.size, scale));
             let down = input.click || input.held;
@@ -599,7 +579,7 @@ impl OptionsDialog {
         }
         let pointer = local(centered(canvas, DIALOG_SIZE, scale));
         if let Some(row) = self.keys.capture {
-            self.active_tooltip = None;
+            self.occlude(input);
             if let Some(key) = input.binding_keys.iter().find(|k| *k != "Escape") {
                 if let Some(KeyRow::Action { command, .. }) = self.res.key_rows.get(row) {
                     keys::assign(&mut self.draft.config.keys, command, key);
@@ -609,43 +589,36 @@ impl OptionsDialog {
             return OptionsOutcome::None;
         }
         if let Some(combo) = self.combo.take() {
-            self.active_tooltip = None;
+            self.occlude(input);
             self.combo_input(combo, input, pointer);
             return OptionsOutcome::None;
         }
         self.page_input(input, pointer, measure)
     }
 
+    /// A layer above the dialog page owns the pointer this frame.
+    fn occlude(&mut self, input: &Input) {
+        self.active_tooltip = None;
+        self.armed = None;
+        self.pressed = None;
+        self.last_armed = None;
+        self.tracker.occlude(input.held);
+    }
+
     fn combo_input(&mut self, mut combo: OpenCombo, input: &Input, pointer: Option<Vec2>) {
-        let count = combo.items.len();
+        let popup = &mut combo.popup;
         if input.wheel != 0. {
-            combo.scroll(input.wheel.round() as i32);
+            popup.scroll(input.wheel.round() as i32);
         }
-        if count > 0 && (input.pressed(Key::Up) || input.pressed(Key::Down)) {
-            let step: i32 = if input.pressed(Key::Up) { -1 } else { 1 };
-            let current = combo.highlight.map_or(-1, |i| i as i32);
-            let next = (current + step).clamp(0, count as i32 - 1) as usize;
-            combo.highlight = Some(next);
-            combo.reveal(next);
+        if input.pressed(Key::Up) || input.pressed(Key::Down) {
+            popup.step(if input.pressed(Key::Up) { -1 } else { 1 });
         }
-        let on_scroll_bar =
-            |p: Vec2| count > combo.rows() && p.x >= combo.list.x + combo.list.w - SCROLLBAR_WIDTH;
-        let hit = pointer
-            .filter(|p| !on_scroll_bar(*p))
-            .and_then(|p| widgets::menu_list_hit(combo.list, combo.first, count, p));
-        if hit.is_some() {
-            combo.highlight = hit;
-        }
-        let pick = if input.click {
-            match (hit, pointer) {
-                (Some(index), _) => Some(Some(index)),
-                (None, Some(p)) if combo.list.contains(p) => None,
-                _ => Some(None),
-            }
-        } else if input.pressed(Key::Enter) {
-            Some(combo.highlight)
-        } else {
-            None
+        let event = popup.pointer(pointer, input.held, input.click, input.released);
+        let pick = match event {
+            Some(widgets::PopupEvent::Select(index)) => Some(Some(index)),
+            Some(widgets::PopupEvent::Close) => Some(None),
+            None if input.pressed(Key::Enter) => Some(popup.highlight),
+            None => None,
         };
         match pick {
             Some(Some(index)) => {
@@ -879,19 +852,13 @@ impl OptionsDialog {
                     modes: &self.modes,
                 };
                 let items = choice.items(&env, &self.draft);
-                let highlight = choice.selected(&env, &self.draft);
-                let mut combo = OpenCombo {
+                let selected = choice.selected(&env, &self.draft);
+                let popup = widgets::PopupList::below(widget.rect, items.len(), selected);
+                self.combo = Some(OpenCombo {
                     choice,
-                    combo: widget.rect,
-                    list: widgets::menu_list_rect(widget.rect, items.len()),
                     items,
-                    first: 0,
-                    highlight,
-                };
-                if let Some(index) = highlight {
-                    combo.reveal(index);
-                }
-                self.combo = Some(combo);
+                    popup,
+                });
             }
             Some(Binding::Command(command)) => self.command(command),
             Some(Binding::KeyList) => self.key_list_click(widget.rect, pointer),
@@ -1338,8 +1305,8 @@ impl OptionsDialog {
                 },
             );
         }
-        if let Some(combo) = &self.combo {
-            p.menu_list(combo.list, &combo.items, combo.first, combo.highlight);
+        if let Some(OpenCombo { items, popup, .. }) = &self.combo {
+            p.menu_list(popup.list, items, popup.first, popup.highlight);
         }
         if let Some(sub) = self.sub {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
@@ -1440,7 +1407,10 @@ impl OptionsDialog {
                 )
             }
             (ControlKind::ComboBox, Some(Binding::Choice(choice))) => {
-                let open = self.combo.as_ref().is_some_and(|o| o.combo == w.rect);
+                let open = self
+                    .combo
+                    .as_ref()
+                    .is_some_and(|o| o.popup.anchor == w.rect);
                 p.combo(
                     w.rect,
                     &choice.text(env, &self.draft),
@@ -1637,6 +1607,9 @@ mod tests {
             "xpos" "400" "ypos" "40" "wide" "50" "tall" "24" }
         "Autoaim" { "ControlName" "ComboBox" "fieldName" "Autoaim" "xpos" "28" "ypos" "172"
             "wide" "175" "tall" "24" }
+        "MouseFilter" { "ControlName" "CCvarToggleCheckButton" "fieldName" "MouseFilter"
+            "xpos" "28" "ypos" "216" "wide" "150" "tall" "28" "labelText" "#GameUI_MouseFilter"
+            "tooltiptext" "#GameUI_MouseFilterLabel" }
     }"##;
     const VIDEO: &str = r##""Resource/OptionsSubVideo.res" {
         "Resolution" { "ControlName" "ComboBox" "fieldName" "Resolution" "xpos" "36" "ypos" "48"
@@ -2116,6 +2089,103 @@ mod tests {
         h.dialog.command(Command::GammaDialog);
         h.frame(Input::default());
         assert!(h.dialog.gamma_texture.is_some());
+    }
+
+    impl Harness {
+        /// A press, one held frame and a release at `at`, like a real click spanning frames.
+        fn slow_click(&mut self, at: Vec2) -> OptionsOutcome {
+            let mut outcome = OptionsOutcome::None;
+            for (click, held, released) in [
+                (true, true, false),
+                (false, true, false),
+                (false, false, true),
+            ] {
+                let frame = self.frame(Input {
+                    pointer: Some(at),
+                    click,
+                    held,
+                    released,
+                    ..Default::default()
+                });
+                if !matches!(frame, OptionsOutcome::None) {
+                    outcome = frame;
+                }
+            }
+            outcome
+        }
+
+        fn hover(&mut self, at: Vec2) {
+            self.frame(Input {
+                pointer: Some(at),
+                ..Default::default()
+            });
+        }
+    }
+
+    /// Mouse page: the Autoaim list (rows from y 196: Off, Basic, Enhanced) lies over the
+    /// MouseFilter check box (y 216..244).
+    const AUTOAIM: (f32, f32) = (40., 180.);
+    const BASIC_OVER_FILTER: (f32, f32) = (40., 196. + MENU_ROW * 1.5);
+    const REVERSE_MOUSE: (f32, f32) = (30., 20.);
+
+    #[test]
+    fn open_dropdown_list_gates_input_to_elements_behind_it() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        let behind = page(BASIC_OVER_FILTER.0, BASIC_OVER_FILTER.1);
+        let outside = page(REVERSE_MOUSE.0, REVERSE_MOUSE.1);
+
+        // List closed: the check box under the list area takes hover, tooltip and clicks.
+        h.hover(behind);
+        assert!(matches!(h.dialog.armed, Some(Target::Control(_))));
+        assert!(h.dialog.active_tooltip().is_some());
+        h.slow_click(behind);
+        assert!(
+            h.dialog.draft().mouse.filter,
+            "closed list: click reaches the box"
+        );
+        h.slow_click(behind);
+        assert!(!h.dialog.draft().mouse.filter);
+        let _ = h.dialog.take_sounds();
+
+        // List open: hovering an entry over the box, or anything outside the list, arms
+        // nothing, shows no tooltip and plays nothing.
+        h.slow_click(page(AUTOAIM.0, AUTOAIM.1));
+        assert!(h.dialog.combo.is_some());
+        let _ = h.dialog.take_sounds();
+        for at in [behind, outside] {
+            h.hover(at);
+            assert_eq!(h.dialog.armed, None);
+            assert_eq!(h.dialog.pressed, None);
+            assert_eq!(h.dialog.active_tooltip(), None);
+            assert!(h.dialog.take_sounds().is_empty());
+        }
+
+        // Clicking the entry selects it and the click is consumed: the box behind it does
+        // not toggle on the press, held or release frames.
+        h.slow_click(behind);
+        assert!(h.dialog.combo.is_none());
+        assert_eq!(h.dialog.draft().mouse.aim_assist, AimAssist::Basic);
+        assert!(
+            !h.dialog.draft().mouse.filter,
+            "selection click must not reach the box"
+        );
+        assert_eq!(h.dialog.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+
+        // Clicking outside closes the list without activating what was clicked.
+        h.slow_click(page(AUTOAIM.0, AUTOAIM.1));
+        assert!(h.dialog.combo.is_some());
+        h.slow_click(outside);
+        assert!(h.dialog.combo.is_none(), "outside click closes the list");
+        assert!(
+            !h.dialog.draft().mouse.invert,
+            "outside click activates nothing"
+        );
+        assert_eq!(h.dialog.draft().mouse.aim_assist, AimAssist::Basic);
+
+        // Clicking outside with the list closed works as usual.
+        h.slow_click(outside);
+        assert!(h.dialog.draft().mouse.invert);
     }
 
     #[test]

@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-15 GameUI: popup lists as the topmost input layer
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:**
+- `hl2-ui::gameui::widgets`: `PopupList`, `PopupHit`, `PopupEvent`; `ButtonTracker::occlude`; `ButtonTracker::reset` keeps the button edge state.
+- `hl2-ui::gameui::options`: the open combo is a `PopupList`; confirmation box, key capture and open list occlude the page (`OptionsDialog::occlude`). Test fixture gains a MouseFilter box under the Auto-aim list.
+- `hl2-ui::console`: `Console::input` occludes the menu tracker while a modal dialog is open.
+- Docs: `docs/gameui.md` 6b, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Selecting an entry in an open dropdown also clicked the control behind it. The list closed on the press while the page tracker, not updated meanwhile, took the next held frame for a new press.
+
+**Tested how:** `cargo test -p hl2-ui` (175 passed; the four new tests fail without the fix), `cargo test -p hl2-bevy` (71 passed), strict clippy, fmt; packaged 300-frame main-menu run (exit 0).
+
+**Result:** No click, hover, sound or tooltip reaches controls behind an open list; outside clicks close it without activation.
+
+**Still broken or not tested:** Click-through and hover gating not checked by hand in the packaged build. Retail may deliver an outside click to the control underneath.
+
+**Next:** Dropdown header toggle tests and docs.
+
 ## 2026-10-15 GameUI: shared push button style, tab hover decision and drag-off capture
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
