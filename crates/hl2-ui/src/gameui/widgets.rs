@@ -243,12 +243,14 @@ impl Theme {
     /// Resolves the look of a property-sheet tab.
     ///
     /// Tabs (SDK `PageTab`) never enter the armed state and pick their border and text color
-    /// from the active flag alone, so hover and press leave a tab's look unchanged, whether
-    /// it is the active tab or not.
-    pub fn tab_style(&self, active: bool, _state: ButtonState) -> TabStyle {
+    /// from the active flag alone. As an owner-approved deviation, a hovered inactive, enabled
+    /// tab gets the same slight `Menu.BgColor` fill as a hovered push button; the active tab
+    /// never changes, and pressing adds nothing.
+    pub fn tab_style(&self, active: bool, state: ButtonState) -> TabStyle {
         TabStyle {
             text: if active { self.text } else { self.text_dull },
             open_bottom: active,
+            hover_bg: (!active && state.armed && state.enabled).then_some(self.menu_bg),
         }
     }
 }
@@ -278,6 +280,8 @@ pub struct TabStyle {
     pub text: Color,
     /// The active tab has no bottom edge, so it opens into its page.
     pub open_bottom: bool,
+    /// Hover fill drawn over the tab background, if any.
+    pub hover_bg: Option<Color>,
 }
 
 /// Resolves a scheme color: a literal `"r g b a"` or a name in `BaseSettings`/`Colors`.
@@ -1171,8 +1175,17 @@ impl Painter<'_> {
     }
 
     /// The open drop-down list of a combo box (`rows` visible items starting at `first`).
+    ///
+    /// The list is fully opaque (owner decision): the frame color is laid down at full alpha
+    /// before the translucent `Menu.BgColor` tint, so nothing behind the list shows through.
     pub fn menu_list(&self, rect: Rect, items: &[String], first: usize, highlight: Option<usize>) {
-        self.fill(rect, self.theme.frame_bg);
+        self.fill(
+            rect,
+            Color {
+                a: 1.,
+                ..self.theme.frame_bg
+            },
+        );
         self.fill(rect, self.theme.menu_bg);
         self.raised(rect);
         let rows = (rect.h / MENU_ROW).floor() as usize;
@@ -1252,6 +1265,9 @@ impl Painter<'_> {
         let style = self.theme.tab_style(active, state);
         let color = style.text;
         self.fill(rect, self.theme.frame_bg);
+        if let Some(bg) = style.hover_bg {
+            self.fill(rect, bg);
+        }
         let r = self.map(rect);
         let t = self.scale.round().max(1.);
         self.canvas
@@ -1797,13 +1813,27 @@ mod tests {
     }
 
     #[test]
-    fn tabs_ignore_hover_and_press_whether_selected_or_not() {
+    fn only_inactive_enabled_tabs_show_a_hover_fill() {
         let theme = Theme::default();
-        for active in [false, true] {
-            let normal = theme.tab_style(active, ButtonState::new(true));
-            for (state, name) in button_states() {
-                assert_eq!(theme.tab_style(active, state), normal, "{name}, {active}");
-            }
+        // Active tab: hover, press and disabled never change it.
+        let active = theme.tab_style(true, ButtonState::new(true));
+        assert_eq!(active.hover_bg, None);
+        for (state, name) in button_states() {
+            assert_eq!(theme.tab_style(true, state), active, "active, {name}");
+        }
+        // Inactive tab: the hover fill appears while the pointer is over it and enabled.
+        let expected = [
+            None,
+            Some(theme.menu_bg),
+            Some(theme.menu_bg),
+            None,
+            None,
+            None,
+        ];
+        for ((state, name), want) in button_states().into_iter().zip(expected) {
+            let style = theme.tab_style(false, state);
+            assert_eq!(style.hover_bg, want, "inactive, {name}");
+            assert_eq!(style.text, theme.text_dull, "inactive, {name}");
         }
         assert_eq!(
             theme.tab_style(true, ButtonState::new(true)).text,
@@ -2204,6 +2234,25 @@ mod tests {
         painter.close_button(close_btn_rect, ButtonState::new(true));
         let close_quads = canvas.drain();
         assert!(close_quads.is_empty(), "no border around the cross");
+    }
+
+    #[test]
+    fn drop_down_list_is_fully_opaque() {
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        assert!(theme.frame_bg.a < 1., "scheme frame color is translucent");
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        painter.menu_list(Rect::new(0., 0., 100., 60.), &[], 0, None);
+        let quads = canvas.drain();
+        assert_eq!(quads[0].destination.w, 100.);
+        assert_eq!(quads[0].color.a, 1., "base layer is opaque");
     }
 
     #[test]

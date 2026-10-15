@@ -6,6 +6,7 @@
 
 Claude Code desktop, claude-opus-5-5. Owner list of nine items; plan decisions: macOS scrolling uses accumulated row steps, macOS native full screen is recognized as the game's Full screen mode (mac-only), tab hover only on inactive tabs, key capture highlights only the key cell.
 - **Close button: done.** Plain × glyph, no border or fill; lightens to the title text color on hover/press (`Theme::close_style`, scheme `FrameTitleButton.*`). Test `close_cross_lightens_on_hover_and_press`; frame tests updated. Unverified, needs manual check: hover the × of the Options dialog and of the Quit box.
+- **Opaque drop-down lists and inactive tab hover: done.** `Painter::menu_list` uses the frame color at full alpha under the `Menu.BgColor` tint; `Theme::tab_style` adds the `Menu.BgColor` hover fill to inactive enabled tabs only. Tests `drop_down_list_is_fully_opaque`, `only_inactive_enabled_tabs_show_a_hover_fill`. Unverified, needs manual check: open the Video page Resolution list over other controls (nothing shows through); hover inactive tabs (slight lightening), the active tab stays unchanged.
 
 ## Previous session: GameUI widget interaction pass (2026-10-15, branch `orbitalman/main-menu`)
 

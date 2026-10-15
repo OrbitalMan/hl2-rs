@@ -202,11 +202,15 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
   the scheme's `Menu.BgColor` (`160 160 160 64`), the translucent fill of menus and drop-down
   lists, which lightens it slightly. Text and border are unchanged; pressed and disabled buttons
   are unaffected; a scheme with its own `Button.ArmedBgColor` keeps it. The color is a scheme
-  value, but using it for button hover is an HL2-RS choice, not retail behavior. Tabs keep the
-  retail look (no hover).
-- **Tabs have no hover.** SDK `PageTab` overrides cursor enter/exit without arming and takes its
-  border and text color from the active flag only, so the generic `Button.Armed*` values never
-  apply to tabs, selected or not. `Theme::tab_style(active, state)` ignores the state.
+  value, but using it for button hover is an HL2-RS choice, not retail behavior.
+- **Tabs.** Retail tabs have no hover: SDK `PageTab` overrides cursor enter/exit without arming
+  and takes its border and text color from the active flag only. Owner decision (2026-10-15):
+  inactive, enabled tabs get the same `Menu.BgColor` hover fill as push buttons
+  (`Theme::tab_style` -> `TabStyle::hover_bg`); the active tab never changes and pressing adds
+  nothing.
+- **Drop-down lists are fully opaque** (owner decision, 2026-10-15): `Painter::menu_list` lays the
+  frame color down at full alpha before the translucent `Menu.BgColor` tint (retail
+  `Frame.BgColor` is `132 132 132 212`).
 - **Drag-off.** SDK buttons capture the mouse on press and do not disarm while selected, so a
   pressed control stays pressed while the pointer is dragged off and back, and the release
   activates it only while the pointer is over it. `ButtonTracker::capturing` implements this for

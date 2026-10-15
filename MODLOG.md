@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-15 GameUI: opaque drop-down lists and inactive tab hover
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Painter::menu_list` base fill at full alpha; `TabStyle::hover_bg` from `Theme::tab_style` for inactive enabled hovered tabs, drawn by `Painter::tab`. Docs: `docs/gameui.md` 6a, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Owner requests: 100% opaque drop-down lists; tabs highlight on hover like dialog buttons (inactive tabs only, owner choice).
+
+**Tested how:** `cargo test -p hl2-ui` (178 passed), `cargo test -p hl2-bevy`, clippy, fmt.
+
+**Result:** Lists hide what is behind them; hovered inactive tabs lighten slightly.
+
+**Still broken or not tested:** Not checked by hand in the packaged build.
+
+**Next:** Keyboard list separators.
+
 ## 2026-10-15 GameUI: plain close cross with hover
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
