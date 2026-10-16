@@ -149,6 +149,7 @@ pub fn update_ui(
                 ctrl: modifiers.ctrl,
                 shift: modifiers.shift,
                 paste,
+                copy: modifiers.copy,
                 keys: crate::ui_host::keys(&keys),
                 pointer,
                 click: buttons.just_pressed(MouseButton::Left),
@@ -158,6 +159,12 @@ pub fn update_ui(
                 binding_keys: crate::ui_host::binding_keys(&keys, &buttons, wheel),
                 time: real_time.as_deref().map(Time::elapsed_secs_f64),
             });
+            if let Some(copied) = ui.source.take_copied()
+                && let Some(clipboard) = clipboard.as_deref_mut()
+                && let Err(error) = clipboard.set_text(copied)
+            {
+                warn!("[ui] console copy failed: {error:?}");
+            }
             let has_apply = effects
                 .iter()
                 .any(|e| matches!(e, hl2_ui::console::Effect::ApplyConfig(_)));

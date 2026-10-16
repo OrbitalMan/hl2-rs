@@ -6,6 +6,7 @@
 
 Claude Code desktop, claude-opus-5-5.
 - **Console completion, suggestions, history (100, saved), Ctrl+R search, editing keys, `con_filter_*`/`con_timestamp`, engine warnings mirrored**: see `docs/gameui.md` section 11. Packaged capture of the completion list checked; paste and log mirroring not exercised by hand; output row copy not ported.
+- **Retail console dialog** (`console::dialog`, SDK `CConsolePanel` layout and retail default placement): frame, sunken history with scroll bar, entry, Submit; drag-select history rows and copy them (Cmd+C / Ctrl+C, Bevy `Clipboard`). Unit tests and packaged capture (`options_capture_console.png`) checked; clipboard copy and drag not exercised by hand; moving/resizing the dialog not ported.
 
 ## Previous session: menu font, advanced options dialogs, Gamepad tab (2026-10-16, branch `orbitalman/main-menu-2`)
 

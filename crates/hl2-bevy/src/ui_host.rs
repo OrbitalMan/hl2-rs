@@ -117,19 +117,21 @@ pub fn wheel_steps<'a>(events: impl Iterator<Item = &'a bevy::input::mouse::Mous
 /// Keys and buttons pressed this frame as persisted binding names: the `KeyCode` name for keys
 /// (`KeyW`, `SuperLeft`), the Source names `MOUSE1`..`MOUSE5` for buttons and
 /// `MWHEELUP`/`MWHEELDOWN` for the wheel. Unidentified native keys are skipped.
-/// Control and Shift held, and whether this frame pastes: Cmd+V on macOS, Ctrl+V elsewhere.
+/// Control and Shift held, and whether this frame pastes or copies: Cmd+V / Cmd+C on macOS,
+/// Ctrl+V / Ctrl+C elsewhere.
 /// Typed text is dropped while Control or Cmd is held (shortcuts, not text).
 pub struct Modifiers {
     pub ctrl: bool,
     pub shift: bool,
     pub command: bool,
     pub paste: bool,
+    pub copy: bool,
 }
 
 pub fn modifiers(native: &ButtonInput<KeyCode>) -> Modifiers {
     let ctrl = native.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let command = native.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]);
-    let paste_modifier = if cfg!(target_os = "macos") {
+    let clipboard_modifier = if cfg!(target_os = "macos") {
         command
     } else {
         ctrl
@@ -138,7 +140,8 @@ pub fn modifiers(native: &ButtonInput<KeyCode>) -> Modifiers {
         ctrl,
         shift: native.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
         command,
-        paste: paste_modifier && native.just_pressed(KeyCode::KeyV),
+        paste: clipboard_modifier && native.just_pressed(KeyCode::KeyV),
+        copy: clipboard_modifier && native.just_pressed(KeyCode::KeyC),
     }
 }
 

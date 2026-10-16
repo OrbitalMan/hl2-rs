@@ -668,9 +668,30 @@ Verified (2026-10-12, macOS M1 Pro Retina):
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed
 `hl2_complete/resource/sourcescheme.res` (`Console.TextColor` OffWhite, `Console.DevTextColor`
-White) and Source's own console variables. Code: `hl2-ui::console::{commands, complete, editor}`
-(pure, unit-tested), drawing in `Console::draw_console`/`draw_completion`, host side in
-`hl2-bevy::console_host`.
+White, `RichText.*`) and Source's own console variables. Code:
+`hl2-ui::console::{commands, complete, dialog, editor}` (pure, unit-tested), drawing in
+`Console::draw_console`/`draw_completion`, host side in `hl2-bevy::console_host`.
+
+- The dialog (`CConsoleDialog`): a `#Console_Title` frame drawn through the shared dialog frame
+  (`Painter::frame_with_close`, rounded, close ×), with no screen dimming, over whatever it was
+  opened from (main menu, pause menu, Options or the game). Default placement as in retail:
+  proportional 16 and 64 (480-line basis) put it at `(w/2 - 16, 64)`, `w/2` wide and
+  `h - 2 * 64` tall. Inside the frame client area (`Frame.ClientInsetX` 8, title 30,
+  `Frame.ClientInsetY` 6) the `CConsolePanel::PerformLayout` insets apply as plain units (the
+  panel is not proportional): history at inset 8 + top 4, entry and `#Console_Submit` button
+  (64 wide, pulled 7 from the edge, Submit is the default button) 24 tall along the bottom,
+  4 apart. `console::dialog::DialogLayout` is the one geometry for drawing and hit tests.
+- History (`RichText`, `DepressedButtonBorder` = sunken `Border.Dark`/`Border.Bright`): background
+  `RichText.BgColor`, a vertical scroll bar (arrows, track paging, nob dragging) and the wheel
+  (3 rows a notch). Scrolled back, the view stays on its lines while output arrives; Enter and
+  Ctrl+End return to the newest. The entry is a sunken `TextEntry` with no prompt (the `] line`
+  echo stays in the history); it scrolls to keep the cursor in view.
+- Selection: dragging over the history selects whole rows (`RichText.SelectedBgColor` Orange,
+  `RichText.SelectedTextColor` Black), scrolling a row per frame past the top or bottom. Cmd+C
+  on macOS, Ctrl+C elsewhere copies the selected rows as the history shows them (the current
+  `con_filter_enable` filter and `con_timestamp` prefix, full lines rather than the clipped
+  view) through Bevy `Clipboard`. Rows are numbered since start, so the selection stays on its
+  lines while new output arrives and old lines leave the 1024-line buffer; Ctrl+L clears it.
 
 - Commands and cvars are described once (`console::commands::COMMANDS`: name, help as
   `name args: description`, what each argument completes from, cvar or command). `help` and
@@ -703,5 +724,6 @@ White) and Source's own console variables. Code: `hl2-ui::console::{commands, co
   target) use HL2-RS colors. Source's `con_filter_enable` (1 shows only lines containing
   `con_filter_text`, 2 shows them brighter) and `con_timestamp` apply to the shown output. The run
   report still records lines as text.
-- Not ported: binds, aliases, `exec`, cvar registries for unimplemented engine cvars, output row
-  selection to the clipboard, and game-specific commands from other titles.
+- Not ported: binds, aliases, `exec`, cvar registries for unimplemented engine cvars,
+  game-specific commands from other titles, moving and resizing the console dialog (and the
+  bounds retail remembers), and character-level selection inside a history row.

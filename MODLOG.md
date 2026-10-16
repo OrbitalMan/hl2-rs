@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Console: retail VGUI console dialog, output row selection and copy
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::console::dialog` (`DialogLayout`: the SDK `CConsoleDialog`/`CConsolePanel::PerformLayout` geometry at the retail default placement; `Selection` by line number). `Console::draw_console` now draws a `#Console_Title` frame through `Painter::frame_with_close`, a sunken `RichText.BgColor` history with a scroll bar, a sunken entry without prompt and the default `#Console_Submit` button, over what the console was opened from and without dimming the screen. Pointer input: close ×, Submit (both capturing, release-click sound), the history scroll bar, the wheel and dragging over rows to select them (`RichText.Selected*` colors). Scrolled-back output stays put while lines arrive. `Input::copy` (Cmd+C on macOS, Ctrl+C elsewhere, `ui_host::Modifiers::copy`), `Console::take_copied`, written to Bevy `Clipboard` in `ui_system`. `Console_Submit` fallback string. History rows use a smaller console font (12 on 14-unit rows). Details in `docs/gameui.md` section 11.
+
+**Why:** owner request: keep the Half-Life 2 look of the console; the panel was still an earlier HL2-RS layout, and output row copy was missing.
+
+**Tested how:** unit tests (layout at 1024x768 and the minimum size, selection spans, drag selection and copy, selection stable while lines arrive and leave the buffer, copy under `con_filter_enable`/`con_timestamp`, Ctrl+L clears it, scrolled-back view stays, Submit and close clicks); hl2-ui and hl2-bevy tests, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged capture `runtime_options_capture.sh` (`options_capture_console.png`: the dialog over the main menu with `map d1` and its completion list).
+
+**Result:** the console reads as the retail VGUI console dialog and output rows can be copied.
+
+**Still broken or not tested:** copying to the system clipboard and the drag selection not exercised by hand in the packaged game; the dialog cannot be moved or resized; selection is by whole rows, not characters.
+
+**Next:** owner check.
+
 ## 2026-10-17 Console: completion, suggestions, history, search, editing keys, log mirroring
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

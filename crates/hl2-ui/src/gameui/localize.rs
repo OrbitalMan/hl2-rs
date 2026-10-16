@@ -147,6 +147,7 @@ pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     // Ctrl+R history search prompt in the console (no installed token).
     ("HL2RS_Console_ReverseSearch", "reverse-i-search"),
     ("Console_Title", "Console"),
+    ("Console_Submit", "Submit"),
     ("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU"),
     (
         "GameUI_MainMenuWarning",

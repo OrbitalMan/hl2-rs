@@ -1,6 +1,7 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
 pub mod commands;
 pub mod complete;
+pub mod dialog;
 pub mod editor;
 
 use crate::gameui::{
@@ -8,12 +9,16 @@ use crate::gameui::{
     menu::{GameMenu, MenuLayout, MenuOutcome, MessageBox, MessageBoxLayout},
     options::{OptionsDialog, OptionsOutcome},
     resources::{self, fallback_game_menu, GameUiResources},
-    widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
+    widgets::{
+        scheme_color, Align, ButtonState, ButtonTracker, Fonts, Painter, ScrollBarLayout,
+        ScrollBarState, Theme, SCROLLBAR_WIDTH,
+    },
 };
 use crate::{
     canvas::*,
     hud::{FontFace, TextOutline},
 };
+use dialog::{DialogLayout, Selection};
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
@@ -130,6 +135,18 @@ pub struct Console {
     previous: Mode,
     pub cheats: bool,
     pub output: VecDeque<Line>,
+    /// Line number (since start) of `output[0]`: lines dropped from the front count on.
+    output_start: u64,
+    /// Output rows selected by dragging over the history, copied by the copy shortcut.
+    selection: Option<Selection>,
+    /// A drag that started in the history is extending the selection.
+    selecting: bool,
+    /// Text the copy shortcut put on the clipboard, until the host takes it.
+    copied: Option<String>,
+    /// The dialog's close (×) and Submit buttons.
+    console_buttons: ButtonTracker<ConsoleButton>,
+    console_hover: Option<ConsoleButton>,
+    history_bar: ScrollBarState,
     /// The input line: editing, completion, history and reverse search.
     editor: editor::LineEditor,
     /// Names arguments complete from (installed maps, the loaded map's entities), set by the host.
@@ -328,11 +345,20 @@ pub struct Input {
     pub shift: bool,
     /// Text pasted this frame (the host reads the clipboard on its paste shortcut).
     pub paste: Option<String>,
+    /// The copy shortcut (Cmd+C on macOS, Ctrl+C elsewhere) was pressed this frame.
+    pub copy: bool,
 }
 impl Input {
     pub(crate) fn pressed(&self, key: Key) -> bool {
         self.keys.contains(&key)
     }
+}
+
+/// The console dialog's push buttons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConsoleButton {
+    Close,
+    Submit,
 }
 
 struct Style {
@@ -344,6 +370,9 @@ struct Style {
     text: Color,
     /// `Console.DevTextColor`.
     dev_text: Color,
+    /// Selected history rows (`RichText.SelectedBgColor` / `RichText.SelectedTextColor`).
+    selected_bg: Color,
+    selected_text: Color,
 }
 impl Default for Style {
     fn default() -> Self {
@@ -354,6 +383,8 @@ impl Default for Style {
             entry: Color::from_rgba(0, 0, 0, 128),
             text: Color::from_rgba(221, 221, 221, 255),
             dev_text: WHITE,
+            selected_bg: Color::from_rgba(255, 155, 0, 255),
+            selected_text: Color::from_rgba(0, 0, 0, 255),
         }
     }
 }
@@ -372,6 +403,13 @@ impl Default for Console {
             previous: Mode::Gameplay,
             cheats: false,
             output: VecDeque::new(),
+            output_start: 0,
+            selection: None,
+            selecting: false,
+            copied: None,
+            console_buttons: ButtonTracker::capturing(),
+            console_hover: None,
+            history_bar: ScrollBarState::default(),
             editor: editor::LineEditor::default(),
             completion: complete::Sources::default(),
             clock: 0.,
@@ -574,11 +612,12 @@ impl Console {
                 text: scheme_color(&root, "Console.TextColor").unwrap_or(console.style.text),
                 dev_text: scheme_color(&root, "Console.DevTextColor")
                     .unwrap_or(console.style.dev_text),
+                ..console.style
             };
             console.menu_layout.apply_source_scheme(&root);
         }
-        // The console colors from the installed source scheme (the base scheme it reads above is
-        // empty in the installed game).
+        // The console and history colors from the installed source scheme (the base scheme it
+        // reads above is empty in the installed game).
         if let Some(root) = scheme_reader
             .read("resource/SourceScheme.res")
             .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
@@ -587,6 +626,12 @@ impl Console {
             for (name, color) in [
                 ("Console.TextColor", &mut console.style.text),
                 ("Console.DevTextColor", &mut console.style.dev_text),
+                ("RichText.BgColor", &mut console.style.entry),
+                ("RichText.SelectedBgColor", &mut console.style.selected_bg),
+                (
+                    "RichText.SelectedTextColor",
+                    &mut console.style.selected_text,
+                ),
             ] {
                 if let Some(value) = scheme_color(&root, name) {
                     *color = value;
@@ -1092,8 +1137,14 @@ impl Console {
         });
         if self.output.len() > OUTPUT_LINES {
             self.output.pop_front();
+            self.output_start += 1;
         }
-        self.scroll = 0;
+        // Scrolled back, the view stays on its lines while new ones arrive below.
+        if self.scroll > 0
+            && (self.con_filter != 1 || self.output.back().is_some_and(|l| self.filter_match(l)))
+        {
+            self.scroll += 1;
+        }
     }
     pub fn submit(&mut self, line: &str) -> Vec<Effect> {
         let line = line.trim();
@@ -1594,6 +1645,9 @@ impl Console {
         if let Some(time) = input.time {
             self.clock = time;
         }
+        if let Some(effects) = self.console_pointer(input) {
+            return effects;
+        }
         let ctrl_key = |name: &str| input.ctrl && input.binding_keys.iter().any(|k| k == name);
         let editor = &mut self.editor;
         if !input.ctrl {
@@ -1686,8 +1740,13 @@ impl Console {
             self.editor.refresh(&self.completion);
         }
         if ctrl_key("KeyL") {
+            self.output_start += self.output.len() as u64;
             self.output.clear();
             self.scroll = 0;
+            self.selection = None;
+        }
+        if input.copy {
+            self.copied = self.selected_text();
         }
         if input.pressed(Key::Enter) {
             let line = self.editor.submit();
@@ -1696,6 +1755,152 @@ impl Console {
         }
         Vec::new()
     }
+    /// Pointer input of the console dialog: the close and Submit buttons, the history scroll
+    /// bar, the wheel, and dragging over history rows to select them. `Some` when a button
+    /// ended this frame's input (the console closed, or the line was submitted).
+    fn console_pointer(&mut self, input: &Input) -> Option<Vec<Effect>> {
+        let layout = self.dialog_layout();
+        let view = HistoryView::new(&layout);
+        let point = input.pointer.map(|p| layout.local(p));
+        let down = input.click || input.held;
+        let total = self.shown_lines().len();
+        let max_scroll = total.saturating_sub(view.rows);
+        if input.wheel != 0. {
+            let steps = (input.wheel * 3.).round() as i64;
+            self.scroll = (self.scroll as i64 + steps).clamp(0, max_scroll as i64) as usize;
+        }
+        self.scroll = self.scroll.min(max_scroll);
+        let first = total - view.rows.min(total) - self.scroll;
+        let bar = ScrollBarLayout::new(view.bar, first, view.rows, total);
+        if !self.selecting && self.history_bar.wants(&bar, point, input.click) {
+            if let Some(first) = self.history_bar.pointer(
+                &bar,
+                point,
+                down,
+                input.click,
+                input.time,
+                first,
+                view.rows,
+            ) {
+                self.scroll = max_scroll.saturating_sub(first);
+            }
+            self.console_buttons.occlude(down);
+            self.console_hover = None;
+            return None;
+        }
+        let hovered = point.and_then(|p| {
+            [
+                (ConsoleButton::Close, layout.close),
+                (ConsoleButton::Submit, layout.submit),
+            ]
+            .into_iter()
+            .find(|(_, rect)| rect.contains(p))
+            .map(|(button, _)| button)
+        });
+        if self.selecting {
+            self.console_buttons.occlude(down);
+            self.console_hover = None;
+        } else {
+            self.console_hover = hovered;
+            match self
+                .console_buttons
+                .update(hovered, down, input.click, input.released)
+            {
+                Some(ConsoleButton::Close) => {
+                    self.console_hover = None;
+                    self.toggle();
+                    return Some(vec![Effect::PlaySound(RELEASE_SOUND.into())]);
+                }
+                Some(ConsoleButton::Submit) => {
+                    let line = self.editor.submit();
+                    self.scroll = 0;
+                    let mut effects = vec![Effect::PlaySound(RELEASE_SOUND.into())];
+                    effects.extend(self.submit(&line));
+                    return Some(effects);
+                }
+                None => {}
+            }
+        }
+        if let Some(p) = point {
+            if input.click && hovered.is_none() && view.text.contains(p) {
+                self.selecting = true;
+                self.selection = view.row_at(p.y, false).and_then(|row| {
+                    self.shown_lines()
+                        .get(first + row)
+                        .map(|(number, _)| Selection::at(*number))
+                });
+            } else if self.selecting && down {
+                // Dragging past the top or bottom scrolls the history a row per frame.
+                if p.y < view.text.y {
+                    self.scroll = (self.scroll + 1).min(max_scroll);
+                } else if p.y > view.text.y + view.text.h {
+                    self.scroll = self.scroll.saturating_sub(1);
+                }
+                let first = total - view.rows.min(total) - self.scroll;
+                let lines = self.shown_lines();
+                let row = view.row_at(p.y, true).unwrap_or(0);
+                let line = lines.get(first + row).or(lines.last()).map(|(n, _)| *n);
+                if let (Some(selection), Some(line)) = (self.selection.as_mut(), line) {
+                    selection.head = line;
+                }
+            }
+        }
+        if !down {
+            self.selecting = false;
+        }
+        None
+    }
+
+    fn dialog_layout(&self) -> DialogLayout {
+        DialogLayout::new(vec2(self.canvas.width(), self.canvas.height()))
+    }
+
+    /// The output the history shows (`con_filter_enable` 1 hides lines without
+    /// `con_filter_text`), with each line's number.
+    fn shown_lines(&self) -> Vec<(u64, &Line)> {
+        (self.output_start..)
+            .zip(self.output.iter())
+            .filter(|(_, line)| self.con_filter != 1 || self.filter_match(line))
+            .collect()
+    }
+
+    /// A line as the history shows it, with its time under `con_timestamp`.
+    fn shown_text(&self, line: &Line) -> String {
+        if self.con_timestamp {
+            format!("[{:7.2}] {}", line.time, line.text)
+        } else {
+            line.text.clone()
+        }
+    }
+
+    /// The selected history rows as text, one line each.
+    fn selected_text(&self) -> Option<String> {
+        let selection = self.selection?;
+        let lines: Vec<String> = self
+            .shown_lines()
+            .into_iter()
+            .filter(|(number, _)| selection.contains(*number))
+            .map(|(_, line)| self.shown_text(line))
+            .collect();
+        (!lines.is_empty()).then(|| lines.join("\n"))
+    }
+
+    /// Text the copy shortcut copied from the history, for the host to put on the clipboard.
+    pub fn take_copied(&mut self) -> Option<String> {
+        self.copied.take()
+    }
+
+    fn console_button_state(&self, button: ConsoleButton) -> ButtonState {
+        let hovered = self.console_hover == Some(button);
+        ButtonState {
+            armed: self.console_buttons.armable(self.console_hover) == Some(button),
+            pressed: hovered && self.console_buttons.is_pressed(button),
+            enabled: true,
+            // SDK `CConsolePanel` makes Submit the default button.
+            default: button == ConsoleButton::Submit,
+        }
+    }
+
     /// The menu shown in the current mode, if any.
     fn game_menu(&self) -> Option<&GameMenu> {
         match self.mode {
@@ -1905,14 +2110,18 @@ impl Console {
             }
             return;
         }
-        // The options dialog is drawn over the menu it was opened from.
-        let shown = if self.mode == Mode::Options {
-            self.options_return
+        // The console and the options dialog are drawn over what they were opened from.
+        let base = if self.mode == Mode::Console {
+            self.previous
         } else {
             self.mode
         };
+        let shown = if base == Mode::Options {
+            self.options_return
+        } else {
+            base
+        };
         let menu_shown = shown == Mode::Pause || shown == Mode::MainMenu;
-        let scale = self.canvas.height() / 720.;
         if menu_shown {
             let menu_cat = if shown == Mode::Pause {
                 self.pause_menu.category()
@@ -2126,11 +2335,12 @@ impl Console {
                 let (origin, scale, layout) = self.quit_geometry(confirm);
                 confirm.draw(&self.painter(origin, scale), &layout);
             }
-            if self.mode == Mode::Options {
+            if base == Mode::Options {
                 self.options.draw(&self.painter(Vec2::ZERO, 1.));
             }
-        } else {
-            self.draw_console(time, scale);
+        }
+        if self.mode == Mode::Console {
+            self.draw_console(time);
         }
         if let Some(loading) = &self.loading_dialog {
             let scale = Painter::scale_for(self.canvas.height());
@@ -2144,9 +2354,53 @@ const WARNING_TEXT: Color = Color::new(1.0, 0.8, 0.3, 1.0);
 const ERROR_TEXT: Color = Color::new(1.0, 0.4, 0.35, 1.0);
 /// SDK `CConsolePanel` shows at most this many completion rows, the last one `...` when more.
 const COMPLETION_ROWS: usize = 10;
-/// Console row height and text size in 720-line canvas units.
-const CONSOLE_ROW: f32 = 19.;
-const CONSOLE_TEXT: f32 = 16.;
+/// Dialog push buttons play this when they activate.
+const RELEASE_SOUND: &str = "ui/buttonclickrelease.wav";
+/// Console history and completion row height, text size and baseline distance from the row
+/// bottom, in layout units.
+const CONSOLE_ROW: f32 = 14.;
+const CONSOLE_TEXT: f32 = 12.;
+const CONSOLE_DESCENT: f32 = 3.;
+/// Space between the history's border and its rows.
+const HISTORY_PAD: f32 = 3.;
+
+/// The history's text rows and scroll bar inside its border, in frame layout units.
+struct HistoryView {
+    text: Rect,
+    bar: Rect,
+    /// Whole rows that fit.
+    rows: usize,
+}
+
+impl HistoryView {
+    fn new(layout: &DialogLayout) -> Self {
+        let h = layout.history;
+        let bar = Rect::new(
+            h.x + h.w - 1. - SCROLLBAR_WIDTH,
+            h.y + 1.,
+            SCROLLBAR_WIDTH,
+            (h.h - 2.).max(0.),
+        );
+        let text = Rect::new(
+            h.x + HISTORY_PAD,
+            h.y + HISTORY_PAD,
+            (bar.x - h.x - 2. * HISTORY_PAD).max(0.),
+            (h.h - 2. * HISTORY_PAD).max(0.),
+        );
+        let rows = ((text.h / CONSOLE_ROW) as usize).max(1);
+        Self { text, bar, rows }
+    }
+
+    /// The row at layout height `y`; `clamp` puts points above or below on the first or last.
+    fn row_at(&self, y: f32, clamp: bool) -> Option<usize> {
+        let row = ((y - self.text.y) / CONSOLE_ROW).floor();
+        if clamp {
+            Some(row.clamp(0., (self.rows - 1) as f32) as usize)
+        } else {
+            (row >= 0. && (row as usize) < self.rows).then_some(row as usize)
+        }
+    }
+}
 
 impl Console {
     /// Whether `line` passes `con_filter_enable` 1 (and is drawn brighter under 2).
@@ -2170,132 +2424,119 @@ impl Console {
         }
     }
 
-    fn draw_console(&self, time: f64, scale: f32) {
+    /// The console dialog (SDK `CConsoleDialog`): a titled frame with the history, the entry
+    /// and the Submit button, then the completion popup over everything.
+    fn draw_console(&self, time: f64) {
+        let layout = self.dialog_layout();
+        let scale = layout.scale;
+        let painter = self.painter(layout.origin, scale);
+        let em = (CONSOLE_TEXT * scale) as u16 as f32;
         let text = |content: &str, x: f32, y: f32, color: Color| {
             text(
                 &self.canvas,
                 content,
                 vec2(x, y),
-                (CONSOLE_TEXT * scale) as u16 as f32,
+                em,
                 1.,
                 self.mono.as_ref(),
                 color,
             );
         };
-        let width_of = |content: &str| {
-            self.mono.as_ref().map_or(0., |font| {
-                font.width_em(content, (CONSOLE_TEXT * scale) as u16 as f32)
-            })
-        };
-        let left = 32. * scale;
-        let top = 32. * scale;
-        let width = (self.canvas.width() - 64. * scale).min(1000. * scale);
-        let height = self.canvas.height() - 64. * scale;
-        self.canvas.rectangle(
-            0.,
-            0.,
-            self.canvas.width(),
-            self.canvas.height(),
-            Color::new(0., 0., 0., 0.3),
+        let localization = &self.gameui.localization;
+        painter.frame_with_close(
+            layout.size,
+            &localization.text("#Console_Title"),
+            Some(self.console_button_state(ConsoleButton::Close)),
         );
-        self.canvas
-            .rectangle(left, top, width, height, self.style.panel);
-        rectangle_lines(
-            &self.canvas,
-            left,
-            top,
-            width,
-            height,
-            1.,
-            Color::from_rgba(150, 158, 147, 255),
-        );
-        let console_title = self.gameui.localization.text("#GameUI_Console");
-        text(&console_title, left + 12. * scale, top + 24. * scale, WHITE);
-        self.canvas.rectangle(
-            left + 10. * scale,
-            top + 36. * scale,
-            width - 20. * scale,
-            height - 88. * scale,
-            self.style.entry,
-        );
-        // Output: filtered (con_filter_enable 1), scrolled, one color per level.
-        let lines: Vec<&Line> = self
-            .output
-            .iter()
-            .filter(|line| self.con_filter != 1 || self.filter_match(line))
-            .collect();
-        let rows = ((height / scale - 108.) / CONSOLE_ROW).max(1.) as usize;
-        let end = lines.len().saturating_sub(self.scroll);
-        let start = end.saturating_sub(rows);
-        let max_width = width - 36. * scale;
-        for (i, line) in lines[start..end].iter().enumerate() {
-            let shown = if self.con_timestamp {
-                format!("[{:7.2}] {}", line.time, line.text)
+
+        // History (`RichText`, `DepressedButtonBorder`): filtered, scrolled, one color per
+        // level, selected rows highlighted.
+        painter.fill(layout.history, self.style.entry);
+        painter.sunken(layout.history);
+        let view = HistoryView::new(&layout);
+        let lines = self.shown_lines();
+        let rows = view.rows.min(lines.len());
+        let scroll = self.scroll.min(lines.len() - rows);
+        let first = lines.len() - rows - scroll;
+        let area = layout.canvas(view.text);
+        let row = CONSOLE_ROW * scale;
+        for (i, (number, line)) in lines[first..first + rows].iter().enumerate() {
+            let top = area.y + i as f32 * row;
+            let selected = self.selection.is_some_and(|s| s.contains(*number));
+            let color = if selected {
+                self.canvas
+                    .rectangle(area.x, top, area.w, row, self.style.selected_bg);
+                self.style.selected_text
             } else {
-                line.text.clone()
+                self.line_color(line)
             };
-            // Bound horizontal text to the panel. Full output remains in runtime reports.
+            // Long lines are clipped to the history; copying takes them whole.
+            let shown = self.shown_text(line);
             let mut clipped = String::new();
             for c in shown.chars() {
                 clipped.push(c);
-                if width_of(&clipped) > max_width {
+                if self.console_text_width(&clipped, scale) > area.w {
                     clipped.pop();
                     break;
                 }
             }
-            text(
-                &clipped,
-                left + 18. * scale,
-                top + (57. + i as f32 * CONSOLE_ROW) * scale,
-                self.line_color(line),
-            );
+            text(&clipped, area.x, top + row - CONSOLE_DESCENT * scale, color);
         }
-        // Input line, or the reverse history search in its place.
-        let bottom = top + height - 38. * scale;
-        let entry_x = left + 10. * scale;
-        let entry_w = width - 20. * scale;
-        self.canvas
-            .rectangle(entry_x, bottom, entry_w, 28. * scale, self.style.entry);
-        let columns = ((width / scale - 40.) / 9.).max(1.) as usize;
-        let (prompt, line, cursor) = match self.editor.search() {
-            Some((query, found)) => {
-                let label = self
-                    .gameui
-                    .localization
-                    .text("#HL2RS_Console_ReverseSearch");
-                let found = found.unwrap_or_default();
-                (
-                    format!("({label})`{query}': "),
-                    found.to_owned(),
-                    found.chars().count(),
-                )
-            }
-            None => (
-                "] ".to_owned(),
-                self.editor.text().to_owned(),
-                self.editor.cursor(),
-            ),
-        };
-        let start = cursor.saturating_sub(columns.saturating_sub(1));
-        let shown: String = line.chars().skip(start).take(columns).collect();
-        text(
-            &format!("{prompt}{shown}"),
-            left + 15. * scale,
-            bottom + 20. * scale,
-            WHITE,
+        painter.scroll_bar(
+            view.bar,
+            first,
+            view.rows,
+            lines.len(),
+            self.history_bar.pressed(),
         );
+
+        // The entry (`TextEntry`), or the reverse history search in its place.
+        painter.fill(layout.entry, painter.theme.entry_bg);
+        painter.sunken(layout.entry);
+        let (line, cursor) = match self.editor.search() {
+            Some((query, found)) => {
+                let label = localization.text("#HL2RS_Console_ReverseSearch");
+                let line = format!("({label})`{query}': {}", found.unwrap_or_default());
+                let cursor = line.chars().count();
+                (line, cursor)
+            }
+            None => (self.editor.text().to_owned(), self.editor.cursor()),
+        };
+        let inner = Rect::new(
+            layout.entry.x + 3.,
+            layout.entry.y,
+            layout.entry.w - 6.,
+            layout.entry.h,
+        );
+        // Scroll the line so the cursor stays inside the entry.
+        let chars: Vec<char> = line.chars().collect();
+        let width = |from: usize, to: usize| {
+            painter.text_width(&chars[from..to].iter().collect::<String>(), false)
+        };
+        let mut start = 0;
+        while start < cursor && width(start, cursor) > inner.w - 2. {
+            start += 1;
+        }
+        let mut end = cursor;
+        while end < chars.len() && width(start, end + 1) <= inner.w {
+            end += 1;
+        }
+        let shown: String = chars[start..end].iter().collect();
+        painter.text_in(&shown, inner, Align::Left, painter.theme.text, false);
         if ((time * 2.) as u64).is_multiple_of(2) {
-            let before: String = line.chars().skip(start).take(cursor - start).collect();
-            let cursor_x = width_of(&format!("{prompt}{before}"));
-            self.canvas.rectangle(
-                left + 15. * scale + cursor_x,
-                bottom + 5. * scale,
-                1.,
-                18. * scale,
-                WHITE,
+            let x = inner.x + width(start, cursor) + 1.;
+            painter.fill(
+                Rect::new(x, inner.y + 4., 1., inner.h - 8.),
+                painter.theme.text,
             );
         }
-        self.draw_completion(scale, (entry_x, bottom, entry_w, 28. * scale), &text);
+        painter.button(
+            layout.submit,
+            &localization.text("#Console_Submit"),
+            self.console_button_state(ConsoleButton::Submit),
+        );
+        let entry = layout.canvas(layout.entry);
+        self.draw_completion(scale, (entry.x, entry.y, entry.w, entry.h), &text);
     }
 
     /// The completion popup (SDK `CConsolePanel` completion list, VGUI menu colors): a help
@@ -2405,7 +2646,12 @@ impl Console {
                         break;
                     }
                 }
-                text(&clipped, cx, ry + 15. * scale, color);
+                text(
+                    &clipped,
+                    cx,
+                    ry + (CONSOLE_ROW - CONSOLE_DESCENT) * scale,
+                    color,
+                );
                 cx += self.console_text_width(&clipped, scale);
             }
         }
@@ -2714,6 +2960,152 @@ mod tests {
         });
         assert!(console.output.is_empty(), "Ctrl+L clears the output");
     }
+    /// Canvas point at the middle of a frame-relative layout rectangle of the console dialog.
+    fn dialog_point(console: &Console, rect: Rect) -> Vec2 {
+        let r = console.dialog_layout().canvas(rect);
+        vec2(r.x + r.w * 0.5, r.y + r.h * 0.5)
+    }
+    /// Canvas point on the history row `row` (0 is the top row shown).
+    fn history_point(console: &Console, row: usize) -> Vec2 {
+        let layout = console.dialog_layout();
+        let text = layout.canvas(HistoryView::new(&layout).text);
+        vec2(
+            text.x + 10.,
+            text.y + (row as f32 + 0.5) * CONSOLE_ROW * layout.scale,
+        )
+    }
+    fn press(console: &mut Console, at: Vec2) -> Vec<Effect> {
+        console.input(&Input {
+            pointer: Some(at),
+            click: true,
+            held: true,
+            ..Default::default()
+        })
+    }
+    fn release(console: &mut Console, at: Vec2) -> Vec<Effect> {
+        console.input(&Input {
+            pointer: Some(at),
+            released: true,
+            ..Default::default()
+        })
+    }
+    /// Drags over the history from row `from` to row `to`.
+    fn drag(console: &mut Console, from: usize, to: usize) {
+        press(console, history_point(console, from));
+        let to = history_point(console, to);
+        console.input(&Input {
+            pointer: Some(to),
+            held: true,
+            ..Default::default()
+        });
+        release(console, to);
+    }
+    fn copy(console: &mut Console) -> Option<String> {
+        console.input(&Input {
+            copy: true,
+            ..Default::default()
+        });
+        console.take_copied()
+    }
+
+    #[test]
+    fn dragging_over_history_rows_selects_them_for_copy() {
+        let mut console = Console::default();
+        console.canvas.resize(1024., 768.);
+        console.toggle();
+        console.output.clear();
+        for i in 0..5 {
+            console.log(format!("line {i}"));
+        }
+        // Rows 1..=3 by dragging upwards; the selection holds whole lines.
+        drag(&mut console, 3, 1);
+        assert_eq!(
+            copy(&mut console).as_deref(),
+            Some("line 1\nline 2\nline 3")
+        );
+        assert_eq!(console.take_copied(), None, "taken once");
+
+        // New output and lines dropped from the front leave the selection on its lines.
+        for i in 5..OUTPUT_LINES + 5 {
+            console.log(format!("line {i}"));
+        }
+        assert_eq!(copy(&mut console), None, "the selected lines scrolled out");
+        console.output.clear();
+        console.output_start = 0;
+        for i in 0..5 {
+            console.log(format!("line {i}"));
+        }
+        drag(&mut console, 2, 2);
+        console.log("printed after");
+        console.output.pop_front();
+        console.output_start += 1;
+        assert_eq!(copy(&mut console).as_deref(), Some("line 2"));
+
+        // Copying follows what the history shows: the filter and timestamps.
+        drag(&mut console, 0, 3);
+        console.submit("con_filter_enable 1; con_filter_text 3; con_timestamp 1");
+        let copied = copy(&mut console).unwrap();
+        assert!(copied.ends_with("] line 3"), "{copied}");
+        assert!(!copied.contains('\n'), "{copied}");
+
+        console.input(&Input {
+            ctrl: true,
+            binding_keys: vec!["KeyL".into()],
+            ..Default::default()
+        });
+        assert_eq!(copy(&mut console), None, "Ctrl+L clears the selection");
+    }
+
+    #[test]
+    fn scrolled_back_history_stays_put_while_output_arrives() {
+        let mut console = Console::default();
+        console.canvas.resize(1024., 768.);
+        console.toggle();
+        for i in 0..200 {
+            console.log(format!("line {i}"));
+        }
+        console.input(&Input {
+            wheel: 2.,
+            ..Default::default()
+        });
+        assert_eq!(console.scroll, 6);
+        console.log("more");
+        assert_eq!(console.scroll, 7);
+        keys(&mut console, &[Key::Enter]);
+        assert_eq!(console.scroll, 0, "submitting returns to the newest output");
+    }
+
+    #[test]
+    fn submit_button_runs_the_line_and_close_button_closes_the_console() {
+        let mut console = Console::default();
+        console.canvas.resize(1024., 768.);
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+        console.toggle();
+        console.input(&Input {
+            text: "echo clicked".into(),
+            ..Default::default()
+        });
+        let submit = dialog_point(&console, console.dialog_layout().submit);
+        press(&mut console, submit);
+        assert_eq!(console.input_line(), "echo clicked", "runs on release");
+        assert_eq!(
+            release(&mut console, submit),
+            vec![Effect::PlaySound(RELEASE_SOUND.into())]
+        );
+        assert_eq!(console.input_line(), "");
+        assert_eq!(
+            console.output.back().map(|l| l.text.as_str()),
+            Some("clicked")
+        );
+
+        let close = dialog_point(&console, console.dialog_layout().close);
+        press(&mut console, close);
+        assert_eq!(console.mode, Mode::Console);
+        release(&mut console, close);
+        assert_eq!(console.mode, Mode::Pause, "back to what it was opened from");
+    }
+
     /// Pointer position at the middle of menu row `index`.
     fn row(console: &Console, index: usize) -> Option<Vec2> {
         let geometry = console.menu_layout.geometry(console.canvas.height());
