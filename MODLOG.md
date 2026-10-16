@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: brighter check box and radio button labels at rest
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `widgets::Theme::label_text` (scheme `Label.TextColor`, OffWhite 221 by default) and `Theme::toggle_text`, shared by `Painter::check_box` and `Painter::radio`: OffWhite at rest, White (`Label.TextBrightColor`) hovered or pressed, the disabled color when disabled. Before, labels at rest used `Label.TextDullColor` (190).
+
+**Why:** owner report: enabled, idle check box and radio labels were far too dim; hover must stay brighter.
+
+**Tested how:** unit test (rest between dull and hover, scheme mapping); hl2-ui tests, strict clippy, Windows check; packaged capture of Keyboard > Advanced.
+
+**Result:** labels read clearly at rest and still brighten on hover.
+
+**Still broken or not tested:** the theme still runs on defaults (the installed `SourceSchemeBase.res` it reads is empty); the default matches the installed `sourcescheme.res` value.
+
+**Next:** owner check.
+
 ## 2026-10-16 GameUI: every dialog stacked on the Options dialog is opaque
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

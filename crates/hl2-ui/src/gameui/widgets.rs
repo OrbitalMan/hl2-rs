@@ -58,6 +58,9 @@ pub struct Theme {
     pub frame_bg: Color,
     pub title_text: Color,
     pub text: Color,
+    /// Normal label text (`Label.TextColor`, OffWhite): check box and radio button labels at
+    /// rest, between `text_dull` and the brighter hover `text`.
+    pub label_text: Color,
     pub text_dull: Color,
     pub text_disabled: Color,
     pub text_disabled_shadow: Color,
@@ -112,6 +115,7 @@ impl Default for Theme {
             frame_bg: rgba(132, 132, 132, 212),
             title_text: rgba(255, 255, 255, 255),
             text: rgba(255, 255, 255, 255),
+            label_text: rgba(221, 221, 221, 255),
             text_dull: rgba(190, 190, 190, 255),
             text_disabled: rgba(117, 117, 117, 255),
             text_disabled_shadow: rgba(30, 30, 30, 255),
@@ -166,10 +170,11 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 36] = [
+        let fields: [(&str, &mut Color); 37] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
+            ("Label.TextColor", &mut theme.label_text),
             ("Label.TextDullColor", &mut theme.text_dull),
             ("Label.DisabledFgColor1", &mut theme.text_disabled),
             ("Label.DisabledFgColor2", &mut theme.text_disabled_shadow),
@@ -281,6 +286,18 @@ impl Theme {
     /// from the active flag alone. As an owner-approved deviation, a hovered inactive, enabled
     /// tab gets the same slight `Menu.BgColor` fill as a hovered push button; the active tab
     /// never changes, and pressing adds nothing.
+    /// Label color of a check box or radio button: the normal label color at rest, the bright
+    /// text while hovered or pressed, the disabled color when disabled.
+    pub fn toggle_text(&self, state: ButtonState) -> Color {
+        if !state.enabled {
+            self.text_disabled
+        } else if state.armed || state.pressed {
+            self.text
+        } else {
+            self.label_text
+        }
+    }
+
     pub fn tab_style(&self, active: bool, state: ButtonState) -> TabStyle {
         TabStyle {
             text: if active { self.text } else { self.text_dull },
@@ -1125,13 +1142,7 @@ impl Painter<'_> {
             self.check_mark(bx, color, offset);
         }
         let text_rect = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
-        let text_color = if !state.enabled {
-            self.theme.text_disabled
-        } else if state.armed || state.pressed {
-            self.theme.text
-        } else {
-            self.theme.text_dull
-        };
+        let text_color = self.theme.toggle_text(state);
         if state.enabled {
             self.text_in(label, text_rect, Align::Left, text_color, false);
         } else {
@@ -1163,13 +1174,7 @@ impl Painter<'_> {
             self.disc(center + offset, 2.5, color);
         }
         let text_rect = Rect::new(rect.x + LABEL_INDENT, rect.y, rect.w - LABEL_INDENT, rect.h);
-        let text_color = if !state.enabled {
-            self.theme.text_disabled
-        } else if state.armed || state.pressed {
-            self.theme.text
-        } else {
-            self.theme.text_dull
-        };
+        let text_color = self.theme.toggle_text(state);
         if state.enabled {
             self.text_in(label, text_rect, Align::Left, text_color, false);
         } else {
@@ -2146,6 +2151,28 @@ mod tests {
         assert_eq!(theme.frame_bg, Color::from_rgba(1, 2, 3, 4));
         assert_eq!(theme.selection_bg, Color::from_rgba(255, 155, 0, 255));
         assert_eq!(theme.slider_nob, Theme::default().slider_nob);
+    }
+
+    #[test]
+    fn toggle_labels_rest_between_dull_and_hover_text() {
+        let theme = Theme::default();
+        let rest = theme.toggle_text(ButtonState::new(true));
+        let hover = theme.toggle_text(ButtonState::active(true, true, false));
+        let pressed = theme.toggle_text(ButtonState::active(true, false, true));
+        assert!(rest.r > theme.text_dull.r && rest.r < hover.r, "{rest:?}");
+        assert_eq!((hover, pressed), (theme.text, theme.text));
+        assert_eq!(
+            theme.toggle_text(ButtonState::new(false)),
+            theme.text_disabled
+        );
+        let roots = source_assets::keyvalues::parse_resource(
+            br#"Scheme { Colors { OffWhite "221 221 221 255" } BaseSettings { Label.TextColor OffWhite } }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            Theme::from_scheme(&roots[0]).label_text,
+            Color::from_rgba(221, 221, 221, 255)
+        );
     }
 
     /// The desktop scheme's push button entries, with the console-only armed color.

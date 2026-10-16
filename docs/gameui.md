@@ -236,6 +236,10 @@ Semantics:
   moves below it (`FOOTER_GAP` 8) and the frame grows by the same amount (`footer_reflow`; footer =
   OK/Close buttons plus an unbound caption at most two button heights above them). The FOV
   slider's "0.00"/"1.00" end captions are the layout's own `leftText`/`rightText`, kept as authored.
+- Check box and radio button labels: `Theme::toggle_text` (scheme `Label.TextColor`, OffWhite 221,
+  at rest; `Label.TextBrightColor` White while hovered or pressed; disabled color when disabled).
+  Owner request (2026-10-16): the former rest color, `Label.TextDullColor`, was too dim on the
+  opaque stacked dialogs.
 - Stacked layers: every dialog drawn over the Options dialog (brightness, credits, Keyboard and
   Video Advanced, the confirmation box) uses `Theme::stacked` (opaque `frame_bg`), so the dialog
   below never shows through; the Options dialog itself, over the game scene, keeps the scheme's
