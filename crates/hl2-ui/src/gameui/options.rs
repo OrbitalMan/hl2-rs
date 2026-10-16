@@ -119,6 +119,8 @@ pub(crate) enum Sub {
     VideoCredits,
     /// Keyboard > Advanced; its OK applies its settings at once, like retail.
     KeyboardAdvanced,
+    /// Video > Advanced; likewise.
+    VideoAdvanced,
 }
 
 impl Sub {
@@ -132,6 +134,7 @@ impl Sub {
             Self::AudioCredits => Panel::AudioCredits,
             Self::VideoCredits => Panel::VideoCredits,
             Self::KeyboardAdvanced => Panel::KeyboardAdvanced,
+            Self::VideoAdvanced => Panel::VideoAdvanced,
         }
     }
 
@@ -140,13 +143,17 @@ impl Sub {
             Self::Gamma => "#GameUI_AdjustGamma_Title",
             Self::AudioCredits | Self::VideoCredits => "#GameUI_ThirdPartyTechCredits",
             Self::KeyboardAdvanced => "#GameUI_KeyboardAdvanced_Title",
+            Self::VideoAdvanced => "#GameUI_VideoAdvanced_Title",
         }
     }
 
     fn fallback_size(self) -> Vec2 {
         match self {
             Self::Gamma => GAMMA_SIZE,
-            Self::AudioCredits | Self::VideoCredits | Self::KeyboardAdvanced => CREDITS_SIZE,
+            Self::AudioCredits
+            | Self::VideoCredits
+            | Self::KeyboardAdvanced
+            | Self::VideoAdvanced => CREDITS_SIZE,
         }
     }
 
@@ -155,6 +162,10 @@ impl Sub {
     fn apply_on_ok(self, from: &Config, to: &mut Config) -> bool {
         match self {
             Self::KeyboardAdvanced => to.keyboard = from.keyboard.clone(),
+            Self::VideoAdvanced => {
+                to.video.advanced = from.video.advanced.clone();
+                to.video.fov = from.video.fov;
+            }
             Self::Gamma | Self::AudioCredits | Self::VideoCredits => return false,
         }
         true
@@ -222,7 +233,8 @@ struct Widget<'a> {
 
 impl Widget<'_> {
     fn interactive(&self) -> bool {
-        self.binding.is_some()
+        self.binding
+            .is_some_and(|b| !matches!(b, Binding::ValueLabel(_)))
             || matches!(
                 self.control.kind,
                 ControlKind::Button | ControlKind::UrlButton
@@ -267,7 +279,7 @@ pub struct OptionsDialog {
     last_armed: Option<Target>,
     sounds: Vec<String>,
     tracker: widgets::ButtonTracker<Target>,
-    drag: Option<(Value, Rect)>,
+    drag: Option<(Value, Rect, widgets::SliderRange)>,
     combo: Option<OpenCombo>,
     editing: Option<Editing>,
     keys: KeyList,
@@ -661,6 +673,12 @@ impl OptionsDialog {
                 }
             }
             let pointer = local(centered(canvas, size, scale));
+            // A combo list opened in the sub-dialog is the topmost layer there.
+            if let Some(combo) = self.combo.take() {
+                self.occlude(input);
+                self.combo_input(combo, input, pointer);
+                return OptionsOutcome::None;
+            }
             return self.sub_input(sub, size, input, pointer);
         }
         let pointer = local(centered(canvas, DIALOG_SIZE, scale));
@@ -727,11 +745,11 @@ impl OptionsDialog {
         pointer: Option<Vec2>,
         input: &Input,
     ) -> Option<Target> {
-        if let Some((value, rect)) = self.drag {
+        if let Some((value, rect, range)) = self.drag {
             if input.held {
                 if let Some(p) = pointer {
                     let fraction = widgets::slider_fraction_at(rect, p.x);
-                    value.set(&mut self.draft.config, value.range().value(fraction));
+                    value.set(&mut self.draft.config, range.value(fraction));
                 }
                 return None;
             }
@@ -921,8 +939,9 @@ impl OptionsDialog {
             Some(Binding::Skill(skill)) => self.draft.config.gameplay.skill = skill,
             Some(Binding::Slider(value)) => {
                 let fraction = widgets::slider_fraction_at(widget.rect, pointer.x);
-                value.set(&mut self.draft.config, value.range().value(fraction));
-                self.drag = Some((value, widget.rect));
+                let range = value.slider_range(widget.control.range);
+                value.set(&mut self.draft.config, range.value(fraction));
+                self.drag = Some((value, widget.rect, range));
             }
             Some(Binding::Entry(value)) => {
                 if self.editing.as_ref().is_none_or(|e| e.value != value) {
@@ -950,7 +969,7 @@ impl OptionsDialog {
             }
             Some(Binding::Command(command)) => return self.command(command),
             Some(Binding::KeyList) => self.key_list_click(widget.rect, pointer),
-            None => {}
+            Some(Binding::ValueLabel(_)) | None => {}
         }
         OptionsOutcome::None
     }
@@ -1011,8 +1030,7 @@ impl OptionsDialog {
                         .insert(command.clone(), keys::UNBOUND.into());
                 }
             }
-            // Placeholder: disabled, so activation only logs its label (see `activate`).
-            Command::VideoAdvanced => {}
+            Command::VideoAdvanced => self.open_sub(Sub::VideoAdvanced),
             Command::SubOk => return self.ok_sub(),
             Command::SubCancel => self.cancel_sub(),
         }
@@ -1459,14 +1477,8 @@ impl OptionsDialog {
                 },
             );
         }
-        if let Some(OpenCombo { items, popup, .. }) = &self.combo {
-            p.menu_list(
-                popup.list,
-                items,
-                popup.first,
-                popup.highlight,
-                popup.bar_pressed(),
-            );
+        if self.sub.is_none() {
+            self.draw_combo(&p);
         }
         if let Some(sub) = self.sub {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
@@ -1505,6 +1517,7 @@ impl OptionsDialog {
                     let pressed = !sub_modal && self.pressed == target;
                     self.draw_widget(&sp, widget, &env, armed, pressed);
                 }
+                self.draw_combo(&sp);
             }
         }
         if let Some(confirm) = &self.confirm {
@@ -1524,12 +1537,34 @@ impl OptionsDialog {
         }
     }
 
+    /// The open combo list, over the layer (page or sub-dialog) that opened it.
+    fn draw_combo(&self, p: &Painter) {
+        if let Some(OpenCombo { items, popup, .. }) = &self.combo {
+            p.menu_list(
+                popup.list,
+                items,
+                popup.first,
+                popup.highlight,
+                popup.bar_pressed(),
+            );
+        }
+    }
+
     fn draw_widget(&self, p: &Painter, w: &Widget, env: &Env, armed: bool, pressed: bool) {
         let loc = &self.res.localization;
         let c = w.control;
         let label = loc.localize(&c.label);
         let config = &self.draft.config;
         match (&c.kind, w.binding) {
+            (ControlKind::Label, Some(Binding::ValueLabel(value))) => {
+                let align = match c.align {
+                    LayoutAlign::Center => Align::Center,
+                    LayoutAlign::East => Align::Right,
+                    _ => Align::Left,
+                };
+                let text = format!("{:.0}", value.get(config));
+                p.label(&text, w.rect, align, w.enabled);
+            }
             (ControlKind::Label, _) => {
                 let multiline = c.align == LayoutAlign::NorthWest || c.tall >= FONT_TALL * 2.;
                 if multiline {
@@ -1581,7 +1616,9 @@ impl OptionsDialog {
             (ControlKind::ComboBox, _) => p.combo(w.rect, "", false, false),
             (ControlKind::Slider, binding) => {
                 let fraction = match binding {
-                    Some(Binding::Slider(value)) => value.range().fraction(value.get(config)),
+                    Some(Binding::Slider(value)) => {
+                        value.slider_range(c.range).fraction(value.get(config))
+                    }
                     _ => 0.,
                 };
                 p.slider(
@@ -1828,6 +1865,22 @@ mod tests {
         "Button2" { "ControlName" "Button" "fieldName" "Button2" "xpos" "182" "ypos" "100"
             "wide" "80" "tall" "24" "labelText" "#GameUI_Cancel" "Command" "Close" }
     }"##;
+    const VIDEO_ADVANCED: &str = r##""resource/OptionsSubVideoAdvancedDlg.res" {
+        "OptionsSubVideoAdvancedDlg" { "ControlName" "COptionsSubVideoAdvancedDlg"
+            "fieldName" "OptionsSubVideoAdvancedDlg" "wide" "482" "tall" "358" }
+        "frame_close" { "ControlName" "Button" "fieldName" "frame_close" "xpos" "457" "ypos" "8"
+            "wide" "18" "tall" "18" "labelText" "r" }
+        "VSync" { "ControlName" "ComboBox" "fieldName" "VSync" "xpos" "330" "ypos" "196"
+            "wide" "132" "tall" "24" }
+        "FovSlider" { "ControlName" "CCvarSlider" "fieldName" "FovSlider" "xpos" "176"
+            "ypos" "252" "wide" "140" "tall" "50" "minvalue" "75" "maxvalue" "110" }
+        "FOVValueLabel" { "ControlName" "Label" "fieldName" "FOVValueLabel" "xpos" "276"
+            "ypos" "232" "wide" "32" "tall" "24" "labelText" "75" "textAlignment" "east" }
+        "Button1" { "ControlName" "Button" "fieldName" "Button1" "xpos" "290" "ypos" "316"
+            "wide" "80" "tall" "24" "labelText" "#GameUI_OK" "Command" "OK" }
+        "Button2" { "ControlName" "Button" "fieldName" "Button2" "xpos" "382" "ypos" "316"
+            "wide" "80" "tall" "24" "labelText" "#GameUI_Cancel" "Command" "Close" }
+    }"##;
     const GAMMA: &str = r##""Resource/OptionsSubVideoGammaDlg.res" {
         "OptionsSubVideoGammaDlg" { "ControlName" "CGammaDialog" "fieldName" "OptionsSubVideoGammaDlg"
             "xpos" "0" "ypos" "0" "wide" "290" "tall" "396" }
@@ -1858,6 +1911,7 @@ mod tests {
             ("optionssubkeyboard", KEYBOARD),
             ("optionssubvideogammadlg", GAMMA),
             ("optionssubkeyboardadvanceddlg", KEYBOARD_ADVANCED),
+            ("optionssubvideoadvanceddlg", VIDEO_ADVANCED),
         ] {
             layouts.insert(name.to_owned(), Layout::parse(text.as_bytes()).unwrap());
         }
@@ -2331,14 +2385,14 @@ mod tests {
     }
 
     #[test]
-    fn placeholders_log_and_gamma_dialog_restores_on_cancel() {
+    fn video_advanced_opens_and_gamma_dialog_restores_on_cancel() {
         let mut h = Harness::new();
         h.tab(Tab::Video);
         h.click(page(300., 200.));
-        assert_eq!(
-            h.dialog.take_log(),
-            ["Advanced: not implemented in HL2-RS yet."]
-        );
+        assert_eq!(h.dialog.sub, Some(Sub::VideoAdvanced));
+        assert!(h.dialog.take_log().is_empty(), "no longer a placeholder");
+        assert!(h.dialog.escape(), "Escape closes the sub-dialog first");
+        assert_eq!(h.dialog.sub, None);
         h.click(page(300., 125.));
         assert_eq!(h.dialog.sub, Some(Sub::Gamma));
         // Gamma frame 290x396 centered: origin (495, 162); slider track at y 122.
@@ -2407,6 +2461,48 @@ mod tests {
         );
         assert!(h.dialog.draft().mouse.invert, "and stay in the draft");
         assert!(h.dialog.changed(), "so Apply stays enabled for them");
+    }
+
+    #[test]
+    fn video_advanced_combo_and_fov_slider_apply_on_ok() {
+        let mut h = Harness::new();
+        h.tab(Tab::Video);
+        h.click(page(300., 200.));
+        assert_eq!(h.dialog.sub, Some(Sub::VideoAdvanced));
+        // Frame record 482 x 358, centered at (399, 181).
+        let origin = vec2(399., 181.);
+        h.click(origin + vec2(330. + 66., 196. + 12.));
+        assert!(
+            h.dialog.combo.is_some(),
+            "the combo opens inside the sub-dialog"
+        );
+        h.click(origin + vec2(330. + 66., 220. + MENU_ROW * 0.5));
+        assert!(h.dialog.combo.is_none());
+        assert!(!h.dialog.draft().video.advanced.vsync, "Disabled picked");
+        // The FOV slider spans the layout's 75..110, not a page constant.
+        h.click(origin + vec2(176. + 139., 252. + SLIDER_TRACK_Y));
+        assert_eq!(h.dialog.draft().video.fov, 110.);
+        let res = h.dialog.res.clone();
+        let area = Rect::new(0., 0., 482., 358.);
+        let widgets = layout_widgets(
+            &res,
+            Panel::VideoAdvanced,
+            area,
+            &h.dialog.draft,
+            &Config::default(),
+        );
+        let label = widgets
+            .iter()
+            .find(|w| w.control.name == "FOVValueLabel")
+            .unwrap();
+        assert!(!label.interactive(), "the value label is display only");
+        assert!(widgets.iter().all(|w| w.control.name != "frame_close"));
+        let outcome = h.click(origin + vec2(290. + 40., 316. + 12.));
+        let OptionsOutcome::Apply(applied) = outcome else {
+            panic!("advanced OK applies at once: {outcome:?}");
+        };
+        assert!(!applied.video.advanced.vsync);
+        assert_eq!(applied.video.fov, 110.);
     }
 
     #[test]
@@ -2518,8 +2614,10 @@ mod tests {
         h.frame(Input::default());
         assert!(h.dialog.gamma_texture.is_some());
         // Sub-dialog OK/Cancel buttons bind through their layout `Command`, frame chrome is
-        // skipped, and every control lies below the title bar inside the frame.
-        let subs: &[Sub] = &[Sub::KeyboardAdvanced];
+        // skipped, and every interactive control lies below the title bar inside the frame
+        // (label boxes only start there: the installed `Label10` box overhangs the frame by 2,
+        // and the frame clips it).
+        let subs: &[Sub] = &[Sub::KeyboardAdvanced, Sub::VideoAdvanced];
         for &sub in subs {
             let panel = sub.panel();
             let size = h.dialog.sub_frame_size(sub, |_| 0.);
@@ -2527,8 +2625,9 @@ mod tests {
             let widgets = layout_widgets(&h.dialog.res, panel, area, &draft, &Config::default());
             for w in &widgets {
                 let r = w.rect;
+                let inside_end = !w.interactive() || (r.x + r.w <= size.x && r.y + r.h <= size.y);
                 assert!(
-                    r.x >= 0. && r.y >= CLIENT_TOP && r.x + r.w <= size.x && r.y + r.h <= size.y,
+                    r.x >= 0. && r.y >= CLIENT_TOP && r.x < size.x && r.y < size.y && inside_end,
                     "{panel:?} {} {r:?} outside {size:?}",
                     w.control.name
                 );

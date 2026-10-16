@@ -7,7 +7,8 @@
 Claude Code desktop, claude-opus-5-5.
 - **Menu labels in GorDIN SemiBold** (scheme `MenuLarge`, resolved from the scheme's `CustomFontFiles`), narrower than the former Liberation Sans; slightly smaller at the same cell size. Not compared with a retail capture.
 - **Keyboard > Advanced** implemented (fast weapon switch, developer console). Unit and owned-layout tests; **not checked visually in the packaged build**: replay scripts cannot click inside the Options dialog, because opening it pauses the fixed ticks that drive the script.
-- Remaining in this session: Video > Advanced, Gamepad tab.
+- **Video > Advanced** implemented: retail item lists, settings stored in `video.advanced`; Field of view slider (layout range 75-110) and V-sync (window present mode) take effect, the detail levels (model, texture, shader, water, shadow, antialiasing, filtering, color correction, motion blur, multicore, classic effects, Aero) are **stored only**. Same visual-check limitation as above.
+- Remaining in this session: Gamepad tab.
 
 ## Previous session: merge of main (2026-10-16, branch `orbitalman/main-menu-2`)
 

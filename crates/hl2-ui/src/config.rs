@@ -104,6 +104,120 @@ impl HudAspect {
     }
 }
 
+/// A setting chosen from a combo: its values in combo order and their localization tokens.
+pub trait Listed: Copy + PartialEq + 'static {
+    const ALL: &'static [Self];
+    fn token(self) -> &'static str;
+}
+
+/// Video > Advanced detail levels with the items the retail dialog lists, in combo order.
+macro_rules! choice_enum {
+    ($(#[$doc:meta])* $name:ident { $($variant:ident => $token:literal),+ $(,)? }) => {
+        $(#[$doc])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name {
+            $($variant,)+
+        }
+
+        impl Listed for $name {
+            const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            fn token(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $token,)+
+                }
+            }
+        }
+    };
+}
+
+choice_enum! {
+    /// Model detail (`r_rootlod`).
+    ModelDetail { Low => "#gameui_low", Medium => "#gameui_medium", High => "#gameui_high" }
+}
+choice_enum! {
+    /// Texture detail (`mat_picmip`).
+    TextureDetail {
+        Low => "#gameui_low", Medium => "#gameui_medium", High => "#gameui_high",
+        VeryHigh => "#gameui_ultra",
+    }
+}
+choice_enum! {
+    /// Shader detail (`mat_reducefillrate`).
+    ShaderDetail { Low => "#gameui_low", High => "#gameui_high", VeryHigh => "#gameui_ultra" }
+}
+choice_enum! {
+    /// Water detail (`r_waterforceexpensive` / `r_waterforcereflectentities`).
+    WaterDetail {
+        Simple => "#gameui_noreflections", World => "#gameui_reflectonlyworld",
+        All => "#gameui_reflectall",
+    }
+}
+choice_enum! {
+    /// Shadow detail (`r_shadowrendertotexture` / `r_flashlightdepthtexture`).
+    ShadowDetail { Low => "#gameui_low", Medium => "#gameui_medium", High => "#gameui_high" }
+}
+choice_enum! {
+    /// Antialiasing mode (`mat_antialias`): the multisample counts offered here.
+    Antialiasing {
+        None => "#GameUI_None", X2 => "#GameUI_2X", X4 => "#GameUI_4X", X8 => "#GameUI_8X",
+    }
+}
+choice_enum! {
+    /// Filtering mode (`mat_trilinear` / `mat_forceaniso`).
+    Filtering {
+        Bilinear => "#GameUI_Bilinear", Trilinear => "#GameUI_Trilinear",
+        Anisotropic2 => "#GameUI_Anisotropic2X", Anisotropic4 => "#GameUI_Anisotropic4X",
+        Anisotropic8 => "#GameUI_Anisotropic8X", Anisotropic16 => "#GameUI_Anisotropic16X",
+    }
+}
+
+/// Video > Advanced. Only `vsync` changes rendering today; the detail levels are stored.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdvancedVideoSettings {
+    pub model_detail: ModelDetail,
+    pub texture_detail: TextureDetail,
+    pub shader_detail: ShaderDetail,
+    pub water_detail: WaterDetail,
+    pub shadow_detail: ShadowDetail,
+    /// `mat_colorcorrection`.
+    pub color_correction: bool,
+    pub antialiasing: Antialiasing,
+    pub filtering: Filtering,
+    /// `mat_vsync`: present frames in step with the display.
+    pub vsync: bool,
+    /// `mat_motion_blur_enabled`.
+    pub motion_blur: bool,
+    /// `mat_queue_mode` (-1 multicore, 0 single).
+    pub multicore: bool,
+    /// Classic Effects (`r_classic_fire` / `r_classic_blood`).
+    pub classic_effects: bool,
+    /// Windows Aero extensions (`mat_disable_d3d9ex` 0); the layout shows it on Windows only.
+    pub d3d9ex: bool,
+}
+
+impl Default for AdvancedVideoSettings {
+    fn default() -> Self {
+        Self {
+            model_detail: ModelDetail::High,
+            texture_detail: TextureDetail::High,
+            shader_detail: ShaderDetail::High,
+            water_detail: WaterDetail::World,
+            shadow_detail: ShadowDetail::High,
+            color_correction: true,
+            antialiasing: Antialiasing::None,
+            filtering: Filtering::Trilinear,
+            vsync: true,
+            motion_blur: true,
+            multicore: true,
+            classic_effects: false,
+            d3d9ex: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VideoSettings {
@@ -115,6 +229,8 @@ pub struct VideoSettings {
     pub hud_aspect: HudAspect,
     /// `mat_monitorgamma` (1.6 bright to 2.6 dark).
     pub gamma: f32,
+    /// Video > Advanced.
+    pub advanced: AdvancedVideoSettings,
     /// Legacy flag from older files; read once by [`Config::migrate`], never written.
     #[serde(skip_serializing)]
     pub borderless: Option<bool>,
@@ -130,6 +246,7 @@ impl Default for VideoSettings {
             hdr: HdrMode::None,
             hud_aspect: HudAspect::Fit,
             gamma: 2.2,
+            advanced: AdvancedVideoSettings::default(),
             borderless: None,
         }
     }

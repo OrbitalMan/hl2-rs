@@ -426,6 +426,35 @@ pub(crate) fn apply_video_config_to_window(
 }
 
 /// Carries out video settings applied from the Options dialog or the console.
+/// The swap-chain present mode: `--uncapped` always presents without waiting; otherwise
+/// Video > Advanced "Wait for vertical sync" (`mat_vsync`) decides.
+pub fn present_mode(uncapped: bool, vsync: bool) -> bevy::window::PresentMode {
+    if vsync && !uncapped {
+        bevy::window::PresentMode::AutoVsync
+    } else {
+        bevy::window::PresentMode::AutoNoVsync
+    }
+}
+
+/// Keeps the window's present mode on the configured V-sync setting. It touches only the present
+/// mode, never resolution or display mode, and writes the window only when the mode differs.
+pub(crate) fn sync_present_mode(
+    options: Res<crate::Options>,
+    ui: Option<Res<crate::ui_host::Console>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    let vsync = ui
+        .as_deref()
+        .is_none_or(|ui| ui.source.config.video.advanced.vsync);
+    let mode = present_mode(options.uncapped, vsync);
+    // Reading through `Mut` does not mark the window changed; only the assignment does.
+    if let Ok(mut window) = windows.single_mut()
+        && window.present_mode != mode
+    {
+        window.present_mode = mode;
+    }
+}
+
 pub(crate) fn apply_video_settings(
     mut sim: ResMut<crate::simulation::Simulation>,
     mut frame: Option<ResMut<GameFrame>>,
@@ -757,6 +786,14 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::{PrimaryWindow, WindowMode, WindowResolution};
+
+    #[test]
+    fn vsync_follows_the_setting_unless_uncapped() {
+        use bevy::window::PresentMode;
+        assert_eq!(present_mode(false, true), PresentMode::AutoVsync);
+        assert_eq!(present_mode(false, false), PresentMode::AutoNoVsync);
+        assert_eq!(present_mode(true, true), PresentMode::AutoNoVsync);
+    }
 
     fn monitor(width: u32, height: u32, scale_factor: f64) -> Monitor {
         Monitor {

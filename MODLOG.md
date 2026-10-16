@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: Video > Advanced dialog
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::config`: `video.advanced` (`AdvancedVideoSettings`) with list enums built by `choice_enum!` and a `Listed` trait (values in combo order, item tokens). `settings`: `Panel::VideoAdvanced`, `Choice::Advanced(AdvancedChoice)` (one arm for all thirteen combos), `Value::Fov` with `slider_range` (a layout `minvalue`/`maxvalue` wins), `Binding::ValueLabel` for `FOVValueLabel`. `layout`: `Control::range` from `minvalue`/`maxvalue`. `options`: `Sub::VideoAdvanced` (OK applies `video.advanced` and the FOV at once); combo lists opened in a sub-dialog get input before it and draw over it. `hl2-bevy::video::sync_present_mode`: the window's present mode follows V-sync (`--uncapped` wins), written only on change, separate from the resolution/mode apply.
+
+**Why:** owner request: implement the Video/Advanced dialog.
+
+**Tested how:** unit tests (combo item lists and edits, FOV range from the layout, combo inside the sub-dialog, OK applies, present mode); owned test (every installed combo, the FOV slider and its label bind; interactive controls inside the frame); workspace tests, strict clippy (also Windows target), fmt; packaged 300-frame runtime check.
+
+**Result:** Video > Advanced... opens the dialog with the installed layout; V-sync and field of view apply on OK.
+
+**Still broken or not tested:** the detail levels have no renderer effect (stored only); the antialiasing list is fixed rather than queried from the hardware; the Windows-only DirectX level combo stays empty; not checked visually in the packaged build (scripted clicks cannot reach the Options dialog); the installed `Label10` box overhangs the frame by 2 units (clipped by the frame, as authored).
+
+**Next:** Gamepad tab.
+
 ## 2026-10-16 GameUI: Keyboard > Advanced dialog
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

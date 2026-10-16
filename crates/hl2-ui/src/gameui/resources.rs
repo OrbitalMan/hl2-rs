@@ -339,6 +339,7 @@ pub const LAYOUT_FILES: &[&str] = &[
     "optionssubaudiothirdpartydlg",
     "optionssubvideothirdpartydlg",
     "optionssubkeyboardadvanceddlg",
+    "optionssubvideoadvanceddlg",
 ];
 
 /// Everything the GameUI reads from the installation.

@@ -523,6 +523,7 @@ fn main() -> Result<()> {
         .add_plugins(simulation::MovementPlugin)
         .add_systems(PreUpdate, crate::video::present_frame)
         .add_systems(PostUpdate, crate::video::update_present_gamma)
+        .add_systems(PostUpdate, crate::video::sync_present_mode)
         .add_systems(
             Update,
             (

@@ -11,7 +11,9 @@ use super::{
     widgets::SliderRange,
 };
 use crate::config::{
-    AimAssist, Captions, Config, DisplayMode, HdrMode, HudAspect, SoundQuality, Speakers,
+    AdvancedVideoSettings, AimAssist, Antialiasing, Captions, Config, DisplayMode, Filtering,
+    HdrMode, HudAspect, Listed, ModelDetail, ShaderDetail, ShadowDetail, SoundQuality, Speakers,
+    TextureDetail, WaterDetail,
 };
 
 /// The options being edited: the draft configuration plus the Video page's aspect filter, which
@@ -89,10 +91,14 @@ pub enum Value {
     AccelExponent,
     AimAssistScale,
     Gamma,
+    /// `fov_desired` (Video > Advanced).
+    Fov,
 }
 
 impl Value {
-    /// Slider range (retail `GameUI.dll` constants).
+    /// Slider range (retail `GameUI.dll` constants). A slider whose layout gives `minvalue` /
+    /// `maxvalue` uses those instead ([`Self::slider_range`]); the field of view has no constant
+    /// and falls back to the installed `FovSlider` range.
     pub fn range(self) -> SliderRange {
         match self {
             Self::Volume | Self::MusicVolume => SliderRange::new(0., 1.),
@@ -100,7 +106,13 @@ impl Value {
             Self::AccelExponent => SliderRange::new(1., 1.4),
             Self::AimAssistScale => SliderRange::new(0.5, 2.),
             Self::Gamma => SliderRange::new(1.6, 2.6),
+            Self::Fov => SliderRange::new(75., 110.),
         }
+    }
+
+    /// The range of a slider bound to this value: the layout's own range when it gives one.
+    pub fn slider_range(self, layout: Option<(f32, f32)>) -> SliderRange {
+        layout.map_or_else(|| self.range(), |(min, max)| SliderRange::new(min, max))
     }
 
     pub fn get(self, c: &Config) -> f32 {
@@ -111,6 +123,7 @@ impl Value {
             Self::AccelExponent => c.mouse.accel_exponent,
             Self::AimAssistScale => c.mouse.aim_assist_scale,
             Self::Gamma => c.video.gamma,
+            Self::Fov => c.video.fov,
         }
     }
 
@@ -131,12 +144,123 @@ impl Value {
             Self::AccelExponent => &mut c.mouse.accel_exponent,
             Self::AimAssistScale => &mut c.mouse.aim_assist_scale,
             Self::Gamma => &mut c.video.gamma,
+            Self::Fov => &mut c.video.fov,
         } = value;
+    }
+}
+
+/// The combos of Video > Advanced, over [`AdvancedVideoSettings`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdvancedChoice {
+    ModelDetail,
+    TextureDetail,
+    ShaderDetail,
+    WaterDetail,
+    ShadowDetail,
+    Antialiasing,
+    Filtering,
+    ColorCorrection,
+    VSync,
+    MotionBlur,
+    Multicore,
+    ClassicEffects,
+    D3D9Ex,
+}
+
+/// Off/on combos list "Disabled" first.
+const FLAG_TOKENS: [&str; 2] = ["#gameui_disabled", "#gameui_enabled"];
+const CLASSIC_EFFECTS_TOKENS: [&str; 2] =
+    ["#GameUI_ClassicEffects_Off", "#GameUI_ClassicEffects_On"];
+
+fn listed_tokens<T: Listed>() -> Vec<&'static str> {
+    T::ALL.iter().map(|v| v.token()).collect()
+}
+
+fn listed_index<T: Listed>(value: T) -> usize {
+    T::ALL.iter().position(|v| *v == value).unwrap_or(0)
+}
+
+fn listed_pick<T: Listed>(index: usize, value: &mut T) {
+    if let Some(v) = T::ALL.get(index) {
+        *value = *v;
+    }
+}
+
+impl AdvancedChoice {
+    fn flag(self, a: &AdvancedVideoSettings) -> Option<bool> {
+        Some(match self {
+            Self::ColorCorrection => a.color_correction,
+            Self::VSync => a.vsync,
+            Self::MotionBlur => a.motion_blur,
+            Self::Multicore => a.multicore,
+            Self::ClassicEffects => a.classic_effects,
+            Self::D3D9Ex => a.d3d9ex,
+            _ => return None,
+        })
+    }
+
+    fn flag_mut(self, a: &mut AdvancedVideoSettings) -> Option<&mut bool> {
+        Some(match self {
+            Self::ColorCorrection => &mut a.color_correction,
+            Self::VSync => &mut a.vsync,
+            Self::MotionBlur => &mut a.motion_blur,
+            Self::Multicore => &mut a.multicore,
+            Self::ClassicEffects => &mut a.classic_effects,
+            Self::D3D9Ex => &mut a.d3d9ex,
+            _ => return None,
+        })
+    }
+
+    /// Item tokens in combo order (the retail dialog's lists).
+    pub fn tokens(self) -> Vec<&'static str> {
+        match self {
+            Self::ModelDetail => listed_tokens::<ModelDetail>(),
+            Self::TextureDetail => listed_tokens::<TextureDetail>(),
+            Self::ShaderDetail => listed_tokens::<ShaderDetail>(),
+            Self::WaterDetail => listed_tokens::<WaterDetail>(),
+            Self::ShadowDetail => listed_tokens::<ShadowDetail>(),
+            Self::Antialiasing => listed_tokens::<Antialiasing>(),
+            Self::Filtering => listed_tokens::<Filtering>(),
+            Self::ClassicEffects => CLASSIC_EFFECTS_TOKENS.to_vec(),
+            _ => FLAG_TOKENS.to_vec(),
+        }
+    }
+
+    pub fn selected(self, a: &AdvancedVideoSettings) -> usize {
+        match self {
+            Self::ModelDetail => listed_index(a.model_detail),
+            Self::TextureDetail => listed_index(a.texture_detail),
+            Self::ShaderDetail => listed_index(a.shader_detail),
+            Self::WaterDetail => listed_index(a.water_detail),
+            Self::ShadowDetail => listed_index(a.shadow_detail),
+            Self::Antialiasing => listed_index(a.antialiasing),
+            Self::Filtering => listed_index(a.filtering),
+            flag => usize::from(flag.flag(a).unwrap_or(false)),
+        }
+    }
+
+    pub fn select(self, a: &mut AdvancedVideoSettings, index: usize) {
+        match self {
+            Self::ModelDetail => listed_pick(index, &mut a.model_detail),
+            Self::TextureDetail => listed_pick(index, &mut a.texture_detail),
+            Self::ShaderDetail => listed_pick(index, &mut a.shader_detail),
+            Self::WaterDetail => listed_pick(index, &mut a.water_detail),
+            Self::ShadowDetail => listed_pick(index, &mut a.shadow_detail),
+            Self::Antialiasing => listed_pick(index, &mut a.antialiasing),
+            Self::Filtering => listed_pick(index, &mut a.filtering),
+            flag => {
+                if let (Some(value), true) = (flag.flag_mut(a), index < 2) {
+                    *value = index == 1;
+                }
+            }
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
+    /// A Video > Advanced combo.
+    Advanced(AdvancedChoice),
     AimAssist,
     Speakers,
     Quality,
@@ -157,6 +281,7 @@ impl Choice {
             tokens.map(|t| loc.text(t)).collect()
         };
         match self {
+            Self::Advanced(advanced) => tokens(&mut advanced.tokens().into_iter()),
             Self::AimAssist => tokens(&mut AimAssist::ALL.iter().map(|v| v.token())),
             Self::Speakers => tokens(&mut Speakers::ALL.iter().map(|v| v.token())),
             Self::Quality => tokens(&mut SoundQuality::ALL.iter().map(|v| v.token())),
@@ -183,6 +308,7 @@ impl Choice {
             list.iter().position(|v| *v == value)
         }
         match self {
+            Self::Advanced(advanced) => Some(advanced.selected(&c.video.advanced)),
             Self::AimAssist => find(&AimAssist::ALL, c.mouse.aim_assist),
             Self::Speakers => find(&Speakers::ALL, c.audio.speakers),
             Self::Quality => find(&SoundQuality::ALL, c.audio.quality),
@@ -225,6 +351,7 @@ impl Choice {
         let resolutions = env.resolutions(draft);
         let c = &mut draft.config;
         match self {
+            Self::Advanced(advanced) => advanced.select(&mut c.video.advanced, index),
             Self::AimAssist => {
                 if let Some(v) = AimAssist::ALL.get(index) {
                     c.mouse.aim_assist = *v;
@@ -332,7 +459,7 @@ pub enum Command {
     KeyClear,
     /// "Advanced..." on the Keyboard page.
     KeyAdvanced,
-    /// "Advanced..." on the Video page (placeholder).
+    /// "Advanced..." on the Video page.
     VideoAdvanced,
     /// OK of a sub-dialog.
     SubOk,
@@ -343,7 +470,7 @@ pub enum Command {
 impl Command {
     /// Placeholders are drawn disabled; activating one only logs its label.
     pub fn placeholder(self) -> bool {
-        matches!(self, Self::VideoAdvanced)
+        false
     }
 }
 
@@ -356,6 +483,8 @@ pub enum Binding {
     Slider(Value),
     /// The text entry showing (and accepting) a slider's value.
     Entry(Value),
+    /// A label showing a slider's value (Video > Advanced `FOVValueLabel`).
+    ValueLabel(Value),
     Choice(Choice),
     Command(Command),
     /// The keyboard page's binding list.
@@ -374,6 +503,7 @@ pub enum Panel {
     AudioCredits,
     VideoCredits,
     KeyboardAdvanced,
+    VideoAdvanced,
 }
 
 impl Panel {
@@ -389,6 +519,7 @@ impl Panel {
             Self::AudioCredits => "optionssubaudiothirdpartydlg",
             Self::VideoCredits => "optionssubvideothirdpartydlg",
             Self::KeyboardAdvanced => "optionssubkeyboardadvanceddlg",
+            Self::VideoAdvanced => "optionssubvideoadvanceddlg",
         }
     }
 }
@@ -436,9 +567,33 @@ pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
         (Panel::Gamma, "gammaentry") => Entry(Value::Gamma),
         (Panel::KeyboardAdvanced, "fastswitchcheck") => Toggle(self::Toggle::FastSwitch),
         (Panel::KeyboardAdvanced, "consolecheck") => Toggle(self::Toggle::DeveloperConsole),
+        (Panel::VideoAdvanced, "fovslider") => Slider(Value::Fov),
+        (Panel::VideoAdvanced, "fovvaluelabel") => ValueLabel(Value::Fov),
+        (Panel::VideoAdvanced, name) => Choice(self::Choice::Advanced(advanced_choice(name)?)),
         (Panel::Gamma, "okbutton") => Command(self::Command::SubOk),
         (Panel::Gamma, "button1") => Command(self::Command::SubCancel),
         (Panel::AudioCredits | Panel::VideoCredits, "button2") => Command(self::Command::SubCancel),
+        _ => return None,
+    })
+}
+
+/// The Video > Advanced combo with this (lower-case) field name.
+fn advanced_choice(name: &str) -> Option<AdvancedChoice> {
+    use AdvancedChoice::*;
+    Some(match name {
+        "modeldetail" => ModelDetail,
+        "texturedetail" => TextureDetail,
+        "shaderdetail" => ShaderDetail,
+        "waterdetail" => WaterDetail,
+        "shadowdetail" => ShadowDetail,
+        "antialiasingmode" => Antialiasing,
+        "filteringmode" => Filtering,
+        "colorcorrection" => ColorCorrection,
+        "vsync" => VSync,
+        "motionblur" => MotionBlur,
+        "multicore" => Multicore,
+        "classiceffects" => ClassicEffects,
+        "d3d9ex" => D3D9Ex,
         _ => return None,
     })
 }
@@ -635,6 +790,49 @@ mod tests {
     }
 
     #[test]
+    fn advanced_video_combos_list_retail_items_and_edit_their_settings() {
+        let mut a = AdvancedVideoSettings::default();
+        assert_eq!(
+            AdvancedChoice::TextureDetail.tokens(),
+            [
+                "#gameui_low",
+                "#gameui_medium",
+                "#gameui_high",
+                "#gameui_ultra"
+            ]
+        );
+        assert_eq!(
+            AdvancedChoice::ShaderDetail.tokens(),
+            ["#gameui_low", "#gameui_high", "#gameui_ultra"]
+        );
+        assert_eq!(AdvancedChoice::VSync.tokens(), FLAG_TOKENS);
+        assert_eq!(
+            AdvancedChoice::ClassicEffects.tokens(),
+            CLASSIC_EFFECTS_TOKENS
+        );
+        assert_eq!(AdvancedChoice::VSync.selected(&a), 1, "enabled");
+        AdvancedChoice::VSync.select(&mut a, 0);
+        assert!(!a.vsync);
+        AdvancedChoice::VSync.select(&mut a, 7);
+        assert!(!a.vsync, "out-of-range items are ignored");
+        AdvancedChoice::Filtering.select(&mut a, 5);
+        assert_eq!(a.filtering, Filtering::Anisotropic16);
+        assert_eq!(AdvancedChoice::Filtering.selected(&a), 5);
+        assert_eq!(
+            binding(Panel::VideoAdvanced, "FilteringMode"),
+            Some(Binding::Choice(Choice::Advanced(AdvancedChoice::Filtering)))
+        );
+        assert_eq!(binding(Panel::VideoAdvanced, "dxlabel"), None);
+        assert_eq!(
+            Value::Fov.slider_range(Some((75., 110.))),
+            SliderRange::new(75., 110.)
+        );
+        let mut c = Config::default();
+        Value::Fov.set(&mut c, 130.);
+        assert_eq!(c.video.fov, 110.);
+    }
+
+    #[test]
     fn dynamic_enabled_states() {
         let applied = Config::default();
         let mut draft = Draft::new(applied.clone());
@@ -658,10 +856,14 @@ mod tests {
             enabled(gamma, false, &draft, &windowed),
             "unlocked in windowed mode"
         );
-        let advanced = Some(Binding::Command(Command::VideoAdvanced));
-        assert!(!enabled(advanced, true, &draft, &applied));
-        let key_advanced = Some(Binding::Command(Command::KeyAdvanced));
-        assert!(enabled(key_advanced, true, &draft, &applied));
+        for advanced in [Command::VideoAdvanced, Command::KeyAdvanced] {
+            assert!(enabled(
+                Some(Binding::Command(advanced)),
+                true,
+                &draft,
+                &applied
+            ));
+        }
         assert_eq!(
             command_binding("OK"),
             Some(Binding::Command(Command::SubOk))

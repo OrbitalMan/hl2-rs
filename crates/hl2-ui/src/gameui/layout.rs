@@ -138,6 +138,8 @@ pub struct Control {
     pub right_text: String,
     /// Tooltip text / token (`tooltiptext`).
     pub tooltip: String,
+    /// Slider range (`minvalue` / `maxvalue` of a `CCvarSlider`), when the layout gives both.
+    pub range: Option<(f32, f32)>,
 }
 
 impl Control {
@@ -231,6 +233,10 @@ fn control(entry: &Entry) -> Option<Control> {
         left_text: text("leftText").unwrap_or_default().to_owned(),
         right_text: text("rightText").unwrap_or_default().to_owned(),
         tooltip: text("tooltiptext").unwrap_or_default().to_owned(),
+        range: text("minvalue")
+            .zip(text("maxvalue"))
+            .and_then(|(min, max)| Some((min.parse::<f32>().ok()?, max.parse::<f32>().ok()?)))
+            .filter(|(min, max)| min.is_finite() && max.is_finite() && min < max),
     })
 }
 
@@ -249,7 +255,8 @@ mod tests {
         "enabled" "0" [$OSX] }
     "BuildModeDialog" { "ControlName" "BuildModeDialog" "xpos" "1081" }
     "Hidden" { "ControlName" "Label" "visible" "0" "xpos" "r40" "ypos" "c-12" "wide" "20" }
-    "Slider" { "ControlName" "CCvarSlider" "xpos" "200" "ypos" "40" "wide" "200" "tall" "40" }
+    "Slider" { "ControlName" "CCvarSlider" "xpos" "200" "ypos" "40" "wide" "200" "tall" "40"
+        "minvalue" "75" "maxvalue" "110" }
 }"##;
 
     #[test]
@@ -275,6 +282,8 @@ mod tests {
         assert_eq!(hidden.rect((400., 300.)).0, 360.);
         assert_eq!(hidden.rect((400., 300.)).1, 138.);
         assert_eq!(layout.get("Slider").unwrap().kind, ControlKind::Slider);
+        assert_eq!(layout.get("Slider").unwrap().range, Some((75., 110.)));
+        assert_eq!(reverse.range, None);
     }
 
     #[test]

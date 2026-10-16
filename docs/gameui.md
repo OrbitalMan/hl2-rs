@@ -211,7 +211,19 @@ Semantics:
   installed `.res` file.
 - High Dynamic Range is shown on macOS too, although the retail `.res` hides it there.
 - Placeholders are shown disabled and log `"<label>: not implemented in HL2-RS yet."`: Gamepad tab
-  (empty page), Video Advanced....
+  (empty page).
+- Video > Advanced (`optionssubvideoadvanceddlg.res`, title `#GameUI_VideoAdvanced_Title`, frame
+  record 482 x 510, 358 on macOS): combos with the retail item lists (Model/Shadow detail
+  Low/Medium/High; Texture detail adds Very High; Shader detail Low/High/Very High; Water detail
+  Simple reflections/Reflect world/Reflect all; Antialiasing None/2x/4x/8x MSAA; Filtering
+  Bilinear/Trilinear/Anisotropic 2X-16X; Color Correction, Wait for vertical sync, Motion Blur,
+  Multicore Rendering, Windows Aero extensions Disabled/Enabled; Classic Effects Off/On) stored in
+  `video.advanced`, plus the Field of view slider (`fov_desired`, range from the layout's
+  `minvalue`/`maxvalue` 75-110) with its value label. Only V-sync and the field of view change
+  rendering (`video::sync_present_mode`; `--uncapped` still wins); the detail levels are stored
+  only. Retail lists only the antialiasing modes the hardware supports; here the list is fixed.
+  The DirectX level rows are hidden on macOS/Linux by the layout (`[$POSIX]`); on Windows the
+  disabled DirectX level combo stays empty.
 - Keyboard > Advanced (`optionssubkeyboardadvanceddlg.res`, title
   `#GameUI_KeyboardAdvanced_Title`): Fast weapon switch (`hud_fastswitch`, config
   `keyboard.fast_switch`, read by weapon selection every frame) and Enable developer console
