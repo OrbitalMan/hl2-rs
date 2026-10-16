@@ -58,6 +58,7 @@ type UiInputDevices<'w, 's> = (
     MessageReader<'w, 's, bevy::input::keyboard::KeyboardInput>,
     MessageReader<'w, 's, bevy::input::mouse::MouseWheel>,
     Option<Res<'w, Time<Real>>>,
+    Option<ResMut<'w, bevy::clipboard::Clipboard>>,
 );
 
 type UiDisplayDevices<'w, 's> = (
@@ -67,7 +68,7 @@ type UiDisplayDevices<'w, 's> = (
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_ui(
-    (keys, buttons, mut characters, mut wheels, real_time): UiInputDevices,
+    (keys, buttons, mut characters, mut wheels, real_time, mut clipboard): UiInputDevices,
     (mut windows, monitors): UiDisplayDevices,
     video_viewport: Option<Res<VideoViewport>>,
     mut sim: ResMut<crate::simulation::Simulation>,
@@ -133,8 +134,21 @@ pub fn update_ui(
                     ui.source.mode
                 );
             }
+            let modifiers = crate::ui_host::modifiers(&keys);
+            // A clipboard that answers later (not the desktop backends) is not waited for.
+            let paste = modifiers
+                .paste
+                .then(|| clipboard.as_deref_mut()?.fetch_text().poll_result()?.ok())
+                .flatten();
             let effects = ui.source.input(&hl2_ui::console::Input {
-                text,
+                text: if modifiers.ctrl || modifiers.command {
+                    String::new()
+                } else {
+                    text
+                },
+                ctrl: modifiers.ctrl,
+                shift: modifiers.shift,
+                paste,
                 keys: crate::ui_host::keys(&keys),
                 pointer,
                 click: buttons.just_pressed(MouseButton::Left),

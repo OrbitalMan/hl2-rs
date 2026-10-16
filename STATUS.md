@@ -2,7 +2,12 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: menu font, advanced options dialogs, Gamepad tab (2026-10-16, branch `orbitalman/main-menu-2`)
+## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
+
+Claude Code desktop, claude-opus-5-5.
+- **Console completion, suggestions, history (100, saved), Ctrl+R search, editing keys, `con_filter_*`/`con_timestamp`, engine warnings mirrored**: see `docs/gameui.md` section 11. Packaged capture of the completion list checked; paste and log mirroring not exercised by hand; output row copy not ported.
+
+## Previous session: menu font, advanced options dialogs, Gamepad tab (2026-10-16, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
 - **Menu labels in GorDIN SemiBold** (scheme `MenuLarge`, resolved from the scheme's `CustomFontFiles`), narrower than the former Liberation Sans; slightly smaller at the same cell size. Not compared with a retail capture.

@@ -1,4 +1,8 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
+pub mod commands;
+pub mod complete;
+pub mod editor;
+
 use crate::gameui::{
     display::DisplayModes,
     menu::{GameMenu, MenuLayout, MenuOutcome, MessageBox, MessageBoxLayout},
@@ -16,60 +20,49 @@ use source_assets::{keyvalues, vpk::Vfs};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
-const COMMANDS: &[(&str, &str)] = &[
-    ("help", "help [command]: describe implemented commands"),
-    (
-        "find",
-        "find <text>: search implemented command names and descriptions",
-    ),
-    (
-        "sv_cheats",
-        "sv_cheats [0|1]: query or enable local cheat commands",
-    ),
-    (
-        "impulse",
-        "impulse 101: grant the six implemented weapons, ammunition and suit (cheat)",
-    ),
-    (
-        "noclip",
-        "noclip [0|1]: toggle collision-free flight (cheat)",
-    ),
-    (
-        "getpos",
-        "getpos: print camera position and Source pitch/yaw/roll in degrees; getpos 2 is not implemented",
-    ),
-    (
-        "setpos",
-        "setpos <x> <y> [z]: move the player origin, preserving height if z is omitted (cheat)",
-    ),
-    (
-        "setang",
-        "setang <pitch> <yaw> [roll]: set Source view angles; roll must be zero (cheat)",
-    ),
-    (
-        "map",
-        "map <name>: load an installed map and reset the player inventory",
-    ),
-    ("clear", "clear: clear console output"),
-    ("ent_fire", "ent_fire <targetname> [input=Use] [parameter] [delay]: queue entity input; names/globs supported (cheat)"),
-    ("echo", "echo <text>: print text"),
-    ("toggleconsole", "toggleconsole: close or open the console"),
-    ("quit", "quit: exit and save the runtime report"),
-    ("volume", "volume [0..1]: query or set master audio volume"),
-    ("sensitivity", "sensitivity [value]: query or set mouse sensitivity"),
-    ("fov", "fov [degrees]: query or set camera field of view"),
-    ("mat_hdr_level", "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)"),
-    ("mat_setvideomode", "mat_setvideomode <width> <height> <windowed 0|1>: set the video mode"),
-    ("mainmenu", "mainmenu: show the main menu"),
-    (
-        "background_map",
-        "background_map [name|default]: query or set the persistent main-menu background map",
-    ),
-    (
-        "map_background",
-        "map_background <name>: load an installed map as the main-menu background and persist it",
-    ),
-];
+/// Output lines kept for scrollback.
+const OUTPUT_LINES: usize = 1024;
+
+/// How a console line was printed, which picks its color.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    /// The echo of a submitted line (`] command`).
+    Input,
+    /// Ordinary output (`Msg`): scheme `Console.TextColor`.
+    Normal,
+    /// Developer output (`DevMsg`, mirrored engine log): scheme `Console.DevTextColor`.
+    Developer,
+    Warning,
+    Error,
+}
+
+/// A console output line. It reads and serializes as its text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Line {
+    pub level: Level,
+    pub text: String,
+    /// Seconds since start when printed (`con_timestamp`).
+    pub time: f64,
+}
+
+impl std::ops::Deref for Line {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
+impl PartialEq<str> for Line {
+    fn eq(&self, other: &str) -> bool {
+        self.text == other
+    }
+}
+
+impl Serialize for Line {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.text)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub enum Mode {
@@ -136,12 +129,18 @@ pub struct Console {
     pub mode: Mode,
     previous: Mode,
     pub cheats: bool,
-    pub input: String,
-    pub output: VecDeque<String>,
-    history: Vec<String>,
-    history_index: Option<usize>,
-    history_draft: String,
-    cursor: usize,
+    pub output: VecDeque<Line>,
+    /// The input line: editing, completion, history and reverse search.
+    editor: editor::LineEditor,
+    /// Names arguments complete from (installed maps, the loaded map's entities), set by the host.
+    completion: complete::Sources,
+    /// Seconds since start of the latest input frame, stamped on printed lines.
+    clock: f64,
+    /// `con_filter_enable`: 0 off, 1 only lines containing `con_filter_text`, 2 those brighter.
+    con_filter: u8,
+    con_filter_text: String,
+    /// `con_timestamp`: prefix lines with the time they were printed.
+    con_timestamp: bool,
     scroll: usize,
     font: Option<FontFace>,
     menu_font: Option<FontFace>,
@@ -323,6 +322,12 @@ pub struct Input {
     /// Monotonic real time of this frame in seconds, used for double clicks. `None` (scripted
     /// input without times) disables double-click detection.
     pub time: Option<f64>,
+    /// Control is held (console editing shortcuts); typed text is ignored meanwhile.
+    pub ctrl: bool,
+    /// Shift is held (Shift+Tab steps the completion list back).
+    pub shift: bool,
+    /// Text pasted this frame (the host reads the clipboard on its paste shortcut).
+    pub paste: Option<String>,
 }
 impl Input {
     pub(crate) fn pressed(&self, key: Key) -> bool {
@@ -335,7 +340,10 @@ struct Style {
     menu_armed: Color,
     panel: Color,
     entry: Color,
+    /// `Console.TextColor`.
     text: Color,
+    /// `Console.DevTextColor`.
+    dev_text: Color,
 }
 impl Default for Style {
     fn default() -> Self {
@@ -345,6 +353,7 @@ impl Default for Style {
             panel: Color::from_rgba(132, 132, 132, 212),
             entry: Color::from_rgba(0, 0, 0, 128),
             text: Color::from_rgba(221, 221, 221, 255),
+            dev_text: WHITE,
         }
     }
 }
@@ -362,12 +371,13 @@ impl Default for Console {
             mode: Mode::Gameplay,
             previous: Mode::Gameplay,
             cheats: false,
-            input: String::new(),
             output: VecDeque::new(),
-            history: Vec::new(),
-            history_index: None,
-            history_draft: String::new(),
-            cursor: 0,
+            editor: editor::LineEditor::default(),
+            completion: complete::Sources::default(),
+            clock: 0.,
+            con_filter: 0,
+            con_filter_text: String::new(),
+            con_timestamp: false,
             scroll: 0,
             font: None,
             menu_font: None,
@@ -562,8 +572,26 @@ impl Console {
                 panel: scheme_color(&root, "Frame.BgColor").unwrap_or(console.style.panel),
                 entry: scheme_color(&root, "RichText.BgColor").unwrap_or(console.style.entry),
                 text: scheme_color(&root, "Console.TextColor").unwrap_or(console.style.text),
+                dev_text: scheme_color(&root, "Console.DevTextColor")
+                    .unwrap_or(console.style.dev_text),
             };
             console.menu_layout.apply_source_scheme(&root);
+        }
+        // The console colors from the installed source scheme (the base scheme it reads above is
+        // empty in the installed game).
+        if let Some(root) = scheme_reader
+            .read("resource/SourceScheme.res")
+            .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
+            .and_then(|roots| roots.into_iter().next())
+        {
+            for (name, color) in [
+                ("Console.TextColor", &mut console.style.text),
+                ("Console.DevTextColor", &mut console.style.dev_text),
+            ] {
+                if let Some(value) = scheme_color(&root, name) {
+                    *color = value;
+                }
+            }
         }
         if let Some(root) = scheme_reader
             .read("resource/ClientScheme.res")
@@ -993,6 +1021,10 @@ impl Console {
     /// Escape closes the quit box first, then leaves a menu category, then toggles the menus.
     /// The main menu over a background level has nothing to return to.
     pub fn escape(&mut self) {
+        // In the console Escape first ends a history search, then hides the completion list.
+        if self.mode == Mode::Console && self.editor.dismiss() {
+            return;
+        }
         if let Some(loading) = &self.loading_dialog {
             if loading.is_failed() {
                 self.loading_dialog = None;
@@ -1049,8 +1081,16 @@ impl Console {
         }
     }
     pub fn log(&mut self, text: impl Into<String>) {
-        self.output.push_back(text.into());
-        if self.output.len() > 256 {
+        self.print(Level::Normal, text);
+    }
+    /// Prints a line at `level`, stamped with the current time.
+    pub fn print(&mut self, level: Level, text: impl Into<String>) {
+        self.output.push_back(Line {
+            level,
+            text: text.into(),
+            time: self.clock,
+        });
+        if self.output.len() > OUTPUT_LINES {
             self.output.pop_front();
         }
         self.scroll = 0;
@@ -1060,15 +1100,7 @@ impl Console {
         if line.is_empty() {
             return Vec::new();
         }
-        self.log(format!("] {line}"));
-        if self.history.last().is_none_or(|last| last != line) {
-            self.history.push(line.to_owned());
-            if self.history.len() > 128 {
-                self.history.remove(0);
-            }
-        }
-        self.history_index = None;
-        self.history_draft.clear();
+        self.print(Level::Input, format!("] {line}"));
         let commands = match tokenize(line) {
             Ok(commands) => commands,
             Err(error) => {
@@ -1090,9 +1122,9 @@ impl Console {
         let name = tokens[0].to_ascii_lowercase();
         let args = &tokens[1..];
         let usage = || {
-            COMMANDS.iter().find(|(n, _)| *n == name).map_or_else(
+            commands::find(&name).map_or_else(
                 || format!("Unknown or unimplemented command: {}", tokens[0]),
-                |(_, d)| d.to_string(),
+                |spec| spec.help.to_string(),
             )
         };
         let cheat = || {
@@ -1194,14 +1226,14 @@ impl Console {
                     return Err(usage());
                 }
                 let query = args.first().map(|s| s.to_ascii_lowercase());
-                let found: Vec<_> = COMMANDS
+                let found: Vec<_> = commands::COMMANDS
                     .iter()
-                    .filter(|(n, description)| {
+                    .filter(|spec| {
                         query.as_ref().is_none_or(|q| {
                             if name == "help" {
-                                n == q
+                                spec.name == q
                             } else {
-                                description.to_ascii_lowercase().contains(q)
+                                spec.help.to_ascii_lowercase().contains(q)
                             }
                         })
                     })
@@ -1209,8 +1241,8 @@ impl Console {
                 if found.is_empty() {
                     self.log("No implemented command matches.");
                 }
-                for (_, description) in found {
-                    self.log(*description);
+                for spec in found {
+                    self.log(spec.help);
                 }
             }
             "clear" => {
@@ -1239,6 +1271,27 @@ impl Console {
                 }
                 return Ok(Some(Effect::Quit));
             }
+            "con_filter_enable" | "con_filter_text" | "con_timestamp" => match args {
+                [] => {
+                    let value = self.cvar_value(&name).unwrap_or_default();
+                    self.log(format!("\"{name}\" = \"{value}\""));
+                }
+                [value] => {
+                    match name.as_str() {
+                        "con_filter_enable" => {
+                            self.con_filter = value
+                                .parse::<u8>()
+                                .ok()
+                                .filter(|v| *v <= 2)
+                                .ok_or_else(usage)?;
+                        }
+                        "con_filter_text" => self.con_filter_text = value.clone(),
+                        _ => self.con_timestamp = boolean(value).ok_or_else(usage)?,
+                    }
+                    self.scroll = 0;
+                }
+                _ => return Err(usage()),
+            },
             "volume" => {
                 if args.is_empty() {
                     self.log(format!("\"volume\" = \"{:.2}\"", self.config.audio.volume));
@@ -1384,26 +1437,44 @@ impl Console {
         }
         Ok(None)
     }
-    fn history_move(&mut self, older: bool) {
-        if self.history.is_empty() {
-            return;
-        }
-        if self.history_index.is_none() {
-            self.history_draft = self.input.clone();
-        }
-        self.history_index = if older {
-            Some(
-                self.history_index
-                    .map_or(self.history.len() - 1, |i| i.saturating_sub(1)),
-            )
-        } else {
-            self.history_index
-                .and_then(|i| (i + 1 < self.history.len()).then_some(i + 1))
-        };
-        self.input = self
-            .history_index
-            .map_or_else(|| self.history_draft.clone(), |i| self.history[i].clone());
-        self.cursor = self.input.len();
+    /// The current value of an implemented cvar, as the console prints it.
+    pub fn cvar_value(&self, name: &str) -> Option<String> {
+        let c = &self.config;
+        Some(match name.to_ascii_lowercase().as_str() {
+            "sv_cheats" => u8::from(self.cheats).to_string(),
+            "volume" => format!("{:.2}", c.audio.volume),
+            "sensitivity" => format!("{:.2}", c.mouse.sensitivity),
+            "fov" => format!("{:.0}", c.video.fov),
+            "mat_hdr_level" => c.video.hdr.level().to_string(),
+            "background_map" => self.background_map()?.to_owned(),
+            "con_filter_enable" => self.con_filter.to_string(),
+            "con_filter_text" => self.con_filter_text.clone(),
+            "con_timestamp" => u8::from(self.con_timestamp).to_string(),
+            _ => return None,
+        })
+    }
+
+    /// The text being typed on the console line.
+    pub fn input_line(&self) -> &str {
+        self.editor.text()
+    }
+
+    /// Names that command arguments complete from (installed maps, the loaded map's entities).
+    pub fn set_completion_sources(&mut self, sources: complete::Sources) {
+        self.completion = sources;
+        self.editor.refresh(&self.completion);
+    }
+
+    /// Restores the command history the host saved.
+    pub fn set_history(&mut self, history: Vec<String>) {
+        self.editor.set_history(history);
+    }
+
+    /// The command history, once after it changed (the host saves it then).
+    pub fn take_changed_history(&mut self) -> Option<Vec<String>> {
+        self.editor
+            .take_history_changed()
+            .then(|| self.editor.history().to_vec())
     }
     /// Called before gameplay input collection. Opening characters are drained by the host.
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
@@ -1520,39 +1591,81 @@ impl Console {
     }
 
     fn console_input(&mut self, input: &Input) -> Vec<Effect> {
-        for c in input.text.chars() {
-            if !c.is_control() && c != '`' && c != '~' && self.input.len() + c.len_utf8() <= 1024 {
-                self.input.insert(self.cursor, c);
-                self.cursor += c.len_utf8();
+        if let Some(time) = input.time {
+            self.clock = time;
+        }
+        let ctrl_key = |name: &str| input.ctrl && input.binding_keys.iter().any(|k| k == name);
+        let editor = &mut self.editor;
+        if !input.ctrl {
+            let typed: String = input
+                .text
+                .chars()
+                .filter(|c| *c != '`' && *c != '~')
+                .collect();
+            editor.insert(&typed);
+        }
+        if let Some(paste) = &input.paste {
+            editor.paste(paste);
+        }
+        if ctrl_key("KeyR") {
+            editor.search_back();
+        }
+        if ctrl_key("KeyU") {
+            editor.kill_to_start();
+        }
+        if ctrl_key("KeyK") {
+            editor.kill_to_end();
+        }
+        if ctrl_key("KeyW") {
+            editor.delete_word_back();
+        }
+        if ctrl_key("KeyA") {
+            editor.home();
+        }
+        if ctrl_key("KeyE") {
+            editor.end();
+        }
+        if input.pressed(Key::Backspace) {
+            if input.ctrl {
+                editor.delete_word_back();
+            } else {
+                editor.backspace();
             }
         }
-        if input.pressed(Key::Backspace) && self.cursor > 0 {
-            let previous = self.input[..self.cursor].char_indices().last().unwrap().0;
-            self.input.replace_range(previous..self.cursor, "");
-            self.cursor = previous;
+        if input.pressed(Key::Delete) {
+            if input.ctrl {
+                editor.delete_word_forward();
+            } else {
+                editor.delete();
+            }
         }
-        if input.pressed(Key::Delete) && self.cursor < self.input.len() {
-            let length = self.input[self.cursor..].chars().next().unwrap().len_utf8();
-            self.input
-                .replace_range(self.cursor..self.cursor + length, "");
+        if input.pressed(Key::Left) {
+            if input.ctrl {
+                editor.word_left();
+            } else {
+                editor.left();
+            }
         }
-        if input.pressed(Key::Left) && self.cursor > 0 {
-            self.cursor = self.input[..self.cursor].char_indices().last().unwrap().0;
-        }
-        if input.pressed(Key::Right) && self.cursor < self.input.len() {
-            self.cursor += self.input[self.cursor..].chars().next().unwrap().len_utf8();
+        if input.pressed(Key::Right) {
+            if input.ctrl {
+                editor.word_right();
+            } else {
+                editor.right();
+            }
         }
         if input.pressed(Key::Home) {
-            self.cursor = 0;
+            if input.ctrl {
+                self.scroll = self.output.len();
+            } else {
+                self.editor.home();
+            }
         }
         if input.pressed(Key::End) {
-            self.cursor = self.input.len();
-        }
-        if input.pressed(Key::Up) {
-            self.history_move(true);
-        }
-        if input.pressed(Key::Down) {
-            self.history_move(false);
+            if input.ctrl {
+                self.scroll = 0;
+            } else {
+                self.editor.end();
+            }
         }
         if input.pressed(Key::PageUp) {
             self.scroll = (self.scroll + 10).min(self.output.len().saturating_sub(1));
@@ -1560,27 +1673,25 @@ impl Console {
         if input.pressed(Key::PageDown) {
             self.scroll = self.scroll.saturating_sub(10);
         }
+        // Completion follows the edited line before Tab/Up/Down step through it.
+        self.editor.refresh(&self.completion);
+        if input.pressed(Key::Up) {
+            self.editor.step(true, false);
+        }
+        if input.pressed(Key::Down) {
+            self.editor.step(false, false);
+        }
         if input.pressed(Key::Tab) {
-            let matches: Vec<_> = COMMANDS
-                .iter()
-                .filter(|(name, _)| name.starts_with(&self.input))
-                .collect();
-            if matches.len() == 1 {
-                self.input = format!("{} ", matches[0].0);
-                self.cursor = self.input.len();
-            } else if matches.len() > 1 {
-                self.log(
-                    matches
-                        .into_iter()
-                        .map(|(n, _)| *n)
-                        .collect::<Vec<_>>()
-                        .join("  "),
-                );
-            }
+            self.editor.step(input.shift, true);
+            self.editor.refresh(&self.completion);
+        }
+        if ctrl_key("KeyL") {
+            self.output.clear();
+            self.scroll = 0;
         }
         if input.pressed(Key::Enter) {
-            let line = std::mem::take(&mut self.input);
-            self.cursor = 0;
+            let line = self.editor.submit();
+            self.scroll = 0;
             return self.submit(&line);
         }
         Vec::new()
@@ -1802,23 +1913,6 @@ impl Console {
         };
         let menu_shown = shown == Mode::Pause || shown == Mode::MainMenu;
         let scale = self.canvas.height() / 720.;
-        let text = |content: &str, x, y, size, color, mono: bool| {
-            text(
-                &self.canvas,
-                content,
-                vec2(x, y),
-                (size * scale) as u16 as f32,
-                1.,
-                if mono {
-                    self.mono.as_ref()
-                } else if menu_shown {
-                    self.menu_font.as_ref()
-                } else {
-                    self.font.as_ref()
-                },
-                color,
-            );
-        };
         if menu_shown {
             let menu_cat = if shown == Mode::Pause {
                 self.pause_menu.category()
@@ -2036,115 +2130,291 @@ impl Console {
                 self.options.draw(&self.painter(Vec2::ZERO, 1.));
             }
         } else {
-            let left = 32. * scale;
-            let top = 32. * scale;
-            let width = (self.canvas.width() - 64. * scale).min(1000. * scale);
-            let height = self.canvas.height() - 64. * scale;
-            self.canvas.rectangle(
-                0.,
-                0.,
-                self.canvas.width(),
-                self.canvas.height(),
-                Color::new(0., 0., 0., 0.3),
-            );
-            self.canvas
-                .rectangle(left, top, width, height, self.style.panel);
-            rectangle_lines(
-                &self.canvas,
-                left,
-                top,
-                width,
-                height,
-                1.,
-                Color::from_rgba(150, 158, 147, 255),
-            );
-            let console_title = self.gameui.localization.text("#GameUI_Console");
-            text(
-                &console_title,
-                left + 12. * scale,
-                top + 24. * scale,
-                18.,
-                WHITE,
-                false,
-            );
-            self.canvas.rectangle(
-                left + 10. * scale,
-                top + 36. * scale,
-                width - 20. * scale,
-                height - 88. * scale,
-                self.style.entry,
-            );
-            let rows = ((height / scale - 108.) / 19.).max(1.) as usize;
-            let end = self.output.len().saturating_sub(self.scroll);
-            let start = end.saturating_sub(rows);
-            for (i, line) in self.output.iter().skip(start).take(end - start).enumerate() {
-                // Bound horizontal text to the panel. Full output remains in runtime reports.
-                let columns = ((width / scale - 36.) / 9.).max(1.) as usize;
-                let mut clipped = String::new();
-                for c in line.chars().take(columns) {
-                    let mut candidate = clipped.clone();
-                    candidate.push(c);
-                    if self.mono.as_ref().is_some_and(|font| {
-                        font.width_em(&candidate, (16. * scale) as u16 as f32) > width - 36. * scale
-                    }) {
-                        break;
-                    }
-                    clipped = candidate;
-                }
-                text(
-                    &clipped,
-                    left + 18. * scale,
-                    top + (57. + i as f32 * 19.) * scale,
-                    16.,
-                    self.style.text,
-                    true,
-                );
-            }
-            let bottom = top + height - 38. * scale;
-            self.canvas.rectangle(
-                left + 10. * scale,
-                bottom,
-                width - 20. * scale,
-                28. * scale,
-                self.style.entry,
-            );
-            let columns = ((width / scale - 40.) / 9.).max(1.) as usize;
-            let preceding = self.input[..self.cursor].chars().count();
-            let start = preceding.saturating_sub(columns.saturating_sub(1));
-            let shown: String = self.input.chars().skip(start).take(columns).collect();
-            text(
-                &format!("] {shown}"),
-                left + 15. * scale,
-                bottom + 20. * scale,
-                16.,
-                WHITE,
-                true,
-            );
-            if ((time * 2.) as u64).is_multiple_of(2) {
-                let prefix = format!(
-                    "] {}",
-                    self.input
-                        .chars()
-                        .skip(start)
-                        .take(preceding - start)
-                        .collect::<String>()
-                );
-                let cursor_x = self.mono.as_ref().map_or(0., |font| {
-                    font.width_em(&prefix, (16. * scale) as u16 as f32)
-                });
-                self.canvas.rectangle(
-                    left + 15. * scale + cursor_x,
-                    bottom + 5. * scale,
-                    1.,
-                    18. * scale,
-                    WHITE,
-                );
-            }
+            self.draw_console(time, scale);
         }
         if let Some(loading) = &self.loading_dialog {
             let scale = Painter::scale_for(self.canvas.height());
             loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
         }
+    }
+}
+
+/// Warning and error lines (not in the scheme; HL2-RS colors).
+const WARNING_TEXT: Color = Color::new(1.0, 0.8, 0.3, 1.0);
+const ERROR_TEXT: Color = Color::new(1.0, 0.4, 0.35, 1.0);
+/// SDK `CConsolePanel` shows at most this many completion rows, the last one `...` when more.
+const COMPLETION_ROWS: usize = 10;
+/// Console row height and text size in 720-line canvas units.
+const CONSOLE_ROW: f32 = 19.;
+const CONSOLE_TEXT: f32 = 16.;
+
+impl Console {
+    /// Whether `line` passes `con_filter_enable` 1 (and is drawn brighter under 2).
+    fn filter_match(&self, line: &Line) -> bool {
+        self.con_filter_text.is_empty()
+            || line
+                .text
+                .to_lowercase()
+                .contains(&self.con_filter_text.to_lowercase())
+    }
+
+    fn line_color(&self, line: &Line) -> Color {
+        if self.con_filter == 2 && !self.con_filter_text.is_empty() && self.filter_match(line) {
+            return self.style.dev_text;
+        }
+        match line.level {
+            Level::Input | Level::Normal => self.style.text,
+            Level::Developer => self.style.dev_text,
+            Level::Warning => WARNING_TEXT,
+            Level::Error => ERROR_TEXT,
+        }
+    }
+
+    fn draw_console(&self, time: f64, scale: f32) {
+        let text = |content: &str, x: f32, y: f32, color: Color| {
+            text(
+                &self.canvas,
+                content,
+                vec2(x, y),
+                (CONSOLE_TEXT * scale) as u16 as f32,
+                1.,
+                self.mono.as_ref(),
+                color,
+            );
+        };
+        let width_of = |content: &str| {
+            self.mono.as_ref().map_or(0., |font| {
+                font.width_em(content, (CONSOLE_TEXT * scale) as u16 as f32)
+            })
+        };
+        let left = 32. * scale;
+        let top = 32. * scale;
+        let width = (self.canvas.width() - 64. * scale).min(1000. * scale);
+        let height = self.canvas.height() - 64. * scale;
+        self.canvas.rectangle(
+            0.,
+            0.,
+            self.canvas.width(),
+            self.canvas.height(),
+            Color::new(0., 0., 0., 0.3),
+        );
+        self.canvas
+            .rectangle(left, top, width, height, self.style.panel);
+        rectangle_lines(
+            &self.canvas,
+            left,
+            top,
+            width,
+            height,
+            1.,
+            Color::from_rgba(150, 158, 147, 255),
+        );
+        let console_title = self.gameui.localization.text("#GameUI_Console");
+        text(&console_title, left + 12. * scale, top + 24. * scale, WHITE);
+        self.canvas.rectangle(
+            left + 10. * scale,
+            top + 36. * scale,
+            width - 20. * scale,
+            height - 88. * scale,
+            self.style.entry,
+        );
+        // Output: filtered (con_filter_enable 1), scrolled, one color per level.
+        let lines: Vec<&Line> = self
+            .output
+            .iter()
+            .filter(|line| self.con_filter != 1 || self.filter_match(line))
+            .collect();
+        let rows = ((height / scale - 108.) / CONSOLE_ROW).max(1.) as usize;
+        let end = lines.len().saturating_sub(self.scroll);
+        let start = end.saturating_sub(rows);
+        let max_width = width - 36. * scale;
+        for (i, line) in lines[start..end].iter().enumerate() {
+            let shown = if self.con_timestamp {
+                format!("[{:7.2}] {}", line.time, line.text)
+            } else {
+                line.text.clone()
+            };
+            // Bound horizontal text to the panel. Full output remains in runtime reports.
+            let mut clipped = String::new();
+            for c in shown.chars() {
+                clipped.push(c);
+                if width_of(&clipped) > max_width {
+                    clipped.pop();
+                    break;
+                }
+            }
+            text(
+                &clipped,
+                left + 18. * scale,
+                top + (57. + i as f32 * CONSOLE_ROW) * scale,
+                self.line_color(line),
+            );
+        }
+        // Input line, or the reverse history search in its place.
+        let bottom = top + height - 38. * scale;
+        let entry_x = left + 10. * scale;
+        let entry_w = width - 20. * scale;
+        self.canvas
+            .rectangle(entry_x, bottom, entry_w, 28. * scale, self.style.entry);
+        let columns = ((width / scale - 40.) / 9.).max(1.) as usize;
+        let (prompt, line, cursor) = match self.editor.search() {
+            Some((query, found)) => {
+                let label = self
+                    .gameui
+                    .localization
+                    .text("#HL2RS_Console_ReverseSearch");
+                let found = found.unwrap_or_default();
+                (
+                    format!("({label})`{query}': "),
+                    found.to_owned(),
+                    found.chars().count(),
+                )
+            }
+            None => (
+                "] ".to_owned(),
+                self.editor.text().to_owned(),
+                self.editor.cursor(),
+            ),
+        };
+        let start = cursor.saturating_sub(columns.saturating_sub(1));
+        let shown: String = line.chars().skip(start).take(columns).collect();
+        text(
+            &format!("{prompt}{shown}"),
+            left + 15. * scale,
+            bottom + 20. * scale,
+            WHITE,
+        );
+        if ((time * 2.) as u64).is_multiple_of(2) {
+            let before: String = line.chars().skip(start).take(cursor - start).collect();
+            let cursor_x = width_of(&format!("{prompt}{before}"));
+            self.canvas.rectangle(
+                left + 15. * scale + cursor_x,
+                bottom + 5. * scale,
+                1.,
+                18. * scale,
+                WHITE,
+            );
+        }
+        self.draw_completion(scale, (entry_x, bottom, entry_w, 28. * scale), &text);
+    }
+
+    /// The completion popup (SDK `CConsolePanel` completion list, VGUI menu colors): a help
+    /// line for the command being typed, then up to `COMPLETION_ROWS` items, cvars with their
+    /// value. It opens below the entry when it fits, else above it.
+    fn draw_completion(
+        &self,
+        scale: f32,
+        (x, entry_y, w, entry_h): (f32, f32, f32, f32),
+        text: &dyn Fn(&str, f32, f32, Color),
+    ) {
+        let theme = &self.theme;
+        let mut rows: Vec<Vec<(String, Color)>> = Vec::new();
+        let mut highlighted = None;
+        if self.editor.search().is_none() {
+            if let Some(help) = complete::arg_help(self.editor.text()) {
+                let mut runs = vec![(help.name.to_owned(), theme.text)];
+                for (i, arg) in help.args.iter().enumerate() {
+                    let color = if help.current == Some(i) {
+                        theme.text
+                    } else {
+                        theme.text_dull
+                    };
+                    runs.push((format!(" {arg}"), color));
+                }
+                if help.cvar {
+                    if let Some(value) = self.cvar_value(help.name) {
+                        runs.push((format!(" = \"{value}\""), self.style.dev_text));
+                    }
+                }
+                runs.push((format!("   {}", help.description), theme.label_text));
+                rows.push(runs);
+            }
+        }
+        let help_rows = rows.len();
+        if let Some((items, index)) = self.editor.popup() {
+            let more = items.len() > COMPLETION_ROWS;
+            let shown = if more {
+                COMPLETION_ROWS - 1
+            } else {
+                items.len()
+            };
+            // Keep the item stepped to in view.
+            let first = index.map_or(0, |i| (i + 1).saturating_sub(shown));
+            for (i, item) in items.iter().enumerate().skip(first).take(shown) {
+                let mut runs = vec![(item.text.clone(), theme.text)];
+                if let Some(value) = commands::find(&item.text)
+                    .filter(|spec| spec.cvar)
+                    .and_then(|spec| self.cvar_value(spec.name))
+                {
+                    runs.push((format!(" {value}"), self.style.dev_text));
+                }
+                if !item.detail.is_empty() {
+                    runs.push((format!("   {}", item.detail), theme.label_text));
+                }
+                if index == Some(i) {
+                    highlighted = Some(rows.len());
+                }
+                rows.push(runs);
+            }
+            if more {
+                rows.push(vec![("...".to_owned(), theme.text_dull)]);
+            }
+        }
+        if rows.is_empty() {
+            return;
+        }
+        let row = CONSOLE_ROW * scale;
+        let h = rows.len() as f32 * row + 4. * scale;
+        let below = entry_y + entry_h;
+        let y = if below + h <= self.canvas.height() {
+            below
+        } else {
+            (entry_y - h).max(0.)
+        };
+        self.canvas.rectangle(
+            x,
+            y,
+            w,
+            h,
+            Color::new(theme.menu_bg.r, theme.menu_bg.g, theme.menu_bg.b, 1.),
+        );
+        rectangle_lines(&self.canvas, x, y, w, h, 1., theme.border_dark);
+        let max_width = w - 12. * scale;
+        for (r, runs) in rows.iter().enumerate() {
+            let ry = y + 2. * scale + r as f32 * row;
+            if highlighted == Some(r) {
+                self.canvas
+                    .rectangle(x + 1., ry, w - 2., row, theme.selection_bg);
+            }
+            if r == help_rows && help_rows > 0 {
+                self.canvas
+                    .rectangle(x + 1., ry, w - 2., 1., theme.border_dark);
+            }
+            let mut cx = x + 6. * scale;
+            for (content, color) in runs {
+                let color = if highlighted == Some(r) {
+                    theme.selection_text
+                } else {
+                    *color
+                };
+                let mut clipped = String::new();
+                for c in content.chars() {
+                    clipped.push(c);
+                    if cx - x + self.console_text_width(&clipped, scale) > max_width {
+                        clipped.pop();
+                        break;
+                    }
+                }
+                text(&clipped, cx, ry + 15. * scale, color);
+                cx += self.console_text_width(&clipped, scale);
+            }
+        }
+    }
+
+    fn console_text_width(&self, content: &str, scale: f32) -> f32 {
+        self.mono.as_ref().map_or(0., |font| {
+            font.width_em(content, (CONSOLE_TEXT * scale) as u16 as f32)
+        })
     }
 }
 
@@ -2320,7 +2590,7 @@ mod tests {
         }
     }
     #[test]
-    fn console_returns_to_its_previous_pause_state_and_history_restores_draft() {
+    fn console_returns_to_its_previous_pause_state_and_steps_through_history() {
         let mut console = Console::default();
         console.escape();
         assert!(console.paused());
@@ -2328,19 +2598,31 @@ mod tests {
         assert_eq!(console.mode, Mode::Console);
         console.escape();
         assert_eq!(console.mode, Mode::Pause);
+        console.toggle();
+        for line in ["echo first", "echo second"] {
+            console.input(&Input {
+                text: line.into(),
+                keys: [Key::Enter].into(),
+                ..Default::default()
+            });
+        }
+        // An empty line: Up and Down step through the history, newest first.
+        keys(&mut console, &[Key::Up]);
+        assert_eq!(console.input_line(), "echo second");
+        keys(&mut console, &[Key::Up]);
+        assert_eq!(console.input_line(), "echo first");
+        keys(&mut console, &[Key::Down]);
+        assert_eq!(console.input_line(), "echo second");
+        // Escape hides the list, then closes the console.
         console.escape();
-        assert!(!console.paused());
-        console.submit("echo first");
-        console.submit("echo second");
-        console.input = "draft".into();
-        console.history_move(true);
-        assert_eq!(console.input, "echo second");
-        console.history_move(true);
-        assert_eq!(console.input, "echo first");
-        console.history_move(false);
-        assert_eq!(console.input, "echo second");
-        console.history_move(false);
-        assert_eq!(console.input, "draft");
+        assert_eq!(console.mode, Mode::Console);
+        console.escape();
+        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(
+            console.take_changed_history(),
+            Some(vec!["echo first".to_owned(), "echo second".to_owned()])
+        );
+        assert_eq!(console.take_changed_history(), None);
     }
     #[test]
     fn explicit_text_input_edits_unicode_at_boundaries_and_completes_commands() {
@@ -2350,34 +2632,87 @@ mod tests {
             text: "aé🦀".into(),
             ..Default::default()
         });
-        console.input(&Input {
-            keys: [Key::Left].into(),
-            ..Default::default()
-        });
-        console.input(&Input {
-            keys: [Key::Backspace].into(),
-            ..Default::default()
-        });
-        assert_eq!(console.input, "a🦀");
-        console.input(&Input {
-            keys: [Key::Delete].into(),
-            ..Default::default()
-        });
-        assert_eq!(console.input, "a");
-        console.input.clear();
-        console.cursor = 0;
+        keys(&mut console, &[Key::Left]);
+        keys(&mut console, &[Key::Backspace]);
+        assert_eq!(console.input_line(), "a🦀");
+        keys(&mut console, &[Key::Delete]);
+        assert_eq!(console.input_line(), "a");
+        keys(&mut console, &[Key::Backspace]);
         console.input(&Input {
             text: "noc".into(),
             keys: [Key::Tab].into(),
             ..Default::default()
         });
-        assert_eq!(console.input, "noclip ");
+        assert_eq!(
+            console.input_line(),
+            "noclip ",
+            "one match: taken with a space"
+        );
+        keys(&mut console, &[Key::Enter]);
+        assert!(console.input_line().is_empty());
+        assert!(console.output.iter().any(|s| s.contains("sv_cheats")));
+    }
+    #[test]
+    fn console_shortcuts_search_paste_filter_and_timestamps() {
+        let mut console = Console::default();
+        console.toggle();
+        console.set_history(vec!["fov 90".into(), "volume 0.5".into()]);
         console.input(&Input {
-            keys: [Key::Enter].into(),
+            text: "x".into(),
+            ctrl: true,
+            binding_keys: vec!["KeyR".into()],
             ..Default::default()
         });
-        assert!(console.input.is_empty());
-        assert!(console.output.iter().any(|s| s.contains("sv_cheats")));
+        console.input(&Input {
+            text: "fov".into(),
+            ..Default::default()
+        });
+        assert_eq!(console.editor.search(), Some(("fov", Some("fov 90"))));
+        console.escape();
+        assert_eq!(console.mode, Mode::Console, "Escape ends the search first");
+        console.input(&Input {
+            paste: Some("echo pasted\n".into()),
+            ..Default::default()
+        });
+        assert_eq!(console.input_line(), "echo pasted");
+        console.input(&Input {
+            ctrl: true,
+            binding_keys: vec!["KeyU".into()],
+            ..Default::default()
+        });
+        assert_eq!(console.input_line(), "");
+        console.submit("con_filter_enable 1; con_filter_text Loaded; con_timestamp 1");
+        assert_eq!(
+            console.cvar_value("con_filter_enable").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            console.cvar_value("con_filter_text").as_deref(),
+            Some("Loaded")
+        );
+        assert!(console.con_timestamp);
+        assert!(console.submit("con_filter_enable 3").is_empty());
+        assert_eq!(
+            console.cvar_value("con_filter_enable").as_deref(),
+            Some("1")
+        );
+        let loaded = Line {
+            level: Level::Normal,
+            text: "Loaded hl2/background01".into(),
+            time: 0.,
+        };
+        assert!(console.filter_match(&loaded));
+        assert_eq!(
+            serde_json::to_string(&loaded).unwrap(),
+            "\"Loaded hl2/background01\"",
+            "lines serialize as their text in the run report"
+        );
+        console.input(&Input {
+            ctrl: true,
+            binding_keys: vec!["KeyL".into()],
+            ..Default::default()
+        });
+        assert!(console.output.is_empty(), "Ctrl+L clears the output");
     }
     /// Pointer position at the middle of menu row `index`.
     fn row(console: &Console, index: usize) -> Option<Vec2> {

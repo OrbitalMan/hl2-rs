@@ -28,7 +28,7 @@ impl Console {
         }
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"mode":self.source.mode,"background_level":self.source.background_level(),"sv_cheats":self.source.cheats,"input":self.source.input,"output":self.source.output,"pending_map":self.map_request,"pending_game":self.map_request_game})
+        serde_json::json!({"mode":self.source.mode,"background_level":self.source.background_level(),"sv_cheats":self.source.cheats,"input":self.source.input_line(),"output":self.source.output,"pending_map":self.map_request,"pending_game":self.map_request_game})
     }
 }
 #[derive(Clone, Deserialize)]
@@ -117,6 +117,31 @@ pub fn wheel_steps<'a>(events: impl Iterator<Item = &'a bevy::input::mouse::Mous
 /// Keys and buttons pressed this frame as persisted binding names: the `KeyCode` name for keys
 /// (`KeyW`, `SuperLeft`), the Source names `MOUSE1`..`MOUSE5` for buttons and
 /// `MWHEELUP`/`MWHEELDOWN` for the wheel. Unidentified native keys are skipped.
+/// Control and Shift held, and whether this frame pastes: Cmd+V on macOS, Ctrl+V elsewhere.
+/// Typed text is dropped while Control or Cmd is held (shortcuts, not text).
+pub struct Modifiers {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub command: bool,
+    pub paste: bool,
+}
+
+pub fn modifiers(native: &ButtonInput<KeyCode>) -> Modifiers {
+    let ctrl = native.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
+    let command = native.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]);
+    let paste_modifier = if cfg!(target_os = "macos") {
+        command
+    } else {
+        ctrl
+    };
+    Modifiers {
+        ctrl,
+        shift: native.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+        command,
+        paste: paste_modifier && native.just_pressed(KeyCode::KeyV),
+    }
+}
+
 pub fn binding_keys(
     keys: &ButtonInput<KeyCode>,
     buttons: &ButtonInput<MouseButton>,

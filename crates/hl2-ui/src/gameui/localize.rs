@@ -144,6 +144,8 @@ pub fn unescape(s: &str) -> String {
 /// Central English fallback table for user-visible strings when game resources are missing or unresolved.
 pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     ("GameUI_Console", "Console"),
+    // Ctrl+R history search prompt in the console (no installed token).
+    ("HL2RS_Console_ReverseSearch", "reverse-i-search"),
     ("Console_Title", "Console"),
     ("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU"),
     (

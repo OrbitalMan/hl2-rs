@@ -135,6 +135,40 @@ pub fn game_for_map(root: &Path, map: &str, current: Option<&str>) -> Option<Str
     })
 }
 
+/// Every map name the installed games ship (`maps/<name>.bsp`, loose or in a game's own VPKs),
+/// sorted, each name once: what the console's `map` completes from.
+pub fn installed_maps(root: &Path) -> Vec<String> {
+    let mut maps = std::collections::BTreeSet::new();
+    let map_name = |path: &str| {
+        let name = path.strip_prefix("maps/")?.strip_suffix(".bsp")?;
+        (!name.contains('/')).then(|| name.to_owned())
+    };
+    for game in games(root) {
+        let folder = root.join(&game);
+        for entry in std::fs::read_dir(folder.join("maps"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let file = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            maps.extend(map_name(&format!("maps/{file}")));
+        }
+        for vpk in std::fs::read_dir(&folder)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().ends_with("_dir.vpk"))
+            })
+            .filter_map(|p| crate::vpk::Vpk::open(&p).ok())
+        {
+            maps.extend(vpk.entries.keys().filter_map(|path| map_name(path)));
+        }
+    }
+    maps.into_iter().collect()
+}
+
 /// A bounded launch-readiness check, not a complete content/integrity audit. `map` is the map
 /// requested on the command line, if any; without one only the shared content is checked.
 pub fn validate_content(path: PathBuf, map: Option<&str>) -> Result<PathBuf> {
@@ -217,6 +251,27 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn installed_maps_list_every_games_loose_maps_once() {
+        let fixture = Fixture::new();
+        for (path, bytes) in [
+            ("hl2/gameinfo.txt", &b"x"[..]),
+            ("hl2/maps/background01.bsp", b"VBSP"),
+            ("hl2/maps/d1_trainstation_01.bsp", b"VBSP"),
+            ("hl2/maps/d1_trainstation_01.nav", b"x"),
+            ("lostcoast/gameinfo.txt", b"x"),
+            ("lostcoast/maps/BACKGROUND01.bsp", b"VBSP"),
+            ("lostcoast/maps/d2_lostcoast.bsp", b"VBSP"),
+            ("notagame/maps/hidden.bsp", b"VBSP"),
+        ] {
+            fixture.put(path, bytes);
+        }
+        assert_eq!(
+            installed_maps(&fixture.0),
+            ["background01", "d1_trainstation_01", "d2_lostcoast"]
+        );
     }
 
     #[test]

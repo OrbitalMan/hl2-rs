@@ -663,3 +663,45 @@ Verified (2026-10-12, macOS M1 Pro Retina):
 - Live packaged run with real mouse interaction: navigated Options -> Video, selected and applied
   4:3 and wide resolutions (1600x1200, 2048x1536, 640x480, 1024x768, 1280x1024) in windowed mode,
   confirming reliable click responsiveness and window sizing.
+
+## 11. Developer console (2026-10-17)
+
+Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed
+`hl2_complete/resource/sourcescheme.res` (`Console.TextColor` OffWhite, `Console.DevTextColor`
+White) and Source's own console variables. Code: `hl2-ui::console::{commands, complete, editor}`
+(pure, unit-tested), drawing in `Console::draw_console`/`draw_completion`, host side in
+`hl2-bevy::console_host`.
+
+- Commands and cvars are described once (`console::commands::COMMANDS`: name, help as
+  `name args: description`, what each argument completes from, cvar or command). `help` and
+  `find` print from it.
+- Completion (retail `RebuildCompletionList`, extended): the line's last command (after the last
+  `;` outside quotes) completes its first word from every command and cvar, later words from the
+  argument's source: installed maps (`source_assets::install::installed_maps`, loose and in each
+  game's own VPKs), the loaded map's targetnames and the inputs its own connections fire
+  (`console_host::MapEntityNames`), command names, or fixed values. Ranking: exact name, prefix
+  matches alphabetically (retail), then substring and letters-in-order matches (HL2-RS
+  addition). An empty line lists the command history, like retail.
+- The list shows under the input line, or above it when there is no room (the entry is at the
+  bottom of the panel), at most 10 rows with the last one `...` when more (retail
+  `MAX_MENU_ITEMS`), cvars with their current value. Above it, a help line shows the usage of the
+  command being typed with the argument being typed highlighted (HL2-RS addition).
+- Keys: Tab/Down step forward and Shift+Tab/Up back, putting the item in the line (retail
+  `OnAutoComplete`); Tab on a single match takes it with a space; Up/Down on a line without
+  matches step through the history; Escape ends a Ctrl+R search, then hides the list, then
+  closes the console; Ctrl+R searches the history backwards (Enter runs the match, arrows/Tab take
+  it); Ctrl+W/Backspace and Ctrl+Delete delete words, Ctrl+U/K to the start/end, Ctrl+A/E move
+  there, Ctrl+arrows move by words, Ctrl+Home/End scroll the output, Ctrl+L clears it; paste is
+  Cmd+V on macOS and Ctrl+V elsewhere (Bevy `Clipboard`); typed text is ignored while Control or
+  Cmd is held.
+- History: 100 entries (retail `MAX_HISTORY_ITEMS`), a repeated command moves to the end, saved
+  in `hl2-console-history.txt` next to the settings file (never in the install). Lines submitted
+  by scripts or `Console::submit` do not join it.
+- Output: lines carry a level and the time they were printed; input echoes and messages use
+  `Console.TextColor`, developer lines (mirrored HL2-RS info logs) `Console.DevTextColor`, read
+  from the installed `SourceScheme.res`; warnings and errors (mirrored from the engine log, every
+  target) use HL2-RS colors. Source's `con_filter_enable` (1 shows only lines containing
+  `con_filter_text`, 2 shows them brighter) and `con_timestamp` apply to the shown output. The run
+  report still records lines as text.
+- Not ported: binds, aliases, `exec`, cvar registries for unimplemented engine cvars, output row
+  selection to the clipboard, and game-specific commands from other titles.

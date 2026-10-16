@@ -5,6 +5,7 @@ mod bloom;
 mod camera;
 mod campaign;
 mod canvas_renderer;
+mod console_host;
 mod effects;
 mod eyes;
 mod gameplay;
@@ -480,10 +481,18 @@ fn main() -> Result<()> {
         .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
         .init_resource::<studio_decals::StudioDecals>()
+        .insert_resource(console_host::InstalledMaps(
+            source_assets::install::installed_maps(&options.game),
+        ))
+        .init_resource::<console_host::MapEntityNames>()
         .init_resource::<crate::video::VideoViewport>()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
             DefaultPlugins
+                .set(bevy::log::LogPlugin {
+                    custom_layer: console_host::log_layer,
+                    ..default()
+                })
                 .set(AssetPlugin {
                     file_path: asset_root.to_string_lossy().into_owned(),
                     ..default()
@@ -593,6 +602,14 @@ fn main() -> Result<()> {
         )
         .add_systems(Last, effects::observe.before(monitor))
         .add_systems(Last, audio::observe.before(monitor))
+        .add_systems(
+            Update,
+            (
+                console_host::sync_sources,
+                console_host::drain_log,
+                console_host::save_history,
+            ),
+        )
         .add_systems(Last, monitor);
     if options.profile {
         performance::install(&mut app);
@@ -707,6 +724,7 @@ fn setup(
         ),
     );
     let mut console_ui = ui_host::Console::new(ui);
+    console_ui.source.set_history(console_host::load_history());
     console_ui
         .source
         .level_loaded_for_map(&map_game, &map_name, prepared.1);
@@ -844,6 +862,7 @@ pub(crate) fn install_map(
         images,
     );
     commands.insert_resource(eyes::Eyes::new(&loaded));
+    commands.insert_resource(console_host::MapEntityNames::of(&loaded.world.entities));
     sky::install(&loaded, commands, meshes, materials, images);
     commands.insert_resource(sky::Sky::new(
         loaded.bsp,

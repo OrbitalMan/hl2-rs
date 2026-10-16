@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Console: completion, suggestions, history, search, editing keys, log mirroring
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::console::commands` (one descriptor table: help, argument sources, cvars), `complete` (last-command completion of names and arguments, ranking, usage help line), `editor` (line editing, completion stepping, history, Ctrl+R search); `Console` uses them, prints `Line`s with a level and time (they still read and serialize as text), draws the completion list and help line, and gains `con_filter_enable`, `con_filter_text`, `con_timestamp`; console colors come from the installed `SourceScheme.res`. `Input` gains `ctrl`, `shift`, `paste` (serde defaults: replays keep loading). `source_assets::install::installed_maps`. `hl2-bevy::console_host`: completion sources, history file, `LogPlugin` layer mirroring warnings/errors and HL2-RS info into the console; Ctrl/Shift and paste (Bevy `Clipboard`) in `ui_system`. Details in `docs/gameui.md` section 11.
+
+**Why:** owner request: bring proven console features (autocompletion, suggestions, history, editing, logging) to HL2-RS while keeping the Half-Life 2 console's behavior and look.
+
+**Tested how:** unit tests (descriptors, ranking, argument completion after `;`, help line, editing keys, Tab/Up/Down stepping, history on an empty line and its 100-entry cap and dedupe, Escape layering, Ctrl+R, paste, `con_*` cvars, `Line` serialization, entity names from connections, installed map listing); workspace tests, strict clippy, Windows check, fmt; packaged runtime check, submenu replay and Options replays (old scripts still load); packaged capture of `map d1` showing the help line and the map list.
+
+**Result:** the console completes commands, cvars, maps and `ent_fire` targets/inputs as you type, keeps its history across runs and shows engine warnings.
+
+**Still broken or not tested:** paste and the log mirroring not exercised by hand; output row selection/copy not ported; the full Source cvar set is not registered (only implemented commands complete); the console panel itself is still the earlier HL2-RS layout, not the retail VGUI console frame.
+
+**Next:** owner check.
+
 ## 2026-10-16 GameUI: brighter check box and radio button labels at rest
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
