@@ -463,99 +463,70 @@ impl GameUiResources {
         if res.spoken_languages.is_empty() {
             res.spoken_languages.push("english".into());
         }
-        res.background_maps = fallback_background_maps();
-        for &(game, _, default_map) in INITIAL_BACKGROUND_MAPS {
-            let (first_map, all_maps) = if game == "main" || game == "hl2" {
-                let text = reader.read_text("scripts/chapterbackgrounds.txt");
-                let first = text
-                    .as_deref()
-                    .and_then(background_map)
-                    .unwrap_or_else(|| default_map.to_owned());
-                let all = text
-                    .as_deref()
-                    .map(chapter_background_maps)
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or_else(|| vec![first.clone()]);
-                (first, all)
-            } else {
-                let text = vfs
-                    .game_root()
-                    .and_then(|root| {
-                        source_assets::vpk::Vfs::mount_expansion(root, Some(game)).ok()
-                    })
-                    .and_then(|exp_vfs| {
-                        Reader::new(&exp_vfs).read_text("scripts/chapterbackgrounds.txt")
-                    });
-                let first = text
-                    .as_deref()
-                    .and_then(background_map)
-                    .unwrap_or_else(|| default_map.to_owned());
-                let resolved_first = if game == "lostcoast" && first == "background01" {
+        // Each game shows chapter 1 of its own `scripts/chapterbackgrounds.txt` as its menu
+        // background and starts New Game with its own `cfg/chapter1.cfg`, both read through that
+        // game's own search path. The games are the ones the menu switches to.
+        for game in menu_games(&res.game_menu) {
+            let backgrounds = read_game_text(vfs, &game, "scripts/chapterbackgrounds.txt");
+            let Some(text) = backgrounds else {
+                res.missing
+                    .push(format!("{game}/scripts/chapterbackgrounds.txt"));
+                continue;
+            };
+            let Some(first_map) = background_map(&text) else {
+                continue;
+            };
+            // Lost Coast's background is also called `background01`; it is keyed apart from
+            // Half-Life 2's so both can be loaded and shown.
+            let key = |map: &str| {
+                if game == "lostcoast" && map == "background01" {
                     "lostcoast_background01".to_owned()
                 } else {
-                    first
-                };
-                let all = text
-                    .as_deref()
-                    .map(chapter_background_maps)
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or_else(|| vec![resolved_first.clone()]);
-                (resolved_first, all)
+                    map.to_owned()
+                }
             };
-            res.background_maps
-                .insert(game.to_owned(), first_map.clone());
+            res.background_maps.insert(game.clone(), key(&first_map));
 
-            // Load pre-blurred background VTF images for all chapter maps in this game
-            for map_name in all_maps {
+            // Pre-blurred background images for every chapter background of this game.
+            for map_name in chapter_background_maps(&text) {
                 let vtf_base = blur(&map_name);
-                let store_key = if game == "lostcoast" && map_name == "background01" {
-                    "lostcoast_background01"
-                } else {
-                    &map_name
-                };
-                if let Some(img) = load_vtf_file(&reader, vfs, game, vtf_base) {
-                    res.background_images.insert(store_key.to_owned(), img);
+                let store_key = key(&map_name);
+                if let Some(img) = load_vtf_file(&reader, vfs, &game, vtf_base) {
+                    res.background_images.insert(store_key.clone(), img);
                 }
                 let wide_name = format!("{vtf_base}_widescreen");
-                if let Some(img) = load_vtf_file(&reader, vfs, game, &wide_name) {
+                if let Some(img) = load_vtf_file(&reader, vfs, &game, &wide_name) {
                     res.background_images
                         .insert(format!("{store_key}_widescreen"), img);
                 }
             }
-
-            // Alias game category name to its chapter 1 background image
-            let canonical_key = if game == "lostcoast" {
-                "lostcoast_background01"
-            } else {
-                blur(&first_map)
-            };
-            if let Some(img) = res.background_images.get(canonical_key).cloned() {
-                res.background_images.insert(game.to_owned(), img);
+            // The game's category shows its chapter 1 background image.
+            let first_key = key(&first_map);
+            if let Some(img) = res.background_images.get(blur(&first_key)).cloned() {
+                res.background_images.insert(game.clone(), img);
             }
             if let Some(img) = res
                 .background_images
-                .get(&format!("{canonical_key}_widescreen"))
+                .get(&format!("{}_widescreen", blur(&first_key)))
                 .cloned()
             {
                 res.background_images
                     .insert(format!("{game}_widescreen"), img);
             }
+
+            match read_game_text(vfs, &game, "cfg/chapter1.cfg").and_then(|t| chapter_map(&t)) {
+                Some(map) => {
+                    res.new_game_maps.insert(game.clone(), map);
+                }
+                None => res.missing.push(format!("{game}/cfg/chapter1.cfg")),
+            }
         }
-        res.background_map = res
-            .background_maps
-            .get("hl2")
-            .cloned()
-            .or_else(|| res.background_maps.get("main").cloned());
-        for &(game, cfg_path, default_map) in INITIAL_EPISODE_MAPS {
-            let map = reader
-                .read_text(cfg_path)
-                .or_else(|| {
-                    vfs.game_root()
-                        .and_then(|root| std::fs::read_to_string(root.join(cfg_path)).ok())
-                })
-                .and_then(|text| chapter_map(&text))
-                .unwrap_or_else(|| default_map.to_owned());
-            res.new_game_maps.insert(game.to_owned(), map);
+        // The main category shows the first game's background (Half-Life 2 in the menu).
+        res.background_map = menu_games(&res.game_menu)
+            .first()
+            .and_then(|game| res.background_maps.get(game).cloned());
+        if let Some(map) = res.background_map.clone() {
+            res.background_maps.insert("main".to_owned(), map);
         }
         for category in ["main", "hl2", "episodic", "ep2", "lostcoast"] {
             let gameinfo_path = match category {
@@ -734,26 +705,39 @@ pub fn background_map(text: &str) -> Option<String> {
         .filter(|map| !map.is_empty())
 }
 
-/// Initial background maps for each game and episode category.
-pub const INITIAL_BACKGROUND_MAPS: &[(&str, &str, &str)] = &[
-    ("main", "scripts/chapterbackgrounds.txt", "background01"),
-    ("hl2", "scripts/chapterbackgrounds.txt", "background01"),
-    (
-        "episodic",
-        "episodic/scripts/chapterbackgrounds.txt",
-        "ep1_background01",
-    ),
-    (
-        "ep2",
-        "ep2/scripts/chapterbackgrounds.txt",
-        "ep2_background01",
-    ),
-    (
-        "lostcoast",
-        "lostcoast/scripts/chapterbackgrounds.txt",
-        "lostcoast_background01",
-    ),
-];
+/// The games the main menu switches to, in menu order: the arguments of the
+/// `SwitchExpansion <game>` commands in `gamemenu.res`, which name the game's folder in the
+/// installation (`hl2`, `episodic`, `ep2`, `lostcoast`).
+pub fn menu_games(items: &[MenuItem]) -> Vec<String> {
+    let mut games: Vec<String> = Vec::new();
+    for item in items {
+        let mut words = item.command.split_whitespace();
+        let switch = words
+            .next()
+            .is_some_and(|w| w.eq_ignore_ascii_case("SwitchExpansion"));
+        if let (true, Some(game)) = (switch, words.next()) {
+            if !games.iter().any(|g| g.eq_ignore_ascii_case(game)) {
+                games.push(game.to_owned());
+            }
+        }
+    }
+    games
+}
+
+/// The installation folder of the base game, which every game mount ends with.
+const BASE_GAME: &str = "hl2";
+
+/// Reads a text file the way `game` itself sees it: through that game's own search path (its
+/// folder, then Half-Life 2 and the platform), independent of which game's map is loaded now.
+/// Without an installation root (test file systems) it reads through `vfs`.
+fn read_game_text(vfs: &Vfs, game: &str, path: &str) -> Option<String> {
+    let Some(root) = vfs.game_root() else {
+        return Reader::new(vfs).read_text(path);
+    };
+    let expansion = (game != BASE_GAME).then_some(game);
+    let game_vfs = Vfs::mount_expansion(root, expansion).ok()?;
+    Reader::new(&game_vfs).read_text(path)
+}
 
 /// Extracts all unique background maps from a `scripts/chapterbackgrounds.txt` file content.
 pub fn chapter_background_maps(text: &str) -> Vec<String> {
@@ -780,30 +764,6 @@ pub fn chapter_background_maps(text: &str) -> Vec<String> {
 /// In Source GameUI, the console blur image name in `materials/console/` always matches the background map name.
 pub fn blur(map: &str) -> &str {
     map.trim_end_matches(".bsp")
-}
-
-/// Fallback initial background maps for each game and episode category.
-pub fn fallback_background_maps() -> BTreeMap<String, String> {
-    INITIAL_BACKGROUND_MAPS
-        .iter()
-        .map(|(game, _, map)| ((*game).to_owned(), (*map).to_owned()))
-        .collect()
-}
-
-/// Initial game and episode maps verified against retail Source installation configs.
-pub const INITIAL_EPISODE_MAPS: &[(&str, &str, &str)] = &[
-    ("hl2", "cfg/chapter1.cfg", "d1_trainstation_01"),
-    ("episodic", "episodic/cfg/chapter1.cfg", "ep1_citadel_00"),
-    ("ep2", "ep2/cfg/chapter1.cfg", "ep2_outland_01"),
-    ("lostcoast", "lostcoast/cfg/chapter1.cfg", "d2_lostcoast"),
-];
-
-/// Fallback initial new game maps for each game and episode category.
-pub fn fallback_new_game_maps() -> BTreeMap<String, String> {
-    INITIAL_EPISODE_MAPS
-        .iter()
-        .map(|(game, _, map)| ((*game).to_owned(), (*map).to_owned()))
-        .collect()
 }
 
 /// The map of a chapter config (`map d1_trainstation_01` or `playvideo_exitcommand ep1_recap map ep2_outland_01`).
@@ -999,53 +959,72 @@ mod tests {
     }
 
     #[test]
-    fn initial_episode_maps_table_and_fallbacks() {
-        let maps = fallback_new_game_maps();
+    fn menu_games_come_from_switch_expansion_commands_in_menu_order() {
+        let item = |command: &str| MenuItem {
+            label: String::new(),
+            command: command.into(),
+            category: Some("main".into()),
+            order: 0,
+            visibility: Visibility::Always,
+            caps: false,
+        };
+        let items = [
+            item("SwitchExpansion hl2"),
+            item("SwitchCategory extras"),
+            item("switchexpansion episodic"),
+            item("SwitchExpansion ep2"),
+            item("OpenOptionsDialog"),
+            item("SwitchExpansion lostcoast"),
+            item("SwitchExpansion hl2"),
+        ];
+        assert_eq!(menu_games(&items), ["hl2", "episodic", "ep2", "lostcoast"]);
         assert_eq!(
-            maps.get("hl2").map(String::as_str),
-            Some("d1_trainstation_01")
-        );
-        assert_eq!(
-            maps.get("episodic").map(String::as_str),
-            Some("ep1_citadel_00")
-        );
-        assert_eq!(maps.get("ep2").map(String::as_str), Some("ep2_outland_01"));
-        assert_eq!(
-            maps.get("lostcoast").map(String::as_str),
-            Some("d2_lostcoast")
+            menu_games(&fallback_game_menu())
+                .first()
+                .map(String::as_str),
+            Some("hl2")
         );
     }
 
     #[test]
-    fn initial_background_maps_table_and_fallbacks() {
-        let maps = fallback_background_maps();
-        assert_eq!(maps.get("main").map(String::as_str), Some("background01"));
-        assert_eq!(maps.get("hl2").map(String::as_str), Some("background01"));
-        assert_eq!(
-            maps.get("episodic").map(String::as_str),
-            Some("ep1_background01")
-        );
-        assert_eq!(
-            maps.get("ep2").map(String::as_str),
-            Some("ep2_background01")
-        );
-        assert_eq!(
-            maps.get("lostcoast").map(String::as_str),
-            Some("lostcoast_background01")
-        );
-
+    fn background_map_for_resolves_aliases() {
         let res = GameUiResources {
-            background_maps: maps,
+            background_maps: [("hl2", "background01"), ("episodic", "ep1_background01")]
+                .into_iter()
+                .map(|(game, map)| (game.to_owned(), map.to_owned()))
+                .collect(),
             ..Default::default()
         };
-        assert_eq!(res.background_map_for("episodic"), Some("ep1_background01"));
-        assert_eq!(res.background_map_for("ep2"), Some("ep2_background01"));
-        assert_eq!(
-            res.background_map_for("lostcoast"),
-            Some("lostcoast_background01")
-        );
         assert_eq!(res.background_map_for("hl2"), Some("background01"));
+        assert_eq!(res.background_map_for("hl2ep1"), Some("ep1_background01"));
         assert_eq!(res.background_map_for("unknown"), None);
+    }
+
+    #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn every_game_reads_its_own_chapter_files_whatever_map_is_loaded() {
+        let root = source_assets::install::discover().expect("installed game");
+        // The menu's file system follows the loaded background map; an Episode Two background
+        // mounts Episode Two first. Half-Life 2 must still get its own chapter files.
+        for startup in [None, Some("ep2"), Some("episodic"), Some("lostcoast")] {
+            let vfs = Vfs::mount_expansion(&root, startup).expect("mount");
+            let res = GameUiResources::load(&vfs);
+            let map = |game: &str| res.background_maps.get(game).map(String::as_str);
+            let new_game = |game: &str| res.new_game_maps.get(game).map(String::as_str);
+            assert_eq!(map("hl2"), Some("background01"), "{startup:?}");
+            assert_eq!(map("main"), Some("background01"), "{startup:?}");
+            assert_eq!(map("episodic"), Some("ep1_background01"), "{startup:?}");
+            assert_eq!(map("ep2"), Some("ep2_background01"), "{startup:?}");
+            assert_eq!(
+                map("lostcoast"),
+                Some("lostcoast_background01"),
+                "{startup:?}"
+            );
+            assert_eq!(new_game("hl2"), Some("d1_trainstation_01"), "{startup:?}");
+            assert_eq!(new_game("episodic"), Some("ep1_citadel_00"), "{startup:?}");
+            assert_eq!(new_game("ep2"), Some("ep2_outland_01"), "{startup:?}");
+            assert_eq!(new_game("lostcoast"), Some("d2_lostcoast"), "{startup:?}");
+        }
     }
 
     #[test]

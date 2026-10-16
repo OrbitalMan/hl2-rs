@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: every game reads its own chapter files (Half-Life 2 submenu background)
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::gameui::resources`: `menu_games` (games from `gamemenu.res` `SwitchExpansion` commands), `read_game_text` (reads through the game's own mount); `GameUiResources::load` takes each game's background from its own `scripts/chapterbackgrounds.txt` and New Game map from its own `cfg/chapter1.cfg`; removed `INITIAL_BACKGROUND_MAPS`, `INITIAL_EPISODE_MAPS`, `fallback_background_maps`, `fallback_new_game_maps`. Console tests use explicit test data. New playground script `runtime_submenus.sh` (+ `submenus.json`). Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Owner report: selecting the Half-Life 2 submenu did not update the background. The resources were read through the startup map's mount (the saved background's game), so HL2's chapter files were the episode's.
+
+**Tested how:** `cargo test -p hl2-ui` (189), owned-install (5, incl. the new mount test, which fails when reading through the startup mount), `cargo test -p hl2-bevy` (74), strict clippy for macOS and `x86_64-pc-windows-msvc`, fmt; packaged menu replay (HL2 now loads `background01`; before, `ep2_background01`).
+
+**Result:** Each submenu shows its own game's chapter 1 background regardless of the saved background.
+
+**Still broken or not tested:** Host map mounting still guesses the game from the map name; not checked by hand.
+
+**Next:** Owner check; optionally carry the game with background requests instead of guessing from names.
+
 ## 2026-10-15 GameUI/host: brightness (mat_monitorgamma) applied, dialog unlocked
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

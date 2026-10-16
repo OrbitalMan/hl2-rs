@@ -92,6 +92,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
   - Display resolutions too small to fit dialogs must log a report to the console rather than arbitrarily clipping or reintroducing unwanted scrolling.
 
 - **Expansion Background Maps**:
+  - Game assets are the source of truth, no map tables: the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`); each game's menu background is chapter 1 of its own `scripts/chapterbackgrounds.txt` and its New Game map comes from its own `cfg/chapter1.cfg`, both read through that game's own mount (`resources::read_game_text`), never through the mount of whatever map is loaded (the startup mount follows the saved background, so an Episode Two background made Half-Life 2 resolve to `ep2_background01`).
   - Entering an expansion's submenu (Half-Life 2, Episode One, Episode Two, Lost Coast) updates the background map to that expansion's initial chapter background and triggers an asynchronous 3D scene swap.
   - Background map load failures only log a warning to console and `campaign.failures`; they must never crash the game, terminate the process, or dismiss the menu.
   - Navigating Back or pressing Escape preserves the current expansion background map; it must not revert to base Half-Life 2 until another expansion is explicitly chosen.

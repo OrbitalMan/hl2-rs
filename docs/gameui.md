@@ -69,7 +69,8 @@ overlay and list voice packs; the VFS search path itself is unchanged.
 | Options pages | `resource/optionssub{difficulty,keyboard,mouse,gamepad,audio,video}.res`, `optionssubvideogammadlg.res`, `optionssub{audio,video}thirdpartydlg.res` |
 | Key actions / defaults | `scripts/kb_act.lst`, `cfg/config_default.cfg` |
 | Gamma test image | `materials/vgui/gamma.vtf` (ImagePanel `image "gamma"`) |
-| Background map | `scripts/chapterbackgrounds.txt` (chapter 1 -> `background01`) |
+| Background map | Each game's own `scripts/chapterbackgrounds.txt` (chapter 1; `hl2` -> `background01`), read through that game's mount; the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`, `read_game_text`) |
+| New Game map | Each game's own `cfg/chapter1.cfg`, read the same way |
 | Spoken languages | `hl2/hl2_sound_vo_<language>_dir.vpk` present in the install |
 
 Retail slider ranges (installed `GameUI.dll` constants): `sensitivity` 0.1-6.0, `m_customaccel_exponent`

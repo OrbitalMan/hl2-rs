@@ -2,7 +2,12 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: GameUI polish and macOS window pass (2026-10-15, branch `orbitalman/main-menu`)
+## Current session: Half-Life 2 submenu background (2026-10-16, branch `orbitalman/main-menu-2`)
+
+Claude Code desktop, claude-opus-5-5.
+- **Half-Life 2 submenu did not switch the background: fixed.** Root cause: `GameUiResources` is built once from the startup map's file system, which is mounted for the game of the saved background (for example Episode Two). Half-Life 2's entry then read `scripts/chapterbackgrounds.txt` through that mount and got the episode's copy, so HL2 resolved to the episode background already showing and nothing loaded (New Game maps had the same flaw through `cfg/chapter1.cfg`). Now each game reads its own chapter files through its own mount (`resources::read_game_text`), and the games come from the `SwitchExpansion` commands of `gamemenu.res` (`resources::menu_games`); the hardcoded `INITIAL_BACKGROUND_MAPS` / `INITIAL_EPISODE_MAPS` tables and their fallbacks are gone. Tests: owned-install `every_game_reads_its_own_chapter_files_whatever_map_is_loaded` (base, Episode One, Episode Two and Lost Coast startup mounts; fails when reading through the startup mount), `menu_games_come_from_switch_expansion_commands_in_menu_order`. Packaged replay (`AntigravityPlayground/runtime_submenus.sh`, Episode One -> back -> Half-Life 2): before, HL2 loaded `ep2_background01`; after, `ep1_background01` then `background01`. Not changed: the host still picks a map's mount from its name (`source_assets::vpk::expansion_for_map`) and Lost Coast's `background01` is keyed `lostcoast_background01`.
+
+## Previous session: GameUI polish and macOS window pass (2026-10-15, branch `orbitalman/main-menu`)
 
 Claude Code desktop, claude-opus-5-5. Owner list of nine items; plan decisions: macOS scrolling uses accumulated row steps, macOS native full screen is recognized as the game's Full screen mode (mac-only), tab hover only on inactive tabs, key capture highlights only the key cell.
 - **Close button: done.** Plain × glyph, no border or fill; lightens to the title text color on hover/press (`Theme::close_style`, scheme `FrameTitleButton.*`). Test `close_cross_lightens_on_hover_and_press`; frame tests updated. Unverified, needs manual check: hover the × of the Options dialog and of the Quit box.

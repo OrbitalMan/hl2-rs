@@ -2362,6 +2362,14 @@ mod tests {
             ..Default::default()
         })
     }
+    /// Game -> map test data, standing in for the installed chapter files.
+    fn test_maps(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(game, map)| ((*game).to_owned(), (*map).to_owned()))
+            .collect()
+    }
+
     /// A console with the built-in menu structure, a known first chapter and a background map.
     fn installed_console() -> Console {
         let loc = Localization::default();
@@ -2369,8 +2377,19 @@ mod tests {
             localization: loc,
             game_menu: fallback_game_menu(),
             background_map: Some("background01".into()),
-            background_maps: crate::gameui::resources::fallback_background_maps(),
-            new_game_maps: crate::gameui::resources::fallback_new_game_maps(),
+            background_maps: test_maps(&[
+                ("main", "background01"),
+                ("hl2", "background01"),
+                ("episodic", "ep1_background01"),
+                ("ep2", "ep2_background01"),
+                ("lostcoast", "lostcoast_background01"),
+            ]),
+            new_game_maps: test_maps(&[
+                ("hl2", "d1_trainstation_01"),
+                ("episodic", "ep1_citadel_00"),
+                ("ep2", "ep2_outland_01"),
+                ("lostcoast", "d2_lostcoast"),
+            ]),
             ..Default::default()
         };
         let mut console = Console::default();
