@@ -86,10 +86,23 @@ struct Sample {
     player: Player,
     gameplay: Option<serde_json::Value>,
     ray_entity: Option<usize>,
+    /// Colliders overlapping the player hull (entity, dynamic).
+    hull_contacts: Vec<(Option<usize>, bool, f32, glam::Vec3)>,
+    /// The player VPhysics shadow's center.
+    shadow: Option<glam::Vec3>,
+    /// Wall-clock milliseconds of the last physics step.
+    physics_ms: f64,
+    /// Wall-clock milliseconds of the last whole fixed host step (gameplay, NPCs,
+    /// projectiles, physics and player).
+    step_ms: f64,
+    /// Awake dynamic bodies after the step (props that never sleep at idle).
+    awake_bodies: usize,
     console: Option<serde_json::Value>,
 }
 #[derive(Resource)]
 pub struct Simulation {
+    /// Wall-clock milliseconds of the last whole fixed step (test reports).
+    last_step_ms: f64,
     pub player: Player,
     pub physics: Physics,
     eye: glam::Vec3,
@@ -137,6 +150,7 @@ impl Simulation {
         commands: Vec<Command>,
     ) -> Self {
         Self {
+            last_step_ms: 0.,
             player: Player::new(eye),
             physics: Physics::new(world),
             eye,
@@ -183,9 +197,14 @@ impl Simulation {
             None => (self.yaw, self.pitch),
         }
     }
-    /// Horizontal 4:3 field of view of the view: env_zoom's, else the player's.
-    pub fn view_fov(&self) -> f32 {
-        self.zoom_fov.unwrap_or(self.fov)
+    /// Horizontal 4:3 field of view of the view: env_zoom's, else `player_fov` (the player's
+    /// own, including weapon zoom).
+    pub fn view_fov(&self, player_fov: f32) -> f32 {
+        self.zoom_fov.unwrap_or(player_fov)
+    }
+    /// Whether the view is the player's own (no point_viewcontrol camera).
+    pub fn player_view(&self) -> bool {
+        self.view_control.is_none()
     }
     pub fn flying(&self) -> bool {
         self.fly
@@ -390,6 +409,8 @@ impl Simulation {
                 crouch: c.crouch,
                 sprint: c.sprint,
                 slow: c.slow,
+                max_speed: None,
+                surface: Default::default(),
             };
             if self.background_level || self.frozen() {
                 // Retail ignores player input on a menu background level and under a
@@ -430,6 +451,8 @@ impl Simulation {
             if let Some(game) = game.as_deref_mut() {
                 let direction =
                     glam::Vec3::from_array(source_direction(self.yaw, self.pitch).to_array());
+                // GetDefaultFOV for SetFOV ramps (the `fov` command / fixture FOV).
+                game.inventory.fov.default_fov = self.fov;
                 game.tick(
                     &mut self.physics,
                     &self.player,
@@ -456,6 +479,16 @@ impl Simulation {
                     noclip: false,
                 };
                 let feet = self.player.feet;
+                // SetMaxSpeed from the weapons stage (gravity gun load) for this step.
+                self.input.max_speed = game
+                    .as_deref()
+                    .and_then(|game| game.inventory.player_max_speed());
+                self.input.surface = game
+                    .as_deref()
+                    .filter(|_| self.player.grounded)
+                    .map(|game| game.ground_surface(&self.physics, feet))
+                    .unwrap_or_default();
+                // A scripted camera (point_viewcontrol) freezes the player in place.
                 let input = if self.frozen() {
                     Input {
                         yaw: self.yaw,
@@ -466,6 +499,24 @@ impl Simulation {
                 };
                 self.player.step(input, &self.physics, TICK);
                 self.eye = self.player.eye();
+                // The player's VPhysics shadow pushes and weighs down movable props.
+                let held = game.as_deref().and_then(|game| {
+                    game.inventory.physcannon.held.or(game
+                        .inventory
+                        .carry
+                        .as_ref()
+                        .map(|carry| carry.entity))
+                });
+                self.physics.update_player_shadow(
+                    feet,
+                    self.player.feet,
+                    self.player.crouched,
+                    self.player.grounded && !self.player.dead,
+                    self.player.step_height,
+                    self.player.wish_velocity,
+                    held,
+                    TICK,
+                );
                 if let Some(game) = game.as_deref_mut() {
                     game.step_sounds(&self.physics, before, feet, &self.player);
                     if game.player_outcome(&mut self.player) {
@@ -520,6 +571,14 @@ impl Simulation {
                 player: self.player.clone(),
                 gameplay: game.as_deref().map(|g| g.report(&self.physics)),
                 console: ui.as_deref().map(|u| u.report()),
+                hull_contacts: self.physics.hull_contacts(
+                    self.player.feet,
+                    if self.player.crouched { 36. } else { 72. },
+                ),
+                shadow: self.physics.player_shadow_center(),
+                physics_ms: self.physics.last_step_ms,
+                step_ms: self.last_step_ms,
+                awake_bodies: self.physics.awake_bodies(),
                 ray_entity: self
                     .physics
                     .ray(
@@ -566,7 +625,9 @@ fn fixed_step(
     performance: Option<Res<crate::performance::Performance>>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "fixed_simulation");
+    let started = std::time::Instant::now();
     sim.step(game.as_deref_mut(), ui.as_deref_mut());
+    sim.last_step_ms = started.elapsed().as_secs_f64() * 1000.;
     if ui.is_some_and(|u| u.quit_requested) {
         exit.write(AppExit::Success);
     }

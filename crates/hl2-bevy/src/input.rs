@@ -343,6 +343,8 @@ pub(crate) fn controls(
         crouch: devices.pressed("+duck", cfg),
         sprint: devices.pressed("+speed", cfg),
         slow: devices.pressed("+walk", cfg),
+        // max_speed and the ground surface are set per fixed step by the simulation.
+        ..Input::default()
     };
 }
 

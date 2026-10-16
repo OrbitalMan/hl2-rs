@@ -302,9 +302,12 @@ mod tests {
     fn headless_bevy_app_submenu_entry_switches_background_map_and_scene() {
         let game = source_assets::install::discover().expect("owned install");
         let mut app = App::new();
-        let options =
-            crate::Options::parse_from(["--game".to_owned(), game.to_string_lossy().to_string()])
-                .expect("valid options");
+        let options = crate::Options::parse_from([
+            "--no-setup".to_owned(),
+            "--game".to_owned(),
+            game.to_string_lossy().to_string(),
+        ])
+        .expect("valid options");
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<crate::rendering::SourceMaterial>>()
             .init_resource::<Assets<Image>>()
@@ -601,9 +604,12 @@ mod tests {
     fn headless_bevy_app_ep2_submenu_entry_switches_background_map() {
         let game = source_assets::install::discover().expect("owned install");
         let mut app = App::new();
-        let options =
-            crate::Options::parse_from(["--game".to_owned(), game.to_string_lossy().to_string()])
-                .expect("valid options");
+        let options = crate::Options::parse_from([
+            "--no-setup".to_owned(),
+            "--game".to_owned(),
+            game.to_string_lossy().to_string(),
+        ])
+        .expect("valid options");
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<crate::rendering::SourceMaterial>>()
             .init_resource::<Assets<Image>>()
@@ -725,9 +731,22 @@ mod tests {
             temp.join("hl2/gameinfo.txt"),
             b"\"GameInfo\" { \"game\" \"Half-Life 2\" }",
         );
-        let options =
-            crate::Options::parse_from(["--game".to_owned(), temp.to_string_lossy().to_string()])
-                .expect("valid options");
+        // The launch check needs the shared content a real installation always has.
+        for file in [
+            "scripts/game_sounds_manifest.txt",
+            "resource/ClientScheme.res",
+            "models/weapons/v_pistol.mdl",
+        ] {
+            let path = temp.join("hl2").join(file);
+            let _ = std::fs::create_dir_all(path.parent().unwrap());
+            let _ = std::fs::write(path, b"fixture");
+        }
+        let options = crate::Options::parse_from([
+            "--no-setup".to_owned(),
+            "--game".to_owned(),
+            temp.to_string_lossy().to_string(),
+        ])
+        .expect("valid options");
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<crate::rendering::SourceMaterial>>()
             .init_resource::<Assets<Image>>()

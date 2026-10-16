@@ -556,5 +556,18 @@ mod tests {
         }
         let lostcoast = Vfs::mount_game(&root, "lostcoast").unwrap();
         assert!(lostcoast.read("maps/ep1_citadel_00.bsp").unwrap().is_none());
+        // The installation ships zero-byte loose placeholders for some weapon models; the
+        // archived models searched first must win over them.
+        let hl2 = Vfs::mount(&root).unwrap();
+        for model in [
+            "models/weapons/v_crossbow.mdl",
+            "models/weapons/v_bugbait.mdl",
+        ] {
+            let bytes = hl2.read(model).unwrap().unwrap_or_default();
+            assert!(
+                !bytes.is_empty(),
+                "{model} resolved to an empty placeholder"
+            );
+        }
     }
 }

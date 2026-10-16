@@ -25,7 +25,10 @@ pub const DMG_RADIATION: u32 = 1 << 18;
 pub const DMG_DROWNRECOVER: u32 = 1 << 19;
 pub const DMG_ACID: u32 = 1 << 20;
 pub const DMG_SLOWBURN: u32 = 1 << 21;
+pub const DMG_NEVERGIB: u32 = 1 << 12;
 pub const DMG_PLASMA: u32 = 1 << 24;
+pub const DMG_DISSOLVE: u32 = 1 << 26;
+pub const DMG_BUCKSHOT: u32 = 1 << 29;
 /// hl2_shareddefs.h DMG_SNIPER (DMG_LASTGENERICFLAG << 1).
 pub const DMG_SNIPER: u32 = 1 << 30;
 /// CSingleplayRules::Damage_GetTimeBased.

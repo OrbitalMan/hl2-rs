@@ -604,6 +604,7 @@ impl Bsp {
             let start = usize::try_from(i32le(b, 0)?)?;
             let count = usize::try_from(i32le(b, 4)?)?;
             let mut ps = Vec::new();
+            let mut side_materials = Vec::new();
             for side in sides
                 .get(start..start + count)
                 .context("brush side range")?
@@ -613,7 +614,15 @@ impl Bsp {
                         .get(u16le(side, 0)? as usize)
                         .context("brush plane index")?,
                 );
+                // dbrushside_t texinfo (offset 2); -1 (TEXINFO_NODE) has no material.
+                let ti = i16::from_le_bytes([side[2], side[3]]);
+                side_materials.push(if ti < 0 {
+                    String::new()
+                } else {
+                    texinfo_material(&texinfo, &texdata, strings, table, ti).unwrap_or_default()
+                });
             }
+            world.brush_side_materials.push(side_materials);
             world.brushes.push(Brush {
                 planes: ps,
                 contents,

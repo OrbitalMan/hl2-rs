@@ -5,6 +5,7 @@ pub mod animation;
 pub mod decals;
 pub mod lighting;
 pub mod movement;
+pub mod studio_decals;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Vertex {
@@ -80,6 +81,14 @@ pub struct Brush {
 pub struct World {
     #[serde(default)]
     pub background_camera: Option<BackgroundCamera>,
+    /// Material (lower-case, "" for none) of each side of `brushes[i]`, side order as
+    /// in the brush's planes; empty when the loader did not record them.
+    #[serde(default)]
+    pub brush_side_materials: Vec<Vec<String>>,
+    /// Material -> $surfaceprop (lower-case) for brush-side materials, resolved at
+    /// load from the owned VMTs.
+    #[serde(default)]
+    pub material_surfaceprops: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub background_entities: Vec<usize>,
     pub name: String,
@@ -112,6 +121,183 @@ pub struct World {
     /// Studio illumination origin and flags per model asset key.
     #[serde(default)]
     pub illumination: std::collections::BTreeMap<String, lighting::ModelIllumination>,
+    /// Authored VPhysics solid parameters (.phy "solid" block) per model asset key.
+    #[serde(default)]
+    pub model_physics: std::collections::BTreeMap<String, PhysicsSolid>,
+    /// Studio header mass (Studio_GetMass, the NPC physics shadow's mass) per NPC model
+    /// asset key.
+    #[serde(default)]
+    pub model_mass: std::collections::BTreeMap<String, f32>,
+    /// prop_data health per model asset key (CPropData::ParsePropData: the MDL's
+    /// prop_data block over its propdata.txt base chain); 0 = unbreakable.
+    #[serde(default)]
+    pub model_prop_health: std::collections::BTreeMap<String, f32>,
+    /// Gibs (.phy `break` blocks) per breakable model asset key; each gib model's
+    /// physics is in `model_physics`/`model_collision` under its skin-0 key.
+    #[serde(default)]
+    pub model_breaks: std::collections::BTreeMap<String, Vec<BreakModel>>,
+    /// The resolved prop_data block per breakable model asset key (damage modifiers,
+    /// damage table, propdata chunk sets).
+    #[serde(default)]
+    pub model_prop_data: std::collections::BTreeMap<String, PropData>,
+    /// scripts/propdata.txt "BreakableModels": chunk set name -> chunk models (smallest
+    /// first), each model's physics under its skin-0 key when a map prop can use it.
+    #[serde(default)]
+    pub breakable_chunks: Vec<(String, Vec<String>)>,
+    /// Resolved surfaceproperties entries (lowercase name, "base" inheritance applied).
+    #[serde(default)]
+    pub surface_materials: std::collections::BTreeMap<String, SurfaceMaterial>,
+}
+/// One .phy "solid" block. Defaults follow SDK g_PhysDefaultObjectParams
+/// (physics_shared.cpp): mass 1, inertia 1, damping 0.1, rotdamping 0.1, "DEFAULT".
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhysicsSolid {
+    pub index: i32,
+    /// Kilograms.
+    pub mass: f32,
+    /// Multiplier on the shape inertia tensor.
+    pub inertia: f32,
+    pub damping: f32,
+    pub rotdamping: f32,
+    pub surfaceprop: String,
+    /// Cubic inches, 0 when absent.
+    pub volume: f32,
+    /// The collision model's precomputed IVP mass center (Source units) and principal
+    /// rotation inertia per kilogram (m^2, Source axes), when the solid was read.
+    #[serde(default)]
+    pub compact_inertia: Option<(Vec3, Vec3)>,
+    /// The collision file's stored drag fractions (VPHY header, stored order), when read.
+    #[serde(default)]
+    pub drag_fractions: Option<Vec3>,
+}
+/// A prop's prop_data after CPropData::ParsePropFromKV: the propdata.txt "base" chain
+/// first, then the model's own block. Defaults follow CBreakableProp (modifiers 1).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PropData {
+    pub health: f32,
+    pub dmg_bullets: f32,
+    pub dmg_club: f32,
+    pub dmg_explosive: f32,
+    /// Custom physics impact damage table ("glass"); None = the NPC table.
+    pub damage_table: Option<String>,
+    /// Propdata chunk set ("WoodChunks") used when the model has no .phy gibs.
+    pub breakable_model: Option<String>,
+    pub breakable_count: i32,
+    pub breakable_skin: i32,
+    /// explosive_damage / explosive_radius when the prop_data section sets them (they
+    /// override the entity's ExplodeDamage / ExplodeRadius keyvalues).
+    pub explosive_damage: Option<f32>,
+    pub explosive_radius: Option<f32>,
+}
+impl Default for PropData {
+    fn default() -> Self {
+        Self {
+            health: 0.,
+            dmg_bullets: 1.,
+            dmg_club: 1.,
+            dmg_explosive: 1.,
+            damage_table: None,
+            breakable_model: None,
+            breakable_count: 0,
+            breakable_skin: 0,
+            explosive_damage: None,
+            explosive_radius: None,
+        }
+    }
+}
+/// One gib of a breakable model: a .phy `break` block (CBreakParser defaults: health 1,
+/// fadetime 20 s, not a ragdoll, no offset).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BreakModel {
+    /// Normalized "models/....mdl" path (FixupModelName).
+    pub model: String,
+    pub ragdoll: bool,
+    pub offset: Vec3,
+    pub health: f32,
+    pub fade_time: f32,
+    /// Some(true): COLLISION_GROUP_DEBRIS ("debris" > 0, or a "fadetime" without an
+    /// earlier "debris"); Some(false): INTERACTIVE; None: the breaking prop's group.
+    pub debris: Option<bool>,
+    pub motion_disabled: bool,
+    /// "burst": outward speed (units/s) away from the parent origin; absent = the
+    /// breaking prop's default (CBreakableProp::Break: 100).
+    #[serde(default)]
+    pub burst: Option<f32>,
+}
+impl Default for PhysicsSolid {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            mass: 1.,
+            inertia: 1.,
+            damping: 0.1,
+            rotdamping: 0.1,
+            surfaceprop: "default".into(),
+            volume: 0.,
+            compact_inertia: None,
+            drag_fractions: None,
+        }
+    }
+}
+/// surfacedata_t fields that gameplay uses (vphysics_interface.h), values from
+/// scripts/surfaceproperties*.txt after "base" inheritance.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SurfaceMaterial {
+    pub friction: f32,
+    pub elasticity: f32,
+    /// kg / m^3.
+    pub density: f32,
+    pub hardness_factor: f32,
+    pub hard_threshold: f32,
+    pub hard_velocity_threshold: f32,
+    pub roughness_factor: f32,
+    pub rough_threshold: f32,
+    pub impact_hard: Option<String>,
+    pub impact_soft: Option<String>,
+    pub scrape_smooth: Option<String>,
+    pub scrape_rough: Option<String>,
+    pub break_sound: Option<String>,
+    /// Game material character ('X' marks no-sound surfaces such as sky/nodraw).
+    pub game_material: Option<char>,
+    /// surfacegameprops_t jumpFactor / maxSpeedFactor (player movement on this
+    /// ground; 1 unless a script lowers them, e.g. slipperyslime's jumpfactor).
+    #[serde(default = "one")]
+    pub jump_factor: f32,
+    #[serde(default = "one")]
+    pub max_speed_factor: f32,
+    /// surfacephysicsparams_t thickness (inches; sheet materials) and dampening
+    /// (contact drag). Parsed for reference: vphysics' use of them is not in the SDK.
+    #[serde(default)]
+    pub thickness: f32,
+    #[serde(default)]
+    pub dampening: f32,
+}
+fn one() -> f32 {
+    1.
+}
+impl Default for SurfaceMaterial {
+    fn default() -> Self {
+        Self {
+            friction: 0.,
+            elasticity: 0.,
+            density: 0.,
+            hardness_factor: 0.,
+            hard_threshold: 0.,
+            hard_velocity_threshold: 0.,
+            roughness_factor: 0.,
+            rough_threshold: 0.,
+            impact_hard: None,
+            impact_soft: None,
+            scrape_smooth: None,
+            scrape_rough: None,
+            break_sound: None,
+            game_material: None,
+            jump_factor: 1.,
+            max_speed_factor: 1.,
+            thickness: 0.,
+            dampening: 0.,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConvexPiece {

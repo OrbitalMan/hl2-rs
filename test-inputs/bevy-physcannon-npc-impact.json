@@ -1,0 +1,102 @@
+[
+{
+"tick": 1,
+"label": "aim",
+"eye": [
+-3490,
+-2110,
+128
+],
+"yaw": 236,
+"pitch": -35,
+"actions": [
+{
+"action": "loadout"
+},
+{
+"action": "slot",
+"slot": 0
+}
+]
+},
+{
+"tick": 2,
+"actions": [
+{
+"action": "slot",
+"slot": 0
+}
+]
+},
+{
+"tick": 3,
+"actions": [
+{
+"action": "confirm"
+}
+]
+},
+{
+"tick": 4
+},
+{
+"tick": 100,
+"label": "pick",
+"secondary": true,
+"actions": [
+{
+"action": "actor_pose",
+"target": "terminal_side_cop",
+"origin": [
+-3618,
+-1957,
+65
+],
+"yaw": 310
+}
+]
+},
+{
+"tick": 140,
+"label": "turn",
+"yaw": 130,
+"pitch": -6
+},
+{
+"tick": 200,
+"label": "held",
+"yaw": 130,
+"pitch": -6
+},
+{
+"tick": 220,
+"label": "launch",
+"yaw": 130,
+"pitch": -6,
+"primary": true
+},
+{
+"tick": 222,
+"label": "l030",
+"yaw": 130,
+"pitch": -6
+},
+{
+"tick": 240,
+"label": "l300",
+"yaw": 130,
+"pitch": -6
+},
+{
+"tick": 260,
+"label": "l600",
+"yaw": 130,
+"pitch": -6
+},
+{
+"tick": 320,
+"label": "end",
+"yaw": 130,
+"pitch": -6
+}
+]

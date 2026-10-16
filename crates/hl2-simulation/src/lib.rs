@@ -3,6 +3,7 @@
 //! The Rapier adapter preserves the retained runtime's behavior and limitations;
 //! extracting it does not establish equivalence with Valve's VPhysics solver.
 
+pub mod drag;
 pub mod npc_probe;
 pub mod physics;
 
@@ -10,14 +11,25 @@ pub mod actors;
 pub mod entities;
 pub mod footsteps;
 pub mod gameplay;
+pub mod gibs;
 pub mod globals;
+pub mod grab;
+pub mod impact_damage;
 pub mod npc;
+pub mod phys_explosion;
 pub mod player_damage;
+pub mod player_pickup;
 pub mod projectiles;
 pub mod selection;
 pub mod sounds;
 pub mod soundscapes;
 pub mod suit;
+pub mod view_punch;
+pub mod viewmodel_effects;
+pub mod weapon_bugbait;
+pub mod weapon_crossbow;
+pub mod weapon_physcannon;
+pub mod weapon_rpg;
 
 pub mod campaign;
 pub mod explosion_particles;

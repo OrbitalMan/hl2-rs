@@ -1,0 +1,113 @@
+[
+{
+"tick": 1,
+"label": "aim",
+"eye": [
+-3230,
+-2560,
+128
+],
+"yaw": 180,
+"pitch": -8,
+"actions": [
+{
+"action": "loadout"
+},
+{
+"action": "slot",
+"slot": 1
+}
+]
+},
+{
+"tick": 2,
+"actions": [
+{
+"action": "confirm"
+}
+]
+},
+{
+"tick": 3
+},
+{
+"tick": 40,
+"actions": [
+{
+"origin": [
+-3330,
+-2560,
+64
+],
+"yaw": 0,
+"target": "terminal_side_cop",
+"action": "actor_pose"
+}
+]
+},
+{
+"tick": 70,
+"label": "posed"
+},
+{
+"tick": 80,
+"primary": true,
+"label": "shot1"
+},
+{
+"tick": 82,
+"primary": false
+},
+{
+"tick": 110,
+"yaw": 183,
+"pitch": -12
+},
+{
+"tick": 112,
+"primary": true,
+"label": "shot2"
+},
+{
+"tick": 114,
+"primary": false
+},
+{
+"tick": 140,
+"yaw": 177,
+"pitch": -4
+},
+{
+"tick": 142,
+"primary": true,
+"label": "shot3"
+},
+{
+"tick": 144,
+"primary": false
+},
+{
+"tick": 170,
+"yaw": 180,
+"pitch": -8,
+"label": "end"
+},
+{
+"tick": 180,
+"label": "final"
+},
+{
+"tick": 190,
+"eye": [
+-3290,
+-2470,
+120
+],
+"yaw": 210,
+"pitch": -10
+},
+{
+"tick": 200,
+"label": "side"
+}
+]

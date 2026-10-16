@@ -155,6 +155,10 @@ impl Default for MaterialData {
     }
 }
 
+/// Build the thrown frag's Rapier body from w_grenade.phy (default); `--frag-swept-box`
+/// keeps the legacy fitted swept box for comparisons.
+pub static FRAG_RIGID_BODY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 pub fn load(root: &Path, game: &str, map: &str) -> Result<LoadedMap> {
     load_with_canvas(root, game, map, hl2_ui::canvas::Canvas::default(), true)
 }
@@ -202,19 +206,41 @@ pub fn load_with_canvas(
     let mut decal_errors = Vec::new();
     add_static_decals(&mut world, &vfs, &mut decal_errors);
     let model_report = models::append_models(&mut world, &vfs);
+    let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
+    // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body
+    // from w_grenade.phy (12-sided prism as a round cylinder, the .phy's IVP inertia) and
+    // SDK spawn orientation. Session 13 replay against five native throws (lob, roll,
+    // overhand, plaza, wall) fits as well as or better than the old fitted swept box.
+    if FRAG_RIGID_BODY.load(std::sync::atomic::Ordering::Relaxed)
+        && let Err(error) =
+            models::append_model_physics(&mut world, &vfs, hl2_simulation::projectiles::FRAG_MODEL)
+    {
+        world.warnings.push(format!(
+            "{}: {error:#}",
+            hl2_simulation::projectiles::FRAG_MODEL
+        ));
+    }
     hl2_ui::gameui::loading::report_progress(0.50, "LoadingProgress_SignonDataLocal");
     let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
-    let effects = crate::effects::PreparedEffects::load(&vfs);
+    let effects = crate::effects::PreparedEffects::load(&vfs, &world);
     let mut names = rendered_material_names(&world);
-    names.extend(effects.grenade.iter().map(|s| s.material.clone()));
+    names.extend(
+        effects
+            .models
+            .values()
+            .flatten()
+            .map(|s| s.material.clone()),
+    );
     for weapon in gameplay.weapons.values() {
-        if let Some(surfaces) = world
-            .model_assets
-            .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
-        {
-            names.extend(surfaces.iter().map(|s| s.material.clone()));
+        for skin in 0..2 {
+            if let Some(surfaces) = world
+                .model_assets
+                .get(&format!("{}#{skin}", weapon.viewmodel.to_lowercase()))
+            {
+                names.extend(surfaces.iter().map(|s| s.material.clone()));
+            }
         }
     }
     if names.len() > MAX_MATERIALS {
@@ -1322,5 +1348,193 @@ mod tests {
         };
         assert!(metadata(&definition).is_err());
         assert!(asset_path("../../outside", ".vmt").is_err());
+    }
+}
+#[cfg(test)]
+/// Replays native frag throws (private oracle ent_text samples on d1_trainstation_02,
+/// sessions 11 and 13) through the shipped frag body. The native spin is random, so each
+/// case runs seven spins and the best fit must stay within the bound.
+mod owned_frag_replay {
+    use glam::Vec3;
+    use hl2_simulation::{
+        entities::Scene,
+        gameplay::{FragThrow, frag_launch},
+        physics::Physics,
+        projectiles::{ProjectileKind, ProjectileSpawn, Projectiles},
+    };
+    fn forward(pitch: f32, yaw: f32) -> Vec3 {
+        let (p, y) = (pitch.to_radians(), yaw.to_radians());
+        Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_frag_throws_follow_native_samples() {
+        let root = source_assets::install::discover().unwrap();
+        let loaded = super::load(&root, "hl2", "d1_trainstation_02").unwrap();
+        let world = loaded.world.clone();
+        let lob = vec![
+            (0.195, [-3060.6, -2042.3, 98.5]),
+            (0.36, [-3014.4, -2059.3, 67.6]),
+            (0.537, [-2982.2, -2066.6, 68.9]),
+            (0.688, [-2958.1, -2068.5, 69.7]),
+            (0.897, [-2926.1, -2068.6, 61.4]),
+            (1.059, [-2901.4, -2068.5, 38.0]),
+            (1.207, [-2881.3, -2065.5, 27.2]),
+            (1.355, [-2859.0, -2060.9, 13.5]),
+            (1.524, [-2845.1, -2059.5, 2.1]),
+            (2.257, [-2842.8, -2071.9, 2.1]),
+        ];
+        let roll = vec![
+            (0.209, [-3013.6, -2050.9, 66.5]),
+            (0.346, [-2940.1, -2077.7, 67.2]),
+            (0.517, [-2855.0, -2108.8, 53.5]),
+            (0.697, [-2767.8, -2140.6, 21.5]),
+            (0.837, [-2713.0, -2158.1, 3.5]),
+            (0.969, [-2669.9, -2167.8, -0.7]),
+            (1.113, [-2630.4, -2175.8, -1.3]),
+            (1.299, [-2591.9, -2182.9, -1.6]),
+            (1.458, [-2564.1, -2188.8, -1.1]),
+            (1.601, [-2546.6, -2196.0, -1.3]),
+            (1.746, [-2532.2, -2206.3, -1.8]),
+            (1.893, [-2519.6, -2216.4, -1.7]),
+            (2.091, [-2504.1, -2227.2, -1.8]),
+            (2.253, [-2495.4, -2235.8, -1.7]),
+        ];
+        let high = vec![
+            (0.199, [-2954.4, -2080.9, 231.4]),
+            (0.374, [-2807.1, -2134.6, 315.8]),
+            (0.524, [-2695.9, -2175.1, 365.2]),
+            (0.678, [-2593.6, -2212.2, 397.7]),
+            (0.847, [-2489.1, -2250.2, 416.1]),
+            (1.027, [-2382.3, -2289.2, 416.8]),
+            (1.166, [-2298.1, -2319.8, 402.9]),
+            (1.335, [-2210.7, -2351.5, 373.4]),
+        ];
+        let plaza = vec![
+            (0.961, [-2287.2, -1852.6, 143.0]),
+            (1.443, [-2060.8, -1796.1, 29.4]),
+            (1.927, [-2074.0, -1769.5, 26.1]),
+            (2.425, [-2087.1, -1751.8, 18.1]),
+            (2.887, [-2098.9, -1747.5, 18.1]),
+        ];
+        let wall = vec![
+            (0.661, [-3157.6, -2002.0, 163.5]),
+            (1.639, [-3134.0, -1999.3, 66.2]),
+            (2.085, [-3123.3, -1992.8, 66.1]),
+        ];
+        let only = std::env::var("FRAG_REPLAY_ONLY").unwrap_or_default();
+        let cases = [
+            // (name, kind, eye z, pitch, yaw, native spawn delay, samples, best RMS bound)
+            ("lob", FragThrow::Lob, 128., 25., -20., 0.092, lob, 35.),
+            ("roll", FragThrow::Roll, 92., 25., -20., 0.092, roll, 30.),
+            ("high", FragThrow::Throw, 128., -30., -20., 0.045, high, 8.),
+            (
+                "plaza",
+                FragThrow::Throw,
+                128.,
+                -10.,
+                12.,
+                0.045,
+                plaza,
+                25.,
+            ),
+            ("wall", FragThrow::Throw, 128., 0., 180., 0.045, wall, 55.),
+        ];
+        let verbose = std::env::var("FRAG_REPLAY_VERBOSE").is_ok();
+        let mut total = 0.;
+        for (name, kind, eyez, pitch, yaw, delay, samples, bound) in cases {
+            if !only.is_empty() && !only.contains(name) {
+                continue;
+            }
+            let mut rms_all = vec![];
+            for spin in [-0.9f32, -0.5, -0.2, 0., 0.3, 0.6, 0.95] {
+                let mut scene = Scene::new(&world);
+                let mut physics = Physics::new(&world);
+                physics.tick(0.015);
+                let (ex, ey) = if name == "wall" {
+                    (-3000., -1998.)
+                } else {
+                    (-3104., -2018.)
+                };
+                let eye = Vec3::new(ex, ey, eyez);
+                let feet = Vec3::new(ex, ey, 64.);
+                let (position, velocity, angular, angles) = frag_launch(
+                    &physics,
+                    kind,
+                    eye,
+                    forward(pitch, yaw),
+                    Vec3::ZERO,
+                    feet,
+                    Some(Vec3::Z),
+                    spin,
+                );
+                let mut projectiles = Projectiles::default();
+                projectiles.spawn(
+                    ProjectileSpawn {
+                        angles: Some(angles),
+                        kind: ProjectileKind::FragGrenade,
+                        position,
+                        velocity,
+                        angular_velocity: angular,
+                        at: 0.,
+                        damage: 125.,
+                        radius: 250.,
+                        mass: 0.,
+                        lifetime: 3.2,
+                    },
+                    &mut scene,
+                );
+                let mut track = vec![(0f32, position)];
+                for tick in 1..200 {
+                    scene.time = f64::from(tick) * 0.015;
+                    projectiles.tick(
+                        &world,
+                        &mut scene,
+                        &mut physics,
+                        Vec3::splat(9999.),
+                        false,
+                        0.015,
+                    );
+                    physics.tick(0.015);
+                    scene.sounds.clear();
+                    if let Some(f) = projectiles.active.first() {
+                        track.push((tick as f32 * 0.015, f.position));
+                    }
+                }
+                let at = |t: f32| -> Vec3 {
+                    let i = track
+                        .iter()
+                        .position(|(tt, _)| *tt >= t)
+                        .unwrap_or(track.len() - 1)
+                        .max(1);
+                    let (t0, p0) = track[i - 1];
+                    let (t1, p1) = track[i];
+                    p0.lerp(p1, ((t - t0) / (t1 - t0).max(1e-6)).clamp(0., 1.))
+                };
+                let mut sq = 0.;
+                for (t, p) in &samples {
+                    let ours = at(*t as f32 - delay as f32 + 0.015);
+                    let d = ours.distance(Vec3::from_array(*p));
+                    if verbose {
+                        println!(
+                            "  {name} spin {spin} t {t} ours {:.1} {:.1} {:.1} native {:?} d {:.1}",
+                            ours.x, ours.y, ours.z, p, d
+                        );
+                    }
+                    sq += d * d;
+                }
+                let rms = (sq / samples.len() as f32).sqrt();
+                let end = at(samples.last().unwrap().0 as f32 - delay as f32)
+                    .distance(Vec3::from_array(samples.last().unwrap().1));
+                rms_all.push(rms);
+                println!("{name} spin {spin:5.2} rms {rms:6.1} end {end:6.1}");
+            }
+            let mean = rms_all.iter().sum::<f32>() / rms_all.len() as f32;
+            total += mean;
+            let best = rms_all.iter().cloned().fold(f32::MAX, f32::min);
+            println!("{name} MEAN rms {mean:.1} best {best:.1}");
+            assert!(best < bound, "{name}: best RMS {best} >= {bound}");
+        }
+        println!("TOTAL {total:.1}");
     }
 }

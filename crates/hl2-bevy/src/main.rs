@@ -14,8 +14,10 @@ mod material_proxies;
 mod monitors;
 mod performance;
 mod rendering;
+mod setup;
 mod simulation;
 mod sky;
+mod studio_decals;
 mod tonemap;
 mod ui_host;
 mod ui_system;
@@ -115,6 +117,9 @@ impl Options {
         let config = hl2_ui::config::Config::load_or_default();
         let mut args = args.into_iter();
         let mut game = None;
+        let mut show_setup = false;
+        let mut no_setup = false;
+        let mut setup_preview = None;
         let mut options = Self {
             game: PathBuf::new(),
             map: None,
@@ -168,6 +173,9 @@ impl Options {
             }
             match arg.as_str() {
                 "--game" => game = Some(PathBuf::from(next(&mut args)?)),
+                "--setup" => show_setup = true,
+                "--no-setup" => no_setup = true,
+                "--setup-preview" => setup_preview = Some(PathBuf::from(next(&mut args)?)),
                 "--map" => options.map = Some(next(&mut args)?),
                 "--frames" => options.frames = Some(next(&mut args)?.parse()?),
                 "--capture" => options.capture = Some(next(&mut args)?.into()),
@@ -201,6 +209,9 @@ impl Options {
                 "--mute-ambient" => {
                     audio::MUTE_AMBIENT.store(true, std::sync::atomic::Ordering::Relaxed)
                 }
+                "--frag-swept-box" => {
+                    assets::FRAG_RIGID_BODY.store(false, std::sync::atomic::Ordering::Relaxed)
+                }
                 "--no-focus" => options.no_focus = true,
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
@@ -212,6 +223,9 @@ impl Options {
                 "--main-menu" => options.main_menu = true,
                 "--background-map" => options.background_map = Some(next(&mut args)?),
                 "--help" | "-h" => {
+                    println!(
+                        "Installation: auto-detect Steam or use the remembered folder.\n--setup: choose/remember the game folder; --no-setup: fail without opening setup.\n--game PATH and HL2_ROOT override the remembered folder.\n--setup-preview PNG: capture setup and exit without loading a map."
+                    );
                     println!(
                         "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --background-map NAME --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; Windowed (No Border) is not offered on macOS)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead; --background-map overrides the background map.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
@@ -259,9 +273,18 @@ impl Options {
             || options.movement_script.is_some();
         options.display_mode =
             startup_display_mode(options.display_mode, explicit_mode, unattended);
-        options.game = match game {
-            Some(path) => source_assets::install::validate(path)?,
-            None => source_assets::install::discover()?,
+        if (show_setup || setup_preview.is_some()) && no_setup {
+            bail!("--setup and --no-setup cannot be used together");
+        }
+        options.game = match setup::resolve(
+            game,
+            options.map.as_deref(),
+            show_setup || setup_preview.is_some(),
+            no_setup || unattended || options.no_focus,
+            setup_preview,
+        )? {
+            Some(path) => path,
+            None => std::process::exit(0), // Setup cancelled; no game was loaded.
         };
         for path in [
             Some(&options.report),
@@ -380,6 +403,9 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
 }
 
 fn main() -> Result<()> {
+    if setup::run_helper()? {
+        return Ok(());
+    }
     let options = Options::parse()?;
     let (loaded, background_level) = load_startup_map(&options)?;
     let map_name = loaded.world.name.clone();
@@ -453,6 +479,7 @@ fn main() -> Result<()> {
         .insert_resource(simulation)
         .init_resource::<campaign::Campaign>()
         .init_resource::<CaptureControl>()
+        .init_resource::<studio_decals::StudioDecals>()
         .init_resource::<crate::video::VideoViewport>()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(
@@ -524,6 +551,8 @@ fn main() -> Result<()> {
                 rendering::present_entities,
                 rendering::present_weapons,
                 effects::present,
+                effects::present_gibs,
+                studio_decals::present,
                 sky::present,
                 monitors::present,
                 monitors::present_materials,
@@ -723,6 +752,7 @@ fn setup(
             ..default()
         },
         bevy::camera::visibility::RenderLayers::layer(1),
+        camera::ViewmodelCamera,
         Tonemapping::None,
         bevy::camera::Exposure::default(),
         tonemap::ToneMapped,
@@ -733,7 +763,10 @@ fn setup(
         },
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
-            fov: 2. * ((54f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
+            fov: 2.
+                * ((hl2_simulation::viewmodel_effects::VIEWMODEL_FOV.to_radians() / 2.).tan()
+                    / (4. / 3.))
+                    .atan(),
             near: 0.1,
             far: 1000.,
             ..default()
@@ -818,6 +851,12 @@ pub(crate) fn install_map(
     ));
     effects::adopt(loaded.effects.sprites, commands);
     commands.insert_resource(loaded.gameplay);
+    // Studio decal draws went with the old map; its entity indices now name the new map's.
+    commands.queue(|world: &mut World| {
+        if let Some(mut decals) = world.get_resource_mut::<studio_decals::StudioDecals>() {
+            decals.new_map();
+        }
+    });
     commands.insert_resource(canvas_renderer::Hud::new(loaded.hud));
     audio::install(commands, sounds, loaded.audio);
     loaded.console
@@ -870,6 +909,13 @@ type RenderResources<'w> = (
     Res<'w, tonemap::Tonemap>,
     Res<'w, Assets<rendering::SourceMaterial>>,
 );
+/// Exit writer and optional diagnostics read by `monitor`.
+type ExitResources<'w> = (
+    MessageWriter<'w, AppExit>,
+    Option<Res<'w, performance::Performance>>,
+    Option<Res<'w, bevy::diagnostic::DiagnosticsStore>>,
+    Res<'w, studio_decals::StudioDecals>,
+);
 fn monitor(
     mut commands: Commands,
     (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
@@ -877,11 +923,7 @@ fn monitor(
     status: Res<Status>,
     (adapter, pvs, tonemap, source_materials): RenderResources,
     (cameras, draws, map_entities, all_cameras, meshes, images, geometry, two_textures): DiagnosticQueries,
-    (mut exit, performance, render_diagnostics): (
-        MessageWriter<AppExit>,
-        Option<Res<performance::Performance>>,
-        Option<Res<bevy::diagnostic::DiagnosticsStore>>,
-    ),
+    (mut exit, performance, render_diagnostics, studio): ExitResources,
 ) {
     let _timing = performance::scope(performance.as_deref(), "diagnostics");
     if simulation.loading() {
@@ -924,7 +966,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         report.presentation["two_texture_materials"] = serde_json::json!(
             two_textures

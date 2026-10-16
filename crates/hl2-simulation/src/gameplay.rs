@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Default)]
 pub struct Weapon {
+    /// Entity class (weapon_*), the script file name.
+    pub class: String,
     pub name: String,
     pub slot: usize,
     pub slot_position: usize,
@@ -28,15 +30,43 @@ pub struct Weapon {
     pub pellets: usize,
     pub damage: f32,
     pub sounds: BTreeMap<String, String>,
+    /// Script "weight" (GetNextBestWeapon prefers the highest).
+    pub weight: i32,
+    /// Script "autoswitchto" / "autoswitchfrom" set to 0.
+    pub no_autoswitch_to: bool,
+    pub no_autoswitch_from: bool,
 }
-const IMPLEMENTED: [&str; 6] = [
+const IMPLEMENTED: [&str; 11] = [
     "weapon_crowbar",
     "weapon_pistol",
     "weapon_357",
     "weapon_smg1",
     "weapon_ar2",
     "weapon_shotgun",
+    "weapon_frag",
+    "weapon_crossbow",
+    "weapon_rpg",
+    "weapon_bugbait",
+    "weapon_physcannon",
 ];
+/// Thrown frag kinds by viewmodel event (npcevent.h EVENT_WEAPON_THROW/2/3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum FragThrow {
+    Throw,
+    Roll,
+    Lob,
+}
+/// CWeaponFrag state: m_AttackPaused, m_fDrawbackFinished, m_bRedraw.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct FragState {
+    paused: u8,
+    drawback_finished: bool,
+    redraw: bool,
+    /// Viewmodel event cursor (animation, start, elapsed).
+    cursor: Option<(String, f64, f32)>,
+    /// Throws whose animation event fired this tick; the host launches them.
+    pub pending: Vec<FragThrow>,
+}
 
 pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
     let skill = vfs.read("cfg/skill.cfg")?.context("skill.cfg missing")?;
@@ -75,8 +105,11 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
             secondary_ammo_type.to_ascii_lowercase()
         };
         // Buckshot is the ammunition/damage name; sk_plr_dmg_shotgun does not exist.
+        // CAmmoDef (hl2_gamerules.cpp GetAmmoDef): XBowBolt uses the sk_*_crossbow cvars.
         let skill_name = if class == "weapon_crowbar" {
             "crowbar".into()
+        } else if ammo_type.eq_ignore_ascii_case("XBowBolt") {
+            "crossbow".into()
         } else {
             ammo_type.to_ascii_lowercase()
         };
@@ -88,6 +121,7 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
         weapons.insert(
             class.into(),
             Weapon {
+                class: class.into(),
                 name,
                 slot: value("bucket").and_then(|s| s.parse().ok()).unwrap_or(0),
                 slot_position: value("bucket_position")
@@ -101,6 +135,9 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
                     .unwrap_or_default()
                     .into(),
                 viewmodel: value("viewmodel").context("viewmodel absent")?.into(),
+                weight: value("weight").and_then(|s| s.parse().ok()).unwrap_or(0),
+                no_autoswitch_to: value("autoswitchto").is_some_and(|s| s.trim() == "0"),
+                no_autoswitch_from: value("autoswitchfrom").is_some_and(|s| s.trim() == "0"),
                 magazine,
                 default_clip: value("default_clip")
                     .and_then(|s| s.parse().ok())
@@ -118,6 +155,8 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
                     .max(0.),
                 secondary_radius: if class == "weapon_smg1" {
                     number("sk_smg1_grenade_radius").unwrap_or(0.).max(0.)
+                } else if class == "weapon_frag" {
+                    number("sk_fraggrenade_radius").unwrap_or(0.).max(0.)
                 } else if class == "weapon_ar2" {
                     number("sk_weapon_ar2_alt_fire_radius")
                         .unwrap_or(10.)
@@ -139,7 +178,12 @@ pub fn definitions(vfs: &Vfs) -> Result<BTreeMap<String, Weapon>> {
                 } else {
                     1
                 },
-                damage: number(&format!("sk_plr_dmg_{skill_name}")).unwrap_or(0.),
+                // CGrenadeFrag::Spawn: a player's grenade uses sk_plr_dmg_fraggrenade.
+                damage: if class == "weapon_frag" {
+                    number("sk_plr_dmg_fraggrenade").unwrap_or(0.)
+                } else {
+                    number(&format!("sk_plr_dmg_{skill_name}")).unwrap_or(0.)
+                },
                 sounds,
             },
         );
@@ -177,13 +221,112 @@ struct Reload {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
-struct EmptyFire {
+pub(crate) struct EmptyFire {
     latched: bool,
-    next_sound: f64,
+    pub(crate) next_sound: f64,
 }
 
 /// CSingleplayRules::FlPlayerFallDamage with the HL2_DLL constants: damage grows linearly
 /// from the maximum safe fall speed (526.5) to 100 at the fatal speed (922.5).
+/// BloodColor() of an NPC class (SDK SetBloodColor): red, any other color (drawn with
+/// the YellowBlood decal by UTIL_BloodDecalTrace), or None for DONT_BLEED /
+/// BLOOD_COLOR_MECH.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BloodColor {
+    Red,
+    Yellow,
+}
+pub fn blood_color(class: &str) -> Option<BloodColor> {
+    match class {
+        "npc_cscanner"
+        | "npc_clawscanner"
+        | "npc_manhack"
+        | "npc_rollermine"
+        | "npc_turret_floor"
+        | "npc_turret_ceiling"
+        | "npc_turret_ground"
+        | "npc_combine_camera"
+        | "npc_strider"
+        | "npc_helicopter"
+        | "npc_combinegunship"
+        | "npc_combinedropship"
+        | "npc_dog"
+        | "npc_bullseye"
+        | "npc_enemyfinder"
+        | "npc_apcdriver" => None,
+        "npc_antlion"
+        | "npc_antlionguard"
+        | "npc_headcrab"
+        | "npc_headcrab_fast"
+        | "npc_headcrab_black"
+        | "npc_headcrab_poison"
+        | "npc_zombie"
+        | "npc_fastzombie"
+        | "npc_poisonzombie"
+        | "npc_zombine"
+        | "npc_barnacle"
+        | "npc_houndeye"
+        | "npc_vortigaunt" => Some(BloodColor::Yellow),
+        _ => Some(BloodColor::Red),
+    }
+}
+/// CAmmoDef DamageForce of the player's bullet ammo (hl2_gamerules.cpp BULLET_IMPULSE:
+/// ft/s x 12 x the grains' mass in kg x 3.5), kg in/s.
+pub fn bullet_impulse(ammo_type: &str) -> f32 {
+    let impulse = |grains: f32, feet_per_second: f32| {
+        let pounds = 0.002285 * grains / 16.;
+        feet_per_second * 12. * pounds * 0.453_592 * 3.5
+    };
+    match ammo_type.to_ascii_lowercase().as_str() {
+        "357" => impulse(800., 5000.),
+        "buckshot" => impulse(400., 1200.),
+        // Pistol, SMG1, AR2.
+        _ => impulse(200., 1225.),
+    }
+}
+/// CBreakable's modifiers: func_breakdmg_bullet 0.5, func_breakdmg_club 1.5,
+/// func_breakdmg_explosive 1.25 (props.cpp convar defaults).
+const FUNC_BREAKABLE_DAMAGE: modkit_core::PropData = modkit_core::PropData {
+    health: 0.,
+    dmg_bullets: 0.5,
+    dmg_club: 1.5,
+    dmg_explosive: 1.25,
+    damage_table: None,
+    breakable_model: None,
+    breakable_count: 0,
+    breakable_skin: 0,
+    explosive_damage: None,
+    explosive_radius: None,
+};
+/// GetBreakableDamage (props.cpp) for a breakable with prop data (CBreakableProp,
+/// modifiers default 1): bullets x dmg.bullets (buckshot twice that), clubs x dmg.club,
+/// blasts x dmg.explosive, slash + crush x 10, time-based damage none.
+pub fn breakable_damage(amount: f32, kind: u32, data: Option<&modkit_core::PropData>) -> f32 {
+    use crate::player_damage::*;
+    let defaults = modkit_core::PropData::default();
+    let data = data.unwrap_or(&defaults);
+    let mut damage = amount;
+    if kind & DMG_BULLET != 0 {
+        damage *= if kind & DMG_BUCKSHOT != 0 {
+            data.dmg_bullets * 2.
+        } else {
+            data.dmg_bullets
+        };
+    }
+    if kind & DMG_CLUB != 0 {
+        damage *= data.dmg_club;
+    }
+    if kind & DMG_BLAST != 0 {
+        damage *= data.dmg_explosive;
+    }
+    if kind & DMG_SLASH != 0 && kind & DMG_CRUSH != 0 {
+        damage *= 10.;
+    }
+    if kind & TIME_BASED != 0 {
+        damage = 0.;
+    }
+    damage
+}
 pub fn fall_damage(fall_speed: f32) -> f32 {
     const MAX_SAFE: f32 = 526.5;
     const FATAL: f32 = 922.5;
@@ -194,7 +337,11 @@ pub fn fall_damage(fall_speed: f32) -> f32 {
 #[serde(default)]
 pub struct Inventory {
     #[serde(skip)]
-    pub impacts: Vec<(crate::physics::RayHit, bool)>,
+    /// Bullet/melee hits with whether melee and the shot direction.
+    pub impacts: Vec<(crate::physics::RayHit, bool, Vec3)>,
+    /// TraceBleed world hits and their blood color this tick.
+    #[serde(skip)]
+    pub blood: Vec<(crate::physics::RayHit, BloodColor)>,
     #[serde(skip)]
     pub projectile_spawns: Vec<ProjectileSpawn>,
     pub previous: String,
@@ -220,19 +367,62 @@ pub struct Inventory {
     pub delayed_secondary_attack: bool,
     #[serde(skip)]
     attack_input: Option<(bool, bool)>,
-    next_attack: f64,
-    next_secondary: BTreeMap<String, f64>,
-    owner_attack_until: f64,
+    pub(crate) next_attack: f64,
+    pub(crate) next_secondary: BTreeMap<String, f64>,
+    pub(crate) owner_attack_until: f64,
     #[serde(skip)]
     ar2_charge_until: Option<f64>,
-    soonest_attack: f64,
+    pub(crate) soonest_attack: f64,
     reload: Option<Reload>,
-    empty_fire: BTreeMap<String, EmptyFire>,
+    pub(crate) empty_fire: BTreeMap<String, EmptyFire>,
     shotgun_need_pump: bool,
     #[serde(skip)]
     holding_attack: bool,
+    /// weapon_frag throw state.
+    #[serde(skip)]
+    pub frag: FragState,
+    /// weapon_crossbow zoom, reload and charger state.
+    #[serde(skip)]
+    pub crossbow: crate::weapon_crossbow::CrossbowState,
+    /// CBasePlayer::SetFOV state (crossbow zoom); the host draws `view_fov`.
+    #[serde(skip)]
+    pub fov: crate::weapon_crossbow::FovRamp,
+    /// weapon_rpg guiding, laser dot and missile handle.
+    #[serde(skip)]
+    pub rpg: crate::weapon_rpg::RpgState,
+    /// weapon_bugbait throw state.
+    #[serde(skip)]
+    pub bugbait: crate::weapon_bugbait::BugBaitState,
+    /// weapon_physcannon held object and element state.
+    #[serde(skip)]
+    pub physcannon: crate::weapon_physcannon::PhyscannonState,
+    /// The +USE carry (CPlayerPickupController); the active weapon is holstered.
+    #[serde(skip)]
+    pub carry: Option<crate::grab::GrabController>,
+    /// The player's punch angle (weapon recoil); decays every tick.
+    #[serde(skip)]
+    pub punch: crate::view_punch::ViewPunch,
+    /// Squeezes this tick (thrown splats are in Projectiles); step 14 consumes them.
+    #[serde(skip)]
+    pub bugbait_events: Vec<crate::weapon_bugbait::BugBaitEvent>,
+    /// The weapon's origin for the squeeze (the player's feet from tick).
+    #[serde(skip)]
+    pub(crate) squeeze_origin: Vec3,
+    /// Sounds requested where no scene is at hand (holster); emitted on the next tick.
+    #[serde(skip)]
+    pub(crate) deferred_sounds: Vec<crate::sounds::SoundRequest>,
+    /// Idle sequence resolved from ACT_VM_IDLE/ACT_VM_FIDGET for script-only viewmodels.
+    #[serde(skip)]
+    pub idle_override: Option<String>,
+    /// SetSuitUpdate requests (sentence without '!', no-repeat seconds); the host
+    /// forwards them to its suit queue.
+    #[serde(skip)]
+    pub suit_updates: Vec<(String, f32)>,
+    /// IN_DUCK for the frag roll, set by the host before tick.
+    #[serde(skip)]
+    pub ducking: bool,
     burst: usize,
-    last_shot: f64,
+    pub(crate) last_shot: f64,
     penalty: f32,
     rng: u64,
 }
@@ -240,6 +430,7 @@ impl Default for Inventory {
     fn default() -> Self {
         Self {
             impacts: Vec::new(),
+            blood: Vec::new(),
             projectile_spawns: Vec::new(),
             previous: String::new(),
             health: 100.,
@@ -267,6 +458,20 @@ impl Default for Inventory {
             empty_fire: BTreeMap::new(),
             shotgun_need_pump: false,
             holding_attack: false,
+            frag: FragState::default(),
+            crossbow: Default::default(),
+            fov: Default::default(),
+            rpg: Default::default(),
+            bugbait: Default::default(),
+            physcannon: Default::default(),
+            carry: None,
+            punch: Default::default(),
+            bugbait_events: Vec::new(),
+            squeeze_origin: Vec3::ZERO,
+            deferred_sounds: Vec::new(),
+            idle_override: None,
+            suit_updates: Vec::new(),
+            ducking: false,
             burst: 0,
             last_shot: -1e30,
             penalty: 0.,
@@ -297,6 +502,7 @@ impl Inventory {
             reload.at += delta;
         }
         self.impacts.clear();
+        self.blood.clear();
         self.projectile_spawns.clear();
         self.attack_input = None;
         self.holding_attack = false;
@@ -314,7 +520,7 @@ impl Inventory {
             .map(|w| self.ammo(&w.secondary_ammo_type))
             .unwrap_or(0)
     }
-    fn ammo(&self, ammo_type: &str) -> i32 {
+    pub(crate) fn ammo(&self, ammo_type: &str) -> i32 {
         if ammo_type.eq_ignore_ascii_case("Pistol") {
             self.pistol_ammo.max(0)
         } else {
@@ -325,7 +531,7 @@ impl Inventory {
                 .max(0)
         }
     }
-    fn set_ammo(&mut self, ammo_type: &str, value: i32) {
+    pub(crate) fn set_ammo(&mut self, ammo_type: &str, value: i32) {
         if ammo_type.eq_ignore_ascii_case("Pistol") {
             self.pistol_ammo = value.max(0);
         } else if !ammo_type.eq_ignore_ascii_case("None") && !ammo_type.is_empty() {
@@ -370,7 +576,7 @@ impl Inventory {
         self.reload.is_some()
     }
     pub fn can_holster(&self) -> bool {
-        self.ar2_charge_until.is_none()
+        self.ar2_charge_until.is_none() && self.rpg_can_holster() && self.physcannon_can_holster()
     }
     pub fn charge_until(&self) -> Option<f64> {
         self.ar2_charge_until
@@ -380,16 +586,85 @@ impl Inventory {
     pub fn set_attack_input(&mut self, primary: bool, secondary: bool) {
         self.attack_input = Some((primary, secondary));
     }
-    pub fn idle_animation(&self) -> &'static str {
+    pub fn idle_animation(&self) -> &str {
+        if let Some(idle) = &self.idle_override {
+            return idle;
+        }
         match self.active.as_str() {
             "weapon_ar2" => "ir_idle",
             "weapon_pistol" if self.owned.get(&self.active) == Some(&0) => "idle01empty",
             _ => "idle01",
         }
     }
+    /// CBaseCombatWeapon::HasAnyAmmo for an owned weapon.
+    pub fn has_any_ammo(&self, weapon: &Weapon) -> bool {
+        let uses_primary = !weapon.ammo_type.is_empty() && weapon.ammo_type != "None";
+        let uses_secondary =
+            !weapon.secondary_ammo_type.is_empty() && weapon.secondary_ammo_type != "None";
+        if !uses_primary && !uses_secondary {
+            return true;
+        }
+        let clip = self.owned.get(&weapon.class).copied().unwrap_or(0);
+        (uses_primary && (clip > 0 || self.ammo(&weapon.ammo_type) > 0))
+            || (uses_secondary && self.ammo(&weapon.secondary_ammo_type) > 0)
+    }
+    /// CSingleplayRules::GetNextBestWeapon: the highest weight among owned weapons that
+    /// allow auto-switching to them and have ammo.
+    pub fn next_best_weapon(&self, weapons: &BTreeMap<String, Weapon>) -> Option<String> {
+        if weapons
+            .get(&self.active)
+            .is_some_and(|w| w.no_autoswitch_from)
+        {
+            return None;
+        }
+        let mut best: Option<(&Weapon, i32)> = None;
+        for class in self.owned.keys() {
+            let Some(w) = weapons.get(class) else {
+                continue;
+            };
+            if *class == self.active
+                || w.no_autoswitch_to
+                || !self.has_any_ammo(w)
+                || best.is_some_and(|(_, weight)| w.weight <= weight)
+            {
+                continue;
+            }
+            best = Some((w, w.weight));
+        }
+        best.map(|(w, _)| w.class.clone())
+    }
+    fn switch_if_empty(&mut self, weapons: &BTreeMap<String, Weapon>, time: f64) {
+        let Some(weapon) = weapons.get(&self.active) else {
+            return;
+        };
+        if self.has_any_ammo(weapon) {
+            return;
+        }
+        if let Some(next) = self.next_best_weapon(weapons) {
+            self.give(&next, weapons, time);
+        }
+    }
     pub fn give(&mut self, class: &str, weapons: &BTreeMap<String, Weapon>, time: f64) {
         if let Some(w) = weapons.get(class) {
-            self.owned.entry(class.into()).or_insert(w.default_clip);
+            if w.magazine < 0 && !self.owned.contains_key(class) && w.ammo_max > 0 {
+                // CBaseCombatWeapon::GiveDefaultAmmo: a clipless weapon's default clip
+                // is reserve ammunition.
+                self.owned.insert(class.into(), -1);
+                let ammo = w.ammo_type.clone();
+                self.give_ammo(&ammo, w.default_clip.max(0), weapons);
+            }
+            if !self.owned.contains_key(class) {
+                // CBaseCombatCharacter::Weapon_Equip: a default clip larger than the clip
+                // fills the clip and gives the rest as reserve (crossbow 5 = 1 + 4).
+                let clip = if w.magazine > 0 && w.default_clip > w.magazine {
+                    let ammo = w.ammo_type.clone();
+                    self.give_ammo(&ammo, w.default_clip - w.magazine, weapons);
+                    w.magazine
+                } else {
+                    w.default_clip
+                };
+                self.owned.insert(class.into(), clip);
+            }
             if self.active == class {
                 return;
             }
@@ -398,8 +673,10 @@ impl Inventory {
             if !self.can_holster() {
                 return;
             }
+            self.holster_hooks(weapons, time);
             self.previous = self.active.clone();
             self.reload = None;
+            self.idle_override = None;
             self.delayed_attack = false;
             self.delayed_secondary_attack = false;
             self.attack_input = None;
@@ -407,10 +684,25 @@ impl Inventory {
             self.burst = 0;
             self.penalty = 0.;
             self.holding_attack = false;
+            // CWeaponFrag::Deploy/Holster clear the throw state.
+            self.frag = FragState::default();
             let animation = if class == "weapon_ar2" {
                 "ir_draw"
             } else if class == "weapon_pistol" && self.owned[class] == 0 {
                 "drawempty"
+            } else if class == "weapon_physcannon" {
+                self.physcannon_deploy();
+                "ACT_VM_DRAW"
+            } else if class == "weapon_bugbait" {
+                self.bugbait_deploy();
+                "ACT_VM_DRAW"
+            } else if class == "weapon_rpg" {
+                self.rpg_deploy();
+                "ACT_VM_DRAW"
+            } else if class == "weapon_crossbow" {
+                // CWeaponCrossbow::Deploy; the sequence is resolved from the activity
+                // on the next tick (resolve_activity), which also fixes the deadlines.
+                self.crossbow_deploy(self.owned[class])
             } else {
                 "draw"
             };
@@ -422,6 +714,39 @@ impl Inventory {
             // Releasing the trigger may shorten pistol firing recovery, never draw recovery.
             self.soonest_attack = self.next_attack;
         }
+    }
+    /// Weapon-specific Holster side effects of the active weapon.
+    pub(crate) fn holster_hooks(&mut self, weapons: &BTreeMap<String, Weapon>, time: f64) {
+        // CWeaponCrossbow::Holster -> StopEffects (unzoom over 0.2 s, charger off).
+        if self.active == "weapon_crossbow" {
+            self.crossbow_holster(time);
+        }
+        if self.active == "weapon_physcannon" {
+            self.physcannon_holster();
+        }
+        // CWeaponRPG::Holster -> StopGuiding (SPECIAL2 while guiding).
+        if self.active == "weapon_rpg" {
+            if self.rpg.guiding {
+                if let Some(sound) = weapons
+                    .get("weapon_rpg")
+                    .and_then(|w| w.sounds.get("special2"))
+                {
+                    self.deferred_sounds.push(sound.as_str().into());
+                }
+            }
+            self.rpg_holster(None);
+        }
+    }
+    /// Deploy the active weapon again (CPlayerPickupController::Shutdown), keeping the
+    /// last-weapon slot.
+    pub(crate) fn redeploy(&mut self, weapons: &BTreeMap<String, Weapon>, time: f64) {
+        let class = std::mem::take(&mut self.active);
+        if class.is_empty() {
+            return;
+        }
+        let previous = self.previous.clone();
+        self.give(&class, weapons, time);
+        self.previous = previous;
     }
     pub fn tick(
         &mut self,
@@ -452,7 +777,34 @@ impl Inventory {
         }
         self.holding_attack = attack;
         let (primary, secondary) = self.attack_input.take().unwrap_or((attack, false));
+        scene.sounds.append(&mut self.deferred_sounds);
+        // CGameMovement::DecayPunchAngle (player movement, every tick).
+        self.punch.decay(dt);
+        self.resolve_activity(world, weapons);
         self.advance_reload(world, scene, weapons, primary, secondary);
+        if self.active == "weapon_crossbow" && self.health > 0. {
+            self.crossbow_tick(world, scene, weapons, primary, secondary);
+        }
+        if self.active == "weapon_rpg" && self.health > 0. {
+            self.rpg_tick(world, scene, weapons, primary, secondary);
+        }
+        if self.active == "weapon_physcannon" {
+            // The host runs physcannon_frame with physics after the weapon tick.
+            self.physcannon_buttons(primary, secondary);
+        }
+        if self.active == "weapon_bugbait" && self.health > 0. {
+            self.squeeze_origin = feet;
+            self.bugbait_tick(world, scene, weapons, primary, secondary);
+        }
+        if self.active == "weapon_frag" && self.health > 0. {
+            self.frag_tick(world, scene, weapons, primary, secondary);
+        }
+        // CBaseCombatWeapon::ItemPostFrame -> ReloadOrSwitchWeapons with no attack held:
+        // an empty weapon switches to the next best one once its attack delays pass
+        // (the last frag thrown leaves the grenade slot).
+        if !primary && !secondary && self.health > 0. && scene.time > self.next_attack {
+            self.switch_if_empty(weapons, scene.time);
+        }
 
         for (id, e) in world.entities.iter().enumerate() {
             if scene.states[id].killed
@@ -503,8 +855,10 @@ impl Inventory {
                 scene.states[id].killed = true;
                 scene.states[id].visible = false;
                 // CHealthKit/CHealthVial::MyTouch and CHL2_Player::ApplyBattery
-                // each emit their own installed sound. Suit logon uses HEV sentences,
-                // whose scheduler is not implemented; it must not emit an ammo pickup.
+                // each emit their own installed sound. CItemSuit::MyTouch plays the
+                // suit logon sentence (UTIL_EmitSoundSuit, suitvolume 0.25):
+                // !HEV_A0 with SF_SUIT_SHORTLOGON (1), else !HEV_AAx (owned sentences.txt
+                // comments HEV_A0 out, so the short logon is silent).
                 let sound = match e.class() {
                     "item_healthkit" => Some("HealthKit.Touch"),
                     "item_healthvial" => Some("HealthVial.Touch"),
@@ -514,6 +868,21 @@ impl Inventory {
                 };
                 if let Some(sound) = sound {
                     scene.sounds.push(sound.into());
+                }
+                if e.class() == "item_suit" {
+                    let flags = e
+                        .get("spawnflags")
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    scene.sounds.push(crate::sounds::SoundRequest {
+                        volume: Some(0.25),
+                        ..if flags & 0x10000 != 0 {
+                            "!HEV_A0"
+                        } else {
+                            "!HEV_AAx"
+                        }
+                        .into()
+                    });
                 }
             }
         }
@@ -647,23 +1016,27 @@ impl Inventory {
             if self.owned[&self.active] == 0 {
                 self.shotgun_need_pump = true;
             }
-            ("reload1", ReloadPhase::ShellStart)
+            ("reload1".to_owned(), ReloadPhase::ShellStart)
         } else {
             (
                 if self.active == "weapon_ar2" {
-                    "ir_reload"
+                    "ir_reload".to_owned()
+                } else if self.active == "weapon_crossbow" {
+                    activity_sequence(world, w, "ACT_VM_RELOAD")
                 } else {
-                    "reload"
+                    "reload".to_owned()
                 },
                 ReloadPhase::Magazine,
             )
         };
-        let end = scene.time + duration(world, w, animation);
+        let end = scene.time + duration(world, w, &animation);
         self.reload = Some(Reload {
             weapon: self.active.clone(),
             at: end,
             phase,
         });
+        // CWeaponCrossbow::Reload clears m_bMustReload once the base reload starts.
+        self.crossbow.must_reload = false;
         self.next_attack = end;
         // Retail SMG reload restores the secondary/owner timer so that a
         // grenade can interrupt a magazine reload. AR2 retains the owner gate.
@@ -672,10 +1045,10 @@ impl Inventory {
         } else {
             end
         };
-        self.animate(animation, scene.time);
+        self.animate(&animation, scene.time);
         self.penalty = 0.;
         if self.active != "weapon_shotgun" {
-            play_sound(scene, w, "reload", world, animation);
+            play_sound(scene, w, "reload", world, &animation);
         }
     }
     pub fn attack(
@@ -692,12 +1065,20 @@ impl Inventory {
             || self.ar2_charge_until.is_some()
             || scene.time < self.next_attack
             || scene.time < self.owner_attack_until
+            || matches!(
+                self.active.as_str(),
+                "weapon_frag" | "weapon_bugbait" | "weapon_physcannon"
+            )
         {
             return;
         }
         let Some(w) = weapons.get(&self.active) else {
             return;
         };
+        if self.active == "weapon_rpg" {
+            self.rpg_fire(w, world, scene, physics, eye, direction);
+            return;
+        }
         let Some(&clip) = self.owned.get(&self.active) else {
             return;
         };
@@ -719,12 +1100,23 @@ impl Inventory {
                 }
             } else if self.ammo(&w.ammo_type) > 0 {
                 self.reload(weapons, scene, world);
+            } else if self.active == "weapon_crossbow" {
+                // HandleFireOnEmpty: the empty click (0.5 s apart); no dry-fire sequence.
+                let empty = self.empty_fire.entry(self.active.clone()).or_default();
+                if scene.time > empty.next_sound {
+                    play_sound(scene, w, "empty", world, "");
+                    empty.next_sound = scene.time + 0.5;
+                }
             } else {
                 self.soonest_attack = scene.time + 0.2;
                 self.next_attack = scene.time + duration(world, w, "dryfire");
                 self.animate("dryfire", scene.time);
                 play_sound(scene, w, "empty", world, "dryfire");
             }
+            return;
+        }
+        if self.active == "weapon_crossbow" {
+            self.crossbow_fire(w, world, scene, eye, direction);
             return;
         }
         let automatic = is_automatic(&self.active);
@@ -812,6 +1204,12 @@ impl Inventory {
         eye: Vec3,
         direction: Vec3,
     ) {
+        if matches!(
+            self.active.as_str(),
+            "weapon_frag" | "weapon_bugbait" | "weapon_physcannon"
+        ) {
+            return;
+        }
         if matches!(self.active.as_str(), "weapon_smg1" | "weapon_ar2") {
             self.projectile_secondary(weapons, world, scene, eye, direction);
             return;
@@ -959,6 +1357,7 @@ impl Inventory {
             Vec3::new(self.random(), self.random(), self.random()) * 400.
         };
         self.projectile_spawns.push(ProjectileSpawn {
+            angles: None,
             kind: if ball {
                 crate::projectiles::ProjectileKind::CombineBall
             } else {
@@ -992,7 +1391,7 @@ impl Inventory {
                     // (skill, armor, HUD message); knockback is not modeled.
                     scene.player_damage.push(crate::player_damage::DamageInfo {
                         amount: damage.amount,
-                        kind: crate::player_damage::DMG_BLAST,
+                        kind: damage.kind,
                         inflictor: damage.origin,
                     });
                 }
@@ -1007,10 +1406,33 @@ impl Inventory {
                         continue;
                     }
                     let npc = entity.class().starts_with("npc_");
-                    let health = entity
-                        .get("health")
-                        .and_then(|s| s.parse::<f32>().ok())
+                    // CPropData::ParsePropData: prop_data health overrides the keyvalue
+                    // (not on *_override props); 0 means unbreakable.
+                    let data = entity
+                        .class()
+                        .starts_with("prop_physics")
+                        .then(|| {
+                            world
+                                .model_instances
+                                .iter()
+                                .find(|i| i.entity == Some(id))
+                                .and_then(|i| world.model_prop_data.get(&i.asset_key()))
+                        })
+                        .flatten();
+                    let prop_data = data
+                        .filter(|_| !entity.class().ends_with("_override"))
+                        .map(|d| d.health);
+                    let health = prop_data
+                        .or_else(|| entity.get("health").and_then(|s| s.parse::<f32>().ok()))
                         .filter(|v| *v > 0.);
+                    // Health 0 / none: DAMAGE_EVENTS_ONLY, never breaks (prop_data 0, or a
+                    // prop_physics without prop_data health or a health keyvalue).
+                    if !npc
+                        && (prop_data == Some(0.)
+                            || (health.is_none() && entity.class().starts_with("prop_physics")))
+                    {
+                        continue;
+                    }
                     if !npc
                         && !matches!(entity.class(), "func_breakable" | "func_physbox")
                         && !entity.class().starts_with("prop_physics")
@@ -1027,13 +1449,98 @@ impl Inventory {
                         if state.value <= 0. {
                             state.value = health.unwrap_or(40.);
                         }
-                        state.value -= damage.amount;
+                        // CBreakable (func_breakable, func_physbox) starts from the
+                        // func_breakdmg_* convars instead of 1.
+                        let brush = matches!(entity.class(), "func_breakable" | "func_physbox")
+                            .then_some(&FUNC_BREAKABLE_DAMAGE);
+                        state.value -= if npc {
+                            damage.amount
+                        } else {
+                            breakable_damage(damage.amount, damage.kind, data.or(brush))
+                        };
                     }
                     let dead = state.value <= 0.;
                     scene.fire(id, "OnDamaged", usize::MAX);
                     if dead {
                         self.kills += 1;
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
+                        // CBreakableProp::Break -> PhysBreakSound: the surfaceprop's break
+                        // cue from the world at the prop (it is about to be removed).
+                        if let Some(name) = (!npc)
+                            .then(|| physics.prop_materials.get(&id))
+                            .flatten()
+                            .and_then(|prop| world.surface_materials.get(prop))
+                            .and_then(|m| m.break_sound.clone())
+                        {
+                            let origin = physics
+                                .entity_pose(id)
+                                .map_or(scene.states[id].origin, |(p, _)| p);
+                            scene.sounds.push(crate::sounds::SoundRequest {
+                                origin: Some(origin),
+                                ..name.as_str().into()
+                            });
+                        }
+                        // CBreakableProp::Break: an explosive prop (prop_data
+                        // explosive_damage/radius over the ExplodeDamage/ExplodeRadius
+                        // keyvalues, not on *_override props) calls ExplosionCreate at its
+                        // center with both scaled by the model scale; env_explosion takes
+                        // integers and a zero radius means magnitude x 2.5.
+                        if !npc && entity.class().starts_with("prop_physics") {
+                            let key = |k: &str| {
+                                entity
+                                    .get(k)
+                                    .and_then(|v| v.trim().parse::<f32>().ok())
+                                    .unwrap_or(0.)
+                            };
+                            let own = data.filter(|_| !entity.class().ends_with("_override"));
+                            let explode_damage = own
+                                .and_then(|d| d.explosive_damage)
+                                .unwrap_or_else(|| key("ExplodeDamage"));
+                            let explode_radius = own
+                                .and_then(|d| d.explosive_radius)
+                                .unwrap_or_else(|| key("ExplodeRadius"));
+                            if explode_damage > 0. || explode_radius > 0. {
+                                let scale = entity
+                                    .get("modelscale")
+                                    .and_then(|v| v.trim().parse::<f32>().ok())
+                                    .filter(|v| *v > 0.)
+                                    .unwrap_or(1.);
+                                let magnitude = (explode_damage * scale).trunc();
+                                let radius = (explode_radius * scale).trunc();
+                                let radius = if radius > 0. {
+                                    radius
+                                } else {
+                                    (magnitude * 2.5).trunc()
+                                };
+                                let center = physics
+                                    .entity_body(id)
+                                    .and_then(|b| physics.center_of_mass(b))
+                                    .unwrap_or(scene.states[id].origin);
+                                scene.prop_explosions.push((center, magnitude, radius));
+                            }
+                        }
+                        // PropBreakableCreateAll takes the prop's pose and motion.
+                        let body = physics.entity_body(id).filter(|_| !npc);
+                        if let (Some(body), Some(instance), Some(state)) = (
+                            body,
+                            world.model_instances.iter().find(|i| i.entity == Some(id)),
+                            body.and_then(|b| physics.body_state(b)),
+                        ) {
+                            let angular = state.rotation
+                                * (state.local_angular_degrees * std::f32::consts::PI / 180.);
+                            let center_of_mass =
+                                physics.center_of_mass(body).unwrap_or(state.position);
+                            scene.prop_breaks.push(crate::gibs::PropBreak {
+                                entity: id,
+                                model_key: instance.asset_key(),
+                                origin: state.position,
+                                rotation: state.rotation,
+                                velocity: state.velocity,
+                                angular_velocity: angular,
+                                center_of_mass,
+                                skin: instance.skin as i32,
+                            });
+                        }
                         scene.states[id].killed = true;
                         scene.states[id].visible = false;
                         physics.set_entity(
@@ -1065,39 +1572,248 @@ impl Inventory {
         // SDK UTIL_ImpactTrace: every bullet and player-crowbar hit plays the hit surface's
         // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
         // WeaponSound(MELEE_HIT) is the NPC-operator path.
-        self.impacts.push((hit, melee));
+        self.impacts.push((hit, melee, direction));
         if melee {
             self.animate("hitcenter1", scene.time);
         }
         self.hits += 1;
-        physics.impulse(id, direction, if melee { 4. } else { 1. });
+        // VPhysicsTakeDamage: ApplyForceOffset(damage force, hit point). Bullets carry
+        // their ammo's CalculateBulletDamageForce impulse, melee CalculateMeleeDamageForce
+        // (damage x ImpulseScale(75, 4)), both kg in/s with phys_pushscale 1.
+        let force = if melee {
+            weapon.damage * 75. * 4.
+        } else {
+            bullet_impulse(&weapon.ammo_type)
+        };
+        physics.impulse_at(id, direction * (force / 39.37), hit.position);
         if let Some(e) = entity {
+            if !flesh {
+                // Breakables take the shot through the entity damage path like every
+                // other damage source (CBreakableProp::OnTakeDamage: prop_data health,
+                // GetBreakableDamage modifiers, break sound, gibs); that path decides
+                // whether the entity can break. Buckshot ammo adds DMG_BUCKSHOT, the
+                // crowbar/stunstick deal DMG_CLUB.
+                if matches!(e.class(), "func_breakable" | "func_physbox")
+                    || e.class().starts_with("prop_physics")
+                {
+                    use crate::player_damage::{DMG_BUCKSHOT, DMG_BULLET, DMG_CLUB};
+                    let kind = if melee {
+                        DMG_CLUB
+                    } else if weapon.ammo_type.eq_ignore_ascii_case("Buckshot") {
+                        DMG_BULLET | DMG_BUCKSHOT
+                    } else {
+                        DMG_BULLET
+                    };
+                    scene.entity_damage.push(crate::projectiles::Damage {
+                        target: crate::projectiles::DamageTarget::Entity(id),
+                        amount: weapon.damage,
+                        kind,
+                        dissolve: false,
+                        direction,
+                        origin: hit.position,
+                    });
+                }
+                return;
+            }
+            self.trace_bleed(physics, world, id, &hit, direction, weapon.damage);
             let explicit_health = e.get("health").and_then(|v| v.parse::<f32>().ok());
-            if flesh
-                || matches!(e.class(), "func_breakable" | "func_physbox")
-                || e.class() == "prop_physics" && explicit_health.is_some_and(|v| v > 0.)
-            {
-                if scene.states[id].value <= 0. {
-                    scene.states[id].value = explicit_health.filter(|v| *v > 0.).unwrap_or(40.);
-                }
-                scene.states[id].value -= weapon.damage;
-                scene.fire(id, "OnDamaged", usize::MAX);
-                if scene.states[id].value <= 0. {
-                    self.kills += 1;
-                    scene.fire(id, if flesh { "OnDeath" } else { "OnBreak" }, usize::MAX);
-                    scene.states[id].killed = true;
-                    scene.states[id].visible = false;
-                    physics.set_entity(
-                        id,
-                        scene.states[id].origin,
-                        scene.states[id].rotation,
-                        false,
-                    );
-                }
+            if scene.states[id].value <= 0. {
+                scene.states[id].value = explicit_health.filter(|v| *v > 0.).unwrap_or(40.);
+            }
+            scene.states[id].value -= weapon.damage;
+            scene.fire(id, "OnDamaged", usize::MAX);
+            if scene.states[id].value <= 0. {
+                self.kills += 1;
+                scene.fire(id, "OnDeath", usize::MAX);
+                scene.states[id].killed = true;
+                scene.states[id].visible = false;
+                physics.set_entity(
+                    id,
+                    scene.states[id].origin,
+                    scene.states[id].rotation,
+                    false,
+                );
             }
         }
     }
-    fn animate(&mut self, name: &str, time: f64) {
+    /// CWeaponFrag::ItemPostFrame with the base attack dispatch: animation events
+    /// (SEQUENCE_FINISHED, THROW/2/3), release after the drawback, pullback on
+    /// attack2 then attack, 0.5 s rethrow and the redraw once the throw has finished.
+    fn frag_tick(
+        &mut self,
+        world: &World,
+        scene: &mut Scene,
+        weapons: &BTreeMap<String, Weapon>,
+        primary: bool,
+        secondary: bool,
+    ) {
+        let Some(weapon) = weapons.get("weapon_frag").cloned() else {
+            return;
+        };
+        let time = scene.time;
+        let elapsed = (time - self.animation_at).max(0.) as f32;
+        let previous = self
+            .frag
+            .cursor
+            .as_ref()
+            .filter(|(animation, started, _)| {
+                *animation == self.animation && *started == self.animation_at
+            })
+            .map_or(-f32::EPSILON, |(_, _, elapsed)| *elapsed);
+        let events: Vec<i32> = world
+            .rigs
+            .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
+            .and_then(|rig| rig.clips.get(&self.animation))
+            .map(|clip| {
+                clip.events_between(previous, elapsed)
+                    .into_iter()
+                    .map(|e| e.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.frag.cursor = Some((self.animation.clone(), self.animation_at, elapsed));
+        for id in events {
+            let kind = match id {
+                3900 => {
+                    self.frag.drawback_finished = true;
+                    continue;
+                }
+                3005 => FragThrow::Throw,
+                3013 => FragThrow::Roll,
+                3016 => FragThrow::Lob,
+                _ => continue,
+            };
+            // ThrowGrenade/RollGrenade/LobGrenade, DecrementAmmo, RETHROW_DELAY 0.5.
+            self.frag.pending.push(kind);
+            let ammo = self.ammo(&weapon.ammo_type);
+            self.set_ammo(&weapon.ammo_type, (ammo - 1).max(0));
+            self.frag.redraw = true;
+            self.next_attack = time + 0.5;
+            self.next_secondary.insert("weapon_frag".into(), time + 0.5);
+            let key = match kind {
+                FragThrow::Throw => "single_shot",
+                FragThrow::Lob => "double_shot",
+                FragThrow::Roll => "special1",
+            };
+            play_sound(scene, &weapon, key, world, &self.animation);
+        }
+        if self.frag.drawback_finished {
+            let release = match self.frag.paused {
+                1 if !primary => Some("throw"),
+                2 if !secondary => Some(if self.ducking { "roll" } else { "lob" }),
+                _ => None,
+            };
+            if let Some(animation) = release {
+                self.animate(animation, time);
+                self.frag.drawback_finished = false;
+            }
+        }
+        let ammo = self.ammo(&weapon.ammo_type);
+        let next_secondary = self
+            .next_secondary
+            .get("weapon_frag")
+            .copied()
+            .unwrap_or(0.);
+        // Base ItemPostFrame: attack2 before attack; no ammo is HandleFireOnEmpty.
+        if secondary && next_secondary <= time && ammo > 0 && !self.frag.redraw {
+            self.frag.paused = 2;
+            self.animate("drawbacklow", time);
+            self.next_secondary
+                .insert("weapon_frag".into(), f64::INFINITY);
+        } else if primary && self.next_attack <= time && ammo > 0 && !self.frag.redraw {
+            self.frag.paused = 1;
+            self.animate("drawbackhigh", time);
+            self.next_attack = f64::INFINITY;
+        }
+        // m_bRedraw: once the throw sequence has finished, Reload draws a new grenade.
+        if self.frag.redraw && f64::from(elapsed) >= duration(world, &weapon, &self.animation) {
+            let next_secondary = self
+                .next_secondary
+                .get("weapon_frag")
+                .copied()
+                .unwrap_or(0.);
+            if ammo > 0 && self.next_attack <= time && next_secondary <= time {
+                self.animate("draw", time);
+                let draw = duration(world, &weapon, "draw");
+                self.next_attack = time + draw;
+                self.next_secondary
+                    .insert("weapon_frag".into(), time + draw);
+                self.frag.redraw = false;
+            }
+        }
+    }
+    /// Launch this tick's thrown grenades (ThrowGrenade, LobGrenade, RollGrenade).
+    /// `forward` is the eye direction and `velocity` the player's; `ground` is the
+    /// floor normal under the roll start when one is within 16 units.
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_frags(
+        &mut self,
+        weapons: &BTreeMap<String, Weapon>,
+        physics: &Physics,
+        eye: Vec3,
+        forward: Vec3,
+        velocity: Vec3,
+        feet: Vec3,
+        ground: Option<Vec3>,
+        time: f64,
+    ) {
+        let Some(weapon) = weapons.get("weapon_frag") else {
+            self.frag.pending.clear();
+            return;
+        };
+        for kind in std::mem::take(&mut self.frag.pending) {
+            // random() is already uniform in [-1, 1] (RandomInt(-1200, 1200) spin).
+            let random = self.random();
+            let (position, throw, angular, angles) =
+                frag_launch(physics, kind, eye, forward, velocity, feet, ground, random);
+            self.projectile_spawns.push(ProjectileSpawn {
+                kind: crate::projectiles::ProjectileKind::FragGrenade,
+                angles: Some(angles),
+                position,
+                velocity: throw,
+                angular_velocity: angular,
+                at: time,
+                damage: weapon.damage,
+                radius: weapon.secondary_radius,
+                mass: 0.,
+                // GRENADE_TIMER
+                lifetime: 3.,
+            });
+        }
+    }
+    /// Replace an activity placeholder ("ACT_*", set where no world is available) with
+    /// the viewmodel's sequence; a draw placeholder also fixes the deadlines it set.
+    fn resolve_activity(&mut self, world: &World, weapons: &BTreeMap<String, Weapon>) {
+        if !self.animation.starts_with("ACT_") {
+            return;
+        }
+        let Some(weapon) = weapons.get(&self.active) else {
+            return;
+        };
+        let mut activity = std::mem::take(&mut self.animation);
+        // The installed v_crossbow.mdl has no ACT_CROSSBOW_*_UNLOADED sequences (the SDK's
+        // SetIdealActivity would then leave the previous sequence); use the plain draw.
+        // Retail behavior of an unloaded deploy is not tested.
+        if activity == "ACT_CROSSBOW_DRAW_UNLOADED"
+            && world
+                .rigs
+                .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
+                .is_some_and(|rig| rig.lookup_sequence(&activity, None, |_| 0).is_none())
+        {
+            activity = "ACT_VM_DRAW".into();
+        }
+        self.animation = activity_sequence(world, weapon, &activity);
+        if activity.contains("DRAW") {
+            let end = self.animation_at + duration(world, weapon, &self.animation);
+            self.next_attack = end;
+            self.owner_attack_until = end;
+            self.soonest_attack = end;
+            self.next_secondary.insert(self.active.clone(), end);
+            // SetIdealActivity: the weapon idle time is the sequence end.
+            self.rpg.idle_at = end;
+        }
+    }
+    pub(crate) fn animate(&mut self, name: &str, time: f64) {
         self.animation = name.into();
         self.animation_at = time;
     }
@@ -1120,7 +1836,52 @@ impl Inventory {
         let up = right.cross(direction).normalize_or_zero();
         (direction + right * x * spread_cone + up * y * spread_cone).normalize_or_zero()
     }
-    fn random(&mut self) -> f32 {
+    /// CBaseEntity::TraceBleed for a bullet/club hit on an NPC: 1/2/4 traces (damage
+    /// < 10 / < 25 / more) continuing the shot direction with +/-0.1/0.2/0.3 noise per
+    /// axis for 172 units (MASK_SOLID_BRUSHONLY minus grates, ignoring the NPC); each hit
+    /// gets a Blood (red) or YellowBlood decal (UTIL_BloodDecalTrace). Mechanical NPCs
+    /// do not bleed.
+    fn trace_bleed(
+        &mut self,
+        physics: &Physics,
+        world: &World,
+        id: usize,
+        hit: &crate::physics::RayHit,
+        direction: Vec3,
+        damage: f32,
+    ) {
+        let class = world.entities.get(id).map_or("", |e| e.class());
+        let Some(color) = blood_color(class) else {
+            return;
+        };
+        if damage <= 0. {
+            return;
+        }
+        let (noise, count) = if damage < 10. {
+            (0.1, 1)
+        } else if damage < 25. {
+            (0.2, 2)
+        } else {
+            (0.3, 4)
+        };
+        for _ in 0..count {
+            let jitter = Vec3::new(self.random(), self.random(), self.random()) * noise;
+            let trace = -direction + jitter;
+            let end = hit.position + trace * -172.;
+            if let Some(blood) = physics
+                .projectile_ray(hit.position, end, &[id])
+                .filter(|b| {
+                    world
+                        .entities
+                        .get(b.entity)
+                        .is_none_or(|e| !e.class().starts_with("npc_"))
+                })
+            {
+                self.blood.push((blood, color));
+            }
+        }
+    }
+    pub(crate) fn random(&mut self) -> f32 {
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 7;
         self.rng ^= self.rng << 17;
@@ -1172,7 +1933,13 @@ fn melee_trace(
     }
     closest.or(Some(hit))
 }
-fn play_sound(scene: &mut Scene, weapon: &Weapon, key: &str, world: &World, animation: &str) {
+pub(crate) fn play_sound(
+    scene: &mut Scene,
+    weapon: &Weapon,
+    key: &str,
+    world: &World,
+    animation: &str,
+) {
     let Some(sound) = weapon.sounds.get(key) else {
         return;
     };
@@ -1190,6 +1957,75 @@ fn play_sound(scene: &mut Scene, weapon: &Weapon, key: &str, world: &World, anim
         });
     if !event_sounds {
         scene.sounds.push(sound.clone().into());
+    }
+}
+/// Launch position, velocity and spin for a frag throw kind (weapon_frag.cpp).
+/// CheckThrowPosition pulls the start back along a 6-unit hull trace from the eye
+/// (the body center for rolls). `random` in [-1, 1] picks the authored spin range.
+#[allow(clippy::too_many_arguments)]
+pub fn frag_launch(
+    physics: &Physics,
+    kind: FragThrow,
+    eye: Vec3,
+    forward: Vec3,
+    velocity: Vec3,
+    feet: Vec3,
+    ground: Option<Vec3>,
+    random: f32,
+) -> (Vec3, Vec3, Vec3, Vec3) {
+    let right = forward.cross(Vec3::Z).normalize_or_zero();
+    let check = |from: Vec3, to: Vec3| {
+        physics
+            .projectile_sweep(
+                from,
+                to,
+                crate::physics::ProjectileHull::Box(Vec3::splat(6.)),
+                &[],
+            )
+            .map_or(to, |hit| hit.position)
+    };
+    match kind {
+        FragThrow::Throw => {
+            let source = check(eye, eye + forward * 18. + right * 8.);
+            let mut aim = forward;
+            aim.z += 0.1;
+            (
+                source,
+                velocity + aim * 1200.,
+                Vec3::new(600., (random * 1200.).round(), 0.),
+                // Fraggrenade_Create(..., vec3_angle, ...): thrown and lobbed frags start
+                // upright (model z up), whatever the aim.
+                Vec3::ZERO,
+            )
+        }
+        FragThrow::Lob => {
+            let source = check(eye, eye + forward * 18. + right * 8. - Vec3::Z * 8.);
+            (
+                source,
+                velocity + forward * 350. + Vec3::Z * 50.,
+                Vec3::new(200., (random * 600.).round(), 0.),
+                Vec3::ZERO,
+            )
+        }
+        FragThrow::Roll => {
+            // Bottom center of the player box plus GRENADE_RADIUS, along the floor.
+            let mut facing = Vec3::new(forward.x, forward.y, 0.).normalize_or_zero();
+            if let Some(normal) = ground {
+                let tangent = facing.cross(normal);
+                facing = normal.cross(tangent);
+            }
+            let start = feet + Vec3::Z * 4.;
+            let source = check(feet + Vec3::Z * 36., start + facing * 18.);
+            // QAngle orientation(0, yaw, -90): the long axis lies across the roll and
+            // the 720 deg/s spin about it rolls the frag forward.
+            let yaw = forward.y.atan2(forward.x).to_degrees();
+            (
+                source,
+                velocity + facing * 700.,
+                Vec3::new(0., 0., 720.),
+                Vec3::new(0., yaw, -90.),
+            )
+        }
     }
 }
 fn is_automatic(class: &str) -> bool {
@@ -1227,7 +2063,19 @@ fn cone(degrees: f32) -> f32 {
         _ => (degrees.to_radians() * 0.5).sin(),
     }
 }
-fn duration(world: &World, weapon: &Weapon, animation: &str) -> f64 {
+/// The viewmodel sequence for an activity (CBaseAnimating::SelectWeightedSequence with
+/// the first weighted choice), or the lowercase activity name when the rig is absent.
+pub(crate) fn activity_sequence(world: &World, weapon: &Weapon, activity: &str) -> String {
+    world
+        .rigs
+        .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
+        .and_then(|rig| {
+            rig.lookup_sequence(activity, None, |_| 0)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| activity.to_lowercase())
+}
+pub(crate) fn duration(world: &World, weapon: &Weapon, animation: &str) -> f64 {
     world
         .rigs
         .get(&format!("{}#0", weapon.viewmodel.to_lowercase()))
@@ -1237,6 +2085,9 @@ fn duration(world: &World, weapon: &Weapon, animation: &str) -> f64 {
         .unwrap_or_else(|| fallback_duration(weapon_class(weapon), animation))
 }
 fn weapon_class(weapon: &Weapon) -> &str {
+    if !weapon.class.is_empty() {
+        return &weapon.class;
+    }
     match weapon.ammo_type.as_str() {
         "Pistol" => "weapon_pistol",
         "357" => "weapon_357",
@@ -1292,6 +2143,213 @@ fn ammo_pickup(class: &str) -> Option<(&'static str, i32)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_empty_frag_switches_to_the_heaviest_weapon_with_ammo() {
+        let mk = |class: &str, ammo: &str, magazine: i32, weight: i32, no_to: bool| Weapon {
+            class: class.into(),
+            ammo_type: ammo.into(),
+            magazine,
+            ammo_max: 10,
+            weight,
+            no_autoswitch_to: no_to,
+            ..Default::default()
+        };
+        let weapons: BTreeMap<String, Weapon> = [
+            mk("weapon_frag", "grenade", -1, 1, false),
+            mk("weapon_pistol", "Pistol", 18, 2, false),
+            mk("weapon_smg1", "SMG1", 45, 3, false),
+            mk("weapon_rpg", "RPG_Round", -1, 0, true),
+            mk("weapon_crowbar", "None", -1, 0, false),
+        ]
+        .into_iter()
+        .map(|w| (w.class.clone(), w))
+        .collect();
+        let mut inv = Inventory::default();
+        for (class, clip) in [
+            ("weapon_frag", -1),
+            ("weapon_pistol", 0),
+            ("weapon_smg1", 0),
+            ("weapon_rpg", -1),
+            ("weapon_crowbar", -1),
+        ] {
+            inv.owned.insert(class.into(), clip);
+        }
+        inv.active = "weapon_frag".into();
+        inv.set_ammo("Pistol", 5);
+        inv.set_ammo("RPG_Round", 3);
+        // SMG1 has neither clip nor reserve; the RPG never takes auto-switches.
+        assert!(!inv.has_any_ammo(&weapons["weapon_frag"]));
+        assert_eq!(
+            inv.next_best_weapon(&weapons).as_deref(),
+            Some("weapon_pistol")
+        );
+        inv.set_ammo("Pistol", 0);
+        assert_eq!(
+            inv.next_best_weapon(&weapons).as_deref(),
+            Some("weapon_crowbar")
+        );
+    }
+    #[test]
+    fn frag_launches_follow_weapon_frag_math() {
+        use super::*;
+        let world = World::default();
+        let physics = Physics::new(&world);
+        let eye = Vec3::new(0., 0., 64.);
+        let (source, velocity, spin, _) = frag_launch(
+            &physics,
+            FragThrow::Throw,
+            eye,
+            Vec3::X,
+            Vec3::Y * 10.,
+            Vec3::ZERO,
+            None,
+            0.5,
+        );
+        // eye + 18 forward + 8 right (right of +X is -Y); forward.z + 0.1 at 1200 u/s.
+        assert_eq!(source, Vec3::new(18., -8., 64.));
+        assert_eq!(velocity, Vec3::new(1200., 10., 120.));
+        assert_eq!(spin, Vec3::new(600., 600., 0.));
+        let (source, velocity, _, _) = frag_launch(
+            &physics,
+            FragThrow::Lob,
+            eye,
+            Vec3::X,
+            Vec3::ZERO,
+            Vec3::ZERO,
+            None,
+            0.,
+        );
+        assert_eq!(source, Vec3::new(18., -8., 56.));
+        assert_eq!(velocity, Vec3::new(350., 0., 50.));
+        let (source, velocity, spin, _) = frag_launch(
+            &physics,
+            FragThrow::Roll,
+            eye,
+            Vec3::new(0.6, 0., -0.8),
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Some(Vec3::Z),
+            0.,
+        );
+        assert!((source - Vec3::new(18., 0., 4.)).length() < 1e-4);
+        assert!((velocity - Vec3::new(700., 0., 0.)).length() < 1e-3);
+        assert_eq!(spin, Vec3::new(0., 0., 720.));
+    }
+    #[test]
+    fn trace_bleed_marks_the_wall_behind_bleeding_npcs() {
+        use rapier3d::prelude::*;
+        const S: f32 = 1. / 39.37;
+        let mut world = World::default();
+        let npc = |class: &str| modkit_core::Entity {
+            properties: vec![("classname".into(), class.into())],
+        };
+        world.entities.push(npc("npc_metropolice"));
+        world.entities.push(npc("npc_cscanner"));
+        // Synthetic wall 100 units behind the hit point (not game data).
+        let mut physics = Physics::default();
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(5. * S, 200. * S, 200. * S).translation(vector![
+                100. * S,
+                0.,
+                0.
+            ]),
+        );
+        physics.refresh_queries();
+        let hit = crate::physics::RayHit {
+            entity: 0,
+            position: Vec3::ZERO,
+            normal: -Vec3::X,
+        };
+        let mut inv = Inventory::default();
+        let count = |inv: &mut Inventory, id: usize, damage: f32| {
+            inv.blood.clear();
+            inv.trace_bleed(&physics, &world, id, &hit, Vec3::X, damage);
+            inv.blood.len()
+        };
+        // 1 / 2 / 4 traces by damage, all reaching the wall within 172 units.
+        assert_eq!(count(&mut inv, 0, 5.), 1);
+        assert_eq!(count(&mut inv, 0, 12.), 2);
+        assert_eq!(count(&mut inv, 0, 40.), 4);
+        assert!(inv
+            .blood
+            .iter()
+            .all(|(b, c)| (b.position.x - 95.).abs() < 1. && *c == BloodColor::Red));
+        // Machines do not bleed.
+        assert_eq!(count(&mut inv, 1, 40.), 0);
+        assert_eq!(blood_color("npc_headcrab"), Some(BloodColor::Yellow));
+    }
+    #[test]
+    fn breaking_an_explosive_prop_queues_its_explosion() {
+        // Synthetic: prop_physics with health 10 and ExplodeDamage 100 (radius 0 ->
+        // magnitude x 2.5), and one with only health (no explosion).
+        use crate::projectiles::{Damage, DamageTarget};
+        let prop = |extra: &[(&str, &str)]| modkit_core::Entity {
+            properties: [("classname", "prop_physics"), ("health", "10")]
+                .iter()
+                .chain(extra)
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let world = World {
+            entities: vec![
+                prop(&[("ExplodeDamage", "100.7"), ("origin", "5 0 0")]),
+                prop(&[]),
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let hit = |id| Damage {
+            target: DamageTarget::Entity(id),
+            amount: 20.,
+            kind: crate::player_damage::DMG_BULLET,
+            dissolve: false,
+            direction: Vec3::X,
+            origin: Vec3::ZERO,
+        };
+        Inventory::default().apply_projectile_damage(
+            vec![hit(0), hit(1)],
+            &world,
+            &mut scene,
+            &mut physics,
+        );
+        assert!(scene.states[0].killed && scene.states[1].killed);
+        assert_eq!(scene.prop_explosions.len(), 1);
+        let (_, magnitude, radius) = scene.prop_explosions[0];
+        assert_eq!((magnitude, radius), (100., 250.));
+    }
+    #[test]
+    fn breakable_damage_applies_prop_data_modifiers() {
+        use crate::player_damage::*;
+        // Wooden.Large (owned propdata.txt): bullets 0.75, club 2, explosive 1.5.
+        let wood = modkit_core::PropData {
+            health: 50.,
+            dmg_bullets: 0.75,
+            dmg_club: 2.,
+            dmg_explosive: 1.5,
+            ..Default::default()
+        };
+        assert_eq!(breakable_damage(8., DMG_BULLET, Some(&wood)), 6.);
+        assert_eq!(
+            breakable_damage(8., DMG_BULLET | DMG_BUCKSHOT, Some(&wood)),
+            12.
+        );
+        assert_eq!(breakable_damage(10., DMG_CLUB, Some(&wood)), 20.);
+        assert_eq!(breakable_damage(10., DMG_BLAST, Some(&wood)), 15.);
+        assert_eq!(breakable_damage(10., DMG_CRUSH, Some(&wood)), 10.);
+        assert_eq!(
+            breakable_damage(1., DMG_SLASH | DMG_CRUSH, Some(&wood)),
+            10.
+        );
+        assert_eq!(breakable_damage(10., DMG_POISON, Some(&wood)), 0.);
+        // Without prop data the CBreakableProp defaults (1) apply; brush breakables
+        // use the func_breakdmg_* convars.
+        assert_eq!(breakable_damage(8., DMG_BULLET, None), 8.);
+        assert_eq!(
+            breakable_damage(8., DMG_BULLET, Some(&FUNC_BREAKABLE_DAMAGE)),
+            4.
+        );
+    }
     #[test]
     fn fall_damage_and_armor_exceptions_follow_sdk() {
         use super::*;
@@ -2079,6 +3137,7 @@ mod tests {
             vec![Damage {
                 target: DamageTarget::Player,
                 amount: 100.,
+                kind: crate::player_damage::DMG_BLAST,
                 dissolve: false,
                 direction: Vec3::X,
                 origin: Vec3::X,
@@ -2098,6 +3157,7 @@ mod tests {
         let dissolve = Damage {
             target: DamageTarget::Entity(0),
             amount: 0.,
+            kind: crate::player_damage::DMG_DISSOLVE,
             dissolve: true,
             direction: Vec3::X,
             origin: Vec3::ZERO,
@@ -2154,7 +3214,7 @@ mod tests {
         assert!(inv.impacts[0].0.position.distance(Vec3::X * 100.) < 0.001);
         assert!(inv.impacts[1..]
             .iter()
-            .any(|(hit, _)| hit.position.y.abs() > 0.1));
+            .any(|(hit, _, _)| hit.position.y.abs() > 0.1));
         assert_eq!(inv.owned["weapon_shotgun"], 5);
     }
 

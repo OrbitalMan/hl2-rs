@@ -28,12 +28,133 @@ pub struct ProjectileHit {
     pub fraction: f32,
 }
 const SCALE: f32 = 1. / 39.37;
+/// k_flMaxVelocity / k_flMaxAngularVelocity (SDK public/vphysics/performance.h).
+const MAX_VELOCITY: f32 = 2000.;
+const MAX_ANGULAR_VELOCITY: f32 = 360. * 10.;
 // Retail CGameMovement::PlayerSolidMask(true): NPC-only clip volumes do not
 // block players. Keep their colliders available for other query categories.
 const PLAYER_BRUSH_MASK: u32 = 0x1400b;
-fn enabled_filter() -> QueryFilter<'static> {
+/// VPhysics projectiles (thrown frags): COLLISION_GROUP_WEAPON-like bodies that touch
+/// the world and props but not characters, and that traces/player movement ignore.
+const PROJECTILE_GROUP: Group = Group::GROUP_2;
+/// Colliders of npc_* model instances.
+const NPC_GROUP: Group = Group::GROUP_3;
+/// The player's VPhysics shadow (CBasePlayer::SetupVPhysicsShadow): it only pushes and
+/// rests on movable props; traces and player movement ignore it.
+const SHADOW_GROUP: Group = Group::GROUP_4;
+/// NPC movement hulls (SOLID_BBOX: an axis-aligned box of the class hull, e.g.
+/// HULL_HUMAN): player movement and physics props collide with them; traces use the
+/// model-shaped colliders instead.
+const HULL_GROUP: Group = Group::GROUP_5;
+/// MASK_SOLID (CONTENTS_SOLID | MOVEABLE | WINDOW | MONSTER | GRATE): what physics
+/// objects collide with (CBaseEntity::PhysicsSolidMaskForEntity).
+const MASK_SOLID: u32 = 0x1 | 0x4000 | 0x2 | 0x2000000 | 0x8;
+/// prop_physics with SF_PHYSPROP_DEBRIS (4): COLLISION_GROUP_DEBRIS collides only with
+/// COLLISION_GROUP_NONE (CGameRules::ShouldCollide): the world and ordinary props, not
+/// the player (movement or shadow), NPCs, thrown frags or other debris. Traces (bullets,
+/// +USE, the gravity gun) still hit it.
+const DEBRIS_GROUP: Group = Group::GROUP_6;
+const DEBRIS_GROUPS: InteractionGroups = InteractionGroups::new(
+    DEBRIS_GROUP,
+    Group::ALL
+        .difference(DEBRIS_GROUP)
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP)
+        .difference(NPC_GROUP)
+        .difference(PROJECTILE_GROUP),
+);
+const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
+    Group::ALL,
+    Group::ALL
+        .difference(PROJECTILE_GROUP)
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP),
+);
+/// Player movement: everything solid to the player, NPC hull boxes included (not
+/// debris props).
+const PLAYER_GROUPS: InteractionGroups = InteractionGroups::new(
+    Group::ALL,
+    Group::ALL
+        .difference(PROJECTILE_GROUP)
+        .difference(SHADOW_GROUP)
+        .difference(DEBRIS_GROUP),
+);
+/// The SDK hull (mins, maxs) of npc_* classes (SetHullType), for those done so far.
+pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
+    // HULL_HUMAN (ai_hull.cpp, non-HL1 table).
+    const HUMAN: (Vec3, Vec3) = (Vec3::new(-13., -13., 0.), Vec3::new(13., 13., 72.));
+    matches!(
+        class,
+        "npc_metropolice"
+            | "npc_combine_s"
+            | "npc_citizen"
+            | "npc_alyx"
+            | "npc_barney"
+            | "npc_kleiner"
+            | "npc_eli"
+            | "npc_breen"
+            | "npc_mossman"
+            | "npc_magnusson"
+            | "npc_gman"
+            | "npc_monk"
+            | "npc_zombie"
+            | "npc_zombine"
+            | "npc_poisonzombie"
+            | "npc_fastzombie"
+            | "npc_stalker"
+            | "npc_assassin"
+    )
+    .then_some(HUMAN)
+}
+/// Traces with COLLISION_GROUP_NONE (FindUseEntity, the gravity gun's FindObject and
+/// punt): they also hit COLLISION_GROUP_WEAPON bodies such as a thrown frag.
+const PICK_GROUPS: InteractionGroups = InteractionGroups::new(
+    Group::ALL,
+    Group::ALL.difference(SHADOW_GROUP).difference(HULL_GROUP),
+);
+/// Entity ids of VPhysics projectile bodies (thrown frags), above every map entity
+/// index, so the entity-keyed +USE and gravity gun holds can take them.
+pub const PROJECTILE_ENTITY_BASE: usize = 1 << 40;
+pub fn projectile_entity(projectile: u64) -> usize {
+    PROJECTILE_ENTITY_BASE + projectile as usize
+}
+pub fn is_projectile_entity(id: usize) -> bool {
+    (PROJECTILE_ENTITY_BASE..usize::MAX).contains(&id)
+}
+/// SetupVPhysicsShadow: mass 85, no rotation, no drag; SetPushMassLimit(350).
+pub const PLAYER_SHADOW_MASS: f32 = 85.;
+pub const PLAYER_PUSH_MASS_LIMIT: f32 = 350.;
+/// VPhysics keeps objects apart by IVP's collision margin: the maps' authored rest
+/// poses put .phy hull bottoms 0.497 (PlasticCrate01a) and 0.500 (a lying
+/// garbage_glassbottle003a) units above the floor, while the stored hulls fit the render
+/// meshes, so without it props sank half a unit into floors (owner report). Applied as
+/// a Rapier contact skin on dynamic prop colliders (contacts only; traces unchanged).
+pub const VPHYSICS_CONTACT_MARGIN: f32 = 0.5;
+/// Contact depth (units) past which a CCD-gated prop keeps continuous collision.
+const EMBEDDED_DEPTH: f32 = 1.;
+/// phys_lengthconstraint as Rapier rope joints (off: see `add_constraints`).
+const ROPE_CONSTRAINTS: bool = false;
+/// SetPushSpeedLimit(50): the shadow's speed into a pushable object's contact normal.
+pub const PLAYER_PUSH_SPEED_LIMIT: f32 = 50.;
+/// The smallest extent of a body's pieces together, in its own frame (meters).
+fn body_thickness(body: &RigidBody, colliders: &ColliderSet) -> f32 {
+    let mut bounds: Option<rapier3d::parry::bounding_volume::Aabb> = None;
+    for c in body.colliders().iter().filter_map(|c| colliders.get(*c)) {
+        let local = c
+            .position_wrt_parent()
+            .copied()
+            .unwrap_or_else(Isometry::identity);
+        let aabb = c.shape().compute_aabb(&local);
+        bounds = Some(bounds.map_or(aabb, |b| b.merged(&aabb)));
+    }
+    bounds.map_or(f32::INFINITY, |b| b.extents().min())
+}
+fn groups_filter(groups: InteractionGroups) -> QueryFilter<'static> {
     static ENABLED: fn(ColliderHandle, &Collider) -> bool = |_, c| c.is_enabled();
-    QueryFilter::default().exclude_sensors().predicate(&ENABLED)
+    QueryFilter::default()
+        .groups(groups)
+        .exclude_sensors()
+        .predicate(&ENABLED)
 }
 fn vector(p: Vec3) -> Vector<Real> {
     vector![p.x * SCALE, p.y * SCALE, p.z * SCALE]
@@ -88,6 +209,19 @@ fn mesh_shape(
     convex: bool,
     matrices: Option<&[Mat4]>,
 ) -> Option<SharedShape> {
+    mesh_shape_with(
+        surfaces,
+        convex,
+        matrices,
+        TriMeshFlags::MERGE_DUPLICATE_VERTICES | TriMeshFlags::FIX_INTERNAL_EDGES,
+    )
+}
+fn mesh_shape_with(
+    surfaces: &[Surface],
+    convex: bool,
+    matrices: Option<&[Mat4]>,
+    flags: TriMeshFlags,
+) -> Option<SharedShape> {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     for s in surfaces {
@@ -109,18 +243,303 @@ fn mesh_shape(
     if convex {
         SharedShape::convex_hull(&vertices)
     } else {
-        SharedShape::trimesh_with_flags(
-            vertices,
-            indices,
-            TriMeshFlags::MERGE_DUPLICATE_VERTICES | TriMeshFlags::FIX_INTERNAL_EDGES,
-        )
-        .ok()
+        SharedShape::trimesh_with_flags(vertices, indices, flags).ok()
     }
+}
+/// The .phy solid after CPhysicsProp::CreateVPhysics' keyvalue scaling: mass x
+/// massScale (when > 0), inertia x inertiaScale (when > 0, at least 0.5).
+fn authored_solid(
+    solid: &modkit_core::PhysicsSolid,
+    keyvalue: impl Fn(&str) -> Option<f32>,
+) -> modkit_core::PhysicsSolid {
+    let mut solid = solid.clone();
+    if let Some(scale) = keyvalue("massScale").filter(|s| *s > 0.) {
+        solid.mass *= scale;
+    }
+    if let Some(scale) = keyvalue("inertiaScale").filter(|s| *s > 0.) {
+        solid.inertia = (solid.inertia * scale).max(0.5);
+    }
+    // VPhysics rejects non-positive masses; keep the body simulable.
+    solid.mass = solid.mass.max(0.001);
+    solid
+}
+fn surface_material<'a>(world: &'a World, name: &str) -> Option<&'a modkit_core::SurfaceMaterial> {
+    world
+        .surface_materials
+        .get(name)
+        .or_else(|| world.surface_materials.get("default"))
+}
+/// Rapier restitution from a surfaceprop's elasticity, clamped to 0..1: the shipped
+/// scripts carry out-of-range values (metal_bouncy 1000, quicksand 2) whose IVP
+/// meaning is not in the SDK, and Rapier restitution above 1 adds energy per bounce.
+fn restitution(m: &modkit_core::SurfaceMaterial) -> f32 {
+    m.elasticity.clamp(0., 1.)
+}
+/// Side materials of world brush `index`, or None when every side resolves to the
+/// "default" surfaceprop (or nothing is recorded).
+fn brush_sides(world: &World, index: usize, brush: &Brush) -> Option<Vec<SideMaterial>> {
+    let names = world.brush_side_materials.get(index)?;
+    let default = world.surface_materials.get("default")?;
+    let mut any = false;
+    let sides = brush
+        .planes
+        .iter()
+        .zip(names)
+        .map(|(plane, material)| {
+            let m = world
+                .material_surfaceprops
+                .get(material)
+                .and_then(|prop| world.surface_materials.get(prop))
+                .unwrap_or(default);
+            any |= m.friction != default.friction || m.elasticity != default.elasticity;
+            SideMaterial {
+                normal: plane.normal,
+                friction: m.friction,
+                restitution: restitution(m),
+            }
+        })
+        .collect();
+    any.then_some(sides)
+}
+fn world_material(world: &World) -> impl Fn(ColliderBuilder) -> ColliderBuilder + '_ {
+    let material = world.surface_materials.get("default");
+    move |builder| match material {
+        Some(m) => builder
+            .friction(m.friction)
+            .restitution(restitution(m))
+            .friction_combine_rule(CoefficientCombineRule::Multiply)
+            .restitution_combine_rule(CoefficientCombineRule::Multiply),
+        None => builder.friction(0.8),
+    }
+}
+/// The body's mass properties from the authored total mass: uniform density over
+/// the convex pieces, then the whole inertia tensor times the solid's "inertia"
+/// multiplier (VPhysics scales the object's tensor, parallel-axis terms included).
+/// A hull that is a prism of at least 10 equal-radius sides about the model z axis (the
+/// frag's w_grenade.phy: 12 sides, radius 1.808) as a smooth Rapier cylinder. Native IVP
+/// rolls such a hull along the floor with little loss (lob/roll samples: ~150 u/s held for
+/// most of a second); Rapier's faceted hull loses energy on every edge impact and stops
+/// within ~1 s, so the round body stands in for IVP's rolling contact.
+fn prism_cylinder(vertices: &[Vec3]) -> Option<SharedShape> {
+    let rim: Vec<_> = vertices
+        .iter()
+        .filter(|v| v.truncate().length() > 0.5)
+        .collect();
+    if rim.len() < 20 {
+        return None;
+    }
+    let radius = rim.iter().map(|v| v.truncate().length()).sum::<f32>() / rim.len() as f32;
+    if rim
+        .iter()
+        .any(|v| (v.truncate().length() - radius).abs() > 0.02 * radius)
+    {
+        return None;
+    }
+    let (low, high) = rim
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), v| (l.min(v.z), h.max(v.z)));
+    if high - low < radius {
+        return None;
+    }
+    // Rapier cylinders run along their local y; turn that onto the model z axis.
+    Some(SharedShape::compound(vec![(
+        Isometry::new(
+            vector![0., 0., (low + high) * 0.5 * SCALE],
+            vector![std::f32::consts::FRAC_PI_2, 0., 0.],
+        ),
+        SharedShape::cylinder((high - low) * 0.5 * SCALE, radius * SCALE),
+    )]))
+}
+fn authored_mass_properties(shapes: &[SharedShape], mass: f32, inertia: f32) -> MassProperties {
+    let unit = shapes
+        .iter()
+        .map(|s| s.mass_properties(1.))
+        .fold(MassProperties::default(), |sum, m| sum + m);
+    let composite = if unit.mass() > 1e-9 {
+        let mut scaled = unit;
+        scaled.set_mass(mass, true);
+        scaled
+    } else {
+        MassProperties::new(Point::origin(), mass, Vector::repeat(mass * 0.01))
+    };
+    MassProperties::with_principal_inertia_frame(
+        composite.local_com,
+        mass,
+        composite.principal_inertia() * inertia,
+        composite.principal_inertia_local_frame,
+    )
 }
 struct PropShapes {
     shapes: Vec<SharedShape>,
     native: bool,
     native_failed: bool,
+}
+/// One VPhysics-style collision event (gamevcollisionevent_t subset).
+#[derive(Clone, Debug)]
+pub struct PhysicsCollision {
+    pub colliders: [ColliderHandle; 2],
+    /// Entity ids; None for world geometry and free bodies (thrown frags).
+    pub entities: [Option<usize>; 2],
+    /// Surfaceprop of authored bodies; None when the collider carries none (world).
+    pub surfaceprops: [Option<String>; 2],
+    pub position: Vec3,
+    /// Each side's object origin (pObject->GetPosition), the contact for fixed geometry.
+    pub origins: [Vec3; 2],
+    /// Contact normal (from the first collider toward the second).
+    pub normal: Vec3,
+    /// collisionSpeed: relative normal speed before the impact, units/s.
+    pub speed: f32,
+    /// deltaCollisionTime: seconds since this pair last started touching.
+    pub delta_time: f32,
+    /// Each side's body velocity before and after the step (units/s; zero for fixed or
+    /// kinematic colliders) and mass (0 when not dynamic): gamevcollisionevent_t
+    /// preVelocity/postVelocity and GetMass for impact damage.
+    pub pre_velocities: [Vec3; 2],
+    pub post_velocities: [Vec3; 2],
+    pub masses: [f32; 2],
+}
+#[derive(Clone, Copy, Debug)]
+pub struct BodyState {
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub velocity: Vec3,
+    pub local_angular_degrees: Vec3,
+}
+/// Linear velocity, angular velocity and center of mass before a step.
+type PreStep = (Vector<Real>, Vector<Real>, Point<Real>);
+/// One world brush side's material: outward plane normal, friction, restitution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SideMaterial {
+    pub normal: Vec3,
+    pub friction: f32,
+    pub restitution: f32,
+}
+/// Per-side world materials (VBSP sets each world collision triangle's material from
+/// its brush side; Rapier has one material per collider, so the solver contacts of a
+/// brush collider take the side facing the other body).
+#[derive(Default)]
+pub struct WorldSideMaterials {
+    pub sides: HashMap<ColliderHandle, Vec<SideMaterial>>,
+    /// The player shadow's colliders and the bodies it must not touch this step (the
+    /// held object).
+    pub shadow: Vec<ColliderHandle>,
+    pub shadow_excluded: Vec<RigidBodyHandle>,
+    /// Model-shaped NPC colliders of hull-box NPCs: trace hitboxes only. Rapier enables
+    /// a pair when either collider's active collision types allow it, so a dynamic prop
+    /// still generated and solved contacts against every animated hitbox (owner report:
+    /// a pallet sliding off a plaza cop dropped 46 -> 17 fps); the pair filter drops them.
+    pub hitboxes: std::collections::HashSet<ColliderHandle>,
+    /// Entity pairs that never collide (logic_collision_pair with startdisabled 1:
+    /// PhysDisableEntityCollisions), smaller id first.
+    pub disabled_pairs: std::collections::HashSet<(usize, usize)>,
+    /// World brushes that are only player/NPC clips (no MASK_SOLID contents). VBSP
+    /// builds them as separate world solids whose contents CCollisionEvent::
+    /// ShouldCollide tests against PhysicsSolidMaskForEntity: physics objects (MASK_SOLID)
+    /// pass through them. Player movement and traces keep their own clip handling.
+    pub clip_brushes: std::collections::HashSet<ColliderHandle>,
+    /// Bodies whose world constraint has SF_CONSTRAINT_DISABLE_COLLISION: the
+    /// constraint disables the entity pair with the world entity
+    /// (PhysDisableEntityCollisions on g_PhysWorldObject), which also owns the static
+    /// props, so these bodies ignore every static collider without an entity.
+    pub world_disabled_bodies: std::collections::HashSet<RigidBodyHandle>,
+}
+impl WorldSideMaterials {
+    /// The side whose outward normal best matches `outward` (from the brush toward
+    /// the other body).
+    pub fn side(&self, collider: ColliderHandle, outward: Vec3) -> Option<SideMaterial> {
+        self.sides
+            .get(&collider)?
+            .iter()
+            .copied()
+            .max_by(|a, b| a.normal.dot(outward).total_cmp(&b.normal.dot(outward)))
+    }
+}
+impl PhysicsHooks for WorldSideMaterials {
+    /// The player controller's contact filter: the shadow touches only movable
+    /// (dynamic) bodies within the push mass limit, never world geometry, doors or
+    /// the object the player holds.
+    fn filter_contact_pair(&self, context: &PairFilterContext) -> Option<SolverFlags> {
+        if self.hitboxes.contains(&context.collider1) || self.hitboxes.contains(&context.collider2)
+        {
+            return None;
+        }
+        if self.clip_brushes.contains(&context.collider1)
+            || self.clip_brushes.contains(&context.collider2)
+        {
+            return None;
+        }
+        if !self.world_disabled_bodies.is_empty() {
+            let world = |c| {
+                context
+                    .colliders
+                    .get(c)
+                    .is_some_and(|c| c.parent().is_none() && c.user_data == 0)
+            };
+            let disabled = |b: Option<RigidBodyHandle>| {
+                b.is_some_and(|b| self.world_disabled_bodies.contains(&b))
+            };
+            if (disabled(context.rigid_body1) && world(context.collider2))
+                || (disabled(context.rigid_body2) && world(context.collider1))
+            {
+                return None;
+            }
+        }
+        if !self.disabled_pairs.is_empty() {
+            let entity = |c| {
+                context
+                    .colliders
+                    .get(c)
+                    .and_then(|c| (c.user_data as usize).checked_sub(1))
+            };
+            if let (Some(a), Some(b)) = (entity(context.collider1), entity(context.collider2)) {
+                if self.disabled_pairs.contains(&(a.min(b), a.max(b))) {
+                    return None;
+                }
+            }
+        }
+        let other = if self.shadow.contains(&context.collider1) {
+            context.rigid_body2
+        } else if self.shadow.contains(&context.collider2) {
+            context.rigid_body1
+        } else {
+            return Some(SolverFlags::COMPUTE_IMPULSES);
+        };
+        let (handle, body) = other.and_then(|h| context.bodies.get(h).map(|b| (h, b)))?;
+        (body.is_dynamic()
+            && body.mass() <= PLAYER_PUSH_MASS_LIMIT
+            && !self.shadow_excluded.contains(&handle))
+        .then_some(SolverFlags::COMPUTE_IMPULSES)
+    }
+    fn modify_solver_contacts(&self, context: &mut ContactModificationContext) {
+        // VPhysics keeps one collision margin per contact pair, but Rapier adds both
+        // colliders' skins: two props would rest a full margin further apart than a
+        // prop on the floor (owner report: stacked crates sat higher than native).
+        let skin = |c| context.colliders.get(c).map_or(0., |c| c.contact_skin());
+        let shared = skin(context.collider1).min(skin(context.collider2));
+        if shared > 0. {
+            for contact in context.solver_contacts.iter_mut() {
+                contact.dist += shared;
+            }
+            return;
+        }
+        let n = Vec3::new(context.normal.x, context.normal.y, context.normal.z);
+        let (side, other) = if let Some(side) = self.side(context.collider1, n) {
+            (side, context.collider2)
+        } else if let Some(side) = self.side(context.collider2, -n) {
+            (side, context.collider1)
+        } else {
+            return;
+        };
+        // Multiply combine, as for every other surfaceprop pair.
+        let (friction, restitution) = context
+            .colliders
+            .get(other)
+            .map_or((1., 0.), |c| (c.friction(), c.restitution()));
+        for contact in context.solver_contacts.iter_mut() {
+            contact.friction = side.friction * friction;
+            contact.restitution = side.restitution * restitution;
+        }
+    }
 }
 #[derive(Default)]
 pub struct Physics {
@@ -137,25 +556,170 @@ pub struct Physics {
     ccd: CCDSolver,
     entity_colliders: BTreeMap<usize, Vec<ColliderHandle>>,
     world_brush_contents: HashMap<ColliderHandle, u32>,
+    pub world_sides: WorldSideMaterials,
     npc_collider_contents: HashMap<ColliderHandle, u32>,
     player_world_brushes: Vec<Brush>,
     player_convex_cache: Mutex<player_convex::ConvexCache>,
     pub dynamic: BTreeMap<usize, RigidBodyHandle>,
+    /// Surfaceprop of each authored VPhysics prop (entity id -> lowercase name).
+    pub prop_materials: BTreeMap<usize, String>,
+    /// Surfaceprop per collider of authored bodies (props and free bodies).
+    collider_materials: HashMap<ColliderHandle, String>,
+    /// This step's new contacts (see collect_collisions).
+    pub collisions: Vec<PhysicsCollision>,
+    /// Last step's new contacts with post velocities taken after this step, when the
+    /// contact has been resolved (gamevcollisionevent_t postVelocity), for impact damage.
+    pub resolved_collisions: Vec<PhysicsCollision>,
+    touching: std::collections::HashSet<(ColliderHandle, ColliderHandle)>,
+    pair_times: HashMap<(ColliderHandle, ColliderHandle), f64>,
+    /// Simulated seconds (sum of tick dt).
+    pub time: f64,
+    /// VPhysics air density for the drag controller (drag.rs; 0 disables drag).
+    pub air_density: f32,
+    /// Drag geometry per dynamic body, computed once from its colliders.
+    drag_geometry: HashMap<RigidBodyHandle, Option<crate::drag::DragGeometry>>,
+    /// Bodies with drag disabled (EnableDrag(false): a held object's controlled body).
+    pub drag_disabled: std::collections::HashSet<RigidBodyHandle>,
+    /// VPhysics constraints created at load, and those that could not be.
+    pub constraints: usize,
+    pub constraint_errors: Vec<String>,
+    /// Prop bodies whose continuous collision runs only while their linear travel per
+    /// step exceeds the body's own thickness (cached, 0 = not computed yet), so a body
+    /// never skips past anything thicker than itself. Rapier's own test uses the
+    /// thinnest piece (a pallet slat) and counts rotation too: its time-of-impact
+    /// search against the world cost 17-40 ms per step while a pallet rocked on and
+    /// tipped off a cop (owner report: 46 -> 17 fps) and 2-4 ms with props at rest.
+    ccd_gated: HashMap<RigidBodyHandle, f32>,
+    spawn_embedded_checked: bool,
+    /// Stored drag fractions of bodies from a read collision file (PhysicsSolid).
+    drag_fractions: HashMap<RigidBodyHandle, Vec3>,
     pub native_shape_count: usize,
     pub native_shape_fallbacks: usize,
     pub skipped: usize,
+    /// The player's VPhysics shadow body and whether it uses the crouch hull.
+    pub player_shadow: Option<(RigidBodyHandle, bool)>,
+    /// NPC hull box collider and its (mins, maxs) per entity.
+    npc_hulls: BTreeMap<usize, (ColliderHandle, Vec3, Vec3)>,
+    /// Model-shaped colliders of NPCs that have a hull box: hitboxes for traces only,
+    /// not solid to player movement and without contacts.
+    npc_hitboxes: std::collections::HashSet<ColliderHandle>,
+    /// Diagnostics: wall-clock milliseconds of the last tick.
+    pub last_step_ms: f64,
+    /// Props launched by the gravity gun whose first collision has not happened yet
+    /// (CPhysicsProp m_bFirstCollisionAfterLaunch).
+    pub launched: std::collections::HashSet<usize>,
+    /// Props with SF_PHYSPROP_PREVENT_PICKUP (0x200): FVPHYSICS_NO_PLAYER_PICKUP and
+    /// CPhysicsProp::CanBePickedUpByPhyscannon false.
+    pub no_pickup: std::collections::HashSet<usize>,
+}
+/// Body-local hull points (metres) of a body's colliders for its drag geometry.
+fn drag_geometry(body: &RigidBody, colliders: &ColliderSet) -> Option<crate::drag::DragGeometry> {
+    let mut points = Vec::new();
+    for handle in body.colliders() {
+        let Some(collider) = colliders.get(*handle) else {
+            continue;
+        };
+        let local = collider
+            .position_wrt_parent()
+            .copied()
+            .unwrap_or_else(Isometry::identity);
+        let shape = collider.shape();
+        let mut add = |p: Point<Real>| {
+            let q = local * p;
+            points.push(Vec3::new(q.x, q.y, q.z));
+        };
+        if let Some(hull) = shape.as_convex_polyhedron() {
+            hull.points().iter().copied().for_each(&mut add);
+        } else {
+            let aabb = shape.compute_local_aabb();
+            for i in 0..8 {
+                add(point![
+                    if i & 1 == 0 { aabb.mins.x } else { aabb.maxs.x },
+                    if i & 2 == 0 { aabb.mins.y } else { aabb.maxs.y },
+                    if i & 4 == 0 { aabb.mins.z } else { aabb.maxs.z }
+                ]);
+            }
+        }
+    }
+    crate::drag::DragGeometry::from_points(&points)
+}
+/// One drag-controller step on a body (retail 10012ec0 order: linear, then angular).
+fn apply_drag(body: &mut RigidBody, geometry: &crate::drag::DragGeometry, density: f32, dt: f32) {
+    use crate::drag::*;
+    let props = body.mass_properties().local_mprops;
+    let inertia = props.inv_principal_inertia_sqrt;
+    let inv_inertia = Vec3::new(
+        inertia.x * inertia.x,
+        inertia.y * inertia.y,
+        inertia.z * inertia.z,
+    );
+    let rotation = *body.rotation();
+    let v = *body.linvel();
+    let local = rotation.inverse_transform_vector(&v);
+    let factor = step_factor(
+        linear_query(
+            geometry.linear_basis(props.inv_mass),
+            Vec3::new(local.x, local.y, local.z),
+            DEFAULT_COEFFICIENT,
+        ),
+        -0.5,
+        density,
+        dt,
+    );
+    if factor < 0. {
+        body.set_linvel(v + v * factor, false);
+    }
+    let w = *body.angvel();
+    let local = rotation.inverse_transform_vector(&w);
+    let factor = step_factor(
+        angular_query(
+            geometry.angular_basis(inv_inertia),
+            Vec3::new(local.x, local.y, local.z),
+            DEFAULT_COEFFICIENT,
+        ),
+        -1.,
+        density,
+        dt,
+    );
+    if factor < 0. {
+        body.set_angvel(w + w * factor, false);
+    }
 }
 impl Physics {
     pub fn new(world: &World) -> Self {
         let mut p = Self {
             player_world_brushes: world.brushes.clone(),
+            air_density: crate::drag::AIR_DENSITY,
             ..Self::default()
         };
-        for brush in &world.brushes {
+        // World brushes use the "default" surfaceprop (friction/elasticity) when the
+        // table is loaded; brushes with other side materials also get per-contact
+        // side materials through WorldSideMaterials.
+        let world_material = world_material(world);
+        for (index, brush) in world.brushes.iter().enumerate() {
             if let Some(shape) = brush_shape(brush) {
-                let collider = p
-                    .colliders
-                    .insert(ColliderBuilder::new(shape).friction(0.8));
+                let sides = brush_sides(world, index, brush);
+                let builder = world_material(ColliderBuilder::new(shape));
+                let builder = if sides.is_some() {
+                    builder.active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS)
+                } else {
+                    builder
+                };
+                // Clip-only brushes: no contacts with physics objects (see clip_brushes).
+                let clip = brush.contents & MASK_SOLID == 0;
+                let builder = if clip {
+                    let hooks = builder.active_hooks | ActiveHooks::FILTER_CONTACT_PAIRS;
+                    builder.active_hooks(hooks)
+                } else {
+                    builder
+                };
+                let collider = p.colliders.insert(builder);
+                if clip {
+                    p.world_sides.clip_brushes.insert(collider);
+                }
+                if let Some(sides) = sides {
+                    p.world_sides.sides.insert(collider, sides);
+                }
                 p.world_brush_contents.insert(collider, brush.contents);
                 p.npc_collider_contents.insert(collider, brush.contents);
             } else {
@@ -163,9 +727,26 @@ impl Physics {
             }
         }
         for surface in &world.terrain {
-            if let Some(shape) = mesh_shape(std::slice::from_ref(surface), false, None) {
+            // Displacement triangles keep the BSP's clockwise-front winding (their
+            // geometric normals point away from the face normal), while Rapier's
+            // oriented trimesh (FIX_INTERNAL_EDGES) treats the counter-clockwise side as
+            // the outside: reversed, props rest on displacements instead of falling
+            // through them (terracotta pot #491 on the tr02 playground fell 9 units).
+            // Without internal-edge correction: with it, a pot resting on the flat
+            // playground displacement jittered, wandered and tipped over within 5 s
+            // (native rests upright); VPhysics displacement collision has none either.
+            let mut surface = surface.clone();
+            for triangle in surface.indices.as_chunks_mut::<3>().0 {
+                triangle.swap(1, 2);
+            }
+            if let Some(shape) = mesh_shape_with(
+                std::slice::from_ref(&surface),
+                false,
+                None,
+                TriMeshFlags::MERGE_DUPLICATE_VERTICES,
+            ) {
                 p.colliders
-                    .insert(ColliderBuilder::new(shape).friction(0.8));
+                    .insert(world_material(ColliderBuilder::new(shape)));
             }
         }
         for (id, e) in world.entities.iter().enumerate() {
@@ -247,7 +828,15 @@ impl Physics {
                     .unwrap_or("idle")
                     .to_lowercase()
             });
-            let native_eligible = instance.kind == "static_prop" && instance.solid_mode == Some(6);
+            // VPhysics props use their authored .phy pieces once the model loader
+            // read the solid parameters (CPhysicsProp::CreateVPhysics); otherwise
+            // the prior render-hull policy stays.
+            let authored = dynamic
+                .then(|| world.model_physics.get(&instance.asset_key()))
+                .flatten();
+            let native_eligible = (instance.kind == "static_prop"
+                && instance.solid_mode == Some(6))
+                || authored.is_some();
             let key = (instance.asset_key(), dynamic, clip.clone(), native_eligible);
             let cached = shape_cache.entry(key).or_insert_with(|| {
                 let pieces = native_eligible
@@ -311,33 +900,96 @@ impl Physics {
             p.native_shape_fallbacks += usize::from(cached.native_failed);
             let position = pose(instance.origin, angles(instance.angles));
             let entity = instance.entity;
+            let keyvalue = |key: &str| {
+                instance
+                    .entity
+                    .and_then(|id| world.entities.get(id))
+                    .and_then(|e| e.get(key))
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .filter(|v| v.is_finite())
+            };
+            let solid = authored.map(|solid| authored_solid(solid, keyvalue));
+            let (linear_damping, angular_damping) = solid
+                .as_ref()
+                .map_or((0.05, 0.1), |s| (s.damping, s.rotdamping));
+            let masses = solid
+                .as_ref()
+                .map(|s| authored_mass_properties(&cached.shapes, s.mass, s.inertia));
             let body = dynamic.then(|| {
                 p.bodies.insert(
                     RigidBodyBuilder::dynamic()
+                        .additional_mass_properties(masses.unwrap_or_default())
                         .position(position)
                         .sleeping(prop_flags & 1 != 0)
-                        .ccd_enabled(true)
-                        .linear_damping(0.05)
-                        .angular_damping(0.1),
+                        .linear_damping(linear_damping)
+                        .angular_damping(angular_damping),
                 )
             });
             if let (Some(id), Some(body)) = (entity, body) {
+                p.ccd_gated.insert(body, 0.);
                 p.dynamic.insert(id, body);
+                if world
+                    .entities
+                    .get(id)
+                    .and_then(|e| e.get("spawnflags"))
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .is_some_and(|flags| flags & 0x200 != 0)
+                {
+                    p.no_pickup.insert(id);
+                }
             }
+            if let (Some(body), Some(fractions)) =
+                (body, solid.as_ref().and_then(|s| s.drag_fractions))
+            {
+                p.drag_fractions.insert(body, fractions);
+            }
+            let material = solid
+                .as_ref()
+                .and_then(|s| surface_material(world, &s.surfaceprop));
+            if let (Some(id), Some(s)) = (entity, &solid) {
+                p.prop_materials.insert(id, s.surfaceprop.clone());
+            }
+            let surfaceprop = solid.as_ref().map(|s| s.surfaceprop.clone());
             for shape in &cached.shapes {
-                let collider = ColliderBuilder::new(shape.clone())
-                    .friction(0.7)
-                    .restitution(0.05)
-                    .user_data(entity.map_or(0, |i| i as u128 + 1));
+                let collider = match material {
+                    // VPhysics multiplies both surfaces' friction and elasticity
+                    // (frag fit: grenade 0.9 x concrete 0.8). Rapier restitution is
+                    // not IVP elasticity: "native fit needed".
+                    Some(m) => ColliderBuilder::new(shape.clone())
+                        .friction(m.friction)
+                        .restitution(restitution(m))
+                        .friction_combine_rule(CoefficientCombineRule::Multiply)
+                        .restitution_combine_rule(CoefficientCombineRule::Multiply),
+                    None => ColliderBuilder::new(shape.clone())
+                        .friction(0.7)
+                        .restitution(0.05),
+                }
+                .user_data(entity.map_or(0, |i| i as u128 + 1));
                 let c = match body {
                     Some(body) => {
+                        // Authored bodies carry their mass on the body; pieces add none.
+                        let collider = match &masses {
+                            Some(_) => collider.density(0.),
+                            None => collider.mass(10.),
+                        }
+                        .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                        .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS);
                         p.colliders
-                            .insert_with_parent(collider.mass(10.), body, &mut p.bodies)
+                            .insert_with_parent(collider, body, &mut p.bodies)
                     }
                     None => p.colliders.insert(collider.position(position)),
                 };
                 if let Some(id) = entity {
                     p.entity_colliders.entry(id).or_default().push(c);
+                }
+                if let Some(name) = &surfaceprop {
+                    p.collider_materials.insert(c, name.clone());
+                }
+                if instance.kind.starts_with("npc_") {
+                    p.colliders[c]
+                        .set_collision_groups(InteractionGroups::new(NPC_GROUP, Group::ALL));
+                } else if body.is_some() && prop_flags & 4 != 0 {
+                    p.colliders[c].set_collision_groups(DEBRIS_GROUPS);
                 }
                 p.npc_collider_contents.insert(
                     c,
@@ -348,9 +1000,295 @@ impl Physics {
                     },
                 );
             }
+            // SOLID_BBOX NPCs: movement and physics collide with the class hull box at
+            // the entity origin (never rotated); the model shape stays for traces.
+            if let (Some(id), Some((mins, maxs))) = (entity, npc_hull(&instance.kind)) {
+                for c in p.entity_colliders.get(&id).cloned().unwrap_or_default() {
+                    if let Some(collider) = p.colliders.get_mut(c) {
+                        collider.set_active_collision_types(ActiveCollisionTypes::empty());
+                        collider.set_active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
+                    }
+                    p.npc_hitboxes.insert(c);
+                    p.world_sides.hitboxes.insert(c);
+                }
+                let half = (maxs - mins) * 0.5;
+                let hull = p.colliders.insert(
+                    ColliderBuilder::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
+                        .translation(vector(instance.origin + (mins + maxs) * 0.5))
+                        .friction(0.7)
+                        .user_data(id as u128 + 1)
+                        .collision_groups(InteractionGroups::new(
+                            HULL_GROUP,
+                            Group::ALL
+                                .difference(PROJECTILE_GROUP)
+                                .difference(SHADOW_GROUP),
+                        )),
+                );
+                p.npc_collider_contents.insert(hull, CONTENTS_MONSTER);
+                if let Some(s) = &solid {
+                    p.collider_materials.insert(hull, s.surfaceprop.clone());
+                }
+                p.npc_hulls.insert(id, (hull, mins, maxs));
+            }
         }
+        // Fold additional (authored) mass properties in before the first query.
+        for handle in p.dynamic.values() {
+            if let Some(body) = p.bodies.get_mut(*handle) {
+                body.recompute_mass_properties_from_colliders(&p.colliders);
+            }
+        }
+        p.add_constraints(world);
+        p.add_collision_pairs(world);
         p.query.update(&p.colliders);
         p
+    }
+    /// logic_collision_pair (logicentities.cpp CLogicCollisionPair::Activate): with
+    /// startdisabled 1 the two named entities never collide with each other, e.g. the
+    /// d1_trainstation_02 teeter-totter seat and the static base it is authored inside.
+    /// Not modeled: the EnableCollisions/DisableCollisions inputs.
+    fn add_collision_pairs(&mut self, world: &World) {
+        let named = |name: &str| {
+            world.entities.iter().position(|e| {
+                e.get("targetname")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name.trim()))
+            })
+        };
+        for e in world.entities.iter() {
+            if e.class() != "logic_collision_pair"
+                || e.get("startdisabled")
+                    .and_then(|v| v.trim().parse::<i32>().ok())
+                    != Some(1)
+            {
+                continue;
+            }
+            let (Some(a), Some(b)) = (
+                e.get("attach1").and_then(named),
+                e.get("attach2").and_then(named),
+            ) else {
+                continue;
+            };
+            self.world_sides.disabled_pairs.insert((a.min(b), a.max(b)));
+            for id in [a, b] {
+                for c in self.entity_colliders.get(&id).cloned().unwrap_or_default() {
+                    if let Some(collider) = self.colliders.get_mut(c) {
+                        let hooks = collider.active_hooks() | ActiveHooks::FILTER_CONTACT_PAIRS;
+                        collider.set_active_hooks(hooks);
+                    }
+                }
+            }
+        }
+    }
+    /// VPhysics constraint entities (SDK physconstraint.cpp CPhysConstraint::
+    /// ActivateConstraint) as Rapier impulse joints between the attached bodies; a
+    /// missing or non-physics attachment is the world. phys_hinge: revolute about
+    /// `hingeaxis - origin`, with SetAxisFriction(hingefriction x 1000, kg in^2/s^2) as a
+    /// capped zero-velocity motor; phys_ballsocket: spherical at the origin;
+    /// phys_ragdollconstraint: spherical with the x/y/z min/max limits (degrees) in the
+    /// constraint's angles; phys_lengthconstraint: rope from the origin (attach1 side) to
+    /// `attachpoint` (attach2 side), length + addlength; phys_constraint: fixed.
+    /// SF_CONSTRAINT_DISABLE_COLLISION (1) turns contacts off between the pair.
+    /// Not modeled: breaking (force/torque limits), constraint systems' solver
+    /// grouping, StartInactive/TurnOn/TurnOff, sounds, sliders, pulleys, phys_thruster.
+    fn add_constraints(&mut self, world: &World) {
+        let named = |name: &str| {
+            world.entities.iter().position(|e| {
+                e.get("targetname")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name.trim()))
+            })
+        };
+        let mut fixed = None;
+        for (id, e) in world.entities.iter().enumerate() {
+            let class = e.class();
+            if !matches!(
+                class,
+                "phys_hinge"
+                    | "phys_ballsocket"
+                    | "phys_ragdollconstraint"
+                    | "phys_lengthconstraint"
+                    | "phys_constraint"
+            ) {
+                continue;
+            }
+            let body = |key: &str| {
+                e.get(key)
+                    .filter(|n| !n.trim().is_empty())
+                    .and_then(named)
+                    .and_then(|target| self.dynamic.get(&target).copied())
+            };
+            let (a, b) = (body("attach1"), body("attach2"));
+            if a.is_none() && b.is_none() {
+                self.constraint_errors
+                    .push(format!("{class} #{id}: no physics attachment"));
+                continue;
+            }
+            let world_hinge = a.is_none() || b.is_none();
+            let world_body =
+                *fixed.get_or_insert_with(|| self.bodies.insert(RigidBodyBuilder::fixed()));
+            // The world side first (a multibody's fixed root is its parent).
+            let (a, b) = match (a, b) {
+                (Some(a), Some(b)) => (a, b),
+                (Some(body), None) | (None, Some(body)) => (world_body, body),
+                (None, None) => unreachable!("checked above"),
+            };
+            let flags = e
+                .get("spawnflags")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+                .unwrap_or(0);
+            let origin = e.origin();
+            // SF_CONSTRAINT_ASSUME_WORLD_GEOMETRY on a world hinge (CPhysHinge::Spawn):
+            // the object's mass center is snapped onto the hinge axis
+            // (masscenteroverride_t::SnapToAxis) and IVP makes it a BecomeHinged object;
+            // here the snapped body keeps an ordinary revolute joint to the world. Session
+            // 15's impulse joint drifted 115 units because the teeter-totter seat also
+            // collided with the base it is authored inside; logic_collision_pair now
+            // disables that pair.
+            if class == "phys_hinge" && flags & 8 != 0 && world_hinge {
+                if let Some(axis) = e
+                    .get("hingeaxis")
+                    .and_then(modkit_core::parse_vec3)
+                    .map(|p| (p - origin).normalize_or_zero())
+                    .filter(|a| a.length_squared() > 0.5)
+                {
+                    self.snap_mass_center_to_axis(b, origin, axis);
+                }
+            }
+            let point = |key: &str| e.get(key).and_then(modkit_core::parse_vec3);
+            let number = |key: &str| {
+                e.get(key)
+                    .and_then(|v| v.trim().parse::<f32>().ok())
+                    .unwrap_or(0.)
+            };
+            let frame_rotation = if class == "phys_hinge" {
+                let Some(axis) = point("hingeaxis")
+                    .map(|p| (p - origin).normalize_or_zero())
+                    .filter(|a| a.length_squared() > 0.5)
+                else {
+                    self.constraint_errors
+                        .push(format!("{class} #{id}: bad hinge axis"));
+                    continue;
+                };
+                Quat::from_rotation_arc(Vec3::X, axis)
+            } else {
+                angles(point("angles").unwrap_or(Vec3::ZERO))
+            };
+            let frame = pose(origin, frame_rotation);
+            let local = |handle: RigidBodyHandle| {
+                self.bodies
+                    .get(handle)
+                    .map_or(frame, |body| body.position().inv_mul(&frame))
+            };
+            let contacts = flags & 1 == 0;
+            if !contacts && world_hinge {
+                self.world_sides.world_disabled_bodies.insert(b);
+                for c in self
+                    .bodies
+                    .get(b)
+                    .map(|body| body.colliders().to_vec())
+                    .unwrap_or_default()
+                {
+                    if let Some(collider) = self.colliders.get_mut(c) {
+                        let hooks = collider.active_hooks() | ActiveHooks::FILTER_CONTACT_PAIRS;
+                        collider.set_active_hooks(hooks);
+                    }
+                }
+            }
+            let joint: GenericJoint = match class {
+                "phys_hinge" => {
+                    // kg in^2/s^2 -> N m.
+                    let friction = number("hingefriction") * 1000. * SCALE * SCALE;
+                    let mut joint = GenericJointBuilder::new(JointAxesMask::LOCKED_REVOLUTE_AXES)
+                        .local_frame1(local(a))
+                        .local_frame2(local(b))
+                        .contacts_enabled(contacts);
+                    if friction > 0. {
+                        joint = joint
+                            .motor_velocity(JointAxis::AngX, 0., 1e3)
+                            .motor_max_force(JointAxis::AngX, friction);
+                    }
+                    joint.build()
+                }
+                "phys_ballsocket" => GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
+                    .local_frame1(local(a))
+                    .local_frame2(local(b))
+                    .contacts_enabled(contacts)
+                    .build(),
+                "phys_ragdollconstraint" => {
+                    let limit =
+                        |min: &str, max: &str| [number(min).to_radians(), number(max).to_radians()];
+                    GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
+                        .local_frame1(local(a))
+                        .local_frame2(local(b))
+                        .contacts_enabled(contacts)
+                        .limits(JointAxis::AngX, limit("xmin", "xmax"))
+                        .limits(JointAxis::AngY, limit("ymin", "ymax"))
+                        .limits(JointAxis::AngZ, limit("zmin", "zmax"))
+                        .build()
+                }
+                // Rejected for now (session 15, two attempts): the d1_trainstation_02
+                // swing seats hung from two ropes each first dropped ~19 units, then
+                // were flung to z 245 (also with CCD off for jointed bodies). Ropes stay
+                // off until a different approach is validated; seats fall as before.
+                "phys_lengthconstraint" if !ROPE_CONSTRAINTS => {
+                    self.constraint_errors
+                        .push(format!("{class} #{id}: rope constraints disabled"));
+                    continue;
+                }
+                "phys_lengthconstraint" => {
+                    let Some(attach) = point("attachpoint") else {
+                        continue;
+                    };
+                    let length = origin.distance(attach) + number("addlength");
+                    let anchor = |handle: RigidBodyHandle, at: Vec3| {
+                        let p = Point::from(vector(at));
+                        self.bodies
+                            .get(handle)
+                            .map_or(p, |body| body.position().inverse_transform_point(&p))
+                    };
+                    RopeJointBuilder::new(length * SCALE)
+                        .local_anchor1(anchor(a, origin))
+                        .local_anchor2(anchor(b, attach))
+                        .contacts_enabled(contacts)
+                        .build()
+                        .data
+                }
+                _ => GenericJointBuilder::new(JointAxesMask::LOCKED_FIXED_AXES)
+                    .local_frame1(local(a))
+                    .local_frame2(local(b))
+                    .contacts_enabled(contacts)
+                    .build(),
+            };
+            self.impulses.insert(a, b, joint, true);
+            self.constraints += 1;
+        }
+    }
+    /// masscenteroverride_t::SnapToAxis: move a body's mass center to the closest point
+    /// on the line through `point` along `axis` (world space), keeping mass and inertia.
+    fn snap_mass_center_to_axis(&mut self, handle: RigidBodyHandle, point: Vec3, axis: Vec3) {
+        let Some(body) = self.bodies.get_mut(handle) else {
+            return;
+        };
+        let props = body.mass_properties().local_mprops;
+        let com = body.position() * props.local_com;
+        let com = Vec3::new(com.x, com.y, com.z) / SCALE;
+        let snapped = point + axis * (com - point).dot(axis);
+        let local = body
+            .position()
+            .inverse_transform_point(&Point::from(vector(snapped)));
+        let mass = props.mass();
+        let snapped_props = MassProperties::with_principal_inertia_frame(
+            local,
+            mass,
+            props.principal_inertia(),
+            props.principal_inertia_local_frame,
+        );
+        // Map props carry their mass as additional properties over zero-density
+        // colliders, so replacing them moves the center.
+        body.set_additional_mass_properties(snapped_props, true);
+        body.recompute_mass_properties_from_colliders(&self.colliders);
+    }
+    /// Dynamic bodies the island manager keeps awake.
+    pub fn awake_bodies(&self) -> usize {
+        self.islands.active_dynamic_bodies().len()
     }
     pub fn set_entity(&mut self, id: usize, origin: Vec3, rotation: Quat, enabled: bool) {
         let dynamic = self.dynamic.get(&id);
@@ -362,6 +1300,16 @@ impl Physics {
                 .get_mut(*dynamic.unwrap())
                 .unwrap()
                 .set_enabled(enabled);
+        }
+        if let Some(&(hull, mins, maxs)) = self.npc_hulls.get(&id) {
+            let at = pose(origin + (mins + maxs) * 0.5, Quat::IDENTITY);
+            if let Some(c) = self.colliders.get_mut(hull) {
+                if *c.position() != at || c.is_enabled() != enabled {
+                    c.set_position(at);
+                    c.set_enabled(enabled);
+                    self.changed_entity_colliders.push(hull);
+                }
+            }
         }
         let target = dynamic.is_none().then(|| pose(origin, rotation));
         if let Some(colliders) = self.entity_colliders.get(&id) {
@@ -405,10 +1353,82 @@ impl Physics {
         self.changed_entity_colliders.clear();
     }
     pub fn tick(&mut self, dt: f32) {
+        let started = std::time::Instant::now();
+        self.tick_inner(dt);
+        self.last_step_ms = started.elapsed().as_secs_f64() * 1000.;
+    }
+    fn tick_inner(&mut self, dt: f32) {
         self.player_convex_cache
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .retain(&self.colliders);
+        // Props authored interpenetrating a static entity (the teeter-totter seat in its
+        // prop_dynamic base) keep continuous collision: Rapier's penetration recovery
+        // ejects them hundreds of units once CCD is off. Found once, after the first
+        // step's contacts; props pressed into geometry later (a pallet on a cop hull,
+        // props sunk into terrain) stay gated.
+        if !self.spawn_embedded_checked && self.time > 0. {
+            self.spawn_embedded_checked = true;
+            let static_entity = |c: &Collider| {
+                c.parent().is_none()
+                    && c.user_data != 0
+                    && c.collision_groups().memberships != HULL_GROUP
+            };
+            for pair in self.narrow.contact_pairs() {
+                if !pair.has_any_active_contact
+                    || !pair
+                        .manifolds
+                        .iter()
+                        .any(|m| m.points.iter().any(|p| p.dist < -EMBEDDED_DEPTH * SCALE))
+                {
+                    continue;
+                }
+                let (Some(c1), Some(c2)) = (
+                    self.colliders.get(pair.collider1),
+                    self.colliders.get(pair.collider2),
+                ) else {
+                    continue;
+                };
+                for (body, other) in [(c1, c2), (c2, c1)] {
+                    if let (Some(parent), true) = (body.parent(), static_entity(other)) {
+                        self.ccd_gated.remove(&parent);
+                        if let Some(b) = self.bodies.get_mut(parent) {
+                            b.enable_ccd(true);
+                        }
+                    }
+                }
+            }
+        }
+        // VPhysics drag controller (drag.rs: retail per-object bases, native air density).
+        let mut before = HashMap::new();
+        for (handle, body) in self.bodies.iter_mut() {
+            if !body.is_dynamic() || body.is_sleeping() || !body.is_enabled() {
+                continue;
+            }
+            if let Some(thickness) = self.ccd_gated.get_mut(&handle) {
+                if *thickness <= 0. {
+                    *thickness = body_thickness(body, &self.colliders);
+                }
+                let fast = body.linvel().norm() * dt > *thickness;
+                if body.is_ccd_enabled() != fast {
+                    body.enable_ccd(fast);
+                }
+            }
+            if self.air_density > 0. && !self.drag_disabled.contains(&handle) {
+                let colliders = &self.colliders;
+                let stored = self.drag_fractions.get(&handle).copied();
+                if let Some(geometry) = *self.drag_geometry.entry(handle).or_insert_with(|| {
+                    drag_geometry(body, colliders)
+                        .map(|g| stored.map_or(g, |fractions| g.with_fractions(fractions)))
+                }) {
+                    apply_drag(body, &geometry, self.air_density, dt);
+                }
+            }
+            before.insert(
+                handle,
+                (*body.linvel(), *body.angvel(), *body.center_of_mass()),
+            );
+        }
         self.pipeline.step(
             &vector![0., 0., -600. * SCALE],
             &IntegrationParameters {
@@ -424,10 +1444,794 @@ impl Physics {
             &mut self.multibody,
             &mut self.ccd,
             Some(&mut self.query),
-            &(),
+            &self.world_sides,
             &(),
         );
+        self.time += f64::from(dt);
+        // physics_performanceparams_t::Defaults (SDK performance.h; CPhysicsHook keeps
+        // them): world-space speed limits of 2000 u/s and 3600 deg/s per object.
+        for (_, body) in self.bodies.iter_mut() {
+            if !body.is_dynamic() || body.is_sleeping() {
+                continue;
+            }
+            let (v, w) = (*body.linvel(), *body.angvel());
+            let (max_v, max_w) = (MAX_VELOCITY * SCALE, MAX_ANGULAR_VELOCITY.to_radians());
+            if v.norm() > max_v {
+                body.set_linvel(v * (max_v / v.norm()), false);
+            }
+            if w.norm() > max_w {
+                body.set_angvel(w * (max_w / w.norm()), false);
+            }
+        }
+        // Rapier finds a new contact at the end of a step and resolves it in the next:
+        // last step's events get their post-impact velocities now.
+        let mut resolved = std::mem::take(&mut self.collisions);
+        for event in &mut resolved {
+            for side in 0..2 {
+                if let Some(body) = self
+                    .colliders
+                    .get(event.colliders[side])
+                    .and_then(|c| c.parent())
+                    .and_then(|b| self.bodies.get(b))
+                    .filter(|b| b.is_dynamic())
+                {
+                    let v = body.linvel();
+                    event.post_velocities[side] = Vec3::new(v.x, v.y, v.z) / SCALE;
+                }
+            }
+        }
+        self.resolved_collisions = resolved;
+        self.collect_collisions(&before);
         self.changed_entity_colliders.clear();
+    }
+    /// New contacts of this step as VPhysics collision events: the pre-step relative
+    /// speed along the contact normal (collisionSpeed) and the time since the pair last
+    /// touched (deltaCollisionTime). Resting contacts that persist raise no event.
+    fn collect_collisions(&mut self, before: &HashMap<RigidBodyHandle, PreStep>) {
+        self.collisions.clear();
+        let mut touching = std::collections::HashSet::new();
+        for pair in self.narrow.contact_pairs() {
+            if !pair.has_any_active_contact {
+                continue;
+            }
+            let key = (pair.collider1, pair.collider2);
+            touching.insert(key);
+            if self.touching.contains(&key) {
+                continue;
+            }
+            let (Some(c1), Some(c2)) = (
+                self.colliders.get(pair.collider1),
+                self.colliders.get(pair.collider2),
+            ) else {
+                continue;
+            };
+            let Some((manifold, point)) = pair.manifolds.iter().find_map(|m| {
+                m.points
+                    .iter()
+                    .find(|p| p.dist <= 0.01)
+                    .or(m.points.first())
+                    .map(|p| (m, p))
+            }) else {
+                continue;
+            };
+            let normal = manifold.data.normal;
+            let contact = c1.position() * point.local_p1;
+            let velocity = |c: &Collider| {
+                c.parent()
+                    .and_then(|b| before.get(&b))
+                    .map_or(Vector::zeros(), |(v, w, com)| v + w.cross(&(contact - com)))
+            };
+            let relative = velocity(c1) - velocity(c2);
+            let speed = relative.dot(&normal).abs() / SCALE;
+            if before
+                .get(&c1.parent().unwrap_or(RigidBodyHandle::invalid()))
+                .is_none()
+                && before
+                    .get(&c2.parent().unwrap_or(RigidBodyHandle::invalid()))
+                    .is_none()
+            {
+                continue;
+            }
+            let last = self.pair_times.insert(key, self.time);
+            let entity = |c: &Collider| (c.user_data as usize).checked_sub(1);
+            let contact_units = Vec3::new(contact.x, contact.y, contact.z) / SCALE;
+            let origin = |c: &Collider| {
+                c.parent()
+                    .and_then(|b| self.bodies.get(b))
+                    .map_or(contact_units, |b| {
+                        let t = b.position().translation;
+                        Vec3::new(t.x, t.y, t.z) / SCALE
+                    })
+            };
+            let dynamic = |c: &Collider| {
+                c.parent()
+                    .and_then(|b| self.bodies.get(b))
+                    .filter(|b| b.is_dynamic())
+            };
+            let pre = |c: &Collider| {
+                c.parent()
+                    .and_then(|b| before.get(&b))
+                    .filter(|_| dynamic(c).is_some())
+                    .map_or(Vec3::ZERO, |(v, _, _)| Vec3::new(v.x, v.y, v.z) / SCALE)
+            };
+            let post = |c: &Collider| {
+                dynamic(c).map_or(Vec3::ZERO, |b| {
+                    let v = b.linvel();
+                    Vec3::new(v.x, v.y, v.z) / SCALE
+                })
+            };
+            let mass = |c: &Collider| dynamic(c).map_or(0., |b| b.mass());
+            self.collisions.push(PhysicsCollision {
+                pre_velocities: [pre(c1), pre(c2)],
+                post_velocities: [post(c1), post(c2)],
+                masses: [mass(c1), mass(c2)],
+                colliders: [pair.collider1, pair.collider2],
+                entities: [entity(c1), entity(c2)],
+                surfaceprops: [
+                    self.collider_materials.get(&pair.collider1).cloned(),
+                    self.collider_materials.get(&pair.collider2).cloned(),
+                ],
+                position: contact_units,
+                origins: [origin(c1), origin(c2)],
+                normal: Vec3::new(normal.x, normal.y, normal.z),
+                speed,
+                delta_time: last.map_or(f32::MAX, |t| (self.time - t) as f32),
+            });
+        }
+        // Forget pair times of colliders that no longer exist.
+        if self.pair_times.len() > 4096 {
+            let colliders = &self.colliders;
+            self.pair_times
+                .retain(|(a, b), _| colliders.contains(*a) && colliders.contains(*b));
+        }
+        self.touching = touching;
+    }
+    /// A free VPhysics body (thrown frag) from an authored solid: the .phy pieces in
+    /// model space (a box of `half_extents` without them), the solid's mass, inertia
+    /// multiplier, damping and surfaceprop. Velocity is world units/s; the angular
+    /// velocity is degrees/s about the body's local axes (IPhysicsObject::SetVelocity).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_projectile_body(
+        &mut self,
+        world: &World,
+        model_key: &str,
+        half_extents: Vec3,
+        position: Vec3,
+        rotation: Quat,
+        velocity: Vec3,
+        local_angular_degrees: Vec3,
+    ) -> RigidBodyHandle {
+        self.add_runtime_body(
+            world,
+            model_key,
+            half_extents,
+            position,
+            rotation,
+            velocity,
+            local_angular_degrees,
+            false,
+        )
+    }
+    /// A runtime prop_physics body (BreakModelCreate_Prop: a gib): the model's .phy
+    /// solid like `add_projectile_body`, but colliding as an ordinary prop (NPC hulls,
+    /// other props and gibs, the player shadow) with the VPhysics margin and the .phy's
+    /// stored drag fractions.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_prop_body(
+        &mut self,
+        world: &World,
+        model_key: &str,
+        half_extents: Vec3,
+        position: Vec3,
+        rotation: Quat,
+        velocity: Vec3,
+        local_angular_degrees: Vec3,
+    ) -> RigidBodyHandle {
+        let body = self.add_runtime_body(
+            world,
+            model_key,
+            half_extents,
+            position,
+            rotation,
+            velocity,
+            local_angular_degrees,
+            true,
+        );
+        if let Some(fractions) = world
+            .model_physics
+            .get(model_key)
+            .and_then(|s| s.drag_fractions)
+        {
+            self.drag_fractions.insert(body, fractions);
+        }
+        body
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn add_runtime_body(
+        &mut self,
+        world: &World,
+        model_key: &str,
+        half_extents: Vec3,
+        position: Vec3,
+        rotation: Quat,
+        velocity: Vec3,
+        local_angular_degrees: Vec3,
+        prop: bool,
+    ) -> RigidBodyHandle {
+        let solid = world
+            .model_physics
+            .get(model_key)
+            .cloned()
+            .unwrap_or_default();
+        let shapes: Vec<SharedShape> = world
+            .model_collision
+            .get(model_key)
+            .and_then(|pieces| {
+                pieces
+                    .iter()
+                    .map(|piece| {
+                        prism_cylinder(&piece.vertices).or_else(|| {
+                            SharedShape::convex_hull(
+                                &piece
+                                    .vertices
+                                    .iter()
+                                    .map(|point| Point::from(vector(*point)))
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()
+            })
+            .filter(|shapes| !shapes.is_empty())
+            .unwrap_or_else(|| {
+                vec![SharedShape::cuboid(
+                    half_extents.x * SCALE,
+                    half_extents.y * SCALE,
+                    half_extents.z * SCALE,
+                )]
+            });
+        let mass = solid.mass.max(0.001);
+        // VPhysics takes the inertia precomputed in the collision model (IVP compact
+        // surface, per kilogram) rather than one derived from the hull it simulates.
+        let masses = match solid.compact_inertia {
+            Some((center, inertia)) if inertia.is_finite() && inertia.min_element() > 0. => {
+                let inertia = inertia * mass * solid.inertia;
+                MassProperties::new(
+                    Point::from(vector(center)),
+                    mass,
+                    vector![inertia.x, inertia.y, inertia.z],
+                )
+            }
+            _ => authored_mass_properties(&shapes, mass, solid.inertia),
+        };
+        let angular = rotation * (local_angular_degrees * std::f32::consts::PI / 180.);
+        let body = self.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .additional_mass_properties(masses)
+                .position(pose(position, rotation))
+                .linvel(vector(velocity))
+                .angvel(vector![angular.x, angular.y, angular.z])
+                .linear_damping(solid.damping)
+                .angular_damping(solid.rotdamping),
+        );
+        self.ccd_gated.insert(body, 0.);
+        let material = surface_material(world, &solid.surfaceprop);
+        for shape in shapes {
+            let builder = ColliderBuilder::new(shape).density(0.);
+            let builder = if prop {
+                builder
+                    .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                    .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS)
+            } else {
+                builder.collision_groups(InteractionGroups::new(
+                    PROJECTILE_GROUP,
+                    Group::ALL
+                        .difference(NPC_GROUP)
+                        .difference(PROJECTILE_GROUP),
+                ))
+            };
+            let builder = match material {
+                Some(m) => builder
+                    .friction(m.friction)
+                    .restitution(restitution(m))
+                    .friction_combine_rule(CoefficientCombineRule::Multiply)
+                    .restitution_combine_rule(CoefficientCombineRule::Multiply),
+                None => builder,
+            };
+            let collider = self
+                .colliders
+                .insert_with_parent(builder, body, &mut self.bodies);
+            self.collider_materials
+                .insert(collider, solid.surfaceprop.clone());
+        }
+        if let Some(b) = self.bodies.get_mut(body) {
+            b.recompute_mass_properties_from_colliders(&self.colliders);
+        }
+        // The frag keeps the projected-hull fractions: its native replay
+        // (owned_frag_throws_follow_native_samples) was validated with them, and the
+        // stored fractions moved the plaza throw from RMS 12.8 to 40.1 (session 14)
+        // while fitting the native pallet launch: an unmodelled frame difference
+        // (physics-research-20261013b/drag-axes) remains open.
+        body
+    }
+    /// IPhysicsObject::GetContactPoint != 0: the entity's body touches something.
+    pub fn entity_in_contact(&self, id: usize) -> bool {
+        let Some(body) = self.dynamic.get(&id).and_then(|h| self.bodies.get(*h)) else {
+            return false;
+        };
+        body.colliders().iter().any(|c| {
+            self.narrow
+                .contact_pairs_with(*c)
+                .any(|pair| pair.has_any_active_contact)
+        })
+    }
+    /// Diagnostics: colliders (entity id, or None for the world; dynamic body?) that
+    /// overlap the player hull at `feet`, shrunk by half the collision epsilon like
+    /// trace_hull's overlap test.
+    pub fn hull_contacts(&self, feet: Vec3, maxs_z: f32) -> Vec<(Option<usize>, bool, f32, Vec3)> {
+        let half = Vec3::new(16., 16., maxs_z * 0.5) - Vec3::splat(0.015625);
+        let position = pose(feet + Vec3::Z * maxs_z * 0.5, Quat::IDENTITY);
+        let mut found = Vec::new();
+        self.query.intersections_with_shape(
+            &self.bodies,
+            &self.colliders,
+            &position,
+            &Cuboid::new(vector(half)),
+            groups_filter(PLAYER_GROUPS),
+            |handle| {
+                let c = &self.colliders[handle];
+                // Penetration depth (units) and normal from the hull into the collider.
+                let (depth, normal) = rapier3d::parry::query::contact(
+                    &position,
+                    &Cuboid::new(vector(half)),
+                    c.position(),
+                    c.shape(),
+                    0.,
+                )
+                .ok()
+                .flatten()
+                .map_or((0., Vec3::ZERO), |k| {
+                    (
+                        -k.dist / SCALE,
+                        Vec3::new(k.normal1.x, k.normal1.y, k.normal1.z),
+                    )
+                });
+                found.push((
+                    (c.user_data as usize).checked_sub(1),
+                    c.parent()
+                        .and_then(|b| self.bodies.get(b))
+                        .is_some_and(|b| b.is_dynamic()),
+                    depth,
+                    normal,
+                ));
+                true
+            },
+        );
+        found
+    }
+    /// The body touches a fixed body (world, static prop) or one heavier than the push
+    /// mass limit on its far side along `direction` (its contact normal points within
+    /// ~45 degrees of it). The player shadow's own contacts do not count.
+    fn blocked_along(&self, body: RigidBodyHandle, direction: Vec3) -> bool {
+        let Some(b) = self.bodies.get(body) else {
+            return false;
+        };
+        b.colliders().iter().any(|collider| {
+            self.narrow.contact_pairs_with(*collider).any(|pair| {
+                if !pair.has_any_active_contact
+                    || self.world_sides.shadow.contains(&pair.collider1)
+                    || self.world_sides.shadow.contains(&pair.collider2)
+                {
+                    return false;
+                }
+                let (sign, other) = if pair.collider1 == *collider {
+                    (1., pair.collider2)
+                } else {
+                    (-1., pair.collider1)
+                };
+                let immovable = self
+                    .colliders
+                    .get(other)
+                    .and_then(|c| c.parent())
+                    .and_then(|h| self.bodies.get(h))
+                    .is_none_or(|o| !o.is_dynamic() || o.mass() > PLAYER_PUSH_MASS_LIMIT);
+                immovable
+                    && pair.manifolds.iter().any(|m| {
+                        let n = m.data.normal * sign;
+                        !m.data.solver_contacts.is_empty()
+                            && Vec3::new(n.x, n.y, n.z).dot(direction) > 0.7
+                    })
+            })
+        })
+    }
+    /// Teleport an entity's dynamic body (test fixtures): Source angles, world
+    /// velocity, no spin. False when the entity has no dynamic body.
+    pub fn place_body(
+        &mut self,
+        id: usize,
+        origin: Vec3,
+        angles_deg: Vec3,
+        velocity: Vec3,
+    ) -> bool {
+        let Some(body) = self.dynamic.get(&id).and_then(|h| self.bodies.get_mut(*h)) else {
+            return false;
+        };
+        body.set_position(pose(origin, angles(angles_deg)), true);
+        body.set_linvel(vector(velocity), true);
+        body.set_angvel(vector![0., 0., 0.], true);
+        true
+    }
+    /// Diagnostics: the player VPhysics shadow's center.
+    pub fn player_shadow_center(&self) -> Option<Vec3> {
+        let body = self.bodies.get(self.player_shadow?.0)?;
+        let t = *body.translation() / SCALE;
+        Some(Vec3::new(t.x, t.y, t.z))
+    }
+    /// Give a projectile body an entity id (`projectile_entity`): traces report it,
+    /// and the +USE / gravity gun holds find it through `dynamic`.
+    pub fn bind_projectile_entity(&mut self, handle: RigidBodyHandle, id: usize) {
+        let Some(body) = self.bodies.get(handle) else {
+            return;
+        };
+        let colliders = body.colliders().to_vec();
+        for collider in &colliders {
+            if let Some(c) = self.colliders.get_mut(*collider) {
+                c.user_data = id as u128 + 1;
+            }
+        }
+        if let Some(surface) = colliders
+            .first()
+            .and_then(|c| self.collider_materials.get(c))
+        {
+            self.prop_materials.insert(id, surface.clone());
+        }
+        self.entity_colliders.insert(id, colliders);
+        self.dynamic.insert(id, handle);
+    }
+    /// COLLISION_GROUP_DEBRIS for a runtime prop body (a debris gib): it keeps colliding
+    /// with the world and ordinary props only.
+    pub fn set_body_debris(&mut self, handle: RigidBodyHandle) {
+        let Some(body) = self.bodies.get(handle) else {
+            return;
+        };
+        for collider in body.colliders().to_vec() {
+            if let Some(c) = self.colliders.get_mut(collider) {
+                c.set_collision_groups(DEBRIS_GROUPS);
+            }
+        }
+    }
+    pub fn remove_body(&mut self, handle: RigidBodyHandle) {
+        let removed: Vec<ColliderHandle> = self
+            .bodies
+            .get(handle)
+            .map(|body| body.colliders().to_vec())
+            .unwrap_or_default();
+        for collider in &removed {
+            self.collider_materials.remove(collider);
+        }
+        if let Some(id) = self
+            .dynamic
+            .iter()
+            .find(|(id, h)| **h == handle && is_projectile_entity(**id))
+            .map(|(id, _)| *id)
+        {
+            self.dynamic.remove(&id);
+            self.entity_colliders.remove(&id);
+            self.prop_materials.remove(&id);
+        }
+        self.drag_fractions.remove(&handle);
+        self.drag_geometry.remove(&handle);
+        self.ccd_gated.remove(&handle);
+        self.bodies.remove(
+            handle,
+            &mut self.islands,
+            &mut self.colliders,
+            &mut self.impulses,
+            &mut self.multibody,
+            true,
+        );
+        // Queries between now and the next step must not reach the removed colliders
+        // (a faded gib panicked a later ray in the query pipeline).
+        if !removed.is_empty() {
+            self.query
+                .update_incremental(&self.colliders, &[], &removed, true);
+        }
+    }
+    /// Position, rotation, velocity (units/s) and local angular velocity (deg/s).
+    /// CBasePlayer::PostThinkVPhysics / UpdateVPhysicsPosition for one tick: the 85 kg
+    /// shadow box follows the player's hull. When a grounded player is blocked by a
+    /// physics object they do not stand on, its target moves halfway toward where they
+    /// wanted to go (old feet + wish velocity x dt), so the shadow shoves the object
+    /// (the contact filter keeps it to movable bodies <= 350 kg). Retail contact-plane
+    /// limits: at most 50 u/s into a pushable object's contact normal, 0 into a heavy or
+    /// blocked one, also checked ahead of contact by a sweep. A step up teleports the
+    /// shadow. Not done: the retail two/multi-normal constraint cases, bounded per-axis
+    /// corrections, weighing light supports down, the shadow pushing the player back
+    /// (VPhysicsShadowUpdate), Jump.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_player_shadow(
+        &mut self,
+        old_feet: Vec3,
+        feet: Vec3,
+        crouched: bool,
+        grounded: bool,
+        step_height: f32,
+        wish_velocity: Vec3,
+        held: Option<usize>,
+        dt: f32,
+    ) {
+        if !feet.is_finite() || !old_feet.is_finite() || !wish_velocity.is_finite() || dt <= 0. {
+            return;
+        }
+        // VEC_HULL / VEC_DUCK_HULL; the body origin sits at the hull center.
+        let half = Vec3::new(16., 16., if crouched { 18. } else { 36. });
+        // The collider is the hull at its sides and top; props keep their
+        // VPHYSICS_CONTACT_MARGIN skin off it, so props resting against the shadow stay
+        // outside the player's movement hull (without a margin they sat inside Rapier's
+        // contact tolerance and player traces started solid). Its bottom is raised by
+        // that margin so it never presses a supporting prop into the floor.
+        let skin = Vec3::new(half.x, half.y, half.z - VPHYSICS_CONTACT_MARGIN * 0.5);
+        let skin_offset = Vec3::Z * (VPHYSICS_CONTACT_MARGIN * 0.5);
+        let center = |feet: Vec3| feet + Vec3::Z * half.z;
+        let (handle, current) = match self.player_shadow {
+            Some((handle, hull)) if self.bodies.contains(handle) => (handle, hull),
+            _ => {
+                // Retail shadow: a dynamic object of mass 85 with ~infinite inertia, no
+                // gravity and no drag, driven by the controller's velocity corrections.
+                let body = self.bodies.insert(
+                    RigidBodyBuilder::dynamic()
+                        .position(pose(center(feet), Quat::IDENTITY))
+                        .lock_rotations()
+                        .gravity_scale(0.)
+                        .additional_mass(PLAYER_SHADOW_MASS)
+                        .ccd_enabled(true),
+                );
+                let collider = self.colliders.insert_with_parent(
+                    ColliderBuilder::cuboid(skin.x * SCALE, skin.y * SCALE, skin.z * SCALE)
+                        .translation(vector(skin_offset))
+                        .density(0.)
+                        .friction(0.8)
+                        .active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS)
+                        .collision_groups(InteractionGroups::new(
+                            SHADOW_GROUP,
+                            Group::ALL
+                                .difference(PROJECTILE_GROUP)
+                                .difference(NPC_GROUP)
+                                .difference(SHADOW_GROUP),
+                        )),
+                    body,
+                    &mut self.bodies,
+                );
+                self.world_sides.shadow = vec![collider];
+                self.drag_disabled.insert(body);
+                self.player_shadow = Some((body, crouched));
+                (body, crouched)
+            }
+        };
+        if current != crouched {
+            for collider in &self.world_sides.shadow {
+                if let Some(c) = self.colliders.get_mut(*collider) {
+                    c.set_shape(SharedShape::cuboid(
+                        skin.x * SCALE,
+                        skin.y * SCALE,
+                        skin.z * SCALE,
+                    ));
+                }
+            }
+            self.player_shadow = Some((handle, crouched));
+        }
+        let excluded = held.and_then(|id| self.dynamic.get(&id).copied());
+        // Bodies under the feet (GetGroundVPhysics) and in the way of the wish move
+        // (m_touchedPhysObject), from short hull sweeps against movable bodies.
+        let movable = |physics: &Self, from: Vec3, to: Vec3| -> Option<RigidBodyHandle> {
+            let shape = Cuboid::new(vector![half.x * SCALE, half.y * SCALE, half.z * SCALE]);
+            let filter = QueryFilter::default()
+                .groups(QUERY_GROUPS)
+                .exclude_sensors();
+            let (collider, _) = physics.query.cast_shape(
+                &physics.bodies,
+                &physics.colliders,
+                &pose(center(from), Quat::IDENTITY),
+                &vector(to - from),
+                &shape,
+                ShapeCastOptions::with_max_time_of_impact(1.),
+                filter,
+            )?;
+            let body = physics.colliders.get(collider)?.parent()?;
+            physics
+                .bodies
+                .get(body)
+                .filter(|b| b.is_dynamic() && Some(body) != excluded && body != handle)
+                .map(|_| body)
+        };
+        let ground = if grounded {
+            movable(self, feet + Vec3::Z * 0.5, feet - Vec3::Z * 2.)
+        } else {
+            None
+        };
+        let planar = Vec3::new(wish_velocity.x, wish_velocity.y, 0.);
+        // m_outStepHeight: this move stepped up (StepMove).
+        let step = step_height;
+        let touched = grounded
+            && step <= 0.
+            && ground.is_none()
+            && planar.length_squared() > 1.
+            && movable(
+                self,
+                feet + Vec3::Z,
+                feet + Vec3::Z + planar.normalize() * (planar.length() * dt + 1.),
+            )
+            .is_some();
+        let mut target = center(feet);
+        if touched {
+            target = center(feet) * 0.5 + center(old_feet + planar * dt) * 0.5;
+        }
+        self.world_sides.shadow_excluded = excluded.into_iter().collect();
+        // The controller's contact-plane limits (retail player controller callback):
+        // into each touching object's contact normal the shadow may move at most the
+        // push speed limit (50) when the object is movable within the push mass limit,
+        // otherwise not at all. Normals are clipped one after another; the retail
+        // two-normal (cross product) and over-two cases are not reproduced.
+        let mut limits = Vec::new();
+        for collider in &self.world_sides.shadow {
+            for pair in self.narrow.contact_pairs_with(*collider) {
+                if !pair.has_any_active_contact {
+                    continue;
+                }
+                let (sign, other) = if pair.collider1 == *collider {
+                    (1., pair.collider2)
+                } else {
+                    (-1., pair.collider1)
+                };
+                let Some(other) = self.colliders.get(other).and_then(|c| c.parent()) else {
+                    continue;
+                };
+                let pushable = self
+                    .bodies
+                    .get(other)
+                    .is_some_and(|b| b.is_dynamic() && b.mass() <= PLAYER_PUSH_MASS_LIMIT);
+                for manifold in &pair.manifolds {
+                    if manifold.data.solver_contacts.is_empty() {
+                        continue;
+                    }
+                    let n = manifold.data.normal * sign;
+                    let n = Vec3::new(n.x, n.y, n.z);
+                    // A body pressed against something fixed (or too heavy) behind it
+                    // along the push cannot respond: no push speed (shoving it into a
+                    // wall left it inside the player's hull).
+                    let limit = if pushable && !self.blocked_along(other, n) {
+                        PLAYER_PUSH_SPEED_LIMIT
+                    } else {
+                        0.
+                    };
+                    limits.push((n, limit));
+                }
+            }
+        }
+        let Some(t) = self.bodies.get(handle).map(|b| *b.translation() / SCALE) else {
+            return;
+        };
+        let mut position = Vec3::new(t.x, t.y, t.z);
+        if step > 0.1 && position.distance(target) <= 64. {
+            // The game code teleports the shadow up by the step height (SetPosition
+            // above 4 units, IPhysicsPlayerController::StepUp otherwise) instead of
+            // driving it through the stepped-on object.
+            position.z = target.z;
+        }
+        let velocity = if position.distance(target) > 64. {
+            position = target;
+            Vec3::ZERO
+        } else {
+            let mut velocity = (target - position) / dt;
+            for (normal, limit) in &limits {
+                let into = velocity.dot(*normal);
+                if into > *limit {
+                    velocity -= *normal * (into - limit);
+                }
+            }
+            // The same limits ahead of contact: the shadow follows a falling or
+            // walking player several units per tick, so a first contact found only
+            // after the step was already deep (a landing rammed a 5 kg box ~1.7 units
+            // into the floor, and its rebound filled the player's hull).
+            let shape = Cuboid::new(vector(skin));
+            let shadow_colliders = self.world_sides.shadow.clone();
+            let skip = |c: ColliderHandle, collider: &Collider| {
+                !shadow_colliders.contains(&c)
+                    && collider.parent().is_some_and(|h| {
+                        Some(h) != excluded && self.bodies.get(h).is_some_and(|b| b.is_dynamic())
+                    })
+            };
+            let filter = QueryFilter::default()
+                .groups(InteractionGroups::new(
+                    SHADOW_GROUP,
+                    Group::ALL
+                        .difference(PROJECTILE_GROUP)
+                        .difference(NPC_GROUP)
+                        .difference(SHADOW_GROUP),
+                ))
+                .exclude_sensors()
+                .predicate(&skip);
+            let delta = velocity * dt;
+            if let Some((collider, hit)) = self.query.cast_shape(
+                &self.bodies,
+                &self.colliders,
+                &pose(position + skin_offset, Quat::IDENTITY),
+                &vector(delta),
+                &shape,
+                ShapeCastOptions::with_max_time_of_impact(1.),
+                filter,
+            ) {
+                let n = Vec3::new(hit.normal1.x, hit.normal1.y, hit.normal1.z);
+                let other = self.colliders.get(collider).and_then(|c| c.parent());
+                let pushable = other
+                    .and_then(|b| self.bodies.get(b))
+                    .is_some_and(|b| b.mass() <= PLAYER_PUSH_MASS_LIMIT)
+                    && other.is_some_and(|b| !self.blocked_along(b, n));
+                let limit = if pushable {
+                    PLAYER_PUSH_SPEED_LIMIT
+                } else {
+                    0.
+                };
+                let into = velocity.dot(n);
+                let allowed = (delta * hit.time_of_impact).dot(n) / dt + limit;
+                if into > allowed {
+                    velocity -= n * (into - allowed.max(0.));
+                }
+            }
+            velocity
+        };
+        if let Some(body) = self.bodies.get_mut(handle) {
+            body.set_translation(vector(position), true);
+            body.set_linvel(vector(velocity), true);
+        }
+        // No explicit weight on movable ground: the retail shadow has no gravity (the
+        // controller's Update clears it) and light supports are not rideable. An 85 kg
+        // impulse here sank a 5 kg box ~1.5 units into the floor and its rebound filled
+        // the player's hull (stuck on top of props). Weighing light props down stays
+        // open (lead: the controller's support-contact case, normal Z < -0.7).
+    }
+    pub fn body_state(&self, handle: RigidBodyHandle) -> Option<BodyState> {
+        let b = self.bodies.get(handle)?;
+        let p = b.position();
+        let q = p.rotation.quaternion();
+        let rotation = Quat::from_xyzw(q.i, q.j, q.k, q.w);
+        let w = b.angvel();
+        let local = rotation.inverse() * Vec3::new(w.x, w.y, w.z);
+        let v = b.linvel();
+        Some(BodyState {
+            position: Vec3::new(p.translation.x, p.translation.y, p.translation.z) / SCALE,
+            rotation,
+            velocity: Vec3::new(v.x, v.y, v.z) / SCALE,
+            local_angular_degrees: local * 180. / std::f32::consts::PI,
+        })
+    }
+    /// IPhysicsObject::SetVelocity with world velocity and local angular deg/s.
+    pub fn set_body_velocity(
+        &mut self,
+        handle: RigidBodyHandle,
+        velocity: Vec3,
+        local_angular_degrees: Vec3,
+    ) {
+        if let Some(b) = self.bodies.get_mut(handle) {
+            let q = b.position().rotation.quaternion();
+            let rotation = Quat::from_xyzw(q.i, q.j, q.k, q.w);
+            let w = rotation * (local_angular_degrees * std::f32::consts::PI / 180.);
+            b.set_linvel(vector(velocity), true);
+            b.set_angvel(vector![w.x, w.y, w.z], true);
+        }
+    }
+    /// The entity's VPhysics body (map prop or bound runtime body).
+    pub fn entity_body(&self, id: usize) -> Option<RigidBodyHandle> {
+        self.dynamic.get(&id).copied()
+    }
+    /// World center of mass (units); the body's linear velocity is the velocity there.
+    pub fn center_of_mass(&self, handle: RigidBodyHandle) -> Option<Vec3> {
+        let c = self.bodies.get(handle)?.center_of_mass();
+        Some(Vec3::new(c.x, c.y, c.z) / SCALE)
+    }
+    /// Mass (kg) of an entity's dynamic VPhysics body.
+    pub fn entity_mass(&self, id: usize) -> Option<f32> {
+        Some(self.bodies.get(*self.dynamic.get(&id)?)?.mass())
     }
     pub fn entity_pose(&self, id: usize) -> Option<(Vec3, Quat)> {
         let b = self.bodies.get(*self.dynamic.get(&id)?)?;
@@ -442,7 +2246,40 @@ impl Physics {
         self.impact_ray(origin, direction, distance)
             .map(|h| (h.entity, h.position))
     }
+    /// Shot/use trace (MASK_SHOT, MASK_SOLID): player/NPC-only clip brushes do not stop
+    /// it.
     pub fn impact_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
+        self.ray_with(origin, direction, distance, QUERY_GROUPS, false)
+    }
+    /// Ground trace under the player (MASK_PLAYERSOLID: clip brushes count).
+    pub fn ground_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
+        self.ray_with(origin, direction, distance, QUERY_GROUPS, true)
+    }
+    /// `impact_ray` with COLLISION_GROUP_NONE: also hits thrown frags.
+    pub fn pick_ray(&self, origin: Vec3, direction: Vec3, distance: f32) -> Option<RayHit> {
+        self.ray_with(origin, direction, distance, PICK_GROUPS, false)
+    }
+    /// `impact_hull` with COLLISION_GROUP_NONE: also hits thrown frags.
+    pub fn pick_hull(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        distance: f32,
+        half: Vec3,
+    ) -> Option<RayHit> {
+        self.hull_with(origin, direction, distance, half, PICK_GROUPS, false)
+    }
+    fn ray_with(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        distance: f32,
+        groups: InteractionGroups,
+        clips: bool,
+    ) -> Option<RayHit> {
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            collider.is_enabled() && (clips || !self.world_sides.clip_brushes.contains(&handle))
+        };
         let ray = Ray::new(
             Point::from(vector(origin)),
             vector![direction.x, direction.y, direction.z],
@@ -453,7 +2290,7 @@ impl Physics {
             &ray,
             distance * SCALE,
             true,
-            enabled_filter(),
+            groups_filter(groups).predicate(&predicate),
         )?;
         let id = self.colliders[h].user_data as usize;
         Some(RayHit {
@@ -461,6 +2298,18 @@ impl Physics {
             position: origin + direction * (hit.time_of_impact / SCALE),
             normal: Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z),
         })
+    }
+    /// IPhysicsObject::ApplyForceOffset: an impulse (kg m/s, world) at a world point
+    /// (units) on the entity's body.
+    pub fn impulse_at(&mut self, id: usize, impulse: Vec3, point: Vec3) {
+        if let Some(b) = self.dynamic.get(&id).and_then(|h| self.bodies.get_mut(*h)) {
+            let p = vector(point);
+            b.apply_impulse_at_point(
+                vector![impulse.x, impulse.y, impulse.z],
+                Point::from(p),
+                true,
+            );
+        }
     }
     pub fn impulse(&mut self, id: usize, direction: Vec3, strength: f32) {
         if let Some(h) = self.dynamic.get(&id) {
@@ -519,6 +2368,7 @@ impl Physics {
                 compute_impact_geometry_on_penetration: true,
             },
             QueryFilter::default()
+                .groups(QUERY_GROUPS)
                 .exclude_sensors()
                 .predicate(&predicate),
         )?;
@@ -532,6 +2382,15 @@ impl Physics {
     /// Solid-mask visibility used by local projectile damage, excluding the
     /// damage receiver. Player/NPC-only clip brushes do not block this trace.
     pub fn projectile_ray(&self, start: Vec3, end: Vec3, excluded: &[usize]) -> Option<RayHit> {
+        self.filtered_ray(start, end, &|entity| !excluded.contains(&entity))
+    }
+    /// `projectile_ray` that only tests colliders whose entity passes `keep`.
+    pub fn filtered_ray(
+        &self,
+        start: Vec3,
+        end: Vec3,
+        keep: &dyn Fn(usize) -> bool,
+    ) -> Option<RayHit> {
         let delta = end - start;
         let length = delta.length();
         if !length.is_finite() || length <= 1e-5 {
@@ -541,7 +2400,7 @@ impl Physics {
         let predicate = |handle: ColliderHandle, collider: &Collider| {
             let entity = (collider.user_data as usize).wrapping_sub(1);
             collider.is_enabled()
-                && !excluded.contains(&entity)
+                && keep(entity)
                 && self
                     .world_brush_contents
                     .get(&handle)
@@ -557,6 +2416,7 @@ impl Physics {
             length * SCALE,
             true,
             QueryFilter::default()
+                .groups(QUERY_GROUPS)
                 .exclude_sensors()
                 .predicate(&predicate),
         )?;
@@ -596,9 +2456,23 @@ impl Physics {
         distance: f32,
         half: Vec3,
     ) -> Option<RayHit> {
+        self.hull_with(origin, direction, distance, half, QUERY_GROUPS, false)
+    }
+    fn hull_with(
+        &self,
+        origin: Vec3,
+        direction: Vec3,
+        distance: f32,
+        half: Vec3,
+        groups: InteractionGroups,
+        clips: bool,
+    ) -> Option<RayHit> {
         if distance <= 0. || direction.length_squared() < 1e-8 {
             return None;
         }
+        let predicate = |handle: ColliderHandle, collider: &Collider| {
+            collider.is_enabled() && (clips || !self.world_sides.clip_brushes.contains(&handle))
+        };
         let shape = Cuboid::new(vector(half));
         let options = ShapeCastOptions {
             max_time_of_impact: 1.,
@@ -613,7 +2487,7 @@ impl Physics {
             &vector(direction * distance),
             &shape,
             options,
-            enabled_filter(),
+            groups_filter(groups).predicate(&predicate),
         )?;
         Some(RayHit {
             entity: (self.colliders[handle].user_data as usize).wrapping_sub(1),
@@ -645,6 +2519,10 @@ impl NpcCollisionWorld for Physics {
             let entity = entity_of(collider);
             collider.is_enabled()
                 && !collider.is_sensor()
+                && !matches!(
+                    collider.collision_groups().memberships,
+                    PROJECTILE_GROUP | SHADOW_GROUP | HULL_GROUP
+                )
                 && entity.is_none_or(|id| !query.excluded_entities.contains(&id))
                 // Explicit actor bounds supersede an NPC's render-mesh collider.
                 && !entity.is_some_and(|id| {
@@ -665,6 +2543,7 @@ impl NpcCollisionWorld for Physics {
                 && !player_convex::supported(collider)
         };
         let filter = QueryFilter::default()
+            .groups(QUERY_GROUPS)
             .exclude_sensors()
             .predicate(&fallback);
         let mut result = HullTrace {
@@ -844,9 +2723,11 @@ impl CollisionWorld for Physics {
         let player_contents_filter = |handle: ColliderHandle, collider: &Collider| {
             collider.is_enabled()
                 && !self.world_brush_contents.contains_key(&handle)
+                && !self.npc_hitboxes.contains(&handle)
                 && !player_convex::supported(collider)
         };
         let filter = QueryFilter::default()
+            .groups(PLAYER_GROUPS)
             .exclude_sensors()
             .predicate(&player_contents_filter);
         // A standing hull merely touching the floor must not prevent uncrouching.
@@ -885,7 +2766,12 @@ impl CollisionWorld for Physics {
                 let collider = &self.colliders[*handle];
                 if collider.is_enabled()
                     && !collider.is_sensor()
+                    && !matches!(
+                        collider.collision_groups().memberships,
+                        PROJECTILE_GROUP | SHADOW_GROUP | DEBRIS_GROUP
+                    )
                     && !self.world_brush_contents.contains_key(handle)
+                    && !self.npc_hitboxes.contains(handle)
                 {
                     if let Some(brush) = cache.brush(*handle, collider) {
                         let hit =
@@ -1178,6 +3064,123 @@ mod tests {
             .is_none());
         assert!(physics.entity_closest_point(0, start).is_none());
     }
+    #[test]
+    fn npc_hull_box_carries_the_player_while_traces_hit_the_model_shape() {
+        // Synthetic citizen: an 8-unit-wide model column 60 tall (not game data).
+        let instance = modkit_core::ModelInstance {
+            background: false,
+            model: "synthetic_citizen.mdl".into(),
+            origin: Vec3::ZERO,
+            angles: Vec3::new(0., 30., 0.),
+            skin: 0,
+            scale: 1.,
+            kind: "npc_citizen".into(),
+            solid: true,
+            solid_mode: Some(2),
+            entity: Some(0),
+        };
+        let key = instance.asset_key();
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![("classname".into(), "npc_citizen".into())],
+            }],
+            model_assets: BTreeMap::from([(
+                key,
+                vec![box_surface(Vec3::new(-4., -4., 0.), Vec3::new(4., 4., 60.))],
+            )]),
+            model_instances: vec![instance],
+            ..Default::default()
+        };
+        let mut physics = Physics::new(&world);
+        let (mins, maxs) = (Vec3::new(-16., -16., 0.), Vec3::new(16., 16., 72.));
+        // Standing over the shoulder (player center 20 units out, beyond the model but
+        // over the 13-unit hull): the fall stops on the hull top at z 72.
+        let fall = physics.trace_hull(Vec3::new(20., 0., 100.), Vec3::new(20., 0., 0.), mins, maxs);
+        assert!(
+            (100. - fall.fraction * 100. - 72.).abs() < 0.1,
+            "{}",
+            fall.fraction
+        );
+        // A shot just outside the model column misses (the hull is not a hitbox) ...
+        assert!(physics
+            .impact_ray(Vec3::new(8., 0., 100.), -Vec3::Z, 200.)
+            .is_none());
+        // ... and one into the column hits the NPC.
+        let hit = physics
+            .impact_ray(Vec3::new(0., 0., 100.), -Vec3::Z, 200.)
+            .unwrap();
+        assert_eq!(hit.entity, 0);
+        assert!((hit.position.z - 60.).abs() < 0.1, "{}", hit.position);
+        // The box follows the entity without rotating, and goes with it when disabled.
+        physics.set_entity(0, Vec3::X * 100., Quat::from_rotation_z(0.7), true);
+        physics.refresh_queries();
+        let moved = physics.trace_hull(
+            Vec3::new(120., 0., 100.),
+            Vec3::new(120., 0., 0.),
+            mins,
+            maxs,
+        );
+        assert!(
+            (100. - moved.fraction * 100. - 72.).abs() < 0.1,
+            "{}",
+            moved.fraction
+        );
+        // A thrown 5 kg box strikes the hull box: the contact event names the NPC
+        // (impact damage input) and the box stops at the hull face.
+        let body = physics.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(vector![160. * SCALE, 0., 40. * SCALE])
+                .linvel(vector![-600. * SCALE, 0., 0.])
+                .gravity_scale(0.)
+                .additional_mass(5.),
+        );
+        physics.colliders.insert_with_parent(
+            ColliderBuilder::cuboid(4. * SCALE, 4. * SCALE, 4. * SCALE).density(0.),
+            body,
+            &mut physics.bodies,
+        );
+        let mut struck = false;
+        for _ in 0..20 {
+            physics.tick(TICK);
+            struck |= physics
+                .collisions
+                .iter()
+                .any(|c| c.entities.contains(&Some(0)));
+        }
+        assert!(struck);
+        // The model-shaped hitboxes never form contact pairs with props (Rapier
+        // enables a pair when either side's collision types allow it): a box placed
+        // across the model column's face touches only the hull.
+        let inside = physics.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(vector![4. * SCALE, 0., 30. * SCALE])
+                .gravity_scale(0.),
+        );
+        physics.colliders.insert_with_parent(
+            ColliderBuilder::cuboid(2. * SCALE, 2. * SCALE, 2. * SCALE),
+            inside,
+            &mut physics.bodies,
+        );
+        physics.tick(TICK);
+        assert!(physics.narrow.contact_pairs().all(|pair| {
+            !physics.npc_hitboxes.contains(&pair.collider1)
+                && !physics.npc_hitboxes.contains(&pair.collider2)
+                || !pair.has_any_active_contact
+        }));
+        physics.remove_body(inside);
+        let x = physics.bodies[body].translation().x / SCALE;
+        assert!(x > 100. + 13., "box passed into the hull: x {x}");
+        physics.remove_body(body);
+        physics.set_entity(0, Vec3::X * 100., Quat::IDENTITY, false);
+        physics.refresh_queries();
+        let gone = physics.trace_hull(
+            Vec3::new(120., 0., 100.),
+            Vec3::new(120., 0., 0.),
+            mins,
+            maxs,
+        );
+        assert_eq!(gone.fraction, 1.);
+    }
     fn native_prop_world() -> World {
         let instance = modkit_core::ModelInstance {
             background: false,
@@ -1276,6 +3279,293 @@ mod tests {
         assert_eq!(dynamic.bodies.len(), 1);
         assert_eq!(dynamic.native_shape_count, 0);
         assert_eq!(dynamic.native_shape_fallbacks, 0);
+    }
+    /// The synthetic prop (body z 20..60 around (100, 200)) as a named prop_physics
+    /// plus one constraint entity (synthetic keyvalues, not game data).
+    fn constrained_prop(constraint: &[(&str, &str)]) -> (Physics, RigidBodyHandle) {
+        let mut world = native_prop_world();
+        world.model_instances[0].kind = "prop_physics".into();
+        world.model_instances[0].entity = Some(0);
+        world.entities.push(modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "prop_physics".into()),
+                ("targetname".into(), "block".into()),
+            ],
+        });
+        world.entities.push(modkit_core::Entity {
+            properties: constraint
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
+        let physics = Physics::new(&world);
+        let body = physics.dynamic[&0];
+        (physics, body)
+    }
+    #[test]
+    fn debris_props_let_the_player_through_but_stop_picks() {
+        // The synthetic prop (body x 80..120, y 180..220, z 20..60) with and without
+        // SF_PHYSPROP_DEBRIS; the player hull sweeps across it.
+        for (flags, blocks) in [("4", false), ("0", true)] {
+            let mut world = native_prop_world();
+            world.model_instances[0].kind = "prop_physics".into();
+            world.model_instances[0].entity = Some(0);
+            world.entities.push(modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "prop_physics".into()),
+                    ("spawnflags".into(), flags.into()),
+                ],
+            });
+            let mut physics = Physics::new(&world);
+            physics.refresh_queries();
+            let (mins, maxs) = (Vec3::new(-16., -16., 0.), Vec3::new(16., 16., 72.));
+            let sweep = physics.trace_hull(
+                Vec3::new(0., 200., 10.),
+                Vec3::new(200., 200., 10.),
+                mins,
+                maxs,
+            );
+            assert_eq!(sweep.fraction < 1., blocks, "flags {flags}");
+            // +USE / the gravity gun (COLLISION_GROUP_NONE traces) still find it.
+            let pick = physics.pick_ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
+            assert_eq!(pick.map(|h| h.entity), Some(0), "flags {flags}");
+        }
+    }
+    #[test]
+    fn hinged_prop_keeps_its_pivot_while_ropes_stay_off() {
+        let (mut physics, body) = constrained_prop(&[
+            ("classname", "phys_hinge"),
+            ("attach1", "block"),
+            ("origin", "100 200 60"),
+            ("hingeaxis", "100 210 60"),
+            ("hingefriction", "0.05"),
+            ("spawnflags", "1"),
+        ]);
+        assert_eq!(
+            (physics.constraints, physics.constraint_errors.len()),
+            (1, 0)
+        );
+        let pivot = physics.bodies[body]
+            .position()
+            .inverse_transform_point(&Point::from(vector(Vec3::new(100., 200., 60.))));
+        // A push off the hinge axis: it swings about it instead of falling.
+        physics.bodies[body].set_linvel(vector![2., 0., 0.], true);
+        for _ in 0..200 {
+            physics.tick(TICK);
+        }
+        let held = physics.bodies[body].position() * pivot;
+        let held = Vec3::new(held.x, held.y, held.z) / SCALE;
+        assert!(held.distance(Vec3::new(100., 200., 60.)) < 0.5, "{held}");
+        let state = physics.body_state(body).unwrap();
+        assert!(state.position.z > 10., "fell: {}", state.position);
+        // Ropes are disabled (rejected in session 15): reported, not joined.
+        let (physics, _) = constrained_prop(&[
+            ("classname", "phys_lengthconstraint"),
+            ("attach2", "block"),
+            ("origin", "100 200 200"),
+            ("attachpoint", "100 200 60"),
+        ]);
+        assert_eq!(
+            (physics.constraints, physics.constraint_errors.len()),
+            (0, 1)
+        );
+        // Unknown attachments are reported, not joined.
+        let (physics, _) = constrained_prop(&[
+            ("classname", "phys_ballsocket"),
+            ("attach1", "nothing"),
+            ("origin", "0 0 0"),
+        ]);
+        assert_eq!(
+            (physics.constraints, physics.constraint_errors.len()),
+            (0, 1)
+        );
+    }
+    #[test]
+    fn authored_vphysics_props_use_phy_mass_pieces_damping_and_surface_material() {
+        // Synthetic parameters (not read from a game file).
+        let mut world = native_prop_world();
+        world.model_instances[0].kind = "prop_physics".into();
+        world.model_instances[0].entity = Some(0);
+        world.entities.push(modkit_core::Entity {
+            properties: vec![("classname".into(), "prop_physics".into())],
+        });
+        let key = world.model_instances[0].asset_key();
+        world.model_physics.insert(
+            key,
+            modkit_core::PhysicsSolid {
+                mass: 35.,
+                damping: 0.,
+                rotdamping: 0.2,
+                inertia: 2.,
+                surfaceprop: "synthetic_wood".into(),
+                ..Default::default()
+            },
+        );
+        world.surface_materials.insert(
+            "synthetic_wood".into(),
+            modkit_core::SurfaceMaterial {
+                friction: 0.6,
+                elasticity: 0.3,
+                ..Default::default()
+            },
+        );
+        let physics = Physics::new(&world);
+        assert_eq!(
+            physics.native_shape_count, 2,
+            "authored pieces, not the hull"
+        );
+        let body = &physics.bodies[physics.dynamic[&0]];
+        assert!((body.mass() - 35.).abs() < 1e-3, "{}", body.mass());
+        assert_eq!(body.linear_damping(), 0.);
+        assert_eq!(body.angular_damping(), 0.2);
+        assert_eq!(physics.prop_materials[&0], "synthetic_wood");
+        for (_, collider) in physics.colliders.iter() {
+            assert_eq!(collider.friction(), 0.6);
+            assert_eq!(collider.restitution(), 0.3);
+            assert_eq!(
+                collider.friction_combine_rule(),
+                CoefficientCombineRule::Multiply
+            );
+        }
+        let inertia = body.mass_properties().local_mprops.principal_inertia();
+        // massScale doubles the mass; inertiaScale 0.1 clamps to 0.5 x the authored 2.
+        world.entities[0]
+            .properties
+            .push(("massScale".into(), "2".into()));
+        world.entities[0]
+            .properties
+            .push(("inertiaScale".into(), "0.1".into()));
+        let scaled = Physics::new(&world);
+        let body = &scaled.bodies[scaled.dynamic[&0]];
+        assert!((body.mass() - 70.).abs() < 1e-3);
+        let scaled_inertia = body.mass_properties().local_mprops.principal_inertia();
+        // 2x mass and a 0.5 / 2 inertia multiplier: half the tensor.
+        assert!((scaled_inertia - inertia * 0.5).norm() < inertia.norm() * 1e-3);
+    }
+    #[test]
+    fn world_brush_sides_use_their_own_surfaceprop() {
+        // Synthetic: one floor brush whose top side is "synthetic/ice" (friction 0.1)
+        // or the default material; a 5 kg box slides across it from 300 u/s.
+        let slide = |top: &str| {
+            let mut world = World {
+                brushes: vec![bounds_brush(
+                    Vec3::new(-4000., -4000., -16.),
+                    Vec3::new(4000., 4000., 0.),
+                )],
+                brush_side_materials: vec![["", "", "", "", top, ""].map(String::from).to_vec()],
+                ..Default::default()
+            };
+            for (name, friction) in [("default", 0.8), ("synthetic_ice", 0.1)] {
+                world.surface_materials.insert(
+                    name.into(),
+                    modkit_core::SurfaceMaterial {
+                        friction,
+                        elasticity: 0.1,
+                        ..Default::default()
+                    },
+                );
+            }
+            world
+                .material_surfaceprops
+                .insert("synthetic/ice".into(), "synthetic_ice".into());
+            world.model_physics.insert(
+                "synthetic#0".into(),
+                modkit_core::PhysicsSolid {
+                    mass: 5.,
+                    damping: 0.,
+                    rotdamping: 0.,
+                    surfaceprop: "default".into(),
+                    ..Default::default()
+                },
+            );
+            let mut physics = Physics::new(&world);
+            physics.air_density = 0.;
+            let hooked = physics.world_sides.sides.len();
+            let body = physics.add_projectile_body(
+                &world,
+                "synthetic#0",
+                Vec3::splat(4.),
+                Vec3::new(0., 0., 4.05),
+                Quat::IDENTITY,
+                Vec3::new(300., 0., 0.),
+                Vec3::ZERO,
+            );
+            for _ in 0..60 {
+                physics.tick(0.015);
+            }
+            (hooked, physics.body_state(body).unwrap().position.x)
+        };
+        let (plain_hooks, plain) = slide("");
+        let (ice_hooks, ice) = slide("synthetic/ice");
+        assert_eq!((plain_hooks, ice_hooks), (0, 1));
+        assert!(ice > plain + 20., "ice {ice} vs default {plain}");
+    }
+    #[test]
+    fn free_bodies_report_new_contacts_once_and_feel_air_drag() {
+        // Synthetic floor and solid (not game data).
+        let mut world = World {
+            brushes: vec![bounds_brush(
+                Vec3::new(-2000., -2000., -16.),
+                Vec3::new(2000., 2000., 0.),
+            )],
+            ..Default::default()
+        };
+        world.model_physics.insert(
+            "synthetic#0".into(),
+            modkit_core::PhysicsSolid {
+                mass: 5.,
+                damping: 0.,
+                rotdamping: 0.,
+                surfaceprop: "synthetic_metal".into(),
+                ..Default::default()
+            },
+        );
+        let mut physics = Physics::new(&world);
+        assert_eq!(physics.air_density, crate::drag::AIR_DENSITY);
+        let body = physics.add_projectile_body(
+            &world,
+            "synthetic#0",
+            Vec3::splat(4.),
+            Vec3::new(0., 0., 1000.),
+            Quat::IDENTITY,
+            Vec3::new(1000., 0., 0.),
+            Vec3::ZERO,
+        );
+        physics.tick(0.015);
+        let v = physics.body_state(body).unwrap().velocity;
+        // Retail drag on the 8-unit box (5 kg) moving along x: face 8 x 8 units, full
+        // orthographic fraction, factor -0.5 x basis x |v| x density x dt (m/s).
+        let face = (8. * 0.0254f32).powi(2);
+        let speed = 1000. * SCALE;
+        let factor = -0.5 * face / 5. * speed * crate::drag::AIR_DENSITY * 0.015;
+        let expected = 1000. * (1. + factor);
+        assert!((v.x - expected).abs() < 0.5, "{v} vs {expected}");
+        // Drop onto the floor: one event at the fall speed, then resting is silent.
+        physics.air_density = 0.;
+        physics.set_body_velocity(body, Vec3::ZERO, Vec3::ZERO);
+        if let Some(b) = physics.bodies.get_mut(body) {
+            b.set_translation(vector(Vec3::new(0., 0., 40.)), true);
+        }
+        let mut events = vec![];
+        for _ in 0..120 {
+            physics.tick(0.015);
+            events.extend(physics.collisions.iter().cloned());
+        }
+        assert!(!events.is_empty());
+        let first = &events[0];
+        let fall = (2. * 600. * 36f32).sqrt();
+        assert!(
+            (first.speed - fall).abs() < 25.,
+            "{} vs {fall}",
+            first.speed
+        );
+        assert_eq!(first.delta_time, f32::MAX);
+        assert!(first.surfaceprops.contains(&Some("synthetic_metal".into())));
+        assert!(first.entities.iter().all(Option::is_none));
+        // Any later contact events are small settling contacts, not new impacts.
+        assert!(events[1..].iter().all(|e| e.speed < 70.), "{events:?}");
+        let rest = physics.body_state(body).unwrap().position;
+        assert!((rest.z - 4.).abs() < 1., "{rest}");
     }
     #[test]
     fn static_prop_bbox_and_unknown_modes_do_not_reuse_native_hulls() {
@@ -1591,12 +3881,39 @@ mod tests {
         assert!(!sweep.start_solid);
         let inside = Vec3::new(15., 0., 40.);
         assert!(!physics.trace_hull(inside, inside, mins, maxs).start_solid);
-        // This change is limited to player queries; existing weapon traces and
-        // retained world brush/collider data keep their prior behavior.
+        // Shots and use traces (MASK_SHOT / MASK_SOLID) pass clip-only brushes; the
+        // player's ground trace (MASK_PLAYERSOLID) still finds them.
         assert!(physics
             .impact_ray(Vec3::new(-5., 0., 40.), Vec3::X, 40.)
+            .is_none());
+        assert!(physics
+            .ground_ray(Vec3::new(15., 0., 140.), -Vec3::Z, 60.)
             .is_some());
         assert_eq!(physics.colliders.len(), 1);
+    }
+    #[test]
+    fn physics_objects_pass_clip_only_brushes_but_rest_on_solid_ones() {
+        // CCollisionEvent::ShouldCollide: world contents vs MASK_SOLID.
+        for (contents, rests) in [(0x8020000, false), (0x10000, false), (1, true)] {
+            let mut physics = Physics::new(&clip_box(contents));
+            let body = physics
+                .bodies
+                .insert(RigidBodyBuilder::dynamic().translation(vector![
+                    15. * SCALE,
+                    0.,
+                    110. * SCALE
+                ]));
+            physics.colliders.insert_with_parent(
+                ColliderBuilder::ball(4. * SCALE).density(100.),
+                body,
+                &mut physics.bodies,
+            );
+            for _ in 0..80 {
+                physics.tick(0.015);
+            }
+            let z = physics.bodies[body].translation().z / SCALE;
+            assert_eq!(z > 100., rests, "contents {contents:#x}: z {z}");
+        }
     }
     #[test]
     fn player_clip_solid_and_mixed_monster_solid_still_block_players() {
@@ -1996,5 +4313,132 @@ mod tests {
             assert_eq!(movement.reason, Some(reason));
             assert_eq!(movement.end, start);
         }
+    }
+    /// A free box resting on a floor plate (synthetic values, not game data).
+    fn shadow_scene(mass: f32, gravity: bool, z: f32) -> (Physics, RigidBodyHandle) {
+        let mut physics = Physics::new(&World::default());
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(2000. / 39.37, 2000. / 39.37, 8. / 39.37)
+                .translation(vector![0., 0., -8. / 39.37])
+                .friction(0.8),
+        );
+        let body = physics.bodies.insert(
+            RigidBodyBuilder::dynamic()
+                .translation(vector![40. / 39.37, 0., z / 39.37])
+                .gravity_scale(if gravity { 1. } else { 0. })
+                .additional_mass(mass),
+        );
+        physics.colliders.insert_with_parent(
+            ColliderBuilder::cuboid(8. / 39.37, 8. / 39.37, 8. / 39.37)
+                .density(0.)
+                .friction(0.8),
+            body,
+            &mut physics.bodies,
+        );
+        physics.refresh_queries();
+        (physics, body)
+    }
+    #[test]
+    fn stacked_props_keep_one_margin_like_a_prop_on_the_floor() {
+        // Two 16-unit boxes with the prop skin dropped onto a floor plate (synthetic).
+        let mut physics = Physics::new(&World::default());
+        physics.colliders.insert(
+            ColliderBuilder::cuboid(2000. * SCALE, 2000. * SCALE, 8. * SCALE).translation(vector![
+                0.,
+                0.,
+                -8. * SCALE
+            ]),
+        );
+        let boxes = [9., 26.].map(|z| {
+            let body = physics
+                .bodies
+                .insert(RigidBodyBuilder::dynamic().translation(vector![0., 0., z * SCALE]));
+            physics.colliders.insert_with_parent(
+                ColliderBuilder::cuboid(8. * SCALE, 8. * SCALE, 8. * SCALE)
+                    .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                    .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS),
+                body,
+                &mut physics.bodies,
+            );
+            body
+        });
+        for _ in 0..200 {
+            physics.tick(TICK);
+        }
+        let z = boxes.map(|b| physics.bodies[b].translation().z / SCALE);
+        let floor_gap = z[0] - 8.;
+        let stack_gap = z[1] - z[0] - 16.;
+        assert!(
+            (floor_gap - 0.5).abs() < 0.1,
+            "floor gap {floor_gap} stack {stack_gap}"
+        );
+        assert!((stack_gap - 0.5).abs() < 0.1, "stack gap {stack_gap}");
+    }
+    #[test]
+    fn player_shadow_shoves_light_props_but_not_heavy_ones() {
+        for (mass, moves) in [(20., true), (500., false)] {
+            let (mut physics, body) = shadow_scene(mass, true, 8.);
+            // The player stands against the box (hull edge x 16, box edge x 32) and
+            // keeps walking into it; movement leaves the feet where they are.
+            let feet = Vec3::new(15.9, 0., 0.);
+            for _ in 0..40 {
+                physics.update_player_shadow(
+                    feet,
+                    feet,
+                    false,
+                    true,
+                    0.,
+                    Vec3::new(190., 0., 0.),
+                    None,
+                    TICK,
+                );
+                physics.tick(TICK);
+            }
+            let x = physics.bodies[body].translation().x * 39.37;
+            assert_eq!(x > 41., moves, "{mass} kg box at x {x}");
+            // The shadow follows the player and never wanders into the world.
+            let (shadow, _) = physics.player_shadow.unwrap();
+            let s = *physics.bodies[shadow].translation() * 39.37;
+            assert!((s.z - 36.).abs() < 1. && s.x < 20., "{s:?}");
+        }
+    }
+    #[test]
+    fn player_shadow_does_not_push_the_held_object_or_sink_the_prop_it_stands_on() {
+        let (mut physics, body) = shadow_scene(20., true, 8.);
+        physics.dynamic.insert(7, body);
+        let feet = Vec3::new(15.9, 0., 0.);
+        for _ in 0..40 {
+            physics.update_player_shadow(
+                feet,
+                feet,
+                false,
+                true,
+                0.,
+                Vec3::new(190., 0., 0.),
+                Some(7),
+                TICK,
+            );
+            physics.tick(TICK);
+        }
+        assert!(physics.bodies[body].translation().x * 39.37 < 40.5);
+        // Landing on and standing on a light box on the floor: the shadow neither rams
+        // it into the floor nor lifts it into the player's hull (owner report: stuck on
+        // top of props). Feet fall onto the box top (z 16) and stay there.
+        let (mut physics, body) = shadow_scene(5., true, 8.);
+        for tick in 0..80 {
+            let z = (40. - tick as f32 * 6.).max(16.);
+            let feet = Vec3::new(40., 0., z);
+            let old = Vec3::new(40., 0., (46. - tick as f32 * 6.).max(16.));
+            physics.update_player_shadow(old, feet, false, z <= 16., 0., Vec3::ZERO, None, TICK);
+            physics.tick(TICK);
+        }
+        let z = physics.bodies[body].translation().z * 39.37;
+        assert!((z - 8.).abs() < 0.2, "box sank or rose to z {z}");
+        let feet = Vec3::new(40., 0., 16.);
+        assert!(
+            physics.hull_contacts(feet, 72.).iter().all(|c| c.2 < 0.05),
+            "{:?}",
+            physics.hull_contacts(feet, 72.)
+        );
     }
 }
