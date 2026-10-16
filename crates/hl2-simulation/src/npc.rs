@@ -130,14 +130,35 @@ pub struct GoalSnapshot {
 pub struct NavRestrictions {
     pub unusable_nodes: BTreeSet<usize>,
     pub unusable_links: BTreeSet<usize>,
-    pub dynamic_link_state_unknown: bool,
+    /// CAI_DynamicLink: graph links each info_node_link / info_node_link_controller
+    /// entity controls.
+    pub dynamic: BTreeMap<usize, Vec<usize>>,
+    /// Links whose dynamic link is LINK_OFF (bits_LINK_OFF).
+    pub off_links: BTreeSet<usize>,
+    /// info_node_link entities whose nodes or link are not in the graph (the SDK creates
+    /// a missing link when hull bits are set; not modeled).
+    pub missing_dynamic: usize,
 }
+/// MAX_NODE_LINK_DIST / MAX_AIR_NODE_LINK_DIST (ai_node.h).
+const MAX_NODE_LINK_DIST: f32 = 60. * 12.;
+const MAX_AIR_NODE_LINK_DIST: f32 = 120. * 12.;
 impl NavRestrictions {
-    /// Exclude hinted nodes rather than pretending to implement hint locks.
-    /// Dynamic controllers require runtime state not present in the AIN file.
+    /// Exclude hinted nodes rather than pretending to implement hint locks. Dynamic
+    /// links (CAI_DynamicLink::InitDynamicLinks) take their initial state: an
+    /// info_node_link controls the link between its StartNode/EndNode editor ids; an
+    /// info_node_link_controller (GenerateLinksFromVolume) every link whose nodes lie
+    /// within MAX_NODE_LINK_DIST (air: MAX_AIR_NODE_LINK_DIST) of its center and whose
+    /// segment crosses its box grown by one unit.
     pub fn from_world(world: &World, graph: &Graph) -> Self {
         let mut result = Self::default();
-        for entity in &world.entities {
+        let node_of = |id: i32| graph.hammer_ids.iter().position(|h| *h == id);
+        let link_of = |a: usize, b: usize| {
+            graph.links.iter().position(|l| {
+                (l.source == a && l.destination == b) || (l.source == b && l.destination == a)
+            })
+        };
+        for (entity_id, entity) in world.entities.iter().enumerate() {
+            let off = entity.get("initialstate").is_some_and(|v| v.trim() == "0");
             match entity.class() {
                 "info_node_hint" => {
                     if let Some(id) = entity.get("nodeid").and_then(|s| s.parse::<i32>().ok()) {
@@ -148,14 +169,105 @@ impl NavRestrictions {
                         }
                     }
                 }
-                "info_node_link" | "info_node_link_controller" => {
-                    result.dynamic_link_state_unknown = true;
+                "info_node_link" => {
+                    let id = |k: &str| entity.get(k).and_then(|v| v.trim().parse::<i32>().ok());
+                    let link = id("StartNode")
+                        .and_then(node_of)
+                        .zip(id("EndNode").and_then(node_of))
+                        .and_then(|(a, b)| link_of(a, b));
+                    match link {
+                        Some(link) => {
+                            result.dynamic.insert(entity_id, vec![link]);
+                            if off {
+                                result.off_links.insert(link);
+                            }
+                        }
+                        None => result.missing_dynamic += 1,
+                    }
+                }
+                "info_node_link_controller" => {
+                    let origin = entity.origin();
+                    let vec = |k: &str| {
+                        modkit_core::parse_vec3(entity.get(k).unwrap_or("0 0 0"))
+                            .unwrap_or(Vec3::ZERO)
+                    };
+                    let (mins, maxs) = (origin + vec("mins"), origin + vec("maxs"));
+                    let center = (mins + maxs) * 0.5;
+                    let air = entity
+                        .get("useairlinkradius")
+                        .is_some_and(|v| v.trim() == "1");
+                    let reach = if air {
+                        MAX_AIR_NODE_LINK_DIST
+                    } else {
+                        MAX_NODE_LINK_DIST
+                    } + 0.1;
+                    let (lo, hi) = (mins - Vec3::ONE, maxs + Vec3::ONE);
+                    let links: Vec<usize> = graph
+                        .links
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| {
+                            let (Some(a), Some(b)) =
+                                (graph.nodes.get(l.source), graph.nodes.get(l.destination))
+                            else {
+                                return false;
+                            };
+                            a.origin.distance(center) < reach
+                                && b.origin.distance(center) < reach
+                                && segment_crosses_box(a.origin, b.origin, lo, hi)
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    if off {
+                        result.off_links.extend(links.iter().copied());
+                    }
+                    result.dynamic.insert(entity_id, links);
                 }
                 _ => {}
             }
         }
         result
     }
+    /// TurnOn / TurnOff of a dynamic link entity; false when it controls nothing.
+    pub fn set_dynamic(&mut self, entity: usize, on: bool) -> bool {
+        let Some(links) = self.dynamic.get(&entity) else {
+            return false;
+        };
+        for link in links {
+            if on {
+                self.off_links.remove(link);
+            } else {
+                self.off_links.insert(*link);
+            }
+        }
+        true
+    }
+}
+/// IsBoxIntersectingRay for the segment a -> b.
+fn segment_crosses_box(a: Vec3, b: Vec3, lo: Vec3, hi: Vec3) -> bool {
+    let d = b - a;
+    let (mut t0, mut t1) = (0f32, 1f32);
+    for axis in 0..3 {
+        if d[axis].abs() < 1e-6 {
+            if a[axis] < lo[axis] || a[axis] > hi[axis] {
+                return false;
+            }
+            continue;
+        }
+        let (mut x, mut y) = (
+            (lo[axis] - a[axis]) / d[axis],
+            (hi[axis] - a[axis]) / d[axis],
+        );
+        if x > y {
+            std::mem::swap(&mut x, &mut y);
+        }
+        t0 = t0.max(x);
+        t1 = t1.min(y);
+        if t0 > t1 {
+            return false;
+        }
+    }
+    true
 }
 
 #[derive(Clone, Debug, Default)]
@@ -326,6 +438,10 @@ impl Controller {
             })
             .map(|(id, _)| id)
             .collect();
+    }
+    /// info_node_link / info_node_link_controller TurnOn / TurnOff.
+    pub fn set_dynamic_link(&mut self, entity: usize, on: bool) -> bool {
+        self.restrictions.set_dynamic(entity, on)
     }
     pub fn new(graph: Option<Graph>, restrictions: NavRestrictions) -> Self {
         Self {
@@ -905,9 +1021,6 @@ fn plan<W: NpcCollisionWorld>(
         });
     }
     let graph = graph.ok_or(GoalBlockReason::MissingGraph)?;
-    if restrictions.dynamic_link_state_unknown {
-        return Err(GoalBlockReason::UnsupportedGraphState);
-    }
     let view = actor
         .view_offset
         .ok_or(GoalBlockReason::MissingViewOffset)?;
@@ -992,6 +1105,7 @@ fn search(
         }
         if link.accepted_move_types[0] & 1 != 0
             && !restrictions.unusable_links.contains(&index)
+            && !restrictions.off_links.contains(&index)
             && positions[link.source].is_some()
             && positions[link.destination].is_some()
         {
@@ -1168,6 +1282,52 @@ mod tests {
             .unwrap();
         controller.set_view_offset(7, Vec3::Z * 70.).unwrap();
         controller
+    }
+    #[test]
+    fn dynamic_links_take_their_initial_state_and_toggle() {
+        // Nodes 0-1-2 in a row (editor ids 0..2); a link entity turns 1-2 off, a
+        // controller box across 0-1 starts on.
+        let g = graph(
+            &[Vec3::ZERO, Vec3::new(200., 0., 0.), Vec3::new(400., 0., 0.)],
+            &[(0, 1), (1, 2)],
+        );
+        let entity = |pairs: &[(&str, &str)]| modkit_core::Entity {
+            properties: pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        };
+        let world = World {
+            entities: vec![
+                entity(&[
+                    ("classname", "info_node_link"),
+                    ("StartNode", "2"),
+                    ("EndNode", "1"),
+                    ("initialstate", "0"),
+                ]),
+                entity(&[
+                    ("classname", "info_node_link_controller"),
+                    ("origin", "100 0 0"),
+                    ("mins", "-8 -64 -64"),
+                    ("maxs", "8 64 64"),
+                    ("initialstate", "1"),
+                ]),
+                entity(&[
+                    ("classname", "info_node_link"),
+                    ("StartNode", "0"),
+                    ("EndNode", "2"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let mut r = NavRestrictions::from_world(&world, &g);
+        assert_eq!(r.dynamic[&0], [1]);
+        assert_eq!(r.dynamic[&1], [0]);
+        assert_eq!(r.missing_dynamic, 1);
+        assert_eq!(r.off_links, [1].into());
+        assert!(r.set_dynamic(0, true) && r.off_links.is_empty());
+        assert!(r.set_dynamic(1, false) && r.off_links == [0].into());
+        assert!(!r.set_dynamic(2, true));
     }
     fn graph(points: &[Vec3], edges: &[(usize, usize)]) -> Graph {
         Graph {

@@ -2390,6 +2390,8 @@ impl Scene {
                 ))
             || (class == "aiscripted_schedule"
                 && matches!(input.as_str(), "startschedule" | "stopschedule"))
+            || (matches!(class, "info_node_link" | "info_node_link_controller")
+                && matches!(input.as_str(), "turnon" | "turnoff"))
         {
             self.ai_inputs
                 .push((id, input, p.parameter.clone(), p.activator));

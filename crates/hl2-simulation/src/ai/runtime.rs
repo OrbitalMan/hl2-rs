@@ -369,7 +369,7 @@ impl AiRuntime {
     }
     /// SetPoliceGoal / ActivateBaton on cops and EnableKnockOut / DisableKnockOut on
     /// ai_goal_police (processed even while the AI is off, so map-spawn inputs stick).
-    fn inputs(&mut self, world: &World, scene: &mut Scene) {
+    fn inputs(&mut self, world: &World, scene: &mut Scene, controller: &mut Controller) {
         if !self.goals_started && !self.actors.is_empty() {
             // CAI_GoalEntity::Activate at spawn for StartActive goals.
             self.goals_started = true;
@@ -391,6 +391,17 @@ impl AiRuntime {
             }
             if class == "aiscripted_schedule" {
                 self.scripted_schedule_input(world, scene, target, &input);
+                continue;
+            }
+            if matches!(class, "info_node_link" | "info_node_link_controller") {
+                // CAI_DynamicLink(Controller)::InputTurnOn/Off: the graph links' state.
+                if !controller.set_dynamic_link(target, input == "turnon") {
+                    *self
+                        .diagnostics
+                        .unknown_goals
+                        .entry(format!("dynamic link #{target}"))
+                        .or_default() += 1;
+                }
                 continue;
             }
             match input.as_str() {
@@ -462,8 +473,10 @@ impl AiRuntime {
             })
             .collect()
     }
-    /// Entities of a class with this targetname.
+    /// Entities of a class matching a name (FindEntityByName: a trailing '*' matches
+    /// any suffix).
     fn named(world: &World, class: &str, name: &str) -> Vec<usize> {
+        let name = name.to_lowercase();
         world
             .entities
             .iter()
@@ -471,7 +484,7 @@ impl AiRuntime {
             .filter(|(_, e)| {
                 e.class() == class
                     && e.get("targetname")
-                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                        .is_some_and(|n| crate::entities::glob(&name, &n.to_lowercase()))
             })
             .map(|(id, _)| id)
             .collect()
@@ -502,7 +515,12 @@ impl AiRuntime {
     /// ai_goal_assault inputs: Activate (EnableGoal: SetParameters for each actor),
     /// Deactivate (DisableGoal), BeginAssault (ReceiveAssaultCue(CUE_ENTITY_INPUT)).
     fn assault_goal_input(&mut self, world: &World, scene: &mut Scene, goal: usize, input: &str) {
-        let actors = self.goal_actors(world, goal);
+        // Held templates (not spawned yet) and dead NPCs are not actors.
+        let actors: Vec<usize> = self
+            .goal_actors(world, goal)
+            .into_iter()
+            .filter(|&id| scene.states[id].visible && !scene.states[id].killed)
+            .collect();
         match input {
             "activate" | "updateactors" => {
                 let e = &world.entities[goal];
@@ -930,7 +948,7 @@ impl AiRuntime {
         transients: &[ActorHull],
         player: PlayerState,
     ) {
-        self.inputs(world, scene);
+        self.inputs(world, scene, controller);
         if !self.enabled {
             if self.was_enabled {
                 self.was_enabled = false;
