@@ -1037,11 +1037,12 @@ impl Console {
             }
         };
     }
+    /// Opens or closes the console; it opens only while `con_enable` is on.
     pub fn toggle(&mut self) {
         if self.mode == Mode::Console {
             self.mode = self.previous;
             self.clear_menu_hover();
-        } else {
+        } else if self.config.keyboard.developer_console {
             self.previous = self.mode;
             self.clear_menu_hover();
             self.mode = Mode::Console;
@@ -4222,5 +4223,22 @@ mod tests {
         assert_eq!(width("lostcoast", "background01", true), Some(20.0));
         assert_eq!(width("ep2", "ep2_background01", true), Some(2.0));
         assert_eq!(width("episodic", "ep2_background01", false), None);
+    }
+
+    #[test]
+    fn con_enable_off_keeps_the_console_closed_but_lets_it_close() {
+        let mut console = Console {
+            mode: Mode::MainMenu,
+            ..Default::default()
+        };
+        console.config.keyboard.developer_console = false;
+        console.toggle();
+        assert_eq!(console.mode, Mode::MainMenu, "con_enable 0");
+        console.config.keyboard.developer_console = true;
+        console.toggle();
+        assert_eq!(console.mode, Mode::Console);
+        console.config.keyboard.developer_console = false;
+        console.toggle();
+        assert_eq!(console.mode, Mode::MainMenu, "an open console still closes");
     }
 }

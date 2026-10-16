@@ -317,6 +317,25 @@ impl Default for GameplaySettings {
     }
 }
 
+/// Keyboard > Advanced.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeyboardSettings {
+    /// `hud_fastswitch`: number keys switch weapons at once instead of opening the menu.
+    pub fast_switch: bool,
+    /// `con_enable`: the console key opens the developer console.
+    pub developer_console: bool,
+}
+
+impl Default for KeyboardSettings {
+    fn default() -> Self {
+        Self {
+            fast_switch: false,
+            developer_console: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -324,6 +343,7 @@ pub struct Config {
     pub video: VideoSettings,
     pub audio: AudioSettings,
     pub mouse: MouseSettings,
+    pub keyboard: KeyboardSettings,
     pub keys: BTreeMap<String, String>,
 }
 
@@ -365,6 +385,7 @@ impl Default for Config {
             video: VideoSettings::default(),
             audio: AudioSettings::default(),
             mouse: MouseSettings::default(),
+            keyboard: KeyboardSettings::default(),
             keys,
         }
     }
@@ -531,6 +552,10 @@ mod tests {
         assert_eq!(config.mouse.accel_exponent, 1.05);
         assert_eq!(config.gameplay.skill, 2);
         assert_eq!(config.keys.get("+jump").map(String::as_str), Some("KeyJ"));
+        assert!(
+            config.keyboard.developer_console && !config.keyboard.fast_switch,
+            "files without a keyboard section keep the console and the weapon menu"
+        );
 
         let borderless = Config::from_json(br#"{ "video": { "borderless": true } }"#).unwrap();
         assert_eq!(borderless.video.display_mode, DisplayMode::NoBorder);

@@ -51,6 +51,8 @@ pub enum Toggle {
     RawInput,
     Acceleration,
     MuteLoseFocus,
+    FastSwitch,
+    DeveloperConsole,
 }
 
 impl Toggle {
@@ -61,6 +63,8 @@ impl Toggle {
             Self::RawInput => c.mouse.raw_input,
             Self::Acceleration => c.mouse.acceleration,
             Self::MuteLoseFocus => c.audio.mute_losefocus,
+            Self::FastSwitch => c.keyboard.fast_switch,
+            Self::DeveloperConsole => c.keyboard.developer_console,
         }
     }
 
@@ -71,6 +75,8 @@ impl Toggle {
             Self::RawInput => &mut c.mouse.raw_input,
             Self::Acceleration => &mut c.mouse.acceleration,
             Self::MuteLoseFocus => &mut c.audio.mute_losefocus,
+            Self::FastSwitch => &mut c.keyboard.fast_switch,
+            Self::DeveloperConsole => &mut c.keyboard.developer_console,
         } = value;
     }
 }
@@ -324,24 +330,20 @@ pub enum Command {
     KeyDefaults,
     KeyEdit,
     KeyClear,
-    /// "Advanced..." on the Keyboard page (placeholder).
+    /// "Advanced..." on the Keyboard page.
     KeyAdvanced,
     /// "Advanced..." on the Video page (placeholder).
     VideoAdvanced,
-    /// OK of a sub-dialog (gamma).
+    /// OK of a sub-dialog.
     SubOk,
     /// Cancel / Close of a sub-dialog.
     SubCancel,
 }
 
 impl Command {
-    /// Placeholders are drawn disabled; activating one only logs.
-    pub fn placeholder(self) -> Option<&'static str> {
-        match self {
-            Self::KeyAdvanced => Some("Advanced keyboard options"),
-            Self::VideoAdvanced => Some("Advanced video options"),
-            _ => None,
-        }
+    /// Placeholders are drawn disabled; activating one only logs its label.
+    pub fn placeholder(self) -> bool {
+        matches!(self, Self::VideoAdvanced)
     }
 }
 
@@ -371,6 +373,7 @@ pub enum Panel {
     Gamma,
     AudioCredits,
     VideoCredits,
+    KeyboardAdvanced,
 }
 
 impl Panel {
@@ -385,6 +388,7 @@ impl Panel {
             Self::Gamma => "optionssubvideogammadlg",
             Self::AudioCredits => "optionssubaudiothirdpartydlg",
             Self::VideoCredits => "optionssubvideothirdpartydlg",
+            Self::KeyboardAdvanced => "optionssubkeyboardadvanceddlg",
         }
     }
 }
@@ -430,11 +434,23 @@ pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
         (Panel::Keyboard, "clearkeybutton") => Command(self::Command::KeyClear),
         (Panel::Gamma, "gamma") => Slider(Value::Gamma),
         (Panel::Gamma, "gammaentry") => Entry(Value::Gamma),
+        (Panel::KeyboardAdvanced, "fastswitchcheck") => Toggle(self::Toggle::FastSwitch),
+        (Panel::KeyboardAdvanced, "consolecheck") => Toggle(self::Toggle::DeveloperConsole),
         (Panel::Gamma, "okbutton") => Command(self::Command::SubOk),
         (Panel::Gamma, "button1") => Command(self::Command::SubCancel),
         (Panel::AudioCredits | Panel::VideoCredits, "button2") => Command(self::Command::SubCancel),
         _ => return None,
     })
+}
+
+/// The binding of a button by its layout `Command`: dialog layouts close themselves with `OK` and
+/// `Close` (VGUI `Frame` commands).
+pub fn command_binding(command: &str) -> Option<Binding> {
+    match command.to_ascii_lowercase().as_str() {
+        "ok" => Some(Binding::Command(Command::SubOk)),
+        "close" | "cancel" => Some(Binding::Command(Command::SubCancel)),
+        _ => None,
+    }
 }
 
 /// Controls the retail layout hides on macOS (`[$OSX]`) that this rewrite still shows, because
@@ -466,7 +482,7 @@ pub fn enabled(
             draft.config.mouse.aim_assist != AimAssist::Off
         }
         Some(Binding::Command(Command::GammaDialog)) => true,
-        Some(Binding::Command(command)) if command.placeholder().is_some() => false,
+        Some(Binding::Command(command)) if command.placeholder() => false,
         _ => layout_enabled,
     }
 }
@@ -644,6 +660,17 @@ mod tests {
         );
         let advanced = Some(Binding::Command(Command::VideoAdvanced));
         assert!(!enabled(advanced, true, &draft, &applied));
+        let key_advanced = Some(Binding::Command(Command::KeyAdvanced));
+        assert!(enabled(key_advanced, true, &draft, &applied));
+        assert_eq!(
+            command_binding("OK"),
+            Some(Binding::Command(Command::SubOk))
+        );
+        assert_eq!(
+            command_binding("Close"),
+            Some(Binding::Command(Command::SubCancel))
+        );
+        assert_eq!(command_binding("OpenSteamInput"), None);
         assert_eq!(
             binding(Panel::Mouse, "ReverseMouse"),
             Some(Binding::Toggle(Toggle::ReverseMouse))

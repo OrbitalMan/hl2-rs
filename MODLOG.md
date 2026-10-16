@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: Keyboard > Advanced dialog
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::config`: new `keyboard` section (`fast_switch` = `hud_fastswitch`, `developer_console` = `con_enable`, default on). `settings`: `Panel::KeyboardAdvanced` (`optionssubkeyboardadvanceddlg.res`), `Toggle::FastSwitch`/`DeveloperConsole`, `command_binding` (layout `Command` `OK`/`Close` -> sub-dialog OK/Cancel). `options`: `Sub::KeyboardAdvanced`; sub-dialogs snapshot the draft when opened and Cancel/Escape/title close restore it (replaces the gamma-only restore); an advanced dialog's OK applies its own settings at once (`Sub::apply_on_ok`, retail OK writes the cvars) and leaves other unapplied edits in the draft; frames without a frame record take the controls' extent; `frame_*` chrome controls are skipped. `Console::toggle` opens only while `con_enable` is on. `hl2-bevy::input`: weapon selection follows `keyboard.fast_switch` every frame.
+
+**Why:** owner request: implement the Keyboard/Advanced dialog.
+
+**Tested how:** unit tests (Cancel restores, OK applies only the dialog's settings, frame size from the layout extent, `con_enable` gating, command bindings, legacy config keeps the console); owned test (installed layout binds both check boxes and OK/Cancel by `Command`, no frame chrome, every control inside the frame); workspace tests, strict clippy (also `x86_64-pc-windows-msvc`), fmt.
+
+**Result:** Keyboard > Advanced... opens the dialog; Fast weapon switch selects weapons directly on slot keys; clearing Enable developer console stops the console key from opening the console.
+
+**Still broken or not tested:** not checked visually or by hand in the packaged build (scripted clicks cannot reach the dialog: opening Options pauses the ticks that drive replay scripts); the pause menu still offers its console entry while `con_enable` is off.
+
+**Next:** Video > Advanced, Gamepad tab.
+
 ## 2026-10-16 GameUI: main-menu labels in the scheme's GorDIN face
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

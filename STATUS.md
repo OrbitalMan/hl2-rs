@@ -2,7 +2,14 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: merge of main (2026-10-16, branch `orbitalman/main-menu-2`)
+## Current session: menu font, advanced options dialogs, Gamepad tab (2026-10-16, branch `orbitalman/main-menu-2`)
+
+Claude Code desktop, claude-opus-5-5.
+- **Menu labels in GorDIN SemiBold** (scheme `MenuLarge`, resolved from the scheme's `CustomFontFiles`), narrower than the former Liberation Sans; slightly smaller at the same cell size. Not compared with a retail capture.
+- **Keyboard > Advanced** implemented (fast weapon switch, developer console). Unit and owned-layout tests; **not checked visually in the packaged build**: replay scripts cannot click inside the Options dialog, because opening it pauses the fixed ticks that drive the script.
+- Remaining in this session: Video > Advanced, Gamepad tab.
+
+## Previous session: merge of main (2026-10-16, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
 - **main `6226ae7` merged** (installation setup, arsenal and physics sessions 11-17, impact-table CI fix). Resolutions are listed in MODLOG; validation in `docs/validation.md`. The sections below from both lines of work are kept as they were.

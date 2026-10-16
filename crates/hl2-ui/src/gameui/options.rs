@@ -109,14 +109,16 @@ pub enum OptionsOutcome {
     Close(Option<Config>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A sub-dialog over the options dialog. Edits in a sub-dialog go to the draft; Cancel restores
+/// the draft as it was when the sub-dialog opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Sub {
-    /// Brightness dialog; `saved` is restored on Cancel.
-    Gamma {
-        saved: f32,
-    },
+    /// Brightness; its value stays in the draft until OK/Apply on the options dialog.
+    Gamma,
     AudioCredits,
     VideoCredits,
+    /// Keyboard > Advanced; its OK applies its settings at once, like retail.
+    KeyboardAdvanced,
 }
 
 impl Sub {
@@ -126,24 +128,36 @@ impl Sub {
 
     fn panel(self) -> Panel {
         match self {
-            Self::Gamma { .. } => Panel::Gamma,
+            Self::Gamma => Panel::Gamma,
             Self::AudioCredits => Panel::AudioCredits,
             Self::VideoCredits => Panel::VideoCredits,
+            Self::KeyboardAdvanced => Panel::KeyboardAdvanced,
         }
     }
 
     fn title(self) -> &'static str {
         match self {
-            Self::Gamma { .. } => "#GameUI_AdjustGamma_Title",
+            Self::Gamma => "#GameUI_AdjustGamma_Title",
             Self::AudioCredits | Self::VideoCredits => "#GameUI_ThirdPartyTechCredits",
+            Self::KeyboardAdvanced => "#GameUI_KeyboardAdvanced_Title",
         }
     }
 
     fn fallback_size(self) -> Vec2 {
         match self {
-            Self::Gamma { .. } => GAMMA_SIZE,
-            Self::AudioCredits | Self::VideoCredits => CREDITS_SIZE,
+            Self::Gamma => GAMMA_SIZE,
+            Self::AudioCredits | Self::VideoCredits | Self::KeyboardAdvanced => CREDITS_SIZE,
         }
+    }
+
+    /// Copies the settings this sub-dialog's OK applies at once from `from` into `to`; returns
+    /// whether it applies anything (retail advanced dialogs write their cvars on OK).
+    fn apply_on_ok(self, from: &Config, to: &mut Config) -> bool {
+        match self {
+            Self::KeyboardAdvanced => to.keyboard = from.keyboard.clone(),
+            Self::Gamma | Self::AudioCredits | Self::VideoCredits => return false,
+        }
+        true
     }
 }
 
@@ -259,6 +273,8 @@ pub struct OptionsDialog {
     keys: KeyList,
     confirm: Option<MessageBox>,
     sub: Option<Sub>,
+    /// The draft configuration when the open sub-dialog opened, restored by its Cancel.
+    sub_saved: Option<Config>,
     gamma_texture: Option<Texture2D>,
     bink_texture: Option<Texture2D>,
     log: Vec<String>,
@@ -292,6 +308,7 @@ impl Default for OptionsDialog {
             keys: KeyList::default(),
             confirm: None,
             sub: None,
+            sub_saved: None,
             gamma_texture: None,
             bink_texture: None,
             log: Vec::new(),
@@ -335,15 +352,41 @@ pub fn button_rects() -> [Rect; 3] {
     [rect(apply - 160.), rect(apply - 80.), rect(apply)]
 }
 
-/// Frame size of a sub-dialog: its layout's frame record, else the fallback.
+/// Frame size of a sub-dialog: its layout's frame record; for a layout without one, the extent
+/// of its controls with the left margin repeated on the right and bottom; else the fallback.
 fn frame_size(res: &GameUiResources, sub: Sub) -> Vec2 {
-    res.layout(sub.panel().layout())
-        .and_then(|layout| {
-            layout.controls.iter().find(|c| {
-                matches!(c.kind, ControlKind::Other(_)) && c.wide >= 200. && c.tall >= 100.
-            })
-        })
-        .map_or(sub.fallback_size(), |c| vec2(c.wide, c.tall))
+    let Some(layout) = res.layout(sub.panel().layout()) else {
+        return sub.fallback_size();
+    };
+    if let Some(frame) = layout
+        .controls
+        .iter()
+        .find(|c| matches!(c.kind, ControlKind::Other(_)) && c.wide >= 200. && c.tall >= 100.)
+    {
+        return vec2(frame.wide, frame.tall);
+    }
+    let rects: Vec<(f32, f32, f32, f32)> = layout
+        .controls
+        .iter()
+        .filter(|c| c.visible && !is_frame_chrome(c))
+        .map(|c| c.rect((0., 0.)))
+        .collect();
+    let left = rects.iter().map(|r| r.0).fold(f32::INFINITY, f32::min);
+    let right = rects.iter().map(|r| r.0 + r.2).fold(0., f32::max);
+    let bottom = rects.iter().map(|r| r.1 + r.3).fold(0., f32::max);
+    if rects.is_empty() || !left.is_finite() {
+        return sub.fallback_size();
+    }
+    vec2(right + left, bottom + left)
+}
+
+/// Controls a VGUI `Frame` creates for itself (`frame_caption`, `frame_close`, resize grips):
+/// the dialog frame draws its own title bar and close button.
+fn is_frame_chrome(control: &Control) -> bool {
+    control
+        .name
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("frame_"))
 }
 
 fn layout_widgets<'a>(
@@ -360,10 +403,11 @@ fn layout_widgets<'a>(
         .controls
         .iter()
         .filter(|c| c.visible || settings::force_visible(panel, &c.name))
-        .filter(|c| !matches!(c.kind, ControlKind::Other(_)))
+        .filter(|c| !matches!(c.kind, ControlKind::Other(_)) && !is_frame_chrome(c))
         .map(|control| {
             let (x, y, w, h) = control.rect((area.w, area.h));
-            let binding = settings::binding(panel, &control.name);
+            let binding = settings::binding(panel, &control.name)
+                .or_else(|| settings::command_binding(&control.command));
             Widget {
                 control,
                 rect: Rect::new(area.x + x, area.y + y, w, h),
@@ -420,6 +464,7 @@ impl OptionsDialog {
         self.keys.capture = None;
         self.confirm = None;
         self.sub = None;
+        self.sub_saved = None;
         self.active_tooltip = None;
     }
 
@@ -435,7 +480,7 @@ impl OptionsDialog {
     /// The brightness being previewed: the draft's gamma while the brightness sub-dialog is
     /// open (retail applies the slider immediately; Cancel restores the saved value).
     pub fn preview_gamma(&self) -> Option<f32> {
-        matches!(self.sub, Some(Sub::Gamma { .. })).then_some(self.draft.config.video.gamma)
+        matches!(self.sub, Some(Sub::Gamma)).then_some(self.draft.config.video.gamma)
     }
 
     /// The window's display mode changed outside the dialog (for example macOS native full
@@ -475,10 +520,8 @@ impl OptionsDialog {
         {
             return true;
         }
-        if let Some(sub) = self.sub.take() {
-            if let Sub::Gamma { saved } = sub {
-                self.draft.config.video.gamma = saved;
-            }
+        if self.sub.is_some() {
+            self.cancel_sub();
             return true;
         }
         false
@@ -618,8 +661,7 @@ impl OptionsDialog {
                 }
             }
             let pointer = local(centered(canvas, size, scale));
-            self.sub_input(sub, size, input, pointer);
-            return OptionsOutcome::None;
+            return self.sub_input(sub, size, input, pointer);
         }
         let pointer = local(centered(canvas, DIALOG_SIZE, scale));
         if let Some(row) = self.keys.capture {
@@ -864,7 +906,7 @@ impl OptionsDialog {
     fn activate(&mut self, widget: &Widget, pointer: Vec2) -> OptionsOutcome {
         if !widget.enabled {
             if let Some(Binding::Command(command)) = widget.binding {
-                if command.placeholder().is_some() {
+                if command.placeholder() {
                     let label = self.res.localization.localize(&widget.control.label);
                     self.placeholder(&label);
                 }
@@ -906,28 +948,50 @@ impl OptionsDialog {
                     popup,
                 });
             }
-            Some(Binding::Command(command)) => self.command(command),
+            Some(Binding::Command(command)) => return self.command(command),
             Some(Binding::KeyList) => self.key_list_click(widget.rect, pointer),
             None => {}
         }
         OptionsOutcome::None
     }
 
-    fn command(&mut self, command: Command) {
+    fn open_sub(&mut self, sub: Sub) {
+        self.sub_saved = Some(self.draft.config.clone());
+        self.sub = Some(sub);
+    }
+
+    /// Cancel, Escape or the title-bar close of a sub-dialog: its edits are dropped.
+    fn cancel_sub(&mut self) {
+        if let Some(saved) = self.sub_saved.take() {
+            self.draft.config = saved;
+        }
+        self.sub = None;
+    }
+
+    /// OK of a sub-dialog: its edits stay in the draft, and an advanced dialog applies its own
+    /// settings at once (other unapplied edits stay unapplied).
+    fn ok_sub(&mut self) -> OptionsOutcome {
+        self.commit_entry();
+        self.sub_saved = None;
+        let Some(sub) = self.sub.take() else {
+            return OptionsOutcome::None;
+        };
+        let mut applied = self.applied.clone();
+        if sub.apply_on_ok(&self.draft.config, &mut applied) && applied != self.applied {
+            self.applied = applied;
+            return OptionsOutcome::Apply(self.applied.clone());
+        }
+        OptionsOutcome::None
+    }
+
+    fn command(&mut self, command: Command) -> OptionsOutcome {
         self.tracker.reset();
         let loc = &self.res.localization;
         match command {
-            Command::GammaDialog => {
-                self.sub = Some(Sub::Gamma {
-                    saved: self.draft.config.video.gamma,
-                })
-            }
-            Command::AudioCredits => {
-                self.sub = Some(Sub::AudioCredits);
-            }
-            Command::VideoCredits => {
-                self.sub = Some(Sub::VideoCredits);
-            }
+            Command::GammaDialog => self.open_sub(Sub::Gamma),
+            Command::AudioCredits => self.open_sub(Sub::AudioCredits),
+            Command::VideoCredits => self.open_sub(Sub::VideoCredits),
+            Command::KeyAdvanced => self.open_sub(Sub::KeyboardAdvanced),
             Command::KeyDefaults => {
                 self.confirm = Some(MessageBox::new(
                     loc.text("#GameUI_KeyboardSettings"),
@@ -947,20 +1011,12 @@ impl OptionsDialog {
                         .insert(command.clone(), keys::UNBOUND.into());
                 }
             }
-            Command::KeyAdvanced | Command::VideoAdvanced => {
-                let label = command.placeholder().unwrap_or_default();
-                self.placeholder(label);
-            }
-            Command::SubOk => {
-                self.sub = None;
-            }
-            Command::SubCancel => {
-                if let Some(Sub::Gamma { saved }) = self.sub {
-                    self.draft.config.video.gamma = saved;
-                }
-                self.sub = None;
-            }
+            // Placeholder: disabled, so activation only logs its label (see `activate`).
+            Command::VideoAdvanced => {}
+            Command::SubOk => return self.ok_sub(),
+            Command::SubCancel => self.cancel_sub(),
         }
+        OptionsOutcome::None
     }
 
     /// Resets the `kb_act.lst` actions to the installed defaults (actions without one become
@@ -1103,10 +1159,16 @@ impl OptionsDialog {
         }
     }
 
-    fn sub_input(&mut self, sub: Sub, size: Vec2, input: &Input, pointer: Option<Vec2>) {
+    fn sub_input(
+        &mut self,
+        sub: Sub,
+        size: Vec2,
+        input: &Input,
+        pointer: Option<Vec2>,
+    ) -> OptionsOutcome {
         if sub.is_credits() {
             self.credits_input(size, input, pointer);
-            return;
+            return OptionsOutcome::None;
         }
         let res = self.res.clone();
         let area = Rect::new(0., 0., size.x, size.y);
@@ -1117,21 +1179,22 @@ impl OptionsDialog {
         match self.track(&list, &extra, pointer, input) {
             Some(Target::Close) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                self.command(Command::SubCancel);
+                self.command(Command::SubCancel)
             }
-            Some(Target::Control(i)) => {
-                if let (Some(widget), Some(p)) = (list.get(i), pointer) {
+            Some(Target::Control(i)) => match (list.get(i), pointer) {
+                (Some(widget), Some(p)) => {
                     if !matches!(widget.binding, Some(Binding::Slider(_))) {
                         self.sounds.push("ui/buttonclickrelease.wav".to_string());
                     }
-                    self.activate(widget, p);
+                    self.activate(widget, p)
                 }
-            }
+                _ => OptionsOutcome::None,
+            },
             _ if input.pressed(Key::Enter) && !was_editing => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                self.command(Command::SubOk);
+                self.command(Command::SubOk)
             }
-            _ => {}
+            _ => OptionsOutcome::None,
         }
     }
 
@@ -1750,8 +1813,20 @@ mod tests {
             "wide" "134" "tall" "24" "labelText" "#GameUI_UseDefaults" }
         "ChangeKeyButton" { "ControlName" "Button" "fieldName" "ChangeKeyButton" "xpos" "272"
             "ypos" "276" "wide" "106" "tall" "24" "labelText" "#GameUI_SetNewKey" }
+        "KeyAdvancedButton" { "ControlName" "Button" "fieldName" "KeyAdvancedButton" "xpos" "148"
+            "ypos" "276" "wide" "111" "tall" "24" "labelText" "#GameUI_AdvancedEllipsis" }
         "ClearKeyButton" { "ControlName" "Button" "fieldName" "ClearKeyButton" "xpos" "384"
             "ypos" "276" "wide" "105" "tall" "24" "labelText" "#GameUI_ClearKey" }
+    }"##;
+    const KEYBOARD_ADVANCED: &str = r##""resource/OptionsSubKeyboardAdvancedDlg.res" {
+        "FastSwitchCheck" { "ControlName" "CheckButton" "fieldName" "FastSwitchCheck" "xpos" "20"
+            "ypos" "38" "wide" "240" "tall" "24" "labelText" "#GameUI_FastSwitchCheck" }
+        "ConsoleCheck" { "ControlName" "CheckButton" "fieldName" "ConsoleCheck" "xpos" "20"
+            "ypos" "66" "wide" "244" "tall" "24" "labelText" "#GameUI_DeveloperConsoleCheck" }
+        "Button1" { "ControlName" "Button" "fieldName" "Button1" "xpos" "95" "ypos" "100"
+            "wide" "80" "tall" "24" "labelText" "#GameUI_OK" "Command" "OK" "Default" "1" }
+        "Button2" { "ControlName" "Button" "fieldName" "Button2" "xpos" "182" "ypos" "100"
+            "wide" "80" "tall" "24" "labelText" "#GameUI_Cancel" "Command" "Close" }
     }"##;
     const GAMMA: &str = r##""Resource/OptionsSubVideoGammaDlg.res" {
         "OptionsSubVideoGammaDlg" { "ControlName" "CGammaDialog" "fieldName" "OptionsSubVideoGammaDlg"
@@ -1782,6 +1857,7 @@ mod tests {
             ("optionssubvideo", VIDEO),
             ("optionssubkeyboard", KEYBOARD),
             ("optionssubvideogammadlg", GAMMA),
+            ("optionssubkeyboardadvanceddlg", KEYBOARD_ADVANCED),
         ] {
             layouts.insert(name.to_owned(), Layout::parse(text.as_bytes()).unwrap());
         }
@@ -2264,7 +2340,7 @@ mod tests {
             ["Advanced: not implemented in HL2-RS yet."]
         );
         h.click(page(300., 125.));
-        assert_eq!(h.dialog.sub, Some(Sub::Gamma { saved: 2.2 }));
+        assert_eq!(h.dialog.sub, Some(Sub::Gamma));
         // Gamma frame 290x396 centered: origin (495, 162); slider track at y 122.
         let gamma = vec2(495., 162.);
         h.click(gamma + vec2(17. + 4., 122.));
@@ -2296,10 +2372,41 @@ mod tests {
         });
         h.tab(Tab::Video);
         h.click(page(300., 125.));
+        assert!(h.dialog.sub == Some(Sub::Gamma), "opens in windowed mode");
+    }
+
+    #[test]
+    fn keyboard_advanced_cancel_restores_and_ok_applies_only_its_settings() {
+        let mut h = Harness::new();
+        h.tab(Tab::Keyboard);
+        h.dialog.draft.config.mouse.invert = true;
+        h.click(page(148. + 50., 276. + 12.));
+        assert_eq!(h.dialog.sub, Some(Sub::KeyboardAdvanced));
+        // No frame record: the controls span x 20..264, y 38..124, so the frame is 284 x 144
+        // (left margin repeated), centered at (498, 288).
+        let size = h.dialog.sub_frame_size(Sub::KeyboardAdvanced, |_| 0.);
+        assert_eq!(size, vec2(284., 144.));
+        let origin = vec2(498., 288.);
+        h.click(origin + vec2(30., 50.));
+        assert!(h.dialog.draft().keyboard.fast_switch);
+        h.click(origin + vec2(182. + 40., 112.));
+        assert_eq!(h.dialog.sub, None);
+        assert!(!h.dialog.draft().keyboard.fast_switch, "Cancel restores");
+        assert!(h.dialog.draft().mouse.invert, "earlier page edits stay");
+
+        h.click(page(148. + 50., 276. + 12.));
+        h.click(origin + vec2(30., 78.));
+        let outcome = h.click(origin + vec2(95. + 40., 112.));
+        let OptionsOutcome::Apply(applied) = outcome else {
+            panic!("advanced OK applies at once: {outcome:?}");
+        };
+        assert!(!applied.keyboard.developer_console);
         assert!(
-            matches!(h.dialog.sub, Some(Sub::Gamma { .. })),
-            "opens in windowed mode"
+            !applied.mouse.invert,
+            "other unapplied edits are not applied"
         );
+        assert!(h.dialog.draft().mouse.invert, "and stay in the draft");
+        assert!(h.dialog.changed(), "so Apply stays enabled for them");
     }
 
     #[test]
@@ -2370,6 +2477,10 @@ mod tests {
             ),
             (Panel::AudioCredits, &["Button2"]),
             (Panel::VideoCredits, &["Button2"]),
+            (
+                Panel::KeyboardAdvanced,
+                &["FastSwitchCheck", "ConsoleCheck"],
+            ),
         ];
         let config = Config::default();
         let draft = Draft::new(config.clone());
@@ -2406,6 +2517,35 @@ mod tests {
         h.dialog.command(Command::GammaDialog);
         h.frame(Input::default());
         assert!(h.dialog.gamma_texture.is_some());
+        // Sub-dialog OK/Cancel buttons bind through their layout `Command`, frame chrome is
+        // skipped, and every control lies below the title bar inside the frame.
+        let subs: &[Sub] = &[Sub::KeyboardAdvanced];
+        for &sub in subs {
+            let panel = sub.panel();
+            let size = h.dialog.sub_frame_size(sub, |_| 0.);
+            let area = Rect::new(0., 0., size.x, size.y);
+            let widgets = layout_widgets(&h.dialog.res, panel, area, &draft, &Config::default());
+            for w in &widgets {
+                let r = w.rect;
+                assert!(
+                    r.x >= 0. && r.y >= CLIENT_TOP && r.x + r.w <= size.x && r.y + r.h <= size.y,
+                    "{panel:?} {} {r:?} outside {size:?}",
+                    w.control.name
+                );
+            }
+            let commands: Vec<_> = widgets
+                .iter()
+                .filter_map(|w| match w.binding {
+                    Some(Binding::Command(c @ (Command::SubOk | Command::SubCancel))) => Some(c),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(commands, [Command::SubOk, Command::SubCancel], "{panel:?}");
+            assert!(widgets.iter().all(|w| !is_frame_chrome(w.control)));
+        }
+        h.dialog.command(Command::KeyAdvanced);
+        h.frame(Input::default());
+        assert_eq!(h.dialog.sub, Some(Sub::KeyboardAdvanced));
     }
 
     impl Harness {
@@ -2890,7 +3030,7 @@ mod tests {
     fn options_subdialog_close_button_cancels_and_restores() {
         let mut h = Harness::new();
         h.dialog.open(Config::default());
-        h.dialog.sub = Some(Sub::Gamma { saved: 2.2 });
+        h.dialog.open_sub(Sub::Gamma);
         h.dialog.draft.config.video.gamma = 1.6;
 
         let canvas = vec2(1280., 720.);

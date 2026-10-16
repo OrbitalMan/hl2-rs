@@ -264,9 +264,11 @@ pub(crate) fn controls(
     ui: Option<Res<crate::ui_host::Console>>,
     mut mouse_filter: Local<hl2_ui::input::MouseFilter>,
 ) {
-    // CGameRules::Think reads `skill` every frame, so a changed setting applies at once.
+    // CGameRules::Think reads `skill` every frame, and weapon selection reads
+    // `hud_fastswitch` on each key, so changed settings apply at once.
     if let (Some(game), Some(ui)) = (game.as_deref_mut(), ui.as_deref()) {
         game.set_skill(ui.source.config.gameplay.skill);
+        game.selection.fast_switch = ui.source.config.keyboard.fast_switch;
     }
     let Ok((window, cursor)) = windows.single() else {
         return;

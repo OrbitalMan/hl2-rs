@@ -211,7 +211,19 @@ Semantics:
   installed `.res` file.
 - High Dynamic Range is shown on macOS too, although the retail `.res` hides it there.
 - Placeholders are shown disabled and log `"<label>: not implemented in HL2-RS yet."`: Gamepad tab
-  (empty page), Keyboard Advanced..., Video Advanced....
+  (empty page), Video Advanced....
+- Keyboard > Advanced (`optionssubkeyboardadvanceddlg.res`, title
+  `#GameUI_KeyboardAdvanced_Title`): Fast weapon switch (`hud_fastswitch`, config
+  `keyboard.fast_switch`, read by weapon selection every frame) and Enable developer console
+  (`con_enable`, `keyboard.developer_console`, default on; while off the console key and
+  `toggleconsole` do not open the console, an open console still closes). The layout has no frame
+  record, so the frame is the controls' extent with the left margin repeated (284 x 144).
+- Sub-dialogs (brightness, credits, advanced): edits go to the draft and Cancel, Escape or the
+  title-bar close restore the draft as it was when the sub-dialog opened. OK of an advanced dialog
+  applies that dialog's settings at once, as retail OK writes its cvars, and leaves other
+  unapplied edits in the draft. Buttons without an explicit binding bind by their layout
+  `Command` (`OK`, `Close`); `frame_*` controls (caption, close, grips) are frame chrome and are
+  not drawn as widgets.
 
 ### 6a. Widget interaction states (2026-10-15)
 
