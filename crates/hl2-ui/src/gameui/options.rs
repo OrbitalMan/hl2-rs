@@ -127,6 +127,11 @@ impl Sub {
         matches!(self, Self::AudioCredits | Self::VideoCredits)
     }
 
+    /// Drawn on a fully opaque frame: dialogs whose content would mix with the page behind.
+    fn opaque(self) -> bool {
+        self.is_credits() || self == Self::VideoAdvanced
+    }
+
     fn panel(self) -> Panel {
         match self {
             Self::Gamma => Panel::Gamma,
@@ -363,9 +368,22 @@ pub fn button_rects() -> [Rect; 3] {
     [rect(apply - 160.), rect(apply - 80.), rect(apply)]
 }
 
-/// Frame size of a sub-dialog: its layout's frame record; for a layout without one, the extent
-/// of its controls with the left margin repeated on the right and bottom; else the fallback.
+/// Frame size of a sub-dialog: as authored ([`authored_frame_size`]), taller by the footer
+/// reflow ([`footer_reflow`]) when content reaches into the footer.
 fn frame_size(res: &GameUiResources, sub: Sub) -> Vec2 {
+    let size = authored_frame_size(res, sub);
+    let Some(layout) = res.layout(sub.panel().layout()) else {
+        return size;
+    };
+    let controls = drawn_controls(sub.panel(), layout);
+    let (shift, _) = footer_reflow(sub.panel(), &controls, (size.x, size.y));
+    size + vec2(0., shift)
+}
+
+/// Frame size of a sub-dialog as authored: its layout's frame record; for a layout without one,
+/// the extent of its controls with the left margin repeated on the right and bottom; else the
+/// fallback.
+fn authored_frame_size(res: &GameUiResources, sub: Sub) -> Vec2 {
     let Some(layout) = res.layout(sub.panel().layout()) else {
         return sub.fallback_size();
     };
@@ -391,6 +409,74 @@ fn frame_size(res: &GameUiResources, sub: Sub) -> Vec2 {
     vec2(right + left, bottom + left)
 }
 
+/// Space kept between a dialog's lowest content control and its footer when the footer moves.
+const FOOTER_GAP: f32 = 8.;
+
+/// The controls a layout draws (visible, not frame chrome or the frame record itself).
+fn drawn_controls(panel: Panel, layout: &super::layout::Layout) -> Vec<&Control> {
+    layout
+        .controls
+        .iter()
+        .filter(|c| c.visible || settings::force_visible(panel, &c.name))
+        .filter(|c| !matches!(c.kind, ControlKind::Other(_)) && !is_frame_chrome(c))
+        .collect()
+}
+
+fn control_binding(panel: Panel, control: &Control) -> Option<Binding> {
+    settings::binding(panel, &control.name).or_else(|| settings::command_binding(&control.command))
+}
+
+/// A dialog footer that overlaps content moves below it.
+///
+/// VGUI places controls absolutely. The installed Video > Advanced layout keeps older macOS
+/// (`[$OSX]`) footer positions that predate its Classic Effects row, so OK/Cancel land on that
+/// combo. The footer is the OK/Cancel buttons plus the unbound caption over them (a label
+/// without `associate`, at most two button heights above the button row: the installed caption
+/// sits 26 units above it on Windows, 6 on macOS). When content reaches
+/// into the footer, the footer moves down to `FOOTER_GAP` below the lowest content control, and
+/// the frame grows by the same amount. Returns the shift and whether each control is footer.
+fn footer_reflow(panel: Panel, controls: &[&Control], parent: (f32, f32)) -> (f32, Vec<bool>) {
+    let is_button = |c: &Control| {
+        matches!(
+            control_binding(panel, c),
+            Some(Binding::Command(Command::SubOk | Command::SubCancel))
+        )
+    };
+    let buttons: Vec<(f32, f32)> = controls
+        .iter()
+        .filter(|c| is_button(c))
+        .map(|c| (c.rect(parent).1, c.tall))
+        .collect();
+    let Some((button_top, button_tall)) =
+        buttons.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0))
+    else {
+        return (0., vec![false; controls.len()]);
+    };
+    let footer: Vec<bool> = controls
+        .iter()
+        .map(|c| {
+            is_button(c)
+                || (c.kind == ControlKind::Label
+                    && c.associate.is_empty()
+                    && control_binding(panel, c).is_none()
+                    && c.rect(parent).1 >= button_top - 2. * button_tall)
+        })
+        .collect();
+    let footer_top = controls
+        .iter()
+        .zip(&footer)
+        .filter(|(_, f)| **f)
+        .map(|(c, _)| c.rect(parent).1)
+        .fold(f32::INFINITY, f32::min);
+    let content_bottom = controls
+        .iter()
+        .zip(&footer)
+        .filter(|(_, f)| !**f)
+        .map(|(c, _)| c.rect(parent).1 + c.tall)
+        .fold(0., f32::max);
+    ((content_bottom + FOOTER_GAP - footer_top).max(0.), footer)
+}
+
 /// Controls a VGUI `Frame` creates for itself (`frame_caption`, `frame_close`, resize grips):
 /// the dialog frame draws its own title bar and close button.
 fn is_frame_chrome(control: &Control) -> bool {
@@ -410,15 +496,15 @@ fn layout_widgets<'a>(
     let Some(layout) = res.layout(panel.layout()) else {
         return Vec::new();
     };
-    let mut widgets: Vec<Widget> = layout
-        .controls
-        .iter()
-        .filter(|c| c.visible || settings::force_visible(panel, &c.name))
-        .filter(|c| !matches!(c.kind, ControlKind::Other(_)) && !is_frame_chrome(c))
-        .map(|control| {
+    let controls = drawn_controls(panel, layout);
+    let (shift, footer) = footer_reflow(panel, &controls, (area.w, area.h));
+    let mut widgets: Vec<Widget> = controls
+        .into_iter()
+        .zip(footer)
+        .map(|(control, in_footer)| {
             let (x, y, w, h) = control.rect((area.w, area.h));
-            let binding = settings::binding(panel, &control.name)
-                .or_else(|| settings::command_binding(&control.command));
+            let y = if in_footer { y + shift } else { y };
+            let binding = control_binding(panel, control);
             Widget {
                 control,
                 rect: Rect::new(area.x + x, area.y + y, w, h),
@@ -1443,8 +1529,8 @@ impl OptionsDialog {
         );
         let tabs = self.tab_rects(&|t| p.text_width(t, false));
         let page = page_rect();
-        p.raised(page);
         let active = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
+        p.raised_open_top(page, tabs[active]);
         for (i, rect) in tabs.iter().enumerate() {
             if i != active {
                 let (armed, pressed) = state(Target::Tab(i));
@@ -1491,7 +1577,7 @@ impl OptionsDialog {
         if let Some(sub) = self.sub {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
             let mut theme = base.theme.clone();
-            if sub.is_credits() {
+            if sub.opaque() {
                 theme.frame_bg.a = 1.0;
             }
             let sp = Painter {
@@ -2524,6 +2610,46 @@ mod tests {
     }
 
     #[test]
+    fn footer_moves_below_content_it_overlaps_and_the_frame_grows() {
+        // The installed macOS rows: the caption at 310 and OK/Cancel at 316 overlap the
+        // Classic Effects combo (316..340).
+        let overlapping = Layout::parse(
+            br##""resource/OptionsSubVideoAdvancedDlg.res" {
+            "ClassicEffectsLabel" { "ControlName" "Label" "fieldName" "ClassicEffectsLabel"
+                "xpos" "22" "ypos" "292" "wide" "138" "tall" "24" "associate" "ClassicEffects" }
+            "ClassicEffects" { "ControlName" "ComboBox" "fieldName" "ClassicEffects" "xpos" "22"
+                "ypos" "316" "wide" "132" "tall" "24" }
+            "Label11" { "ControlName" "Label" "fieldName" "Label11" "xpos" "18" "ypos" "310"
+                "wide" "280" "tall" "24" "labelText" "#GameUI_RecommendedSettings" }
+            "Button1" { "ControlName" "Button" "fieldName" "Button1" "xpos" "290" "ypos" "316"
+                "wide" "80" "tall" "24" "Command" "OK" }
+            "Button2" { "ControlName" "Button" "fieldName" "Button2" "xpos" "382" "ypos" "316"
+                "wide" "80" "tall" "24" "Command" "Close" }
+        }"##,
+        )
+        .unwrap();
+        let controls: Vec<&Control> = overlapping.controls.iter().collect();
+        let (shift, footer) = footer_reflow(Panel::VideoAdvanced, &controls, (482., 358.));
+        assert_eq!(shift, 340. + FOOTER_GAP - 310.);
+        assert_eq!(
+            footer,
+            [false, false, true, true, true],
+            "caption and buttons"
+        );
+        // The Windows rows (caption 442, buttons 468) already clear the content.
+        let mut clear = overlapping.clone();
+        for (name, y) in [("Label11", 442.), ("Button1", 468.), ("Button2", 468.)] {
+            clear.get_mut(name).unwrap().y = crate::gameui::layout::Coord::Start(y);
+        }
+        let controls: Vec<&Control> = clear.controls.iter().collect();
+        assert_eq!(
+            footer_reflow(Panel::VideoAdvanced, &controls, (482., 510.)).0,
+            0.
+        );
+        assert!(Sub::VideoAdvanced.opaque() && !Sub::KeyboardAdvanced.opaque());
+    }
+
+    #[test]
     fn video_advanced_combo_and_fov_slider_apply_on_ok() {
         let mut h = Harness::new();
         h.tab(Tab::Video);
@@ -2677,7 +2803,7 @@ mod tests {
         // skipped, and every interactive control lies below the title bar inside the frame
         // (label boxes only start there: the installed `Label10` box overhangs the frame by 2,
         // and the frame clips it).
-        let subs: &[Sub] = &[Sub::KeyboardAdvanced, Sub::VideoAdvanced];
+        let subs: &[Sub] = &[Sub::Gamma, Sub::KeyboardAdvanced, Sub::VideoAdvanced];
         for &sub in subs {
             let panel = sub.panel();
             let size = h.dialog.sub_frame_size(sub, |_| 0.);
@@ -2691,6 +2817,20 @@ mod tests {
                     "{panel:?} {} {r:?} outside {size:?}",
                     w.control.name
                 );
+            }
+            let overlaps = |a: Rect, b: Rect| {
+                a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+            };
+            let interactive: Vec<&Widget> = widgets.iter().filter(|w| w.interactive()).collect();
+            for (i, a) in interactive.iter().enumerate() {
+                for b in &interactive[i + 1..] {
+                    assert!(
+                        !overlaps(a.rect, b.rect),
+                        "{panel:?}: {} overlaps {}",
+                        a.control.name,
+                        b.control.name
+                    );
+                }
             }
             let commands: Vec<_> = widgets
                 .iter()

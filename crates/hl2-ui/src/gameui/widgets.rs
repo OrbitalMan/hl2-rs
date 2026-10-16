@@ -276,6 +276,7 @@ impl Theme {
         TabStyle {
             text: if active { self.text } else { self.text_dull },
             open_bottom: active,
+            fill: !active,
             hover_bg: (!active && state.armed && state.enabled).then_some(self.menu_bg),
         }
     }
@@ -306,6 +307,9 @@ pub struct TabStyle {
     pub text: Color,
     /// The active tab has no bottom edge, so it opens into its page.
     pub open_bottom: bool,
+    /// Inactive tabs fill their own background; the active tab is the page's surface (the
+    /// frame shows through both), so the two read as one piece.
+    pub fill: bool,
     /// Hover fill drawn over the tab background, if any.
     pub hover_bg: Option<Color>,
 }
@@ -404,6 +408,23 @@ impl Painter<'_> {
 
     pub fn raised(&self, rect: Rect) {
         self.border(rect, self.theme.border_bright, self.theme.border_dark);
+    }
+
+    /// A raised border whose top edge is open between the side edges of `tab`, where the active
+    /// tab joins the page below it.
+    pub fn raised_open_top(&self, rect: Rect, tab: Rect) {
+        let r = self.map(rect);
+        let tab = self.map(tab);
+        let t = self.scale.round().max(1.);
+        let (bright, dark) = (self.theme.border_bright, self.theme.border_dark);
+        let gap_start = (tab.x + t).clamp(r.x, r.x + r.w);
+        let gap_end = (tab.x + tab.w - t).clamp(gap_start, r.x + r.w);
+        self.canvas.rectangle(r.x, r.y, gap_start - r.x, t, bright);
+        self.canvas
+            .rectangle(gap_end, r.y, r.x + r.w - gap_end, t, bright);
+        self.canvas.rectangle(r.x, r.y, t, r.h, bright);
+        self.canvas.rectangle(r.x, r.y + r.h - t, r.w, t, dark);
+        self.canvas.rectangle(r.x + r.w - t, r.y, t, r.h, dark);
     }
 
     pub fn sunken(&self, rect: Rect) {
@@ -1344,7 +1365,9 @@ impl Painter<'_> {
     pub fn tab(&self, rect: Rect, label: &str, active: bool, state: ButtonState) {
         let style = self.theme.tab_style(active, state);
         let color = style.text;
-        self.fill(rect, self.theme.frame_bg);
+        if style.fill {
+            self.fill(rect, self.theme.frame_bg);
+        }
         if let Some(bg) = style.hover_bg {
             self.fill(rect, bg);
         }

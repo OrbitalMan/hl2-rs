@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: opaque Video > Advanced, footer reflow, active tab joins its page
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::gameui::options`: `Sub::opaque` (credits and Video > Advanced draw on an opaque frame); `footer_reflow` moves a sub-dialog footer (OK/Close buttons and the unbound caption over them) below content it overlaps and grows the frame by the same amount, used by `frame_size` and `layout_widgets`; the page border opens under the active tab. `widgets`: `TabStyle::fill` (the active tab adds no fill), `Painter::raised_open_top`.
+
+**Why:** owner requests: Video > Advanced at 100% opacity; its elements did not fit (on macOS the installed `[$OSX]` footer rows put OK/Cancel and the caption on the Classic Effects combo); the selected tab should share the fill of the page below.
+
+**Tested how:** unit test (macOS rows shift by 38, Windows rows by 0, footer classification); owned test (no two interactive controls overlap in the gamma, Keyboard > Advanced and Video > Advanced installed layouts); workspace tests, strict clippy, Windows check, fmt; packaged captures at 1024x768 (`runtime_options_capture.sh`: Keyboard > Advanced, Video > Advanced) checked by eye.
+
+**Result:** Video > Advanced is opaque and 396 tall on macOS with the footer below Classic Effects; Windows keeps the authored 510 layout. The active tab and its page read as one surface.
+
+**Still broken or not tested:** Windows not run; Keyboard > Advanced and the brightness dialog stay translucent (not requested).
+
+**Next:** owner check.
+
 ## 2026-10-16 GameUI: Gamepad tab
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

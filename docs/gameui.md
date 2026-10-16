@@ -231,6 +231,13 @@ Semantics:
   only. Retail lists only the antialiasing modes the hardware supports; here the list is fixed.
   The DirectX level rows are hidden on macOS/Linux by the layout (`[$POSIX]`); on Windows the
   disabled DirectX level combo stays empty.
+  The dialog is drawn fully opaque. Its macOS (`[$OSX]`) footer positions predate the Classic
+  Effects row and would put OK/Cancel on that combo, so a sub-dialog footer that overlaps content
+  moves below it (`FOOTER_GAP` 8) and the frame grows by the same amount (`footer_reflow`; footer =
+  OK/Close buttons plus an unbound caption at most two button heights above them). The FOV
+  slider's "0.00"/"1.00" end captions are the layout's own `leftText`/`rightText`, kept as authored.
+- Tabs: the active tab adds no fill of its own and the page border is open under it
+  (`Painter::raised_open_top`), so it shares the page's surface; inactive tabs keep their fill.
 - Keyboard > Advanced (`optionssubkeyboardadvanceddlg.res`, title
   `#GameUI_KeyboardAdvanced_Title`): Fast weapon switch (`hud_fastswitch`, config
   `keyboard.fast_switch`, read by weapon selection every frame) and Enable developer console
