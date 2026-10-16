@@ -1007,8 +1007,8 @@ mod tests {
         let root = source_assets::install::discover().expect("installed game");
         // The menu's file system follows the loaded background map; an Episode Two background
         // mounts Episode Two first. Half-Life 2 must still get its own chapter files.
-        for startup in [None, Some("ep2"), Some("episodic"), Some("lostcoast")] {
-            let vfs = Vfs::mount_expansion(&root, startup).expect("mount");
+        for startup in ["hl2", "ep2", "episodic", "lostcoast"] {
+            let vfs = Vfs::mount_game(&root, startup).expect("mount");
             let res = GameUiResources::load(&vfs);
             let map = |game: &str| res.background_maps.get(game).map(String::as_str);
             let new_game = |game: &str| res.new_game_maps.get(game).map(String::as_str);
@@ -1316,7 +1316,7 @@ mod tests {
             .background_image("hl2", "background01", false)
             .unwrap();
 
-        let vfs_lc = source_assets::vpk::Vfs::mount_expansion(&root, Some("lostcoast")).unwrap();
+        let vfs_lc = source_assets::vpk::Vfs::mount_game(&root, "lostcoast").unwrap();
         let res_lc = GameUiResources::load(&vfs_lc);
         let hl2_lc = res_lc
             .background_image("hl2", "background01", false)

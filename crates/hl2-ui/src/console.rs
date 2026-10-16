@@ -760,6 +760,23 @@ impl Console {
         GameMap::new(game, map)
     }
 
+    /// The background to show when leaving a map for the main menu: the running game's own
+    /// chapter 1 background, which becomes the saved menu background (a Half-Life 2 map played
+    /// from the Episode Two menu returns to Half-Life 2's background), else the saved one.
+    fn menu_background_after_game(&mut self) -> Option<GameMap> {
+        let running = self.loaded_map.as_ref().map(|m| m.game.clone());
+        let Some((game, map)) = running.and_then(|game| {
+            let map = self.gameui.background_maps.get(&game)?.clone();
+            Some((game, map))
+        }) else {
+            return self.background();
+        };
+        let background = GameMap::new(game, map);
+        self.set_background(Some(background.clone()));
+        let _ = self.config.save();
+        Some(background)
+    }
+
     /// Shows a game's menu category over that game's own chapter 1 background, loading it
     /// unless it is already the loaded background level.
     fn show_category(&mut self, category: &str) -> Vec<Effect> {
@@ -1470,7 +1487,7 @@ impl Console {
                     ConfirmKind::ReturnToMainMenu => {
                         self.mode = Mode::MainMenu;
                         self.clear_menu_hover();
-                        match self.background() {
+                        match self.menu_background_after_game() {
                             Some(background) => effects.push(Effect::MainMenuMap(background)),
                             None => {
                                 self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
@@ -2815,6 +2832,47 @@ mod tests {
             ]
         );
         assert_eq!(console.mode, Mode::MainMenu);
+    }
+
+    #[test]
+    fn return_to_main_menu_shows_the_running_games_background() {
+        let mut console = installed_console();
+        // The Episode Two menu is showing, then a Half-Life 2 map is loaded from the console.
+        console.set_background(Some(GameMap::new("ep2", "ep2_background01")));
+        console.level_loaded_for_map("ep2", "ep2_background01", true);
+        assert_eq!(
+            console.submit("map d1_trainstation_02"),
+            vec![Effect::Map("d1_trainstation_02".into())]
+        );
+        console.level_loaded_for_map("hl2", "d1_trainstation_02", false);
+        assert_eq!(console.mode, Mode::Gameplay);
+
+        console.escape();
+        click_row(&mut console, 5); // Return to main menu
+        let (confirm, _) = console.confirm_box.clone().expect("confirmation box");
+        let (origin, scale, layout) = console.quit_geometry(&confirm);
+        let pointer =
+            Some(origin + vec2(layout.buttons[0].x + 3., layout.buttons[0].y + 3.) * scale);
+        let press = Input {
+            pointer,
+            click: true,
+            held: true,
+            ..Default::default()
+        };
+        let _ = console.input(&press);
+        let effects = console.input(&Input {
+            pointer,
+            released: true,
+            ..Default::default()
+        });
+        assert!(
+            effects.contains(&Effect::MainMenuMap(GameMap::new("hl2", "background01"))),
+            "{effects:?}"
+        );
+        assert_eq!(
+            console.background(),
+            Some(GameMap::new("hl2", "background01"))
+        );
     }
 
     #[test]

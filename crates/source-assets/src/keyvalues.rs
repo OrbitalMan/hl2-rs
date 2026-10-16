@@ -539,7 +539,7 @@ mod tests {
     #[ignore = "requires owned install"]
     fn parse_ep2_hudlayout() {
         let game = crate::install::discover().expect("game install");
-        let vfs = crate::vpk::Vfs::mount_expansion(&game, Some("ep2")).expect("vfs");
+        let vfs = crate::vpk::Vfs::mount_game(&game, "ep2").expect("vfs");
         let bytes = vfs
             .read("scripts/HudLayout.res")
             .expect("read")

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 VFS: mount gameinfo.txt search paths; Return to main menu shows the running game's background
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `source-assets::vpk`: `search_paths(root, game)` reads `<game>/gameinfo.txt` `FileSystem/SearchPaths`; `Vfs` is an ordered list of loose folders and VPKs built by `Vfs::mount_game`; `Vfs::mount` mounts `hl2`; removed `mount_expansion` (hardcoded `ep2` -> `episodic`) and the separate custom-folder pass. `hl2-ui::console`: `menu_background_after_game` for Return to main menu. `scripts/build-bevy.sh`: replace the packaged executable instead of overwriting it. Playground: `runtime_return_menu.sh` + `return_menu.json`, `check_search_order.py`. Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Owner: read inheritance from `gameinfo.txt` instead of hardcoding it; owner report: after loading `d1_trainstation_02` from the Episode Two menu, Return to main menu still showed Episode Two's background.
+
+**Tested how:** `cargo test -p source-assets` (95), `-p hl2-ui` (193), `-p hl2-bevy` (74); owned-install: `source-assets` 20/20 (with `HL2_ROOT`), `hl2-simulation` + `modkit-core` `--include-ignored`, `hl2-ui` 5, `hl2-bevy` 6; strict clippy for macOS and `x86_64-pc-windows-msvc`; fmt; packaged replays `runtime_return_menu.sh` and `runtime_submenus.sh`.
+
+**Result:** Each game mounts its declared search path; the reported case returns to `hl2/background01`.
+
+**Still broken or not tested:** Retail order now prefers VPKs over loose folders (loose `hl2/models/weapons/*.mdl` duplicates are no longer used); 11 older owned `source-assets` tests still require `HL2_ROOT`; the menu returns to chapter 1's background, not the chapter of the map played; not run on Windows.
+
+**Next:** Owner check; optionally move the remaining `HL2_ROOT` tests to `install::discover()`.
+
 ## 2026-10-16 Host/GameUI: carry each map's game instead of guessing it from the name
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
