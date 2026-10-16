@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 session 21 (cont.): NPC-vs-NPC enemies, ai_relationship, gunfire sounds, chase repath, dynamic graph links, path simplification/turn rate (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_dynamiclink.cpp, ai_navigator.cpp SimplifyPath*, ai_motor.cpp MoveFacing/UpdateYaw/AI_ClampYaw, npc_metropolice.cpp MaxYawSpeed, ai_basenpc.cpp UpdateEnemyPos/GetGoalRepathTolerance, CAI_Relationship, soundent.h volumes and the weapons' InsertSound calls).
+
+**Changed:** dynamic graph links (initial state, TurnOn/TurnOff); wildcard assault names; held templates are not goal actors; SimplifyPathForward and the metrocop turn rate for AI goals; chase paths refound as the enemy moves; NPC-vs-NPC sight/memory/targeting, ai_relationship, F4 allegiance sides, CSoundEnt gunfire from NPCs and the player, NPC damage memory; AI report yaw.
+
+**Why:** owner reports (robotic straight-line movement, cops stopping to look while chasing, the canals planner refusing graph routes) and the owner's priority on NPC-vs-NPC fights for showcases.
+
+**Tested how:** hl2-simulation unit tests (dynamic links, path simplification, chase repath, friend/foe targeting, ai_relationship apply/revert, report serialization), workspace tests (two known release-only should_panic failures), strict Clippy, fmt; packaged canals reruns (no blocked moves), d1_trainstation_02 F4 duel (artifacts/s21/npc-duel2), regression batch artifacts/s21b-regression.
+
+**Result:** the duel works both ways (hearing, turning, returning fire, reloads, a winner). Regression: weapons 17/17, attention 26/26, movement 25/26 (the known doll01 warning), campaign texture errors 25 (station03 set); every final image matches s21-regression except the Breen slate exposure (max 15, known variation); feeds identical.
+
+**Still broken or not tested:** stunstick melee on NPCs; packaged chase/turn comparison with native; scene moves are not simplified; F4 spawns face away and a cop behind the player reacts only to sound; graph searches refuse graphs over 1500 nodes.
+
+**Next:** DESIGN 14n steps 2-4 (citizens/medics, soldiers, natural attacks), stunstick melee on NPCs, native chase comparison.
+
 ## 2026-10-16 session 21: native NPC pistol comparison; metrocop pistol regulator, assault behavior, aiscripted_schedule, player hitboxes (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (npc_metropolice.cpp OnUpdateShotRegulator/SelectSchedule/TranslateSchedule/CreateBehaviors, ai_utils.cpp CAI_ShotRegulator, ai_basenpc.cpp OnRangeAttack1/GatherEnemyConditions/GetActualShootPosition/GetAttackSpread/GetSpreadBias, ai_behavior_assault.cpp/.h, ai_behavior.h behavior host, scripted.cpp CAI_ScriptedSchedule, player.cpp TraceAttack), Codex's private ai-scripted-schedule contract notes (campaign-scenes-20261016h), owned models/player.mdl (temporary probe test, not committed), native oracle capture with 60 fps recording and per-process audio.

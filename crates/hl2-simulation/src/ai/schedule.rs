@@ -283,6 +283,10 @@ pub struct AiNpc {
     pub shot_regulator: Option<crate::npc_weapons::ShotRegulator>,
     /// bits_MEMORY_HAD_LOS: the enemy was in line of sight at the last think.
     pub had_enemy_los: bool,
+    /// GOALTYPE_ENEMY navigation: the chase path's goal position and the earliest next
+    /// repath (UpdateEnemyPos).
+    pub enemy_goal: Option<Vec3>,
+    enemy_repath_at: f64,
 }
 
 /// WorldSpaceCenter to the enemy's WorldSpaceCenter (both standing 72-unit hulls: the
@@ -370,7 +374,37 @@ impl AiNpc {
         }
         Some(TaskStatus::Complete)
     }
+    /// CAI_BaseNPC::UpdateEnemyPos while following a chase path: when the enemy's last
+    /// known position strays from the goal by more than GetGoalRepathTolerance (120,
+    /// scaled down by the seconds to reach it, x1.2 for non-player targets), refind the
+    /// path (at most every 0.1 s). None: nothing to do; Some(false): no route. The
+    /// smoothed-velocity term uses the metrocop run speed (we keep no NPC velocity).
+    fn repath_to_enemy(&mut self, ctx: &Context, motor: &mut dyn Motor) -> Option<bool> {
+        const RUN_SPEED: f32 = 190.;
+        let goal = self.enemy_goal?;
+        let (enemy, lkp) = ctx.enemy?;
+        if ctx.now < self.enemy_repath_at
+            || matches!(motor.movement(), MoveStatus::Arrived | MoveStatus::Idle)
+        {
+            return None;
+        }
+        let seconds = (ctx.origin - lkp).length() / RUN_SPEED;
+        let mut tolerance = (120. * seconds).clamp(0., 120.);
+        if enemy != super::metropolice::PLAYER {
+            tolerance *= 1.2;
+        }
+        if goal.distance(lkp) <= tolerance {
+            return None;
+        }
+        self.enemy_repath_at = ctx.now + 0.1;
+        if !motor.path_to(lkp, true) {
+            return Some(false);
+        }
+        self.enemy_goal = Some(lkp);
+        Some(true)
+    }
     fn set_schedule(&mut self, name: String) {
+        self.enemy_goal = None;
         self.schedule = Some(name);
         self.task = 0;
         self.task_started = false;
@@ -603,12 +637,19 @@ impl AiNpc {
                     Failed
                 }
             }
-            "TASK_GET_PATH_TO_ENEMY_LOS"
-            | "TASK_GET_CHASE_PATH_TO_ENEMY"
-            | "TASK_GET_PATH_TO_RANGE_ENEMY_LKP_LOS" => match ctx.enemy {
-                Some((_, p)) if motor.path_to(p, true) => Complete,
+            "TASK_GET_CHASE_PATH_TO_ENEMY" => match ctx.enemy {
+                Some((_, p)) if motor.path_to(p, true) => {
+                    self.enemy_goal = Some(p);
+                    Complete
+                }
                 _ => Failed,
             },
+            "TASK_GET_PATH_TO_ENEMY_LOS" | "TASK_GET_PATH_TO_RANGE_ENEMY_LKP_LOS" => {
+                match ctx.enemy {
+                    Some((_, p)) if motor.path_to(p, true) => Complete,
+                    _ => Failed,
+                }
+            }
             "TASK_GET_PATH_TO_TARGET" => match ctx.target {
                 Some(p) if motor.path_to(p, true) => Complete,
                 _ => Failed,
@@ -736,6 +777,7 @@ impl AiNpc {
                     Running
                 }
             }
+            "TASK_WAIT_FOR_MOVEMENT" if self.repath_to_enemy(ctx, motor) == Some(false) => Failed,
             "TASK_WAIT_FOR_MOVEMENT" => match motor.movement() {
                 MoveStatus::Moving => Running,
                 MoveStatus::Failed => Failed,
@@ -814,6 +856,42 @@ pub(crate) mod tests {
     struct Base;
     impl Behavior for Base {}
 
+    #[test]
+    fn chase_paths_follow_the_moving_enemy() {
+        let mut npc = AiNpc::new(1);
+        npc.enemy_goal = Some(Vec3::new(300., 0., 0.));
+        let mut motor = FakeMotor {
+            status: Some(MoveStatus::Moving),
+            ..Default::default()
+        };
+        let ctx = |now: f64, enemy: Vec3| Context {
+            now,
+            enemy: Some((super::super::metropolice::PLAYER, enemy)),
+            ..Default::default()
+        };
+        // Moved 50 of a 120-unit tolerance: keep the path.
+        assert_eq!(
+            npc.repath_to_enemy(&ctx(1., Vec3::new(300., 50., 0.)), &mut motor),
+            None
+        );
+        // Moved 200: refind the path to the new position, then wait 0.1 s.
+        let moved = Vec3::new(300., 200., 0.);
+        assert_eq!(npc.repath_to_enemy(&ctx(1., moved), &mut motor), Some(true));
+        assert_eq!(motor.path, Some(moved));
+        let further = Vec3::new(300., 400., 0.);
+        assert_eq!(npc.repath_to_enemy(&ctx(1.05, further), &mut motor), None);
+        assert_eq!(
+            npc.repath_to_enemy(&ctx(1.2, further), &mut motor),
+            Some(true)
+        );
+        // Close by, the tolerance shrinks with the time to reach the enemy: 36 units
+        // away (0.19 s at run speed) a 30-unit move already repaths.
+        npc.enemy_goal = Some(Vec3::new(20., 0., 0.));
+        assert_eq!(
+            npc.repath_to_enemy(&ctx(2., Vec3::new(20., 30., 0.)), &mut motor),
+            Some(true)
+        );
+    }
     #[test]
     fn default_table_parses_and_text_format_round_trips() {
         let s = Schedules::default();

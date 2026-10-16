@@ -2058,6 +2058,8 @@ pub struct NpcBullets {
     pub player_hits: Vec<(Vec3, f32)>,
     /// Tracer segments (shooter, start, end).
     pub tracers: Vec<(usize, Vec3, Vec3)>,
+    /// (victim, attacker) per pellet that struck an NPC.
+    pub npc_hits: Vec<(usize, usize)>,
 }
 /// MAX_TRACE_LENGTH.
 pub const MAX_TRACE_LENGTH: f32 = 56755.84;
@@ -2169,6 +2171,13 @@ pub fn npc_fire_bullets(
             ));
         }
         if let Some(hit) = hit {
+            if world
+                .entities
+                .get(hit.entity)
+                .is_some_and(|e| e.class().starts_with("npc_"))
+            {
+                out.npc_hits.push((hit.entity, shot.attacker));
+            }
             out.impacts.push((hit, direction));
             apply_hit(
                 world,

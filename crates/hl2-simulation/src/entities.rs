@@ -2399,6 +2399,8 @@ impl Scene {
                 && matches!(input.as_str(), "startschedule" | "stopschedule"))
             || (matches!(class, "info_node_link" | "info_node_link_controller")
                 && matches!(input.as_str(), "turnon" | "turnoff"))
+            || (class == "ai_relationship"
+                && matches!(input.as_str(), "applyrelationship" | "revertrelationship"))
         {
             self.ai_inputs
                 .push((id, input, p.parameter.clone(), p.activator));

@@ -786,6 +786,8 @@ impl Gameplay {
                 direction,
             );
         } else if allowed && !self.primary_consumed && (primary || self.inventory.delayed_attack) {
+            let active = self.inventory.active.clone();
+            let clip = self.inventory.owned.get(&active).copied();
             self.inventory.attack(
                 &self.weapons,
                 &self.world,
@@ -794,6 +796,19 @@ impl Gameplay {
                 eye,
                 direction,
             );
+            // The weapons' PrimaryAttack: CSoundEnt::InsertSound(SOUND_COMBAT, origin,
+            // SOUNDENT_VOLUME_PISTOL/MACHINEGUN/SHOTGUN 1500 (the 357: 600), 0.2).
+            let volume = match active.as_str() {
+                "weapon_pistol" | "weapon_smg1" | "weapon_ar2" | "weapon_shotgun" => Some(1500.),
+                "weapon_357" => Some(600.),
+                _ => None,
+            };
+            if let Some(volume) =
+                volume.filter(|_| self.inventory.owned.get(&active).copied() < clip)
+            {
+                self.ai
+                    .insert_combat_sound(player.feet, volume, self.scene.time);
+            }
         }
         // weapon_physcannon: ItemPreFrame/ItemPostFrame on the Rapier props (weapons stage).
         self.inventory.physcannon_frame(
@@ -894,6 +909,9 @@ impl Gameplay {
                     &mut || self.ai.uniform(),
                     &mut bullets,
                 );
+            }
+            for &(victim, attacker) in &bullets.npc_hits {
+                self.ai.npc_attacked(victim, attacker);
             }
             for (inflictor, amount) in bullets.player_hits {
                 self.ai.diagnostics.bullet_hits_on_player += 1;

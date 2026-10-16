@@ -99,6 +99,8 @@ pub struct AiActor {
     /// The origin and body yaw (degrees) at the last think (report only).
     pub origin: [f32; 3],
     pub yaw: f32,
+    /// An NPC that shot this one since the last think (OnTakeDamage: the attacker).
+    pub damaged_by: Option<usize>,
     #[serde(skip)]
     goal: Option<GoalKey>,
     /// Animation events up to this time were handled.
@@ -168,6 +170,25 @@ pub struct AiRuntime {
     /// aiscripted_schedule controllers that found their actor (m_bDidFireOnce).
     #[serde(skip)]
     scripted_fired: std::collections::BTreeSet<usize>,
+    /// F4 per-spawn allegiance toward the player of any NPC (AI or not): its side in
+    /// NPC-vs-NPC fights (DESIGN 14n step 1).
+    pub allegiances: BTreeMap<usize, Disposition>,
+    /// Entities whose class is npc_* (sight candidates), built on first use.
+    #[serde(skip)]
+    npc_ids: Option<Vec<usize>>,
+    /// ai_relationship overrides (subject, target) -> disposition (target PLAYER for
+    /// "!player"), and the pairs each active ai_relationship entity applied.
+    #[serde(serialize_with = "serialize_pairs")]
+    pub relationship_overrides: BTreeMap<(usize, usize), Disposition>,
+    #[serde(skip)]
+    applied_relationships: BTreeMap<usize, Vec<(usize, usize)>>,
+}
+/// A pair-keyed map as a list of (subject, target, value) for the JSON report.
+fn serialize_pairs<S: serde::Serializer, V: Serialize>(
+    map: &BTreeMap<(usize, usize), V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(map.iter().map(|((a, b), v)| (a, b, v)))
 }
 /// The yaw of an entity's "angles" keyvalue (degrees).
 fn yaw_keyvalue(e: &modkit_core::Entity) -> f32 {
@@ -300,6 +321,10 @@ impl AiRuntime {
             assault_used: BTreeMap::new(),
             goals_started: false,
             scripted_fired: Default::default(),
+            allegiances: BTreeMap::new(),
+            npc_ids: None,
+            relationship_overrides: BTreeMap::new(),
+            applied_relationships: BTreeMap::new(),
             schedules,
             relationships: Relationships::default(),
             sounds: SoundEnt::default(),
@@ -375,6 +400,11 @@ impl AiRuntime {
             // CAI_GoalEntity::Activate at spawn for StartActive goals.
             self.goals_started = true;
             for (id, e) in world.entities.iter().enumerate() {
+                if e.class() == "ai_relationship"
+                    && e.get("StartActive").is_some_and(|v| v.trim() == "1")
+                {
+                    self.apply_relationship(world, scene, id, true);
+                }
                 if e.class() == "ai_goal_assault"
                     && e.get("StartActive").is_some_and(|v| v.trim() == "1")
                 {
@@ -392,6 +422,10 @@ impl AiRuntime {
             }
             if class == "aiscripted_schedule" {
                 self.scripted_schedule_input(world, scene, target, &input);
+                continue;
+            }
+            if class == "ai_relationship" {
+                self.apply_relationship(world, scene, target, input == "applyrelationship");
                 continue;
             }
             if matches!(class, "info_node_link" | "info_node_link_controller") {
@@ -681,6 +715,78 @@ impl AiRuntime {
             _ => {}
         }
     }
+    /// CAI_Relationship ApplyRelationship / RevertRelationship: subjects and targets by
+    /// targetname or classname ("!player" for the player), within `radius` of the entity
+    /// when set; disposition 1 hate, 2 fear, 3 like, 4 neutral; Reciprocal applies it both
+    /// ways. Revert removes the pairs this entity applied. Rank (priority) is not modeled.
+    fn apply_relationship(&mut self, world: &World, scene: &Scene, rel: usize, apply: bool) {
+        if let Some(pairs) = self.applied_relationships.remove(&rel) {
+            for pair in pairs {
+                self.relationship_overrides.remove(&pair);
+            }
+        }
+        if !apply {
+            return;
+        }
+        let e = &world.entities[rel];
+        let disposition = match e.get("disposition").map(str::trim) {
+            Some("1") => Disposition::HT,
+            Some("2") => Disposition::FR,
+            Some("3") => Disposition::LI,
+            Some("4") => Disposition::NU,
+            _ => return,
+        };
+        let radius = e
+            .get("radius")
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .unwrap_or(0.);
+        let at = e.origin();
+        let matching = |pattern: &str| -> Vec<usize> {
+            let pattern = pattern.trim().to_lowercase();
+            if pattern.is_empty() {
+                return Vec::new();
+            }
+            if pattern == "!player" {
+                return vec![PLAYER];
+            }
+            world
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(i, x)| {
+                    (crate::entities::glob(
+                        &pattern,
+                        &x.get("targetname").unwrap_or("").to_lowercase(),
+                    ) || crate::entities::glob(&pattern, x.class()))
+                        && (radius <= 0.
+                            || scene
+                                .states
+                                .get(*i)
+                                .is_some_and(|s| s.origin.distance(at) <= radius))
+                })
+                .map(|(i, _)| i)
+                .collect()
+        };
+        let subjects = matching(e.get("subject").unwrap_or(""));
+        let targets = matching(e.get("target").unwrap_or(""));
+        let reciprocal = e.get("Reciprocal").is_some_and(|v| v.trim() == "1");
+        let mut pairs = Vec::new();
+        for &a in &subjects {
+            for &b in &targets {
+                if a == b {
+                    continue;
+                }
+                pairs.push((a, b));
+                if reciprocal {
+                    pairs.push((b, a));
+                }
+            }
+        }
+        for &pair in &pairs {
+            self.relationship_overrides.insert(pair, disposition);
+        }
+        self.applied_relationships.insert(rel, pairs);
+    }
     /// UnlockRallyPoint for an NPC.
     fn release_rally(&mut self, id: usize) {
         self.rally_locks.retain(|_, holder| *holder != id);
@@ -849,6 +955,7 @@ impl AiRuntime {
             player_disposition: None,
             origin: [0.; 3],
             yaw: 0.,
+            damaged_by: None,
             goal: None,
             events_until: 0.,
         })
@@ -1060,6 +1167,20 @@ impl AiRuntime {
                         WeaponEvent::Fired => {
                             fired = true;
                             self.diagnostics.shots_fired += 1;
+                            // Operator_HandleAnimEvent: InsertSound(SOUND_COMBAT |
+                            // SOUND_CONTEXT_GUNFIRE, operator origin, SOUNDENT_VOLUME_*, 0.2).
+                            if let Some(volume) =
+                                def.as_ref().and_then(|d| d.fire).map(|f| f.sound_volume)
+                            {
+                                self.sounds.insert(
+                                    senses::sound::COMBAT,
+                                    scene.states[id].origin,
+                                    volume,
+                                    0.2,
+                                    Some(id),
+                                    now,
+                                );
+                            }
                         }
                         _ => {}
                     }
@@ -1186,6 +1307,45 @@ impl AiRuntime {
             && player.eye().distance(eye) <= senses::LOOK_DISTANCE
             && sight.visible(eye, player.eye(), &[id]);
         let fvisible = !player.noclip && sight.visible(eye, player.center(), &[id]);
+        // NPC-vs-NPC sight (DESIGN 14n step 1): hated, live NPCs in the view cone and look
+        // distance with LOS to their center.
+        let npc_ids = self
+            .npc_ids
+            .get_or_insert_with(|| {
+                world
+                    .entities
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| e.class().starts_with("npc_"))
+                    .map(|(i, _)| i)
+                    .collect()
+            })
+            .clone();
+        let viewer = Viewer {
+            entity: id,
+            class: Class::Metropolice,
+            eye,
+            facing,
+            field_of_view: METROPOLICE_FOV,
+            look_distance: senses::LOOK_DISTANCE,
+        };
+        let seen_npcs: Vec<(usize, Vec3)> = npc_ids
+            .into_iter()
+            .filter(|&other| {
+                let Some(state) = scene.states.get(other) else {
+                    return false;
+                };
+                let center = state.origin + Vec3::Z * 36.;
+                other != id
+                    && !state.killed
+                    && state.visible
+                    && center.distance(eye) <= senses::LOOK_DISTANCE
+                    && self.npc_disposition(world, id, other, precriminal) == Disposition::HT
+                    && senses::in_view_cone(&viewer, center)
+                    && sight.visible(eye, center, &[id, other])
+            })
+            .map(|other| (other, scene.states[other].origin))
+            .collect();
         // Policing goal state (the goal entity can change through inputs).
         let goal_entity = {
             let AiClass::Metropolice(cop) = &self.actors[&id].class;
@@ -1197,6 +1357,10 @@ impl AiRuntime {
             goal.target = target.map(|t| t.0);
             Some((goal, target))
         });
+        let player_override = self.relationship_overrides.get(&(id, PLAYER)).copied();
+        let attacker_disposition = self.actors[&id]
+            .damaged_by
+            .map(|a| self.npc_disposition(world, id, a, precriminal));
         let relationships = &self.relationships;
         let precriminal_hate = relationships
             .get(Class::Metropolice, classify("player", precriminal))
@@ -1250,7 +1414,8 @@ impl AiRuntime {
         if player_visible {
             actor.npc.conditions.set(COND_SEE_PLAYER);
         }
-        let hates = match actor.player_disposition {
+        // F4 allegiance, then an ai_relationship toward !player, then the class rules.
+        let hates = match actor.player_disposition.or(player_override) {
             Some(disposition) => disposition == Disposition::HT,
             None => cop.hates_player(precriminal_hate || !precriminal, now),
         };
@@ -1273,16 +1438,73 @@ impl AiRuntime {
         if player.noclip && actor.npc.enemy == Some(PLAYER) {
             actor.npc.enemy = None;
         }
+        // Damage from an NPC: COND_LIGHT_DAMAGE, the attacker remembered where it stands and
+        // made the enemy when there is none (unless liked).
+        if let Some(attacker) = actor.damaged_by.take() {
+            actor.npc.conditions.set(COND_LIGHT_DAMAGE);
+            if let Some(state) = scene.states.get(attacker).filter(|s| !s.killed) {
+                if attacker_disposition != Some(Disposition::LI) {
+                    actor
+                        .npc
+                        .enemies
+                        .update(Some(attacker), state.origin, 0., true, now);
+                    if actor.npc.enemy.is_none() {
+                        actor.npc.enemy = Some(attacker);
+                    }
+                }
+            }
+        }
+        // Hated NPCs in sight: memory, and BestEnemy (the nearest) when there is none.
+        for &(other, feet) in &seen_npcs {
+            actor.npc.conditions.set(COND_SEE_HATE);
+            actor.npc.enemies.update(Some(other), feet, 0., true, now);
+        }
+        if let Some(e) = actor.npc.enemy.filter(|&e| e != PLAYER) {
+            if scene.states.get(e).is_none_or(|s| s.killed || !s.visible) {
+                actor.npc.conditions.set(COND_ENEMY_DEAD);
+                actor.npc.enemy = None;
+            }
+        }
+        if actor.npc.enemy.is_none() {
+            actor.npc.enemy = seen_npcs
+                .iter()
+                .min_by(|a, b| a.1.distance(origin).total_cmp(&b.1.distance(origin)))
+                .map(|&(other, _)| other);
+        }
         actor.npc.enemies.refresh(
             now,
-            |e| (e == PLAYER).then_some(player.feet),
-            |e| e == PLAYER && player.dead,
+            |e| {
+                if e == PLAYER {
+                    Some(player.feet)
+                } else {
+                    scene.states.get(e).map(|s| s.origin)
+                }
+            },
+            |e| {
+                if e == PLAYER {
+                    player.dead
+                } else {
+                    scene.states.get(e).is_none_or(|s| s.killed)
+                }
+            },
         );
         if let Some(enemy) = actor.npc.enemy {
             if previous_enemy != Some(enemy) {
                 actor.npc.conditions.set(COND_NEW_ENEMY);
             }
-            let seen = enemy == PLAYER && player_visible;
+            let seen = if enemy == PLAYER {
+                player_visible
+            } else {
+                seen_npcs.iter().any(|&(o, _)| o == enemy)
+            };
+            // The enemy's feet, center, eyes and velocity (the player's view or an NPC's
+            // standing hull).
+            let (t_feet, t_center, t_eye, t_velocity) = if enemy == PLAYER {
+                (player.feet, player.center(), player.eye(), player.velocity)
+            } else {
+                let o = scene.states[enemy].origin;
+                (o, o + Vec3::Z * 36., o + Vec3::Z * 64., Vec3::ZERO)
+            };
             // GatherEnemyConditions: OnFoundPlayer/OnFoundEnemy when LOS to the enemy
             // is gained (bits_MEMORY_HAD_LOS), OnLostPlayerLOS/OnLostEnemyLOS when lost.
             let los = enemy == PLAYER && fvisible;
@@ -1300,9 +1522,9 @@ impl AiRuntime {
                 actor.npc.conditions.set(COND_SEE_ENEMY);
                 // CWeaponStunStick::WeaponMeleeAttack1Condition (player in 48 units in
                 // 0.35 s, within 70 of height and facing within 0.7).
-                let delta = player.center() - (origin + Vec3::Z * 36.);
+                let delta = t_center - (origin + Vec3::Z * 36.);
                 let forward = facing.truncate().normalize_or_zero();
-                let projected = (player.feet + player.velocity * 0.35 - origin).truncate();
+                let projected = (t_feet + t_velocity * 0.35 - origin).truncate();
                 if cop.has_baton {
                     if delta.z.abs() > 70. {
                         actor.npc.conditions.set(COND_TOO_FAR_TO_ATTACK);
@@ -1318,12 +1540,12 @@ impl AiRuntime {
                     // the enemy's eyes, else its BodyTarget, and
                     // CBaseCombatWeapon::WeaponRangeAttack1Condition(flDot, flDist).
                     let shoot = origin + Vec3::Z * 55.;
-                    let los = sight.visible(shoot, player.eye(), &[id])
-                        || sight.visible(shoot, player.center(), &[id]);
+                    let los = sight.visible(shoot, t_eye, &[id, enemy])
+                        || sight.visible(shoot, t_center, &[id, enemy]);
                     if los {
                         actor.npc.conditions.set(COND_WEAPON_HAS_LOS);
                     }
-                    let to = player.feet - origin;
+                    let to = t_feet - origin;
                     let dot = to.truncate().normalize_or_zero().dot(forward);
                     let distance = to.length();
                     let condition = if clip == 0 {
@@ -1658,10 +1880,81 @@ impl AiRuntime {
             self.held_weapons.remove(&id);
         }
     }
+    /// An NPC's bullet struck AI actor `target` (the victim responds at its next think).
+    pub fn npc_attacked(&mut self, target: usize, attacker: usize) {
+        if target == attacker {
+            return;
+        }
+        if let Some(actor) = self.actors.get_mut(&target) {
+            actor.damaged_by = Some(attacker);
+        }
+    }
+    /// CSoundEnt::InsertSound for host-side sounds (the player's gunfire).
+    pub fn insert_combat_sound(&mut self, origin: Vec3, volume: f32, now: f64) {
+        self.sounds
+            .insert(senses::sound::COMBAT, origin, volume, 0.2, None, now);
+    }
     /// A spawn's disposition toward the player (F4 allegiance).
     pub fn set_player_disposition(&mut self, id: usize, disposition: Option<Disposition>) {
         if let Some(actor) = self.actors.get_mut(&id) {
             actor.player_disposition = disposition;
+        }
+        match disposition {
+            Some(d) => self.allegiances.insert(id, d),
+            None => self.allegiances.remove(&id),
+        };
+    }
+    /// IRelationType of NPC `subject` toward NPC `target`. F4 allegiances make sides: two
+    /// NPCs with allegiances hate each other when they differ and like each other when
+    /// they match; one with an allegiance hates an NPC whose class (SDK table) hates the
+    /// player when its allegiance is friendly, and one whose class likes the player when
+    /// it is hostile (our extension: the SDK has only per-entity ai_relationship). Without
+    /// allegiances the SDK class table decides.
+    pub fn npc_disposition(
+        &self,
+        world: &World,
+        subject: usize,
+        target: usize,
+        precriminal: bool,
+    ) -> Disposition {
+        let class = |id: usize| {
+            classify(
+                world.entities.get(id).map_or("", |e| e.class()),
+                precriminal,
+            )
+        };
+        let side = |id: usize| -> Option<Disposition> {
+            self.allegiances.get(&id).copied().or_else(|| {
+                match self.relationships.get(class(id), Class::Player).0 {
+                    Disposition::HT => Some(Disposition::HT),
+                    Disposition::LI => Some(Disposition::LI),
+                    _ => None,
+                }
+            })
+        };
+        if let Some(&d) = self.relationship_overrides.get(&(subject, target)) {
+            return d;
+        }
+        match (
+            self.allegiances.get(&subject),
+            self.allegiances.get(&target),
+        ) {
+            (Some(a), Some(b)) => {
+                if a == b {
+                    Disposition::LI
+                } else {
+                    Disposition::HT
+                }
+            }
+            (Some(a), None) => match side(target) {
+                Some(b) if b != *a => Disposition::HT,
+                _ => Disposition::NU,
+            },
+            (None, Some(b)) => match side(subject) {
+                Some(a) if a != *b => Disposition::HT,
+                _ => Disposition::NU,
+            },
+            (None, None) => self.relationships.get(class(subject), class(target)).0,
         }
     }
     /// The weapons `class` can be given on a model with `activities` (upper case):
@@ -2074,6 +2367,73 @@ mod tests {
         assert_eq!(assault.received, super::super::assault::Cue::EntityInput);
         assert!(!assault.active());
         assert!(r.ai.rally_locks.is_empty());
+    }
+    #[test]
+    fn friend_and_foe_cops_target_each_other_and_relationships_override_classes() {
+        let world = World {
+            entities: vec![
+                entity(&[
+                    ("classname", "npc_metropolice"),
+                    ("targetname", "friend"),
+                    ("origin", "0 0 0"),
+                    ("angles", "0 0 0"),
+                    ("additionalequipment", "weapon_pistol"),
+                ]),
+                entity(&[
+                    ("classname", "npc_metropolice"),
+                    ("targetname", "foe"),
+                    ("origin", "300 0 0"),
+                    ("angles", "0 180 0"),
+                    ("additionalequipment", "weapon_pistol"),
+                ]),
+                entity(&[
+                    ("classname", "npc_citizen"),
+                    ("targetname", "bystander"),
+                    ("origin", "0 300 0"),
+                ]),
+                entity(&[
+                    ("classname", "ai_relationship"),
+                    ("subject", "npc_metropolice"),
+                    ("target", "bystander"),
+                    ("disposition", "1"),
+                    ("StartActive", "1"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let scene = Scene::new(&world);
+        let physics = Physics::new(&world);
+        let ai = AiRuntime::new(&world, None);
+        let mut r = Rig {
+            world,
+            scene,
+            physics,
+            controller: Controller::new(None, Default::default()),
+            ai,
+        };
+        // Same class, no allegiances: the SDK table says neutral.
+        assert_eq!(r.ai.npc_disposition(&r.world, 0, 1, true), Disposition::NU);
+        r.ai.set_player_disposition(0, Some(Disposition::LI));
+        r.ai.set_player_disposition(1, Some(Disposition::HT));
+        assert_eq!(r.ai.npc_disposition(&r.world, 0, 1, true), Disposition::HT);
+        assert_eq!(r.ai.npc_disposition(&r.world, 1, 0, true), Disposition::HT);
+        r.ai.enabled = true;
+        run(&mut r, 20, player_at(-3000.));
+        assert_eq!(r.ai.actors[&0].npc.enemy, Some(1));
+        assert_eq!(r.ai.actors[&1].npc.enemy, Some(0));
+        // StartActive ai_relationship: cops hate the passive citizen (class rule NU).
+        assert_eq!(r.ai.npc_disposition(&r.world, 1, 2, true), Disposition::HT);
+        // The AI report (pair-keyed overrides included) serializes.
+        assert!(serde_json::to_string(&r.ai).is_ok());
+        r.scene
+            .ai_inputs
+            .push((3, "revertrelationship".into(), String::new(), usize::MAX));
+        run(&mut r, 1, player_at(-3000.));
+        assert_eq!(r.ai.npc_disposition(&r.world, 1, 2, true), Disposition::NU);
+        // A killed enemy is dropped (COND_ENEMY_DEAD) for the next one.
+        r.scene.states[1].killed = true;
+        run(&mut r, 10, player_at(-3000.));
+        assert_eq!(r.ai.actors[&0].npc.enemy, None);
     }
     #[test]
     fn set_police_goal_enables_policing_warnings_and_goal_outputs() {
