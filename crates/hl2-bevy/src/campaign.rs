@@ -12,12 +12,16 @@ pub(crate) struct MapOwned;
 /// Observable completion marker recorded when a map has finished loading and is installed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapLoaded {
+    /// Installation folder of the map's game (`hl2`, `lostcoast`, ...).
+    pub game: String,
     pub map: String,
     pub background: bool,
 }
 
 struct Request {
     map: String,
+    /// Installation folder of the map's game (`hl2`, `lostcoast`, ...).
+    game: String,
     landmark: String,
     direct: bool,
     /// Load as the main-menu background level (menu shown, HUD hidden).
@@ -32,8 +36,8 @@ struct Job {
 pub struct Campaign {
     job: Option<Job>,
     pub metadata: serde_json::Value,
-    /// Name of the currently active, fully loaded map.
-    pub loaded_map: Option<String>,
+    /// The currently active, fully loaded map and its game.
+    pub loaded_map: Option<hl2_ui::console::GameMap>,
     pub last_event: Option<MapLoaded>,
     history: Vec<serde_json::Value>,
     failures: Vec<String>,
@@ -44,8 +48,9 @@ impl Campaign {
         let name = loaded.world.name.clone();
         Self {
             metadata: assets::map_metadata(loaded),
-            loaded_map: Some(name.clone()),
+            loaded_map: Some(hl2_ui::console::GameMap::new(&loaded.game, &name)),
             last_event: Some(MapLoaded {
+                game: loaded.game.clone(),
                 map: name,
                 background: false,
             }),
@@ -58,7 +63,7 @@ impl Campaign {
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"loading":self.job.as_ref().map(|j|&j.request.map),"loading_frames":self.loading_frames,
-            "active_map":self.metadata["map"],"loaded_map":self.loaded_map,"gameplay_ready":self.is_gameplay_ready(),"last_event":self.last_event.as_ref().map(|e| &e.map),"failures":self.failures,
+            "active_map":self.metadata["map"],"loaded_map":self.loaded_map.as_ref().map(|m| &m.map),"loaded_game":self.loaded_map.as_ref().map(|m| &m.game),"gameplay_ready":self.is_gameplay_ready(),"last_event":self.last_event.as_ref().map(|e| &e.map),"last_event_game":self.last_event.as_ref().map(|e| &e.game),"failures":self.failures,
             "limitations":"landmark eye, inventory and global-state transfer; saved entity/AI state, full player transfer and complete campaign remain unfinished"})
     }
 }
@@ -84,13 +89,26 @@ pub fn poll(
                 .log("Gameplay map load in progress; background map request ignored");
             ui.background_request = false;
             ui.map_request = None;
+            ui.map_request_game = None;
         }
     } else {
         let background = std::mem::take(&mut ui.background_request);
+        let requested_game = ui.map_request_game.take();
+        let current_game = campaign.loaded_map.as_ref().map(|m| m.game.clone());
+        // Menu backgrounds name their game and level transitions stay in the running game;
+        // a bare map name (`map`, `--map`, respawn) loads in the game that ships it.
         let request = ui
             .map_request
             .take()
             .map(|map| Request {
+                game: requested_game.unwrap_or_else(|| {
+                    source_assets::install::game_for_map(
+                        &options.game,
+                        &map,
+                        current_game.as_deref(),
+                    )
+                    .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned())
+                }),
                 map,
                 landmark: String::new(),
                 direct: true,
@@ -99,6 +117,9 @@ pub fn poll(
             .or_else(|| {
                 game.scene.transition.take().map(|(map, landmark)| Request {
                     map,
+                    game: current_game
+                        .clone()
+                        .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned()),
                     landmark,
                     direct: false,
                     background: false,
@@ -110,6 +131,7 @@ pub fn poll(
         let result: ResultSlot = Arc::new(Mutex::new(None));
         let output = result.clone();
         let map = request.map.clone();
+        let map_game = request.game.clone();
         let root = options.game.clone();
         let canvas = ui.source.canvas.clone();
         let new_game = request.direct;
@@ -117,7 +139,7 @@ pub fn poll(
             .name("hl2-owned-map-loader".into())
             .spawn(move || {
                 let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    assets::load_with_canvas(&root, &map, canvas, new_game)
+                    assets::load_with_canvas(&root, &map_game, &map, canvas, new_game)
                 }))
                 .map_err(|_| "owned map loader panicked".to_owned())
                 .and_then(|r| r.map_err(|e| format!("{e:#}")));
@@ -132,7 +154,8 @@ pub fn poll(
             return;
         }
         if request.background {
-            ui.source.start_background_loading(&request.map);
+            ui.source
+                .start_background_loading(&request.game, &request.map);
         } else {
             ui.source.start_loading(&request.map);
         }
@@ -160,8 +183,11 @@ pub fn poll(
                 ui.source.log(&warning);
                 campaign.failures.push(warning);
                 sim.loading_failed();
-                ui.source
-                    .background_load_failed_for_map(&job.request.map, &error.to_string());
+                ui.source.background_load_failed_for_map(
+                    &job.request.game,
+                    &job.request.map,
+                    &error,
+                );
                 return;
             }
             let error = format!("Map transition failed for {}: {error}", job.request.map);
@@ -211,8 +237,12 @@ pub fn poll(
     campaign.history.push(serde_json::json!({"from":game.world.name,"to":loaded.world.name,"direct":job.request.direct,"landmark":job.request.landmark,
         "previous_eye":previous_eye.to_array(),"arrival_eye":eye.to_array(),"inventory":loaded.gameplay.inventory,"previous_time":game.scene.time}));
     campaign.metadata = assets::map_metadata(&loaded);
-    campaign.loaded_map = Some(loaded.world.name.clone());
+    campaign.loaded_map = Some(hl2_ui::console::GameMap::new(
+        &loaded.game,
+        &loaded.world.name,
+    ));
     campaign.last_event = Some(MapLoaded {
+        game: loaded.game.clone(),
         map: loaded.world.name.clone(),
         background: job.request.background,
     });
@@ -228,7 +258,7 @@ pub fn poll(
             sim.fly = true;
         }
         ui.source
-            .level_loaded_for_map(&loaded.world.name, job.request.background);
+            .level_loaded_for_map(&loaded.game, &loaded.world.name, job.request.background);
         if !job.request.background
             && let Ok(mut cursor) = windows.single_mut()
         {
@@ -236,9 +266,11 @@ pub fn poll(
             cursor.visible = false;
         }
     } else {
-        ui.source.level_loaded_for_map(&loaded.world.name, false);
+        ui.source
+            .level_loaded_for_map(&loaded.game, &loaded.world.name, false);
     }
-    ui.source.log(format!("Loaded {}", loaded.world.name));
+    ui.source
+        .log(format!("Loaded {}/{}", loaded.game, loaded.world.name));
     let _unused_new_console = crate::install_map(
         loaded,
         &mut commands,
@@ -282,8 +314,9 @@ mod tests {
             .init_resource::<crate::Status>()
             .insert_resource(options)
             .insert_resource(Campaign {
-                loaded_map: Some("background01".into()),
+                loaded_map: Some(hl2_ui::console::GameMap::new("hl2", "background01")),
                 last_event: Some(MapLoaded {
+                    game: "hl2".into(),
                     map: "background01".into(),
                     background: true,
                 }),
@@ -293,7 +326,7 @@ mod tests {
         let vfs = source_assets::vpk::Vfs::mount(&game).expect("mount game");
         let canvas = hl2_ui::canvas::Canvas::default();
         let mut console = hl2_ui::console::Console::load(&vfs, canvas);
-        console.loaded_map = Some("background01".into());
+        console.loaded_map = Some(hl2_ui::console::GameMap::new("hl2", "background01"));
         console.level_loaded(true);
 
         let sim = simulation::Simulation::new(
@@ -328,9 +361,15 @@ mod tests {
         {
             let ui = app.world().resource::<ui_host::Console>();
             assert_eq!(ui.source.menu_category(), "main");
-            assert_eq!(ui.source.loaded_map.as_deref(), Some("background01"));
+            assert_eq!(
+                ui.source.loaded_map,
+                Some(hl2_ui::console::GameMap::new("hl2", "background01"))
+            );
             let campaign = app.world().resource::<Campaign>();
-            assert_eq!(campaign.loaded_map.as_deref(), Some("background01"));
+            assert_eq!(
+                campaign.loaded_map,
+                Some(hl2_ui::console::GameMap::new("hl2", "background01"))
+            );
         }
 
         // 2. Enter Episode One submenu (row 1: SwitchExpansion episodic)
@@ -340,7 +379,7 @@ mod tests {
         };
         assert!(
             effects.contains(&hl2_ui::console::Effect::MainMenuMap(
-                "ep1_background01".into()
+                hl2_ui::console::GameMap::new("episodic", "ep1_background01")
             )),
             "Effect::MainMenuMap emitted for ep1_background01"
         );
@@ -371,6 +410,7 @@ mod tests {
             );
             assert!(ui.background_request);
             assert_eq!(ui.map_request.as_deref(), Some("ep1_background01"));
+            assert_eq!(ui.map_request_game.as_deref(), Some("episodic"));
             assert!(sim.loading());
         }
 
@@ -379,7 +419,12 @@ mod tests {
         for _ in 0..100 {
             app.update();
             let campaign = app.world().resource::<Campaign>();
-            if campaign.job.is_none() && campaign.loaded_map.as_deref() == Some("ep1_background01")
+            if campaign.job.is_none()
+                && campaign.loaded_map.as_ref()
+                    == Some(&hl2_ui::console::GameMap::new(
+                        "episodic",
+                        "ep1_background01",
+                    ))
             {
                 completed = true;
                 break;
@@ -394,17 +439,30 @@ mod tests {
         // 5. Assert completion and that scene swapped
         {
             let campaign = app.world().resource::<Campaign>();
-            assert_eq!(campaign.loaded_map.as_deref(), Some("ep1_background01"));
+            assert_eq!(
+                campaign.loaded_map,
+                Some(hl2_ui::console::GameMap::new(
+                    "episodic",
+                    "ep1_background01"
+                ))
+            );
             assert_eq!(
                 campaign.last_event,
                 Some(MapLoaded {
+                    game: "episodic".into(),
                     map: "ep1_background01".into(),
                     background: true,
                 })
             );
 
             let ui = app.world().resource::<ui_host::Console>();
-            assert_eq!(ui.source.loaded_map.as_deref(), Some("ep1_background01"));
+            assert_eq!(
+                ui.source.loaded_map,
+                Some(hl2_ui::console::GameMap::new(
+                    "episodic",
+                    "ep1_background01"
+                ))
+            );
             assert_eq!(ui.source.menu_category(), "episodic");
             assert!(!ui.source.is_loading());
 
@@ -458,9 +516,9 @@ mod tests {
         };
         assert!(
             lc_effects.contains(&hl2_ui::console::Effect::MainMenuMap(
-                "lostcoast_background01".into()
+                hl2_ui::console::GameMap::new("lostcoast", "background01")
             )),
-            "Effect::MainMenuMap emitted for lostcoast_background01"
+            "Effect::MainMenuMap emitted for lostcoast/background01"
         );
         let mut pending_effects = Some(lc_effects);
         app.world_mut()
@@ -483,8 +541,18 @@ mod tests {
                 .gameplay
                 .background_map
                 .as_deref(),
-            Some("lostcoast_background01"),
-            "persisted background map updated to lostcoast_background01"
+            Some("background01"),
+            "persisted background map updated to Lost Coast's background01"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<ui_host::Console>()
+                .source
+                .config
+                .gameplay
+                .background_game
+                .as_deref(),
+            Some("lostcoast")
         );
 
         let mut completed = false;
@@ -492,7 +560,8 @@ mod tests {
             app.update();
             let campaign = app.world().resource::<Campaign>();
             if campaign.job.is_none()
-                && campaign.loaded_map.as_deref() == Some("lostcoast_background01")
+                && campaign.loaded_map.as_ref()
+                    == Some(&hl2_ui::console::GameMap::new("lostcoast", "background01"))
             {
                 completed = true;
                 break;
@@ -507,13 +576,14 @@ mod tests {
         {
             let campaign = app.world().resource::<Campaign>();
             assert_eq!(
-                campaign.loaded_map.as_deref(),
-                Some("lostcoast_background01")
+                campaign.loaded_map,
+                Some(hl2_ui::console::GameMap::new("lostcoast", "background01"))
             );
             assert_eq!(
                 campaign.last_event,
                 Some(MapLoaded {
-                    map: "lostcoast_background01".into(),
+                    game: "lostcoast".into(),
+                    map: "background01".into(),
                     background: true,
                 })
             );
@@ -543,8 +613,9 @@ mod tests {
             .init_resource::<crate::Status>()
             .insert_resource(options)
             .insert_resource(Campaign {
-                loaded_map: Some("background01".into()),
+                loaded_map: Some(hl2_ui::console::GameMap::new("hl2", "background01")),
                 last_event: Some(MapLoaded {
+                    game: "hl2".into(),
                     map: "background01".into(),
                     background: true,
                 }),
@@ -554,7 +625,7 @@ mod tests {
         let vfs = source_assets::vpk::Vfs::mount(&game).expect("mount game");
         let canvas = hl2_ui::canvas::Canvas::default();
         let mut console = hl2_ui::console::Console::load(&vfs, canvas);
-        console.loaded_map = Some("background01".into());
+        console.loaded_map = Some(hl2_ui::console::GameMap::new("hl2", "background01"));
         console.level_loaded(true);
 
         let sim = simulation::Simulation::new(
@@ -591,7 +662,7 @@ mod tests {
         };
         assert!(
             effects.contains(&hl2_ui::console::Effect::MainMenuMap(
-                "ep2_background01".into()
+                hl2_ui::console::GameMap::new("ep2", "ep2_background01")
             )),
             "Effect::MainMenuMap emitted for ep2_background01"
         );
@@ -612,7 +683,9 @@ mod tests {
         for _ in 0..100 {
             app.update();
             let campaign = app.world().resource::<Campaign>();
-            if campaign.job.is_none() && campaign.loaded_map.as_deref() == Some("ep2_background01")
+            if campaign.job.is_none()
+                && campaign.loaded_map.as_ref()
+                    == Some(&hl2_ui::console::GameMap::new("ep2", "ep2_background01"))
             {
                 completed = true;
                 break;
@@ -625,10 +698,14 @@ mod tests {
         );
 
         let campaign = app.world().resource::<Campaign>();
-        assert_eq!(campaign.loaded_map.as_deref(), Some("ep2_background01"));
+        assert_eq!(
+            campaign.loaded_map,
+            Some(hl2_ui::console::GameMap::new("ep2", "ep2_background01"))
+        );
         assert_eq!(
             campaign.last_event,
             Some(MapLoaded {
+                game: "ep2".into(),
                 map: "ep2_background01".into(),
                 background: true,
             })
@@ -660,12 +737,12 @@ mod tests {
             .init_resource::<crate::Status>()
             .insert_resource(options)
             .insert_resource(Campaign {
-                loaded_map: Some("background01".into()),
+                loaded_map: Some(hl2_ui::console::GameMap::new("hl2", "background01")),
                 ..default()
             });
 
         let mut console = hl2_ui::console::Console::default();
-        console.loaded_map = Some("background01".into());
+        console.loaded_map = Some(hl2_ui::console::GameMap::new("hl2", "background01"));
         console.level_loaded(true);
 
         let sim = simulation::Simulation::new(

@@ -339,24 +339,40 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
     let vfs =
         source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
     let config = hl2_ui::config::Config::load_or_default();
-    let background = options
-        .background_map
-        .clone()
-        .or(config.gameplay.background_map)
-        .or_else(|| hl2_ui::gameui::resources::startup_background_map(&vfs))
-        .context(
-            "no main-menu background map in scripts/chapterbackgrounds.txt or config; pass a loadable --map",
-        )?;
-    println!("Loading owned main-menu background {background}...");
-    let loaded = match assets::load(&options.game, &background) {
+    let base_game = source_assets::install::BASE_GAME;
+    let default_background = hl2_ui::gameui::resources::startup_background_map(&vfs);
+    // `--background-map` loads in the game that ships the map; the persisted background
+    // remembers its game (one saved without it belongs to the game that ships it).
+    let (game, background) = match (&options.background_map, config.gameplay.background_map) {
+        (Some(map), _) => (
+            source_assets::install::game_for_map(&options.game, map, None)
+                .unwrap_or_else(|| base_game.to_owned()),
+            map.clone(),
+        ),
+        (None, Some(map)) => (
+            config
+                .gameplay
+                .background_game
+                .or_else(|| source_assets::install::game_for_map(&options.game, &map, None))
+                .unwrap_or_else(|| base_game.to_owned()),
+            map,
+        ),
+        (None, None) => (
+            base_game.to_owned(),
+            default_background.clone().context(
+                "no main-menu background map in scripts/chapterbackgrounds.txt or config; pass a loadable --map",
+            )?,
+        ),
+    };
+    println!("Loading owned main-menu background {game}/{background}...");
+    let loaded = match assets::load(&options.game, &game, &background) {
         Ok(loaded) => loaded,
         Err(err) => {
             eprintln!(
-                "Warning: background map {background} failed to load: {err:#}; falling back to default background"
+                "Warning: background map {game}/{background} failed to load: {err:#}; falling back to default background"
             );
-            let default_bg = hl2_ui::gameui::resources::startup_background_map(&vfs)
-                .unwrap_or_else(|| "background01".to_owned());
-            assets::load(&options.game, &default_bg)
+            let default_bg = default_background.unwrap_or_else(|| "background01".to_owned());
+            assets::load(&options.game, base_game, &default_bg)
                 .with_context(|| format!("load fallback main-menu background map {default_bg}"))?
         }
     };
@@ -635,6 +651,7 @@ fn setup(
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
     let map_name = loaded.world.name.clone();
+    let map_game = loaded.game.clone();
     commands.insert_resource(campaign::Campaign::new(&loaded));
     let (spawn, yaw) = loaded.world.spawn();
     let position = options
@@ -660,13 +677,19 @@ fn setup(
         ),
     );
     let mut console_ui = ui_host::Console::new(ui);
-    console_ui.source.loaded_map = Some(map_name);
-    console_ui.source.level_loaded(prepared.1);
+    console_ui
+        .source
+        .level_loaded_for_map(&map_game, &map_name, prepared.1);
     if let Some(map) = &options.map {
+        // A command-line map has no running game: it is not resolved against the game of the
+        // saved menu background that was loaded first.
+        let game = source_assets::install::game_for_map(&options.game, map, None)
+            .unwrap_or_else(|| source_assets::install::BASE_GAME.to_owned());
         console_ui.map_request = Some(map.clone());
+        console_ui.map_request_game = Some(game.clone());
         console_ui.background_request = options.main_menu;
         if options.main_menu {
-            console_ui.source.start_background_loading(map);
+            console_ui.source.start_background_loading(&game, map);
         } else {
             console_ui.source.start_loading(map);
         }
@@ -1110,11 +1133,36 @@ mod tests {
         assert_eq!(parsed.background_map.as_deref(), Some("background02"));
     }
     #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn background01_loads_from_the_named_game() {
+        let root = source_assets::install::discover().expect("owned install");
+        let hl2 = crate::assets::load(&root, "hl2", "background01").expect("hl2 background01");
+        let lostcoast = crate::assets::load(&root, "lostcoast", "background01")
+            .expect("lostcoast background01");
+        assert_eq!(
+            (hl2.game.as_str(), lostcoast.game.as_str()),
+            ("hl2", "lostcoast")
+        );
+        // Both are called background01; their worlds differ.
+        let materials = |loaded: &crate::assets::LoadedMap| {
+            loaded
+                .materials
+                .keys()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_ne!(materials(&hl2), materials(&lostcoast));
+    }
+    #[test]
     #[ignore]
     fn episode_maps_load_successfully() {
         let game = source_assets::install::discover().expect("owned install");
-        for map in ["ep1_citadel_00", "ep2_outland_01", "d2_lostcoast"] {
-            let loaded = crate::assets::load(&game, map)
+        for (map_game, map) in [
+            ("episodic", "ep1_citadel_00"),
+            ("ep2", "ep2_outland_01"),
+            ("lostcoast", "d2_lostcoast"),
+        ] {
+            let loaded = crate::assets::load(&game, map_game, map)
                 .unwrap_or_else(|err| panic!("Failed to load {}: {:?}", map, err));
             assert_eq!(loaded.world.name, map);
             assert_eq!(loaded.gameplay.world.name, map);
@@ -1122,7 +1170,10 @@ mod tests {
             // Observable completion signals
             let campaign = crate::campaign::Campaign::new(&loaded);
             assert!(campaign.is_gameplay_ready());
-            assert_eq!(campaign.loaded_map.as_deref(), Some(map));
+            assert_eq!(
+                campaign.loaded_map,
+                Some(hl2_ui::console::GameMap::new(map_game, map))
+            );
 
             // Verify simulation transition to gameplay
             let (spawn, spawn_yaw) = loaded.world.spawn();

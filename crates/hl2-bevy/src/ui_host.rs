@@ -10,6 +10,9 @@ pub type UiHost = Console;
 pub struct Console {
     pub source: hl2_ui::console::Console,
     pub map_request: Option<String>,
+    /// Installation folder of the game `map_request` belongs to, when the request names it
+    /// (menu backgrounds); otherwise the loader finds the game that ships the map.
+    pub map_request_game: Option<String>,
     /// The pending `map_request` loads a main-menu background level.
     pub background_request: bool,
     pub quit_requested: bool,
@@ -19,12 +22,13 @@ impl Console {
         Self {
             source,
             map_request: None,
+            map_request_game: None,
             background_request: false,
             quit_requested: false,
         }
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"mode":self.source.mode,"background_level":self.source.background_level(),"sv_cheats":self.source.cheats,"input":self.source.input,"output":self.source.output,"pending_map":self.map_request})
+        serde_json::json!({"mode":self.source.mode,"background_level":self.source.background_level(),"sv_cheats":self.source.cheats,"input":self.source.input,"output":self.source.output,"pending_map":self.map_request,"pending_game":self.map_request_game})
     }
 }
 #[derive(Clone, Deserialize)]

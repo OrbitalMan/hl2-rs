@@ -32,6 +32,8 @@ pub struct TwoTexture {
 }
 
 pub struct LoadedMap {
+    /// Installation folder of the game the map was loaded for (`hl2`, `lostcoast`, ...).
+    pub game: String,
     pub world: Arc<World>,
     pub gameplay: crate::gameplay::Gameplay,
     pub console: hl2_ui::console::Console,
@@ -153,11 +155,14 @@ impl Default for MaterialData {
     }
 }
 
-pub fn load(game: &Path, map: &str) -> Result<LoadedMap> {
-    load_with_canvas(game, map, hl2_ui::canvas::Canvas::default(), true)
+pub fn load(root: &Path, game: &str, map: &str) -> Result<LoadedMap> {
+    load_with_canvas(root, game, map, hl2_ui::canvas::Canvas::default(), true)
 }
+/// Loads `maps/<map>.bsp` through the search path of `game`, the installation folder of the
+/// game the map belongs to (`hl2`, `episodic`, `ep2`, `lostcoast`).
 pub fn load_with_canvas(
-    game: &Path,
+    root: &Path,
+    game: &str,
     map: &str,
     canvas: hl2_ui::canvas::Canvas,
     new_game: bool,
@@ -172,21 +177,22 @@ pub fn load_with_canvas(
         bail!("map must be a bare Source map name");
     }
     hl2_ui::gameui::loading::report_progress(0.05, "LoadingProgress_SpawningServer");
-    let expansion = source_assets::vpk::expansion_for_map(map);
-    let mut vfs = Vfs::mount_expansion(game, expansion).context("mount installed owned content")?;
+    if game.is_empty()
+        || !game
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+    {
+        bail!("game must be a bare installation folder name");
+    }
+    let mut vfs = Vfs::mount_game(root, game).context("mount installed owned content")?;
     hl2_ui::gameui::loading::report_progress(0.15, "LoadingProgress_LoadMap");
-    let disk_map = if map == "lostcoast_background01" || map == "lostcoast" {
-        "background01"
-    } else {
-        map
-    };
     let bytes = vfs
-        .read(&format!("maps/{disk_map}.bsp"))?
-        .with_context(|| format!("owned map {disk_map}.bsp not found"))?;
+        .read(&format!("maps/{map}.bsp"))?
+        .with_context(|| format!("owned map {game}/maps/{map}.bsp not found"))?;
     if bytes.len() > 512 * 1024 * 1024 {
         bail!("owned map exceeds 512 MiB read limit");
     }
-    let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {disk_map}.bsp"))?;
+    let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {map}.bsp"))?;
     vfs.mount_pak(bsp.lump(40)).context("mount map pak")?;
     hl2_ui::gameui::loading::report_progress(0.35, "LoadingProgress_PrecacheWorld");
     let mut world = bsp.world(map).context("decode Source world")?;
@@ -305,6 +311,7 @@ pub fn load_with_canvas(
     };
     hl2_ui::gameui::loading::report_progress(1.0, "LoadingProgress_SignonLocal");
     Ok(LoadedMap {
+        game: game.to_owned(),
         console,
         effects,
         eyes,

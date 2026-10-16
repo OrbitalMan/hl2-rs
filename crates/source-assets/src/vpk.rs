@@ -173,24 +173,17 @@ pub struct Vfs {
     custom_roots: Vec<PathBuf>,
     custom_archives: Vec<Vpk>,
 }
-/// Returns the expansion directory name corresponding to the given Source map name, if any.
-pub fn expansion_for_map(map: &str) -> Option<&'static str> {
-    let lower = map.trim_end_matches(".bsp").to_ascii_lowercase();
-    if lower.starts_with("ep2_") {
-        Some("ep2")
-    } else if lower.starts_with("ep1_") {
-        Some("episodic")
-    } else if lower.contains("lostcoast") {
-        Some("lostcoast")
-    } else {
-        None
-    }
-}
-
 impl Vfs {
     /// Mounts the installed game and platform content, defaulting to the base Half-Life 2 search path.
     pub fn mount(game: &Path) -> Result<Self> {
         Self::mount_expansion(game, None)
+    }
+
+    /// Mounts the search path of the game installed in folder `game` of the installation
+    /// (`hl2`, `episodic`, `ep2`, `lostcoast`).
+    pub fn mount_game(root: &Path, game: &str) -> Result<Self> {
+        let expansion = (!game.eq_ignore_ascii_case(crate::install::BASE_GAME)).then_some(game);
+        Self::mount_expansion(root, expansion)
     }
 
     /// Mounts content for an optional specific expansion (`episodic`, `ep2`, `lostcoast`).
@@ -459,22 +452,5 @@ mod tests {
         std::fs::write(&p, b"bad").unwrap();
         assert!(Vpk::open(&p).is_err());
         std::fs::remove_file(p).unwrap();
-    }
-
-    #[test]
-    fn expansion_for_map_detects_episodes_and_lostcoast() {
-        assert_eq!(expansion_for_map("d1_trainstation_01"), None);
-        assert_eq!(expansion_for_map("d1_trainstation_01.bsp"), None);
-        assert_eq!(expansion_for_map("ep1_citadel_00"), Some("episodic"));
-        assert_eq!(expansion_for_map("ep1_citadel_00.bsp"), Some("episodic"));
-        assert_eq!(expansion_for_map("ep1_c17_00"), Some("episodic"));
-        assert_eq!(expansion_for_map("ep2_outland_01"), Some("ep2"));
-        assert_eq!(expansion_for_map("ep2_outland_01.bsp"), Some("ep2"));
-        assert_eq!(expansion_for_map("d2_lostcoast"), Some("lostcoast"));
-        assert_eq!(expansion_for_map("lostcoast"), Some("lostcoast"));
-        assert_eq!(
-            expansion_for_map("lostcoast_background01"),
-            Some("lostcoast")
-        );
     }
 }

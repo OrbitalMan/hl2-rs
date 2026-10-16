@@ -101,10 +101,27 @@ pub enum Effect {
     },
     Quit,
     ApplyConfig(Box<crate::config::Config>),
-    /// Load the main-menu background map and show the main menu over it ("Return to main menu").
-    MainMenuMap(String),
+    /// Load a game's main-menu background map and show the main menu over it.
+    MainMenuMap(GameMap),
     /// Play a UI sound cue (e.g. button hover or release activation).
     PlaySound(String),
+}
+
+/// A map of one installed game, named by the game's installation folder (`hl2`, `episodic`,
+/// `ep2`, `lostcoast`): Half-Life 2 and Lost Coast both ship a `background01`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GameMap {
+    pub game: String,
+    pub map: String,
+}
+
+impl GameMap {
+    pub fn new(game: impl Into<String>, map: impl Into<String>) -> Self {
+        Self {
+            game: game.into(),
+            map: map.into(),
+        }
+    }
 }
 
 /// Action to perform upon confirming a message box dialog.
@@ -151,9 +168,8 @@ pub struct Console {
     pub background_transition: crate::gameui::loading::BackgroundTransitionState,
     /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
     background_level: bool,
-    /// Currently loaded map name, if any.
-    pub loaded_map: Option<String>,
-    pending_map: Option<String>,
+    /// Currently loaded map, if any.
+    pub loaded_map: Option<GameMap>,
     theme: Theme,
     widget_fonts: Fonts,
     style: Style,
@@ -162,7 +178,8 @@ pub struct Console {
     pub options: OptionsDialog,
     /// The menu the options dialog was opened from (drawn behind it and restored on close).
     options_return: Mode,
-    pub background_textures: BTreeMap<String, Texture2D>,
+    /// `(game, image)` -> pre-blurred background (see `GameUiResources::background_images`).
+    pub background_textures: BTreeMap<(String, String), Texture2D>,
     pub config: crate::config::Config,
 }
 
@@ -374,7 +391,6 @@ impl Default for Console {
             background_transition: crate::gameui::loading::BackgroundTransitionState::Idle,
             background_level: false,
             loaded_map: None,
-            pending_map: None,
             theme: Theme::default(),
             widget_fonts: Fonts::default(),
             style: Style::default(),
@@ -573,35 +589,22 @@ impl Console {
         self.options.set_resources(self.gameui.clone());
     }
 
-    /// Returns the menu expansion category associated with the background map.
-    pub fn expansion_category_for_map(map: &str) -> Option<&'static str> {
-        let clean = crate::gameui::resources::blur(map);
-        if let Some(exp) = source_assets::vpk::expansion_for_map(clean) {
-            Some(exp)
-        } else if clean.starts_with("background") || clean.starts_with("d1_") {
-            Some("hl2")
-        } else {
-            None
-        }
-    }
-
-    /// Returns the pre-blurred background texture for the map name or category and aspect ratio, if loaded.
-    pub fn background_texture(&self, key: &str, widescreen: bool) -> Option<&Texture2D> {
-        let name = crate::gameui::resources::blur(key);
-        let canonical = match name {
-            "hl2ep1" => "episodic",
-            "hl2ep2" => "ep2",
-            "hl2lc" => "lostcoast",
-            "main" => "hl2",
-            other => other,
-        };
-        if widescreen {
-            let key = format!("{canonical}_widescreen");
-            if let Some(tex) = self.background_textures.get(&key) {
-                return Some(tex);
-            }
-        }
-        self.background_textures.get(canonical)
+    /// The pre-blurred image of `game`'s background map `map`, if loaded.
+    pub fn background_texture(
+        &self,
+        game: &str,
+        map: &str,
+        widescreen: bool,
+    ) -> Option<&Texture2D> {
+        let key = |name: String| (game.to_owned(), name);
+        let map = crate::gameui::resources::blur(map);
+        widescreen
+            .then(|| {
+                self.background_textures
+                    .get(&key(format!("{map}_widescreen")))
+            })
+            .flatten()
+            .or_else(|| self.background_textures.get(&key(map.to_owned())))
     }
 
     /// Checks whether the primary title font contains glyphs for all non-whitespace characters in `line`.
@@ -685,8 +688,26 @@ impl Console {
             .or(self.gameui.background_map.as_deref())
     }
 
-    /// Overrides the persistent main-menu background map setting.
-    pub fn set_background_map(&mut self, map: Option<String>) {
+    /// The effective main-menu background: the persisted override (a map saved without its
+    /// game belongs to the game that ships it), else chapter 1 of the first game's
+    /// `scripts/chapterbackgrounds.txt`.
+    pub fn background(&self) -> Option<GameMap> {
+        let gameplay = &self.config.gameplay;
+        match (&gameplay.background_game, &gameplay.background_map) {
+            (Some(game), Some(map)) => Some(GameMap::new(game, map)),
+            (None, Some(map)) => Some(self.game_map(map, None)),
+            (_, None) => self
+                .gameui
+                .background_map
+                .as_ref()
+                .map(|map| GameMap::new(self.gameui.main_game(), map)),
+        }
+    }
+
+    /// Overrides the persistent main-menu background (`None` restores the installed default).
+    pub fn set_background(&mut self, background: Option<GameMap>) {
+        let (game, map) = background.map(|b| (b.game, b.map)).unzip();
+        self.config.gameplay.background_game = game;
         self.config.gameplay.background_map = map;
     }
 
@@ -694,17 +715,7 @@ impl Console {
     /// any other map starts gameplay.
     pub fn level_loaded(&mut self, background: bool) {
         if background && self.background_transition.is_active() {
-            if let Some(pending) = self.pending_map.as_deref() {
-                if !self.background_transition.finish_map(pending) {
-                    return;
-                }
-            } else if let Some(loaded) = self.loaded_map.as_deref() {
-                if !self.background_transition.finish_map(loaded) {
-                    return;
-                }
-            } else {
-                self.background_transition.finish();
-            }
+            self.background_transition.finish();
         }
         self.loading_dialog = None;
         crate::gameui::loading::reset_progress();
@@ -714,10 +725,8 @@ impl Console {
             self.main_menu.back(&self.gameui.localization);
         }
         self.clear_menu_hover();
-        if let Some(pending) = self.pending_map.take() {
-            self.loaded_map = Some(pending);
-        } else if self.loaded_map.is_none() && background {
-            self.loaded_map = self.background_map().map(str::to_owned);
+        if self.loaded_map.is_none() && background {
+            self.loaded_map = self.background();
         }
         self.mode = if background {
             Mode::MainMenu
@@ -727,38 +736,61 @@ impl Console {
         self.previous = self.mode;
     }
 
-    /// Completes background loading for a specific map. Ignores stale map completions.
-    pub fn level_loaded_for_map(&mut self, map: &str, background: bool) {
+    /// Completes loading `game`'s `map`. Ignores stale background completions.
+    pub fn level_loaded_for_map(&mut self, game: &str, map: &str, background: bool) {
         if background
             && self.background_transition.is_active()
-            && !self.background_transition.finish_map(map)
+            && !self.background_transition.finish_map(game, map)
         {
             return;
         }
-        self.loaded_map = Some(map.to_owned());
+        self.loaded_map = Some(GameMap::new(game, map));
         self.level_loaded(background);
+    }
+
+    /// `map` of the game that ships it: `current` first, then Half-Life 2, then the other
+    /// installed games (see `source_assets::install::game_for_map`).
+    fn game_map(&self, map: &str, current: Option<&str>) -> GameMap {
+        let game = self
+            .gameui
+            .install_root
+            .as_deref()
+            .and_then(|root| source_assets::install::game_for_map(root, map, current))
+            .unwrap_or_else(|| current.unwrap_or(self.gameui.main_game()).to_owned());
+        GameMap::new(game, map)
+    }
+
+    /// Shows a game's menu category over that game's own chapter 1 background, loading it
+    /// unless it is already the loaded background level.
+    fn show_category(&mut self, category: &str) -> Vec<Effect> {
+        let game = self.gameui.category_game(category).to_owned();
+        let Some(map) = self.gameui.background_maps.get(&game).cloned() else {
+            self.background_transition.set_displayed_category(category);
+            return Vec::new();
+        };
+        let background = GameMap::new(game, map);
+        self.set_background(Some(background.clone()));
+        let _ = self.config.save();
+        if self.background_level && self.loaded_map.as_ref() == Some(&background) {
+            self.background_transition
+                .set_displayed_category(&background.game);
+            return Vec::new();
+        }
+        self.start_background_loading(&background.game, &background.map);
+        vec![Effect::MainMenuMap(background)]
     }
 
     /// Displays the modal loading dialog for the given map.
     pub fn start_loading(&mut self, map: &str) {
-        self.pending_map = Some(map.to_owned());
         self.clear_menu_hover();
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new(map));
         crate::gameui::loading::reset_progress();
     }
 
-    /// Displays the non-blocking corner plaque for background map loading.
-    pub fn start_background_loading(&mut self, map: &str) {
-        let category = Self::expansion_category_for_map(map)
-            .unwrap_or_else(|| self.main_menu.category())
-            .to_owned();
-        self.start_background_loading_expansion(map, &category);
-    }
-
-    /// Displays the non-blocking corner plaque for background map loading into a specific expansion category.
-    pub fn start_background_loading_expansion(&mut self, map: &str, category: &str) {
-        self.pending_map = Some(map.to_owned());
-        self.background_transition.start(map, category);
+    /// Starts the background transition to `game`'s `map` and shows the corner loading plaque.
+    /// The transition's category is the game, whose subtitle shows once the map has loaded.
+    pub fn start_background_loading(&mut self, game: &str, map: &str) {
+        self.background_transition.start(map, game);
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
         crate::gameui::loading::reset_progress();
     }
@@ -780,25 +812,22 @@ impl Console {
             loading.set_error(reason);
         }
         self.loading_dialog = None;
-        self.pending_map = None;
         crate::gameui::loading::reset_progress();
     }
 
-    /// Ends the background transition if `map` matches the target map, ignoring stale failures.
-    pub fn background_load_failed_for_map(&mut self, map: &str, reason: &str) {
+    /// Ends the background transition if `game`'s `map` is the target, ignoring stale failures.
+    pub fn background_load_failed_for_map(&mut self, game: &str, map: &str, reason: &str) {
         if self.background_transition.is_active()
-            && !self.background_transition.fail_map(map, reason)
+            && !self.background_transition.fail_map(game, map, reason)
         {
             return;
         }
         self.loading_dialog = None;
-        self.pending_map = None;
         crate::gameui::loading::reset_progress();
     }
 
     /// Marks the active loading dialog as failed with the given error message.
     pub fn loading_failed(&mut self, error: &str) {
-        self.pending_map = None;
         if let Some(loading) = &mut self.loading_dialog {
             loading.set_error(error);
             if loading.is_background() {
@@ -822,7 +851,6 @@ impl Console {
             self.background_transition.finish();
         }
         self.loading_dialog = None;
-        self.pending_map = None;
         self.clear_menu_hover();
         crate::gameui::loading::reset_progress();
     }
@@ -1277,7 +1305,7 @@ impl Console {
                         || map.eq_ignore_ascii_case("none")
                         || map.is_empty()
                     {
-                        self.config.gameplay.background_map = None;
+                        self.set_background(None);
                         let _ = self.config.save();
                         self.log(format!(
                             "background_map reset to default ({})",
@@ -1289,7 +1317,9 @@ impl Console {
                         {
                             return Err("background_map: use a simple installed map name".into());
                         }
-                        self.config.gameplay.background_map = Some(map.to_owned());
+                        let current = self.loaded_map.as_ref().map(|m| m.game.as_str());
+                        let background = self.game_map(map, current);
+                        self.set_background(Some(background));
                         let _ = self.config.save();
                         self.log(format!("background_map {map}"));
                     }
@@ -1309,16 +1339,16 @@ impl Console {
                 {
                     return Err("map_background: use a simple installed map name".into());
                 }
+                let current = self.loaded_map.as_ref().map(|m| m.game.as_str());
+                let background = self.game_map(map, current);
+                self.set_background(Some(background.clone()));
+                let _ = self.config.save();
                 if self.is_loading() && !self.background_level {
-                    self.config.gameplay.background_map = Some(map.to_owned());
-                    let _ = self.config.save();
                     self.log("Gameplay map load in progress; background map persisted without interrupting load.");
                     return Ok(None);
                 }
-                self.config.gameplay.background_map = Some(map.to_owned());
-                let _ = self.config.save();
-                self.start_background_loading(map);
-                return Ok(Some(Effect::MainMenuMap(map.to_owned())));
+                self.start_background_loading(&background.game, &background.map);
+                return Ok(Some(Effect::MainMenuMap(background)));
             }
             _ => return Err(usage()),
         }
@@ -1440,8 +1470,8 @@ impl Console {
                     ConfirmKind::ReturnToMainMenu => {
                         self.mode = Mode::MainMenu;
                         self.clear_menu_hover();
-                        match self.background_map().map(str::to_owned) {
-                            Some(map) => effects.push(Effect::MainMenuMap(map)),
+                        match self.background() {
+                            Some(background) => effects.push(Effect::MainMenuMap(background)),
                             None => {
                                 self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
                                 self.level_loaded(true);
@@ -1663,37 +1693,10 @@ impl Console {
                     ConfirmKind::ReturnToMainMenu,
                 ));
             }
-            MenuOutcome::SwitchExpansion(game) => {
-                if let Some(target_map) = self.gameui.background_map_for(&game).map(str::to_owned) {
-                    self.config.gameplay.background_map = Some(target_map.clone());
-                    let _ = self.config.save();
-                    if !self.background_level || self.loaded_map.as_deref() != Some(&target_map) {
-                        self.start_background_loading_expansion(&target_map, &game);
-                        return vec![Effect::MainMenuMap(target_map)];
-                    } else {
-                        self.background_transition.set_displayed_category(&game);
-                    }
-                } else {
-                    self.background_transition.set_displayed_category(&game);
-                }
-            }
+            MenuOutcome::SwitchExpansion(category) => return self.show_category(&category),
             MenuOutcome::SwitchCategory(category) => {
                 if category != "main" && category != "extras" {
-                    if let Some(target_map) =
-                        self.gameui.background_map_for(&category).map(str::to_owned)
-                    {
-                        self.config.gameplay.background_map = Some(target_map.clone());
-                        let _ = self.config.save();
-                        if !self.background_level || self.loaded_map.as_deref() != Some(&target_map)
-                        {
-                            self.start_background_loading_expansion(&target_map, &category);
-                            return vec![Effect::MainMenuMap(target_map)];
-                        } else {
-                            self.background_transition.set_displayed_category(&category);
-                        }
-                    } else {
-                        self.background_transition.set_displayed_category(&category);
-                    }
+                    return self.show_category(&category);
                 } else if category == "main" {
                     self.background_transition.set_displayed_category("main");
                 }
@@ -1793,17 +1796,26 @@ impl Console {
                 self.main_menu.category()
             };
             let is_widescreen = self.canvas.width() / self.canvas.height().max(1.0) >= 1.6;
-            let target_cat = self
-                .background_transition
+            // The pre-blurred image of the upcoming background: the transition's target, else
+            // the loaded map, else the menu category's own background.
+            let transition = &self.background_transition;
+            let upcoming = transition
                 .target_category()
-                .unwrap_or(menu_cat);
-            let upcoming_map = self
-                .background_transition
-                .target_map()
-                .or(self.pending_map.as_deref())
-                .or(self.loaded_map.as_deref())
-                .unwrap_or(target_cat);
-            let bg_tex = self.background_texture(upcoming_map, is_widescreen);
+                .zip(transition.target_map())
+                .or_else(|| {
+                    self.loaded_map
+                        .as_ref()
+                        .map(|m| (m.game.as_str(), m.map.as_str()))
+                })
+                .or_else(|| {
+                    let game = self.gameui.category_game(menu_cat);
+                    self.gameui
+                        .background_maps
+                        .get(game)
+                        .map(|map| (game, map.as_str()))
+                });
+            let bg_tex =
+                upcoming.and_then(|(game, map)| self.background_texture(game, map, is_widescreen));
             if let Some(loading) = &self.loading_dialog {
                 if loading.is_background() {
                     loading.draw_background_overlay(&self.canvas, bg_tex);
@@ -2376,13 +2388,15 @@ mod tests {
         let resources = GameUiResources {
             localization: loc,
             game_menu: fallback_game_menu(),
+            games: ["hl2", "episodic", "ep2", "lostcoast"]
+                .map(String::from)
+                .to_vec(),
             background_map: Some("background01".into()),
             background_maps: test_maps(&[
-                ("main", "background01"),
                 ("hl2", "background01"),
                 ("episodic", "ep1_background01"),
                 ("ep2", "ep2_background01"),
-                ("lostcoast", "lostcoast_background01"),
+                ("lostcoast", "background01"),
             ]),
             new_game_maps: test_maps(&[
                 ("hl2", "d1_trainstation_01"),
@@ -2508,7 +2522,7 @@ mod tests {
             effects,
             vec![
                 Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-                Effect::MainMenuMap("background01".into()),
+                Effect::MainMenuMap(GameMap::new("hl2", "background01")),
             ]
         );
         assert!(console.confirm_box.is_none());
@@ -2689,7 +2703,7 @@ mod tests {
             click_row(&mut console, 1),
             vec![
                 Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-                Effect::MainMenuMap("ep1_background01".into()),
+                Effect::MainMenuMap(GameMap::new("episodic", "ep1_background01")),
             ]
         );
         assert_eq!(console.main_menu.category(), "episodic");
@@ -2730,7 +2744,7 @@ mod tests {
             click_row(&mut console, 2),
             vec![
                 Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-                Effect::MainMenuMap("ep2_background01".into()),
+                Effect::MainMenuMap(GameMap::new("ep2", "ep2_background01")),
             ]
         );
         assert_eq!(console.main_menu.category(), "ep2");
@@ -2770,7 +2784,7 @@ mod tests {
         assert_eq!(console.config.gameplay.background_map, None);
 
         // When overridden in config, background_map() prioritizes config
-        console.set_background_map(Some("background02".into()));
+        console.set_background(Some(GameMap::new("hl2", "background02")));
         assert_eq!(console.background_map(), Some("background02"));
 
         // Trigger Return to Main Menu confirmation and click OK
@@ -2797,7 +2811,7 @@ mod tests {
             effects,
             vec![
                 Effect::PlaySound("ui/buttonclickrelease.wav".into()),
-                Effect::MainMenuMap("background02".into()),
+                Effect::MainMenuMap(GameMap::new("hl2", "background02")),
             ]
         );
         assert_eq!(console.mode, Mode::MainMenu);
@@ -2833,7 +2847,10 @@ mod tests {
 
         // map_background loads as background map and persists to config
         let effects = console.submit("map_background background04");
-        assert_eq!(effects, vec![Effect::MainMenuMap("background04".into())]);
+        assert_eq!(
+            effects,
+            vec![Effect::MainMenuMap(GameMap::new("hl2", "background04"))]
+        );
         assert_eq!(
             console.config.gameplay.background_map.as_deref(),
             Some("background04")
@@ -3095,7 +3112,7 @@ mod tests {
         let mut console = installed_console();
         console.mode = Mode::MainMenu;
         console.background_level = true;
-        console.loaded_map = Some("background01".into());
+        console.loaded_map = Some(GameMap::new("hl2", "background01"));
 
         // Initial background map state is background01
         assert_eq!(console.background_map(), Some("background01"));
@@ -3113,25 +3130,34 @@ mod tests {
         assert!(!console.modal_dialog_open());
         assert!(console.modal_bounds().is_none());
         assert!(
-            effects.contains(&Effect::MainMenuMap("ep1_background01".into())),
+            effects.contains(&Effect::MainMenuMap(GameMap::new(
+                "episodic",
+                "ep1_background01"
+            ))),
             "dispatches Effect::MainMenuMap for ep1_background01"
         );
 
         // Map loads and level_loaded is called
-        console.level_loaded(true);
+        console.level_loaded_for_map("episodic", "ep1_background01", true);
         assert_eq!(
             console.main_menu.category(),
             "episodic",
             "category remains in episodic submenu after background map load"
         );
-        assert_eq!(console.loaded_map.as_deref(), Some("ep1_background01"));
+        assert_eq!(
+            console.loaded_map,
+            Some(GameMap::new("episodic", "ep1_background01"))
+        );
         assert!(!console.is_loading());
 
         // 2. Return to main category via Escape, then enter Episode Two submenu
         console.escape();
         assert_eq!(console.main_menu.category(), "main");
         // Background map remains ep1_background01 until a different expansion is selected
-        assert_eq!(console.loaded_map.as_deref(), Some("ep1_background01"));
+        assert_eq!(
+            console.loaded_map,
+            Some(GameMap::new("episodic", "ep1_background01"))
+        );
 
         // Click row 2: "HL2: EPISODE TWO"
         let effects = click_row(&mut console, 2);
@@ -3144,11 +3170,17 @@ mod tests {
         assert!(console.is_loading());
         assert!(console.loading_dialog.as_ref().unwrap().is_background());
         assert!(!console.modal_dialog_open());
-        assert!(effects.contains(&Effect::MainMenuMap("ep2_background01".into())));
+        assert!(effects.contains(&Effect::MainMenuMap(GameMap::new(
+            "ep2",
+            "ep2_background01"
+        ))));
 
-        console.level_loaded(true);
+        console.level_loaded_for_map("ep2", "ep2_background01", true);
         assert_eq!(console.main_menu.category(), "ep2");
-        assert_eq!(console.loaded_map.as_deref(), Some("ep2_background01"));
+        assert_eq!(
+            console.loaded_map,
+            Some(GameMap::new("ep2", "ep2_background01"))
+        );
 
         // 3. Return to main, then enter Half-Life 2 submenu (row 0)
         console.escape();
@@ -3160,11 +3192,14 @@ mod tests {
             console.config.gameplay.background_map.as_deref(),
             Some("background01")
         );
-        assert!(effects.contains(&Effect::MainMenuMap("background01".into())));
+        assert!(effects.contains(&Effect::MainMenuMap(GameMap::new("hl2", "background01"))));
 
-        console.level_loaded(true);
+        console.level_loaded_for_map("hl2", "background01", true);
         assert_eq!(console.main_menu.category(), "hl2");
-        assert_eq!(console.loaded_map.as_deref(), Some("background01"));
+        assert_eq!(
+            console.loaded_map,
+            Some(GameMap::new("hl2", "background01"))
+        );
 
         // 4. Entering Half-Life 2 submenu when already on background01 does not reload
         console.escape();
@@ -3183,11 +3218,11 @@ mod tests {
         let mut console = installed_console();
         console.mode = Mode::MainMenu;
         console.background_level = true;
-        console.loaded_map = Some("background01".into());
+        console.loaded_map = Some(GameMap::new("hl2", "background01"));
 
         // Switch to Episode One
         let _ = click_row(&mut console, 1);
-        console.level_loaded(true);
+        console.level_loaded_for_map("episodic", "ep1_background01", true);
         assert_eq!(console.main_menu.category(), "episodic");
         assert_eq!(
             console.config.gameplay.background_map.as_deref(),
@@ -3208,7 +3243,10 @@ mod tests {
             Some("ep1_background01"),
             "background map persistence stays intact on Back"
         );
-        assert_eq!(console.loaded_map.as_deref(), Some("ep1_background01"));
+        assert_eq!(
+            console.loaded_map,
+            Some(GameMap::new("episodic", "ep1_background01"))
+        );
     }
 
     #[test]
@@ -3216,7 +3254,7 @@ mod tests {
         let mut console = installed_console();
         console.mode = Mode::MainMenu;
         console.background_level = true;
-        console.loaded_map = Some("background01".into());
+        console.loaded_map = Some(GameMap::new("hl2", "background01"));
 
         // In main menu: row 4 is EXTRAS
         let effects = click_row(&mut console, 4);
@@ -3241,14 +3279,18 @@ mod tests {
         assert!(
             lc_effects
                 .iter()
-                .any(|e| matches!(e, Effect::MainMenuMap(map) if map == "lostcoast_background01")),
-            "entering lostcoast submenu reloads background map to lostcoast_background01"
+                .any(|e| e == &Effect::MainMenuMap(GameMap::new("lostcoast", "background01"))),
+            "entering lostcoast submenu loads Lost Coast's own background01"
         );
         assert_eq!(
             console.config.gameplay.background_map.as_deref(),
-            Some("lostcoast_background01")
+            Some("background01")
         );
-        console.level_loaded(true);
+        assert_eq!(
+            console.config.gameplay.background_game.as_deref(),
+            Some("lostcoast")
+        );
+        console.level_loaded_for_map("lostcoast", "background01", true);
 
         // In lostcoast: row 0 is NEW GAME
         let new_game_effects = click_row(&mut console, 0);
@@ -3317,7 +3359,7 @@ mod tests {
         console.canvas.resize(1920., 1080.);
         console.mode = Mode::MainMenu;
 
-        console.start_background_loading("ep2_background01");
+        console.start_background_loading("ep2", "ep2_background01");
         assert!(console.is_loading());
         assert!(console.is_background_loading());
         assert!(!console.modal_dialog_open());
@@ -3426,7 +3468,7 @@ mod tests {
         console.canvas.resize(1920., 1080.);
         console.mode = Mode::MainMenu;
 
-        console.start_background_loading("ep2_background01");
+        console.start_background_loading("ep2", "ep2_background01");
         assert!(console.is_background_loading());
 
         // Level loads
@@ -3464,7 +3506,7 @@ mod tests {
             &crate::gameui::loading::BackgroundTransitionState::Idle
         );
 
-        console.start_background_loading("ep2_background01");
+        console.start_background_loading("ep2", "ep2_background01");
         assert!(console.is_background_loading());
         assert!(matches!(
             console.background_transition_state(),
@@ -3504,7 +3546,7 @@ mod tests {
         };
         console.canvas.resize(1920., 1080.);
 
-        console.start_background_loading("lostcoast_background01");
+        console.start_background_loading("lostcoast", "background01");
         assert!(console.is_background_loading());
 
         console.background_load_failed("Failed to open BSP file");
@@ -3512,7 +3554,7 @@ mod tests {
         assert_eq!(
             console.background_transition_state(),
             &crate::gameui::loading::BackgroundTransitionState::Failed {
-                map: "lostcoast_background01".into(),
+                map: "background01".into(),
                 displayed_category: "lostcoast".into(),
                 reason: "Failed to open BSP file".into(),
             }
@@ -3539,7 +3581,7 @@ mod tests {
         };
         console.canvas.resize(1920., 1080.);
 
-        console.start_background_loading("ep1_background01");
+        console.start_background_loading("episodic", "ep1_background01");
         assert!(console.is_background_loading());
 
         // Generic loading_failed on a background map must dismiss the dialog and mark transition failed
@@ -3994,7 +4036,7 @@ mod tests {
         );
 
         // Finish background loading for Episode One
-        console.level_loaded_for_map("ep1_background01", true);
+        console.level_loaded_for_map("episodic", "ep1_background01", true);
         assert!(!console.is_background_loading());
         assert!(console.background_transition_state().is_finished());
         // Now new title is applied!
@@ -4006,7 +4048,7 @@ mod tests {
 
         // --- Sequence 2: Select Episode Two -> load failure (new title still applied) ---
         // Enter Episode Two ("SwitchExpansion ep2")
-        console.start_background_loading_expansion("ep2_background01", "ep2");
+        console.start_background_loading("ep2", "ep2_background01");
         assert!(console.is_background_loading());
         assert!(console.background_transition_state().is_active());
         // While loading Episode Two, previously displayed title (Episode One) remains visible
@@ -4029,7 +4071,7 @@ mod tests {
 
         // --- Sequence 3: Fast double switch (latest wins, stale completion ignored) ---
         // Switch to Episode One first
-        console.start_background_loading_expansion("ep1_background01", "episodic");
+        console.start_background_loading("episodic", "ep1_background01");
         assert_eq!(
             console.background_transition_state().target_map(),
             Some("ep1_background01")
@@ -4041,10 +4083,10 @@ mod tests {
         );
 
         // User fast double switches to Lost Coast before Episode One finishes
-        console.start_background_loading_expansion("lostcoast_background01", "lostcoast");
+        console.start_background_loading("lostcoast", "background01");
         assert_eq!(
             console.background_transition_state().target_map(),
-            Some("lostcoast_background01")
+            Some("background01")
         );
         assert_eq!(
             console.current_title(),
@@ -4053,16 +4095,19 @@ mod tests {
         );
 
         // Stale completion arrives for Episode One
-        console.level_loaded_for_map("ep1_background01", true);
+        console.level_loaded_for_map("episodic", "ep1_background01", true);
         // Stale completion must be ignored; transition must still be active for Lost Coast
         assert!(
             console.is_background_loading(),
             "stale Episode One completion must not end active Lost Coast transition"
         );
         assert_eq!(
-            console.background_transition_state().target_map(),
-            Some("lostcoast_background01")
+            console.background_transition_state().target_category(),
+            Some("lostcoast")
         );
+        // A stale Half-Life 2 `background01` completion is not Lost Coast's `background01`.
+        console.level_loaded_for_map("hl2", "background01", true);
+        assert!(console.is_background_loading());
         assert_eq!(
             console.current_title(),
             "Half-Life 2\n== episode two ==",
@@ -4070,7 +4115,7 @@ mod tests {
         );
 
         // Lost Coast finishes
-        console.level_loaded_for_map("lostcoast_background01", true);
+        console.level_loaded_for_map("lostcoast", "background01", true);
         assert!(!console.is_background_loading());
         assert!(console.background_transition_state().is_finished());
         assert_eq!(
@@ -4083,127 +4128,29 @@ mod tests {
     #[test]
     fn test_console_background_texture_resolution() {
         let mut console = Console::default();
-        let dummy_tex = Texture2D::from_rgba8(2, 2, &[255; 16]);
-        let wide_tex = Texture2D::from_rgba8(4, 2, &[200; 32]);
-
-        console
-            .background_textures
-            .insert("hl2".into(), dummy_tex.clone());
-        console
-            .background_textures
-            .insert("hl2_widescreen".into(), wide_tex.clone());
-        console
-            .background_textures
-            .insert("episodic".into(), dummy_tex.clone());
-        console
-            .background_textures
-            .insert("ep2".into(), dummy_tex.clone());
-        console
-            .background_textures
-            .insert("lostcoast".into(), dummy_tex.clone());
-
-        // Canonical and alias lookups
-        assert!(console.background_texture("main", false).is_some());
-        assert_eq!(
-            console.background_texture("main", true).unwrap().width(),
-            4.0
-        );
-        assert_eq!(
-            console.background_texture("main", false).unwrap().width(),
-            2.0
-        );
-
-        // Submenu aliases map to canonical expansions
-        assert!(console.background_texture("hl2ep1", false).is_some());
-        assert!(console.background_texture("episodic", false).is_some());
-        assert!(console.background_texture("hl2ep2", false).is_some());
-        assert!(console.background_texture("ep2", false).is_some());
-        assert!(console.background_texture("hl2lc", false).is_some());
-        assert!(console.background_texture("lostcoast", false).is_some());
-
-        console
-            .background_textures
-            .insert("ep2_background01".into(), dummy_tex.clone());
-        console
-            .background_textures
-            .insert("ep2_background01_widescreen".into(), wide_tex.clone());
-        console
-            .background_textures
-            .insert("background05".into(), dummy_tex.clone());
-        console
-            .background_textures
-            .insert("lostcoast_background01".into(), dummy_tex.clone());
-
-        // Map name lookups (with and without .bsp extension)
-        assert!(console
-            .background_texture("ep2_background01", false)
-            .is_some());
-        assert_eq!(
+        let texture =
+            |width: u32| Texture2D::from_rgba8(width as u16, 2, &vec![255; width as usize * 2 * 4]);
+        for (game, image, width) in [
+            ("hl2", "background01", 2),
+            ("hl2", "background01_widescreen", 4),
+            ("lostcoast", "background01", 20),
+            ("ep2", "ep2_background01", 2),
+        ] {
             console
-                .background_texture("ep2_background01.bsp", true)
-                .unwrap()
-                .width(),
-            4.0
-        );
-        assert!(console.background_texture("background05", false).is_some());
-        assert!(console
-            .background_texture("lostcoast_background01", false)
-            .is_some());
-
-        // Verify expansion_category_for_map
-        assert_eq!(
-            Console::expansion_category_for_map("ep2_background01"),
-            Some("ep2")
-        );
-        assert_eq!(
-            Console::expansion_category_for_map("background01"),
-            Some("hl2")
-        );
-        assert_eq!(
-            Console::expansion_category_for_map("ep1_background01"),
-            Some("episodic")
-        );
-        assert_eq!(
-            Console::expansion_category_for_map("lostcoast_background01"),
-            Some("lostcoast")
-        );
-
-        // Verify background_texture disambiguates shared map names and categories
-        let hl2_tex = Texture2D::from_rgba8(10, 10, &vec![255; 10 * 10 * 4]);
-        let lc_tex = Texture2D::from_rgba8(20, 20, &vec![200; 20 * 20 * 4]);
-        console
-            .background_textures
-            .insert("background01".into(), hl2_tex.clone());
-        console.background_textures.insert("hl2".into(), hl2_tex);
-        console
-            .background_textures
-            .insert("lostcoast_background01".into(), lc_tex.clone());
-        console
-            .background_textures
-            .insert("lostcoast".into(), lc_tex);
-
-        // Map "background01" resolves to HL2 texture
-        let tex_hl2 = console
-            .background_texture("background01", false)
-            .expect("hl2 background texture");
-        assert_eq!(tex_hl2.width(), 10.0);
-
-        // Canonical lostcoast map name resolves to Lost Coast texture
-        let tex_lc = console
-            .background_texture("lostcoast_background01", false)
-            .expect("lostcoast background texture");
-        assert_eq!(tex_lc.width(), 20.0);
-
-        // Category "hl2" resolves to HL2 texture
-        let tex_cat_hl2 = console
-            .background_texture("hl2", false)
-            .expect("hl2 category texture");
-        assert_eq!(tex_cat_hl2.width(), 10.0);
-
-        // Category "lostcoast" resolves to Lost Coast texture
-        let tex_cat_lc = console
-            .background_texture("lostcoast", false)
-            .expect("lostcoast category texture");
-        assert_eq!(tex_cat_lc.width(), 20.0);
+                .background_textures
+                .insert((game.into(), image.into()), texture(width));
+        }
+        let width = |game, map, wide| {
+            console
+                .background_texture(game, map, wide)
+                .map(|t| t.width())
+        };
+        assert_eq!(width("hl2", "background01", false), Some(2.0));
+        assert_eq!(width("hl2", "background01.bsp", true), Some(4.0));
+        // Lost Coast's `background01` is its own image, with no widescreen variant.
+        assert_eq!(width("lostcoast", "background01", false), Some(20.0));
+        assert_eq!(width("lostcoast", "background01", true), Some(20.0));
+        assert_eq!(width("ep2", "ep2_background01", true), Some(2.0));
+        assert_eq!(width("episodic", "ep2_background01", false), None);
     }
 }

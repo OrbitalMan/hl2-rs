@@ -157,9 +157,15 @@ impl BackgroundTransitionState {
         }
     }
 
-    /// Completes the transition if `map` matches the target map. Returns false if stale.
-    pub fn finish_map(&mut self, map: &str) -> bool {
-        if self.target_map() == Some(map) {
+    /// Whether `game`'s `map` is the target. A background transition's category is the game
+    /// whose background loads; Half-Life 2 and Lost Coast both have a `background01`.
+    fn targets(&self, game: &str, map: &str) -> bool {
+        self.target_map() == Some(map) && self.target_category() == Some(game)
+    }
+
+    /// Completes the transition if `game`'s `map` is the target. Returns false if stale.
+    pub fn finish_map(&mut self, game: &str, map: &str) -> bool {
+        if self.targets(game, map) {
             self.finish();
             true
         } else {
@@ -198,9 +204,9 @@ impl BackgroundTransitionState {
         };
     }
 
-    /// Fails the transition if `map` matches the target map. Returns false if stale.
-    pub fn fail_map(&mut self, map: &str, reason: impl Into<String>) -> bool {
-        if self.target_map() == Some(map) {
+    /// Fails the transition if `game`'s `map` is the target. Returns false if stale.
+    pub fn fail_map(&mut self, game: &str, map: &str, reason: impl Into<String>) -> bool {
+        if self.targets(game, map) {
             self.fail(reason);
             true
         } else {
@@ -1036,7 +1042,7 @@ mod tests {
 
         // 3. Stale completion arrives for Episode One
         assert!(
-            !state.finish_map("ep1_background01"),
+            !state.finish_map("episodic", "ep1_background01"),
             "stale finish must return false"
         );
         assert!(state.is_active(), "state must remain active for ep2");
@@ -1044,13 +1050,28 @@ mod tests {
         assert_eq!(state.displayed_category("ep2"), "main");
 
         // 4. Stale failure for Episode One also ignored
-        assert!(!state.fail_map("ep1_background01", "stale error"));
+        assert!(!state.fail_map("episodic", "ep1_background01", "stale error"));
         assert!(state.is_active());
 
         // 5. Episode Two finishes
-        assert!(state.finish_map("ep2_background01"));
+        assert!(state.finish_map("ep2", "ep2_background01"));
         assert!(state.is_finished());
         assert_eq!(state.displayed_category("ep2"), "ep2");
+    }
+
+    #[test]
+    fn background_transition_tells_games_with_the_same_map_name_apart() {
+        let mut state = BackgroundTransitionState::default();
+        state.start("background01", "hl2");
+        state.start("background01", "lostcoast");
+        assert!(
+            !state.finish_map("hl2", "background01"),
+            "stale Half-Life 2 load"
+        );
+        assert!(!state.fail_map("hl2", "background01", "stale"));
+        assert!(state.is_active());
+        assert!(state.finish_map("lostcoast", "background01"));
+        assert_eq!(state.displayed_category("lostcoast"), "lostcoast");
     }
 
     #[test]
@@ -1060,7 +1081,7 @@ mod tests {
 
         let canvas = Canvas::default();
         canvas.resize(1920., 1080.);
-        let mut dialog = LoadingDialog::new_background("lostcoast_background01");
+        let mut dialog = LoadingDialog::new_background("background01");
         assert!(dialog.is_background());
         assert!(dialog.transition.is_active());
 

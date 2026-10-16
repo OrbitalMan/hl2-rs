@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 Host/GameUI: carry each map's game instead of guessing it from the name
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `source-assets`: `install::BASE_GAME`, `install::games`, `install::game_for_map` (the game whose own folder ships `maps/<name>.bsp`; in-session names search the running game first, command-line names start at `hl2`), `Vfs::mount_game`; removed `vpk::expansion_for_map`. `hl2-ui`: `console::GameMap`; `Effect::MainMenuMap(GameMap)`; `Console::loaded_map` is a `GameMap`, `pending_map` removed; `start_background_loading`, `level_loaded_for_map`, `background_load_failed_for_map` take the game; `Console::background`, `set_background`, `show_category` (shared by `SwitchExpansion`/`SwitchCategory`); `BackgroundTransitionState::finish_map`/`fail_map` compare `(game, map)`; `GameUiResources` keeps `install_root`, `games`, `category_game`, `main_game`, and keys `background_images` by `(game, image)` (no category or alias copies); config `gameplay.background_game`; removed `Console::expansion_category_for_map` and `start_background_loading_expansion`. `hl2-bevy`: `assets::load`/`load_with_canvas` take the game, `LoadedMap::game`; campaign requests carry a game (menu: given; transitions: running game; bare names: `game_for_map`); `MapLoaded::game`, report `loaded_game`/`last_event_game`; console line `Loaded <game>/<map>`; startup resolves `--background-map` and an unrecorded saved game from assets. Playground: `runtime_submenus.sh` + `submenus.json` cover Extras -> Lost Coast, new `show_report.py`. Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
+
+**Why:** Owner asked for KISS, asset-driven code without map tables; the host still guessed games from map-name prefixes and renamed Lost Coast's `background01` to an invented key.
+
+**Tested how:** `cargo test -p hl2-ui` (192), `cargo test -p hl2-bevy` (74), `cargo test -p source-assets`, owned-install `cargo test -- --ignored` for `source-assets` (game lookup), `hl2-ui` (5) and `hl2-bevy` (6, incl. headless Episode One/Two/Lost Coast background swaps and `background01_loads_from_the_named_game`), strict clippy for macOS and `x86_64-pc-windows-msvc` (`check_windows.sh`), fmt; packaged replay `runtime_submenus.sh`.
+
+**Result:** Replay loads `hl2/background01`, `episodic/ep1_background01`, `hl2/background01`, `lostcoast/background01`; final report `loaded_game: lostcoast`. A saved `ep2_background01` without a game starts on `ep2/ep2_background01`.
+
+**Still broken or not tested:** `Vfs::mount_expansion` still hardcodes the `ep2` -> `episodic` inheritance rather than reading `gameinfo.txt`; restart into a saved Lost Coast menu (`background_game: lostcoast`) covered by the config test only, not run; gameplay `changelevel` and the `map` console command from inside an episode not exercised by hand; not checked on Windows at runtime.
+
+**Next:** Owner check; optionally derive mounts from each game's `gameinfo.txt` search paths.
+
 ## 2026-10-16 GameUI: every game reads its own chapter files (Half-Life 2 submenu background)
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

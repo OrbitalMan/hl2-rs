@@ -353,12 +353,17 @@ pub struct GameUiResources {
     pub bink_image: Option<Image>,
     /// Installed voice languages (`hl2_sound_vo_<language>_dir.vpk`), lower-case, English first.
     pub spoken_languages: Vec<String>,
+    /// The installation root, for finding the game that ships a map.
+    pub install_root: Option<PathBuf>,
+    /// The games the menu switches to, in menu order (see [`menu_games`]).
+    pub games: Vec<String>,
     /// Main-menu background map (`scripts/chapterbackgrounds.txt`, chapter 1).
     pub background_map: Option<String>,
-    /// Category / expansion -> chapter 1 background map (`scripts/chapterbackgrounds.txt`).
+    /// Game -> chapter 1 background map of that game (`scripts/chapterbackgrounds.txt`).
     pub background_maps: BTreeMap<String, String>,
-    /// Pre-blurred background images for each category (`"hl2"`, `"episodic"`, `"ep2"`, `"lostcoast"`).
-    pub background_images: BTreeMap<String, Image>,
+    /// `(game, image)` -> pre-blurred `materials/console/<image>.vtf` of each chapter background
+    /// map of that game; `<map>_widescreen` images are stored next to `<map>`.
+    pub background_images: BTreeMap<(String, String), Image>,
     /// Game -> first chapter map (`cfg/chapter1.cfg` of each mounted game).
     pub new_game_maps: BTreeMap<String, String>,
     /// Category -> menu title (two lines for episodes, e.g. "Half-Life 2\n--- Episode One ---").
@@ -368,44 +373,54 @@ pub struct GameUiResources {
 }
 
 impl GameUiResources {
-    /// Returns the background map configured for the given category, if any.
-    pub fn background_map_for(&self, category: &str) -> Option<&str> {
-        let canonical = match category {
+    /// The game whose background a menu category shows: a `SwitchExpansion` game is its own
+    /// category, and the root `main` category shows the first game of the menu.
+    pub fn category_game<'a>(&'a self, category: &'a str) -> &'a str {
+        match category {
             "hl2ep1" => "episodic",
             "hl2ep2" => "ep2",
             "hl2lc" => "lostcoast",
+            "main" => self.main_game(),
             other => other,
-        };
+        }
+    }
+
+    /// The first game of the menu (Half-Life 2), shown behind the root menu.
+    pub fn main_game(&self) -> &str {
+        self.games
+            .first()
+            .map(String::as_str)
+            .unwrap_or(source_assets::install::BASE_GAME)
+    }
+
+    /// The chapter 1 background map of the game a menu category shows, if any.
+    pub fn background_map_for(&self, category: &str) -> Option<&str> {
         self.background_maps
-            .get(canonical)
-            .or_else(|| self.background_maps.get(category))
+            .get(self.category_game(category))
             .map(String::as_str)
     }
 
-    /// Returns the pre-blurred background image for the map name or category, if loaded.
-    pub fn background_image(&self, key: &str, widescreen: bool) -> Option<&Image> {
-        let name = blur(key);
-        let canonical_key = match name {
-            "hl2ep1" => "episodic",
-            "hl2ep2" => "ep2",
-            "hl2lc" => "lostcoast",
-            "main" => "hl2",
-            other => other,
-        };
-        if widescreen {
-            let wide_key = format!("{canonical_key}_widescreen");
-            if let Some(img) = self.background_images.get(&wide_key) {
-                return Some(img);
-            }
-        }
-        self.background_images.get(canonical_key)
+    /// The pre-blurred image of `game`'s background map `map`, if loaded.
+    pub fn background_image(&self, game: &str, map: &str, widescreen: bool) -> Option<&Image> {
+        let key = |name: String| (game.to_owned(), name);
+        let map = blur(map);
+        widescreen
+            .then(|| {
+                self.background_images
+                    .get(&key(format!("{map}_widescreen")))
+            })
+            .flatten()
+            .or_else(|| self.background_images.get(&key(map.to_owned())))
     }
 }
 
 impl GameUiResources {
     pub fn load(vfs: &Vfs) -> Self {
         let reader = Reader::new(vfs);
-        let mut res = Self::default();
+        let mut res = Self {
+            install_root: vfs.game_root().map(Path::to_path_buf),
+            ..Self::default()
+        };
         for file in [
             "resource/merged_loc_all.txt",
             "resource/gameui_english.txt",
@@ -466,7 +481,8 @@ impl GameUiResources {
         // Each game shows chapter 1 of its own `scripts/chapterbackgrounds.txt` as its menu
         // background and starts New Game with its own `cfg/chapter1.cfg`, both read through that
         // game's own search path. The games are the ones the menu switches to.
-        for game in menu_games(&res.game_menu) {
+        res.games = menu_games(&res.game_menu);
+        for game in res.games.clone() {
             let backgrounds = read_game_text(vfs, &game, "scripts/chapterbackgrounds.txt");
             let Some(text) = backgrounds else {
                 res.missing
@@ -476,42 +492,18 @@ impl GameUiResources {
             let Some(first_map) = background_map(&text) else {
                 continue;
             };
-            // Lost Coast's background is also called `background01`; it is keyed apart from
-            // Half-Life 2's so both can be loaded and shown.
-            let key = |map: &str| {
-                if game == "lostcoast" && map == "background01" {
-                    "lostcoast_background01".to_owned()
-                } else {
-                    map.to_owned()
-                }
-            };
-            res.background_maps.insert(game.clone(), key(&first_map));
+            res.background_maps.insert(game.clone(), first_map);
 
-            // Pre-blurred background images for every chapter background of this game.
+            // Pre-blurred background images for every chapter background of this game. Maps
+            // are keyed by game: Half-Life 2 and Lost Coast both have a `background01`.
             for map_name in chapter_background_maps(&text) {
-                let vtf_base = blur(&map_name);
-                let store_key = key(&map_name);
-                if let Some(img) = load_vtf_file(&reader, vfs, &game, vtf_base) {
-                    res.background_images.insert(store_key.clone(), img);
+                let map = blur(&map_name);
+                for image_name in [map.to_owned(), format!("{map}_widescreen")] {
+                    if let Some(img) = load_vtf_file(&reader, vfs, &game, &image_name) {
+                        res.background_images
+                            .insert((game.clone(), image_name), img);
+                    }
                 }
-                let wide_name = format!("{vtf_base}_widescreen");
-                if let Some(img) = load_vtf_file(&reader, vfs, &game, &wide_name) {
-                    res.background_images
-                        .insert(format!("{store_key}_widescreen"), img);
-                }
-            }
-            // The game's category shows its chapter 1 background image.
-            let first_key = key(&first_map);
-            if let Some(img) = res.background_images.get(blur(&first_key)).cloned() {
-                res.background_images.insert(game.clone(), img);
-            }
-            if let Some(img) = res
-                .background_images
-                .get(&format!("{}_widescreen", blur(&first_key)))
-                .cloned()
-            {
-                res.background_images
-                    .insert(format!("{game}_widescreen"), img);
             }
 
             match read_game_text(vfs, &game, "cfg/chapter1.cfg").and_then(|t| chapter_map(&t)) {
@@ -522,12 +514,7 @@ impl GameUiResources {
             }
         }
         // The main category shows the first game's background (Half-Life 2 in the menu).
-        res.background_map = menu_games(&res.game_menu)
-            .first()
-            .and_then(|game| res.background_maps.get(game).cloned());
-        if let Some(map) = res.background_map.clone() {
-            res.background_maps.insert("main".to_owned(), map);
-        }
+        res.background_map = res.background_maps.get(res.main_game()).cloned();
         for category in ["main", "hl2", "episodic", "ep2", "lostcoast"] {
             let gameinfo_path = match category {
                 "episodic" => "episodic/gameinfo.txt",
@@ -554,17 +541,6 @@ impl GameUiResources {
         ] {
             if let Some(title) = res.category_titles.get(canonical).cloned() {
                 res.category_titles.insert(alias.to_owned(), title);
-            }
-            if let Some(img) = res.background_images.get(canonical).cloned() {
-                res.background_images.insert(alias.to_owned(), img);
-            }
-            if let Some(img) = res
-                .background_images
-                .get(&format!("{canonical}_widescreen"))
-                .cloned()
-            {
-                res.background_images
-                    .insert(format!("{alias}_widescreen"), img);
             }
         }
         res
@@ -724,9 +700,6 @@ pub fn menu_games(items: &[MenuItem]) -> Vec<String> {
     games
 }
 
-/// The installation folder of the base game, which every game mount ends with.
-const BASE_GAME: &str = "hl2";
-
 /// Reads a text file the way `game` itself sees it: through that game's own search path (its
 /// folder, then Half-Life 2 and the platform), independent of which game's map is loaded now.
 /// Without an installation root (test file systems) it reads through `vfs`.
@@ -734,8 +707,7 @@ fn read_game_text(vfs: &Vfs, game: &str, path: &str) -> Option<String> {
     let Some(root) = vfs.game_root() else {
         return Reader::new(vfs).read_text(path);
     };
-    let expansion = (game != BASE_GAME).then_some(game);
-    let game_vfs = Vfs::mount_expansion(root, expansion).ok()?;
+    let game_vfs = Vfs::mount_game(root, game).ok()?;
     Reader::new(&game_vfs).read_text(path)
 }
 
@@ -989,6 +961,7 @@ mod tests {
     #[test]
     fn background_map_for_resolves_aliases() {
         let res = GameUiResources {
+            games: vec!["hl2".into(), "episodic".into()],
             background_maps: [("hl2", "background01"), ("episodic", "ep1_background01")]
                 .into_iter()
                 .map(|(game, map)| (game.to_owned(), map.to_owned()))
@@ -996,8 +969,36 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(res.background_map_for("hl2"), Some("background01"));
+        assert_eq!(res.background_map_for("main"), Some("background01"));
         assert_eq!(res.background_map_for("hl2ep1"), Some("ep1_background01"));
-        assert_eq!(res.background_map_for("unknown"), None);
+        assert_eq!(res.background_map_for("extras"), None);
+        assert_eq!(res.category_game("main"), "hl2");
+    }
+
+    #[test]
+    fn background_images_are_keyed_by_game_and_map() {
+        let image = |width| Image {
+            width,
+            height: 1,
+            rgba: vec![0; width as usize * 4],
+        };
+        let res = GameUiResources {
+            background_images: [
+                (("hl2", "background01"), image(1)),
+                (("hl2", "background01_widescreen"), image(2)),
+                (("lostcoast", "background01"), image(3)),
+            ]
+            .into_iter()
+            .map(|((game, name), img)| ((game.to_owned(), name.to_owned()), img))
+            .collect(),
+            ..Default::default()
+        };
+        let width = |game, map, wide| res.background_image(game, map, wide).map(|i| i.width);
+        assert_eq!(width("hl2", "background01", false), Some(1));
+        assert_eq!(width("hl2", "background01.bsp", true), Some(2));
+        assert_eq!(width("lostcoast", "background01", false), Some(3));
+        assert_eq!(width("lostcoast", "background01", true), Some(3));
+        assert_eq!(width("episodic", "background01", false), None);
     }
 
     #[test]
@@ -1012,14 +1013,10 @@ mod tests {
             let map = |game: &str| res.background_maps.get(game).map(String::as_str);
             let new_game = |game: &str| res.new_game_maps.get(game).map(String::as_str);
             assert_eq!(map("hl2"), Some("background01"), "{startup:?}");
-            assert_eq!(map("main"), Some("background01"), "{startup:?}");
+            assert_eq!(res.background_map_for("main"), Some("background01"));
             assert_eq!(map("episodic"), Some("ep1_background01"), "{startup:?}");
             assert_eq!(map("ep2"), Some("ep2_background01"), "{startup:?}");
-            assert_eq!(
-                map("lostcoast"),
-                Some("lostcoast_background01"),
-                "{startup:?}"
-            );
+            assert_eq!(map("lostcoast"), Some("background01"), "{startup:?}");
             assert_eq!(new_game("hl2"), Some("d1_trainstation_01"), "{startup:?}");
             assert_eq!(new_game("episodic"), Some("ep1_citadel_00"), "{startup:?}");
             assert_eq!(new_game("ep2"), Some("ep2_outland_01"), "{startup:?}");
@@ -1245,7 +1242,7 @@ mod tests {
         );
         assert_eq!(
             res.background_maps.get("lostcoast").map(String::as_str),
-            Some("lostcoast_background01")
+            Some("background01")
         );
         assert_eq!(
             res.new_game_maps.get("hl2").map(String::as_str),
@@ -1275,34 +1272,21 @@ mod tests {
             res.category_titles.get("lostcoast").map(String::as_str),
             Some("HALF-LIFE'\nlost coasT")
         );
-        assert!(res.background_image("hl2", false).is_some());
-        assert!(res.background_image("hl2", true).is_some());
-        assert!(res.background_image("episodic", false).is_some());
-        assert!(res.background_image("ep2", false).is_some());
-        assert!(res.background_image("lostcoast", false).is_some());
-        assert!(res.background_image("background01", false).is_some());
-        assert!(res.background_image("ep2_background01", false).is_some());
-        assert!(res
-            .background_image("lostcoast_background01", false)
-            .is_some());
-        assert!(res.background_image("background05", false).is_some());
-        println!(
-            "hl2 len: {}",
-            res.background_image("hl2", false).unwrap().rgba.len()
-        );
-        println!(
-            "lostcoast len: {}",
-            res.background_image("lostcoast", false).unwrap().rgba.len()
-        );
-        println!(
-            "background01 == hl2: {}",
-            res.background_image("background01", false).unwrap().rgba
-                == res.background_image("hl2", false).unwrap().rgba
-        );
-        println!(
-            "background01 == lostcoast: {}",
-            res.background_image("background01", false).unwrap().rgba
-                == res.background_image("lostcoast", false).unwrap().rgba
+        let image = |game, map, wide| res.background_image(game, map, wide);
+        for (game, map) in [
+            ("hl2", "background01"),
+            ("hl2", "background05"),
+            ("episodic", "ep1_background01"),
+            ("ep2", "ep2_background01"),
+            ("lostcoast", "background01"),
+        ] {
+            assert!(image(game, map, false).is_some(), "{game}/{map}");
+            assert!(image(game, map, true).is_some(), "{game}/{map} widescreen");
+        }
+        assert_ne!(
+            image("hl2", "background01", false).unwrap().rgba,
+            image("lostcoast", "background01", false).unwrap().rgba,
+            "Half-Life 2 and Lost Coast each show their own background01"
         );
         println!("missing: {:?}", res.missing);
     }
@@ -1315,7 +1299,6 @@ mod tests {
         assert_eq!(blur("ep1_background01.bsp"), "ep1_background01");
         assert_eq!(blur("ep2_background01"), "ep2_background01");
         assert_eq!(blur("ep2_background01.bsp"), "ep2_background01");
-        assert_eq!(blur("lostcoast_background01"), "lostcoast_background01");
 
         let bgs = chapter_background_maps(
             "\"chapters\"\n{\n\t1\t\"background01\"\n\t2\t\"background01\"\n\t3\t\"background02\"\n\t4\t\"background02\"\n}",
@@ -1329,13 +1312,17 @@ mod tests {
         let root = source_assets::install::discover().expect("game install");
         let vfs_clean = source_assets::vpk::Vfs::mount(&root).unwrap();
         let res_clean = GameUiResources::load(&vfs_clean);
-        let hl2_clean = res_clean.background_image("background01", false).unwrap();
+        let hl2_clean = res_clean
+            .background_image("hl2", "background01", false)
+            .unwrap();
 
         let vfs_lc = source_assets::vpk::Vfs::mount_expansion(&root, Some("lostcoast")).unwrap();
         let res_lc = GameUiResources::load(&vfs_lc);
-        let hl2_lc = res_lc.background_image("background01", false).unwrap();
+        let hl2_lc = res_lc
+            .background_image("hl2", "background01", false)
+            .unwrap();
         let lc_bg = res_lc
-            .background_image("lostcoast_background01", false)
+            .background_image("lostcoast", "background01", false)
             .unwrap();
 
         assert_eq!(

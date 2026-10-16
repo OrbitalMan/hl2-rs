@@ -301,6 +301,10 @@ pub struct GameplaySettings {
     /// Overridden or unlocked main-menu background map (falls back to `scripts/chapterbackgrounds.txt`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background_map: Option<String>,
+    /// Installation folder of the game `background_map` belongs to (`hl2`, `lostcoast`, ...);
+    /// unset means the first game of the menu.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_game: Option<String>,
 }
 
 impl Default for GameplaySettings {
@@ -308,6 +312,7 @@ impl Default for GameplaySettings {
         Self {
             skill: 2,
             background_map: None,
+            background_game: None,
         }
     }
 }
@@ -450,6 +455,18 @@ impl Config {
                 self.gameplay.background_map = None;
             }
         }
+        if let Some(game) = self.gameplay.background_game.take() {
+            let game = game.trim();
+            if self.gameplay.background_map.is_some()
+                && !game.is_empty()
+                && game.len() <= 64
+                && game
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                self.gameplay.background_game = Some(game.to_owned());
+            }
+        }
         if self.audio.language.trim().is_empty() {
             self.audio.language = defaults.audio.language;
         }
@@ -589,5 +606,38 @@ mod tests {
         let invalid =
             Config::from_json(br#"{"gameplay":{"background_map":"bad map/name"}}"#).unwrap();
         assert_eq!(invalid.gameplay.background_map, None);
+    }
+
+    #[test]
+    fn background_game_persists_with_its_map_and_rejects_unsafe_folders() {
+        let mut cfg = Config::default();
+        cfg.gameplay.background_map = Some("background01".into());
+        cfg.gameplay.background_game = Some("lostcoast".into());
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        let deserialized = Config::from_json(serialized.as_bytes()).unwrap();
+        assert_eq!(
+            deserialized.gameplay.background_game.as_deref(),
+            Some("lostcoast")
+        );
+        assert_eq!(
+            deserialized.gameplay.background_map.as_deref(),
+            Some("background01")
+        );
+
+        // A game without a (valid) map, or an unsafe folder name, is dropped.
+        for json in [
+            &br#"{"gameplay":{"background_game":"lostcoast"}}"#[..],
+            br#"{"gameplay":{"background_map":"bad map","background_game":"lostcoast"}}"#,
+            br#"{"gameplay":{"background_map":"background01","background_game":"../x"}}"#,
+            br#"{"gameplay":{"background_map":"background01","background_game":" "}}"#,
+        ] {
+            let cfg = Config::from_json(json).unwrap();
+            assert_eq!(
+                cfg.gameplay.background_game,
+                None,
+                "{}",
+                String::from_utf8_lossy(json)
+            );
+        }
     }
 }

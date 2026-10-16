@@ -68,6 +68,52 @@ pub fn validate(path: PathBuf) -> Result<PathBuf> {
     }
     path.canonicalize().context("resolve game root")
 }
+/// The installation folder of the base game, whose search path every other game extends.
+pub const BASE_GAME: &str = "hl2";
+
+/// The games of an installation: the base game first, then every other folder with a
+/// `gameinfo.txt` (`episodic`, `ep2`, `lostcoast`, ...), sorted by name.
+pub fn games(root: &Path) -> Vec<String> {
+    let mut others = std::fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.join("gameinfo.txt").is_file())
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .filter(|name| name != BASE_GAME)
+        .collect::<Vec<_>>();
+    others.sort();
+    std::iter::once(BASE_GAME.to_owned())
+        .chain(others)
+        .collect()
+}
+
+/// The game whose own folder ships `maps/<map>.bsp`, loose or in one of its own VPKs, for map
+/// names given without a game (`map`, `--map`). Like the engine, which searches the running
+/// game first, `current` wins, then the base game, then the other games: Half-Life 2 and Lost
+/// Coast both ship `background01`.
+pub fn game_for_map(root: &Path, map: &str, current: Option<&str>) -> Option<String> {
+    let path = crate::vpk::normalize(&format!("maps/{}.bsp", map.trim_end_matches(".bsp"))).ok()?;
+    let mut games = games(root);
+    if let Some(current) = current.and_then(|c| games.iter().position(|g| g == c)) {
+        let current = games.remove(current);
+        games.insert(0, current);
+    }
+    games.into_iter().find(|game| {
+        let folder = root.join(game);
+        folder.join(&path).is_file()
+            || std::fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().ends_with("_dir.vpk"))
+                })
+                .any(|p| crate::vpk::Vpk::open(&p).is_ok_and(|v| v.entries.contains_key(&path)))
+    })
+}
+
 pub fn maps(root: &Path) -> Result<Vec<PathBuf>> {
     let mut maps = std::fs::read_dir(root.join("hl2/maps"))?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -85,6 +131,52 @@ mod tests {
     fn invalid_root_fails_validation() {
         let temp = std::env::temp_dir();
         assert!(validate(temp).is_err());
+    }
+
+    #[test]
+    fn game_for_map_reads_each_game_folder_base_game_first() {
+        let root = std::env::temp_dir().join(format!("hl2-rs-games-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (game, maps) in [
+            ("hl2", &["background01", "d1_trainstation_01"][..]),
+            ("lostcoast", &["background01", "d2_lostcoast"][..]),
+            ("episodic", &["ep1_citadel_00"][..]),
+            ("hl2_complete", &[][..]),
+        ] {
+            std::fs::create_dir_all(root.join(game).join("maps")).unwrap();
+            std::fs::write(root.join(game).join("gameinfo.txt"), "").unwrap();
+            for map in maps {
+                std::fs::write(root.join(game).join(format!("maps/{map}.bsp")), "").unwrap();
+            }
+        }
+        std::fs::create_dir_all(root.join("platform")).unwrap();
+        assert_eq!(
+            games(&root),
+            ["hl2", "episodic", "hl2_complete", "lostcoast"]
+        );
+        let game = |map: &str| game_for_map(&root, map, None);
+        assert_eq!(game("background01").as_deref(), Some("hl2"));
+        assert_eq!(game("d2_lostcoast.bsp").as_deref(), Some("lostcoast"));
+        assert_eq!(game("ep1_citadel_00").as_deref(), Some("episodic"));
+        assert_eq!(game("ep2_outland_01"), None);
+        assert_eq!(game("../hl2/maps/background01"), None);
+        let from_lostcoast = |map: &str| game_for_map(&root, map, Some("lostcoast"));
+        assert_eq!(from_lostcoast("background01").as_deref(), Some("lostcoast"));
+        assert_eq!(from_lostcoast("d1_trainstation_01").as_deref(), Some("hl2"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn owned_install_maps_belong_to_the_game_that_ships_them() {
+        let root = discover().expect("owned Half-Life 2 installation");
+        let game = |map: &str| game_for_map(&root, map, None);
+        assert_eq!(game("d1_trainstation_01").as_deref(), Some("hl2"));
+        assert_eq!(game("background01").as_deref(), Some("hl2"));
+        assert_eq!(game("ep1_citadel_00").as_deref(), Some("episodic"));
+        assert_eq!(game("ep2_outland_01").as_deref(), Some("ep2"));
+        assert_eq!(game("d2_lostcoast").as_deref(), Some("lostcoast"));
+        assert_eq!(game("no_such_map"), None);
     }
 
     #[test]

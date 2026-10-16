@@ -249,15 +249,17 @@ impl Simulation {
                 }
                 Effect::Map(map) => {
                     ui.map_request = Some(map);
+                    ui.map_request_game = None;
                     ui.background_request = false;
                     self.loading = true;
                 }
-                Effect::MainMenuMap(map) => {
+                Effect::MainMenuMap(background) => {
                     if self.loading && !ui.background_request {
                         ui.source
                             .log("Gameplay map load in progress; ignoring background map request");
                     } else {
-                        ui.map_request = Some(map);
+                        ui.map_request = Some(background.map);
+                        ui.map_request_game = Some(background.game);
                         ui.background_request = true;
                         self.loading = true;
                     }
@@ -954,7 +956,9 @@ mod tests {
         sim.console_effects(
             &mut ui,
             &mut game,
-            vec![hl2_ui::console::Effect::MainMenuMap("background02".into())],
+            vec![hl2_ui::console::Effect::MainMenuMap(
+                hl2_ui::console::GameMap::new("hl2", "background02"),
+            )],
         );
         assert!(sim.loading);
         assert_eq!(ui.map_request.as_deref(), Some("ep1_citadel_00"));
