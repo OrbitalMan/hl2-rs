@@ -882,6 +882,40 @@ mod tests {
         assert_eq!(sim.player.ticks, before.ticks + 1);
     }
     #[test]
+    fn script_ui_entries_keep_running_while_a_menu_dialog_pauses_the_world() {
+        let script: Vec<Command> = serde_json::from_value(serde_json::json!([
+            {"tick": 2, "label": "options-open"},
+            {"tick": 5, "ui": [{"action": "command", "command": "sv_cheats 1"}], "label": "dialog-input"}
+        ]))
+        .unwrap();
+        let mut ui = crate::ui_host::Console::new(Default::default());
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut sim = Simulation::new(
+            &World::default(),
+            glam::Vec3::Z * 128.,
+            0.,
+            0.,
+            false,
+            script,
+        );
+        ui.source.mode = hl2_ui::console::Mode::Options;
+        sim.paused = ui.source.paused();
+        for _ in 0..5 {
+            sim.step(Some(&mut game), Some(&mut ui));
+        }
+        assert!(!sim.world_running());
+        assert_eq!(sim.host_tick, 5);
+        assert!(sim.finished);
+        assert!(ui.source.cheats);
+        assert_eq!(ui.source.mode, hl2_ui::console::Mode::Options);
+        let labels: Vec<_> = sim
+            .samples
+            .iter()
+            .map(|s| (s.label.as_str(), s.host_tick))
+            .collect();
+        assert_eq!(labels, [("options-open", 2), ("dialog-input", 5)]);
+    }
+    #[test]
     fn background_level_world_runs_behind_the_menu_without_player_input() {
         let forward: Vec<Command> = serde_json::from_str(
             &serde_json::to_string(
