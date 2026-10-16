@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: main-menu labels in the scheme's GorDIN face
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** new `hl2-ui::gameui::scheme_fonts`: a scheme font (`Fonts/<name>/1` face and weight) is drawn from the file the scheme registers under `CustomFontFiles` whose family matches and whose weight is closest. `Console::load` draws menu items with the installed `SourceScheme.res` `MenuLarge` (GorDIN, weight 600 -> `resource/GorDIN-Semibold.ttf`), falling back to the former Liberation Sans/GorDIN Regular files. Only installed files are read; no host fonts.
+
+**Why:** owner report: menu letters looked slightly too wide. The menu used Liberation Sans Regular, whose capitals average 0.98 cap heights wide against 0.86 for GorDIN SemiBold (owned files), about 14% wider in the all-caps menu.
+
+**Tested how:** unit tests (scheme font and file list parsing, family/weight choice); owned test `owned_menu_font_is_the_schemes_semibold_gordin` (resolves to GorDIN 600, capitals narrower than Liberation); hl2-ui tests, strict clippy, fmt; packaged menu capture before/after (`menu_capture.png`), compared by eye.
+
+**Result:** menu labels draw in GorDIN SemiBold, narrower and DIN-shaped. The cell size is unchanged, so with GorDIN's taller Windows cell (1.40 em) the letters are also slightly smaller, as a GDI cell font would be.
+
+**Still broken or not tested:** not compared with a retail capture; menu font size still comes from defaults because `SourceSchemeBase.res` (read for the theme and menu metrics) is empty; dialog fonts still use Liberation Sans.
+
+**Next:** owner check of the menu labels.
+
 ## 2026-10-16 source-assets owned tests locate the installation like the runtime
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

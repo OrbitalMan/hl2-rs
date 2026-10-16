@@ -421,8 +421,25 @@ impl Console {
             canvas.clone(),
         )
         .ok();
-        let menu_font = font("resource/linux_fonts/liberationsans-regular.ttf")
-            .or_else(|| font("resource/gordin-regular.ttf"))
+        // Menu items draw the source scheme's MenuLarge face (GorDIN 600 in the installed
+        // scheme) from the font files the scheme registers.
+        let reader = crate::gameui::resources::Reader::new(vfs);
+        let menu_bytes = reader
+            .read("resource/SourceScheme.res")
+            .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
+            .and_then(|roots| roots.into_iter().next())
+            .and_then(|root| {
+                crate::gameui::scheme_fonts::resolve(&root, "MenuLarge", |path| reader.read(path))
+            })
+            .or_else(|| {
+                vfs.read("resource/linux_fonts/liberationsans-regular.ttf")
+                    .ok()
+                    .flatten()
+            })
+            .or_else(|| vfs.read("resource/gordin-regular.ttf").ok().flatten());
+        let menu_font = menu_bytes
+            .as_deref()
+            .and_then(|bytes| FontFace::load(bytes, canvas.clone()).ok())
             .or_else(|| developer_font.clone());
         let ui_font = font("resource/linux_fonts/liberationsans-regular.ttf")
             .or_else(|| font("resource/gordin-regular.ttf"))
@@ -453,11 +470,6 @@ impl Console {
             console.log(format!("GameUI resource unavailable: {file}"));
         }
         console.set_resources(gameui);
-        let menu_bytes = vfs
-            .read("resource/linux_fonts/liberationsans-regular.ttf")
-            .ok()
-            .flatten()
-            .or_else(|| vfs.read("resource/gordin-regular.ttf").ok().flatten());
         if let Some(bytes) = menu_bytes {
             console.menu_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
         }
