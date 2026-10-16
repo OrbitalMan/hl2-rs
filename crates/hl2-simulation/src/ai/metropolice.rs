@@ -8,6 +8,7 @@
 //! (weapon_stunstick.cpp), with CAI_PolicingBehavior hosted when SetPoliceGoal enables it.
 //! Out of scope: pistol/SMG combat, stitching, manhacks, arrests, fire, airboats, squads.
 //! SDK behavior, retail not compared.
+use super::assault::Assault;
 use super::conditions::*;
 use super::police::Policing;
 use super::schedule::{
@@ -62,6 +63,14 @@ const SCHEDULES: &[(&str, &str)] = &[
          COND_TOO_CLOSE_TO_ATTACK COND_TASK_FAILED COND_LOST_ENEMY COND_HEAR_DANGER",
     ),
     (
+        // CAI_ScriptedSchedule ScheduledMoveToGoalEntity: SCHED_IDLE_WALK's interrupts
+        // with the goal entity's route and the script's movement activity.
+        "SCHED_AISCRIPTED_MOVE_TO_GOAL",
+        "Tasks TASK_AISCRIPTED_GET_PATH_TO_GOAL 0 TASK_WAIT_FOR_MOVEMENT 0 TASK_WAIT_PVS 0 \
+         Interrupts COND_NEW_ENEMY COND_SEE_ENEMY COND_LIGHT_DAMAGE COND_HEAVY_DAMAGE COND_SMELL \
+         COND_PROVOKED COND_HEAR_COMBAT COND_HEAR_BULLET_IMPACT",
+    ),
+    (
         "SCHED_METROPOLICE_WAKE_ANGRY",
         "Tasks TASK_STOP_MOVING 0 TASK_SET_ACTIVITY ACTIVITY:ACT_IDLE TASK_FACE_ENEMY 0 Interrupts",
     ),
@@ -73,6 +82,9 @@ pub fn add_schedules(schedules: &mut Schedules) {
         let schedule = Schedule::parse(name, text).expect("metropolice schedule");
         schedules.0.insert((*name).into(), schedule);
     }
+    // CreateBehaviors: the assault behavior's schedules (rappel, follow, actbusy,
+    // standoff and functank are not reconstructed).
+    super::assault::add_schedules(schedules);
 }
 
 /// What the runtime tells the cop about the player each think.
@@ -133,6 +145,12 @@ pub struct Metropolice {
     pub policing: Option<Policing>,
     /// The policing behavior selected the current schedule (IsRunningBehavior).
     pub running_behavior: bool,
+    /// CAI_AssaultBehavior when an ai_goal_assault enabled it.
+    pub assault: Option<Assault>,
+    /// The assault behavior selected the current schedule.
+    pub running_assault: bool,
+    /// An aiscripted_schedule's goal position and run flag (StartSchedule).
+    pub script_goal: Option<(Vec3, bool)>,
     /// NPC_TranslateActivity's angry idle (weapon drawn, in combat or baton on) as
     /// last applied to the idle activity.
     pub idle_angry: bool,
@@ -145,6 +163,9 @@ pub struct Metropolice {
     pub player: Option<PlayerView>,
     #[serde(skip)]
     pub precriminal: bool,
+    /// The think time (custom interrupts read it).
+    #[serde(skip)]
+    pub now: f64,
     #[serde(skip)]
     pub scripted: bool,
 }
@@ -442,6 +463,21 @@ impl Metropolice {
     }
     /// SelectSchedule (precriminal subset).
     fn select(&mut self, npc: &mut AiNpc, ctx: &Context) -> String {
+        let was_assault = std::mem::take(&mut self.running_assault);
+        if was_assault {
+            if let Some(assault) = &mut self.assault {
+                assault.on_schedule_change(npc);
+            }
+        }
+        let schedule = self.select_inner(npc, ctx);
+        if was_assault && !self.running_assault {
+            if let Some(assault) = &mut self.assault {
+                assault.end_selection();
+            }
+        }
+        schedule
+    }
+    fn select_inner(&mut self, npc: &mut AiNpc, ctx: &Context) -> String {
         self.running_behavior = false;
         if npc.conditions.has(COND_METROPOLICE_PHYSOBJECT_ASSAULT) {
             npc.conditions.clear(COND_METROPOLICE_PHYSOBJECT_ASSAULT);
@@ -511,6 +547,16 @@ impl Metropolice {
                 let want = policing.baton;
                 self.set_baton_state(npc, want);
                 return schedule.into();
+            }
+        }
+        if let Some(assault) = &mut self.assault {
+            if assault.can_select(npc, ctx) {
+                self.running_assault = true;
+                // A behavior's base selection is CAI_BaseNPC's.
+                return assault
+                    .select(npc, ctx)
+                    .map(String::from)
+                    .unwrap_or_else(|| default_select_schedule(npc, ctx));
             }
         }
         if self.keep_facing_player && !self.player_is_criminal() {
@@ -597,6 +643,10 @@ impl Behavior for Metropolice {
         self.select(npc, ctx)
     }
     fn select_fail_schedule(&mut self, npc: &AiNpc, failed: &str) -> String {
+        if self.running_assault && npc.fail_schedule.is_none() {
+            // A failed assault schedule without its own fail schedule: the base.
+            return "SCHED_FAIL".into();
+        }
         if self.running_behavior {
             if let Some(policing) = &mut self.policing {
                 if let Some(schedule) = policing.fail_schedule_for(failed) {
@@ -610,12 +660,19 @@ impl Behavior for Metropolice {
     }
     /// TranslateSchedule.
     fn translate_schedule(&mut self, name: &str) -> String {
-        match name {
-            "SCHED_CHASE_ENEMY" if !self.running_behavior => "SCHED_METROPOLICE_CHASE_ENEMY",
+        let running = self.running_behavior || self.running_assault;
+        let name = match name {
+            "SCHED_CHASE_ENEMY" if !running => "SCHED_METROPOLICE_CHASE_ENEMY",
             "SCHED_WAKE_ANGRY" => "SCHED_METROPOLICE_WAKE_ANGRY",
             other => other,
+        };
+        // Then CAI_BehaviorHost::TranslateSchedule: the running behavior's.
+        if self.running_assault {
+            if let Some(t) = self.assault.as_ref().and_then(|a| a.translate(name)) {
+                return t.into();
+            }
         }
-        .into()
+        name.into()
     }
     /// BuildScheduleTestBits.
     fn custom_interrupts(&self, npc: &AiNpc) -> Conditions {
@@ -651,6 +708,11 @@ impl Behavior for Metropolice {
                 c = c.union(policing.custom_interrupts(npc));
             }
         }
+        if self.running_assault {
+            if let Some(assault) = &self.assault {
+                c = c.union(assault.custom_interrupts(npc, self.now));
+            }
+        }
         c
     }
     fn start_task(
@@ -665,6 +727,13 @@ impl Behavior for Metropolice {
             if let Some(policing) = &mut self.policing {
                 if let Some(status) = policing.start_task(npc, task, arg, ctx, motor) {
                     self.drain_policing();
+                    return Some(status);
+                }
+            }
+        }
+        if self.running_assault {
+            if let Some(assault) = &mut self.assault {
+                if let Some(status) = assault.start_task(npc, task, arg, ctx, motor) {
                     return Some(status);
                 }
             }
@@ -696,6 +765,15 @@ impl Behavior for Metropolice {
             }
             "TASK_METROPOLICE_GET_PATH_TO_PRECHASE" => match self.pre_chase {
                 Some((origin, _)) if motor.path_to(origin, false) => TaskStatus::Complete,
+                _ => TaskStatus::Failed,
+            },
+            "TASK_AISCRIPTED_GET_PATH_TO_GOAL" => match self.script_goal.take() {
+                Some((goal, run)) if motor.path_to(goal, run) => {
+                    let activity = if run { "ACT_RUN" } else { "ACT_WALK" };
+                    npc.activity = activity.into();
+                    motor.set_activity(activity);
+                    TaskStatus::Complete
+                }
                 _ => TaskStatus::Failed,
             },
             "TASK_METROPOLICE_CLEAR_PRECHASE" => {
@@ -736,6 +814,13 @@ impl Behavior for Metropolice {
         if self.running_behavior {
             if let Some(policing) = &mut self.policing {
                 if let Some(status) = policing.run_task(npc, task, arg, ctx, motor) {
+                    return Some(status);
+                }
+            }
+        }
+        if self.running_assault {
+            if let Some(assault) = &mut self.assault {
+                if let Some(status) = assault.run_task(npc, task, arg, ctx, motor) {
                     return Some(status);
                 }
             }

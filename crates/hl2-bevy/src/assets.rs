@@ -208,6 +208,14 @@ pub fn load_with_canvas(
     for failure in models::append_rigs(&mut world, &vfs, &weapon_models) {
         world.warnings.push(failure);
     }
+    // The player model's hitboxes take NPC bullets (CHL2_Player::Spawn).
+    for failure in models::append_rigs(
+        &mut world,
+        &vfs,
+        &[hl2_simulation::gameplay::PLAYER_MODEL.to_owned()],
+    ) {
+        world.warnings.push(failure);
+    }
     // ... and drawn bone-merged in their owners' hands (CBaseCombatWeapon::Equip).
     for model in &weapon_models {
         let key = format!("{}#0", model.to_lowercase());

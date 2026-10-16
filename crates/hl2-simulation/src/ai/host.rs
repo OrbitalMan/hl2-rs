@@ -114,6 +114,15 @@ impl Motor for SceneMotor<'_> {
         angle_diff(ideal, next).abs() <= 0.006
     }
     fn path_to(&mut self, goal: Vec3, run: bool) -> bool {
+        // Goal entities often float above the floor (the d1_canals_01 rally point is 32
+        // units up); ground routes end on the floor below (CAI_MoveProbe::FloorPoint over
+        // the step height and a little more), else at the goal as given.
+        let hull = crate::npc_probe::Hull {
+            mins: HUMAN_MINS,
+            maxs: HUMAN_MAXS,
+        };
+        let goal = crate::npc_makers::floor_point(self.physics, goal, hull, self.entity, 0., -72.)
+            .unwrap_or(goal);
         self.release_goal();
         *self.serial += 1;
         let key = GoalKey {

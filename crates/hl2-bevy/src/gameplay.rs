@@ -878,7 +878,11 @@ impl Gameplay {
         // impacts and blood like the player's own shots.
         let shots = std::mem::take(&mut self.ai.shots);
         if !shots.is_empty() {
-            let target = (!player.dead).then_some((player.feet, player.crouched));
+            let target = (!player.dead).then_some(hl2_simulation::gameplay::PlayerTarget {
+                feet: player.feet,
+                crouched: player.crouched,
+                yaw: direction.y.atan2(direction.x).to_degrees(),
+            });
             let mut bullets = hl2_simulation::gameplay::NpcBullets::default();
             for shot in &shots {
                 hl2_simulation::gameplay::npc_fire_bullets(

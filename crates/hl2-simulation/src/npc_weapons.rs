@@ -469,38 +469,83 @@ pub fn rig_key(world_model: &str) -> String {
     format!("{}#0", world_model.to_lowercase())
 }
 
-/// CAI_ShotRegulator (ai_utils.cpp): bursts of min..=max shots `burst_interval` apart,
-/// then a rest of U(min_rest, max_rest). OnUpdateShotRegulator takes the weapon's
-/// GetMinBurst/GetMaxBurst, GetFireRate (both burst interval bounds) and
-/// GetMinRestTime/GetMaxRestTime (0.3 / 0.6 s for the HL2 weapons modeled).
+/// Which OnUpdateShotRegulator sets the regulator's ranges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum RegulatorRule {
+    /// CAI_BaseNPC::OnUpdateShotRegulator: the weapon's GetFireRate (both burst interval
+    /// bounds), GetMinBurst/GetMaxBurst and GetMinRestTime/GetMaxRestTime (0.3 / 0.6 s
+    /// for the HL2 weapons modeled).
+    Weapon,
+    /// CNPC_MetroPolice::OnUpdateShotRegulator with a pistol (burst mode inactive): burst
+    /// sizes and rests scaled by the distance to the enemy, shots U(0.2, 0.5) s apart.
+    MetropolicePistol,
+}
+
+/// npc_metropolice.cpp MIN/MAX_PISTOL_MODIFY_DIST (units).
+const PISTOL_MODIFY_DIST: (f32, f32) = (15. * 12., 150. * 12.);
+
+/// CAI_ShotRegulator (ai_utils.cpp): bursts of min..=max shots U(min, max burst interval)
+/// apart, then a rest of U(min_rest, max_rest). The owner's OnUpdateShotRegulator
+/// (`rule`) sets the ranges at equip and whenever a burst ends (OnRangeAttack1).
 #[derive(Clone, Debug, Serialize)]
 pub struct ShotRegulator {
+    pub rule: RegulatorRule,
     pub min_burst: u32,
     pub max_burst: u32,
-    pub burst_interval: f32,
+    pub min_burst_interval: f32,
+    pub max_burst_interval: f32,
     pub min_rest: f32,
     pub max_rest: f32,
     pub next_shot: f64,
     pub burst_remaining: u32,
     pub in_rest: bool,
+    weapon_burst: (u32, u32),
+    fire_rate: f32,
     seed: u64,
 }
 impl ShotRegulator {
-    /// OnUpdateShotRegulator + Reset(true) for an equipped weapon.
-    pub fn for_weapon(spec: &FireSpec, now: f64, seed: u64) -> Self {
+    /// OnChangeActiveWeapon: OnUpdateShotRegulator (no enemy yet) + Reset(true).
+    pub fn for_weapon(spec: &FireSpec, rule: RegulatorRule, now: f64, seed: u64) -> Self {
         let mut regulator = Self {
+            rule,
             min_burst: spec.min_burst,
             max_burst: spec.max_burst,
-            burst_interval: spec.fire_rate,
+            min_burst_interval: spec.fire_rate,
+            max_burst_interval: spec.fire_rate,
             min_rest: 0.3,
             max_rest: 0.6,
             next_shot: now,
             burst_remaining: 1,
             in_rest: false,
+            weapon_burst: (spec.min_burst, spec.max_burst),
+            fire_rate: spec.fire_rate,
             seed: seed | 1,
         };
+        regulator.on_update(None);
         regulator.reset(true, now);
         regulator
+    }
+    /// OnUpdateShotRegulator; `enemy_distance` is WorldSpaceCenter to the enemy's
+    /// WorldSpaceCenter (None without an enemy).
+    pub fn on_update(&mut self, enemy_distance: Option<f32>) {
+        (self.min_burst, self.max_burst) = self.weapon_burst;
+        (self.min_burst_interval, self.max_burst_interval) = (self.fire_rate, self.fire_rate);
+        (self.min_rest, self.max_rest) = (0.3, 0.6);
+        if self.rule == RegulatorRule::MetropolicePistol {
+            if let Some(distance) = enemy_distance {
+                let (near, far) = PISTOL_MODIFY_DIST;
+                let factor = (distance.clamp(near, far) - near) / (far - near);
+                // The SDK's int initializers truncate.
+                self.min_burst = (2. + 2. * (1. - factor)) as u32;
+                self.max_burst = (5. + 3. * (1. - factor)) as u32;
+                self.min_rest = 0.6 + 0.6 * factor;
+                self.max_rest = 1.2 + 0.8 * factor;
+            } else {
+                self.min_rest = 0.6;
+                self.max_rest = 1.4;
+            }
+            (self.min_burst_interval, self.max_burst_interval) = (0.2, 0.5);
+        }
     }
     fn unit(&mut self) -> f32 {
         self.seed ^= self.seed << 13;
@@ -534,7 +579,17 @@ impl ShotRegulator {
             self.reset(false, now);
         } else {
             self.in_rest = false;
-            self.next_shot = (self.next_shot + f64::from(self.burst_interval)).max(now);
+            let interval = self.min_burst_interval
+                + (self.max_burst_interval - self.min_burst_interval) * self.unit();
+            self.next_shot = (self.next_shot + f64::from(interval)).max(now);
+        }
+    }
+    /// CAI_BaseNPC::OnRangeAttack1: OnFiredWeapon, then OnUpdateShotRegulator once the
+    /// burst ended (the new ranges apply from the next Reset).
+    pub fn on_range_attack1(&mut self, now: f64, enemy_distance: Option<f32>) {
+        self.on_fired(now);
+        if self.is_in_rest_interval(now) {
+            self.on_update(enemy_distance);
         }
     }
 }
@@ -706,6 +761,55 @@ mod tests {
             state ^= state << 17;
             (state as u32 as f32 / u32::MAX as f32) * 2. - 1.
         }
+    }
+
+    #[test]
+    fn metropolice_pistol_regulator_scales_with_distance() {
+        let spec = fire_spec("weapon_pistol").unwrap();
+        let mut r = ShotRegulator::for_weapon(&spec, RegulatorRule::MetropolicePistol, 0., 7);
+        // Equip without an enemy: the weapon's bursts, rest 0.6..1.4, shots 0.2..0.5 apart.
+        assert_eq!((r.min_burst, r.max_burst), (1, 3));
+        assert_eq!((r.min_rest, r.max_rest), (0.6, 1.4));
+        assert_eq!((r.min_burst_interval, r.max_burst_interval), (0.2, 0.5));
+        // Native canals fixture distance (~335 units): bursts 3..=7, rest ~0.66..1.28.
+        r.on_update(Some(335.));
+        assert_eq!((r.min_burst, r.max_burst), (3, 7));
+        assert!((r.min_rest - 0.657).abs() < 0.01 && (r.max_rest - 1.277).abs() < 0.01);
+        // Clamped at 15 ft and 150 ft.
+        r.on_update(Some(10.));
+        assert_eq!(
+            (r.min_burst, r.max_burst, r.min_rest, r.max_rest),
+            (4, 8, 0.6, 1.2)
+        );
+        r.on_update(Some(5000.));
+        assert_eq!(
+            (r.min_burst, r.max_burst, r.min_rest, r.max_rest),
+            (2, 5, 1.2, 2.0)
+        );
+        // Shots within a burst land 0.2..0.5 s apart; the burst end starts a rest.
+        r.on_update(Some(335.));
+        r.reset(true, 10.);
+        let shots = r.burst_remaining;
+        assert!((3..=7).contains(&shots));
+        let mut last = 10.;
+        for _ in 1..shots {
+            r.on_range_attack1(last, Some(335.));
+            assert!(!r.in_rest);
+            let gap = r.next_shot - last;
+            assert!((0.2..=0.5).contains(&gap), "{gap}");
+            last = r.next_shot;
+        }
+        r.on_range_attack1(last, Some(335.));
+        assert!(r.is_in_rest_interval(last));
+        let rest = r.next_shot - last;
+        assert!((0.65..=1.28).contains(&rest), "{rest}");
+        // Other weapons keep the weapon's fixed rate.
+        let smg = fire_spec("weapon_smg1").unwrap();
+        let w = ShotRegulator::for_weapon(&smg, RegulatorRule::Weapon, 0., 7);
+        assert_eq!(
+            (w.min_burst_interval, w.max_burst_interval),
+            (smg.fire_rate, smg.fire_rate)
+        );
     }
 
     #[test]

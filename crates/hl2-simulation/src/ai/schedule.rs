@@ -281,6 +281,14 @@ pub struct AiNpc {
     pub last_failed_task: Option<String>,
     /// CAI_ShotRegulator of the active gun (bits_CAP_USE_SHOT_REGULATOR humanoids).
     pub shot_regulator: Option<crate::npc_weapons::ShotRegulator>,
+    /// bits_MEMORY_HAD_LOS: the enemy was in line of sight at the last think.
+    pub had_enemy_los: bool,
+}
+
+/// WorldSpaceCenter to the enemy's WorldSpaceCenter (both standing 72-unit hulls: the
+/// centers sit 36 units above the origins, so the offsets cancel).
+fn enemy_center_distance(ctx: &Context) -> Option<f32> {
+    ctx.enemy.map(|(_, p)| p.distance(ctx.origin))
 }
 
 /// Up to this many tasks may complete in one think (MaintainSchedule's loop limit).
@@ -302,6 +310,10 @@ impl AiNpc {
                 .and_then(|e| self.enemies.find(Some(e)))
                 .map(|m| m.last_known)
         })
+    }
+    /// SetSchedule from outside the selection (scripted schedules).
+    pub fn force_schedule(&mut self, name: &str) {
+        self.set_schedule(name.into());
     }
     /// ACT_IDLE as the ideal activity: CAI_BaseNPC::SetTurnActivity when a face task
     /// starts unfaced (turn activities ACT_90_LEFT/RIGHT, ACT_180_LEFT are not modeled)
@@ -325,7 +337,7 @@ impl AiNpc {
             return Some(TaskStatus::Failed);
         }
         let activity = if regulator.should_shoot(ctx.now) {
-            regulator.on_fired(ctx.now);
+            regulator.on_range_attack1(ctx.now, enemy_center_distance(ctx));
             "ACT_RANGE_ATTACK1"
         } else {
             "ACT_IDLE_ANGRY"
@@ -350,7 +362,7 @@ impl AiNpc {
         let regulator = self.shot_regulator.as_mut()?;
         if !regulator.is_in_rest_interval(ctx.now) {
             if regulator.should_shoot(ctx.now) {
-                regulator.on_fired(ctx.now);
+                regulator.on_range_attack1(ctx.now, enemy_center_distance(ctx));
                 self.activity = "ACT_RANGE_ATTACK1".into();
                 motor.set_activity("ACT_RANGE_ATTACK1");
             }

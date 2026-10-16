@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 session 21: native NPC pistol comparison; metrocop pistol regulator, assault behavior, aiscripted_schedule, player hitboxes (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (npc_metropolice.cpp OnUpdateShotRegulator/SelectSchedule/TranslateSchedule/CreateBehaviors, ai_utils.cpp CAI_ShotRegulator, ai_basenpc.cpp OnRangeAttack1/GatherEnemyConditions/GetActualShootPosition/GetAttackSpread/GetSpreadBias, ai_behavior_assault.cpp/.h, ai_behavior.h behavior host, scripted.cpp CAI_ScriptedSchedule, player.cpp TraceAttack), Codex's private ai-scripted-schedule contract notes (campaign-scenes-20261016h), owned models/player.mdl (temporary probe test, not committed), native oracle capture with 60 fps recording and per-process audio.
+
+**Changed:** CNPC_MetroPolice pistol shot regulator (distance-scaled bursts/rests, U(0.2, 0.5) s shot spacing, OnRangeAttack1 update); `ai::assault` (CAI_AssaultBehavior + CAI_AssaultGoal, non-episodic schedules, rally locks, assault chains, OnArrival/OnAssaultClear) as a metrocop behavior after policing; OnFoundPlayer/OnFoundEnemy/OnLostPlayerLOS/OnLostEnemyLOS; aiscripted_schedule StartSchedule/StopSchedule (direct goal modes 1/2/6, forcestate, once unless repeatable, radius, 1 s retry); AI move goals drop to the floor (FloorPoint); NPC bullets test the player's models/player.mdl hitboxes after the hull; actor origin in the AI report; DESIGN 14a.
+
+**Why:** Step 1b (owner order): compare NPC pistol fire with native on d1_canals_01 with the HEV suit. Ours killed in 17.9 s with every shot hitting; native takes 35-40 s.
+
+**Tested how:** Native oracle T061116Z (12 HUD captures ~5.2 s apart, ent_text, 60 fps recording, audio onsets) vs packaged runs artifacts/s21/canals-pistol..canals-pistol5 (audio trace shot/hit times, AI report positions/schedules). hl2-simulation unit tests (new regulator, assault, input routing and player hitbox tests), workspace tests (two known release-only should_panic failures), owned tests with HL2_ROOT, strict Clippy, fmt, regression batch artifacts/s21-regression diffed against s20b-regression.
+
+**Result:** The canals cop now runs to its rally point and fights from (632,-3400) like native; burst cadence matches the native audio; player health matches native through 19 s (64/64, 52/52) and drains slower afterwards (22 vs 4 HP at 35 s). Regression: weapons 17/17, attention 26/26, movement 25/26 (the known doll01 collision warning only), no panics, campaign texture errors 25 (the known station03 set); every final image matches s20b-regression (no pixel over 8 except 25 pixels at an NPC head in bevy-attention: glance noise), Breen/slate/Kleiner feeds identical.
+
+**Still broken or not tested:** variance of the native kill time (one run); move-and-shoot, npc_metropolice's own pistol schedules, hint-group navigation, graph routes on maps with info_node_link controllers, aiscripted path modes 4/5 and interruptability 1/2, rally sequences/force crouch/urgent movement, squads; the player hitboxes use the idle01 pose only (no player animation states).
+
+**Next:** native variance rerun, then DESIGN 14n per-class AI or the first-map aiscripted/scene work per the owner's order; merge step 14 to main after the remaining checklist.
+
 ## 2026-10-15/16 session 20: F4 overlay redesign, AI on by default + ai_disable, citizen heads, DX-level VMT blocks, RPG launch flash, grate fences/gates, combine ball rules (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013, private Ghidra pass project (retail client.dll MuzzleFlash switch and MuzzleFlash_AR2_Player), installed-map scans (read-only), native oracle captures/recordings.

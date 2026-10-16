@@ -6,6 +6,7 @@
 //! scripted_sequence or a choreographed scene are NPC_STATE_SCRIPT and the AI leaves
 //! them alone. Simplified from the SDK: every NPC thinks every 0.1 s (no PVS/efficiency
 //! throttling, no think staggering), only npc_metropolice has a class behavior.
+use super::assault;
 use super::conditions::*;
 use super::host::{yaw_of, PhysicsSight, SceneMotor};
 use super::metropolice::{CopRequest, Metropolice, PlayerView, PLAYER};
@@ -95,6 +96,8 @@ pub struct AiActor {
     /// The F4 per-spawn disposition toward the player (an ai_relationship aimed at
     /// this NPC); None: the class rules.
     pub player_disposition: Option<Disposition>,
+    /// The origin at the last think (report only).
+    pub origin: [f32; 3],
     #[serde(skip)]
     goal: Option<GoalKey>,
     /// Animation events up to this time were handled.
@@ -153,6 +156,21 @@ pub struct AiRuntime {
     /// CAI_BaseNPC m_flSoundWaitTime / m_nSoundPriority per NPC (FOkToMakeSound).
     #[serde(skip)]
     sound_wait: BTreeMap<usize, (f64, i32)>,
+    /// CRallyPoint::Lock: rally point entity -> the NPC holding it.
+    pub rally_locks: BTreeMap<usize, usize>,
+    /// CAssaultPoint::m_flTimeLastUsed by entity.
+    #[serde(skip)]
+    assault_used: BTreeMap<usize, f64>,
+    /// StartActive ai_goal_assault entities were activated.
+    #[serde(skip)]
+    goals_started: bool,
+    /// aiscripted_schedule controllers that found their actor (m_bDidFireOnce).
+    #[serde(skip)]
+    scripted_fired: std::collections::BTreeSet<usize>,
+}
+/// The yaw of an entity's "angles" keyvalue (degrees).
+fn yaw_keyvalue(e: &modkit_core::Entity) -> f32 {
+    modkit_core::parse_vec3(e.get("angles").unwrap_or("0 0 0")).map_or(0., |a| a.y)
 }
 /// SentencePriority_t of the metrocop sentence groups as npc_metropolice.cpp speaks
 /// them (-1 = SENTENCE_PRIORITY_INVALID: plays without the sound timer).
@@ -277,6 +295,10 @@ impl AiRuntime {
             held_weapons,
             was_enabled: false,
             sound_wait: BTreeMap::new(),
+            rally_locks: BTreeMap::new(),
+            assault_used: BTreeMap::new(),
+            goals_started: false,
+            scripted_fired: Default::default(),
             schedules,
             relationships: Relationships::default(),
             sounds: SoundEnt::default(),
@@ -348,7 +370,29 @@ impl AiRuntime {
     /// SetPoliceGoal / ActivateBaton on cops and EnableKnockOut / DisableKnockOut on
     /// ai_goal_police (processed even while the AI is off, so map-spawn inputs stick).
     fn inputs(&mut self, world: &World, scene: &mut Scene) {
+        if !self.goals_started && !self.actors.is_empty() {
+            // CAI_GoalEntity::Activate at spawn for StartActive goals.
+            self.goals_started = true;
+            for (id, e) in world.entities.iter().enumerate() {
+                if e.class() == "ai_goal_assault"
+                    && e.get("StartActive").is_some_and(|v| v.trim() == "1")
+                {
+                    scene
+                        .ai_inputs
+                        .push((id, "activate".into(), String::new(), usize::MAX));
+                }
+            }
+        }
         for (target, input, parameter, _) in std::mem::take(&mut scene.ai_inputs) {
+            let class = world.entities.get(target).map_or("", |e| e.class());
+            if class == "ai_goal_assault" {
+                self.assault_goal_input(world, scene, target, &input);
+                continue;
+            }
+            if class == "aiscripted_schedule" {
+                self.scripted_schedule_input(world, scene, target, &input);
+                continue;
+            }
             match input.as_str() {
                 "setpolicegoal" => {
                     let goal = world.entities.iter().enumerate().find_map(|(id, e)| {
@@ -392,6 +436,359 @@ impl AiRuntime {
             }
         }
     }
+    /// CAI_GoalEntity actors: the NPCs whose targetname (SearchType 0) or classname
+    /// (SearchType 1) matches the goal's "actor" keyvalue.
+    fn goal_actors(&self, world: &World, goal: usize) -> Vec<usize> {
+        let Some(e) = world.entities.get(goal) else {
+            return Vec::new();
+        };
+        let name = e.get("actor").unwrap_or("").to_lowercase();
+        let by_class = e.get("SearchType").is_some_and(|v| v.trim() == "1");
+        if name.is_empty() {
+            return Vec::new();
+        }
+        self.actors
+            .keys()
+            .copied()
+            .filter(|&id| {
+                world.entities.get(id).is_some_and(|a| {
+                    let key = if by_class {
+                        a.class().to_owned()
+                    } else {
+                        a.get("targetname").unwrap_or("").to_owned()
+                    };
+                    crate::entities::glob(&name, &key.to_lowercase())
+                })
+            })
+            .collect()
+    }
+    /// Entities of a class with this targetname.
+    fn named(world: &World, class: &str, name: &str) -> Vec<usize> {
+        world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                e.class() == class
+                    && e.get("targetname")
+                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })
+            .map(|(id, _)| id)
+            .collect()
+    }
+    fn assault_point(world: &World, id: usize) -> assault::AssaultPoint {
+        let e = &world.entities[id];
+        let num = |k: &str, d: f32| e.get(k).and_then(|v| v.trim().parse().ok()).unwrap_or(d);
+        let flag = |k: &str| {
+            e.get(k)
+                .is_some_and(|v| v.trim() != "0" && !v.trim().is_empty())
+        };
+        assault::AssaultPoint {
+            entity: id,
+            name: e.get("targetname").unwrap_or("").to_owned(),
+            origin: e.origin(),
+            yaw: yaw_keyvalue(e),
+            next: e.get("nextassaultpoint").unwrap_or("").to_owned(),
+            timeout: num("assaulttimeout", 3.),
+            clear_on_contact: flag("clearoncontact"),
+            allow_diversion: flag("allowdiversion"),
+            diversion_radius: num("allowdiversionradius", 0.),
+            never_timeout: flag("nevertimeout"),
+            strict: flag("strict"),
+            tolerance: num("assaulttolerance", assault::CUE_POINT_TOLERANCE),
+            clear_on_arrival: num("spawnflags", 0.) as u32 & 1 != 0,
+        }
+    }
+    /// ai_goal_assault inputs: Activate (EnableGoal: SetParameters for each actor),
+    /// Deactivate (DisableGoal), BeginAssault (ReceiveAssaultCue(CUE_ENTITY_INPUT)).
+    fn assault_goal_input(&mut self, world: &World, scene: &mut Scene, goal: usize, input: &str) {
+        let actors = self.goal_actors(world, goal);
+        match input {
+            "activate" | "updateactors" => {
+                let e = &world.entities[goal];
+                let rally_name = e.get("rallypoint").unwrap_or("").to_owned();
+                let cue = assault::Cue::from_keyvalue(
+                    e.get("AssaultCue")
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(1),
+                );
+                let random_select = e.get("RallySelectMethod").is_some_and(|v| v.trim() == "1");
+                for id in actors {
+                    let AiClass::Metropolice(cop) = &self.actors[&id].class;
+                    if input == "updateactors"
+                        && cop
+                            .assault
+                            .as_ref()
+                            .is_some_and(|a| a.goal == goal && a.active())
+                    {
+                        continue;
+                    }
+                    self.release_rally(id);
+                    let origin = scene.states[id].origin;
+                    // Unlocked rally points: highest priority, then nearest (or random).
+                    let mut rallies: Vec<usize> =
+                        Self::named(world, "assault_rallypoint", &rally_name)
+                            .into_iter()
+                            .filter(|r| !self.rally_locks.contains_key(r))
+                            .collect();
+                    let priority = |r: usize| {
+                        world.entities[r]
+                            .get("priority")
+                            .and_then(|v| v.trim().parse::<i32>().ok())
+                            .unwrap_or(0)
+                    };
+                    let best = if random_select {
+                        (!rallies.is_empty()).then(|| {
+                            let i = (self.random() * rallies.len() as f32) as usize;
+                            rallies[i.min(rallies.len() - 1)]
+                        })
+                    } else {
+                        rallies.sort_by(|&a, &b| {
+                            priority(b).cmp(&priority(a)).then(
+                                world.entities[a]
+                                    .origin()
+                                    .distance_squared(origin)
+                                    .total_cmp(
+                                        &world.entities[b].origin().distance_squared(origin),
+                                    ),
+                            )
+                        });
+                        rallies.first().copied()
+                    };
+                    let Some(rally) = best else {
+                        *self
+                            .diagnostics
+                            .unknown_goals
+                            .entry(format!("rally {rally_name}"))
+                            .or_default() += 1;
+                        continue;
+                    };
+                    let r = &world.entities[rally];
+                    let rally_point = assault::RallyPoint {
+                        entity: rally,
+                        origin: r.origin(),
+                        yaw: yaw_keyvalue(r),
+                        assault_point: r.get("assaultpoint").unwrap_or("").to_owned(),
+                        delay: r
+                            .get("assaultdelay")
+                            .and_then(|v| v.trim().parse().ok())
+                            .unwrap_or(0.),
+                        priority: priority(rally),
+                    };
+                    // The assault chain by name, following nextassaultpoint.
+                    let mut chain: Vec<(String, Vec<assault::AssaultPoint>)> = Vec::new();
+                    let mut name = rally_point.assault_point.clone();
+                    while !name.is_empty()
+                        && chain.len() < 64
+                        && !chain.iter().any(|(n, _)| n.eq_ignore_ascii_case(&name))
+                    {
+                        let points: Vec<_> = Self::named(world, "assault_assaultpoint", &name)
+                            .into_iter()
+                            .map(|p| Self::assault_point(world, p))
+                            .collect();
+                        let next = points.first().map(|p| p.next.clone()).unwrap_or_default();
+                        chain.push((name.clone(), points));
+                        name = next;
+                    }
+                    // FindAssaultPoint: one candidate, else random excluding the most
+                    // recently used (the hull fit test is not modeled).
+                    let candidates = chain.first().map(|c| c.1.clone()).unwrap_or_default();
+                    let pick = match candidates.len() {
+                        0 => None,
+                        1 => Some(0),
+                        n => {
+                            let recent = (0..n).max_by(|&a, &b| {
+                                let t = |i: usize| {
+                                    self.assault_used
+                                        .get(&candidates[i].entity)
+                                        .copied()
+                                        .unwrap_or(-1.)
+                                };
+                                t(a).total_cmp(&t(b))
+                            });
+                            let others: Vec<usize> =
+                                (0..n).filter(|&i| Some(i) != recent).collect();
+                            let i = (self.random() * others.len() as f32) as usize;
+                            Some(others[i.min(others.len() - 1)])
+                        }
+                    };
+                    let Some(pick) = pick else {
+                        *self
+                            .diagnostics
+                            .unknown_goals
+                            .entry(format!("assault point {}", rally_point.assault_point))
+                            .or_default() += 1;
+                        continue;
+                    };
+                    let point = candidates[pick].clone();
+                    self.assault_used.insert(point.entity, scene.time);
+                    self.rally_locks.insert(rally, id);
+                    let seed = 0x9e37_79b9_7f4a_7c15 ^ (id as u64) << 8;
+                    let actor = self.actors.get_mut(&id).expect("actor");
+                    let AiClass::Metropolice(cop) = &mut actor.class;
+                    cop.assault = Some(assault::Assault::new(
+                        goal,
+                        cue,
+                        rally_point,
+                        point,
+                        chain,
+                        seed,
+                    ));
+                    // InitializeBehavior: ClearSchedule.
+                    actor.npc.schedule = None;
+                }
+            }
+            "deactivate" => {
+                for id in actors {
+                    let actor = self.actors.get_mut(&id).expect("actor");
+                    let AiClass::Metropolice(cop) = &mut actor.class;
+                    if let Some(a) = cop.assault.as_mut().filter(|a| a.goal == goal) {
+                        a.disable();
+                        actor.npc.schedule = None;
+                    }
+                    self.release_rally(id);
+                }
+            }
+            "beginassault" => {
+                for id in actors {
+                    let actor = self.actors.get_mut(&id).expect("actor");
+                    let AiClass::Metropolice(cop) = &mut actor.class;
+                    if let Some(a) = cop.assault.as_mut() {
+                        a.receive_cue(assault::Cue::EntityInput);
+                        a.provoke = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    /// UnlockRallyPoint for an NPC.
+    fn release_rally(&mut self, id: usize) {
+        self.rally_locks.retain(|_, holder| *holder != id);
+    }
+    /// aiscripted_schedule StartSchedule/StopSchedule (CAI_ScriptedSchedule): walk or run
+    /// the m_iszEntity NPC(s) to the goal entity (ScheduledMoveToGoalEntity with
+    /// SCHED_IDLE_WALK interrupts); forcestate sets the NPC state first.
+    fn scripted_schedule_input(
+        &mut self,
+        world: &World,
+        scene: &mut Scene,
+        script: usize,
+        input: &str,
+    ) {
+        let e = &world.entities[script];
+        let name = e.get("m_iszEntity").unwrap_or("").to_lowercase();
+        let graball = e.get("graball").is_some_and(|v| v.trim() == "1");
+        let flags = e
+            .get("spawnflags")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(0);
+        // InputStartSchedule: once, unless SF_SCRIPT_REPEATABLE (4); StopSchedule does
+        // nothing before the first start.
+        let fired = self.scripted_fired.contains(&script);
+        if (input == "startschedule" && fired && flags & 4 == 0)
+            || (input == "stopschedule" && !fired)
+        {
+            return;
+        }
+        // Acquisition: live NPCs matching the selector within m_flRadius of the
+        // controller (0: anywhere).
+        let radius = e
+            .get("m_flRadius")
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .unwrap_or(0.);
+        let at = e.origin();
+        let mut targets: Vec<usize> = self
+            .actors
+            .keys()
+            .copied()
+            .filter(|&id| {
+                !scene.states[id].killed
+                    && scene.states[id].visible
+                    && (radius <= 0. || scene.states[id].origin.distance(at) <= radius)
+                    && world.entities.get(id).is_some_and(|a| {
+                        crate::entities::glob(
+                            &name,
+                            &a.get("targetname").unwrap_or("").to_lowercase(),
+                        ) || crate::entities::glob(&name, a.class())
+                    })
+            })
+            .collect();
+        if !graball {
+            targets.truncate(1);
+        }
+        if input == "startschedule" {
+            if targets.is_empty() {
+                // ScriptThink: no actor yet, try again in a second.
+                scene.send_delayed(script, "StartSchedule", "", 1.);
+                return;
+            }
+            self.scripted_fired.insert(script);
+        }
+        let schedule = e
+            .get("schedule")
+            .and_then(|v| v.trim().parse::<i32>().ok())
+            .unwrap_or(0);
+        let goal_name = e.get("goalent").unwrap_or("");
+        let goal = world.entities.iter().enumerate().find_map(|(id, g)| {
+            g.get("targetname")
+                .is_some_and(|n| n.eq_ignore_ascii_case(goal_name))
+                .then(|| {
+                    if scene.states.get(id).is_some_and(|s| s.origin != Vec3::ZERO) {
+                        scene.states[id].origin
+                    } else {
+                        g.origin()
+                    }
+                })
+        });
+        let state = match e
+            .get("forcestate")
+            .and_then(|v| v.trim().parse::<i32>().ok())
+        {
+            Some(1) => Some(NpcState::Idle),
+            Some(2) => Some(NpcState::Alert),
+            Some(3) => Some(NpcState::Combat),
+            _ => None,
+        };
+        for id in targets {
+            let actor = self.actors.get_mut(&id).expect("actor");
+            let AiClass::Metropolice(cop) = &mut actor.class;
+            if input == "stopschedule" {
+                if cop.script_goal.take().is_some() {
+                    actor.npc.schedule = None;
+                }
+                continue;
+            }
+            let Some(goal) = goal else {
+                *self
+                    .diagnostics
+                    .unknown_goals
+                    .entry(format!("aiscripted goal {goal_name}"))
+                    .or_default() += 1;
+                continue;
+            };
+            // SCHED_SCRIPT_WALK_TO_GOAL 1, RUN_TO_GOAL 2, ENEMY_IS_GOAL_AND_RUN_TO_GOAL 6;
+            // path goals (4, 5) and enemy-is-goal (3) are not modeled.
+            let run = match schedule {
+                1 => false,
+                2 | 6 => true,
+                other => {
+                    *self
+                        .diagnostics
+                        .unknown_goals
+                        .entry(format!("aiscripted schedule {other}"))
+                        .or_default() += 1;
+                    continue;
+                }
+            };
+            if let Some(state) = state {
+                actor.npc.state = state;
+                actor.npc.ideal_state = state;
+            }
+            cop.script_goal = Some((goal, run));
+            actor.npc.force_schedule("SCHED_AISCRIPTED_MOVE_TO_GOAL");
+        }
+    }
     /// The PoliceTarget: "!player" or a named entity (resolved each think).
     fn goal_target(world: &World, scene: &Scene, goal: usize) -> Option<(usize, Vec3)> {
         let name = world.entities.get(goal)?.get("PoliceTarget")?;
@@ -431,6 +828,7 @@ impl AiRuntime {
             last_think: 0.,
             weapon,
             player_disposition: None,
+            origin: [0.; 3],
             goal: None,
             events_until: 0.,
         })
@@ -465,8 +863,15 @@ impl AiRuntime {
             .cloned()
             .or_else(|| npc_weapons::builtin(class))?
             .fire?;
+        // Every AI actor here is an npc_metropolice.
+        let rule = if class == "weapon_pistol" {
+            npc_weapons::RegulatorRule::MetropolicePistol
+        } else {
+            npc_weapons::RegulatorRule::Weapon
+        };
         Some(npc_weapons::ShotRegulator::for_weapon(
             &spec,
+            rule,
             0.,
             0x2545_f491_4f6c_dd1d ^ id as u64,
         ))
@@ -786,6 +1191,12 @@ impl AiRuntime {
         let AiClass::Metropolice(cop) = &mut actor.class;
         cop.scripted = false;
         cop.precriminal = precriminal;
+        cop.now = now;
+        if let Some(assault) = cop.assault.as_mut() {
+            if std::mem::take(&mut assault.provoke) {
+                actor.npc.conditions.set(COND_PROVOKED);
+            }
+        }
         cop.player = (!player.noclip && !player.dead).then(|| PlayerView {
             feet: player.feet,
             center: player.center(),
@@ -852,6 +1263,19 @@ impl AiRuntime {
                 actor.npc.conditions.set(COND_NEW_ENEMY);
             }
             let seen = enemy == PLAYER && player_visible;
+            // GatherEnemyConditions: OnFoundPlayer/OnFoundEnemy when LOS to the enemy
+            // is gained (bits_MEMORY_HAD_LOS), OnLostPlayerLOS/OnLostEnemyLOS when lost.
+            let los = enemy == PLAYER && fvisible;
+            if los != actor.npc.had_enemy_los {
+                actor.npc.had_enemy_los = los;
+                let (a, b) = if los {
+                    ("OnFoundPlayer", "OnFoundEnemy")
+                } else {
+                    ("OnLostPlayerLOS", "OnLostEnemyLOS")
+                };
+                cop.requests.push(CopRequest::Output(a));
+                cop.requests.push(CopRequest::Output(b));
+            }
             if seen {
                 actor.npc.conditions.set(COND_SEE_ENEMY);
                 // CWeaponStunStick::WeaponMeleeAttack1Condition (player in 48 units in
@@ -954,6 +1378,7 @@ impl AiRuntime {
         cop.gather_conditions(&mut actor.npc, &ctx);
         let dt = (now - actor.last_think).clamp(0., 0.2) as f32;
         actor.last_think = now;
+        actor.origin = origin.to_array();
         actor.next_think = now + THINK_INTERVAL;
         let yaw_speed = if actor.npc.activity.starts_with("ACT_WALK") {
             25.
@@ -1004,6 +1429,17 @@ impl AiRuntime {
             }
         }
         self.diagnostics.thinks += 1;
+        // Assault point outputs (OnArrival, OnAssaultClear; activator = this NPC).
+        let mut unlock = false;
+        if let Some(assault) = cop.assault.as_mut() {
+            for (entity, output) in std::mem::take(&mut assault.outputs) {
+                scene.fire(entity, output, id);
+            }
+            unlock = std::mem::take(&mut assault.unlock);
+        }
+        if unlock {
+            self.rally_locks.retain(|_, holder| *holder != id);
+        }
         // Policing outputs on the goal entity.
         if let Some(policing) = &mut cop.policing {
             let goal = policing.goal.entity;
@@ -1517,6 +1953,107 @@ mod tests {
         assert_eq!(cop.policing.as_ref().unwrap().warnings, 2);
     }
 
+    #[test]
+    fn assault_goal_and_scripted_schedule_inputs_reach_the_cop() {
+        let world = World {
+            entities: vec![
+                entity(&[
+                    ("classname", "npc_metropolice"),
+                    ("targetname", "cop1"),
+                    ("origin", "450 0 0"),
+                    ("additionalequipment", "weapon_pistol"),
+                ]),
+                entity(&[
+                    ("classname", "ai_goal_assault"),
+                    ("targetname", "cop1_assault"),
+                    ("actor", "cop1"),
+                    ("rallypoint", "cop1_rp"),
+                    ("AssaultCue", "1"),
+                ]),
+                entity(&[
+                    ("classname", "assault_rallypoint"),
+                    ("targetname", "cop1_rp"),
+                    ("origin", "632 0 32"),
+                    ("angles", "0 180 0"),
+                    ("assaultpoint", "cop1_ap"),
+                    ("priority", "1"),
+                ]),
+                entity(&[
+                    ("classname", "assault_assaultpoint"),
+                    ("targetname", "cop1_ap"),
+                    ("origin", "632 0 8"),
+                    ("assaulttimeout", "3.0"),
+                ]),
+                entity(&[
+                    ("classname", "aiscripted_schedule"),
+                    ("targetname", "cop1_sched"),
+                    ("m_iszEntity", "cop1"),
+                    ("goalent", "cop1_goal"),
+                    ("schedule", "2"),
+                ]),
+                entity(&[
+                    ("classname", "info_target"),
+                    ("targetname", "cop1_goal"),
+                    ("origin", "376 -60 0"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let scene = Scene::new(&world);
+        let physics = Physics::new(&world);
+        let ai = AiRuntime::new(&world, None);
+        let mut r = Rig {
+            world,
+            scene,
+            physics,
+            controller: Controller::new(None, Default::default()),
+            ai,
+        };
+        let far = player_at(-2000.);
+        // StartSchedule: a run to the goal entity, once (no SF_SCRIPT_REPEATABLE).
+        r.scene
+            .ai_inputs
+            .push((4, "startschedule".into(), String::new(), usize::MAX));
+        run(&mut r, 1, far);
+        let actor = &r.ai.actors[&0];
+        assert_eq!(
+            actor.npc.schedule.as_deref(),
+            Some("SCHED_AISCRIPTED_MOVE_TO_GOAL")
+        );
+        let AiClass::Metropolice(cop) = &actor.class;
+        assert_eq!(cop.script_goal, Some((Vec3::new(376., -60., 0.), true)));
+        r.ai.actors.get_mut(&0).unwrap().npc.schedule = None;
+        r.scene
+            .ai_inputs
+            .push((4, "startschedule".into(), String::new(), usize::MAX));
+        run(&mut r, 1, far);
+        assert!(r.ai.actors[&0].npc.schedule.is_none());
+        // Activate: the rally point is locked by the cop, the assault point resolved.
+        r.scene
+            .ai_inputs
+            .push((1, "activate".into(), String::new(), usize::MAX));
+        run(&mut r, 1, far);
+        let AiClass::Metropolice(cop) = &r.ai.actors[&0].class;
+        let assault = cop.assault.as_ref().expect("assault");
+        assert!(assault.active());
+        assert_eq!(assault.rally.entity, 2);
+        assert_eq!(assault.rally.yaw, 180.);
+        assert_eq!(assault.point.entity, 3);
+        assert_eq!(r.ai.rally_locks.get(&2), Some(&0));
+        // BeginAssault cues it; Deactivate disables it and frees the rally point.
+        r.scene
+            .ai_inputs
+            .push((1, "beginassault".into(), String::new(), usize::MAX));
+        r.scene
+            .ai_inputs
+            .push((1, "deactivate".into(), String::new(), usize::MAX));
+        run(&mut r, 1, far);
+        let AiClass::Metropolice(cop) = &r.ai.actors[&0].class;
+        let assault = cop.assault.as_ref().unwrap();
+        assert_eq!(assault.received, super::super::assault::Cue::EntityInput);
+        assert!(!assault.active());
+        assert!(r.ai.rally_locks.is_empty());
+    }
     #[test]
     fn set_police_goal_enables_policing_warnings_and_goal_outputs() {
         let mut r = rig();

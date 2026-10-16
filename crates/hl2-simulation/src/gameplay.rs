@@ -2061,16 +2061,76 @@ pub struct NpcBullets {
 }
 /// MAX_TRACE_LENGTH.
 pub const MAX_TRACE_LENGTH: f32 = 56755.84;
+/// The player as an NPC bullet target.
+#[derive(Clone, Copy, Debug)]
+pub struct PlayerTarget {
+    pub feet: Vec3,
+    pub crouched: bool,
+    /// The model yaw (eye yaw) in degrees.
+    pub yaw: f32,
+}
+/// The player model whose hitboxes NPC bullets trace (CHL2_Player::Spawn
+/// SetModel("models/player.mdl")).
+pub const PLAYER_MODEL: &str = "models/player.mdl";
+/// The player's studio hitboxes (hitbox set 0 of models/player.mdl, all HITGROUP_GENERIC
+/// in retail) posed from its ACT_IDLE sequence idle01 at `time`, model angles (0, yaw,
+/// 0) at the feet: the entry distance of a ray, or None. Without the rig the caller
+/// keeps the hull.
+pub fn player_hitbox_distance(
+    world: &World,
+    target: PlayerTarget,
+    time: f32,
+    origin: Vec3,
+    direction: Vec3,
+) -> Option<Option<f32>> {
+    let rig = world.rigs.get(&format!("{PLAYER_MODEL}#0"))?;
+    if rig.hitboxes.is_empty() {
+        return None;
+    }
+    let skin = rig.matrices("idle01", time);
+    let base = glam::Mat4::from_rotation_translation(
+        glam::Quat::from_rotation_z(target.yaw.to_radians()),
+        target.feet,
+    );
+    let mut best: Option<f32> = None;
+    for hitbox in &rig.hitboxes {
+        let Some(bone) = rig.bones.get(hitbox.bone) else {
+            continue;
+        };
+        let bind = bone.inverse_bind.inverse();
+        let model = skin.get(hitbox.bone).map_or(bind, |m| *m * bind);
+        let frame = base * model;
+        let inverse = frame.inverse();
+        let local_origin = inverse.transform_point3(origin);
+        let local_direction = inverse.transform_vector3(direction);
+        let length = local_direction.length();
+        if length < 1e-6 {
+            continue;
+        }
+        if let Some(t) = ray_box(
+            local_origin,
+            local_direction / length,
+            hitbox.mins,
+            hitbox.maxs,
+        ) {
+            // Back to world distance along the unit world direction.
+            let t = t / length;
+            best = Some(best.map_or(t, |b: f32| b.min(t)));
+        }
+    }
+    Some(best)
+}
 /// FireBullets for an NPC shot: each pellet traces MASK_SHOT from the shoot position
-/// (skipping the shooter); the player's standing or ducked hull (VEC_HULL / VEC_DUCK_HULL)
-/// stands in for its hitboxes; other hits go through `apply_hit`. `player` is the
-/// player's feet and duck state when it can be hit.
+/// (skipping the shooter). The player is hit like the engine's ClipRayToCollideable with
+/// CONTENTS_HITBOX: the ray must enter its standing or ducked hull (VEC_HULL /
+/// VEC_DUCK_HULL) and then one of its model's hitboxes (`player_hitbox_distance`; the
+/// hull alone without the rig). Other hits go through `apply_hit`.
 pub fn npc_fire_bullets(
     world: &World,
     scene: &mut Scene,
     physics: &mut Physics,
     shot: &crate::npc_weapons::NpcShot,
-    player: Option<(Vec3, bool)>,
+    player: Option<PlayerTarget>,
     uniform: &mut dyn FnMut() -> f32,
     out: &mut NpcBullets,
 ) {
@@ -2079,14 +2139,19 @@ pub fn npc_fire_bullets(
         let world_distance = hit
             .as_ref()
             .map_or(MAX_TRACE_LENGTH, |h| (h.position - shot.origin).length());
-        let player_distance = player.and_then(|(feet, ducked)| {
-            let top = if ducked { 36. } else { 72. };
-            ray_box(
+        let time = scene.time as f32;
+        let player_distance = player.and_then(|target| {
+            let top = if target.crouched { 36. } else { 72. };
+            let hull = ray_box(
                 shot.origin,
                 direction,
-                feet + Vec3::new(-16., -16., 0.),
-                feet + Vec3::new(16., 16., top),
-            )
+                target.feet + Vec3::new(-16., -16., 0.),
+                target.feet + Vec3::new(16., 16., top),
+            )?;
+            match player_hitbox_distance(world, target, time, shot.origin, direction) {
+                None => Some(hull),
+                Some(hitbox) => hitbox,
+            }
         });
         if let Some(t) = player_distance.filter(|t| *t < world_distance) {
             out.player_hits.push((shot.origin, shot.damage));
@@ -2889,7 +2954,11 @@ mod tests {
             &mut scene,
             &mut physics,
             &shot,
-            Some((Vec3::new(60., 0., -10.), false)),
+            Some(PlayerTarget {
+                feet: Vec3::new(60., 0., -10.),
+                crouched: false,
+                yaw: 180.,
+            }),
             &mut uniform,
             &mut out,
         );
@@ -2903,13 +2972,58 @@ mod tests {
             &mut scene,
             &mut physics,
             &shot,
-            Some((Vec3::new(150., 0., -10.), false)),
+            Some(PlayerTarget {
+                feet: Vec3::new(150., 0., -10.),
+                crouched: false,
+                yaw: 180.,
+            }),
             &mut uniform,
             &mut out,
         );
         assert!(out.player_hits.is_empty());
         assert_eq!(out.impacts.len(), 1);
         assert!((out.impacts[0].0.position.x - 100.).abs() < 0.5);
+    }
+    #[test]
+    fn npc_bullets_need_a_player_hitbox_inside_the_hull() {
+        // One "head" hitbox on a root bone: a ray through the hull below it misses.
+        let bone = modkit_core::animation::Bone {
+            name: "root".into(),
+            parent: None,
+            bind: modkit_core::animation::Pose {
+                position: Vec3::ZERO,
+                rotation: glam::Quat::IDENTITY,
+            },
+            inverse_bind: glam::Mat4::IDENTITY,
+        };
+        let rig = modkit_core::animation::Rig {
+            bones: vec![bone],
+            hitboxes: vec![modkit_core::animation::Hitbox {
+                bone: 0,
+                group: 0,
+                mins: Vec3::new(-4., -4., 56.),
+                maxs: Vec3::new(4., 4., 66.),
+            }],
+            ..Default::default()
+        };
+        let world = World {
+            rigs: [(format!("{PLAYER_MODEL}#0"), rig)].into(),
+            ..Default::default()
+        };
+        let target = PlayerTarget {
+            feet: Vec3::new(100., 0., 0.),
+            crouched: false,
+            yaw: 90.,
+        };
+        let head = player_hitbox_distance(&world, target, 0., Vec3::new(0., 0., 60.), Vec3::X);
+        assert!((head.unwrap().unwrap() - 96.).abs() < 1e-3);
+        let chest = player_hitbox_distance(&world, target, 0., Vec3::new(0., 0., 40.), Vec3::X);
+        assert_eq!(chest, Some(None));
+        // Without the rig the hull stands in.
+        assert_eq!(
+            player_hitbox_distance(&World::default(), target, 0., Vec3::ZERO, Vec3::X),
+            None
+        );
     }
     #[test]
     fn player_headshots_sneak_attack_unaware_humanoids_like_native() {

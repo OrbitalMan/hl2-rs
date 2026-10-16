@@ -2236,9 +2236,13 @@ impl Scene {
             .collect()
     }
     pub fn send(&mut self, id: usize, input: &str, parameter: &str) {
+        self.send_delayed(id, input, parameter, 0.);
+    }
+    /// An input to an entity by id after `delay` seconds.
+    pub fn send_delayed(&mut self, id: usize, input: &str, parameter: &str, delay: f64) {
         self.sequence += 1;
         self.queue.push(Pending {
-            due: self.time,
+            due: self.time + delay,
             sequence: self.sequence,
             target: format!("#{id}"),
             input: input.into(),
@@ -2379,6 +2383,13 @@ impl Scene {
             ))
             || (class == "ai_goal_police"
                 && matches!(input.as_str(), "enableknockout" | "disableknockout"))
+            || (class == "ai_goal_assault"
+                && matches!(
+                    input.as_str(),
+                    "activate" | "deactivate" | "beginassault" | "updateactors"
+                ))
+            || (class == "aiscripted_schedule"
+                && matches!(input.as_str(), "startschedule" | "stopschedule"))
         {
             self.ai_inputs
                 .push((id, input, p.parameter.clone(), p.activator));
@@ -3230,7 +3241,7 @@ fn clamp_yaw(speed: f32, current: f32, target: f32) -> f32 {
     let step = angle_diff(target, current).clamp(-speed, speed);
     (current + step).rem_euclid(360.)
 }
-fn glob(pattern: &str, value: &str) -> bool {
+pub(crate) fn glob(pattern: &str, value: &str) -> bool {
     if let Some((first, last)) = pattern.split_once('*') {
         value.starts_with(first) && value.ends_with(last)
     } else {
