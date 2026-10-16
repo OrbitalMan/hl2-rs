@@ -1503,11 +1503,18 @@ impl Scene {
         }
         *ready = arrived;
         // CAI_Motor::MoveFacing/UpdateYaw: the body turns toward the path direction at
-        // MaxYawSpeed (45, x10 per second); move_yaw keeps the legs on the path.
+        // MaxYawSpeed x 10 degrees per second; move_yaw keeps the legs on the path.
+        // AI goals belong to npc_metropolice (CNPC_MetroPolice::MaxYawSpeed: ACT_RUN 15,
+        // ACT_WALK 25); scene moves keep the CAI_BaseNPC default 45.
+        let yaw_speed = match animation.map(|(sequence, _)| sequence) {
+            Some("run_all") if key.scene == crate::npc::AI_SCENE => 150.,
+            Some("walk_all") if key.scene == crate::npc::AI_SCENE => 250.,
+            _ => 450.,
+        };
         let forward = self.states[key.actor].rotation * Vec3::X;
         let current = forward.y.atan2(forward.x).to_degrees();
         let body = if animation.is_some() {
-            clamp_yaw(450. * self.tick_dt, current, yaw_degrees)
+            clamp_yaw(yaw_speed * self.tick_dt, current, yaw_degrees)
         } else {
             yaw_degrees
         };

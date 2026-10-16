@@ -96,8 +96,9 @@ pub struct AiActor {
     /// The F4 per-spawn disposition toward the player (an ai_relationship aimed at
     /// this NPC); None: the class rules.
     pub player_disposition: Option<Disposition>,
-    /// The origin at the last think (report only).
+    /// The origin and body yaw (degrees) at the last think (report only).
     pub origin: [f32; 3],
+    pub yaw: f32,
     #[serde(skip)]
     goal: Option<GoalKey>,
     /// Animation events up to this time were handled.
@@ -847,6 +848,7 @@ impl AiRuntime {
             weapon,
             player_disposition: None,
             origin: [0.; 3],
+            yaw: 0.,
             goal: None,
             events_until: 0.,
         })
@@ -1397,6 +1399,7 @@ impl AiRuntime {
         let dt = (now - actor.last_think).clamp(0., 0.2) as f32;
         actor.last_think = now;
         actor.origin = origin.to_array();
+        actor.yaw = yaw_of(scene, id);
         actor.next_think = now + THINK_INTERVAL;
         let yaw_speed = if actor.npc.activity.starts_with("ACT_WALK") {
             25.

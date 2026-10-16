@@ -243,6 +243,84 @@ impl NavRestrictions {
         true
     }
 }
+/// ROUTE_SIMPLIFY_TIME_DELAY (in the PVS, AIStrongOpt off).
+const ROUTE_SIMPLIFY_DELAY: f32 = 0.5;
+/// MIN_ANGLE_COS_SIMPLIFY: 40 degrees left or right of the current heading.
+const MIN_ANGLE_COS_SIMPLIFY: f32 = 0.766;
+/// CAI_Navigator::SimplifyPathForward with the full scan parameters (32 ft out, points
+/// within 12 ft, 3 ft increments, four samples): head straight for the farthest
+/// reachable point along the path ahead, else skip to the next waypoint when it is
+/// reachable and nearer than the scan distance. Points must lie within 40 degrees of the
+/// current heading unless `forced` (the first simplification of a path).
+fn simplify_path_forward<W: NpcCollisionWorld>(
+    world: &W,
+    actor: &Actor,
+    goal: &mut Goal,
+    query: Query<'_>,
+    forced: bool,
+) {
+    const SCAN_DIST: f32 = 32. * 12.;
+    const RADIUS: f32 = 12. * 12.;
+    const INCREMENT: f32 = 3. * 12.;
+    const MAX_SAMPLES: usize = 4;
+    let feet = goal.feet;
+    let points = &goal.route.feet;
+    let next = goal.next;
+    // The goal waypoint is not reducible.
+    if next + 1 >= points.len() {
+        return;
+    }
+    let flat = |v: Vec3| v * Vec3::new(1., 1., 0.);
+    let heading = flat(points[next] - feet).normalize_or_zero();
+    let attempt = |p: Vec3| {
+        forced || flat(p - feet).normalize_or_zero().dot(heading) > MIN_ANGLE_COS_SIMPLIFY
+    };
+    let reachable = |p: Vec3| {
+        let moved = npc_probe::ground_move(world, feet, p, actor.ground, query);
+        moved.completed && flat(moved.end - p).length() < 1.
+    };
+    // Walk out along the path: (point, waypoint index of the segment start, skip test).
+    let mut samples = Vec::new();
+    let mut remaining = SCAN_DIST - flat(points[next] - feet).length();
+    let (mut at, mut wp) = (points[next], next);
+    while remaining > 0. && wp + 1 < points.len() {
+        let to_next = flat(points[wp + 1] - at).length();
+        if to_next < INCREMENT * 1.1 {
+            at = points[wp + 1];
+            remaining -= to_next;
+            wp += 1;
+        } else {
+            at += (points[wp + 1] - points[wp]).normalize_or_zero() * INCREMENT;
+            remaining -= INCREMENT;
+        }
+        let skip = flat(at - feet).length() > RADIUS + 0.1;
+        samples.push((at, wp, skip));
+    }
+    let mut tests = 0;
+    for &(point, segment, skip) in samples.iter().rev() {
+        if skip || tests >= MAX_SAMPLES || !attempt(point) {
+            continue;
+        }
+        tests += 1;
+        if reachable(point) {
+            // SimplifyPathInsertSimplification: the point replaces the waypoints up to
+            // its segment start.
+            goal.route.feet[segment] = point;
+            if let Some(door) = goal.route.doors.get_mut(segment) {
+                *door = None;
+            }
+            goal.next = segment;
+            return;
+        }
+    }
+    let following = points[next + 1];
+    if attempt(following) && flat(following - feet).length() < SCAN_DIST && reachable(following) {
+        goal.next = next + 1;
+        if let Some(door) = goal.route.doors.get_mut(next + 1) {
+            *door = None;
+        }
+    }
+}
 /// IsBoxIntersectingRay for the segment a -> b.
 fn segment_crosses_box(a: Vec3, b: Vec3, lo: Vec3, hi: Vec3) -> bool {
     let d = b - a;
@@ -403,6 +481,10 @@ struct Goal {
     animation_time: f32,
     retry_time: f32,
     contact_normal: Vec3,
+    /// CAI_Navigator m_flNextSimplifyTime as seconds left (AI goals).
+    simplify_in: f32,
+    /// The path was simplified once (bFirstForPath forces the first attempt).
+    simplified: bool,
 }
 #[derive(Clone, Debug, Default)]
 struct Route {
@@ -572,6 +654,8 @@ impl Controller {
             animation_time: 0.,
             retry_time: 0.,
             contact_normal: Vec3::ZERO,
+            simplify_in: 0.,
+            simplified: false,
         };
         let prepared = (|| {
             if pose.entity != key.actor
@@ -803,6 +887,20 @@ fn advance<W: NpcCollisionWorld>(
     if (goal.feet - goal.request.target_feet).truncate().length() <= arrival {
         goal.state = GoalState::Arrived;
         return Ok(());
+    }
+    // CAI_Navigator::SimplifyPath for AI goals (scene moves keep their routes).
+    if key.scene == AI_SCENE {
+        goal.simplify_in -= dt;
+        if goal.simplify_in <= 0. {
+            goal.simplify_in = ROUTE_SIMPLIFY_DELAY;
+            let forced = !goal.simplified;
+            goal.simplified = true;
+            let plain = Query {
+                excluded_entities: &excluded,
+                ..Default::default()
+            };
+            simplify_path_forward(world, actor, goal, plain, forced);
+        }
     }
     let duration = track
         .duration()
@@ -1282,6 +1380,51 @@ mod tests {
             .unwrap();
         controller.set_view_offset(7, Vec3::Z * 70.).unwrap();
         controller
+    }
+    #[test]
+    fn path_simplification_cuts_corners_within_the_heading_cone() {
+        let physics = Physics::new(&world(vec![]));
+        let controller = make_controller(None);
+        let actor = &controller.actors[&7];
+        let excluded = [7];
+        let query = Query {
+            excluded_entities: &excluded,
+            ..Default::default()
+        };
+        let route = Route {
+            nodes: vec![],
+            feet: vec![
+                Vec3::new(150., 0., 0.),
+                Vec3::new(150., 150., 0.),
+                Vec3::new(150., 400., 0.),
+            ],
+            doors: vec![None; 3],
+        };
+        let mut goal = Goal {
+            request: request(Vec3::new(150., 400., 0.)),
+            tolerance: 0.1,
+            state: GoalState::Moving,
+            route,
+            next: 0,
+            feet: Vec3::ZERO,
+            yaw: 0.,
+            animation_time: 0.,
+            retry_time: 0.,
+            contact_normal: Vec3::ZERO,
+            simplify_in: 0.,
+            simplified: false,
+        };
+        // Every scan point lies beyond 12 ft: the first (forced) pass skips to the next
+        // reachable waypoint.
+        simplify_path_forward(&physics, actor, &mut goal, query, true);
+        assert_eq!(goal.next, 1);
+        // Near the corner, heading +X: the nearest point up the next leg is inside the
+        // 40-degree cone and replaces the corner; farther points are outside it.
+        goal.next = 0;
+        goal.feet = Vec3::new(100., 0., 0.);
+        simplify_path_forward(&physics, actor, &mut goal, query, false);
+        assert_eq!(goal.next, 0);
+        assert!((goal.route.feet[0] - Vec3::new(150., 36., 0.)).length() < 0.01);
     }
     #[test]
     fn dynamic_links_take_their_initial_state_and_toggle() {
