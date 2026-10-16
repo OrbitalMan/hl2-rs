@@ -121,9 +121,13 @@ Limitations:
 
 - The background map runs live behind the menu like retail (entities, `ambient_generic` loops,
   soundscapes, effects; `Simulation::world_running`), with player input ignored as in the SDK
-  (`in_main.cpp` skips input when `IsLevelMainMenuBackground()`). It is still viewed from the
-  player spawn, not from its `point_viewcontrol` camera; the soundscape follows the player's ears
-  (SDK `CEnvSoundscape` uses `EarPosition()`), so the spawn is also where retail listens. Escape
+  (`in_main.cpp` skips input when `IsLevelMainMenuBackground()`). The view is the map's
+  `point_viewcontrol` (`view_controller`, enabled by a `logic_auto`; SDK `CTriggerCamera`, in
+  `hl2_simulation::view_control`): its origin, looking at its `target` or along its `angles`,
+  with the player frozen (spawnflag 4). Half-Life 2 backgrounds lock the field of view to 75 with
+  an `env_zoom`; the others use the player's FOV. The soundscape is still selected from the
+  frozen player's ears (SDK `EarPosition()`); positional mixing listens at the camera. Not
+  modelled: camera `moveto` paths, `interpolatepositiontoplayer`, eased (non-snapping) turns. Escape
   over gameplay, Options or the console over gameplay, and map loading still freeze the world.
 - If a background map fails to load, the runtime logs a warning to the console, preserves the menu,
   and does not crash or interrupt menu navigation.

@@ -740,7 +740,7 @@ pub fn queue(
         audio.music_volume = settings.music_volume.clamp(0., 1.);
         audio.muted = settings.mute_losefocus && windows.single().is_ok_and(|w| !w.focused);
     }
-    let listener = glam::Vec3::from_array(simulation.eye().to_array());
+    let listener = glam::Vec3::from_array(simulation.view_origin().to_array());
     let paused = !simulation.world_running();
     if paused != audio.paused {
         if paused {
@@ -858,10 +858,9 @@ pub fn queue(
         .soundscape_time
         .map_or(0., |t| (now - t).max(0.) as f32);
     audio.soundscape_time = Some(now);
-    let forward = glam::Vec3::from_array(
-        crate::source_direction(simulation.yaw, simulation.pitch).to_array(),
-    );
-    let right = glam::Vec3::new(simulation.yaw.sin(), -simulation.yaw.cos(), 0.);
+    let (yaw, pitch) = simulation.view_angles();
+    let forward = glam::Vec3::from_array(crate::source_direction(yaw, pitch).to_array());
+    let right = glam::Vec3::new(yaw.sin(), -yaw.cos(), 0.);
     let params = game.scene.soundscape.params.clone();
     let audio = &mut *audio;
     let operations = audio.soundscape.update(

@@ -30,3 +30,4 @@ pub mod lipsync;
 
 pub mod monitors;
 pub mod tonemap;
+pub mod view_control;

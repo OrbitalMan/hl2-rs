@@ -1166,6 +1166,36 @@ mod tests {
                 );
                 assert!(!sim.player.dead, "{context}: player died");
                 assert!(!sim.loading(), "{context}: started loading");
+                // The view is the map's point_viewcontrol, enabled by its logic_auto.
+                let camera = loaded
+                    .world
+                    .entities
+                    .iter()
+                    .find(|e| e.class() == "point_viewcontrol")
+                    .and_then(|e| e.get("origin"))
+                    .map(|o| {
+                        let v: Vec<f32> = o
+                            .split_whitespace()
+                            .filter_map(|n| n.parse().ok())
+                            .collect();
+                        glam::Vec3::new(v[0], v[1], v[2])
+                    })
+                    .unwrap_or_else(|| panic!("{context}: no point_viewcontrol"));
+                let view = sim
+                    .view_control
+                    .unwrap_or_else(|| panic!("{context}: no view control"));
+                assert!(view.origin.distance(camera) < 0.01, "{context}: {view:?}");
+                assert!(view.freeze_player, "{context}");
+                let zoomed = loaded
+                    .world
+                    .entities
+                    .iter()
+                    .any(|e| e.class() == "env_zoom");
+                assert_eq!(sim.zoom_fov, zoomed.then_some(75.), "{context}");
+                println!(
+                    "{context}: view {:?} pitch {:.2} yaw {:.2} fov {:?}",
+                    view.origin, view.pitch, view.yaw, sim.zoom_fov
+                );
                 // Ambience: the soundscape picked at the player's position, and ambient_generic
                 // loops that play from spawn (SDK CAmbientGeneric, neither flag 16 nor 32).
                 let ambient_loops = loaded

@@ -295,10 +295,11 @@ pub fn present(
     mut meshes: ResMut<Assets<Mesh>>,
     mut draws: Query<(&mut Transform, &mut Visibility)>,
 ) {
-    let direction = glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
+    let (yaw, pitch) = sim.view_angles();
+    let direction = glam::Vec3::from_array(crate::source_direction(yaw, pitch).to_array());
     effects.source.frame(
         &game.projectiles,
-        glam::Vec3::from_array(sim.eye().to_array()),
+        glam::Vec3::from_array(sim.view_origin().to_array()),
         direction,
         game.scene.time,
         !sim.world_running(),

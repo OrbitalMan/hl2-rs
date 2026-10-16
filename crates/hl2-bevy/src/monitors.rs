@@ -118,7 +118,11 @@ pub fn present(
                 r.x_axis.abs() * extent.x + r.y_axis.abs() * extent.y + r.z_axis.abs() * extent.z;
             (center - extent, center + extent)
         });
-        sky.bounds_in_pvs(glam::Vec3::from_array(sim.eye().to_array()), mins, maxs)
+        sky.bounds_in_pvs(
+            glam::Vec3::from_array(sim.view_origin().to_array()),
+            mins,
+            maxs,
+        )
     });
     match active {
         Ok(active) => {

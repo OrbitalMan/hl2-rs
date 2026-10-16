@@ -279,6 +279,8 @@ pub struct Scene {
     pub monitors: crate::monitors::Cameras,
     /// env_tonemap_controller auto-exposure limits and rate.
     pub tonemap: crate::tonemap::Control,
+    /// The point_viewcontrol and env_zoom the local player's view follows.
+    pub view_control: crate::view_control::ViewControl,
     /// point_template children that do not exist until ForceSpawn, with their authored
     /// visible/enabled state.
     templates: BTreeMap<usize, Vec<(usize, bool, bool)>>,
@@ -320,6 +322,7 @@ impl Scene {
             lipsync: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
             tonemap: Default::default(),
+            view_control: Default::default(),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
             tick_dt: 0.,
@@ -2071,6 +2074,29 @@ impl Scene {
             return;
         }
         match input.as_str() {
+            // CTriggerCamera: the view follows this camera until Disable (or its wait ends).
+            "enable" if class == "point_viewcontrol" => {
+                for key in crate::view_control::ViewControl::unsupported(world, id) {
+                    self.unsupported_input(class, key);
+                }
+                if let Some(previous) = self.view_control.enable(id, self.time) {
+                    self.fire(previous, "OnEndFollow", p.activator);
+                }
+            }
+            "disable" if class == "point_viewcontrol" => {
+                if self.view_control.disable(id) {
+                    self.fire(id, "OnEndFollow", p.activator);
+                }
+            }
+            // CEnvZoom: the player's field of view moves to FOV over Rate seconds.
+            "zoom" if class == "env_zoom" => {
+                self.view_control.zoom = Some(crate::view_control::Zoom {
+                    fov: number(e, "FOV", 0.),
+                    rate: number(e, "Rate", 0.),
+                    started: self.time,
+                });
+            }
+            "unzoom" if class == "env_zoom" => self.view_control.zoom = None,
             // CEnvTonemapController: custom auto-exposure limits and the manual tonemap rate.
             "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
             "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,
@@ -2664,6 +2690,10 @@ impl Scene {
     pub fn tick(&mut self, world: &World, player_feet: Vec3, dt: f32) {
         self.time += dt as f64;
         self.tick_dt = dt;
+        if let Some(camera) = self.view_control.expired(world, self.time) {
+            self.view_control.disable(camera);
+            self.fire(camera, "OnEndFollow", usize::MAX);
+        }
         self.player_feet = player_feet;
         self.monitors.tick(&self.states, self.time);
         self.look_targets.cleanup(self.time, |id| {

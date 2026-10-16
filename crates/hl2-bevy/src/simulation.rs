@@ -103,6 +103,11 @@ pub struct Simulation {
     /// The loaded map is a main-menu background level (from the console, every frame): like
     /// retail, its world keeps running behind the menu while player input is ignored.
     pub background_level: bool,
+    /// The active point_viewcontrol's view (from the latest world tick); the player keeps
+    /// its own eye, which still selects the soundscape (SDK `EarPosition`).
+    pub view_control: Option<hl2_simulation::view_control::View>,
+    /// The env_zoom field of view (from the latest world tick), overriding `fov`.
+    pub zoom_fov: Option<f32>,
     pub loading: bool,
     pub focused: bool,
     pub jump_suppressed: bool,
@@ -142,6 +147,8 @@ impl Simulation {
             fly,
             paused: false,
             background_level: false,
+            view_control: None,
+            zoom_fov: None,
             loading: false,
             focused: true,
             jump_suppressed: false,
@@ -158,8 +165,27 @@ impl Simulation {
             death_buttons_released: true,
         }
     }
+    /// The player's eye.
     pub fn eye(&self) -> Vec3 {
         Vec3::from_array(self.eye.to_array())
+    }
+    /// Where the view is: the active point_viewcontrol, else the player's eye.
+    pub fn view_origin(&self) -> Vec3 {
+        match self.view_control {
+            Some(view) => Vec3::from_array(view.origin.to_array()),
+            None => self.eye(),
+        }
+    }
+    /// View yaw and pitch in radians (pitch positive looks up), like `yaw`/`pitch`.
+    pub fn view_angles(&self) -> (f32, f32) {
+        match self.view_control {
+            Some(view) => (view.yaw.to_radians(), -view.pitch.to_radians()),
+            None => (self.yaw, self.pitch),
+        }
+    }
+    /// Horizontal 4:3 field of view of the view: env_zoom's, else the player's.
+    pub fn view_fov(&self) -> f32 {
+        self.zoom_fov.unwrap_or(self.fov)
     }
     pub fn flying(&self) -> bool {
         self.fly
@@ -172,6 +198,11 @@ impl Simulation {
     pub fn world_running(&self) -> bool {
         !self.loading && (!self.paused || self.background_level)
     }
+    /// The player takes no input: a menu background level, or a point_viewcontrol with
+    /// `SF_CAMERA_PLAYER_TAKECONTROL`.
+    fn frozen(&self) -> bool {
+        self.background_level || self.view_control.is_some_and(|v| v.freeze_player)
+    }
     pub fn loading(&self) -> bool {
         self.loading
     }
@@ -183,6 +214,8 @@ impl Simulation {
         self.physics = Physics::new(world);
         self.eye = eye;
         self.player = Player::new(eye);
+        self.view_control = None;
+        self.zoom_fov = None;
         if direct {
             self.fly = false;
             self.yaw = world.spawn().1;
@@ -358,8 +391,9 @@ impl Simulation {
                 sprint: c.sprint,
                 slow: c.slow,
             };
-            if self.background_level {
-                // Retail ignores player input on a menu background level.
+            if self.background_level || self.frozen() {
+                // Retail ignores player input on a menu background level and under a
+                // point_viewcontrol that takes control (SDK `EnableControl(FALSE)`).
                 self.input = Input {
                     yaw: self.yaw,
                     ..Input::default()
@@ -422,7 +456,15 @@ impl Simulation {
                     noclip: false,
                 };
                 let feet = self.player.feet;
-                self.player.step(self.input, &self.physics, TICK);
+                let input = if self.frozen() {
+                    Input {
+                        yaw: self.yaw,
+                        ..Input::default()
+                    }
+                } else {
+                    self.input
+                };
+                self.player.step(input, &self.physics, TICK);
                 self.eye = self.player.eye();
                 if let Some(game) = game.as_deref_mut() {
                     game.step_sounds(&self.physics, before, feet, &self.player);
@@ -436,6 +478,17 @@ impl Simulation {
                 let world = game.world.clone();
                 game.scene
                     .update_soundscape(&world, glam::Vec3::from_array(self.eye.to_array()));
+                let states = &game.scene.states;
+                self.view_control = game.scene.view_control.view(
+                    &world,
+                    |id| states.get(id).filter(|s| !s.killed).map(|s| s.origin),
+                    glam::Vec3::from_array(self.eye.to_array()),
+                );
+                self.zoom_fov = game
+                    .scene
+                    .view_control
+                    .zoom
+                    .map(|zoom| zoom.fov_at(self.fov, game.scene.time));
             }
         }
         if self.player.dead && !self.paused() && !self.transition {

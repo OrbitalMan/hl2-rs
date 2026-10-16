@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 Menu backgrounds: point_viewcontrol camera and env_zoom field of view
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-simulation`: new `view_control` (`ViewControl`, `View`, `Zoom`); `Scene::view_control`; `point_viewcontrol` `Enable`/`Disable`, `env_zoom` `Zoom`/`UnZoom` inputs; camera `wait` expiry in `Scene::tick`. `hl2-bevy::simulation`: `view_control`, `zoom_fov`, `view_origin`/`view_angles`/`view_fov`, player frozen under `TAKECONTROL`; `camera.rs`, `rendering.rs`, `effects.rs`, `audio.rs`, `monitors.rs` use the view. Playground: `runtime_bg_compare.sh`, `set_bg_config.py`, `dump_bg_cameras.py`, `dump_bg_zoom.py`; `validate.sh` runs clippy like CI (`--workspace --all-targets -D warnings`). Docs: `docs/gameui.md`, `AGENTS.md`, `STATUS.md`, `HL2Wiki/menu_background_camera.md`.
+
+**Why:** Owner report: on the Episode Two background the view dropped to the ground like a character; asked to match retail position, angles and FOV.
+
+**Tested how:** `cargo test -p hl2-simulation` (171), `-p hl2-ui` (193), `-p hl2-bevy` (75); owned `hl2-bevy` (7); strict workspace clippy `--all-targets -D warnings`, `x86_64-pc-windows-msvc` clippy; fmt; `runtime_submenus.sh`, `runtime_return_menu.sh`; `runtime_bg_compare.sh` captures compared by eye with the retail pre-blurred menu images.
+
+**Result:** All 15 chapter backgrounds view from their camera; HL2 ones at FOV 75; captures match the retail images' framing.
+
+**Still broken or not tested:** camera `moveto` paths, `interpolatepositiontoplayer` and eased turns not modelled (no menu background uses them); episode/Lost Coast menus use the player's FOV setting as retail does (wider with a high FOV setting); missing materials (magenta) on `ep2_background01` and Lost Coast water; not run on Windows.
+
+**Next:** Owner check; the missing-material areas.
+
 ## 2026-10-16 Host: menu background levels run live (ambience plays behind the menu)
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

@@ -670,11 +670,9 @@ pub fn present_lighting(
         BTreeMap::<Option<usize>, (glam::Vec3, modkit_core::lighting::LightState)>::new();
     // The view model camera sits at the origin looking down +X; map that space onto the
     // player's view so world-space lights and the ambient cube line up.
-    let view = Transform::from_translation(source_to_bevy(sim.eye()))
-        .looking_to(
-            source_to_bevy(crate::source_direction(sim.yaw, sim.pitch)),
-            Vec3::Y,
-        )
+    let (yaw, pitch) = sim.view_angles();
+    let view = Transform::from_translation(source_to_bevy(sim.view_origin()))
+        .looking_to(source_to_bevy(crate::source_direction(yaw, pitch)), Vec3::Y)
         .to_matrix()
         * Transform::IDENTITY
             .looking_to(Vec3::X, Vec3::Y)
