@@ -108,7 +108,7 @@ What exists:
 - Startup (`hl2-bevy::main::load_startup_map`):
   - a loadable `--map` starts gameplay (`--main-menu` turns it into a menu background instead);
   - no `--map`, or one that fails to load, loads the chapter-1 background map (`background01`)
-    paused behind the main menu;
+    running behind the main menu;
   - `--position`, `--yaw`, `--pitch`, `--fly`, `--movement-script`, `--capture-live`,
     `--capture-burst` and `--capture-monitor` without a loadable `--map` exit with an error.
 - New Game in the HALF-LIFE 2 category loads chapter 1 as gameplay. Escape on a background level
@@ -119,8 +119,12 @@ EXTRAS opens the Extras submenu (Lost Coast and Workshop placeholder). New Game 
 
 Limitations:
 
-- The background map is frozen and viewed from the player spawn, not from its
-  `point_viewcontrol` camera.
+- The background map runs live behind the menu like retail (entities, `ambient_generic` loops,
+  soundscapes, effects; `Simulation::world_running`), with player input ignored as in the SDK
+  (`in_main.cpp` skips input when `IsLevelMainMenuBackground()`). It is still viewed from the
+  player spawn, not from its `point_viewcontrol` camera; the soundscape follows the player's ears
+  (SDK `CEnvSoundscape` uses `EarPosition()`), so the spawn is also where retail listens. Escape
+  over gameplay, Options or the console over gameplay, and map loading still freeze the world.
 - If a background map fails to load, the runtime logs a warning to the console, preserves the menu,
   and does not crash or interrupt menu navigation.
 - Menu positions follow the retail layout, but the canvas scale is the existing HUD scale rather

@@ -111,8 +111,9 @@ pub fn update(
         *state.histogram.lock().expect("tonemap histogram") = None;
     }
     // A paused game freezes everything, exposure and bloom adaptation included (owner
-    // observation of native HL2, 2026-10-08); the last exposure stays on the cameras.
-    let paused = sim.paused();
+    // observation of native HL2, 2026-10-08); the last exposure stays on the cameras. A menu
+    // background level keeps running.
+    let paused = !sim.world_running();
     if state.forced.is_none() && !paused {
         let request = state.frames.is_multiple_of(INTERVAL) && {
             let mut pending = state.pending.lock().expect("tonemap pending");

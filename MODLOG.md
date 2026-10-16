@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 Host: menu background levels run live (ambience plays behind the menu)
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-bevy::simulation`: `Simulation::background_level` (from the console each step), `world_running()`; the world/player/soundscape step uses it and ignores scripted player input on background levels; `step` is `pub(crate)` for tests. `audio.rs`, `effects.rs`, `tonemap.rs` pause on `!world_running()` instead of `paused()`. Playground: `show_audio.py`, `show_audio_keys.py`. Docs: `docs/gameui.md` §4 limitations, `AGENTS.md` startup invariant, `STATUS.md`.
+
+**Why:** Owner request: background maps should play their ambient sounds like retail. Retail keeps the background level running behind the menu and only ignores player input (SDK `in_main.cpp`, `IsLevelMainMenuBackground`); HL2RS paused it like the gameplay pause menu.
+
+**Tested how:** `cargo test -p hl2-ui` (193), `-p hl2-bevy` (75); owned `hl2-bevy` (7, incl. the new 15-background live run); strict clippy for macOS and `x86_64-pc-windows-msvc`; fmt; packaged plain launch (`runtime_check.sh`) and a `d1_trainstation_02` Escape-pause run; `runtime_submenus.sh`, `runtime_return_menu.sh`.
+
+**Result:** Menu over Lost Coast: soundscape active, 4 sinks playing; gameplay pause: 4/4 sinks paused. Submenu and return-to-menu replays unchanged.
+
+**Still broken or not tested:** View is still the player spawn, not `point_viewcontrol`; not listened to by me; not run on Windows.
+
+**Next:** Owner listening check; optionally the `point_viewcontrol` camera for background levels.
+
 ## 2026-10-16 VFS: mount gameinfo.txt search paths; Return to main menu shows the running game's background
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

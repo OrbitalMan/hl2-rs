@@ -100,6 +100,9 @@ pub struct Simulation {
     pub(crate) input: Input,
     pub fly: bool,
     pub paused: bool,
+    /// The loaded map is a main-menu background level (from the console, every frame): like
+    /// retail, its world keeps running behind the menu while player input is ignored.
+    pub background_level: bool,
     pub loading: bool,
     pub focused: bool,
     pub jump_suppressed: bool,
@@ -138,6 +141,7 @@ impl Simulation {
             input: Input::default(),
             fly,
             paused: false,
+            background_level: false,
             loading: false,
             focused: true,
             jump_suppressed: false,
@@ -163,6 +167,11 @@ impl Simulation {
     pub fn paused(&self) -> bool {
         self.paused || self.loading
     }
+    /// Whether the world (entities, sounds, effects, the player) advances: in gameplay, and
+    /// behind the menu of a background level, never while a map loads.
+    pub fn world_running(&self) -> bool {
+        !self.loading && (!self.paused || self.background_level)
+    }
     pub fn loading(&self) -> bool {
         self.loading
     }
@@ -187,7 +196,7 @@ impl Simulation {
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"player": self.player, "eye": self.eye.to_array(), "fly": self.fly,
-            "paused": self.paused(), "dev_overlay":self.dev_overlay, "dead": self.player.dead, "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
+            "paused": self.paused(), "background_level": self.background_level, "world_running": self.world_running(), "dev_overlay":self.dev_overlay, "dead": self.player.dead, "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
             "samples": self.samples, "colliders": self.physics.colliders.len(),
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})
@@ -296,7 +305,7 @@ impl Simulation {
             }
         }
     }
-    fn step(
+    pub(crate) fn step(
         &mut self,
         mut game: Option<&mut crate::gameplay::Gameplay>,
         mut ui: Option<&mut crate::ui_host::Console>,
@@ -306,6 +315,9 @@ impl Simulation {
         }
         if !self.commands.is_empty() {
             self.transition = false;
+        }
+        if let Some(ui) = ui.as_deref() {
+            self.background_level = ui.source.background_level();
         }
         self.host_tick += 1;
         let mut label = None;
@@ -346,7 +358,13 @@ impl Simulation {
                 sprint: c.sprint,
                 slow: c.slow,
             };
-            if let Some(game) = game.as_deref_mut() {
+            if self.background_level {
+                // Retail ignores player input on a menu background level.
+                self.input = Input {
+                    yaw: self.yaw,
+                    ..Input::default()
+                };
+            } else if let Some(game) = game.as_deref_mut() {
                 game.buttons(c.primary, c.secondary);
                 game.actions.extend(c.actions);
             }
@@ -374,7 +392,7 @@ impl Simulation {
         {
             game.consume_attacks();
         }
-        if !self.paused() && (self.focused || !self.commands.is_empty()) && !self.transition {
+        if self.world_running() && (self.focused || !self.commands.is_empty()) && !self.transition {
             if let Some(game) = game.as_deref_mut() {
                 let direction =
                     glam::Vec3::from_array(source_direction(self.yaw, self.pitch).to_array());
@@ -748,6 +766,46 @@ mod tests {
         sim.paused = false;
         sim.step(None, None);
         assert_eq!(sim.player.ticks, before.ticks + 1);
+    }
+    #[test]
+    fn background_level_world_runs_behind_the_menu_without_player_input() {
+        let forward: Vec<Command> = serde_json::from_str(
+            &serde_json::to_string(
+                &(1..=20)
+                    .map(|tick| serde_json::json!({"tick": tick, "forward": 1.0, "primary": true}))
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let run = |background: bool| {
+            let mut ui = crate::ui_host::Console::new(Default::default());
+            ui.source.level_loaded(background);
+            if !background {
+                ui.source.mode = hl2_ui::console::Mode::Pause;
+            }
+            let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+            let start = glam::Vec3::new(0., 0., 128.);
+            let mut sim = Simulation::new(&World::default(), start, 0., 0., false, forward.clone());
+            sim.paused = ui.source.paused();
+            for _ in 0..20 {
+                sim.step(Some(&mut game), Some(&mut ui));
+            }
+            (sim, game.scene.time)
+        };
+
+        // Main menu over a background level: the world advances, the player ignores input.
+        let (sim, time) = run(true);
+        assert!(sim.paused() && sim.world_running());
+        assert!(time > 0., "scene time {time}");
+        assert_eq!(sim.player.ticks, 20);
+        assert_eq!(sim.player.feet.truncate(), glam::Vec2::ZERO);
+
+        // Pause menu over gameplay: nothing advances.
+        let (sim, time) = run(false);
+        assert!(sim.paused() && !sim.world_running());
+        assert_eq!(time, 0.);
+        assert_eq!(sim.player.ticks, 0);
     }
     #[test]
     fn movement_schedule_uses_fifteen_milliseconds() {

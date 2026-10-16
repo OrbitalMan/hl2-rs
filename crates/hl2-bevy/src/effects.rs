@@ -301,7 +301,7 @@ pub fn present(
         glam::Vec3::from_array(sim.eye().to_array()),
         direction,
         game.scene.time,
-        sim.paused(),
+        !sim.world_running(),
         &sim.physics,
     );
     effects.draws = effects.source.quads.len();

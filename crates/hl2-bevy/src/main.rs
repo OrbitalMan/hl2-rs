@@ -1134,6 +1134,64 @@ mod tests {
     }
     #[test]
     #[ignore = "requires an owned Half-Life 2 installation"]
+    fn chapter_background_levels_run_live_behind_the_menu() {
+        let root = source_assets::install::discover().expect("owned install");
+        for game in ["hl2", "episodic", "ep2", "lostcoast"] {
+            let vfs = source_assets::vpk::Vfs::mount_game(&root, game).expect("mount");
+            let text = vfs
+                .read("scripts/chapterbackgrounds.txt")
+                .unwrap()
+                .and_then(|b| source_assets::keyvalues::decode_text(&b).ok())
+                .expect("chapterbackgrounds.txt");
+            let menu_background = hl2_ui::gameui::resources::background_map(&text);
+            for map in hl2_ui::gameui::resources::chapter_background_maps(&text) {
+                let loaded = crate::assets::load(&root, game, &map)
+                    .unwrap_or_else(|e| panic!("{game}/{map}: {e:#}"));
+                let mut game_state = loaded.gameplay;
+                let mut ui = crate::ui_host::Console::new(Default::default());
+                ui.source.level_loaded(true);
+                let (spawn, yaw) = loaded.world.spawn();
+                let mut sim =
+                    simulation::Simulation::new(&loaded.world, spawn, yaw, 0., false, vec![]);
+                sim.paused = ui.source.paused();
+                // Ten seconds of 15 ms ticks.
+                for _ in 0..667 {
+                    sim.step(Some(&mut game_state), Some(&mut ui));
+                }
+                let context = format!("{game}/{map}");
+                assert!(game_state.scene.time > 5., "{context}: world did not run");
+                assert!(
+                    game_state.scene.transition.is_none(),
+                    "{context}: level change"
+                );
+                assert!(!sim.player.dead, "{context}: player died");
+                assert!(!sim.loading(), "{context}: started loading");
+                // Ambience: the soundscape picked at the player's position, and ambient_generic
+                // loops that play from spawn (SDK CAmbientGeneric, neither flag 16 nor 32).
+                let ambient_loops = loaded
+                    .world
+                    .entities
+                    .iter()
+                    .filter(|e| e.class() == "ambient_generic")
+                    .filter(|e| {
+                        e.get("spawnflags")
+                            .and_then(|f| f.parse::<u32>().ok())
+                            .is_some_and(|f| f & (16 | 32) == 0)
+                    })
+                    .count();
+                let soundscape = game_state.scene.soundscape.params.is_some();
+                println!("{context}: soundscape {soundscape}, spawn ambient loops {ambient_loops}");
+                // The background each game's menu shows has ambience at the spawn; later
+                // chapters may not (ep1_background02's only soundscape is out of range there).
+                if menu_background.as_deref() == Some(map.as_str()) {
+                    assert!(soundscape || ambient_loops > 0, "{context}: no ambience");
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
     fn background01_loads_from_the_named_game() {
         let root = source_assets::install::discover().expect("owned install");
         let hl2 = crate::assets::load(&root, "hl2", "background01").expect("hl2 background01");

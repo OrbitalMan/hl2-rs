@@ -741,7 +741,7 @@ pub fn queue(
         audio.muted = settings.mute_losefocus && windows.single().is_ok_and(|w| !w.focused);
     }
     let listener = glam::Vec3::from_array(simulation.eye().to_array());
-    let paused = simulation.paused();
+    let paused = !simulation.world_running();
     if paused != audio.paused {
         if paused {
             audio.pause_changes += 1;
