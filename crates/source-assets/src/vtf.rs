@@ -531,10 +531,7 @@ mod tests {
     #[test]
     #[ignore = "requires owned HL2 installation"]
     fn owned_combine_barrier_frames_fade_to_black() {
-        let vfs = crate::vpk::Vfs::mount(std::path::Path::new(
-            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
-        ))
-        .unwrap();
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
         for name in ["comshieldwall", "comshieldwall_close"] {
             let data = vfs
                 .read(&format!("materials/effects/combineshield/{name}.vtf"))
@@ -560,10 +557,7 @@ mod tests {
     #[test]
     #[ignore = "requires owned HL2 installation"]
     fn owned_trainstation_window_cubemaps_decode() {
-        let mut vfs = crate::vpk::Vfs::mount(std::path::Path::new(
-            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
-        ))
-        .unwrap();
+        let mut vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
         let bytes = vfs.read("maps/d1_trainstation_02.bsp").unwrap().unwrap();
         let bsp = crate::bsp::Bsp::parse(&bytes).unwrap();
         vfs.mount_pak(bsp.lump(40)).unwrap();

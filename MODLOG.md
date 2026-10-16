@@ -1,5 +1,17 @@
 # MODLOG
 
+## 2026-10-16 source-assets owned tests locate the installation like the runtime
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** the 11 owned `source-assets` tests in `animation`, `bsp`, `flexes`, `model_lighting`, `overlays`, `sentence`, `visibility` and `vtf` mount `install::discover()` instead of requiring `HL2_ROOT`, like the other owned tests. `STATUS.md` note updated.
+
+**Why:** owned tests must find the game the way the runtime does (`HL2_ROOT` first, then Steam libraries) and never require `HL2_ROOT`.
+
+**Tested how:** `cargo test --locked --release -p source-assets -- --ignored` with `HL2_ROOT` unset (28 passed); `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo fmt --check`.
+
+**Still broken or not tested:** not run on Windows.
+
 ## 2026-10-16 Merge main (installation setup, arsenal and physics sessions 11-17) into `orbitalman/main-menu-2`
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

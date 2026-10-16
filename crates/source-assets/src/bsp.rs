@@ -795,10 +795,7 @@ mod tests {
     #[test]
     #[ignore = "requires owned HL2 installation"]
     fn owned_trainstation_brush_normals_face_the_rendered_side() {
-        let vfs = crate::vpk::Vfs::mount(std::path::Path::new(
-            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
-        ))
-        .unwrap();
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
         let bytes = vfs.read("maps/d1_trainstation_02.bsp").unwrap().unwrap();
         let world = Bsp::parse(&bytes)
             .unwrap()
@@ -825,10 +822,7 @@ mod tests {
     #[test]
     #[ignore = "requires owned HL2 installation"]
     fn owned_trainstation_overlays_become_lightmapped_fragments() {
-        let vfs = crate::vpk::Vfs::mount(std::path::Path::new(
-            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
-        ))
-        .unwrap();
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
         let bytes = vfs.read("maps/d1_trainstation_02.bsp").unwrap().unwrap();
         let bsp = Bsp::parse(&bytes).unwrap();
         let world = bsp.world("d1_trainstation_02").unwrap();

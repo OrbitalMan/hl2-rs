@@ -827,10 +827,7 @@ mod tests {
     #[test]
     #[ignore = "requires owned HL2 installation"]
     fn owned_idle_activities_load_model_sequences_with_finite_poses() {
-        let vfs = Vfs::mount(std::path::Path::new(
-            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
-        ))
-        .unwrap();
+        let vfs = Vfs::mount(&crate::install::discover().unwrap()).unwrap();
         for (model, expected) in [
             ("models/kleiner.mdl", vec![("idle_subtle", 1)]),
             (
@@ -1023,10 +1020,7 @@ mod tests {
     #[test]
     #[ignore = "requires owned HL2 installation"]
     fn owned_barney_gesture_loads_masked_parent_and_delta_children() {
-        let vfs = Vfs::mount(std::path::Path::new(
-            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
-        ))
-        .unwrap();
+        let vfs = Vfs::mount(&crate::install::discover().unwrap()).unwrap();
         let rig = load(
             &vfs,
             "models/barney.mdl",
