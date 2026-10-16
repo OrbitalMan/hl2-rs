@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: Gamepad tab
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2-ui::config`: `gamepad` section (`sensitivity_scale` = `sc_sensitivity_scale`, `aim_assist` = `sc_autoaim_mode`, `aim_assist_scale` = `sc_autoaim_scale`, `weapon_selection` = `hud_weaponui_gamepad` Cross/Carousel), clamped like the mouse aim-assist scale. `settings`: `Panel::Gamepad` (`optionssubgamepad.res`), `Value::JoystickScale`/`GamepadAimAssistScale` (0.5-2), `Choice::GamepadAimAssist`/`WeaponSelection`, `Command::SteamInput` (disabled placeholder). `layout`: `Control::associate`; `options::layout_widgets` disables a label whose associated control is disabled (SDK `Label`). The Gamepad tab draws its page instead of logging a placeholder.
+
+**Why:** owner request: implement the Gamepad tab.
+
+**Tested how:** unit test (page edits its own settings, not the mouse ones; aim-assist sensitivity and its label follow the gamepad aim assist; Steam Input logs its localized label); owned test (all five installed controls bind); config clamp test; workspace tests, strict clippy (also Windows target), fmt; packaged runtime check.
+
+**Result:** the Gamepad tab shows the installed page and stores its settings.
+
+**Still broken or not tested:** no gamepad input exists, so the settings have no effect; Steam Input configuration cannot open; the gamepad aim-assist default (Off) is an HL2-RS choice, not a verified retail default; not checked visually in the packaged build.
+
+**Next:** owner check.
+
 ## 2026-10-16 GameUI: Video > Advanced dialog
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

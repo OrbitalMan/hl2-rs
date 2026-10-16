@@ -110,7 +110,7 @@ pub trait Listed: Copy + PartialEq + 'static {
     fn token(self) -> &'static str;
 }
 
-/// Video > Advanced detail levels with the items the retail dialog lists, in combo order.
+/// Combo settings with the items the retail dialogs list, in combo order.
 macro_rules! choice_enum {
     ($(#[$doc:meta])* $name:ident { $($variant:ident => $token:literal),+ $(,)? }) => {
         $(#[$doc])*
@@ -434,6 +434,39 @@ impl Default for GameplaySettings {
     }
 }
 
+choice_enum! {
+    /// Gamepad weapon selection style (`hud_weaponui_gamepad` 2 cross, 3 carousel).
+    WeaponSelectionStyle {
+        Cross => "#GameUI_Gamepad_WeaponSelection_Crossbar",
+        Carousel => "#GameUI_Gamepad_WeaponSelection_Carousel",
+    }
+}
+
+/// The Gamepad page. Stored only: HL2-RS has no gamepad input yet.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GamepadSettings {
+    /// `sc_sensitivity_scale`.
+    pub sensitivity_scale: f32,
+    /// `sc_autoaim_mode`.
+    pub aim_assist: AimAssist,
+    /// `sc_autoaim_scale`.
+    pub aim_assist_scale: f32,
+    /// `hud_weaponui_gamepad`; the retail page shows Cross for an unset value.
+    pub weapon_selection: WeaponSelectionStyle,
+}
+
+impl Default for GamepadSettings {
+    fn default() -> Self {
+        Self {
+            sensitivity_scale: 1.0,
+            aim_assist: AimAssist::Off,
+            aim_assist_scale: 1.0,
+            weapon_selection: WeaponSelectionStyle::Cross,
+        }
+    }
+}
+
 /// Keyboard > Advanced.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -461,6 +494,7 @@ pub struct Config {
     pub audio: AudioSettings,
     pub mouse: MouseSettings,
     pub keyboard: KeyboardSettings,
+    pub gamepad: GamepadSettings,
     pub keys: BTreeMap<String, String>,
 }
 
@@ -503,6 +537,7 @@ impl Default for Config {
             audio: AudioSettings::default(),
             mouse: MouseSettings::default(),
             keyboard: KeyboardSettings::default(),
+            gamepad: GamepadSettings::default(),
             keys,
         }
     }
@@ -574,6 +609,18 @@ impl Config {
             defaults.mouse.aim_assist_scale,
         );
         clamp(&mut self.video.gamma, 1.6, 2.6, defaults.video.gamma);
+        clamp(
+            &mut self.gamepad.sensitivity_scale,
+            0.5,
+            2.,
+            defaults.gamepad.sensitivity_scale,
+        );
+        clamp(
+            &mut self.gamepad.aim_assist_scale,
+            0.5,
+            2.,
+            defaults.gamepad.aim_assist_scale,
+        );
         clamp(&mut self.video.fov, 50., 120., defaults.video.fov);
         self.gameplay.skill = self.gameplay.skill.clamp(1, 3);
         if let Some(map) = self.gameplay.background_map.take() {
@@ -691,13 +738,15 @@ mod tests {
     #[test]
     fn migrate_clamps_out_of_range_values() {
         let config = Config::from_json(
-            br#"{ "gameplay": { "skill": 9 }, "video": { "gamma": 9.0 }, "mouse": { "accel_exponent": 0.2 }, "audio": { "language": " " } }"#,
+            br#"{ "gameplay": { "skill": 9 }, "video": { "gamma": 9.0 }, "mouse": { "accel_exponent": 0.2 }, "audio": { "language": " " }, "gamepad": { "sensitivity_scale": 7.0 } }"#,
         )
         .unwrap();
         assert_eq!(config.gameplay.skill, 3);
         assert_eq!(config.video.gamma, 2.6);
         assert_eq!(config.mouse.accel_exponent, 1.0);
         assert_eq!(config.audio.language, "english");
+        assert_eq!(config.gamepad.sensitivity_scale, 2.0);
+        assert_eq!(config.gamepad.weapon_selection, WeaponSelectionStyle::Cross);
         assert!(Config::from_json(b"not json").is_none());
         assert_eq!(HdrMode::from_level(1), Some(HdrMode::Bloom));
         assert_eq!(HdrMode::from_level(3), None);

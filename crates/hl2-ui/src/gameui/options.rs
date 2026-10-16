@@ -60,7 +60,6 @@ pub enum Tab {
     Gameplay,
     Keyboard,
     Mouse,
-    /// Empty placeholder page.
     Gamepad,
     Audio,
     Video,
@@ -92,7 +91,7 @@ impl Tab {
             Self::Gameplay => Some(Panel::Gameplay),
             Self::Keyboard => Some(Panel::Keyboard),
             Self::Mouse => Some(Panel::Mouse),
-            Self::Gamepad => None,
+            Self::Gamepad => Some(Panel::Gamepad),
             Self::Audio => Some(Panel::Audio),
             Self::Video => Some(Panel::Video),
         }
@@ -411,7 +410,7 @@ fn layout_widgets<'a>(
     let Some(layout) = res.layout(panel.layout()) else {
         return Vec::new();
     };
-    layout
+    let mut widgets: Vec<Widget> = layout
         .controls
         .iter()
         .filter(|c| c.visible || settings::force_visible(panel, &c.name))
@@ -427,7 +426,20 @@ fn layout_widgets<'a>(
                 enabled: settings::enabled(binding, control.enabled, draft, applied),
             }
         })
-        .collect()
+        .collect();
+    // SDK `Label`: "If the associate is disabled, so are we".
+    let disabled: Vec<&str> = widgets
+        .iter()
+        .filter(|w| !w.enabled)
+        .map(|w| w.control.name.as_str())
+        .collect();
+    for widget in &mut widgets {
+        let associate = &widget.control.associate;
+        if !associate.is_empty() && disabled.iter().any(|d| d.eq_ignore_ascii_case(associate)) {
+            widget.enabled = false;
+        }
+    }
+    widgets
 }
 
 /// Visible key-list rows below the header.
@@ -610,13 +622,7 @@ impl OptionsDialog {
         self.combo = None;
         self.active_tooltip = None;
         self.tracker.reset();
-        if self.tab != tab {
-            self.tab = tab;
-            if tab == Tab::Gamepad {
-                let label = self.tab_label(tab);
-                self.placeholder(&format!("{label} options"));
-            }
-        }
+        self.tab = tab;
     }
 
     fn commit_entry(&mut self) {
@@ -1031,6 +1037,8 @@ impl OptionsDialog {
                 }
             }
             Command::VideoAdvanced => self.open_sub(Sub::VideoAdvanced),
+            // Placeholder: disabled, so activation only logs its label (see `activate`).
+            Command::SteamInput => {}
             Command::SubOk => return self.ok_sub(),
             Command::SubCancel => self.cancel_sub(),
         }
@@ -1865,6 +1873,21 @@ mod tests {
         "Button2" { "ControlName" "Button" "fieldName" "Button2" "xpos" "182" "ypos" "100"
             "wide" "80" "tall" "24" "labelText" "#GameUI_Cancel" "Command" "Close" }
     }"##;
+    const GAMEPAD: &str = r##""Resource\OptionsSubMouse.res" {
+        "JoyScale" { "ControlName" "CCvarSlider" "fieldName" "JoyScale" "xpos" "38" "ypos" "43"
+            "wide" "260" "tall" "40" }
+        "Autoaim" { "ControlName" "ComboBox" "fieldName" "Autoaim" "xpos" "38" "ypos" "116"
+            "wide" "175" "tall" "24" }
+        "AutoaimScaleLabel" { "ControlName" "Label" "fieldName" "AutoaimScaleLabel" "xpos" "38"
+            "ypos" "165" "wide" "179" "tall" "24" "labelText" "#GameUI_AimAssistScale"
+            "associate" "AutoaimScale" }
+        "AutoaimScale" { "ControlName" "CCvarSlider" "fieldName" "AutoaimScale" "xpos" "38"
+            "ypos" "189" "wide" "260" "tall" "40" "enabled" "0" }
+        "WeaponSelection" { "ControlName" "ComboBox" "fieldName" "WeaponSelection" "xpos" "38"
+            "ypos" "262" "wide" "175" "tall" "24" }
+        "SteamInput" { "ControlName" "Button" "fieldName" "SteamInput" "xpos" "240" "ypos" "262"
+            "wide" "240" "tall" "24" "labelText" "#GameUI_Open_SteamInput" "Command" "OpenSteamInput" }
+    }"##;
     const VIDEO_ADVANCED: &str = r##""resource/OptionsSubVideoAdvancedDlg.res" {
         "OptionsSubVideoAdvancedDlg" { "ControlName" "COptionsSubVideoAdvancedDlg"
             "fieldName" "OptionsSubVideoAdvancedDlg" "wide" "482" "tall" "358" }
@@ -1902,6 +1925,7 @@ mod tests {
     fn resources() -> Arc<GameUiResources> {
         let mut localization = Localization::default();
         localization.insert("GameUI_Gamepad", "Gamepad");
+        localization.insert("GameUI_Open_SteamInput", "Open Steam Input Configuration");
         localization.insert("GameUI_AdvancedEllipsis", "Advanced...");
         localization.insert("GameUI_ReverseMouseLabel", "Reverse mouse up-down axis");
         let mut layouts = BTreeMap::new();
@@ -1912,6 +1936,7 @@ mod tests {
             ("optionssubvideogammadlg", GAMMA),
             ("optionssubkeyboardadvanceddlg", KEYBOARD_ADVANCED),
             ("optionssubvideoadvanceddlg", VIDEO_ADVANCED),
+            ("optionssubgamepad", GAMEPAD),
         ] {
             layouts.insert(name.to_owned(), Layout::parse(text.as_bytes()).unwrap());
         }
@@ -2026,16 +2051,51 @@ mod tests {
     }
 
     #[test]
-    fn tabs_switch_and_the_gamepad_placeholder_is_logged() {
+    fn gamepad_page_edits_its_own_settings() {
         let mut h = Harness::new();
-        h.tab(Tab::Mouse);
         h.tab(Tab::Gamepad);
+        assert!(h.dialog.take_log().is_empty(), "no longer a placeholder");
+        let enabled = |h: &Harness, name: &str| {
+            layout_widgets(
+                &h.dialog.res,
+                Panel::Gamepad,
+                page_rect(),
+                &h.dialog.draft,
+                &Config::default(),
+            )
+            .iter()
+            .find(|w| w.control.name == name)
+            .unwrap()
+            .enabled
+        };
+        assert!(!enabled(&h, "AutoaimScale"), "aim assist is off");
+        assert!(
+            !enabled(&h, "AutoaimScaleLabel"),
+            "the label follows its associate"
+        );
+        h.click(page(38. + 80., 116. + 12.));
+        h.click(page(38. + 80., 140. + MENU_ROW * 2.5));
+        assert_eq!(h.dialog.draft().gamepad.aim_assist, AimAssist::Enhanced);
+        assert_eq!(
+            h.dialog.draft().mouse.aim_assist,
+            AimAssist::Off,
+            "not the mouse setting"
+        );
+        assert!(enabled(&h, "AutoaimScale") && enabled(&h, "AutoaimScaleLabel"));
+        h.click(page(38. + 1., 43. + SLIDER_TRACK_Y));
+        assert_eq!(h.dialog.draft().gamepad.sensitivity_scale, 0.5);
+        h.click(page(38. + 80., 262. + 12.));
+        h.click(page(38. + 80., 286. + MENU_ROW * 1.5));
+        assert_eq!(
+            h.dialog.draft().gamepad.weapon_selection,
+            crate::config::WeaponSelectionStyle::Carousel
+        );
+        assert!(!enabled(&h, "SteamInput"));
+        h.click(page(240. + 100., 262. + 12.));
         assert_eq!(
             h.dialog.take_log(),
-            ["Gamepad options: not implemented in HL2-RS yet."]
+            ["Open Steam Input Configuration: not implemented in HL2-RS yet."]
         );
-        h.tab(Tab::Video);
-        assert!(h.dialog.take_log().is_empty());
     }
 
     #[test]

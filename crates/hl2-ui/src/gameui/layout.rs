@@ -140,6 +140,8 @@ pub struct Control {
     pub tooltip: String,
     /// Slider range (`minvalue` / `maxvalue` of a `CCvarSlider`), when the layout gives both.
     pub range: Option<(f32, f32)>,
+    /// The control a label names (`associate`); the label follows its enabled state.
+    pub associate: String,
 }
 
 impl Control {
@@ -237,6 +239,7 @@ fn control(entry: &Entry) -> Option<Control> {
             .zip(text("maxvalue"))
             .and_then(|(min, max)| Some((min.parse::<f32>().ok()?, max.parse::<f32>().ok()?)))
             .filter(|(min, max)| min.is_finite() && max.is_finite() && min < max),
+        associate: text("associate").unwrap_or_default().to_owned(),
     })
 }
 

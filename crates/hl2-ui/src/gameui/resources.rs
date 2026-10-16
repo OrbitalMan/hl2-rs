@@ -333,6 +333,7 @@ pub const LAYOUT_FILES: &[&str] = &[
     "optionssubdifficulty",
     "optionssubkeyboard",
     "optionssubmouse",
+    "optionssubgamepad",
     "optionssubaudio",
     "optionssubvideo",
     "optionssubvideogammadlg",

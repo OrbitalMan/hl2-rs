@@ -210,8 +210,15 @@ Semantics:
 - Mouse: on macOS Raw input and Acceleration are disabled, per the `[$OSX]` conditions in the
   installed `.res` file.
 - High Dynamic Range is shown on macOS too, although the retail `.res` hides it there.
-- Placeholders are shown disabled and log `"<label>: not implemented in HL2-RS yet."`: Gamepad tab
-  (empty page).
+- Placeholders are shown disabled and log `"<label>: not implemented in HL2-RS yet."`: the Gamepad
+  page's Open Steam Input Configuration (no Steam overlay).
+- Gamepad (`optionssubgamepad.res`): Joystick Sensitivity (`sc_sensitivity_scale`), Aim-Assist
+  (`sc_autoaim_mode`, Off/Basic/Enhanced), Aim-Assist Sensitivity (`sc_autoaim_scale`, enabled only
+  while gamepad aim assist is on; both sliders 0.5-2 like the mouse aim-assist slider) and Weapon
+  Selection Style (`hud_weaponui_gamepad`: Cross Layout = 2, Carousel Layout = 3; the retail page
+  shows Cross for an unset value). Stored in `gamepad`, separate from the Mouse page's aim assist;
+  no effect yet (no gamepad input). Labels follow the enabled state of their `associate` control
+  (SDK `Label`), on every page.
 - Video > Advanced (`optionssubvideoadvanceddlg.res`, title `#GameUI_VideoAdvanced_Title`, frame
   record 482 x 510, 358 on macOS): combos with the retail item lists (Model/Shadow detail
   Low/Medium/High; Texture detail adds Very High; Shader detail Low/High/Very High; Water detail

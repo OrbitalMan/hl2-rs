@@ -13,7 +13,7 @@ use super::{
 use crate::config::{
     AdvancedVideoSettings, AimAssist, Antialiasing, Captions, Config, DisplayMode, Filtering,
     HdrMode, HudAspect, Listed, ModelDetail, ShaderDetail, ShadowDetail, SoundQuality, Speakers,
-    TextureDetail, WaterDetail,
+    TextureDetail, WaterDetail, WeaponSelectionStyle,
 };
 
 /// The options being edited: the draft configuration plus the Video page's aspect filter, which
@@ -93,6 +93,10 @@ pub enum Value {
     Gamma,
     /// `fov_desired` (Video > Advanced).
     Fov,
+    /// `sc_sensitivity_scale` (Gamepad).
+    JoystickScale,
+    /// `sc_autoaim_scale` (Gamepad).
+    GamepadAimAssistScale,
 }
 
 impl Value {
@@ -104,7 +108,9 @@ impl Value {
             Self::Volume | Self::MusicVolume => SliderRange::new(0., 1.),
             Self::Sensitivity => SliderRange::new(0.1, 6.),
             Self::AccelExponent => SliderRange::new(1., 1.4),
-            Self::AimAssistScale => SliderRange::new(0.5, 2.),
+            Self::AimAssistScale | Self::JoystickScale | Self::GamepadAimAssistScale => {
+                SliderRange::new(0.5, 2.)
+            }
             Self::Gamma => SliderRange::new(1.6, 2.6),
             Self::Fov => SliderRange::new(75., 110.),
         }
@@ -124,6 +130,8 @@ impl Value {
             Self::AimAssistScale => c.mouse.aim_assist_scale,
             Self::Gamma => c.video.gamma,
             Self::Fov => c.video.fov,
+            Self::JoystickScale => c.gamepad.sensitivity_scale,
+            Self::GamepadAimAssistScale => c.gamepad.aim_assist_scale,
         }
     }
 
@@ -145,6 +153,8 @@ impl Value {
             Self::AimAssistScale => &mut c.mouse.aim_assist_scale,
             Self::Gamma => &mut c.video.gamma,
             Self::Fov => &mut c.video.fov,
+            Self::JoystickScale => &mut c.gamepad.sensitivity_scale,
+            Self::GamepadAimAssistScale => &mut c.gamepad.aim_assist_scale,
         } = value;
     }
 }
@@ -262,6 +272,10 @@ pub enum Choice {
     /// A Video > Advanced combo.
     Advanced(AdvancedChoice),
     AimAssist,
+    /// Gamepad Aim-Assist (`sc_autoaim_mode`).
+    GamepadAimAssist,
+    /// Gamepad weapon selection style.
+    WeaponSelection,
     Speakers,
     Quality,
     Language,
@@ -282,6 +296,10 @@ impl Choice {
         };
         match self {
             Self::Advanced(advanced) => tokens(&mut advanced.tokens().into_iter()),
+            Self::GamepadAimAssist => tokens(&mut AimAssist::ALL.iter().map(|v| v.token())),
+            Self::WeaponSelection => {
+                tokens(&mut listed_tokens::<WeaponSelectionStyle>().into_iter())
+            }
             Self::AimAssist => tokens(&mut AimAssist::ALL.iter().map(|v| v.token())),
             Self::Speakers => tokens(&mut Speakers::ALL.iter().map(|v| v.token())),
             Self::Quality => tokens(&mut SoundQuality::ALL.iter().map(|v| v.token())),
@@ -309,6 +327,8 @@ impl Choice {
         }
         match self {
             Self::Advanced(advanced) => Some(advanced.selected(&c.video.advanced)),
+            Self::GamepadAimAssist => find(&AimAssist::ALL, c.gamepad.aim_assist),
+            Self::WeaponSelection => Some(listed_index(c.gamepad.weapon_selection)),
             Self::AimAssist => find(&AimAssist::ALL, c.mouse.aim_assist),
             Self::Speakers => find(&Speakers::ALL, c.audio.speakers),
             Self::Quality => find(&SoundQuality::ALL, c.audio.quality),
@@ -352,6 +372,12 @@ impl Choice {
         let c = &mut draft.config;
         match self {
             Self::Advanced(advanced) => advanced.select(&mut c.video.advanced, index),
+            Self::GamepadAimAssist => {
+                if let Some(v) = AimAssist::ALL.get(index) {
+                    c.gamepad.aim_assist = *v;
+                }
+            }
+            Self::WeaponSelection => listed_pick(index, &mut c.gamepad.weapon_selection),
             Self::AimAssist => {
                 if let Some(v) = AimAssist::ALL.get(index) {
                     c.mouse.aim_assist = *v;
@@ -461,6 +487,8 @@ pub enum Command {
     KeyAdvanced,
     /// "Advanced..." on the Video page.
     VideoAdvanced,
+    /// "Open Steam Input Configuration" on the Gamepad page (placeholder: no Steam overlay).
+    SteamInput,
     /// OK of a sub-dialog.
     SubOk,
     /// Cancel / Close of a sub-dialog.
@@ -470,7 +498,7 @@ pub enum Command {
 impl Command {
     /// Placeholders are drawn disabled; activating one only logs its label.
     pub fn placeholder(self) -> bool {
-        false
+        matches!(self, Self::SteamInput)
     }
 }
 
@@ -502,6 +530,7 @@ pub enum Panel {
     Gamma,
     AudioCredits,
     VideoCredits,
+    Gamepad,
     KeyboardAdvanced,
     VideoAdvanced,
 }
@@ -513,6 +542,7 @@ impl Panel {
             Self::Gameplay => "optionssubdifficulty",
             Self::Keyboard => "optionssubkeyboard",
             Self::Mouse => "optionssubmouse",
+            Self::Gamepad => "optionssubgamepad",
             Self::Audio => "optionssubaudio",
             Self::Video => "optionssubvideo",
             Self::Gamma => "optionssubvideogammadlg",
@@ -542,6 +572,11 @@ pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
         (Panel::Mouse, "mouseaccelerationlabel") => Entry(Value::AccelExponent),
         (Panel::Mouse, "autoaim") => Choice(self::Choice::AimAssist),
         (Panel::Mouse, "autoaimscale") => Slider(Value::AimAssistScale),
+        (Panel::Gamepad, "joyscale") => Slider(Value::JoystickScale),
+        (Panel::Gamepad, "autoaim") => Choice(self::Choice::GamepadAimAssist),
+        (Panel::Gamepad, "autoaimscale") => Slider(Value::GamepadAimAssistScale),
+        (Panel::Gamepad, "weaponselection") => Choice(self::Choice::WeaponSelection),
+        (Panel::Gamepad, "steaminput") => Command(self::Command::SteamInput),
         (Panel::Audio, "sfxslider") => Slider(Value::Volume),
         (Panel::Audio, "musicslider") => Slider(Value::MusicVolume),
         (Panel::Audio, "speakersetup") => Choice(self::Choice::Speakers),
@@ -635,6 +670,9 @@ pub fn enabled(
         }
         Some(Binding::Slider(Value::AimAssistScale)) => {
             draft.config.mouse.aim_assist != AimAssist::Off
+        }
+        Some(Binding::Slider(Value::GamepadAimAssistScale)) => {
+            draft.config.gamepad.aim_assist != AimAssist::Off
         }
         Some(Binding::Command(Command::GammaDialog)) => true,
         Some(Binding::Command(command)) if command.placeholder() => false,
