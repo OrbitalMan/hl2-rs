@@ -127,11 +127,6 @@ impl Sub {
         matches!(self, Self::AudioCredits | Self::VideoCredits)
     }
 
-    /// Drawn on a fully opaque frame: dialogs whose content would mix with the page behind.
-    fn opaque(self) -> bool {
-        self.is_credits() || self == Self::VideoAdvanced
-    }
-
     fn panel(self) -> Panel {
         match self {
             Self::Gamma => Panel::Gamma,
@@ -1503,6 +1498,8 @@ impl OptionsDialog {
             scale,
         };
         let p = painter_at(centered(canvas, DIALOG_SIZE, scale));
+        // Layers drawn over this dialog (sub-dialogs, the confirmation box) are opaque.
+        let stacked = base.theme.stacked();
         let loc = &self.res.localization;
         let env = Env {
             localization: loc,
@@ -1576,14 +1573,10 @@ impl OptionsDialog {
         }
         if let Some(sub) = self.sub {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
-            let mut theme = base.theme.clone();
-            if sub.opaque() {
-                theme.frame_bg.a = 1.0;
-            }
             let sp = Painter {
                 canvas: base.canvas,
                 fonts: base.fonts,
-                theme: &theme,
+                theme: &stacked,
                 origin: centered(canvas, size, scale),
                 scale,
             };
@@ -1616,7 +1609,11 @@ impl OptionsDialog {
         }
         if let Some(confirm) = &self.confirm {
             let layout = confirm.layout(|t| p.text_width(t, false));
-            confirm.draw(&painter_at(centered(canvas, layout.size, scale)), &layout);
+            let cp = Painter {
+                theme: &stacked,
+                ..painter_at(centered(canvas, layout.size, scale))
+            };
+            confirm.draw(&cp, &layout);
         }
         if let Some(tip) = &self.active_tooltip {
             let tip_painter = Painter {
@@ -2646,7 +2643,6 @@ mod tests {
             footer_reflow(Panel::VideoAdvanced, &controls, (482., 510.)).0,
             0.
         );
-        assert!(Sub::VideoAdvanced.opaque() && !Sub::KeyboardAdvanced.opaque());
     }
 
     #[test]
@@ -3038,39 +3034,52 @@ mod tests {
     }
 
     #[test]
-    fn credits_dialogs_have_100_percent_opacity() {
+    fn dialogs_over_the_options_dialog_are_opaque() {
         let mut h = Harness::new();
-        let painter = Painter {
-            canvas: &h.canvas,
-            fonts: &h.fonts,
-            theme: &h.theme,
-            origin: Vec2::ZERO,
-            scale: 1.,
+        // The frame fill of the topmost layer: the last untextured quad as wide as its frame.
+        let frame_alpha = |h: &mut Harness, width: &dyn Fn(&OptionsDialog, &Painter) -> f32| {
+            let painter = Painter {
+                canvas: &h.canvas,
+                fonts: &h.fonts,
+                theme: &h.theme,
+                origin: Vec2::ZERO,
+                scale: 1.,
+            };
+            let width = width(&h.dialog, &painter);
+            h.dialog.draw(&painter);
+            h.canvas
+                .drain()
+                .iter()
+                .filter(|q| q.texture.is_none() && q.destination.w == width)
+                .map(|q| q.color.a)
+                .next_back()
+                .expect("frame quad")
         };
-
-        let audio_size = h
-            .dialog
-            .sub_frame_size(Sub::AudioCredits, |s| painter.text_width(s, false));
-        h.dialog.sub = Some(Sub::AudioCredits);
-        h.dialog.draw(&painter);
-        let quads = h.canvas.drain();
-        let credits_frame = quads
-            .iter()
-            .find(|q| q.destination.w == audio_size.x)
-            .expect("audio credits frame quad");
-        assert_eq!(credits_frame.color.a, 1.0);
-
-        let video_size = h
-            .dialog
-            .sub_frame_size(Sub::VideoCredits, |s| painter.text_width(s, false));
-        h.dialog.sub = Some(Sub::VideoCredits);
-        h.dialog.draw(&painter);
-        let quads = h.canvas.drain();
-        let video_credits_frame = quads
-            .iter()
-            .find(|q| q.destination.w == video_size.x)
-            .expect("video credits frame quad");
-        assert_eq!(video_credits_frame.color.a, 1.0);
+        assert!(
+            frame_alpha(&mut h, &|_, _| DIALOG_SIZE.x) < 1.,
+            "the options dialog over the game stays translucent"
+        );
+        for sub in [
+            Sub::Gamma,
+            Sub::AudioCredits,
+            Sub::VideoCredits,
+            Sub::KeyboardAdvanced,
+            Sub::VideoAdvanced,
+        ] {
+            h.dialog.open_sub(sub);
+            let width = |d: &OptionsDialog, p: &Painter| {
+                d.sub_frame_size(sub, |s| p.text_width(s, false)).x
+            };
+            assert_eq!(frame_alpha(&mut h, &width), 1., "{sub:?}");
+            h.dialog.cancel_sub();
+        }
+        h.tab(Tab::Keyboard);
+        h.dialog.command(Command::KeyDefaults);
+        let width = |d: &OptionsDialog, p: &Painter| {
+            let confirm = d.confirm.as_ref().expect("confirmation box");
+            confirm.layout(|t| p.text_width(t, false)).size.x
+        };
+        assert_eq!(frame_alpha(&mut h, &width), 1., "confirmation box");
     }
 
     #[test]

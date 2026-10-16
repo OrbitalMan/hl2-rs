@@ -154,6 +154,15 @@ impl Default for Theme {
 }
 
 impl Theme {
+    /// The theme of a dialog drawn over another dialog: an opaque frame background, so the
+    /// controls of the dialog below never show through. A dialog over the game scene keeps the
+    /// scheme's translucent `Frame.BgColor`.
+    pub fn stacked(&self) -> Self {
+        let mut theme = self.clone();
+        theme.frame_bg.a = 1.0;
+        theme
+    }
+
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();

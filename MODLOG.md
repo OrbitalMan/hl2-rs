@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-16 GameUI: every dialog stacked on the Options dialog is opaque
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `widgets::Theme::stacked` (opaque `frame_bg`); `OptionsDialog::draw` uses it for every layer over the dialog (all sub-dialogs and the confirmation box). Replaces the per-dialog `Sub::opaque` list and the credits-only special case.
+
+**Why:** owner request: any sub-dialog over another dialog should be 100% opaque, so the controls below never show through.
+
+**Tested how:** unit test `dialogs_over_the_options_dialog_are_opaque` (options frame translucent; brightness, both credits, both Advanced dialogs and the Use Defaults confirmation opaque); hl2-ui tests, strict clippy, Windows check; packaged capture of Keyboard > Advanced.
+
+**Result:** stacked dialogs are opaque; the Options dialog over the game keeps the scheme's translucency.
+
+**Still broken or not tested:** check-box labels use the scheme's dull text color unless hovered (unchanged), which reads lower-contrast on the opaque grey than it did over the translucent key list.
+
+**Next:** owner check.
+
 ## 2026-10-16 GameUI: opaque Video > Advanced, footer reflow, active tab joins its page
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
