@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 Video: every aspect choice up to the panel's size; ultrawide resolutions
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `gameui::display::native_fits` adds, for each aspect choice, the largest exact mode of that ratio inside the monitor (multiples of 8), merged in `usable_modes`; `STANDARD_MODES` gains larger 4:3 / 5:4 / 16:10 / 16:9 modes and 21:9 / 32:9 ultrawide modes (listed under Widescreen 16:9, as retail groups them; the installed GameUI has no other aspect choice or label).
+
+**Why:** owner report: no large 4:3 resolutions on a Retina display; modern aspect ratios missing.
+
+**Tested how:** unit tests (Retina 3456x2234: 4:3 to 2976x2232, 16:10 to 3456x2160; ultrawide 3440x1440 and 5120x1440 panels); packaged windowed capture of the 4:3 Resolution list on the 3456x2234 panel (starts at 2976x2232). Workspace tests, strict clippy, fmt, Windows-target clippy.
+
+**Result:** every aspect choice reaches the display's size; ultrawide panels get their usual modes.
+
+**Still broken or not tested:** no ultrawide display tested; ultrawide picture framing (FOV) not verified; a windowed 2976x2232 window does not fully fit under the macOS menu bar (the window is placed in the visible frame as before).
+
+**Next:** owner check.
+
 ## 2026-10-18 GameUI: Options and the console are non-modal windows with a focus look
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

@@ -1,7 +1,8 @@
 //! Display-mode choices for the Video page: aspect-ratio buckets and resolution filtering.
 //!
 //! Resolutions are the host's monitor query (Bevy `Monitor::video_modes`) merged with
-//! [`STANDARD_MODES`]. The game renders into an offscreen frame of the configured size and scales
+//! [`STANDARD_MODES`] and, for each aspect choice, the largest exact mode of that ratio that fits
+//! the monitor ([`native_fits`]; a 3456x2234 Retina panel gets 2976x2232 for 4:3). The game renders into an offscreen frame of the configured size and scales
 //! it to the window or display, so a resolution does not need to be a mode the panel can switch
 //! to. Some displays report only a few modes: Apple Retina panels list nothing below 1920x1200
 //! pixels and nothing 4:3, which would leave the Normal (4:3) bucket and small sizes empty.
@@ -11,7 +12,8 @@
 //!
 //! The aspect buckets follow the retail Video page grouping: ratios below 1.5 are
 //! "Normal (4:3)" (this also takes 5:4), ratios within 0.05 of 1.6 are 16:10, everything wider is
-//! 16:9. When the host reports no usable mode, the current window size is offered so the list is
+//! 16:9, including ultrawide 21:9 and 32:9 modes (the installed GameUI has no other aspect
+//! choice or label). When the host reports no usable mode, the current window size is offered so the list is
 //! never empty.
 
 use serde::{Deserialize, Serialize};
@@ -19,8 +21,9 @@ use serde::{Deserialize, Serialize};
 /// Smallest mode the Video page offers (Source rejects smaller desktop modes as well).
 pub const MIN_SIZE: (u32, u32) = (640, 480);
 
-/// Common 4:3, 5:4, 16:9 and 16:10 resolutions offered on every display that is large enough.
-pub const STANDARD_MODES: [Resolution; 23] = [
+/// Common 4:3, 5:4, 16:9, 16:10 and ultrawide (21:9, 32:9) resolutions offered on every display
+/// that is large enough.
+pub const STANDARD_MODES: [Resolution; 35] = [
     Resolution::new(640, 480),
     Resolution::new(800, 600),
     Resolution::new(1024, 768),
@@ -30,7 +33,11 @@ pub const STANDARD_MODES: [Resolution; 23] = [
     Resolution::new(1600, 1200),
     Resolution::new(1920, 1440),
     Resolution::new(2048, 1536),
+    Resolution::new(2560, 1920),
+    Resolution::new(2800, 2100),
+    Resolution::new(3200, 2400),
     Resolution::new(1280, 1024),
+    Resolution::new(2560, 2048),
     Resolution::new(1280, 720),
     Resolution::new(1366, 768),
     Resolution::new(1600, 900),
@@ -38,13 +45,35 @@ pub const STANDARD_MODES: [Resolution; 23] = [
     Resolution::new(2560, 1440),
     Resolution::new(3200, 1800),
     Resolution::new(3840, 2160),
+    Resolution::new(5120, 2880),
     Resolution::new(1280, 800),
     Resolution::new(1440, 900),
     Resolution::new(1680, 1050),
     Resolution::new(1920, 1200),
     Resolution::new(2560, 1600),
     Resolution::new(2880, 1800),
+    Resolution::new(3840, 2400),
+    // Ultrawide: 21:9 panels (64:27, 43:18, 12:5) and 32:9.
+    Resolution::new(2560, 1080),
+    Resolution::new(3440, 1440),
+    Resolution::new(3840, 1600),
+    Resolution::new(5120, 2160),
+    Resolution::new(3840, 1080),
+    Resolution::new(5120, 1440),
 ];
+
+/// The ratio of each aspect choice, for [`native_fits`].
+const ASPECT_RATIOS: [(u32, u32); 3] = [(4, 3), (16, 9), (16, 10)];
+
+/// For each aspect choice, the largest mode of exactly that ratio inside `monitor`, both sides
+/// multiples of 8: displays that report few modes (Retina panels list no 4:3 mode at all) still
+/// get every aspect choice up to the panel's size.
+pub fn native_fits(monitor: Resolution) -> impl Iterator<Item = Resolution> {
+    ASPECT_RATIOS.into_iter().filter_map(move |(w, h)| {
+        let k = (monitor.width / w).min(monitor.height / h) / 8 * 8;
+        (k > 0).then(|| Resolution::new(w * k, h * k))
+    })
+}
 
 /// The Aspect Ratio combo choices.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,7 +139,7 @@ impl Resolution {
 }
 
 /// Usable modes, deduplicated and sorted largest first: the reported modes plus
-/// [`STANDARD_MODES`]. Modes smaller than [`MIN_SIZE`] or larger than the monitor (when known)
+/// [`STANDARD_MODES`] and the monitor's [`native_fits`]. Modes smaller than [`MIN_SIZE`] or larger than the monitor (when known)
 /// are dropped. Falls back to `current` when nothing remains.
 pub fn usable_modes(
     reported: impl IntoIterator<Item = Resolution>,
@@ -120,6 +149,7 @@ pub fn usable_modes(
     let mut modes: Vec<_> = reported
         .into_iter()
         .chain(STANDARD_MODES)
+        .chain(monitor.into_iter().flat_map(native_fits))
         .filter(|m| m.width >= MIN_SIZE.0 && m.height >= MIN_SIZE.1)
         .filter(|m| monitor.is_none_or(|max| m.fits(max)))
         .collect();
@@ -254,6 +284,7 @@ mod tests {
             [
                 r(1366, 1000),
                 r(1366, 768),
+                r(1312, 984),
                 r(1280, 960),
                 r(1280, 800),
                 r(1280, 720),
@@ -316,6 +347,57 @@ mod tests {
         assert_eq!(
             DisplayModes::new(vec![r(1024, 768)]).choices(true),
             [r(1024, 768)]
+        );
+    }
+
+    #[test]
+    fn every_aspect_choice_reaches_the_panel_size() {
+        // A 3456x2234 Retina panel reports no 4:3 mode; 4:3 used to stop at 2048x1536.
+        let modes = usable_modes(
+            [r(3456, 2234), r(3456, 2160), r(1920, 1200)],
+            Some(r(3456, 2234)),
+            r(1728, 1117),
+        );
+        let top = |aspect| resolution_choices(&modes, aspect)[0];
+        assert_eq!(top(AspectRatio::Normal), r(2976, 2232));
+        assert_eq!(top(AspectRatio::Wide16x10), r(3456, 2160));
+        assert_eq!(
+            top(AspectRatio::Wide16x9),
+            r(3456, 2234),
+            "the native size (1.55) groups with 16:9"
+        );
+        assert!(modes.contains(&r(3456, 1944)));
+        for m in native_fits(r(3456, 2234)) {
+            assert!(
+                m.fits(r(3456, 2234)) && m.width % 8 == 0 && m.height % 8 == 0,
+                "{m:?}"
+            );
+        }
+        assert!(modes.contains(&r(2560, 1920)) && modes.contains(&r(2800, 2100)));
+        assert_eq!(
+            native_fits(r(4, 3)).count(),
+            0,
+            "nothing for a tiny monitor"
+        );
+    }
+
+    #[test]
+    fn ultrawide_panels_get_their_modes_under_widescreen() {
+        let modes = usable_modes([], Some(r(3440, 1440)), r(1920, 1080));
+        let wide = resolution_choices(&modes, AspectRatio::Wide16x9);
+        assert_eq!(wide[0], r(3440, 1440));
+        assert!(wide.contains(&r(2560, 1080)));
+        assert!(!modes.contains(&r(5120, 1440)), "larger than the panel");
+        let super_wide = usable_modes([], Some(r(5120, 1440)), r(1920, 1080));
+        assert_eq!(
+            resolution_choices(&super_wide, AspectRatio::Wide16x9)[0],
+            r(5120, 1440)
+        );
+        assert!(super_wide.contains(&r(3840, 1080)));
+        assert_eq!(
+            resolution_choices(&super_wide, AspectRatio::Normal)[0],
+            r(1920, 1440),
+            "4:3 up to the panel's height"
         );
     }
 

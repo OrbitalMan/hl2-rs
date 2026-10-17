@@ -777,6 +777,28 @@ Verified (2026-10-12, macOS M1 Pro Retina):
   4:3 and wide resolutions (1600x1200, 2048x1536, 640x480, 1024x768, 1280x1024) in windowed mode,
   confirming reliable click responsiveness and window sizing.
 
+### 10c. Every aspect choice up to the panel's size; ultrawide modes (2026-10-18)
+
+Owner report: with Normal (4:3) selected, a Retina display offered nothing large (4:3 stopped at
+2048x1536 on a 3456x2234 panel), and modern aspect ratios were missing.
+
+- Retina panels report no 4:3 mode at all, so 4:3 came only from `STANDARD_MODES`. Now
+  `display::native_fits` adds, for each aspect choice, the largest mode of exactly that ratio
+  inside the monitor (sides multiples of 8): on 3456x2234, 2976x2232 (4:3), 3456x2160 (16:10),
+  3456x1944 (16:9). The panel's own 3456x2234 (1.55) stays in the 16:9 bucket, as the retail
+  grouping puts it.
+- `STANDARD_MODES` gains 2560x1920, 2800x2100, 3200x2400 (4:3), 2560x2048 (5:4), 3840x2400
+  (16:10), 5120x2880 (16:9) and ultrawide 2560x1080, 3440x1440, 3840x1600, 5120x2160 (21:9)
+  and 3840x1080, 5120x1440 (32:9). As before, only modes that fit the monitor are offered.
+- The installed GameUI has three aspect choices only (`#GameUI_AspectNormal`, `Wide16x9`,
+  `Wide16x10`; `GameUI.dll` references no other), and retail groups every ratio wider than
+  16:10 under Widescreen 16:9, so ultrawide resolutions are listed there. A separate ultrawide
+  choice would need a label the game does not have.
+- Tests: `every_aspect_choice_reaches_the_panel_size`, `ultrawide_panels_get_their_modes_under_widescreen`.
+  Packaged windowed capture on the 3456x2234 panel: the 4:3 list starts at 2976x2232. Ultrawide
+  modes are not checked on an ultrawide display, and how the game frames ultrawide pictures (FOV)
+  is not verified.
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed
