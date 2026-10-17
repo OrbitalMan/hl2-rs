@@ -447,8 +447,11 @@ SDK `vgui_controls` (`Button`, `RadioButton`, `Slider`, `ComboBox`, `PropertyShe
 - **Look.** A focused push button, link or tab draws the SDK `Button::DrawFocusBorder` dashed
   1-pixel box (3, 3)-(wide - 4, tall - 2) in `Button.FocusBorderColor` (Black). Check boxes and
   radio buttons draw a dashed ring around the whole control, the box or circle and the label,
-  `widgets::FOCUS_PAD` (2) away on every side (`widgets::toggle_content`); sliders around their
-  track and nob (`widgets::slider_content`), text entries and the key list around their frame,
+  `widgets::FOCUS_PAD` (2) away on every side, with the box's vertical margin also beside the box
+  and after the label so the ring sits evenly around the box (`widgets::toggle_content`);
+  sliders around what they draw, nob top to caption bottom (`widgets::slider_content`; the
+  Video > Advanced FOV slider's layout rect starts above the bottom of its value label, so a ring
+  on the rect crossed that text), text entries and the key list around their frame,
   with the same padding (`Painter::focus_ring`). A focused combo box shows its text selected
   (`TextEntry.SelectedBgColor` / `SelectedTextColor`); a text entry being edited draws
   `TextEntry.FocusEdgeColor` inside its border. The key list's selected row uses the scheme's
@@ -456,7 +459,11 @@ SDK `vgui_controls` (`Button`, `RadioButton`, `Slider`, `ComboBox`, `PropertyShe
   focus. No push button draws the default-button border any more.
 - **Slider spacing.** The slider track ends a nob width short of the control's right edge, as in
   SDK `Slider::GetTrackRect` (`w = wide - nobSize`), so the Mouse sensitivity slider keeps clear
-  of the text field right after it.
+  of the text field right after it. Its end captions (Low / High) span the drawn slider, so the
+  right caption ends where the slider does (it ran a nob width past it).
+- **3rd party credits.** Close, the dialog's only control, holds the focus when the credits open
+  (drawn after Tab); Space / Enter press it and the release closes the credits, through the shared
+  `KeyPress`. It no longer draws the default-button border.
 - **Escape.** When Escape would close a dialog with a close button (Options or one of its
   sub-dialogs, the developer console), the close button shows pressed while Escape is held and
   the dialog closes on release (`Console::escape_pressed` / `escape_released`; retail closes on

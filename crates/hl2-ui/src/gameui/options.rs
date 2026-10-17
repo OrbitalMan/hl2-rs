@@ -1415,6 +1415,8 @@ impl OptionsDialog {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 return Some(match target {
                     Target::Ok => self.ok(),
+                    // A sub-dialog's own Close (credits) closes the sub-dialog only.
+                    Target::Cancel if self.sub.is_some() => self.command(Command::SubCancel),
                     Target::Cancel => OptionsOutcome::Close(None),
                     Target::Apply => self.apply(),
                     Target::Control(i) => match list.get(i) {
@@ -1511,6 +1513,10 @@ impl OptionsDialog {
         self.sub_saved = Some(self.draft.config.clone());
         self.sub = Some(sub);
         self.sub_return_focus = self.focus.take();
+        // The credits' Close button is their only control: it holds the focus (drawn after Tab).
+        if sub.is_credits() {
+            self.focus = Some(Target::Cancel);
+        }
         self.key_press.reset();
     }
 
@@ -1911,7 +1917,9 @@ impl OptionsDialog {
 
         let close_rect = Rect::new(size.x - 96., size.y - 34., 80., 24.);
         let close_armed = !modal && self.armed == Some(Target::Cancel);
-        let close_pressed = !modal && self.pressed == Some(Target::Cancel);
+        let close_pressed = !modal
+            && (self.pressed == Some(Target::Cancel)
+                || self.key_press.pressed() == Some(Target::Cancel));
         sp.button(
             close_rect,
             &loc.text("#GameUI_Close"),
@@ -1919,9 +1927,12 @@ impl OptionsDialog {
                 armed: close_armed,
                 pressed: close_pressed,
                 enabled: !modal,
-                default: true,
+                default: false,
             },
         );
+        if !modal && self.focus_visible && self.focus == Some(Target::Cancel) {
+            sp.focus_box(close_rect);
+        }
     }
 
     fn credits_input(&mut self, size: Vec2, input: &Input, pointer: Option<Vec2>) {
@@ -1932,17 +1943,13 @@ impl OptionsDialog {
             (Target::Cancel, close_rect),
         ];
 
-        match self.track(&[], &extra, pointer, input) {
-            Some(Target::Close | Target::Cancel) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                self.command(Command::SubCancel);
-            }
-            // The close button is the dialog's only control and has focus (Space or Enter).
-            _ if input.pressed(Key::Enter) || input.pressed(Key::Space) => {
-                self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                self.command(Command::SubCancel);
-            }
-            _ => {}
+        // Tab keeps the focus on Close and shows it; Space / Enter press and release it.
+        if self.focus_keys(&[], &[Target::Cancel], input).is_some() {
+            return;
+        }
+        if let Some(Target::Close | Target::Cancel) = self.track(&[], &extra, pointer, input) {
+            self.sounds.push("ui/buttonclickrelease.wav".to_string());
+            self.command(Command::SubCancel);
         }
     }
 
@@ -2905,11 +2912,14 @@ mod tests {
             .unwrap()
             .rect;
         let left = boxes(&h).iter().map(|d| d.x).fold(f32::INFINITY, f32::min);
+        let top = boxes(&h).iter().map(|d| d.y).fold(f32::INFINITY, f32::min);
         let square = DIALOG.x + check.x + 2.;
+        let square_top = DIALOG.y + check.y + (check.h - widgets::CHECK_SIZE) * 0.5;
+        assert!(left < square, "the ring encloses the check box");
         assert_eq!(
-            left,
-            square - widgets::FOCUS_PAD,
-            "the ring encloses the check box, padded like the label"
+            square - left,
+            square_top - top,
+            "as far beside the box as above it"
         );
         h.key(Key::Tab);
         let slider = list
@@ -3022,6 +3032,39 @@ mod tests {
             OptionsOutcome::Close(None),
             "the release activates Cancel"
         );
+    }
+
+    #[test]
+    fn credits_close_takes_focus_and_enter_closes_on_release() {
+        let mut h = Harness::new();
+        h.dialog.command(Command::AudioCredits);
+        assert_eq!(
+            h.dialog.focus,
+            Some(Target::Cancel),
+            "Close holds the focus"
+        );
+        assert!(!h.dialog.focus_visible, "drawn only after Tab");
+        h.key(Key::Tab);
+        assert_eq!(h.dialog.focus, Some(Target::Cancel));
+        assert!(h.dialog.focus_visible, "Tab shows the focus");
+        assert!(
+            drawn(&h).iter().any(|q| q.color == h.theme.focus_border),
+            "the focus box is drawn"
+        );
+        let down = Input {
+            keys: [Key::Enter].into(),
+            held_keys: [Key::Enter].into(),
+            ..Default::default()
+        };
+        h.frame(down);
+        assert_eq!(
+            h.dialog.sub,
+            Some(Sub::AudioCredits),
+            "a press does not close"
+        );
+        assert_eq!(h.dialog.key_press.pressed(), Some(Target::Cancel));
+        h.frame(Input::default());
+        assert_eq!(h.dialog.sub, None, "the release closes the credits only");
     }
 
     #[test]
@@ -3677,6 +3720,19 @@ mod tests {
             footer_reflow(Panel::VideoAdvanced, &controls, (482., 510.)).0,
             0.
         );
+    }
+
+    #[test]
+    fn the_fov_slider_ring_stays_clear_of_the_value_label_text() {
+        let layout = Layout::parse(VIDEO_ADVANCED.as_bytes()).unwrap();
+        let rect_of = |name: &str| {
+            let c = layout.controls.iter().find(|c| c.name == name).unwrap();
+            Rect::new(c.x.resolve(482.), c.y.resolve(358.), c.wide, c.tall)
+        };
+        let label = rect_of("FOVValueLabel");
+        let text_bottom = label.y + (label.h - widgets::FONT_TALL) * 0.5 + widgets::FONT_TALL;
+        let ring = widgets::slider_content(rect_of("FovSlider")).pad(widgets::FOCUS_PAD);
+        assert!(ring.y >= text_bottom, "{ring:?} vs {text_bottom}");
     }
 
     #[test]

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: slider captions, even toggle focus rings, keyboard credits
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Painter::slider` lays its Low / High captions over the drawn slider (`widgets::slider_content`), so the right caption ends with the slider instead of a nob width past it (Mouse, Gamepad, Audio, Video > Advanced). `slider_content` spans nob top to caption bottom, so the focus ring of the Video > Advanced FOV slider no longer crosses the Field of view label and value above it. `toggle_content` adds the box's vertical margin beside the box and after the label, so check box and radio rings are even. The 3rd party credits' Close holds the focus when they open, shows it after Tab and is pressed / released by Space or Enter through `focus_keys` / `KeyPress` (it closed on the Enter press, bypassing the focus model); no default border. Replays `bevy-options-capture-keyboard-fov.json` and `-keyboard-credits.json` with assertions in `replays.py` (`options`).
+
+**Why:** owner report.
+
+**Tested how:** unit tests (even margins around a check box, the FOV ring below the value label text, credits focus with Enter closing on release); packaged background captures of the Mouse slider, a check box, the FOV slider and the focused credits Close inspected; `replays.py` `options` ok.
+
+**Result:** captions inside their slider, even rings, a keyboard-reachable credits Close.
+
+**Still broken or not tested:** the FOV slider's captions read 0.00 / 1.00 (unchanged here); not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 Checks: every gameplay fixture replayed with expected outcomes
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

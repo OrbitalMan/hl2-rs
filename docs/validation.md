@@ -56,7 +56,7 @@ fixture is never silently left out.
 | `return_menu` | shared | `bevy-menu-return.json`: Episode Two menu, `map d1_trainstation_02`, Return to main menu: back over `hl2/background01`, which is saved |
 | `chapter_menu` | shared | `bevy-menu-chapter-return.json`: `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06` |
 | `chapter_quit` | shared | `--map d2_coast_01` quit mid-game: the saved background goes from `hl2/background01` to `hl2/background04` |
-| `options` | shared | every `bevy-options-capture*.json`: Keyboard / Video Advanced sub-dialogs open, the dialog drags, the console states; the `-keyboard-*` replays reach their control by keyboard only (focused control, tab and drawn focus from the report; the text entry edits) |
+| `options` | shared | every `bevy-options-capture*.json`: Keyboard / Video Advanced sub-dialogs open, the dialog drags, the console states; the `-keyboard-*` replays reach their control by keyboard only (focused control, tab and drawn focus from the report; the text entry edits; the FOV slider in Video > Advanced; the 3rd party credits' Close holds the focus and Enter closes them on release) |
 | `placement` | shared | a dragged Options dialog is saved and kept when it reopens in a second launch |
 | `captions` | shared | `episodic/ep1_background02`: closed captions on process speech, off process none |
 | `bg_compare` | shared | each game's chapter 1 background loads (FOV 75, 1024x768 captures for comparison with the installed pre-blurred `materials/console/*.vtf`) |

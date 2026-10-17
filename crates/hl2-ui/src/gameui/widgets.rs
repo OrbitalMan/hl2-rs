@@ -1293,7 +1293,9 @@ impl Painter<'_> {
         self.fill(nob, self.theme.slider_nob);
         self.raised(nob);
         if rect.h >= 32. {
-            let caption = Rect::new(rect.x, track_y + 12., rect.w, FONT_TALL);
+            // The captions span what the slider draws, so the right one ends with the slider.
+            let drawn = slider_content(rect);
+            let caption = Rect::new(drawn.x, track_y + 12., drawn.w, FONT_TALL);
             let color = if enabled {
                 self.theme.slider_text
             } else {
@@ -2241,26 +2243,32 @@ pub fn slider_track(rect: Rect) -> (f32, f32) {
 /// Space kept between a control's content and its focus ring.
 pub const FOCUS_PAD: f32 = 2.;
 
-/// What a check box or radio button draws: the box or circle and a label `label_width` wide.
+/// What a check box or radio button draws: the box or circle and a label `label_width` wide,
+/// with the same margin beside the box and after the label as above and below the box, so a
+/// ring around it sits evenly.
 pub fn toggle_content(rect: Rect, label_width: f32) -> Rect {
     let height = FONT_TALL.max(CHECK_SIZE);
-    let right = (rect.x + LABEL_INDENT + label_width).min(rect.x + rect.w);
-    Rect::new(
-        rect.x + 2.,
-        rect.y + (rect.h - height) * 0.5,
-        right - rect.x - 2.,
-        height,
-    )
+    let margin = (height - CHECK_SIZE) * 0.5;
+    let left = rect.x + 2. - margin;
+    let right = (rect.x + LABEL_INDENT + label_width).min(rect.x + rect.w) + margin;
+    Rect::new(left, rect.y + (rect.h - height) * 0.5, right - left, height)
 }
 
-/// What a slider draws across: its track with the nob at both ends.
+/// What a slider draws: its track with the nob at both ends, from the nob's top to the bottom
+/// of the captions (of the tick marks when it has no captions).
 pub fn slider_content(rect: Rect) -> Rect {
     let (start, end) = slider_track(rect);
+    let top = rect.y + SLIDER_TRACK_Y - 8.;
+    let bottom = if rect.h >= 32. {
+        rect.y + SLIDER_TRACK_Y + 12. + FONT_TALL
+    } else {
+        rect.y + SLIDER_TRACK_Y + 12.
+    };
     Rect::new(
         start - NOB_WIDTH * 0.5,
-        rect.y,
+        top,
         end - start + NOB_WIDTH,
-        rect.h,
+        bottom - top,
     )
 }
 

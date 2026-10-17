@@ -199,6 +199,7 @@ KEYBOARD_FOCUS = {
     "keyboard-radio": ("focus-skill-radio", "Gameplay", "Skill2Radio"),
     "keyboard-combo": ("focus-resolution", "Video", "Resolution"),
     "keyboard-button": ("focus-advanced", "Video", "AdvancedButton"),
+    "keyboard-fov": ("focus-fov", "Video", "FovSlider"),  # in Video > Advanced
 }
 OPTIONS_STATES = {
     # replay suffix: (label, what the report must show there)
@@ -215,13 +216,15 @@ def check_options():
     """Every Options capture replay: the labelled state (dialog, sub-dialog, keyboard focus)."""
     for script in sorted((REPO / "test-inputs").glob("bevy-options-capture*.json")):
         suffix = script.stem[len("bevy-options-capture"):].lstrip("-")
-        if suffix not in KEYBOARD_FOCUS and suffix not in OPTIONS_STATES:
+        if suffix not in KEYBOARD_FOCUS and suffix not in OPTIONS_STATES and suffix != "keyboard-credits":
             raise Failure(f"{script.name}: no expectation in replays.py")
         if CONFIG.exists():
             CONFIG.unlink()
         run = game(f"options-{suffix or 'keyboard-advanced'}", *MENU,
                    "--movement-script", str(script.relative_to(REPO)))
-        if suffix in KEYBOARD_FOCUS:
+        if suffix == "keyboard-credits":
+            check_credits_keys(run)
+        elif suffix in KEYBOARD_FOCUS:
             label, tab, focus = KEYBOARD_FOCUS[suffix]
             options = run.sample(label)["console"].get("options") or {}
             expect(f"{suffix} tab", options.get("tab"), tab)
@@ -236,6 +239,19 @@ def check_options():
             if "sub" in wanted:
                 expect(f"{suffix or 'keyboard-advanced'} sub-dialog", (console.get("options") or {}).get("sub"),
                        wanted["sub"])
+
+
+def check_credits_keys(run: Run) -> None:
+    """Audio > 3rd party credits by keyboard: Close holds the focus, Enter closes on release."""
+    options = lambda label: run.sample(label)["console"].get("options") or {}
+    expect("credits opened by Space", options("credits-open").get("sub"), "AudioCredits")
+    expect("Close focused", options("focus-close").get("focus"), "cancel")
+    holds("and drawn after Tab", options("focus-close").get("focus_visible") is True)
+    expect("Enter down keeps the credits open", options("enter-down").get("sub"), "AudioCredits")
+    expect("held too", options("enter-held").get("sub"), "AudioCredits")
+    expect("its release closes them", options("enter-released").get("sub"), None)
+    expect("focus back on the credits button", options("enter-released").get("focus"), "ThirdPartySoundCredits")
+    expect("Options stays open", run.console()["mode"], "Options")
 
 
 def check_placement():
