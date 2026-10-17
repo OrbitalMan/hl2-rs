@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: link text inside its focus box
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Painter::url` draws the link text and underline `widgets::LINK_TEXT_INSET` (5) into the control, so the 3rd party credits links on the Audio and Video pages start inside their focus box (3 in) by `FOCUS_PAD` instead of at the control's edge, where the box crossed the first letter.
+
+**Why:** owner report.
+
+**Tested how:** unit test (link quads start `FOCUS_PAD` inside the focus box); packaged background captures of both links focused by keyboard.
+
+**Result:** the link text sits evenly inside its focus box.
+
+**Still broken or not tested:** the link text now starts 5 units right of the controls above it; Windows not checked.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: slider captions, even toggle focus rings, keyboard credits
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

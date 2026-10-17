@@ -463,7 +463,9 @@ SDK `vgui_controls` (`Button`, `RadioButton`, `Slider`, `ComboBox`, `PropertyShe
   right caption ends where the slider does (it ran a nob width past it).
 - **3rd party credits.** Close, the dialog's only control, holds the focus when the credits open
   (drawn after Tab); Space / Enter press it and the release closes the credits, through the shared
-  `KeyPress`. It no longer draws the default-button border.
+  `KeyPress`. It no longer draws the default-button border. Link text (the credits links on the
+  Audio and Video pages) starts `widgets::LINK_TEXT_INSET` (5) into its control, inside the focus
+  box (3 in) by `FOCUS_PAD`; at the control's edge the box crossed its first letter.
 - **Escape.** When Escape would close a dialog with a close button (Options or one of its
   sub-dialogs, the developer console), the close button shows pressed while Escape is held and
   the dialog closes on release (`Console::escape_pressed` / `escape_released`; retail closes on

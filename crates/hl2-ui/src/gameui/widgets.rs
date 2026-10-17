@@ -1510,6 +1510,13 @@ impl Painter<'_> {
 
     /// `URLButton`: link-colored, underlined text with armed and pressed states.
     pub fn url(&self, rect: Rect, label: &str, state: ButtonState) {
+        // The text starts inside the focus box (3 units in), `FOCUS_PAD` clear of it.
+        let rect = Rect::new(
+            rect.x + LINK_TEXT_INSET,
+            rect.y,
+            rect.w - LINK_TEXT_INSET,
+            rect.h,
+        );
         if !state.enabled {
             self.label(label, rect, Align::Left, false);
             return;
@@ -2242,6 +2249,9 @@ pub fn slider_track(rect: Rect) -> (f32, f32) {
 
 /// Space kept between a control's content and its focus ring.
 pub const FOCUS_PAD: f32 = 2.;
+/// Where a link's text starts in its control: past the left edge of the focus box
+/// (`Painter::focus_box`, 3 units in) by `FOCUS_PAD`.
+pub const LINK_TEXT_INSET: f32 = 3. + FOCUS_PAD;
 
 /// What a check box or radio button draws: the box or circle and a label `label_width` wide,
 /// with the same margin beside the box and after the label as above and below the box, so a
@@ -2777,6 +2787,21 @@ mod tests {
         painter.url(rect, "Link", ButtonState::active(true, true, true));
         let quads_url_pressed = canvas.drain();
         assert!(!quads_url_pressed.is_empty());
+
+        // The link's text and underline start inside its focus box, FOCUS_PAD clear of it.
+        painter.url(rect, "Link", ButtonState::new(true));
+        let left = canvas
+            .drain()
+            .iter()
+            .map(|q| q.destination.x)
+            .fold(f32::INFINITY, f32::min);
+        painter.focus_box(rect);
+        let box_left = canvas
+            .drain()
+            .iter()
+            .map(|q| q.destination.x)
+            .fold(f32::INFINITY, f32::min);
+        assert!(left >= box_left + FOCUS_PAD, "{left} vs {box_left}");
     }
 
     #[test]
