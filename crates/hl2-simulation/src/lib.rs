@@ -32,6 +32,7 @@ pub mod weapon_physcannon;
 pub mod weapon_rpg;
 
 pub mod campaign;
+pub mod captions;
 pub mod explosion_particles;
 pub mod impacts;
 pub mod projectile_visuals;

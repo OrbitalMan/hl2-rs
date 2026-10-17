@@ -346,6 +346,9 @@ pub struct SoundRequest {
     pub stop: bool,
     /// CSoundEnvelopeController operation on the (emitter, name) patch.
     pub patch: Option<PatchOp>,
+    /// EmitSound_t m_bEmitCloseCaption: caption the sound script name for the wave's length.
+    /// Scene speech captions its own token instead.
+    pub caption: bool,
 }
 
 /// CSoundEnvelopeController (SDK soundenvelope.cpp) operations on one looping patch.
@@ -489,6 +492,7 @@ impl From<String> for SoundRequest {
             emitter: None,
             stop: false,
             patch: None,
+            caption: true,
         }
     }
 }
@@ -542,7 +546,7 @@ pub fn playback_path(wave: &str) -> String {
         .to_owned()
 }
 
-fn raw_wave(name: &str) -> bool {
+pub fn raw_wave(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.contains(".wav") || lower.contains(".mp3")
 }
@@ -785,6 +789,15 @@ impl Library {
             .copied()
             .unwrap_or_default()
     }
+    /// The CloseCaption gender suffix of a speaking actor's model (`male` / `female`).
+    pub fn caption_gender(&self, actor: Option<&SoundActor>) -> Option<&'static str> {
+        match self.actors.gender(actor.map(|a| a.model.as_str())) {
+            Ok(ActorGender::Male) => Some("male"),
+            Ok(ActorGender::Female) => Some("female"),
+            _ => None,
+        }
+    }
+
     fn actor_gender(&self, request: &SoundRequest) -> Result<ActorGender> {
         self.actors
             .gender(request.actor.as_ref().map(|actor| actor.model.as_str()))

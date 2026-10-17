@@ -530,7 +530,7 @@ impl PanelLayout {
         )
     }
 }
-fn panel_axis(value: &str, extent: f32, scale: f32) -> Option<f32> {
+pub(crate) fn panel_axis(value: &str, extent: f32, scale: f32) -> Option<f32> {
     let (alignment, number) = if let Some(number) = value.strip_prefix('r') {
         (1, number)
     } else if let Some(number) = value.strip_prefix('c') {
@@ -1553,6 +1553,8 @@ pub struct WeaponHud {
     suit_label: String,
     ammo_label: String,
     alt_label: String,
+    /// The closed caption panel (HudCloseCaption).
+    pub captions: crate::closecaption::CaptionHud,
 }
 
 impl WeaponHud {
@@ -1706,6 +1708,13 @@ impl WeaponHud {
                 loc.add_resource(loc_path, &bytes);
             }
         }
+        let captions = crate::closecaption::CaptionHud::load(
+            vfs,
+            scheme,
+            layout,
+            canvas.clone(),
+            crate::closecaption::LANGUAGE,
+        );
         let health_label = loc.text("#Valve_Hud_HEALTH");
         let suit_label = loc.text("#Valve_Hud_SUIT");
         let ammo_label = loc.text("#Valve_Hud_AMMO");
@@ -1772,7 +1781,40 @@ impl WeaponHud {
             suit_label,
             ammo_label,
             alt_label,
+            captions,
         })
+    }
+
+    /// The closed caption panel (CHudCloseCaption::Paint): its box through the HUD's rounded
+    /// panel background, then the text runs. Hidden while `closecaption` is off.
+    pub fn draw_captions(&self, settings: &crate::closecaption::Settings, time: f64) {
+        self.captions.tick(time);
+        if !settings.closecaption {
+            return;
+        }
+        let size = (self.canvas.width(), self.canvas.height());
+        let Some((panel, paint)) = self.captions.paint(size, time) else {
+            return;
+        };
+        let color = |c: [f32; 4]| Color::new(c[0], c[1], c[2], c[3]);
+        if let Some((rect, background)) = paint.background {
+            self.rounded_box(
+                Rect::new(panel.x + rect[0], panel.y + rect[1], rect[2], rect[3]),
+                color(background),
+            );
+        }
+        let scale = size.1 / 480.;
+        for run in &paint.runs {
+            let Some((face, tall)) = self.captions.face(run.style, scale) else {
+                continue;
+            };
+            let (x, y) = (panel.x + run.x, panel.y + run.y);
+            if let Some(highlight) = run.highlight {
+                self.canvas
+                    .rectangle(x, y, run.width, run.height, color(highlight));
+            }
+            face.draw_cell(&run.text, vec2(x, y), tall, color(run.color));
+        }
     }
 
     /// A ScreenFade message (DamageEffect or env_fade) on the game clock.

@@ -216,6 +216,8 @@ pub struct Diagnostics {
     pub scenes_loaded: usize,
     pub scene_events_started: u64,
     pub scene_completions: u64,
+    /// Scene captions dropped by the caption radius (AttenuateCaption).
+    pub attenuated_captions: u64,
 }
 #[derive(Serialize)]
 pub struct ChoreographyState {
@@ -251,6 +253,8 @@ pub struct Scene {
     pub diagnostics: Diagnostics,
     pub transition: Option<(String, String)>,
     pub sounds: Vec<crate::sounds::SoundRequest>,
+    /// Captions from choreographed speech this tick.
+    pub captions: Vec<crate::captions::CaptionRequest>,
     /// ambient_generic m_fActive after inputs; unset entities keep their spawn state.
     ambient_active: BTreeMap<usize, bool>,
     /// env_soundscape selection for the local player (SDK server soundscape system).
@@ -312,6 +316,7 @@ impl Scene {
             diagnostics: Diagnostics::default(),
             transition: None,
             sounds: Vec::new(),
+            captions: Vec::new(),
             ambient_active: BTreeMap::new(),
             soundscape: crate::soundscapes::Selector::new(world),
             player_damage: Vec::new(),
@@ -776,6 +781,83 @@ impl Scene {
             }),
             ..cue.into()
         }
+    }
+    /// The caption of SPEAK event `index` of `scene` spoken by `actor`: only its group's
+    /// master captions, and only when the player or its view entity is within the caption
+    /// radius of one of the sound's origins (the actor, and the speakers of env_microphones
+    /// that hear it), unless the event suppresses that check.
+    fn scene_caption(
+        &mut self,
+        world: &World,
+        scene: &source_assets::scenes::ChoreoScene,
+        index: usize,
+        actor: usize,
+        speaker: Option<crate::sounds::SoundActor>,
+    ) {
+        let Some((token, duration)) = crate::captions::scene_caption(scene, index) else {
+            return;
+        };
+        if !crate::captions::suppresses_attenuation(scene, index) {
+            let origins =
+                crate::captions::sound_origins(self.states[actor].origin, &self.microphones(world));
+            let view = self
+                .view_control
+                .active()
+                .map(|camera| self.states[camera].origin);
+            if crate::captions::attenuated(self.player_feet, &origins)
+                && view.is_none_or(|view| crate::captions::attenuated(view, &origins))
+            {
+                self.diagnostics.attenuated_captions += 1;
+                return;
+            }
+        }
+        self.captions.push(crate::captions::CaptionRequest {
+            token,
+            duration,
+            // Never "from player" for scenes.
+            from_player: false,
+            actor: speaker,
+        });
+    }
+    /// Enabled env_microphones with a speaker, for caption sound origins.
+    fn microphones(&self, world: &World) -> Vec<crate::captions::Microphone> {
+        let named = |name: &str| {
+            if name.eq_ignore_ascii_case("!player") {
+                return Some(self.player_feet);
+            }
+            world
+                .entities
+                .iter()
+                .position(|e| {
+                    e.get("targetname")
+                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                })
+                .filter(|&id| !self.states[id].killed)
+                .map(|id| self.states[id].origin)
+        };
+        world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(id, e)| {
+                e.class() == "env_microphone"
+                    && self.states[*id].enabled
+                    && !self.states[*id].killed
+            })
+            .filter_map(|(id, e)| {
+                let speaker = named(e.get("SpeakerName").filter(|s| !s.is_empty())?)?;
+                let measure = e
+                    .get("target")
+                    .filter(|t| !t.is_empty())
+                    .and_then(named)
+                    .unwrap_or(self.states[id].origin);
+                Some(crate::captions::Microphone {
+                    measure,
+                    max_range: number(e, "MaxRange", 0.),
+                    speaker,
+                })
+            })
+            .collect()
     }
     /// Precache SPEAK cues from every loaded scene without advancing playback.
     /// Unresolved dynamic actors retain a context-free request for broad preloading.
@@ -1539,6 +1621,16 @@ impl Scene {
                                                     a.entity = None;
                                                 }
                                             }
+                                            // The scene captions its master token itself
+                                            // (CSceneEntity::DispatchStartSpeak).
+                                            request.caption = false;
+                                            self.scene_caption(
+                                                world,
+                                                &scene.data,
+                                                index,
+                                                actor,
+                                                request.actor.clone(),
+                                            );
                                             self.sounds.push(request);
                                         }
                                     }
@@ -3034,6 +3126,62 @@ mod tests {
         }
         data.extend([0, 0, 0]);
         Arc::new(ChoreoScene::parse(&data, &strings).unwrap())
+    }
+    #[test]
+    fn scene_speech_captions_reach_the_player_through_a_microphone_speaker() {
+        // ep1_background02: Kleiner speaks 6000 units away; a microphone beside him replays
+        // the line at a speaker next to the player.
+        let run = |microphone_disabled: &str| {
+            let world = World {
+                entities: vec![
+                    entity("logic_choreographed_scene", "scene", &[]),
+                    entity("npc_kleiner", "kleiner", &[("origin", "6000 0 0")]),
+                    entity(
+                        "env_microphone",
+                        "mic",
+                        &[
+                            ("origin", "6000 40 0"),
+                            ("MaxRange", "100"),
+                            ("SpeakerName", "speaker"),
+                            ("StartDisabled", microphone_disabled),
+                        ],
+                    ),
+                    entity("info_target", "speaker", &[("origin", "20 0 0")]),
+                ],
+                ..Default::default()
+            };
+            let mut data =
+                Arc::unwrap_or_clone(choreography(&[(EventType::Speak, 0., "EP_01.KL_Line")]));
+            data.actors.push(source_assets::scenes::Actor {
+                name: "kleiner".into(),
+                active: true,
+                channels: Vec::new(),
+            });
+            data.events[0].actor = Some(0);
+            data.events[0].end = Some(3.5);
+            let mut scene = Scene::new(&world);
+            scene.install_choreography(0, Arc::new(data));
+            scene.send(0, "Start", "");
+            scene.tick(&world, Vec3::ZERO, 0.015);
+            scene.tick(&world, Vec3::ZERO, 0.1);
+            scene
+        };
+        let scene = run("0");
+        assert_eq!(scene.sounds, vec!["EP_01.KL_Line"]);
+        assert!(
+            !scene.sounds[0].caption,
+            "the scene captions the line itself"
+        );
+        assert_eq!(scene.captions.len(), 1);
+        let caption = &scene.captions[0];
+        assert_eq!(caption.token, "ep_01.kl_line");
+        assert_eq!(caption.duration, 3.5);
+        assert!(!caption.from_player);
+        assert_eq!(caption.actor.as_ref().and_then(|a| a.entity), Some(1));
+        let scene = run("1");
+        assert_eq!(scene.sounds.len(), 1);
+        assert!(scene.captions.is_empty(), "beyond scene_maxcaptionradius");
+        assert_eq!(scene.diagnostics.attenuated_captions, 1);
     }
     #[test]
     fn face_turns_standing_npc_toward_target_at_max_yaw_speed() {

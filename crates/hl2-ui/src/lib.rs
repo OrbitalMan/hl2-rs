@@ -1,5 +1,6 @@
 //! Source-resource HUD behavior shared by hosts through explicit draw commands.
 pub mod canvas;
+pub mod closecaption;
 pub mod config;
 pub mod console;
 pub mod fades;

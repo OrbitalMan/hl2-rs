@@ -338,6 +338,31 @@ impl Vfs {
         }
         Ok(None)
     }
+    /// Every copy of `name` on the search path, in search order (a map's embedded file first),
+    /// for resources that each search path contributes, such as caption dictionaries.
+    pub fn read_all(&self, name: &str) -> Result<Vec<Vec<u8>>> {
+        let name = normalize(name)?;
+        let mut copies = Vec::new();
+        if let Some(d) = self.embedded.get(&name) {
+            copies.push(d.clone());
+        }
+        for layer in &self.layers {
+            match layer {
+                Layer::Dir(folder) => {
+                    let p = folder.join(&name);
+                    if p.is_file() {
+                        copies.push(std::fs::read(p)?);
+                    }
+                }
+                Layer::Pak(vpk) => {
+                    if let Some(d) = vpk.read(&name)? {
+                        copies.push(d);
+                    }
+                }
+            }
+        }
+        Ok(copies)
+    }
     /// The installation root passed to [`Vfs::mount_game`].
     pub fn game_root(&self) -> Option<&Path> {
         Some(&self.root)

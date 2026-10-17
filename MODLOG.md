@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Closed captions: installed dictionaries, scene and sound captions, HUD panel
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `source_assets::captions` (compiled `VCCD` dictionaries, CRC32 token lookup, every `resource/closecaption_<language>.dat` on the search path in order, `Vfs::read_all`). `hl2_simulation::captions` (SPEAK master/slave grouping per actor channel, caption duration, `scene_maxcaptionradius` check, env_microphone speaker origins); `Scene::captions`, `Scene::scene_caption`/`microphones`, `Diagnostics::attenuated_captions`; `SoundRequest::caption` (EmitSound_t `m_bEmitCloseCaption`, off for scene speech), `Library::caption_gender`, `sounds::raw_wave` public. `hl2_ui::closecaption` (pure SDK `CHudCloseCaption` model: tags `<clr>`, `<playerclr>`, `<B>`, `<I>`, `<cr>`, `<sfx>`, `<len>`, `<delay>`, `<norepeat>`, linger/predisplay, wrap, popping, panning, box growth, item fades; `Settings::from_config` for Options > Audio; `CaptionHud` with the `HudLayout.res` `HudCloseCaption` layout, `ClientScheme.res` `CloseCaption_*` fonts resolved among the scheme's registered installed files, `Panel.BgColor`/`BgAlpha`), `WeaponHud::captions`/`draw_captions`. `hl2-bevy`: the audio queue emits captions for sound-script emits, ambient_generic plays and sound patch starts (2 s) and forwards scene captions with the actor gender; `canvas_renderer::present` draws the panel also in background levels, before GameUI; the run report gains `hud.captions`. Plan in `docs/DESIGN.md`, findings in the workspace wiki.
+
+**Why:** owner task: real subtitles / closed captions from the installed game data, honoring the Options audio setting.
+
+**Tested how:** unit tests (dictionary parse/lookup/order/malformed input; tag splitting, delay/len/sfx/subtitles, norepeat and same-tick repeats, gendered tokens, wrap and colors, paint growth/fades/popping, quantized durations, Options mapping, font selection; scene master/slave captions, caption radius, microphone routing, a synthetic Kleiner scene with and without its microphone); owned-install tests (Episode One dictionaries in search order, all Kleiner broadcast lines resolve, the Episode One panel layout/scheme/fonts); hl2-ui and hl2-bevy tests, source-assets and hl2-simulation suites, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged run `runtime_captions.sh` on `episodic/ep1_background02` with closed captions (1024x768, 420 frames): `artifacts/captions_capture.png` shows Kleiner's `ep_01.kl_fellowcitizens06` caption in his color and italics in the box behind the main menu; report: dictionaries [3153, 3970], 1 caption processed, no attenuated captions.
+
+**Result:** captions and subtitles show for scene speech and sound scripts from the installed dictionaries, styled by the installed HUD layout and scheme.
+
+**Still broken or not tested:** no side-by-side comparison with the retail panel; the installed schemes ask for Tahoma/Verdana, which are not installed, so the registered DejaVu Sans files are drawn (metrics differ); VOX sentence captions (HEV), `cc_lang`, `cc_emit` and the other `cc_*` commands are not implemented; partly visible lines are not clipped to the panel; "from player" for ordinary sounds is approximated; the speaker-routed microphone sound itself is not played at the speaker; Subtitles mode and captions in gameplay maps not checked in a packaged run.
+
+**Next:** owner check; VOX sentence captions; a retail capture of the same Kleiner line for comparison.
+
 ## 2026-10-17 GameUI: press-and-hold repeat for keys and scroll bar arrows
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

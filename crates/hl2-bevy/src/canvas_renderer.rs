@@ -149,7 +149,11 @@ pub struct Hud {
 }
 impl Hud {
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines}})
+        let captions = &self.source.captions;
+        let state = captions.state.borrow();
+        let captions = serde_json::json!({"dictionaries":captions.captions.dictionaries.iter().map(|d| d.len()).collect::<Vec<_>>(),
+            "errors":captions.errors,"processed":state.processed,"queued":state.streams().collect::<Vec<_>>(),"recent":state.recent,"missing":state.missing});
+        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"captions":captions})
     }
     pub fn new(source: hl2_ui::hud::WeaponHud) -> Self {
         Self {
@@ -317,6 +321,11 @@ pub fn present(
         );
     }
     hud.source.draw_fade(time);
+    // Closed captions (Options > Audio) also show behind the main menu, under GameUI.
+    let captions = hl2_ui::closecaption::Settings::from_config(ui.source.config.audio.captions);
+    let messages = std::mem::take(&mut game.caption_messages);
+    hud.source.captions.emit(&messages, &captions, time);
+    hud.source.draw_captions(&captions, time);
     // Background levels behind the main menu draw no HUD.
     if !ui.source.background_level() {
         hud.source.draw_status(

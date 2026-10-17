@@ -475,8 +475,11 @@ Steps (one commit):
 
 Limitations:
 
-- Stored only, no effect yet: HDR mode, speaker setup, sound quality, captions, spoken
-  language, aim assist. (Gamma is applied since 2026-10-15, see section 6.)
+- Stored only, no effect yet: HDR mode, speaker setup, sound quality, spoken
+  language, aim assist. (Gamma is applied since 2026-10-15, see section 6; closed captions
+  since 2026-10-17: none = `closecaption 0`, subtitles and sound effects = `closecaption 1`,
+  subtitles = `closecaption 1, cc_subtitles 1`, drawn by `hl2_ui::closecaption`, see
+  `docs/DESIGN.md` "Closed captions".)
 - Raw input has no separate effect: Bevy's accumulated mouse motion is already the raw device delta.
 - The retail engine's smoothed music factor (ducking) is not modeled; only `snd_musicvolume`.
 - The game pauses all sounds while it is paused or unfocused, so mute-when-unfocused is mostly

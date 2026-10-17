@@ -125,6 +125,10 @@ pub struct Gameplay {
     pub unplayed_sounds: u64,
     pub sound_cues: Vec<String>,
     pub sound_requests: Vec<hl2_simulation::sounds::SoundRequest>,
+    /// Scene speech captions waiting for the sound queue (which resolves actor genders).
+    pub captions: Vec<hl2_simulation::captions::CaptionRequest>,
+    /// CloseCaption messages for the HUD caption panel.
+    pub caption_messages: Vec<hl2_ui::closecaption::Request>,
     weapon_sounds: hl2_simulation::sounds::WeaponAnimationSounds,
     pub footsteps: hl2_simulation::footsteps::Footsteps,
     /// Local player damage intake at the current skill (see [`Gameplay::set_skill`]).
@@ -335,6 +339,8 @@ impl Gameplay {
             unplayed_sounds: 0,
             sound_cues: vec![],
             sound_requests: vec![],
+            captions: vec![],
+            caption_messages: vec![],
             weapon_sounds: Default::default(),
             footsteps: Default::default(),
             player_damage: Default::default(),
@@ -389,6 +395,8 @@ impl Gameplay {
             unplayed_sounds: 0,
             sound_cues: vec![],
             sound_requests: vec![],
+            captions: vec![],
+            caption_messages: vec![],
             weapon_sounds: Default::default(),
             footsteps: Default::default(),
         })
@@ -803,6 +811,7 @@ impl Gameplay {
                 self.unplayed_sounds += 1;
             }
         }
+        self.captions.append(&mut self.scene.captions);
         let excess = self.sound_cues.len().saturating_sub(64);
         self.sound_cues.drain(..excess);
     }

@@ -487,8 +487,57 @@ pub struct Audio {
     muted: bool,
     /// CSoundPatch envelopes by (emitter, cue).
     patches: HashMap<(u64, String), hl2_simulation::sounds::PatchEnvelope>,
+    /// Captions of sounds started outside `queue` (ambient_generic spawns).
+    captions: Vec<hl2_ui::closecaption::Request>,
 }
+/// `soundpatch_captionlength`: looping sound patches caption for this long.
+const SOUND_PATCH_CAPTION_LENGTH: f32 = 2.;
 impl Audio {
+    /// The CloseCaption message of an emitted sound (CSoundEmitterSystem::EmitCloseCaption):
+    /// its sound script name for `duration` (the chosen wave's length unless given). Raw
+    /// waves, sentences and menu sounds have none. Unpositioned sounds without a speaker are
+    /// the local player's own (weapons, footsteps), which selects `<playerclr>` colors.
+    fn caption(
+        &self,
+        request: &SoundRequest,
+        path: &str,
+        duration: Option<f32>,
+    ) -> Option<hl2_ui::closecaption::Request> {
+        if !request.caption
+            || request.ui
+            || request.stop
+            || hl2_simulation::sounds::raw_wave(&request.name)
+            || request.name.starts_with(['!', '#'])
+        {
+            return None;
+        }
+        let duration = duration.unwrap_or_else(|| {
+            self.library
+                .decoded
+                .get(path)
+                .map_or(0., |summary| summary.seconds() as f32)
+        });
+        Some(hl2_ui::closecaption::Request {
+            token: request.name.to_ascii_lowercase(),
+            duration: hl2_ui::closecaption::message_duration(duration),
+            from_player: request.actor.is_none()
+                && request.origin.is_none()
+                && request.ambient.is_none(),
+            gender: self.library.caption_gender(request.actor.as_ref()),
+        })
+    }
+    /// A scene's CloseCaption message, with the speaking actor's gender.
+    fn scene_caption(
+        &self,
+        caption: hl2_simulation::captions::CaptionRequest,
+    ) -> hl2_ui::closecaption::Request {
+        hl2_ui::closecaption::Request {
+            token: caption.token,
+            duration: hl2_ui::closecaption::message_duration(caption.duration),
+            from_player: caption.from_player,
+            gender: self.library.caption_gender(caption.actor.as_ref()),
+        }
+    }
     /// Settings factor for one channel, before the master volume: music channels (dry-mix `#`
     /// waves at soundlevel 0) follow the music volume; everything is silent while muted.
     fn mix(&self, music: bool) -> f32 {
@@ -717,6 +766,7 @@ pub fn install(
         music_volume: 1.,
         muted: false,
         patches: HashMap::new(),
+        captions: Vec::new(),
     };
     let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
     let mut spawn: Vec<(usize, Ambient)> = audio
@@ -731,13 +781,16 @@ pub fn install(
             audio.capacity_rejections += 1;
             continue;
         }
-        audio.emit(
+        if let Some(path) = audio.emit(
             commands,
             &ambient.request,
             ambient.looped,
             (ambient.volume, ambient.pitch, Some(ambient.spatial)),
             (false, Some(id), None),
-        );
+        ) && let Some(caption) = audio.caption(&ambient.request, &path, None)
+        {
+            audio.captions.push(caption);
+        }
     }
     commands.insert_resource(audio);
 }
@@ -848,6 +901,11 @@ pub fn queue(
                 "ambient":request.ambient.map(|c| format!("{c:?}"))}));
         }
     }
+    // CloseCaption messages: spawn-time ambient sounds, then scene speech.
+    let mut captions = std::mem::take(&mut audio.captions);
+    for caption in std::mem::take(&mut game.captions) {
+        captions.push(audio.scene_caption(caption));
+    }
     for request in std::mem::take(&mut game.sound_requests) {
         // CBaseEntity::StopSound(name) on the emitter, and CSoundEnvelopeController ops.
         if let Some(emitter) = request.emitter {
@@ -878,17 +936,21 @@ pub fn queue(
                         // The patch loops (SoundCreate on a looping wave; cue points
                         // are not read, so the wave is assumed to loop).
                         if count < MAX_PLAYERS
-                            && audio
-                                .emit(
-                                    &mut commands,
-                                    &request,
-                                    true,
-                                    (volume, pitch.max(1.), spatial),
-                                    (paused, None, None),
-                                )
-                                .is_some()
+                            && let Some(path) = audio.emit(
+                                &mut commands,
+                                &request,
+                                true,
+                                (volume, pitch.max(1.), spatial),
+                                (paused, None, None),
+                            )
                         {
                             count += 1;
+                            // CSoundPatch::StartSound captions the script name.
+                            captions.extend(audio.caption(
+                                &request,
+                                &path,
+                                Some(SOUND_PATCH_CAPTION_LENGTH),
+                            ));
                         }
                     }
                     hl2_simulation::sounds::PatchOp::Destroy => {
@@ -916,14 +978,16 @@ pub fn queue(
                 (control, audio.ambient.get(&id).cloned())
                 && ambient.volume > 0.
                 && !MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed)
-            {
-                audio.emit(
+                && let Some(path) = audio.emit(
                     &mut commands,
                     &ambient.request,
                     ambient.looped,
                     (ambient.volume, ambient.pitch, Some(ambient.spatial)),
                     (paused, Some(id), None),
-                );
+                )
+            {
+                // EmitAmbientSound captions the start of the sound.
+                captions.extend(audio.caption(&ambient.request, &path, None));
             }
             continue;
         }
@@ -955,6 +1019,7 @@ pub fn queue(
             )
         } {
             count += 1;
+            captions.extend(audio.caption(&request, &path, None));
             // Actor speech drives lip sync from the chosen wave's phonemes.
             if let Some(actor) = request.actor.as_ref().and_then(|a| a.entity) {
                 let time = game.scene.time;
@@ -964,6 +1029,7 @@ pub fn queue(
             game.unplayed_sounds += 1;
         }
     }
+    game.caption_messages.extend(captions);
     // Client soundscape frame: scene time drives fades and random sounds, so pause freezes
     // them (dt 0). The server-side selection ran in the fixed tick.
     let now = game.scene.time;
