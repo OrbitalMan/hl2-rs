@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: main-menu background follows the chapter of the map left
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** new `hl2-ui::gameui::chapters` (chapter list from `scripts/chapterbackgrounds.txt` and `cfg/chapter<key>.cfg`, level graph from `trigger_changelevel` targets, map -> chapter assignment, `ChapterIndex` built on a background thread); `source_assets::bsp::read_entities` reads only a map's entity lump; `GameUiResources::chapters`; `Console::index_chapters` (called at startup) and `menu_background_after_game` now pick the chapter's background, falling back to chapter 1. Details in `docs/gameui.md` section 13.
+
+**Why:** owner request: after `map d2_coast_01` and Return to main menu the menu still showed chapter 1's background; the background must come from the chapter the map belongs to, derived from game resources.
+
+**Tested how:** unit tests (stretch and bypass assignment, changelevel targets, console return to the chapter background); owned test over all four installed games (Half-Life 2 chapters 1-13 sample maps including 9a and the `d2_coast_08` detour, Episode One, Episode Two's revisit loop, Lost Coast); workspace tests, strict clippy, Windows check, fmt; packaged replays `runtime_chapter_menu.sh` (`hl2/d2_coast_01` -> `hl2/background04`, `hl2/d3_c17_10a` -> `hl2/background06`) and `runtime_return_menu.sh` (unchanged: `hl2/background01`).
+
+**Result:** leaving a map returns to its chapter's menu background and saves it.
+
+**Still broken or not tested:** not tried by hand; maps reached only through map-spawned commands (no `trigger_changelevel`) would fall back to chapter 1; not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: saved Options and console placements, reset when off screen
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

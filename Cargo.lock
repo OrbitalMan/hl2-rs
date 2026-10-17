@@ -3141,6 +3141,7 @@ dependencies = [
  "fontdue",
  "glam 0.27.0",
  "hl2-simulation",
+ "modkit-core",
  "serde",
  "serde_json",
  "source-assets",

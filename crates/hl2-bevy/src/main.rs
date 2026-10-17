@@ -726,6 +726,8 @@ fn setup(
     );
     let mut console_ui = ui_host::Console::new(ui);
     console_ui.source.set_history(console_host::load_history());
+    // Which chapter each map is in (the menu background after leaving a map), off the main thread.
+    console_ui.source.index_chapters();
     console_ui
         .source
         .level_loaded_for_map(&map_game, &map_name, prepared.1);

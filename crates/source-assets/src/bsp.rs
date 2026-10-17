@@ -30,6 +30,54 @@ impl SkyVisibility {
         self.sky_3d || self.sky_2d
     }
 }
+/// A lump as stored: raw, or LZMA-compressed (`LZMA` header).
+fn decode_lump(raw: &[u8], i: usize) -> Result<Vec<u8>> {
+    if !raw.starts_with(b"LZMA") {
+        return Ok(raw.to_vec());
+    }
+    let expected = u32le(raw, 4)? as usize;
+    let compressed = u32le(raw, 8)? as usize;
+    if expected > 128 * 1024 * 1024 {
+        bail!("BSP lump {i} exceeds 128 MiB limit");
+    }
+    let mut stream = bytes(raw, 12, 5)?.to_vec();
+    stream.extend_from_slice(&(expected as u64).to_le_bytes());
+    stream.extend_from_slice(bytes(raw, 17, compressed)?);
+    let mut output = Vec::new();
+    lzma_rs::lzma_decompress_with_options(
+        &mut Cursor::new(stream),
+        &mut output,
+        &lzma_rs::decompress::Options {
+            memlimit: Some(128 * 1024 * 1024),
+            ..Default::default()
+        },
+    )
+    .with_context(|| format!("LZMA lump {i}"))?;
+    if output.len() != expected {
+        bail!("BSP lump {i} decompressed size mismatch");
+    }
+    Ok(output)
+}
+
+/// The entities of a BSP file, reading only its header and entity lump (lump 0), not the map.
+pub fn read_entities(path: &std::path::Path) -> Result<Vec<modkit_core::Entity>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).with_context(|| path.display().to_string())?;
+    let mut header = [0u8; 24];
+    file.read_exact(&mut header)?;
+    if &header[..4] != b"VBSP" {
+        bail!("not a Valve BSP: {}", path.display());
+    }
+    let (offset, len) = (u32le(&header, 8)? as u64, u32le(&header, 12)? as usize);
+    if len > 64 * 1024 * 1024 {
+        bail!("BSP entity lump too large: {}", path.display());
+    }
+    let mut raw = vec![0; len];
+    file.seek(SeekFrom::Start(offset))?;
+    file.read_exact(&mut raw)?;
+    keyvalues::entities(&decode_lump(&raw, 0)?)
+}
+
 impl Bsp {
     pub fn parse(data: &[u8]) -> Result<Self> {
         if bytes(data, 0, 4)? != b"VBSP" {
@@ -47,34 +95,7 @@ impl Bsp {
             let offset = u32le(data, o)? as usize;
             let len = u32le(data, o + 4)? as usize;
             lump_versions.push(u32le(data, o + 8)?);
-            let raw = bytes(data, offset, len)?;
-            let decoded = if raw.starts_with(b"LZMA") {
-                let expected = u32le(raw, 4)? as usize;
-                let compressed = u32le(raw, 8)? as usize;
-                if expected > 128 * 1024 * 1024 {
-                    bail!("BSP lump {i} exceeds 128 MiB limit");
-                }
-                let mut stream = bytes(raw, 12, 5)?.to_vec();
-                stream.extend_from_slice(&(expected as u64).to_le_bytes());
-                stream.extend_from_slice(bytes(raw, 17, compressed)?);
-                let mut output = Vec::new();
-                lzma_rs::lzma_decompress_with_options(
-                    &mut Cursor::new(stream),
-                    &mut output,
-                    &lzma_rs::decompress::Options {
-                        memlimit: Some(128 * 1024 * 1024),
-                        ..Default::default()
-                    },
-                )
-                .with_context(|| format!("LZMA lump {i}"))?;
-                if output.len() != expected {
-                    bail!("BSP lump {i} decompressed size mismatch");
-                }
-                output
-            } else {
-                raw.to_vec()
-            };
-            lumps.push(decoded);
+            lumps.push(decode_lump(bytes(data, offset, len)?, i)?);
         }
         let (lightmaps, face_lighting) = crate::lighting::build(&lumps)?;
         Ok(Self {

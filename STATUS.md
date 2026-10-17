@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **Return to main menu shows the played chapter's background** (`gameui::chapters`, docs/gameui.md section 13): chapters from `chapterbackgrounds.txt`, `cfg/chapter<key>.cfg` and the maps' `trigger_changelevel` targets; `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06` (packaged replay `chapter_menu.json`). Not tried by hand; not checked on Windows.
 - **Dialogs move by their caption; the console resizes by its corners** (shared `gameui::placement`, docs/gameui.md section 12). Packaged replays checked; not tried with a real mouse.
 - **Options dialog position and console position/size are saved** (`dialogs` in the settings) and reset to the default when they would open off screen; packaged two-run check passed.
 - **Console completion, suggestions, history (100, saved), Ctrl+R search, editing keys, `con_filter_*`/`con_timestamp`, engine warnings mirrored**: see `docs/gameui.md` section 11. Packaged capture of the completion list checked; paste and log mirroring not exercised by hand; output row copy not ported.

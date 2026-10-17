@@ -214,6 +214,8 @@ pub struct Console {
     /// `(game, image)` -> pre-blurred background (see `GameUiResources::background_images`).
     pub background_textures: BTreeMap<(String, String), Texture2D>,
     pub config: crate::config::Config,
+    /// Map -> chapter of every game (menu backgrounds after leaving a map).
+    chapter_index: crate::gameui::chapters::ChapterIndex,
 }
 
 /// Positive native font heights describe Windows character cells, not pixels per EM.
@@ -522,6 +524,7 @@ impl Default for Console {
             options_return: Mode::MainMenu,
             background_textures: BTreeMap::new(),
             config,
+            chapter_index: Default::default(),
         };
         console.set_resources(gameui);
         console.log("HL2-RS developer console. Type help for implemented commands.");
@@ -924,15 +927,45 @@ impl Console {
         GameMap::new(game, map)
     }
 
-    /// The background to show when leaving a map for the main menu: the running game's own
-    /// chapter 1 background, which becomes the saved menu background (a Half-Life 2 map played
-    /// from the Episode Two menu returns to Half-Life 2's background), else the saved one.
+    /// Starts building the map -> chapter index of every game in the background (host, once).
+    pub fn index_chapters(&mut self) {
+        if let Some(root) = self.gameui.install_root.clone() {
+            self.chapter_index =
+                crate::gameui::chapters::ChapterIndex::build(root, self.gameui.chapters.clone());
+        }
+    }
+
+    /// The chapter `game`'s `map` belongs to: from the index, or worked out for that game now when
+    /// the index is not built yet.
+    fn chapter_of(&self, game: &str, map: &str) -> Option<String> {
+        use crate::gameui::chapters;
+        if let Some(found) = self.chapter_index.get(game, map) {
+            return found.map(str::to_owned);
+        }
+        let root = self.gameui.install_root.as_ref()?;
+        let list = self.gameui.chapters.get(game)?;
+        chapters::assign(&chapters::map_links(root, game), list).remove(&map.to_ascii_lowercase())
+    }
+
+    /// The background to show when leaving a map for the main menu: the background of the chapter
+    /// the map belongs to in the running game (`gameui::chapters`), else that game's chapter 1
+    /// background. It becomes the saved menu background (a Half-Life 2 map played from the
+    /// Episode Two menu returns to a Half-Life 2 background). Without a running game, the saved one.
     fn menu_background_after_game(&mut self) -> Option<GameMap> {
-        let running = self.loaded_map.as_ref().map(|m| m.game.clone());
-        let Some((game, map)) = running.and_then(|game| {
-            let map = self.gameui.background_maps.get(&game)?.clone();
-            Some((game, map))
-        }) else {
+        let Some(running) = self.loaded_map.clone() else {
+            return self.background();
+        };
+        let game = running.game;
+        let chapter_background = self.chapter_of(&game, &running.map).and_then(|key| {
+            let chapters = self.gameui.chapters.get(&game)?;
+            chapters
+                .iter()
+                .find(|c| c.key == key)
+                .map(|c| c.background.clone())
+        });
+        let Some(map) =
+            chapter_background.or_else(|| self.gameui.background_maps.get(&game).cloned())
+        else {
             return self.background();
         };
         let background = GameMap::new(game, map);
@@ -4343,6 +4376,61 @@ mod tests {
         assert_eq!(
             console.background(),
             Some(GameMap::new("hl2", "background01"))
+        );
+    }
+
+    #[test]
+    fn return_to_main_menu_shows_the_background_of_the_maps_chapter() {
+        use crate::gameui::chapters::{Chapter, ChapterIndex};
+        let mut console = installed_console();
+        let chapter = |key: &str, start: &str, background: &str| Chapter {
+            key: key.into(),
+            start: Some(start.into()),
+            background: background.into(),
+        };
+        Arc::make_mut(&mut console.gameui).chapters.insert(
+            "hl2".into(),
+            vec![
+                chapter("1", "d1_trainstation_01", "background01"),
+                chapter("7", "d2_coast_01", "background04"),
+            ],
+        );
+        console.chapter_index = ChapterIndex::ready(
+            [(
+                "hl2".to_owned(),
+                [("d2_coast_01".to_owned(), "7".to_owned())].into(),
+            )]
+            .into(),
+        );
+        console.set_background(Some(GameMap::new("hl2", "background01")));
+        console.level_loaded_for_map("hl2", "background01", true);
+        let _ = console.submit("map d2_coast_01");
+        console.level_loaded_for_map("hl2", "d2_coast_01", false);
+
+        console.escape();
+        click_row(&mut console, 5); // Return to main menu
+        let (confirm, _) = console.confirm_box.clone().expect("confirmation box");
+        let (origin, scale, layout) = console.quit_geometry(&confirm);
+        let pointer =
+            Some(origin + vec2(layout.buttons[0].x + 3., layout.buttons[0].y + 3.) * scale);
+        let _ = console.input(&Input {
+            pointer,
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        let effects = console.input(&Input {
+            pointer,
+            released: true,
+            ..Default::default()
+        });
+        assert!(
+            effects.contains(&Effect::MainMenuMap(GameMap::new("hl2", "background04"))),
+            "{effects:?}"
+        );
+        assert_eq!(
+            console.background(),
+            Some(GameMap::new("hl2", "background04"))
         );
     }
 

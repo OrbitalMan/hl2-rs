@@ -369,6 +369,9 @@ pub struct GameUiResources {
     pub background_images: BTreeMap<(String, String), Image>,
     /// Game -> first chapter map (`cfg/chapter1.cfg` of each mounted game).
     pub new_game_maps: BTreeMap<String, String>,
+    /// Game -> its chapters in play order, with their start maps and backgrounds
+    /// (`scripts/chapterbackgrounds.txt`, `cfg/chapter<key>.cfg`).
+    pub chapters: BTreeMap<String, Vec<super::chapters::Chapter>>,
     /// Category -> menu title (two lines for episodes, e.g. "Half-Life 2\n--- Episode One ---").
     pub category_titles: BTreeMap<String, String>,
     /// Files that could not be read or parsed (reported in the console log).
@@ -496,6 +499,14 @@ impl GameUiResources {
                 continue;
             };
             res.background_maps.insert(game.clone(), first_map);
+            let game_vfs = vfs
+                .game_root()
+                .and_then(|root| Vfs::mount_game(root, &game).ok());
+            let chapter_reader = Reader::new(game_vfs.as_ref().unwrap_or(vfs));
+            res.chapters.insert(
+                game.clone(),
+                super::chapters::list(&text, |path| chapter_reader.read_text(path)),
+            );
 
             // Pre-blurred background images for every chapter background of this game. Maps
             // are keyed by game: Half-Life 2 and Lost Coast both have a `background01`.

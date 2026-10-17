@@ -71,7 +71,7 @@ overlay and list voice packs; the VFS search path itself is unchanged.
 | Gamma test image | `materials/vgui/gamma.vtf` (ImagePanel `image "gamma"`) |
 | Background map | Each game's own `scripts/chapterbackgrounds.txt` (chapter 1; `hl2` -> `background01`), read through that game's mount; the games are the `SwitchExpansion <folder>` commands of `gamemenu.res` (`resources::menu_games`, `read_game_text`) |
 | New Game map | Each game's own `cfg/chapter1.cfg`, read the same way |
-| Game of a map | Explicit where known: a submenu loads `(game, map)` (`Effect::MainMenuMap(GameMap)`), the saved background keeps `gameplay.background_game`, level transitions stay in the running game. A bare name (`map`, `map_background`, `--map`, `--background-map`, respawn, a background saved without its game) belongs to the game whose own folder ships `maps/<name>.bsp`, loose or in its own VPKs, searching `hl2` first, then the other `gameinfo.txt` folders (`source_assets::install::game_for_map`); names typed in a session (`map`, `map_background`, respawn) search the running game before `hl2`, command-line names do not. The map is then read through that game's mount (`Vfs::mount_game`), whose order is the `SearchPaths` block of the game's own `gameinfo.txt` (`vpk::search_paths`: custom folders, own VPKs, inherited VPKs, then loose folders). Return to main menu shows the running game's chapter 1 background and saves it as the menu background. Pre-blurred `materials/console/<map>[_widescreen].vtf` images are keyed by `(game, map)`, so Half-Life 2's and Lost Coast's `background01` need no alias |
+| Game of a map | Explicit where known: a submenu loads `(game, map)` (`Effect::MainMenuMap(GameMap)`), the saved background keeps `gameplay.background_game`, level transitions stay in the running game. A bare name (`map`, `map_background`, `--map`, `--background-map`, respawn, a background saved without its game) belongs to the game whose own folder ships `maps/<name>.bsp`, loose or in its own VPKs, searching `hl2` first, then the other `gameinfo.txt` folders (`source_assets::install::game_for_map`); names typed in a session (`map`, `map_background`, respawn) search the running game before `hl2`, command-line names do not. The map is then read through that game's mount (`Vfs::mount_game`), whose order is the `SearchPaths` block of the game's own `gameinfo.txt` (`vpk::search_paths`: custom folders, own VPKs, inherited VPKs, then loose folders). Return to main menu shows the background of the chapter the map belongs to (section 13) and saves it as the menu background. Pre-blurred `materials/console/<map>[_widescreen].vtf` images are keyed by `(game, map)`, so Half-Life 2's and Lost Coast's `background01` need no alias |
 | Spoken languages | `hl2/hl2_sound_vo_<language>_dir.vpk` present in the install |
 
 Retail slider ranges (installed `GameUI.dll` constants): `sensitivity` 0.1-6.0, `m_customaccel_exponent`
@@ -789,3 +789,38 @@ confirmation box, the console dialog and the quit / main-menu box; cursor shapes
 - Cost: resizing rewraps the history every frame; measured 2.6 ms per frame (release) with a
   full 1024-line buffer of 220-character lines and the console font, 0.2 ms without a resize.
   ASCII advances of the console font are cached per size.
+
+## 13. Main-menu background after leaving a map (2026-10-17)
+
+Return to main menu (and any unload back to the menu) shows the background of the chapter the
+map just played belongs to, and saves it as the menu background
+(`Console::menu_background_after_game`). Module: `hl2-ui::gameui::chapters`.
+
+- **Sources (installed files only, no map table):** a game's `scripts/chapterbackgrounds.txt`
+  gives its chapter keys in play order (`1`..`9`, `9a`, `10`..`15` for Half-Life 2) and each
+  chapter's background map; `cfg/chapter<key>.cfg` gives the chapter's start map (the word after
+  `map` anywhere in the line, so Episode Two's `playvideo_exitcommand ep1_recap map
+  ep2_outland_01` works); the `map` keyvalue of every `trigger_changelevel` in the entity lump of
+  each loose `<game>/maps/*.bsp` gives the level-transition graph
+  (`source_assets::bsp::read_entities` reads only the header and lump 0).
+- **Assignment (`chapters::assign`):** the graph is undirected. Removing the chapter start maps
+  splits it into stretches. A stretch bordered by one start belongs to that chapter. A stretch
+  bordered by several starts (a map that skips ahead, such as `d3_c17_02_camera`) is measured by
+  breadth-first distance from its earliest bordering start, within the stretch and its border
+  starts: each map takes the farthest bordering start that is strictly closer than the map
+  itself, so ties keep the earlier chapter (`d2_coast_08`, a detour off `d2_coast_07`, stays in
+  chapter 7). Start maps the game does not ship are ignored. Maps no start reaches, test maps and
+  background maps get no chapter and fall back to the game's chapter 1 background.
+- **Results on the installed games:** Half-Life 2 chapters match the retail chapter list
+  (`d2_coast_01` -> 7 -> `background04`, `d2_prison_07` -> 9a, `d3_c17_10a` -> 11); Episode
+  Two's `ep2_outland_02` revisit loop stays in chapter 2; Lost Coast is one map, chapter 1.
+  Episode One lists 8 chapters, but chapters 6-8 have no cfg of their own (they resolve to the
+  inherited Half-Life 2 ones), so those starts are not Episode One maps and are ignored.
+- **Cost:** reading every map's entity lump takes about 0.2 s for Half-Life 2 (release), less for
+  the others, so `Console::index_chapters` builds the index on a `chapter-index` thread at
+  startup; a lookup before it finishes works the running game out synchronously.
+- **Tests:** unit `stretches_and_bypasses_follow_the_chapter_starts`,
+  `changelevel_targets_come_from_trigger_changelevel_maps`,
+  `return_to_main_menu_shows_the_background_of_the_maps_chapter`; owned
+  `owned_maps_belong_to_their_installed_chapters`; packaged replay
+  `chapter_menu.json` (`d2_coast_01` -> `hl2/background04`, `d3_c17_10a` -> `hl2/background06`).
