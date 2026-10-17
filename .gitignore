@@ -20,6 +20,7 @@
 !/scripts/checks/*.sh
 !/scripts/checks/*.py
 !/test-inputs/*.json
+!/test-inputs/expected/*.json
 !/docs/*.md
 !/docs/images/hl2-rs-trainstation.png
 !/crates/**/Cargo.toml

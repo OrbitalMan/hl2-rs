@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Checks: every gameplay fixture replayed with expected outcomes
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `scripts/checks/replays.py` runs every `test-inputs` fixture: besides the 14 UI checks, one check per gameplay fixture (70) on its map at 1280x720 with generic checks (labels at their ticks, capture size, drawn poses, I/O budget, fixture actions found their entities, model / collision / sprite / sound loading with the known installation gaps listed), specific assertions for movement, entities-weapons, door-swing, door-inputs, the effect and particle fixtures and attention, and each label's outcome compared with `test-inputs/expected/<fixture>.json` (`UPDATE_EXPECTED=1` records them). `coverage` fails for a fixture no check runs. The console check also asserts that sounds pause and resume with the UI and repeats at 1920x1080. Checks run from a copy of the packaged game in `artifacts/replays/game/` with its own default settings, so `bin/hl2-config.json` is no longer set aside and restored; `GROUP=ui|gameplay` and `JOBS=N` (parallel gameplay replays) select and speed up a run.
+
+**Why:** owner request: maximum coverage on macOS, including the gameplay fixtures, so that merging main shows regressions.
+
+**Tested how:** macOS (Apple Silicon): 85 checks ok in 616 s (`JOBS=4`); the outcomes recorded with `JOBS=4` reproduce in a serial run (one forward-ray difference on a tipping pallet, left out since) and a second parallel run. Stale or regression was decided with a windowless build of main running the same fixtures: main also fails the exact sprite-draw counts (particles now count, so they are lower bounds) and shows the pallet sound gap; the security-room fixtures failed only here (fixed in the previous commit). Workspace tests, strict clippy, fmt, Windows-target clippy.
+
+**Result:** a merge of main can be checked against the recorded outcomes of every fixture.
+
+**Still broken or not tested:** outcomes recorded on macOS; on Windows physics results may differ slightly (not run there). Three pallet fixtures report a body impact sound variant that is not preloaded (main too; listed as a known gap). The console replay's `menu-resume` step still does not resume here (Enter with no pause-menu row selected), so its resume and end-state assertions are left out. Derived variants of a few fixtures (attention targets, eye close-ups, a decal baseline image, a console panel run) have no input files and are not run.
+
+**Next:** owner check; a Windows run (`UPDATE_EXPECTED=1` there if only physics positions differ).
+
 ## 2026-10-17 Fixture entity setup applies under a frozen view
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

@@ -7,16 +7,48 @@
 `scripts/checks/check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`
 without linking, from macOS/Linux) are bash.
 
-The packaged UI checks are one cross-platform Python script, `scripts/checks/replays.py` (Python
+The packaged checks are one cross-platform Python script, `scripts/checks/replays.py` (Python
 3.9+, standard library only; `python3 scripts/checks/replays.py`, or `py` / `python` on Windows).
-It builds once (`scripts/build-bevy.sh`, `scripts/build-bevy.ps1` on Windows), runs each check as
-bounded launches of `bin/hl2-bevy` (`bin/hl2-bevy.exe` on Windows) with their own `--report`, and
-asserts on the labelled states the replays record (console mode and output, the Options dialog's
-tab / focused control / pending changes / sub-dialog, loaded maps, saved settings, captures). One
-ok/FAIL line per check; logs, reports and captures in `artifacts/replays/`. Every check starts
-from default settings: `bin/hl2-config.json` is set aside for the run and restored afterwards.
-Environment instead of arguments: `ONLY="console options"` runs those checks, `WINDOWED=1` adds the
-windowed ones of this platform, `NO_BUILD=1` keeps `bin/` as it is.
+It builds once (`scripts/build-bevy.sh`, `scripts/build-bevy.ps1` on Windows), copies the packaged
+game to `artifacts/replays/game/`, runs each check as bounded launches of that copy with their own
+`--report`, and asserts on what the reports record. One ok/FAIL line per check; logs, reports and
+captures in `artifacts/replays/`. The copy keeps its own settings next to it, so every check starts
+from default settings and `bin/hl2-config.json` (and a game running from `bin/`) is never touched.
+Environment instead of arguments: `ONLY="console movement"` runs those checks, `GROUP=ui` or
+`GROUP=gameplay` one group, `JOBS=4` up to four gameplay replays at once, `WINDOWED=1` adds the
+windowed ones of this platform, `NO_BUILD=1` keeps `bin/` as it is, `UPDATE_EXPECTED=1` records the
+gameplay outcomes (below).
+
+UI group: the labelled UI states (console mode and output, the Options dialog's tab / focused
+control / pending changes / sub-dialog), loaded maps, saved settings and captures.
+
+Gameplay group: every other `test-inputs/*.json` fixture, one check per fixture (named after it
+without `bevy-`), on its map (`d1_trainstation_01` for the security-room scenes,
+`d1_trainstation_04` for player death and hurt, `d1_trainstation_02` otherwise), 1280x720, in
+three layers:
+
+1. Every fixture: every label sampled at its authored tick, the capture written at the reported
+   size, drawn entities and effects agree with the simulation, entity I/O within its budget, every
+   fixture action found its entity, models, collision models, effect sprites and sounds load. Known
+   installation gaps are listed in the script: sounds `d1_trainstation_01` references that the
+   installation lacks, collision models the loader does not support yet, and a body impact sound
+   variant that is not preloaded (three pallet fixtures; main shows it too).
+2. Specific assertions: `movement` (bench jumps, air duck, pause, held jump), `entities-weapons`
+   (doors block and open, E use, pistol / SMG grenade / AR2 ball ammo), `door-swing` and
+   `door-inputs` (both leaves swing away from the opener, `OpenAwayFrom`), the five `effect-*`
+   (grenade, ball, decal, explosion, decal on a door), the three `particles-*` (emitter counts and
+   lifetimes) and `attention` (Barney's LOOKAT interests through scene pause, UI pause, overlap,
+   cancel and tail).
+3. Expected outcomes: each labelled sample's I/O counters, inventory, active scenes, gesture and
+   look targets, projectile, gib and impact counters, the player's feet (within 1 unit), state and
+   clock, console mode and forward ray, compared with `test-inputs/expected/<fixture>.json`. Two
+   fields that vary between runs of the same build are left out for two pallet fixtures, and
+   `occluded_blast_targets` everywhere. A difference is either a regression or an intended change;
+   after reviewing it, `UPDATE_EXPECTED=1` records the new outcomes (review the diff of the expected
+   files). The outcomes were recorded on macOS; physics on another platform may differ slightly.
+
+`coverage` fails when a fixture is neither used by a UI check nor listed with its map, so a new
+fixture is never silently left out.
 
 | Check | Category | What it asserts |
 | --- | --- | --- |
@@ -29,11 +61,13 @@ windowed ones of this platform, `NO_BUILD=1` keeps `bin/` as it is.
 | `captions` | shared | `episodic/ep1_background02`: closed captions on process speech, off process none |
 | `bg_compare` | shared | each game's chapter 1 background loads (FOV 75, 1024x768 captures for comparison with the installed pre-blurred `materials/console/*.vtf`) |
 | `save_config` | shared | `bevy-save-config.json`: `volume`, `sensitivity`, `fov`, `mat_hdr_level` from the console are saved |
-| `console` | shared | `bevy-console.json`: cheats refused then granted, quoted `;` kept, the console freezes the scene, `setpos` / queued `ent_fire`, Unicode input and editing, weapon selection cancelled by Escape before pausing, pause menu, outside click, console over the pause menu and back, unknown commands rejected |
+| `console` | shared | `bevy-console.json`: cheats refused then granted, quoted `;` kept, the console freezes the scene, `setpos` / queued `ent_fire`, Unicode input and editing, weapon selection cancelled by Escape before pausing, pause menu, outside click, console over the pause menu and back, unknown commands rejected, sounds pause and resume with the UI; the same replay at 1920x1080 (viewport and capture size) |
 | `console_map` | shared | `bevy-console-map.json`: two `map` loads, a missing map reported once without losing the player or scene, console state kept across loads |
 | `campaign` | shared | `bevy-campaign.json`: `d1_trainstation_01` > 02 > 03 through their triggers, inventory kept, the clock restarts per map |
 | `dev_overlay` | shared | `bevy-dev-overlay.json`: F1 overlay visible with its five lines and live statistics |
 | `hud` | shared | `bevy-hud.json`: unarmed start, loadout and weapon slots, HUD drawn |
+| `coverage` | shared, gameplay | every `test-inputs` fixture is run by a check |
+| one per gameplay fixture | shared, gameplay | the three layers above |
 | `window` | windowed | `bevy-menu-resolution-change.json`: a console resolution change resizes the frame and Options still opens (window captured, `--capture-window`); `bevy-options-keyboard-apply-resolution.json`: Video > Resolution changed and Apply pressed by keyboard only changes the saved resolution and the window |
 | `window_place` | macOS | windowed at 2560x1600 and 1024x768: sized and centred in the screen's visible frame, below the menu bar and above the Dock |
 | `no_border` | Windows | `--borderless`: "Windowed (No Border)" is a borderless window over the monitor (on macOS the same mode is the native full-screen Space, which a replay cannot drive). Not run on this machine |
@@ -43,8 +77,11 @@ read the game frame); windowed ones open a window and take focus. On macOS a win
 the frontmost app at launch (winit activates the app; Bevy offers no switch); on Windows `--no-focus`
 shows the window without activating it (winit `SW_SHOWNOACTIVATE`; not run here).
 
-Verified 2026-10-17 on macOS (Apple Silicon): all 14 shared checks ok (about 5 minutes), `window`
-and `window_place` ok. Not run on Windows or Linux.
+Verified 2026-10-17 on macOS (Apple Silicon): all 85 checks ok (14 UI, `coverage`, 70 gameplay
+fixtures) in 616 s with `JOBS=4`; the outcomes were recorded with `JOBS=4` and reproduced by a
+serial run (1227 s; one forward-ray difference on a tipping pallet, now left out) and a second
+parallel run. `window` and `window_place` ok earlier the same day (not rerun after this change).
+Not run on Windows or Linux.
 
 ## Closed captions (2026-10-17, macOS Apple Silicon)
 

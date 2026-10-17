@@ -1,14 +1,23 @@
-"""Packaged UI replays and captures, with assertions on each run's report.
+"""Packaged replays and captures, with assertions on each run's report.
 
 Cross-platform (Python 3.9+, no packages): builds the packaged game once
-(scripts/build-bevy.sh, or scripts/build-bevy.ps1 on Windows), runs every check as its own
-bounded launch of bin/hl2-bevy[.exe] with its own `--report`, and checks the labelled states the
-replay records (console mode and output, the Options dialog's tab / focus / pending changes,
-loaded maps, saved settings, captures). Prints one ok/FAIL line per check; details in
+(scripts/build-bevy.sh, or scripts/build-bevy.ps1 on Windows), copies it to
+artifacts/replays/game, runs every check as its own bounded launch of that copy with its own
+`--report`, and checks what the report records. Prints one ok/FAIL line per check; details in
 artifacts/replays/<check>.log, reports and captures next to it.
 
-Every check starts from default settings: bin/hl2-config.json is set aside at the start and
-restored at the end (a check that needs particular settings writes them itself).
+Groups:
+  ui          menus, Options, console, campaign transitions, captions, saved settings: the
+              labelled UI states, loaded maps and saved settings
+  gameplay    every other test-inputs fixture on its map, three layers deep: checks every
+              fixture must pass (labels at their ticks, capture, entity poses, I/O budget, asset
+              and sound loading), specific assertions for movement, doors, weapons, effects,
+              particles and attention, and each labelled sample's outcome compared with
+              test-inputs/expected/<fixture>.json; plus `coverage`, which fails when a fixture
+              is not run by any check
+
+Every check starts from default settings (the copy's own hl2-config.json; bin/hl2-config.json
+is never touched; a check that needs particular settings writes them itself).
 
 Categories:
   shared      every platform, in the background (`--background`: no window, nothing takes
@@ -19,8 +28,11 @@ Categories:
 
 Environment (no arguments, so the command line never changes):
   ONLY="console options"   run these checks only
+  GROUP=ui | GROUP=gameplay   run one group
+  JOBS=4                   run up to 4 gameplay replays at once (default 1)
   WINDOWED=1               also run the windowed checks of this platform
   NO_BUILD=1               use bin/ as it is
+  UPDATE_EXPECTED=1        record the gameplay outcomes as expected (after a reviewed change)
 """
 from __future__ import annotations
 
@@ -31,17 +43,22 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "artifacts" / "replays"
-CONFIG = REPO / "bin" / "hl2-config.json"
-SAVED = OUT / "user-settings.json"
 SYSTEM = platform.system()  # Darwin, Windows, Linux
-EXE = REPO / "bin" / ("hl2-bevy.exe" if SYSTEM == "Windows" else "hl2-bevy")
+EXE_NAME = "hl2-bevy.exe" if SYSTEM == "Windows" else "hl2-bevy"
+# The checks run a copy of the packaged game, so its settings (saved next to the executable) are
+# the checks' own: bin/hl2-config.json and a game running from bin/ are never touched.
+GAME = OUT / "game"
+EXE = GAME / EXE_NAME
+CONFIG = GAME / "hl2-config.json"
 
 
 # ---- running the game ---------------------------------------------------------------------
@@ -308,8 +325,23 @@ def check_console():
           g("console-paused")["time"] == g("return-to-pause")["time"] == g("pause-open")["time"])
     holds("unknown commands are rejected",
           "Unknown or unimplemented command: unsupported_command" in out("console-paused"))
+    audio = run.report["render"]["presentation"]["audio"]
+    # Sounds pause with the UI and resume after it. (The replay means to end paused, every sound
+    # paused; with the `menu-resume` step below not resuming here, its last Escape closes the
+    # pause menu instead, so the end state is not compared.)
+    holds("sounds play", audio["started_sinks"] > 0 and audio["failed_requests"] == 0,
+          (audio["started_sinks"], audio["failed_requests"]))
+    holds("playing sounds pause with the UI and resume after it",
+          audio["pause_changes"] >= 2 and audio["resume_changes"] >= 2,
+          (audio["pause_changes"], audio["resume_changes"]))
+    expect("viewport", run.report["render"]["presentation"]["hud"]["viewport"], [1280, 720])
     # The replay's `menu-resume` step presses Enter with no pause-menu row selected; here Escape
     # clears the menu selection, so Enter does nothing and its resume assertions do not apply.
+    large = game("console-1080p", "--map", "d1_trainstation_02", "--width", "1920", "--height", "1080",
+                 "--movement-script", "test-inputs/bevy-console.json")
+    expect("1080p viewport", large.report["render"]["presentation"]["hud"]["viewport"], [1920, 1080])
+    expect("1080p capture", png_size(large.capture), [1920, 1080])
+    expect("1080p console ends the same", large.console()["mode"], run.console()["mode"])
 
 
 def check_console_map():
@@ -371,6 +403,446 @@ def check_hud():
     holds("HUD quads drawn", run.report["render"]["presentation"]["hud"]["quads"] > 0)
 
 
+# ---- gameplay replays (background) ---------------------------------------------------------
+#
+# Every other movement-script fixture in test-inputs/ runs on its map with the generic checks
+# below, plus the specific assertions of the fixtures listed in GAMEPLAY_CHECKS. A fixture that
+# is in neither the UI checks, GAMEPLAY_MAPS nor SKIPPED fails the `coverage` check, so a new
+# fixture is never silently left out.
+
+STATION_01 = ("bevy-activity-idle", "bevy-attention", "bevy-audio-scenes", "bevy-face-security-1805",
+              "bevy-face-security-2100", "bevy-face-security-2130", "bevy-face-security-2245",
+              "bevy-gestures-security-1805", "bevy-gestures-security-2245", "bevy-gestures-timeline",
+              "bevy-monitors-kleiner-scene")
+STATION_02 = ("bevy-barrier-hum", "bevy-bugbait", "bevy-bugbait-wall", "bevy-carry-bottle-shove",
+              "bevy-crate-drop-rest", "bevy-crate-on-box-stack", "bevy-crossbow", "bevy-crowbar-surfaces",
+              "bevy-door-inputs", "bevy-door-swing", "bevy-effect-ball", "bevy-effect-decal",
+              "bevy-effect-decal-door", "bevy-effect-explosion", "bevy-effect-grenade",
+              "bevy-entities-weapons", "bevy-footsteps", "bevy-frag", "bevy-frag-empty-switch",
+              "bevy-frag-high", "bevy-frag-lob", "bevy-frag-native", "bevy-frag-roll",
+              "bevy-frag-use-pickup", "bevy-frag-wall", "bevy-monitors-breen-screen",
+              "bevy-monitors-breen-slate", "bevy-movement", "bevy-pallet-gibs-fade",
+              "bevy-pallet-kills-cop-physdamagescale1", "bevy-pallet-launched-into-wall",
+              "bevy-pallet-on-npc-hull", "bevy-pallet-tips-off-npc-hull", "bevy-pallet-tips-off-plaza-cop",
+              "bevy-particles-ball", "bevy-particles-fire", "bevy-particles-smoke",
+              "bevy-physcannon", "bevy-physcannon-npc-impact", "bevy-physcannon-pallet",
+              "bevy-physcannon-props", "bevy-pistol-breaks-bottle-skin4",
+              "bevy-pistol-breaks-teeter-seat-chunks", "bevy-pistol-level", "bevy-player-on-box",
+              "bevy-player-on-npc-hull", "bevy-player-push", "bevy-player-walk-into-boxes",
+              "bevy-playground-constraints", "bevy-rpg", "bevy-soundscapes",
+              "bevy-studio-decal-bugbait-citizen", "bevy-studio-decal-bugbait-cop",
+              "bevy-studio-decal-cop", "bevy-tictactoe-use-spins-block", "bevy-trace-bleed-cop-wall",
+              "bevy-use-carry")
+STATION_04 = ("bevy-player-death", "bevy-player-hurt")  # station 02 keeps the player invulnerable
+GAMEPLAY_MAPS = {**{f: "d1_trainstation_01" for f in STATION_01},
+                 **{f: "d1_trainstation_02" for f in STATION_02},
+                 **{f: "d1_trainstation_04" for f in STATION_04}}
+# Fixtures used by the UI checks above (by file name stem).
+UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-return",
+               "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
+               "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud")
+SKIPPED: dict[str, str] = {}  # fixture: why it is not run
+# Sounds the installed maps reference but the installation does not have.
+MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
+                                          "ambience/steamburst1.wav"}}
+
+
+# Sound errors that main shows too, by fixture: (wave prefix, reason).
+KNOWN_SOUND_GAPS = {
+    f: ("physics/body/body_medium_impact_soft", "a body impact variant is not preloaded (main too, not a regression)")
+    for f in ("bevy-pallet-on-npc-hull", "bevy-pallet-tips-off-npc-hull", "bevy-pallet-tips-off-plaza-cop")
+}
+# Collision models the loader does not support yet (it reports them and uses the render hull).
+KNOWN_COLLISION_WARNINGS = {
+    "d1_trainstation_01": {
+        "models/props_c17/SuitCase_Passenger_Physics.mdl: unsupported PHY root rotation; dynamic prop uses its render hull",
+        "models/props_junk/wood_crate001a_damaged.mdl: invalid KeyValues entry"},
+    "d1_trainstation_02": {
+        "models/props_c17/doll01.mdl: unsupported PHY root rotation; dynamic prop uses its render hull"},
+}
+
+
+def png_size(path: Path) -> Optional[list[int]]:
+    header = path.read_bytes()[:24]
+    if len(header) == 24 and header[:8] == b"\x89PNG\r\n\x1a\n" and header[12:16] == b"IHDR":
+        return [int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")]
+    return None
+
+
+def near(a, b, tolerance=0.001) -> bool:
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(near(x, y, tolerance) for x, y in zip(a, b))
+    return isinstance(a, (int, float)) and isinstance(b, (int, float)) and abs(a - b) <= tolerance
+
+
+def replay(fixture: str) -> Run:
+    """Run one gameplay fixture on its map and apply the checks every fixture must pass."""
+    script = REPO / "test-inputs" / f"{fixture}.json"
+    run = game(fixture, "--map", GAMEPLAY_MAPS[fixture], "--width", "1280", "--height", "720",
+               "--movement-script", str(script.relative_to(REPO)), timeout=300)
+    check_report(run, json.loads(script.read_text(encoding="utf-8")), GAMEPLAY_MAPS[fixture], fixture)
+    return run
+
+
+def check_report(run: Run, steps: list, map_: str, fixture: str = "") -> None:
+    report, render = run.report, run.report["render"]
+    simulation, presentation = render["simulation"], render["presentation"]
+    authored = {step["label"]: step["tick"] for step in steps if step.get("label")}
+    sampled = {s["label"]: s["host_tick"] for s in simulation["samples"] if s.get("label")}
+    holds("every label sampled at its tick", sampled == authored,
+          {k: (authored.get(k), sampled.get(k)) for k in set(authored) | set(sampled)
+           if authored.get(k) != sampled.get(k)})
+    holds("capture written at the reported size", render["capture_completed"]
+          and report["capture_write_error"] is None and run.capture is not None
+          and png_size(run.capture) == render["capture_size"], render["capture_size"])
+    holds("drawn entities agree with the simulation", presentation["pose_or_visibility_mismatches"] == 0
+          and presentation["effects"]["pose_mismatches"] == 0,
+          (presentation["pose_or_visibility_mismatches"], presentation["effects"]["pose_mismatches"]))
+    io = simulation["gameplay"]["io"]
+    holds("entity I/O within its budget", io["budget_exhaustions"] == 0 and io["malformed_outputs"] == 0)
+    fixture_errors = [k for k in io["unsupported"] if k.startswith("fixture ")]
+    holds("every fixture action found its entity", not fixture_errors, fixture_errors)
+    models = report["models"]
+    warnings = set(models["collision_warnings"]) - KNOWN_COLLISION_WARNINGS.get(map_, set())
+    holds("models and collision load", not models["errors"] and not warnings
+          and models["collision_models_missing"] == 0, models["errors"] or sorted(warnings))
+    holds("no texture budget failure", not any("budget" in e.lower() or "exceeds" in e.lower()
+                                               for e in map(str, report["texture_errors"])))
+    effects = presentation["effects"]
+    holds("effect sprites and models load", not effects["sprite_errors"] and not effects["model_errors"],
+          effects["sprite_errors"] or effects["model_errors"])
+    audio = set(presentation["audio"]["errors"]) - MISSING_SOUNDS.get(map_, set())
+    if fixture in KNOWN_SOUND_GAPS:
+        prefix, why = KNOWN_SOUND_GAPS[fixture]
+        known = {k for k in audio if k.startswith(prefix)}
+        if known:
+            print(f"known gap: {sorted(known)}: {why}")
+        audio -= known
+    holds("sounds play", not audio, {k: presentation["audio"]["errors"][k] for k in audio})
+
+
+def samples_of(run: Run) -> dict:
+    return run.samples()
+
+
+def check_movement(run: Run) -> None:
+    """Bench jumps: air duck keeps the trajectory, pause freezes the player, held jump re-arms."""
+    s = run.samples()
+    sim = run.report["render"]["simulation"]
+    p = lambda label: s[label]["player"]
+    eye = lambda label: p(label)["feet"][2] + p(label)["eye_height"]
+    holds("walk mode throughout", all(x["fly"] is False for x in sim["samples"]))
+    ground = p("bench-ground")
+    holds("settles on the bench top", ground["grounded"] and near(ground["feet"][2], 36.17742157), ground["feet"])
+    ordinary, crouch = p("ordinary-first"), p("crouch-first")
+    holds("both first jumps match before the air duck",
+          all(near(ordinary[k], crouch[k]) for k in ("feet", "velocity", "eye_height"))
+          and not ordinary["grounded"] and not crouch["grounded"]
+          and not ordinary["crouched"] and not crouch["crouched"])
+    holds("the first jump rises", ordinary["velocity"][2] > 0 and ordinary["feet"][2] > ground["feet"][2])
+    for phase in ("rise", "apex"):
+        a, b = p("ordinary-" + phase), p("crouch-" + phase)
+        holds(f"air duck {phase}: same trajectory, feet raised 36 once",
+              near(a["velocity"], b["velocity"]) and near(a["feet"][:2], b["feet"][:2])
+              and near(b["feet"][2] - a["feet"][2], 36.) and near(eye("ordinary-" + phase), eye("crouch-" + phase))
+              and not a["crouched"] and b["crouched"] and not a["grounded"] and not b["grounded"],
+              b["feet"][2] - a["feet"][2])
+    unduck, descend = p("air-unduck"), p("ordinary-descend")
+    holds("unducking in the air restores the ordinary descent", not unduck["crouched"]
+          and all(near(unduck[k], descend[k]) for k in ("feet", "velocity", "eye_height")))
+    for label in ("ordinary-landed", "crouch-landed", "bench-final"):
+        holds(f"{label} on the same bench", p(label)["grounded"] and near(p(label)["feet"][2], ground["feet"][2])
+              and near(p(label)["velocity"][2], 0.))
+    holds("pause freezes the whole player state",
+          p("pause-moving") == p("paused-before") == p("paused-held") and not s["pause-moving"]["paused"]
+          and s["paused-before"]["paused"] and s["paused-held"]["paused"])
+    holds("resume advances one fixed tick", p("resumed-held")["ticks"] == p("paused-held")["ticks"] + 1
+          and not s["resumed-held"]["paused"])
+    landed, released, rearmed = p("held-landed"), p("released-on-ground"), p("rearmed-first")
+    holds("a held jump lands without jumping again", landed["grounded"]
+          and near(landed["feet"][2], ground["feet"][2]) and near(landed["velocity"][2], 0.))
+    holds("releasing keeps the ground", released["grounded"] and near(released["feet"], landed["feet"]))
+    holds("the next press jumps like the first", not rearmed["grounded"]
+          and rearmed["ticks"] == released["ticks"] + 1 and near(rearmed["velocity"], ordinary["velocity"])
+          and near(rearmed["feet"], ordinary["feet"]))
+    holds("and keeps rising", p("rearmed-rise")["feet"][2] > rearmed["feet"][2])
+    holds("the final state holds, paused", sim["paused"] and s["done"]["paused"] and sim["player"] == p("done"))
+    holds("the camera is at the player's eye", near(run.report["render"]["camera_source"], sim["eye"])
+          and near(sim["eye"][2], eye("done")))
+    textures = run.report["textures"]
+    holds("decoded textures within their budget",
+          0 < textures["decoded_base_bytes"] <= textures["decoded_base_budget"])
+
+
+def check_entities_weapons(run: Run) -> None:
+    """Station doors block and open, E uses both leaves, pistol / SMG grenade / AR2 ball ammo."""
+    s = run.samples()
+    g = lambda label: s[label]["gameplay"]
+    door = lambda label: s[label]["ray_entity"] in (350, 351)
+    holds("closed doors stop walking", s["closed-blocks"]["player"]["feet"][0] < -3199)
+    holds("a closed door blocks the weapon ray", door("closed-blocks"))
+    holds("the open doorway can be crossed", s["open-passed"]["player"]["feet"][0] > -3199)
+    expect("opening completes both leaves", g("open-passed")["io"]["door_completions"], 2)
+    holds("the reclosed door blocks the ray", door("reclosed"))
+    expect("E opens both linked leaves", g("use-opened")["io"]["door_completions"], 6)
+    holds("a selection leaves the active weapon in place", g("pistol-pending")["pending"] == "weapon_pistol"
+          and g("pistol-pending")["inventory"]["active"] == "weapon_crowbar")
+    holds("the pistol fires once and spends one round", g("pistol-fired")["inventory"]["shots"] == 1
+          and g("pistol-fired")["inventory"]["owned"]["weapon_pistol"] == 17)
+    holds("the SMG launches a grenade and spends secondary ammo",
+          g("smg-secondary")["projectiles"]["diagnostics"]["grenades_spawned"] == 1
+          and g("smg-secondary")["inventory"]["reserve_ammo"]["SMG1_Grenade"] == 2)
+    holds("the AR2 charge does not launch at once",
+          g("ar2-charge")["projectiles"]["diagnostics"]["balls_spawned"] == 0
+          and g("ar2-charge")["inventory"]["reserve_ammo"]["AR2AltFire"] == 3)
+    holds("the delayed AR2 launch spends one secondary round",
+          g("ar2-launched")["projectiles"]["diagnostics"]["balls_spawned"] == 1
+          and g("ar2-launched")["inventory"]["reserve_ammo"]["AR2AltFire"] == 2)
+    holds("entity meshes drawn", run.report["render"]["presentation"]["owned_meshes"] > 0)
+
+
+def rotate(q, p):
+    x, y, z, w = q
+    px, py, pz = p
+    t = (2 * (y * pz - z * py), 2 * (z * px - x * pz), 2 * (x * py - y * px))
+    return (px + w * t[0] + y * t[2] - z * t[1], py + w * t[1] + z * t[0] - x * t[2],
+            pz + w * t[2] + x * t[1] - y * t[0])
+
+
+def doors_swing_away(run: Run) -> None:
+    s = run.samples()
+    for label, side, count in (("inside-open", -1, 2), ("outside-open", 1, 6)):
+        expect(f"{label} completions", s[label]["gameplay"]["io"]["door_completions"], count)
+        leaves = [e for e in s[label]["gameplay"]["entities"] if e["entity"] in (350, 351)]
+        holds(f"{label}: both leaves swing away from the opener", len(leaves) == 2
+              and all(rotate(e["rotation"], [0, 47, 0])[0] * side < -46 for e in leaves))
+    expect("closed completions", s["closed"]["gameplay"]["io"]["door_completions"], 4)
+    holds("the closed door blocks the ray", s["closed"]["ray_entity"] in (350, 351))
+
+
+def check_door_swing(run: Run) -> None:
+    """Linked station doors open away from the player from both sides and close again."""
+    doors_swing_away(run)
+
+
+def check_door_inputs(run: Run) -> None:
+    """OpenAwayFrom with a named opener, from both sides."""
+    doors_swing_away(run)
+    unsupported = run.report["render"]["simulation"]["gameplay"]["io"]["unsupported"]
+    holds("OpenAwayFrom is implemented", not any("openawayfrom" in k.lower() for k in unsupported))
+
+
+def frozen_final(run: Run) -> None:
+    sim = run.report["render"]["simulation"]
+    holds("ends paused on the last sample", sim["paused"]
+          and sim["gameplay"]["time"] == sim["samples"][-1]["gameplay"]["time"])
+
+
+def check_effect(name: str) -> Callable[[Run], None]:
+    def check(run: Run) -> None:
+        frozen_final(run)
+        g, p = run.report["render"]["simulation"]["gameplay"], run.report["render"]["presentation"]["effects"]
+        if name == "grenade":
+            holds("the live grenade is drawn", p["grenade_draws"] == p["observed_grenades"] == 1)
+            holds("one grenade, one 15 ms step out", len(g["projectiles"]["active"]) == 1
+                  and g["projectiles"]["active"][0]["position"][0] == -3245, g["projectiles"]["active"])
+            expect("SMG grenades left", g["inventory"]["reserve_ammo"]["SMG1_Grenade"], 2)
+        elif name == "ball":
+            # sprite_draws counts drawn quads, which also include particles (2 to 10 here).
+            holds("the paused ball draws its body and halo", p["sprite_draws"] >= 2 and p["pooled_quads"] == 10,
+                  (p["sprite_draws"], p["pooled_quads"]))
+            holds("the AR2 launches after the charge and spends one", g["projectiles"]["diagnostics"]["balls_spawned"] == 1
+                  and g["inventory"]["reserve_ammo"]["AR2AltFire"] == 2)
+        elif name == "explosion":
+            holds("the grenade detonated", g["projectiles"]["diagnostics"]["grenade_detonations"] == 1
+                  and not g["projectiles"]["active"])
+            # At least the two clouds: sprite_draws also counts the explosion's particles.
+            holds("both explosion clouds drawn", p["sprite_draws"] >= 2 and p["effect_frames"] > 0
+                  and g["projectiles"]["effects"][0]["kind"] == "GrenadeExplosion", p["sprite_draws"])
+        else:  # decal, decal-door
+            impacts = g["impacts"]
+            holds("one clipped, drawn impact mark", impacts["created"] == impacts["active"] == p["decal_draws"]
+                  == p["observed_decals"] == 1 and impacts["unclippable"] == 0)
+            holds("one pistol round spent", g["inventory"]["shots"] == 1
+                  and g["inventory"]["owned"]["weapon_pistol"] == 17)
+            # The installation has no base textures for five unused sand shot decals.
+            holds("only the sand shot decals are missing", len(impacts["errors"]) == 5
+                  and all(k.startswith("decals/sand/") for k in impacts["errors"]), impacts["errors"])
+            if name == "decal-door":
+                expect("the marked door opens both leaves", g["io"]["door_completions"], 2)
+    check.__doc__ = f"Effects fixture {name}: frozen final frame and its effect state."
+    return check
+
+
+def check_particles(name: str) -> Callable[[Run], None]:
+    def check(run: Run) -> None:
+        frozen_final(run)
+        sim, p = run.report["render"]["simulation"], run.report["render"]["presentation"]["effects"]
+        e = p["particle_emitters"]
+        holds("every particle drawn", p["missing_particle_draws"] == 0 and e["capacity_rejections"] == 0)
+        holds("quads presented", p["sprite_draws"] > 0)
+        projectiles = sim["gameplay"]["projectiles"]
+        if name == "ball":
+            holds("the ball expired", not projectiles["active"]
+                  and any(x["kind"] == "BallExplosion" for x in projectiles["effects"]))
+            holds("both timed rings and sparks", e["rings_emitted"] == e["rings_live"] == 2
+                  and e["live"]["Spark"] > 0 and e["live"]["Glow"] > 0)
+            ids = [x["id"] for x in projectiles["effects"]]
+            holds("unique effect ids", len(ids) == len(set(ids)))
+            return
+        holds("one grenade detonation", projectiles["diagnostics"]["grenade_detonations"] == 1 and e["events"] == 1)
+        emitted = e["emitted"]
+        holds("smoke, ember, fire and debris counts", emitted["Smoke"] == 44 and emitted["Ember"] == 16
+              and 40 <= emitted["Fire"] <= 48 and 16 <= emitted["Debris"] <= 32, emitted)
+        if name == "fire":
+            holds("fire still burning", e["live"].get("Fire", 0) > 0, e["live"])
+        else:
+            holds("fire out, smoke and embers live", e["live"].get("Fire", 0) == 0
+                  and e["live"].get("Smoke", 0) > 0 and e["live"].get("Ember", 0) == 16, e["live"])
+    check.__doc__ = f"Particles fixture {name}: emitter counts and lifetimes."
+    return check
+
+
+def check_attention(run: Run) -> None:
+    """Barney's LOOKAT interests in security_02: pause, UI freeze, overlap, cancel and tail."""
+    s = run.samples()
+    targets = lambda label: s[label]["gameplay"]["look_targets"].get("798", [])
+    scene = lambda label: next(x for x in s[label]["gameplay"]["choreography"] if x["entity"] == 662)
+    holds("security_02 runs", scene("scene-paused")["active"] or scene("scene-held")["active"],
+          scene("scene-held"))
+    holds("only the tested scene gives Barney interests",
+          all(x["scene"] == 662 for v in s.values() for x in v["gameplay"]["look_targets"].get("798", [])))
+    holds("a scene pause holds its clock", scene("scene-paused")["elapsed"] == scene("scene-held")["elapsed"]
+          and scene("scene-held")["pause"])
+    holds("the interests keep refreshing meanwhile", targets("scene-held")[0]["start"] > targets("scene-paused")[0]["start"]
+          and targets("scene-held")[0]["importance"] == targets("scene-paused")[0]["importance"])
+    overlap = targets("player-monitor-overlap")
+    holds("an overlap selects the player after the monitor", [x["target"] for x in overlap] == [{"Entity": 183}, "Player"])
+    holds("not the largest head importance", overlap[-1]["importance"] < overlap[0]["importance"])
+    holds("the UI freezes scene and interest clocks", s["ui-paused"]["gameplay"]["time"] == s["ui-held"]["gameplay"]["time"]
+          and targets("ui-paused") == targets("ui-held"))
+    holds("resuming advances the interest clock", targets("ui-resumed")[-1]["start"] > targets("ui-held")[-1]["start"])
+    holds("self interest supersedes the monitor", targets("self-interest")[-1]["target"] == {"Entity": 798})
+    holds("cancel stops the scene, keeps the tail", not scene("cancel-retains-tail")["active"]
+          and targets("cancel-retains-tail") and targets("cancel-retains-tail") == targets("cancel-request"))
+    holds("the tail expires within 0.1 s", not targets("cancel-expired") and not targets("attention-final"))
+
+
+# ---- expected outcomes ----
+# Each labelled sample's gameplay outcome (I/O counters, inventory, scenes, projectiles, gibs,
+# impacts, the player's feet and state, console mode, the forward ray) is compared with
+# test-inputs/expected/<fixture>.json. Any change is reported: a regression to fix, or an
+# intended change to record with UPDATE_EXPECTED=1 (review the diff of the expected files).
+EXPECTED = REPO / "test-inputs" / "expected"
+# Fields that differ between two runs of the same build, by fixture (left out of the comparison).
+UNSTABLE = {
+    "bevy-pallet-gibs-fade": {"hits"},
+    "bevy-pallet-launched-into-wall": {"hits", "ray"},
+    "bevy-pallet-tips-off-plaza-cop": {"ray"},
+}
+FEET_TOLERANCE = 1.0  # units
+TIME_TOLERANCE = 1e-3  # seconds
+
+
+def outcome(sample: dict) -> dict:
+    g, player, inventory = sample["gameplay"], sample["player"], sample["gameplay"]["inventory"]
+    diagnostics = dict(g["projectiles"]["diagnostics"])
+    diagnostics.pop("occluded_blast_targets", None)  # varies between runs of the same build
+    counters = lambda d: {k: v for k, v in d.items() if v}  # zero counters left out
+    return {
+        "io": counters({k: v for k, v in g["io"].items() if k != "unsupported"}),
+        "owned": inventory["owned"], "reserve": inventory["reserve_ammo"], "active": inventory["active"],
+        "pending": g["pending"], "shots": inventory["shots"], "bullets": inventory["bullets"],
+        "hits": inventory["hits"], "kills": inventory["kills"], "health": inventory["health"],
+        "armor": inventory["armor"], "suit": inventory.get("suit"),
+        "scenes": sorted(c["targetname"] for c in g["choreography"] if c["active"]),
+        "gesture_layers": len(g["gesture_layers"]),
+        "look_targets": {k: len(v) for k, v in g["look_targets"].items()},
+        "projectiles": counters(diagnostics), "projectiles_active": len(g["projectiles"]["active"]),
+        "gibs": counters({k: g["gibs"][k] for k in ("spawned", "removed")}),
+        "impacts": counters({k: g["impacts"][k] for k in ("created", "active", "studio_created", "unclippable")}),
+        "carrying": g["carrying"], "feet": [round(x, 1) for x in player["feet"]],
+        "grounded": player["grounded"], "crouched": player["crouched"], "player_ticks": player["ticks"],
+        "time": round(g["time"], 4), "paused": sample["paused"], "mode": sample["console"]["mode"],
+        "ray": sample["ray_entity"],
+    }
+
+
+def outcome_differences(want: dict, got: dict, unstable: set) -> list[str]:
+    differences = []
+    for label in sorted(want.keys() | got.keys()):
+        if label not in got or label not in want:
+            differences.append(f"{label}: {'missing' if label not in got else 'new label'}")
+            continue
+        for key in sorted(want[label].keys() | got[label].keys()):
+            a, b = want[label].get(key), got[label].get(key)
+            if key in unstable or a == b:
+                continue
+            if key == "feet" and near(a, b, FEET_TOLERANCE) or key == "time" and near(a, b, TIME_TOLERANCE):
+                continue
+            differences.append(f"{label}.{key}: expected {a!r}, got {b!r}")
+    return differences
+
+
+def expected_text(outcomes: dict) -> str:
+    """One line per label, so a diff shows which sample changed."""
+    line = lambda label: f"{json.dumps(label)}: {json.dumps(outcomes[label], sort_keys=True, separators=(',', ':'))}"
+    return "{\n" + ",\n".join(line(label) for label in outcomes) + "\n}\n"
+
+
+def check_outcomes(fixture: str, run: Run) -> None:
+    got = {label: outcome(sample) for label, sample in run.samples().items()}
+    path = EXPECTED / f"{fixture}.json"
+    if os.environ.get("UPDATE_EXPECTED") == "1":
+        EXPECTED.mkdir(exist_ok=True)
+        path.write_text(expected_text(got), encoding="utf-8")
+        print(f"recorded {path.relative_to(REPO)}")
+        return
+    holds("expected outcomes recorded", path.exists(), "record them with UPDATE_EXPECTED=1")
+    differences = outcome_differences(json.loads(path.read_text(encoding="utf-8")), got,
+                                      UNSTABLE.get(fixture, set()))
+    for line in differences:
+        print(f"  {line}")
+    holds("outcomes as expected", not differences, f"{len(differences)} differences: {differences[:3]}")
+
+
+GAMEPLAY_CHECKS: dict[str, Callable[[Run], None]] = {
+    "bevy-movement": check_movement,
+    "bevy-entities-weapons": check_entities_weapons,
+    "bevy-door-swing": check_door_swing,
+    "bevy-door-inputs": check_door_inputs,
+    "bevy-attention": check_attention,
+    **{f"bevy-effect-{n}": check_effect(n) for n in ("grenade", "ball", "decal", "explosion", "decal-door")},
+    **{f"bevy-particles-{n}": check_particles(n) for n in ("fire", "smoke", "ball")},
+}
+
+
+def gameplay_check(fixture: str) -> Callable[[], None]:
+    def run() -> None:
+        result = replay(fixture)
+        failure = None
+        if fixture in GAMEPLAY_CHECKS:
+            try:
+                GAMEPLAY_CHECKS[fixture](result)
+            except Failure as error:
+                failure = error  # still compare the outcomes, then report the first failure
+        check_outcomes(fixture, result)
+        if failure:
+            raise failure
+    run.__doc__ = (GAMEPLAY_CHECKS[fixture].__doc__ if fixture in GAMEPLAY_CHECKS
+                   else f"{fixture}: the generic replay checks")
+    return run
+
+
+def check_coverage():
+    """Every test-inputs fixture is run by a check (or skipped with a reason)."""
+    fixtures = {p.stem for p in (REPO / "test-inputs").glob("*.json")}
+    covered = set(UI_FIXTURES) | set(GAMEPLAY_MAPS) | set(SKIPPED)
+    covered |= {f for f in fixtures if f.startswith("bevy-options-capture")}
+    holds("every fixture has a check", fixtures <= covered, sorted(fixtures - covered))
+    holds("every listed fixture exists", covered <= fixtures, sorted(covered - fixtures))
+
+
 # ---- windowed checks -----------------------------------------------------------------------
 
 def check_window():
@@ -422,6 +894,7 @@ class Check:
     name: str
     run: Callable[[], None]
     category: str  # shared | windowed | macos | windows
+    group: str = "ui"  # ui | gameplay (GROUP=gameplay runs one group)
 
 
 CHECKS = [
@@ -442,16 +915,21 @@ CHECKS = [
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),
+    Check("coverage", check_coverage, "shared", "gameplay"),
+    *(Check(f[len("bevy-"):], gameplay_check(f), "shared", "gameplay") for f in sorted(GAMEPLAY_MAPS)),
 ]
 
 
 def selected() -> list[Check]:
     only = os.environ.get("ONLY", "").split()
+    group = os.environ.get("GROUP", "")
     windowed = os.environ.get("WINDOWED") == "1"
     platform_category = {"Darwin": "macos", "Windows": "windows"}.get(SYSTEM)
     chosen = []
     for check in CHECKS:
         if only and check.name not in only:
+            continue
+        if group and check.group != group:
             continue
         if check.category in ("macos", "windows") and check.category != platform_category:
             continue
@@ -459,6 +937,39 @@ def selected() -> list[Check]:
             continue
         chosen.append(check)
     return chosen
+
+
+class ThreadOutput:
+    """sys.stdout while checks run: each thread's prints go to its own check log."""
+
+    def __init__(self, console):
+        self.console, self.local = console, threading.local()
+
+    def write(self, text):
+        return getattr(self.local, "handle", self.console).write(text)
+
+    def flush(self):
+        getattr(self.local, "handle", self.console).flush()
+
+
+def run_check(check: Check, output: ThreadOutput) -> tuple[bool, str, float]:
+    begin = time.time()
+    with (OUT / f"{check.name}.log").open("w", encoding="utf-8") as handle:
+        output.local.handle = handle
+        try:
+            check.run()
+            ok, why = True, ""
+        except Failure as failure:
+            ok, why = False, str(failure)
+            print(f"FAIL: {failure}")
+        except Exception as error:  # a broken report or check is a failure too
+            ok, why = False, f"{type(error).__name__}: {error}"
+            print(f"FAIL: {why}")
+        finally:
+            del output.local.handle
+    seconds = time.time() - begin
+    print(f"  {'ok  ' if ok else 'FAIL'}  {check.name:38} {check.category:8} {seconds:5.0f} s  {why}".rstrip())
+    return ok, why, seconds
 
 
 def build() -> None:
@@ -475,44 +986,39 @@ def build() -> None:
         sys.exit(f"build failed: {OUT / 'build.log'}")
 
 
+def stage() -> None:
+    """Copy the packaged game (executable and its bevy-assets) to artifacts/replays/game."""
+    if GAME.exists():
+        shutil.rmtree(GAME)
+    GAME.mkdir(parents=True)
+    shutil.copy2(REPO / "bin" / EXE_NAME, EXE)
+    shutil.copytree(REPO / "bin" / "bevy-assets", GAME / "bevy-assets")
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     build()
-    had_settings = CONFIG.exists()
-    if had_settings:
-        shutil.copy2(CONFIG, SAVED)
-    failed, started = 0, time.time()
+    stage()
+    checks, started = selected(), time.time()
+    output = ThreadOutput(sys.stdout)
+    sys.stdout = output
+    results = []
     try:
-        for check in selected():
+        # UI checks write settings, so they run one at a time, each from default settings.
+        for check in (c for c in checks if c.group == "ui"):
             if CONFIG.exists():
-                CONFIG.unlink()  # every check starts from default settings
-            begin = time.time()
-            log = OUT / f"{check.name}.log"
-            with log.open("w", encoding="utf-8") as handle:
-                stdout, sys.stdout = sys.stdout, handle
-                try:
-                    check.run()
-                    ok, why = True, ""
-                except Failure as failure:
-                    ok, why = False, str(failure)
-                    print(f"FAIL: {failure}")
-                except Exception as error:  # a broken report or check is a failure too
-                    ok, why = False, f"{type(error).__name__}: {error}"
-                    print(f"FAIL: {why}")
-                finally:
-                    sys.stdout = stdout
-            seconds = time.time() - begin
-            if ok:
-                print(f"  ok    {check.name:14} {check.category:8} {seconds:5.0f} s")
-            else:
-                failed += 1
-                print(f"  FAIL  {check.name:14} {check.category:8} {seconds:5.0f} s  {why}")
-    finally:
-        if had_settings:
-            shutil.copy2(SAVED, CONFIG)
-        elif CONFIG.exists():
+                CONFIG.unlink()
+            results.append(run_check(check, output))
+        # Gameplay replays only read the default settings; JOBS of them run at once.
+        if CONFIG.exists():
             CONFIG.unlink()
-    print(f"=== {len(selected())} checks, {failed} failed, {time.time() - started:.0f} s; logs in {OUT} ===")
+        gameplay = [c for c in checks if c.group == "gameplay"]
+        with ThreadPoolExecutor(max(1, int(os.environ.get("JOBS", "1")))) as pool:
+            results += pool.map(lambda c: run_check(c, output), gameplay)
+    finally:
+        sys.stdout = output.console
+    failed = sum(1 for ok, _, _ in results if not ok)
+    print(f"=== {len(checks)} checks, {failed} failed, {time.time() - started:.0f} s; logs in {OUT} ===")
     return 1 if failed else 0
 
 
