@@ -1036,6 +1036,28 @@ impl OptionsDialog {
         self.keys.capture.is_some()
     }
 
+    /// The dialog's frame on `canvas`, in canvas pixels, where it is placed.
+    pub fn frame_bounds(&self, canvas: Vec2) -> Rect {
+        let frame = main_frame(canvas);
+        let placed = self.placement.place(&frame);
+        Rect::new(
+            placed.origin.x,
+            placed.origin.y,
+            placed.size.x * frame.scale,
+            placed.size.y * frame.scale,
+        )
+    }
+
+    /// A layer that takes every click while it is open, wherever the pointer is: a sub-dialog
+    /// (retail opens them modal), the confirmation box, an open drop-down list (an outside
+    /// click closes it) or a key capture.
+    pub fn modal_layer_open(&self) -> bool {
+        self.sub.is_some()
+            || self.confirm.is_some()
+            || self.combo.is_some()
+            || self.keys.capture.is_some()
+    }
+
     /// A layer above the dialog page owns the pointer this frame.
     fn occlude(&mut self, input: &Input) {
         self.active_tooltip = None;
@@ -1552,7 +1574,7 @@ impl OptionsDialog {
         OptionsOutcome::None
     }
 
-    fn command(&mut self, command: Command) -> OptionsOutcome {
+    pub(crate) fn command(&mut self, command: Command) -> OptionsOutcome {
         self.tracker.reset();
         let loc = &self.res.localization;
         match command {

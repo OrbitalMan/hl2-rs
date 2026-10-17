@@ -55,6 +55,7 @@ fixture is never silently left out.
 | `submenus` | shared | `test-inputs/bevy-menu-submenus.json`: Episode One, back, Half-Life 2, back, Extras > Lost Coast load `hl2/background01`, `episodic/ep1_background01`, `hl2/background01`, `lostcoast/background01`, ending in the main menu |
 | `return_menu` | shared | `bevy-menu-return.json`: Episode Two menu, `map d1_trainstation_02`, Return to main menu: back over `hl2/background01`, which is saved |
 | `chapter_menu` | shared | `bevy-menu-chapter-return.json`: `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06` |
+| `menu_options` | shared | `bevy-menu-options-nonmodal.json`: with Options open, a click on a menu row beside it runs the row (Episode One) and focuses the menu while Options stays open; Options dragged over the menu column; NEW GAME clicked under it does not start a game, Options keeps the focus (report `console.windows`) |
 | `chapter_quit` | shared | `--map d2_coast_01` quit mid-game: the saved background goes from `hl2/background01` to `hl2/background04` |
 | `options` | shared | every `bevy-options-capture*.json`: Keyboard / Video Advanced sub-dialogs open, the dialog drags, the console states; the `-keyboard-*` replays reach their control by keyboard only (focused control, tab and drawn focus from the report; the text entry edits; the FOV slider in Video > Advanced; the 3rd party credits' Close holds the focus and Enter closes them on release) |
 | `placement` | shared | a dragged Options dialog is saved and kept when it reopens in a second launch |

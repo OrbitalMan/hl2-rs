@@ -428,11 +428,11 @@ impl Simulation {
                 game.actions.extend(c.actions);
             }
             if let (Some(ui), Some(game)) = (ui.as_deref_mut(), game.as_deref_mut()) {
-                let before = ui.source.mode;
+                let before = ui.source.mode();
                 for action in &c.ui {
                     self.ui_action(ui, game, action);
                 }
-                if ui.source.mode != before {
+                if ui.source.mode() != before {
                     self.paused = ui.source.paused();
                     self.transition = true;
                     self.jump_suppressed |= c.jump;
@@ -767,7 +767,7 @@ mod tests {
             app.world()
                 .resource::<crate::ui_host::Console>()
                 .source
-                .mode,
+                .mode(),
             Mode::Console
         );
         assert!(app.world().resource::<Simulation>().paused);
@@ -782,7 +782,7 @@ mod tests {
             app.world()
                 .resource::<crate::ui_host::Console>()
                 .source
-                .mode,
+                .mode(),
             Mode::Console,
             "the console closes when Escape is released"
         );
@@ -812,7 +812,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<crate::ui_host::Console>()
             .source
-            .mode = Mode::Pause;
+            .set_mode(Mode::Pause);
         step_input(&mut app);
         assert!(app.world().resource::<Simulation>().paused);
         app.world_mut()
@@ -917,7 +917,7 @@ mod tests {
             false,
             script,
         );
-        ui.source.mode = hl2_ui::console::Mode::Options;
+        ui.source.set_mode(hl2_ui::console::Mode::Options);
         sim.paused = ui.source.paused();
         for _ in 0..5 {
             sim.step(Some(&mut game), Some(&mut ui));
@@ -926,7 +926,7 @@ mod tests {
         assert_eq!(sim.host_tick, 5);
         assert!(sim.finished);
         assert!(ui.source.cheats);
-        assert_eq!(ui.source.mode, hl2_ui::console::Mode::Options);
+        assert_eq!(ui.source.mode(), hl2_ui::console::Mode::Options);
         let labels: Vec<_> = sim
             .samples
             .iter()
@@ -949,7 +949,7 @@ mod tests {
             let mut ui = crate::ui_host::Console::new(Default::default());
             ui.source.level_loaded(background);
             if !background {
-                ui.source.mode = hl2_ui::console::Mode::Pause;
+                ui.source.set_mode(hl2_ui::console::Mode::Pause);
             }
             let mut game = crate::gameplay::Gameplay::synthetic(World::default());
             let start = glam::Vec3::new(0., 0., 128.);

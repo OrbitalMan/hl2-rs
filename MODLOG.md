@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 GameUI: Options and the console are non-modal windows with a focus look
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** new `gameui::windows` (pure model: open windows in z-order over a base, keyboard focus, pointer routing with press ownership, modal inner layers, per-window focus fade). `Console` keeps `base` (menu or gameplay) plus `Windows` instead of `previous` / `options_return`; `mode` is private (`mode()` = the focused layer, `set_mode()` opens a window or replaces the base). `Console::input` routes each frame through `Windows::route` and gives every layer its share (`Input::share`); a layer without the pointer has its tracker occluded. A press raises and focuses its window or focuses the menu; Escape closes the top window first; OPTIONS raises an open dialog as it is; Resume and a new game close the windows; a submenu background load keeps them. `modal_dialog_open` now means the quit / return box or a game loading dialog only; `modal_bounds` uses placed frames (`OptionsDialog::frame_bounds`, `Console::window_bounds`). Focus look from SDK `Frame::OnFrameFocusChanged` and the installed scheme: `Frame.BgColor` / `Frame.OutOfFocusBgColor` faded over `Frame.FocusTransitionEffectTime`, `FrameTitleBar.TextColor` / `DisabledTextColor` (`Theme::focus_faded`; stacked windows fade to opaque). The run report lists the open windows. Host writes of the mode go through `set_mode`. Replay `test-inputs/bevy-menu-options-nonmodal.json` with check `menu_options`.
+
+**Why:** owner report: the menu could not be used while Options was open, unlike the original; the console must not block the menu or Options; dialogs show their focus as the original does. Owner asked that hit testing not regress.
+
+**Tested how:** unit tests: `gameui::windows` (9) and console window tests (14: menu beside Options, presses dragged between layers both ways, caption drag over the menu at scale 1 and 2, a sub-dialog over the menu, the quit box over Options, OPTIONS again, Resume, console / Options overlap and raising, pointerless input, the focus fade, Escape with the menu focused, a background load behind Options); updated modality tests. Packaged: `menu_options` (beside the dialog the menu runs, under the dragged dialog NEW GAME does not start a game; a control run without the dialog starts `ep1_citadel_00` from the same click); captures of the console over Options, Options raised over it, and both out of focus with the menu focused inspected. `replays.py` all 86 checks ok (630 s, `JOBS=4`), gameplay outcomes unchanged; workspace tests, strict clippy, fmt, Windows-target clippy.
+
+**Result:** the menu, Options and the console work side by side as in the original, each layer receiving only its share of the input.
+
+**Still broken or not tested:** retail hides open windows on Resume and shows them again with the pause menu; here they close. With the menu focused, an unfocused console over an unfocused Options shows Options through it. The console's completion list counts as inside its frame. Windows not tested.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: link text inside its focus box
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

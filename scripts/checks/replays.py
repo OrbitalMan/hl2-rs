@@ -182,6 +182,21 @@ def check_chapter_menu():
                                     "hl2/d3_c17_10a", "hl2/background06"])
 
 
+def check_menu_options():
+    """Options is not modal: the menu beside it works, the menu under it gets nothing."""
+    run = game("menu_options", *MENU[:-2], "--frames", "800",
+               "--movement-script", "test-inputs/bevy-menu-options-nonmodal.json")
+    beside = run.sample("menu-beside-clicked")["console"]
+    expect("a click beside Options focuses the menu", beside["mode"], "MainMenu")
+    expect("Options stays open", beside.get("windows"), ["Options"])
+    expect("the Episode One row ran", beside.get("pending_map"), "ep1_background01")
+    expect("dragging the caption focuses Options", run.sample("options-dragged")["console"]["mode"], "Options")
+    under = run.sample("menu-under-clicked")["console"]
+    expect("NEW GAME under the dialog does not start a game", under.get("pending_map"), None)
+    expect("Options still open and focused", (under["mode"], under.get("windows")), ("Options", ["Options"]))
+    expect("loaded", run.loaded(), ["hl2/background01", "episodic/ep1_background01"])
+
+
 def check_chapter_quit():
     """Loading a gameplay map saves its chapter's background, so a mid-game quit relaunches over it."""
     settings(gameplay={"background_game": "hl2", "background_map": "background01"})
@@ -455,6 +470,7 @@ GAMEPLAY_MAPS = {**{f: "d1_trainstation_01" for f in STATION_01},
                  **{f: "d1_trainstation_04" for f in STATION_04}}
 # Fixtures used by the UI checks above (by file name stem).
 UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-return",
+               "bevy-menu-options-nonmodal",
                "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
                "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
@@ -918,6 +934,7 @@ CHECKS = [
     Check("return_menu", check_return_menu, "shared"),
     Check("chapter_menu", check_chapter_menu, "shared"),
     Check("chapter_quit", check_chapter_quit, "shared"),
+    Check("menu_options", check_menu_options, "shared"),
     Check("options", check_options, "shared"),
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),

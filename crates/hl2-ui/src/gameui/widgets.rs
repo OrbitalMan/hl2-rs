@@ -56,7 +56,11 @@ impl WidgetKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
     pub frame_bg: Color,
+    /// `Frame.OutOfFocusBgColor`: a frame without the keyboard focus.
+    pub frame_bg_out_of_focus: Color,
     pub title_text: Color,
+    /// `FrameTitleBar.DisabledTextColor`: the title of a frame without the focus.
+    pub title_text_out_of_focus: Color,
     pub text: Color,
     /// Normal label text (`Label.TextColor`, OffWhite): check box and radio button labels at
     /// rest, between `text_dull` and the brighter hover `text`.
@@ -122,7 +126,9 @@ impl Default for Theme {
         let rgba = Color::from_rgba;
         Self {
             frame_bg: rgba(132, 132, 132, 212),
+            frame_bg_out_of_focus: rgba(132, 132, 132, 62),
             title_text: rgba(255, 255, 255, 255),
+            title_text_out_of_focus: rgba(255, 255, 255, 192),
             text: rgba(255, 255, 255, 255),
             label_text: rgba(221, 221, 221, 255),
             text_dull: rgba(190, 190, 190, 255),
@@ -180,12 +186,42 @@ impl Theme {
         theme
     }
 
+    /// A frame's focus look (SDK `Frame::OnFrameFocusChanged`): the background `fade` of the
+    /// way (0..1) from `Frame.OutOfFocusBgColor` to `Frame.BgColor` (it fades over
+    /// `Frame.FocusTransitionEffectTime`), the title in `FrameTitleBar.TextColor` when
+    /// `focused`, else `FrameTitleBar.DisabledTextColor` (switched at once). Composes with
+    /// [`Theme::stacked`]: `theme.stacked().focus_faded(..)` fades to an opaque background.
+    pub fn focus_faded(&self, fade: f32, focused: bool) -> Self {
+        let mix = |from: Color, to: Color| {
+            let t = fade.clamp(0., 1.);
+            Color::new(
+                from.r + (to.r - from.r) * t,
+                from.g + (to.g - from.g) * t,
+                from.b + (to.b - from.b) * t,
+                from.a + (to.a - from.a) * t,
+            )
+        };
+        let mut theme = self.clone();
+        theme.frame_bg = mix(self.frame_bg_out_of_focus, self.frame_bg);
+        theme.title_text = if focused {
+            self.title_text
+        } else {
+            self.title_text_out_of_focus
+        };
+        theme
+    }
+
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 41] = [
+        let fields: [(&str, &mut Color); 43] = [
             ("Frame.BgColor", &mut theme.frame_bg),
+            ("Frame.OutOfFocusBgColor", &mut theme.frame_bg_out_of_focus),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
+            (
+                "FrameTitleBar.DisabledTextColor",
+                &mut theme.title_text_out_of_focus,
+            ),
             ("Label.TextBrightColor", &mut theme.text),
             ("Label.TextColor", &mut theme.label_text),
             ("Label.TextDullColor", &mut theme.text_dull),

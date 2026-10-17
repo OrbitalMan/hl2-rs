@@ -822,6 +822,6 @@ mod tests {
             "warning logged to console"
         );
         assert!(!ui.source.is_loading());
-        assert_eq!(ui.source.mode, hl2_ui::console::Mode::MainMenu);
+        assert_eq!(ui.source.mode(), hl2_ui::console::Mode::MainMenu);
     }
 }

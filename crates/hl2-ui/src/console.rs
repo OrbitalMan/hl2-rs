@@ -14,6 +14,7 @@ use crate::gameui::{
         scheme_color, Align, ButtonState, ButtonTracker, Fonts, HoldRepeat, Painter,
         ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
     },
+    windows::{Layer, Pointer, Window, Windows},
 };
 use crate::{
     canvas::*,
@@ -133,8 +134,14 @@ pub enum ConfirmKind {
 
 pub struct Console {
     pub canvas: Canvas,
-    pub mode: Mode,
-    previous: Mode,
+    /// The focused layer: a window ([`Mode::Options`], [`Mode::Console`]) or the base. Read it
+    /// with [`Console::mode`], change it with [`Console::set_mode`].
+    mode: Mode,
+    /// What the windows are over: the main menu, the pause menu or the game.
+    base: Mode,
+    /// The Options dialog and the console: non-modal windows over the base (retail VGUI
+    /// frames), in z-order with the keyboard focus (`gameui::windows`).
+    windows: Windows,
     pub cheats: bool,
     pub output: VecDeque<Line>,
     /// Line number (since start) of `output[0]`: lines dropped from the front count on.
@@ -211,8 +218,7 @@ pub struct Console {
     pub menu_tracker: ButtonTracker<usize>,
     last_menu_hover: Option<usize>,
     pub options: OptionsDialog,
-    /// The menu the options dialog was opened from (drawn behind it and restored on close).
-    options_return: Mode,
+
     /// `(game, image)` -> pre-blurred background (see `GameUiResources::background_images`).
     pub background_textures: BTreeMap<(String, String), Texture2D>,
     pub config: crate::config::Config,
@@ -427,6 +433,34 @@ impl Input {
     pub(crate) fn pressed(&self, key: Key) -> bool {
         self.keys.contains(&key)
     }
+
+    /// What one UI layer receives of this frame: the pointer (position, button, wheel) when it
+    /// owns it, the keyboard (keys, text, modifiers, clipboard) when it has the focus, and the
+    /// time either way.
+    pub(crate) fn share(&self, pointer: bool, keyboard: bool) -> Input {
+        let mut share = if keyboard {
+            self.clone()
+        } else {
+            Input {
+                time: self.time,
+                ..Input::default()
+            }
+        };
+        if pointer {
+            share.pointer = self.pointer;
+            share.click = self.click;
+            share.held = self.held;
+            share.released = self.released;
+            share.wheel = self.wheel;
+        } else {
+            share.pointer = None;
+            share.click = false;
+            share.held = false;
+            share.released = false;
+            share.wheel = 0.;
+        }
+        share
+    }
 }
 
 /// The console dialog's push buttons.
@@ -475,7 +509,9 @@ impl Default for Console {
         let mut console = Self {
             canvas: Canvas::default(),
             mode: Mode::Gameplay,
-            previous: Mode::Gameplay,
+            base: Mode::Gameplay,
+            // `Frame.FocusTransitionEffectTime` of the installed desktop scheme.
+            windows: Windows::new(0.3),
             cheats: false,
             output: VecDeque::new(),
             output_start: 0,
@@ -528,7 +564,6 @@ impl Default for Console {
             menu_tracker: ButtonTracker::new(),
             last_menu_hover: None,
             options: OptionsDialog::default(),
-            options_return: Mode::MainMenu,
             background_textures: BTreeMap::new(),
             config,
             chapter_index: Default::default(),
@@ -692,6 +727,14 @@ impl Console {
             .and_then(|roots| roots.into_iter().next())
         {
             console.theme = Theme::from_scheme(&root);
+            if let Some(time) = root
+                .get("BaseSettings")
+                .and_then(|e| e.get("Frame.FocusTransitionEffectTime"))
+                .and_then(|e| e.text())
+                .and_then(|t| t.trim().parse::<f32>().ok())
+            {
+                console.windows.fade_time = time;
+            }
             console.style = Style {
                 menu: scheme_color(&root, "MainMenu.TextColor").unwrap_or(console.style.menu),
                 menu_armed: scheme_color(&root, "MainMenu.ArmedTextColor")
@@ -810,12 +853,7 @@ impl Console {
 
     /// The active menu title for the current mode and selected category.
     pub fn current_title(&self) -> &str {
-        let shown = if self.mode == Mode::Options {
-            self.options_return
-        } else {
-            self.mode
-        };
-        let menu_cat = if shown == Mode::Pause {
+        let menu_cat = if self.base == Mode::Pause {
             self.pause_menu.category()
         } else {
             self.main_menu.category()
@@ -826,12 +864,7 @@ impl Console {
 
     /// The active menu category for the current mode.
     pub fn menu_category(&self) -> &str {
-        let shown = if self.mode == Mode::Options {
-            self.options_return
-        } else {
-            self.mode
-        };
-        if shown == Mode::Pause {
+        if self.base == Mode::Pause {
             self.pause_menu.category()
         } else {
             self.main_menu.category()
@@ -902,12 +935,13 @@ impl Console {
         if self.loaded_map.is_none() && background {
             self.loaded_map = self.background();
         }
-        self.mode = if background {
-            Mode::MainMenu
+        if background {
+            // A menu background (a submenu's) loads behind the open windows: they stay.
+            self.base = Mode::MainMenu;
+            self.sync_mode();
         } else {
-            Mode::Gameplay
-        };
-        self.previous = self.mode;
+            self.set_mode(Mode::Gameplay);
+        }
     }
 
     /// Completes loading `game`'s `map`. Ignores stale background completions.
@@ -1105,15 +1139,122 @@ impl Console {
         &self.background_transition
     }
 
-    /// Whether any modal dialog or blocking widget is currently active over the menus.
+    /// A modal dialog is up: the quit / return confirmation box or a game loading dialog. It
+    /// takes every click; the Options dialog and the console are not modal (see [`Windows`]).
     pub fn modal_dialog_open(&self) -> bool {
-        self.mode == Mode::Options
-            || self.confirm_box.is_some()
+        self.confirm_box.is_some()
             || self
                 .loading_dialog
                 .as_ref()
                 .is_some_and(|l| !l.is_background())
-            || self.mode == Mode::Console
+    }
+
+    /// The focused layer: a window ([`Mode::Options`], [`Mode::Console`]) or the base.
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Moves the UI to `mode`: a window mode opens that window on top with the focus (without
+    /// resetting its contents); a base mode (menus, gameplay) replaces the base and closes
+    /// every window.
+    pub fn set_mode(&mut self, mode: Mode) {
+        match mode {
+            Mode::Options => self.windows.open(Window::Options),
+            Mode::Console => self.windows.open(Window::Console),
+            base => {
+                self.base = base;
+                self.windows.clear();
+            }
+        }
+        self.sync_mode();
+    }
+
+    /// Keeps `mode` on the focused layer after the windows changed.
+    fn sync_mode(&mut self) {
+        self.mode = match self.windows.focus() {
+            Layer::Window(Window::Options) => Mode::Options,
+            Layer::Window(Window::Console) => Mode::Console,
+            Layer::Base => self.base,
+        };
+    }
+
+    /// The Options dialog is open (focused or not).
+    pub fn options_open(&self) -> bool {
+        self.windows.is_open(Window::Options)
+    }
+
+    /// The open windows, bottom to top.
+    pub fn open_windows(&self) -> Vec<Window> {
+        self.windows.order().collect()
+    }
+
+    /// The developer console is open (focused or not).
+    pub fn console_open(&self) -> bool {
+        self.windows.is_open(Window::Console)
+    }
+
+    /// The menu under the windows takes the pointer (gameplay under the console does not).
+    fn base_is_menu(&self) -> bool {
+        matches!(self.base, Mode::MainMenu | Mode::Pause)
+    }
+
+    /// Opens the Options dialog with the applied settings, or raises it as it is when open
+    /// (retail activates the existing dialog).
+    pub fn open_options(&mut self) {
+        if !self.options_open() {
+            self.options.open(self.config.clone());
+            self.options
+                .reset_placement_if_off_screen(vec2(self.canvas.width(), self.canvas.height()));
+        }
+        self.windows.open(Window::Options);
+        self.reset_menu_interaction();
+        self.sync_mode();
+    }
+
+    fn close_window(&mut self, window: Window) {
+        if window == Window::Console {
+            self.console_placement.end();
+        }
+        self.windows.close(window);
+        self.reset_menu_interaction();
+        self.sync_mode();
+    }
+
+    /// A window's frame look: faded towards its focused look (SDK `Frame` focus), and, when it
+    /// lies over another window, opaque in focus like every stacked dialog.
+    fn window_theme(&self, window: Window, time: f64) -> Theme {
+        let stacked = self
+            .windows
+            .order()
+            .next()
+            .is_some_and(|bottom| bottom != window);
+        let theme = if stacked {
+            self.theme.stacked()
+        } else {
+            self.theme.clone()
+        };
+        theme.focus_faded(
+            self.windows.focus_amount(window, time),
+            self.windows.focus() == Layer::Window(window),
+        )
+    }
+
+    /// A window's frame on the canvas, in canvas pixels.
+    pub fn window_bounds(&self, window: Window) -> Rect {
+        match window {
+            Window::Options => self
+                .options
+                .frame_bounds(vec2(self.canvas.width(), self.canvas.height())),
+            Window::Console => {
+                let layout = self.dialog_layout();
+                Rect::new(
+                    layout.origin.x,
+                    layout.origin.y,
+                    layout.size.x * layout.scale,
+                    layout.size.y * layout.scale,
+                )
+            }
+        }
     }
 
     /// Bounding rectangle in canvas pixels of the currently active modal dialog, if any.
@@ -1137,28 +1278,23 @@ impl Console {
                 layout.size.y * scale,
             ));
         }
-        if self.mode == Mode::Options {
-            let scale = Painter::scale_for(self.canvas.height());
-            let canvas = vec2(self.canvas.width(), self.canvas.height());
-            let size = crate::gameui::options::DIALOG_SIZE * scale;
-            let origin = ((canvas - size) * 0.5).round();
-            return Some(Rect::new(origin.x, origin.y, size.x, size.y));
-        }
-        if self.mode == Mode::Console {
-            return Some(Rect::new(0., 0., self.canvas.width(), self.canvas.height()));
-        }
         None
     }
 
-    /// Whether a point in canvas coordinates is covered by an active modal dialog.
+    /// Whether a point in canvas coordinates is covered by a modal dialog or an open window.
     pub fn is_occluded(&self, point: Vec2) -> bool {
         self.modal_bounds().is_some_and(|b| b.contains(point))
+            || self
+                .windows
+                .order()
+                .any(|w| self.window_bounds(w).contains(point))
     }
 
     /// The `mat_monitorgamma` to display: the brightness dialog's live value while it is open,
     /// otherwise the applied setting.
     pub fn display_gamma(&self) -> f32 {
-        let preview = (self.mode == Mode::Options)
+        let preview = self
+            .options_open()
             .then(|| self.options.preview_gamma())
             .flatten();
         preview.unwrap_or(self.config.video.gamma)
@@ -1194,7 +1330,7 @@ impl Console {
     /// The main menu over a background level has nothing to return to.
     /// The Options dialog's state for run reports while it is open.
     pub fn options_report(&self) -> Option<crate::gameui::options::OptionsReport> {
-        (self.mode == Mode::Options).then(|| self.options.report())
+        self.options_open().then(|| self.options.report())
     }
 
     /// Escape went down. When it would close a dialog that has a close button (Options or one
@@ -1204,7 +1340,7 @@ impl Console {
     pub fn escape_pressed(&mut self) {
         if self.escape_closes_dialog() {
             self.escape_held = true;
-            self.options.escape_held = self.mode == Mode::Options;
+            self.options.escape_held = self.windows.top() == Some(Window::Options);
         } else {
             self.escape();
         }
@@ -1227,28 +1363,27 @@ impl Console {
         {
             return false;
         }
-        match self.mode {
-            Mode::Options => self.options.escape_closes(),
-            Mode::Console => !self.console_placement.active() && !self.editor.can_dismiss(),
-            _ => false,
+        match self.windows.top() {
+            Some(Window::Options) => self.options.escape_closes(),
+            Some(Window::Console) => !self.console_placement.active() && !self.editor.can_dismiss(),
+            None => false,
         }
     }
 
     pub fn escape(&mut self) {
         // A drag or resize in progress is undone first.
-        if self.quit_placement.cancel()
-            || (self.mode == Mode::Console && self.console_placement.cancel())
-        {
+        let console_on_top = self.windows.top() == Some(Window::Console);
+        if self.quit_placement.cancel() || (console_on_top && self.console_placement.cancel()) {
             return;
         }
         // In the console Escape first ends a history search, then hides the completion list.
-        if self.mode == Mode::Console && self.editor.dismiss() {
+        if console_on_top && self.editor.dismiss() {
             return;
         }
         if let Some(loading) = &self.loading_dialog {
             if loading.is_failed() {
                 self.loading_dialog = None;
-                self.mode = Mode::MainMenu;
+                self.set_mode(Mode::MainMenu);
                 self.main_menu.back(&self.gameui.localization);
                 self.clear_menu_hover();
             }
@@ -1258,19 +1393,27 @@ impl Console {
             self.reset_menu_interaction();
             return;
         }
-        if self.mode == Mode::Options {
-            if !self.options.escape() {
-                self.mode = self.options_return;
-                self.reset_menu_interaction();
+        // Escape closes the top window first, whichever layer has the focus.
+        match self.windows.top() {
+            Some(Window::Options) => {
+                if !self.options.escape() {
+                    self.close_window(Window::Options);
+                }
+                return;
             }
-            return;
+            Some(Window::Console) => {
+                self.close_window(Window::Console);
+                self.clear_menu_hover();
+                return;
+            }
+            None => {}
         }
         let menu = if self.background_level {
             Mode::MainMenu
         } else {
             Mode::Pause
         };
-        self.mode = match self.mode {
+        let base = match self.base {
             Mode::Gameplay => menu,
             Mode::Pause => {
                 if self.background_level {
@@ -1279,7 +1422,6 @@ impl Console {
                     Mode::Gameplay
                 }
             }
-            Mode::Console | Mode::Options => self.previous,
             Mode::MainMenu => {
                 if self.main_menu.back(&self.gameui.localization) || self.background_level {
                     Mode::MainMenu
@@ -1287,18 +1429,21 @@ impl Console {
                     Mode::Gameplay
                 }
             }
+            // Windows are never the base.
+            window @ (Mode::Console | Mode::Options) => window,
         };
+        self.set_mode(base);
     }
-    /// Opens or closes the console; it opens only while `con_enable` is on.
+    /// Opens the console on top with the focus, or closes it (focused or not); it opens only
+    /// while `con_enable` is on.
     pub fn toggle(&mut self) {
-        if self.mode == Mode::Console {
-            self.console_placement.end();
-            self.mode = self.previous;
+        if self.console_open() {
+            self.close_window(Window::Console);
             self.clear_menu_hover();
         } else if self.config.keyboard.developer_console {
-            self.previous = self.mode;
             self.clear_menu_hover();
-            self.mode = Mode::Console;
+            self.windows.open(Window::Console);
+            self.sync_mode();
             let frame = self.console_frame();
             self.console_placement.reset_if_off_screen(&frame);
         }
@@ -1494,8 +1639,7 @@ impl Console {
                 if !args.is_empty() {
                     return Err(usage());
                 }
-                self.previous = self.mode;
-                self.mode = Mode::MainMenu;
+                self.set_mode(Mode::MainMenu);
             }
             "quit" => {
                 if !args.is_empty() {
@@ -1719,7 +1863,7 @@ impl Console {
     fn input_frame(&mut self, input: &Input) -> Vec<Effect> {
         // Held keys repeat for every layer below, except into a key binding being captured.
         let mut repeated = input.clone();
-        if self.mode == Mode::Options && self.options.capturing_key() {
+        if self.options_open() && self.options.capturing_key() {
             self.key_repeat.cancel();
         } else {
             self.key_repeat.apply(&mut repeated);
@@ -1733,6 +1877,9 @@ impl Console {
     }
 
     fn layer_input(&mut self, input: &Input) -> Vec<Effect> {
+        if let Some(time) = input.time {
+            self.windows.set_time(time);
+        }
         if self.modal_dialog_open() {
             // The menus are occluded: keep their tracker on the physical button so the rest of
             // a click that closes the modal layer is not read as a new menu press.
@@ -1741,7 +1888,7 @@ impl Console {
         if let Some(loading) = &self.loading_dialog {
             if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {
                 self.loading_dialog = None;
-                self.mode = Mode::MainMenu;
+                self.set_mode(Mode::MainMenu);
                 self.main_menu.back(&self.gameui.localization);
                 self.clear_menu_hover();
             }
@@ -1750,16 +1897,63 @@ impl Console {
         if self.confirm_box.is_some() {
             return self.confirm_input(input);
         }
-        if self.mode == Mode::Options {
-            return self.options_input(input);
+        self.windows_input(input)
+    }
+
+    /// The Options dialog and the console are not modal (retail VGUI frames): the pointer goes
+    /// to the topmost window under it, else to the menu behind them; a press raises and focuses
+    /// its layer and stays with it until release; the keyboard goes to the focused layer. A
+    /// modal layer inside Options (sub-dialog, its confirmation box, an open list, a key
+    /// capture) takes every click. Every layer sees every frame, with only its share of it.
+    fn windows_input(&mut self, input: &Input) -> Vec<Effect> {
+        let modal =
+            (self.options_open() && self.options.modal_layer_open()).then_some(Window::Options);
+        let bounds: Vec<(Window, Rect)> = self
+            .windows
+            .order()
+            .map(|w| (w, self.window_bounds(w)))
+            .collect();
+        let pointer = Pointer {
+            at: input.pointer,
+            click: input.click,
+            held: input.held,
+            released: input.released,
+        };
+        let base_takes_pointer = self.base_is_menu();
+        let owner = self
+            .windows
+            .route(pointer, modal, base_takes_pointer, |window, at| {
+                bounds.iter().any(|(w, r)| *w == window && r.contains(at))
+            });
+        self.sync_mode();
+        let focus = self.windows.focus();
+        let mut effects = Vec::new();
+        let windows: Vec<Window> = self.windows.order().collect();
+        for window in windows {
+            if !self.windows.is_open(window) {
+                continue;
+            }
+            let layer = Layer::Window(window);
+            let share = input.share(owner == Some(layer), focus == layer);
+            effects.extend(match window {
+                Window::Options => self.options_input(&share),
+                Window::Console => self.console_input(&share),
+            });
+            if self.confirm_box.is_some() || self.modal_dialog_open() {
+                return effects;
+            }
         }
-        if self.mode == Mode::Console {
-            return self.console_input(input);
+        if self.base_is_menu() {
+            let owns = owner == Some(Layer::Base);
+            if !owns {
+                // A window has the pointer: the menu only follows the button (occluded).
+                self.menu_tracker.occlude(input.click || input.held);
+            }
+            let focus = self.windows.focus();
+            let share = input.share(owns, focus == Layer::Base);
+            effects.extend(self.menu_input(&share, owns));
         }
-        if self.mode == Mode::Pause || self.mode == Mode::MainMenu {
-            return self.menu_input(input);
-        }
-        Vec::new()
+        effects
     }
 
     fn options_input(&mut self, input: &Input) -> Vec<Effect> {
@@ -1786,8 +1980,7 @@ impl Console {
             OptionsOutcome::Close(config) => (config, true),
         };
         if close {
-            self.mode = self.options_return;
-            self.reset_menu_interaction();
+            self.close_window(Window::Options);
         }
         let Some(config) = config else {
             return effects;
@@ -1830,7 +2023,7 @@ impl Console {
                         return effects;
                     }
                     ConfirmKind::ReturnToMainMenu => {
-                        self.mode = Mode::MainMenu;
+                        self.set_mode(Mode::MainMenu);
                         self.clear_menu_hover();
                         match self.menu_background_after_game() {
                             Some(background) => effects.push(Effect::MainMenuMap(background)),
@@ -2137,7 +2330,7 @@ impl Console {
     /// The pointer shape the window should show: a resize cursor over or while dragging one of the
     /// console's corner grips, otherwise the arrow.
     pub fn cursor_hint(&self) -> CursorHint {
-        if self.mode != Mode::Console || self.confirm_box.is_some() {
+        if !self.console_open() || self.confirm_box.is_some() {
             return CursorHint::Arrow;
         }
         self.console_placement
@@ -2279,7 +2472,7 @@ impl Console {
 
     /// The menu shown in the current mode, if any.
     fn game_menu(&self) -> Option<&GameMenu> {
-        match self.mode {
+        match self.base {
             Mode::MainMenu => Some(&self.main_menu),
             Mode::Pause => Some(&self.pause_menu),
             _ => None,
@@ -2312,14 +2505,16 @@ impl Console {
         (origin, scale, layout)
     }
 
-    fn menu_input(&mut self, input: &Input) -> Vec<Effect> {
+    /// The menu: arrows and Enter when it has the keyboard, hover and clicks when it owns the
+    /// pointer (`pointer`); without the pointer its tracker only follows the button (occluded).
+    fn menu_input(&mut self, input: &Input, pointer: bool) -> Vec<Effect> {
         if self.modal_dialog_open() {
             return Vec::new();
         }
         let mut effects = Vec::new();
         let count = self.game_menu().map_or(0, |menu| menu.entries().len());
         let rows = self.menu_rows(count);
-        let menu = match self.mode {
+        let menu = match self.base {
             Mode::MainMenu => &mut self.main_menu,
             _ => &mut self.pause_menu,
         };
@@ -2349,6 +2544,7 @@ impl Console {
         }
         let hovered = input
             .pointer
+            .filter(|_| pointer)
             .and_then(|p| rows.iter().position(|row| row.contains(p)))
             .filter(|&i| menu.entries().get(i).is_some_and(|e| e.enabled));
         // Hover selects only when the pointer enters a button, so a pointer resting on a row
@@ -2366,9 +2562,12 @@ impl Console {
         }
         self.last_menu_hover = hovered;
         let down = input.click || input.held;
-        let mut activate = self
-            .menu_tracker
-            .update(hovered, down, input.click, input.released);
+        let mut activate = if pointer {
+            self.menu_tracker
+                .update(hovered, down, input.click, input.released)
+        } else {
+            None
+        };
         if input.pressed(Key::Enter) {
             activate = activate.or(menu.selection);
         }
@@ -2382,32 +2581,29 @@ impl Console {
     pub fn activate_menu(&mut self, index: usize) -> Vec<Effect> {
         let gameui = self.gameui.clone();
         let loc = &gameui.localization;
-        let outcome = match self.mode {
+        let outcome = match self.base {
             Mode::MainMenu => self.main_menu.activate(index, loc),
             Mode::Pause => self.pause_menu.activate(index, loc),
             _ => MenuOutcome::None,
         };
         match outcome {
             MenuOutcome::None => {}
+            // Resuming hides the UI: its windows close (Options without applying).
             MenuOutcome::Resume => {
                 if !self.background_level {
-                    self.mode = Mode::Gameplay;
+                    self.set_mode(Mode::Gameplay);
                 }
             }
-            MenuOutcome::OpenOptions => {
-                self.options_return = self.mode;
-                self.mode = Mode::Options;
-                self.reset_menu_interaction();
-                self.options.open(self.config.clone());
-                self.options
-                    .reset_placement_if_off_screen(vec2(self.canvas.width(), self.canvas.height()));
-            }
+            MenuOutcome::OpenOptions => self.open_options(),
             MenuOutcome::ConfirmQuit => {
                 self.reset_menu_interaction();
                 self.quit_placement.reset();
                 self.confirm_box = Some((MessageBox::quit(loc), ConfirmKind::Quit));
             }
+            // Starting a game closes the windows (Options without applying).
             MenuOutcome::NewGame(map) => {
+                self.windows.clear();
+                self.sync_mode();
                 self.clear_menu_hover();
                 self.start_loading(&map);
                 return vec![Effect::Map(map)];
@@ -2491,17 +2687,8 @@ impl Console {
             }
             return;
         }
-        // The console and the options dialog are drawn over what they were opened from.
-        let base = if self.mode == Mode::Console {
-            self.previous
-        } else {
-            self.mode
-        };
-        let shown = if base == Mode::Options {
-            self.options_return
-        } else {
-            base
-        };
+        // The windows (Options, the console) are drawn over the base, bottom to top.
+        let shown = self.base;
         let menu_shown = shown == Mode::Pause || shown == Mode::MainMenu;
         if menu_shown {
             let menu_cat = if shown == Mode::Pause {
@@ -2680,13 +2867,21 @@ impl Console {
             } else {
                 &self.pause_menu
             };
+            // With the keyboard elsewhere (a window has the focus), a row is armed only under
+            // the pointer or while pressed.
+            let menu_keyboard = self.windows.focus() == Layer::Base;
             let modal_open = self.modal_dialog_open();
             for (i, entry) in menu.entries().iter().enumerate() {
                 if entry.spacer {
                     continue;
                 }
                 let is_pressed = !modal_open && self.menu_tracker.is_pressed(i);
-                let armed = !modal_open && (is_pressed || menu.selection == Some(i));
+                let selected = if menu_keyboard {
+                    menu.selection == Some(i)
+                } else {
+                    self.last_menu_hover == Some(i)
+                };
+                let armed = !modal_open && (is_pressed || selected);
                 let color = if !entry.enabled {
                     self.theme.text_disabled
                 } else if armed {
@@ -2712,16 +2907,23 @@ impl Console {
                     TextOutline::new(border_color, 1.0),
                 );
             }
-            if let Some((confirm, _)) = &self.confirm_box {
-                let (origin, scale, layout) = self.quit_geometry(confirm);
-                confirm.draw(&self.painter(origin, scale), &layout);
-            }
-            if base == Mode::Options {
-                self.options.draw(&self.painter(Vec2::ZERO, 1.));
+        }
+        for window in self.windows.order() {
+            match window {
+                Window::Options => {
+                    let theme = self.window_theme(window, time);
+                    self.options.draw(&Painter {
+                        theme: &theme,
+                        ..self.painter(Vec2::ZERO, 1.)
+                    });
+                }
+                Window::Console => self.draw_console(time),
             }
         }
-        if self.mode == Mode::Console {
-            self.draw_console(time);
+        // The confirmation box is modal over every window.
+        if let Some((confirm, _)) = &self.confirm_box {
+            let (origin, scale, layout) = self.quit_geometry(confirm);
+            confirm.draw(&self.painter(origin, scale), &layout);
         }
         if let Some(loading) = &self.loading_dialog {
             let scale = Painter::scale_for(self.canvas.height());
@@ -2842,14 +3044,9 @@ impl Console {
     fn draw_console(&self, time: f64) {
         let layout = self.dialog_layout();
         let scale = layout.scale;
-        // Over the Options dialog the console is opaque, like every stacked dialog.
-        let stacked = self.theme.stacked();
+        let theme = self.window_theme(Window::Console, time);
         let painter = Painter {
-            theme: if self.previous == Mode::Options {
-                &stacked
-            } else {
-                &self.theme
-            },
+            theme: &theme,
             ..self.painter(layout.origin, scale)
         };
         let em = (CONSOLE_TEXT * scale) as u16 as f32;
@@ -3163,6 +3360,7 @@ fn tokenize(line: &str) -> Result<Vec<Vec<String>>, String> {
 mod tests {
     use super::*;
     use crate::gameui::localize::Localization;
+    use crate::gameui::menu::MenuCommand;
     use crate::gameui::resources::{MenuItem, Visibility};
     #[test]
     fn cell_metrics_rejects_missing_font() {
@@ -3269,9 +3467,9 @@ mod tests {
         console.escape();
         assert!(console.paused());
         console.toggle();
-        assert_eq!(console.mode, Mode::Console);
+        assert_eq!(console.mode(), Mode::Console);
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         console.toggle();
         for line in ["echo first", "echo second"] {
             console.input(&Input {
@@ -3289,9 +3487,9 @@ mod tests {
         assert_eq!(console.input_line(), "echo second");
         // Escape hides the list, then closes the console.
         console.escape();
-        assert_eq!(console.mode, Mode::Console);
+        assert_eq!(console.mode(), Mode::Console);
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         assert_eq!(
             console.take_changed_history(),
             Some(vec!["echo first".to_owned(), "echo second".to_owned()])
@@ -3343,7 +3541,11 @@ mod tests {
         });
         assert_eq!(console.editor.search(), Some(("fov", Some("fov 90"))));
         console.escape();
-        assert_eq!(console.mode, Mode::Console, "Escape ends the search first");
+        assert_eq!(
+            console.mode(),
+            Mode::Console,
+            "Escape ends the search first"
+        );
         console.input(&Input {
             paste: Some("echo pasted\n".into()),
             ..Default::default()
@@ -3550,7 +3752,7 @@ mod tests {
             ..Default::default()
         });
         console.escape();
-        assert_eq!(console.mode, Mode::Console);
+        assert_eq!(console.mode(), Mode::Console);
         assert_eq!(console.dialog_layout().origin, moved.origin);
         // Closing and reopening keeps the place.
         console.toggle();
@@ -3627,7 +3829,7 @@ mod tests {
     fn the_quit_box_moves_alone_and_opens_centered() {
         let mut console = Console::default();
         console.canvas.resize(1280., 720.);
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         let loc = console.gameui.localization.clone();
         console.quit_placement.reset();
         console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
@@ -3899,7 +4101,7 @@ mod tests {
         let mut console = Console::default();
         console.canvas.resize(1024., 768.);
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         console.toggle();
         console.input(&Input {
             text: "echo clicked".into(),
@@ -3920,9 +4122,13 @@ mod tests {
 
         let close = dialog_point(&console, console.dialog_layout().close);
         press(&mut console, close);
-        assert_eq!(console.mode, Mode::Console);
+        assert_eq!(console.mode(), Mode::Console);
         release(&mut console, close);
-        assert_eq!(console.mode, Mode::Pause, "back to what it was opened from");
+        assert_eq!(
+            console.mode(),
+            Mode::Pause,
+            "back to what it was opened from"
+        );
     }
 
     /// Pointer position at the middle of menu row `index`.
@@ -3991,18 +4197,18 @@ mod tests {
     fn pause_menu_entries_activate_by_pointer_and_keyboard() {
         let mut console = installed_console();
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         // Resume, Load, Save, Achievements, Options, Return to main menu, Quit.
         assert_eq!(console.pause_menu.entries().len(), 7);
         click_row(&mut console, 4);
-        assert_eq!(console.mode, Mode::Options);
+        assert_eq!(console.mode(), Mode::Options);
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         assert!(
             click_row(&mut console, 1).is_empty(),
             "Load Game is a placeholder"
         );
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         assert!(console.output.back().unwrap().contains("not implemented"));
         assert_eq!(
             click_row(&mut console, 5),
@@ -4035,7 +4241,7 @@ mod tests {
             vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
         );
         assert!(console.confirm_box.is_none());
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
 
         // The pointer left Return to main menu selected; Down moves to Quit, and Enter asks for
         // confirmation instead of quitting.
@@ -4050,7 +4256,7 @@ mod tests {
         assert!(console.confirm_box.is_some());
         console.escape();
         assert!(console.confirm_box.is_none(), "Escape closes only the box");
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         keys(&mut console, &[Key::Enter]);
         assert_eq!(
             keys(&mut console, &[Key::Enter]),
@@ -4061,14 +4267,14 @@ mod tests {
         );
         console.confirm_box = None;
         click_row(&mut console, 0);
-        assert_eq!(console.mode, Mode::Gameplay, "Resume");
+        assert_eq!(console.mode(), Mode::Gameplay, "Resume");
     }
 
     #[test]
     fn return_to_main_menu_confirmation_dialog_ok_unloads_to_background() {
         let mut console = installed_console();
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         // Click row 5: "Return to main menu"
         assert_eq!(
             click_row(&mut console, 5),
@@ -4102,21 +4308,21 @@ mod tests {
             ]
         );
         assert!(console.confirm_box.is_none());
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
     }
 
     #[test]
     fn background_level_main_menu_navigation_new_game_and_quit_box() {
         let mut console = installed_console();
         console.level_loaded(true);
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
         console.escape();
-        assert_eq!(console.mode, Mode::MainMenu, "nothing to resume");
+        assert_eq!(console.mode(), Mode::MainMenu, "nothing to resume");
         click_row(&mut console, 0);
         assert_eq!(console.main_menu.category(), "hl2");
         console.escape();
         assert_eq!(console.main_menu.category(), "main");
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
         click_row(&mut console, 0);
         assert_eq!(
             click_row(&mut console, 0),
@@ -4126,10 +4332,10 @@ mod tests {
             ]
         );
         console.level_loaded(false);
-        assert_eq!(console.mode, Mode::Gameplay);
+        assert_eq!(console.mode(), Mode::Gameplay);
         assert_eq!(console.main_menu.category(), "main");
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
 
         console.level_loaded(true);
         click_row(&mut console, 6);
@@ -4155,7 +4361,7 @@ mod tests {
             vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
         );
         assert!(console.confirm_box.is_none(), "Cancel closes the box");
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
         click_row(&mut console, 6);
         assert_eq!(
             click_btn(&mut console, layout.buttons[0]),
@@ -4171,14 +4377,14 @@ mod tests {
         let mut console = installed_console();
         console.level_loaded(true);
         click_row(&mut console, 5);
-        assert_eq!(console.mode, Mode::Options);
+        assert_eq!(console.mode(), Mode::Options);
         console.escape();
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
         click_row(&mut console, 5);
         console.toggle();
         console.toggle();
         assert_eq!(
-            console.mode,
+            console.mode(),
             Mode::Options,
             "console round trip keeps the dialog"
         );
@@ -4186,11 +4392,11 @@ mod tests {
         console.canvas.drain();
         console.escape();
         assert_eq!(
-            console.mode,
+            console.mode(),
             Mode::MainMenu,
             "Escape returns to the opening menu"
         );
-        console.mode = Mode::Console;
+        console.set_mode(Mode::Console);
         let effects = console.submit("volume 0.5; sensitivity 2.5; fov 90; mat_hdr_level 0");
         assert_eq!(console.config.audio.volume, 0.5);
         assert_eq!(console.config.mouse.sensitivity, 2.5);
@@ -4248,7 +4454,7 @@ mod tests {
 
         console.escape();
         assert!(console.loading_dialog.is_none());
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
 
         // Test failure path and dismissal via Enter or click
         console.start_loading("invalid_map");
@@ -4259,20 +4465,20 @@ mod tests {
         };
         console.input(&enter_input);
         assert!(console.loading_dialog.is_none());
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
 
         // Test level_loaded also clears loading dialog
         console.start_loading("d1_trainstation_02");
         console.level_loaded(false);
         assert!(console.loading_dialog.is_none());
-        assert_eq!(console.mode, Mode::Gameplay);
+        assert_eq!(console.mode(), Mode::Gameplay);
     }
 
     #[test]
     fn episode_one_and_two_new_game_navigation_and_missing_content_error_recovery() {
         let mut console = installed_console();
         console.level_loaded(true);
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
 
         // Row 1 on main menu: HL2: EPISODE ONE
         assert_eq!(
@@ -4313,7 +4519,7 @@ mod tests {
         // Player dismisses failed dialog via Escape and returns to main menu
         console.escape();
         assert!(console.loading_dialog.is_none());
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
 
         // Row 2 on main menu: HL2: EPISODE TWO
         assert_eq!(
@@ -4349,7 +4555,7 @@ mod tests {
         };
         console.input(&enter);
         assert!(console.loading_dialog.is_none());
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
     }
 
     #[test]
@@ -4365,7 +4571,7 @@ mod tests {
 
         // Trigger Return to Main Menu confirmation and click OK
         console.escape();
-        assert_eq!(console.mode, Mode::Pause);
+        assert_eq!(console.mode(), Mode::Pause);
         click_row(&mut console, 5); // Return to main menu
         let (confirm, _) = console.confirm_box.clone().expect("confirmation box");
         let (origin, scale, layout) = console.quit_geometry(&confirm);
@@ -4390,7 +4596,7 @@ mod tests {
                 Effect::MainMenuMap(GameMap::new("hl2", "background02")),
             ]
         );
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
     }
 
     #[test]
@@ -4404,7 +4610,7 @@ mod tests {
             vec![Effect::Map("d1_trainstation_02".into())]
         );
         console.level_loaded_for_map("hl2", "d1_trainstation_02", false);
-        assert_eq!(console.mode, Mode::Gameplay);
+        assert_eq!(console.mode(), Mode::Gameplay);
 
         console.escape();
         click_row(&mut console, 5); // Return to main menu
@@ -4497,7 +4703,7 @@ mod tests {
     #[test]
     fn a_resting_pointer_does_not_take_the_menu_selection_back_from_the_arrows() {
         let mut console = installed_console();
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         let pointer = row(&console, 0);
         let _ = console.input(&Input {
             pointer,
@@ -4541,18 +4747,17 @@ mod tests {
     #[test]
     fn a_held_escape_presses_the_close_button_and_the_release_closes() {
         let mut console = installed_console();
-        console.mode = Mode::MainMenu;
-        console.options_return = Mode::MainMenu;
-        console.mode = Mode::Options;
+        console.set_mode(Mode::MainMenu);
+        console.set_mode(Mode::Options);
         console.escape_pressed();
-        assert_eq!(console.mode, Mode::Options, "nothing closes on the press");
+        assert_eq!(console.mode(), Mode::Options, "nothing closes on the press");
         assert!(
             console.options.escape_held,
             "the close button shows pressed"
         );
         console.escape_released();
         assert_eq!(
-            console.mode,
+            console.mode(),
             Mode::MainMenu,
             "the release closes the dialog"
         );
@@ -4629,7 +4834,7 @@ mod tests {
             category_titles: resources::fallback_category_titles(&loc),
             ..Default::default()
         });
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         assert_eq!(console.current_title(), "Half-Life 2");
 
         // Menu with items to navigate between main, episodic, and ep2 categories
@@ -4694,7 +4899,7 @@ mod tests {
     #[test]
     fn click_that_dismisses_a_modal_layer_does_not_reach_the_menu_below() {
         let mut console = installed_console();
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         console.canvas.resize(1280., 720.);
         console.start_loading("invalid_map");
         console.loading_failed("Map invalid_map not found");
@@ -4716,7 +4921,7 @@ mod tests {
             }));
         }
         assert!(console.loading_dialog.is_none());
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
         assert!(
             !effects.contains(&Effect::PlaySound("ui/buttonclickrelease.wav".into())),
             "no menu activation from the dismissing click: {effects:?}"
@@ -4726,7 +4931,7 @@ mod tests {
     #[test]
     fn modal_dialog_blocks_underlying_menu_hover_sounds_and_clicks() {
         let mut console = installed_console();
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         console.canvas.resize(1280., 720.);
 
         // 1. When no modal dialog is open, hovering and clicking menu rows work normally
@@ -4744,14 +4949,12 @@ mod tests {
         );
         assert_eq!(console.main_menu.selection, Some(0));
 
-        // 2. Open Options dialog: modal check is true, bounds are present, occlusion detects dialog
-        console.mode = Mode::Options;
-        assert!(console.modal_dialog_open());
-        let opt_bounds = console.modal_bounds().expect("options bounds");
-        assert!(
-            opt_bounds.w > 0. && opt_bounds.h > 0.,
-            "modal bounds must have positive area"
-        );
+        // 2. Options is a window, not modal: it covers its own frame only (the menu around
+        // it keeps working; see the window tests below).
+        console.set_mode(Mode::Options);
+        assert!(!console.modal_dialog_open());
+        let opt_bounds = console.window_bounds(Window::Options);
+        assert!(opt_bounds.w > 0. && opt_bounds.h > 0.);
         let center = vec2(
             opt_bounds.x + opt_bounds.w * 0.5,
             opt_bounds.y + opt_bounds.h * 0.5,
@@ -4759,26 +4962,9 @@ mod tests {
         assert!(console.is_occluded(center));
         assert!(!console.is_occluded(vec2(0., 0.)));
 
-        // Cursor over menu row 0 behind/beside Options does NOT play rollover sound or change menu selection
-        let hover_effects = console.input(&Input {
-            pointer: row(&console, 0),
-            ..Default::default()
-        });
-        assert!(
-            !hover_effects.contains(&Effect::PlaySound("ui/buttonrollover.wav".into())),
-            "hover over underlying menu row must not produce rollover sound while Options is open"
-        );
-
-        // Click over menu row does not activate any menu command
-        let click_effects = click_row(&mut console, 0);
-        assert!(
-            click_effects.is_empty(),
-            "click over underlying menu row must not activate while Options is open"
-        );
-
         // Closing options via escape preserves keyboard selection and returns to main menu
         console.escape();
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
         assert!(!console.modal_dialog_open());
         assert_eq!(console.main_menu.selection, Some(0));
 
@@ -4841,21 +5027,24 @@ mod tests {
         assert!(!console.modal_dialog_open());
         assert_eq!(console.main_menu.selection, None);
 
-        // 5. Console: modal check is true
+        // 5. The console is a window too: not modal; a menu row it does not cover still works.
         console.toggle();
-        assert_eq!(console.mode, Mode::Console);
-        assert!(console.modal_dialog_open());
+        assert_eq!(console.mode(), Mode::Console);
+        assert!(!console.modal_dialog_open());
+        let row0 = row(&console, 0).unwrap();
+        let covered = console.window_bounds(Window::Console).contains(row0);
         let click_effects = click_row(&mut console, 0);
-        assert!(click_effects.is_empty());
+        assert_eq!(click_effects.is_empty(), covered, "{click_effects:?}");
+        assert!(console.console_open());
         console.toggle();
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
         assert!(!console.modal_dialog_open());
     }
 
     #[test]
     fn submenu_entry_switches_background_map_and_persists() {
         let mut console = installed_console();
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         console.background_level = true;
         console.loaded_map = Some(GameMap::new("hl2", "background01"));
 
@@ -4961,7 +5150,7 @@ mod tests {
     #[test]
     fn submenu_back_and_escape_preserves_background_map() {
         let mut console = installed_console();
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         console.background_level = true;
         console.loaded_map = Some(GameMap::new("hl2", "background01"));
 
@@ -4997,7 +5186,7 @@ mod tests {
     #[test]
     fn lostcoast_navigation_and_missing_content_error_recovery() {
         let mut console = installed_console();
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         console.background_level = true;
         console.loaded_map = Some(GameMap::new("hl2", "background01"));
 
@@ -5060,7 +5249,7 @@ mod tests {
         // Dismiss error with Escape -> returns to menu without crash
         console.escape();
         assert!(console.loading_dialog.is_none());
-        assert_eq!(console.mode, Mode::MainMenu);
+        assert_eq!(console.mode(), Mode::MainMenu);
     }
 
     #[test]
@@ -5102,7 +5291,7 @@ mod tests {
     fn background_loading_draw_emits_blur_overlay_behind_menu_and_corner_plaque() {
         let mut console = Console::default();
         console.canvas.resize(1920., 1080.);
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
 
         console.start_background_loading("ep2", "ep2_background01");
         assert!(console.is_loading());
@@ -5173,7 +5362,7 @@ mod tests {
     fn gameplay_loading_draw_does_not_emit_blur_overlay() {
         let mut console = Console::default();
         console.canvas.resize(1920., 1080.);
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
 
         console.start_loading("d1_trainstation_01");
         assert!(console.is_loading());
@@ -5211,7 +5400,7 @@ mod tests {
     fn background_loading_completion_dismisses_blur_overlay() {
         let mut console = Console::default();
         console.canvas.resize(1920., 1080.);
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
 
         console.start_background_loading("ep2", "ep2_background01");
         assert!(console.is_background_loading());
@@ -5242,6 +5431,7 @@ mod tests {
     fn background_loading_state_sequence_success() {
         let mut console = Console {
             mode: Mode::MainMenu,
+            base: Mode::MainMenu,
             ..Default::default()
         };
         console.canvas.resize(1920., 1080.);
@@ -5287,6 +5477,7 @@ mod tests {
     fn background_load_failed_ends_transition_and_cleans_up() {
         let mut console = Console {
             mode: Mode::MainMenu,
+            base: Mode::MainMenu,
             ..Default::default()
         };
         console.canvas.resize(1920., 1080.);
@@ -5322,6 +5513,7 @@ mod tests {
     fn generic_loading_failed_on_background_cleans_up() {
         let mut console = Console {
             mode: Mode::MainMenu,
+            base: Mode::MainMenu,
             ..Default::default()
         };
         console.canvas.resize(1920., 1080.);
@@ -5346,7 +5538,7 @@ mod tests {
     fn menu_buttons_draw_letters_with_border_along_edge_path_and_no_box_fill() {
         let mut console = Console::default();
         console.canvas.resize(1280., 720.);
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         console.title = String::new();
         let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
         console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
@@ -5439,7 +5631,7 @@ mod tests {
     fn menu_titles_and_subtitles_draw_letters_with_border_along_edge_path() {
         let mut console = Console::default();
         console.canvas.resize(1280., 720.);
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
 
         let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
         console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
@@ -5583,7 +5775,7 @@ mod tests {
         }
 
         // 5. Verify Pause menu also renders title outline
-        console.mode = Mode::Pause;
+        console.set_mode(Mode::Pause);
         console.pause_menu.set_in_game(true, &loc);
         console.draw(0.0);
         let pause_quads = console.canvas.drain();
@@ -5614,6 +5806,7 @@ mod tests {
     fn test_subtitle_font_selection_and_glyph_decoration() {
         let mut console = Console {
             mode: Mode::MainMenu,
+            base: Mode::MainMenu,
             ..Default::default()
         };
         console.canvas.resize(1280., 720.);
@@ -5745,7 +5938,7 @@ mod tests {
         loc.insert("GameUI_EpisodeTwo", "Episode Two");
         loc.insert("GameUI_LostCoast", "Lost Coast");
         console.category_titles = resources::fallback_category_titles(&loc);
-        console.mode = Mode::MainMenu;
+        console.set_mode(Mode::MainMenu);
         console.canvas.resize(1920., 1080.);
 
         // Initial default title state
@@ -5901,18 +6094,340 @@ mod tests {
 
     #[test]
     fn con_enable_off_keeps_the_console_closed_but_lets_it_close() {
-        let mut console = Console {
-            mode: Mode::MainMenu,
-            ..Default::default()
-        };
+        let mut console = Console::default();
+        console.set_mode(Mode::MainMenu);
         console.config.keyboard.developer_console = false;
         console.toggle();
-        assert_eq!(console.mode, Mode::MainMenu, "con_enable 0");
+        assert_eq!(console.mode(), Mode::MainMenu, "con_enable 0");
         console.config.keyboard.developer_console = true;
         console.toggle();
-        assert_eq!(console.mode, Mode::Console);
+        assert_eq!(console.mode(), Mode::Console);
         console.config.keyboard.developer_console = false;
         console.toggle();
-        assert_eq!(console.mode, Mode::MainMenu, "an open console still closes");
+        assert_eq!(
+            console.mode(),
+            Mode::MainMenu,
+            "an open console still closes"
+        );
+    }
+
+    // ---- non-modal windows (Options, console) over the menu ----
+
+    fn menu_with_options(height: f32) -> Console {
+        let mut console = installed_console();
+        console.set_mode(Mode::MainMenu);
+        console.canvas.resize(height * 16. / 9., height);
+        console.open_options();
+        console
+    }
+
+    fn row_of(console: &Console, command: MenuCommand) -> usize {
+        console
+            .main_menu
+            .entries()
+            .iter()
+            .position(|e| e.command == command)
+            .expect("menu row")
+    }
+
+    /// A point of the Options dialog, from layout units inside its frame.
+    fn in_options(console: &Console, local: Vec2) -> Vec2 {
+        let bounds = console.window_bounds(Window::Options);
+        let scale = Painter::scale_for(console.canvas.height());
+        vec2(bounds.x, bounds.y) + local * scale
+    }
+
+    fn pointer_frame(
+        console: &mut Console,
+        at: Vec2,
+        click: bool,
+        held: bool,
+        released: bool,
+    ) -> Vec<Effect> {
+        console.input(&Input {
+            pointer: Some(at),
+            click,
+            held,
+            released,
+            ..Default::default()
+        })
+    }
+
+    /// Press at `from`, drag over `via`, release at `to`; every effect of the gesture.
+    fn gesture(console: &mut Console, from: Vec2, via: Vec2, to: Vec2) -> Vec<Effect> {
+        let mut effects = pointer_frame(console, from, true, true, false);
+        effects.extend(pointer_frame(console, via, false, true, false));
+        effects.extend(pointer_frame(console, to, false, true, false));
+        effects.extend(pointer_frame(console, to, false, false, true));
+        effects
+    }
+
+    fn menu_sounds(effects: &[Effect]) -> bool {
+        effects.iter().any(|e| {
+            matches!(e, Effect::PlaySound(s) if s == "ui/buttonrollover.wav" || s == "ui/buttonclickrelease.wav")
+        })
+    }
+
+    #[test]
+    fn options_is_not_modal_and_the_menu_beside_it_takes_clicks() {
+        let mut console = menu_with_options(720.);
+        assert!(
+            !console.modal_dialog_open(),
+            "Options is a window, not a modal dialog"
+        );
+        let episode = row_of(&console, MenuCommand::SwitchExpansion("episodic".into()));
+        let at = row(&console, episode).unwrap();
+        assert!(
+            !console.window_bounds(Window::Options).contains(at),
+            "the row is beside the dialog"
+        );
+        let hover = pointer_frame(&mut console, at, false, false, false);
+        assert!(hover.contains(&Effect::PlaySound("ui/buttonrollover.wav".into())));
+        let effects = gesture(&mut console, at, at, at);
+        assert!(effects.contains(&Effect::PlaySound("ui/buttonclickrelease.wav".into())));
+        assert_eq!(
+            console.main_menu.category(),
+            "episodic",
+            "the menu item ran"
+        );
+        assert!(console.options_open(), "the dialog stays open");
+        assert_eq!(console.mode(), Mode::MainMenu, "the click focused the menu");
+    }
+
+    #[test]
+    fn a_press_on_options_released_over_the_menu_never_reaches_the_menu() {
+        let mut console = menu_with_options(720.);
+        let row0 = row(&console, 0).unwrap();
+        let cancel = button_center(&console, 1);
+        let effects = gesture(&mut console, cancel, row0, row0);
+        assert!(!menu_sounds(&effects), "{effects:?}");
+        assert_eq!(console.last_menu_hover, None, "the menu never armed");
+        assert!(
+            console.options_open(),
+            "Cancel released off the button does nothing"
+        );
+        assert_eq!(console.mode(), Mode::Options);
+    }
+
+    fn button_center(console: &Console, index: usize) -> Vec2 {
+        let rect = crate::gameui::options::button_rects()[index];
+        in_options(console, vec2(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5))
+    }
+
+    #[test]
+    fn a_menu_press_dragged_onto_options_activates_nothing() {
+        let mut console = menu_with_options(720.);
+        let quit = row(&console, row_of(&console, MenuCommand::Quit)).unwrap();
+        let cancel = button_center(&console, 1);
+        let effects = gesture(&mut console, quit, cancel, cancel);
+        assert!(
+            !effects.contains(&Effect::PlaySound("ui/buttonclickrelease.wav".into())),
+            "{effects:?}"
+        );
+        assert!(
+            console.confirm_box.is_none(),
+            "the menu press was cancelled off its row"
+        );
+        assert!(console.options_open(), "and Options' Cancel never saw it");
+    }
+
+    #[test]
+    fn dragging_the_options_caption_over_the_menu_moves_it_at_any_scale() {
+        for height in [720., 1440.] {
+            let mut console = menu_with_options(height);
+            let before = console.window_bounds(Window::Options);
+            let caption = in_options(&console, vec2(150., 12.));
+            let row0 = row(&console, 0).unwrap();
+            let effects = gesture(&mut console, caption, row0, row0);
+            assert!(!menu_sounds(&effects), "{height}: {effects:?}");
+            let after = console.window_bounds(Window::Options);
+            assert_ne!(
+                (after.x, after.y),
+                (before.x, before.y),
+                "{height}: it moved"
+            );
+            assert!(
+                after.contains(row0) || after.x < before.x,
+                "{height}: towards the menu"
+            );
+            // The pointer now hits the dialog where it was dragged.
+            let inside = vec2(after.x + 20., after.y + after.h * 0.5);
+            assert!(console.is_occluded(inside));
+            let effects = pointer_frame(&mut console, inside, false, false, false);
+            assert!(
+                !menu_sounds(&effects),
+                "{height}: hover over the moved dialog"
+            );
+        }
+    }
+
+    #[test]
+    fn a_modal_layer_of_options_takes_every_click() {
+        let mut console = menu_with_options(720.);
+        console
+            .options
+            .command(crate::gameui::settings::Command::VideoCredits);
+        assert!(console.options.modal_layer_open());
+        let episode = row_of(&console, MenuCommand::SwitchExpansion("episodic".into()));
+        let at = row(&console, episode).unwrap();
+        let effects = gesture(&mut console, at, at, at);
+        assert!(!menu_sounds(&effects), "{effects:?}");
+        assert_eq!(
+            console.main_menu.category(),
+            "main",
+            "the menu stayed covered"
+        );
+    }
+
+    #[test]
+    fn quit_from_the_menu_is_modal_over_options_and_cancel_returns_to_it() {
+        let mut console = menu_with_options(720.);
+        let quit = row(&console, row_of(&console, MenuCommand::Quit)).unwrap();
+        gesture(&mut console, quit, quit, quit);
+        assert!(console.confirm_box.is_some());
+        assert!(console.modal_dialog_open());
+        // A click on Options outside the box reaches nothing.
+        let quit_box = console.modal_bounds().expect("the quit box");
+        let cancel = button_center(&console, 1);
+        assert!(!quit_box.contains(cancel));
+        gesture(&mut console, cancel, cancel, cancel);
+        assert!(console.confirm_box.is_some(), "the box stays");
+        assert!(console.options_open(), "Options' Cancel did not run");
+        console.escape();
+        assert!(console.confirm_box.is_none());
+        assert!(console.options_open(), "Options is still there");
+    }
+
+    #[test]
+    fn a_submenu_background_loading_behind_options_keeps_it_open() {
+        let mut console = menu_with_options(720.);
+        console.windows.focus_base();
+        console.sync_mode();
+        console.level_loaded(true);
+        assert!(console.options_open());
+        assert_eq!(console.mode(), Mode::MainMenu);
+        console.level_loaded(false);
+        assert!(!console.options_open(), "a gameplay map closes the windows");
+        assert_eq!(console.mode(), Mode::Gameplay);
+    }
+
+    #[test]
+    fn options_again_from_the_menu_keeps_the_open_dialog_as_it_is() {
+        let mut console = menu_with_options(720.);
+        keys(&mut console, &[Key::Tab]);
+        assert_eq!(console.options.report().focus.as_deref(), Some("tab"));
+        let options = row(&console, row_of(&console, MenuCommand::OpenOptions)).unwrap();
+        gesture(&mut console, options, options, options);
+        assert_eq!(console.mode(), Mode::Options, "raised and focused");
+        assert_eq!(
+            console.options.report().focus.as_deref(),
+            Some("tab"),
+            "not reopened"
+        );
+    }
+
+    #[test]
+    fn resume_from_the_pause_menu_closes_options() {
+        let mut console = installed_console();
+        console.canvas.resize(1280., 720.);
+        console.set_mode(Mode::Pause);
+        console.open_options();
+        let resume = console
+            .pause_menu
+            .entries()
+            .iter()
+            .position(|e| e.command == MenuCommand::Resume)
+            .expect("resume row");
+        console.set_mode(Mode::Pause);
+        console.open_options();
+        console.activate_menu(resume);
+        assert!(!console.options_open());
+        assert_eq!(console.mode(), Mode::Gameplay);
+    }
+
+    #[test]
+    fn the_topmost_window_takes_the_overlap_and_a_press_raises_the_other() {
+        let mut console = menu_with_options(720.);
+        console.toggle();
+        assert_eq!(console.mode(), Mode::Console);
+        let options = console.window_bounds(Window::Options);
+        let console_rect = console.window_bounds(Window::Console);
+        let overlap = (0..40)
+            .flat_map(|i| (0..40).map(move |j| vec2(i as f32 * 32., j as f32 * 18.)))
+            .find(|p| options.contains(*p) && console_rect.contains(*p))
+            .expect("the windows overlap");
+        let options_only = (0..40)
+            .flat_map(|i| (0..40).map(move |j| vec2(i as f32 * 32., j as f32 * 18.)))
+            .find(|p| options.contains(*p) && !console_rect.contains(*p))
+            .expect("Options shows beside the console");
+        pointer_frame(&mut console, overlap, true, true, false);
+        pointer_frame(&mut console, overlap, false, false, true);
+        assert_eq!(console.mode(), Mode::Console, "the console is on top there");
+        pointer_frame(&mut console, options_only, true, true, false);
+        pointer_frame(&mut console, options_only, false, false, true);
+        assert_eq!(
+            console.mode(),
+            Mode::Options,
+            "the press raised and focused Options"
+        );
+        assert_eq!(console.windows.top(), Some(Window::Options));
+        assert!(console.console_open(), "the console stays open below");
+        keys(&mut console, &[Key::Tab]);
+        assert_eq!(
+            console.options.report().focus.as_deref(),
+            Some("tab"),
+            "the keyboard follows the focus"
+        );
+    }
+
+    #[test]
+    fn without_a_pointer_nothing_on_the_menu_arms() {
+        let mut console = menu_with_options(720.);
+        let effects = console.input(&Input {
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        assert!(!menu_sounds(&effects));
+        assert_eq!(console.last_menu_hover, None);
+    }
+
+    #[test]
+    fn an_unfocused_window_fades_to_its_out_of_focus_look() {
+        let mut console = menu_with_options(720.);
+        let focused = console.window_theme(Window::Options, 0.).frame_bg;
+        assert!((focused.a - console.theme.frame_bg.a).abs() < 1e-4);
+        let episode = row_of(&console, MenuCommand::SwitchExpansion("episodic".into()));
+        let at = row(&console, episode).unwrap();
+        console.input(&Input {
+            pointer: Some(at),
+            click: true,
+            held: true,
+            time: Some(10.),
+            ..Default::default()
+        });
+        assert_eq!(console.mode(), Mode::MainMenu);
+        let half = console.window_theme(Window::Options, 10.15).frame_bg.a;
+        let out = console.window_theme(Window::Options, 10.5);
+        assert!(
+            half < focused.a && half > out.frame_bg.a,
+            "fades over 0.3 s"
+        );
+        assert!((out.frame_bg.a - console.theme.frame_bg_out_of_focus.a).abs() < 1e-4);
+        assert_eq!(out.title_text, console.theme.title_text_out_of_focus);
+    }
+
+    #[test]
+    fn escape_closes_the_top_window_even_while_the_menu_has_the_focus() {
+        let mut console = menu_with_options(720.);
+        console.toggle();
+        console.windows.focus_base();
+        console.sync_mode();
+        console.escape();
+        assert!(!console.console_open(), "the console was on top");
+        assert!(console.options_open());
+        console.escape();
+        assert!(!console.options_open());
+        assert_eq!(console.mode(), Mode::MainMenu);
     }
 }

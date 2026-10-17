@@ -1380,7 +1380,7 @@ mod tests {
             assert!(console.is_loading());
             console.level_loaded(false);
             assert!(!console.is_loading());
-            assert_eq!(console.mode, hl2_ui::console::Mode::Gameplay);
+            assert_eq!(console.mode(), hl2_ui::console::Mode::Gameplay);
         }
     }
 }

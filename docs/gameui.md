@@ -922,3 +922,52 @@ quitting mid-game. Module: `hl2-ui::gameui::chapters`.
   `owned_maps_belong_to_their_installed_chapters`; packaged replay
   `test-inputs/bevy-menu-chapter-return.json` (`d2_coast_01` -> `hl2/background04`, `d3_c17_10a` -> `hl2/background06`) and `scripts/checks/replays.py` (`chapter_quit`) (`--map d2_coast_01`, exit
   mid-game: the saved background goes from `hl2/background01` to `hl2/background04`).
+
+## 14. Non-modal windows: Options and the console (2026-10-18)
+
+Owner report: the menu could not be used while the Options dialog was open, unlike the original
+game; the developer console must not block the menu or Options either; dialogs show their focus
+as the original does.
+
+- **Model.** `gameui::windows::Windows` holds the open windows (Options, the console) bottom to
+  top over a base (main menu, pause menu or gameplay) and which layer has the keyboard focus. It
+  is a pure model (no drawing, no `Console`), unit-tested on its own.
+- **Pointer.** Each frame `Windows::route` picks the layer that gets the pointer: the layer a held
+  press belongs to (until release), else a modal layer inside Options (sub-dialog, its
+  confirmation box, an open list, a key capture), else the topmost window whose placed frame
+  contains the pointer, else the menu (gameplay under the console takes no pointer). Without a
+  pointer position (scripted input) the focused layer gets the button and the wheel. Every layer
+  sees every frame with only its share of it (`Input::share`: the pointer if it owns it, the
+  keyboard if it has the focus); a layer without the pointer has its button tracker occluded
+  (`ButtonTracker::occlude`), so a press that started elsewhere is never read as its own.
+- **Focus.** A press on a window raises it to the top and focuses it (SDK `Frame::Activate`); a
+  press on the menu focuses the menu and leaves the windows where they are. With a window
+  focused the menu takes no keys, and its rows arm only under the pointer. `Console::mode()` is
+  the focused layer (`Options`, `Console`, or the base); `Console::set_mode` opens a window on top
+  or replaces the base (closing every window), the only way to change it.
+- **Menu actions.** OPTIONS with the dialog open raises it as it is (retail activates the
+  existing dialog; its unapplied edits stay). QUIT shows the confirmation box, modal over every
+  window. Resume and starting a game hide the UI: the windows close (Options without applying).
+  A submenu background loading behind the windows keeps them open.
+- **Escape** closes the top window first, whichever layer has the focus; with no window open it
+  acts on the base as before. Tilde closes an open console whether it has the focus or not.
+- **Look** (SDK `Frame::OnFrameFocusChanged`, installed `hl2_complete/resource/sourcescheme.res`):
+  the focused window's background is `Frame.BgColor` (132 132 132 212), an unfocused one's
+  `Frame.OutOfFocusBgColor` (132 132 132 62); the background fades linearly over
+  `Frame.FocusTransitionEffectTime` (0.3 s); the title switches at once between
+  `FrameTitleBar.TextColor` and `FrameTitleBar.DisabledTextColor` (255 255 255 192)
+  (`Theme::focus_faded`). A window over another window fades to opaque instead of
+  `Frame.BgColor` (the stacked-dialog rule; the focused window is always the top one). Known
+  case: with the menu focused, an unfocused console over an unfocused Options shows Options
+  through it.
+- **Tests.** `gameui::windows` (topmost hit, raise and focus, press ownership across layers,
+  modal layer, gameplay base, focus after closing, a closed window's press, pointerless input,
+  linear fade); `console` (menu beside Options works; a press on Options released over the menu,
+  a menu press dragged onto Options, a caption drag across the menu at scale 1 and 2, a sub-dialog
+  over the menu, the quit box over Options, OPTIONS again keeping the dialog, Resume closing it,
+  the overlap of the console and Options and raising by a press, pointerless input, the focus
+  fade, Escape with the menu focused, a submenu background load behind Options). Packaged:
+  `test-inputs/bevy-menu-options-nonmodal.json` (`replays.py` `menu_options`).
+- **Not done:** retail hides open windows on Resume and shows them again with the pause menu;
+  here they close. The console's completion list counts as inside the console frame for hit
+  tests.

@@ -50,7 +50,7 @@ pub fn refresh_display_modes(
     let Some(mut ui) = ui else {
         return;
     };
-    let is_options = ui.source.mode == hl2_ui::console::Mode::Options;
+    let is_options = ui.source.options_open();
     let opened = is_options && !*was_options;
     *was_options = is_options;
     if opened && let Ok(window) = windows.single() {
@@ -124,7 +124,7 @@ pub fn update_ui(
         game.actions.push(crate::gameplay::Action::Cancel);
     }
     if let Some(ui) = ui.as_deref_mut() {
-        let before = ui.source.mode;
+        let before = ui.source.mode();
         resize_canvas(&ui.source.canvas, video_viewport.as_deref(), &window);
         if keys.just_pressed(KeyCode::Escape) && !cancel_selection {
             ui.source.escape_pressed();
@@ -136,9 +136,9 @@ pub fn update_ui(
             ui.source.toggle();
         }
         if !window.focused && !ui.source.paused() {
-            ui.source.mode = hl2_ui::console::Mode::Pause;
+            ui.source.set_mode(hl2_ui::console::Mode::Pause);
         }
-        if ui.source.mode == before
+        if ui.source.mode() == before
             && let Some(game) = game.as_deref_mut()
         {
             let pointer =
@@ -153,7 +153,7 @@ pub fn update_ui(
                     window.focused,
                     video_viewport.as_deref().map(|v| v.bounds()),
                     pointer,
-                    ui.source.mode
+                    ui.source.mode()
                 );
             }
             let modifiers = crate::ui_host::modifiers(&keys);
@@ -201,7 +201,7 @@ pub fn update_ui(
         }
         // Applied video settings (`sim.pending_video_config`) are carried out by
         // `video::apply_video_settings`.
-        sim.transition = ui.source.mode != before;
+        sim.transition = ui.source.mode() != before;
         sim.paused = ui.source.paused();
         let cfg = Some(&ui.source.config);
         if sim.transition || sim.paused {
@@ -458,7 +458,7 @@ mod tests {
 
         // UI state should now be in Pause menu
         let ui = app.world().resource::<crate::ui_host::Console>();
-        assert_eq!(ui.source.mode, hl2_ui::console::Mode::Pause);
+        assert_eq!(ui.source.mode(), hl2_ui::console::Mode::Pause);
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
             .press(KeyCode::Escape);
         app.world_mut().run_system_once(update_ui).unwrap();
         let ui = app.world().resource::<crate::ui_host::Console>();
-        assert_eq!(ui.source.mode, hl2_ui::console::Mode::MainMenu);
+        assert_eq!(ui.source.mode(), hl2_ui::console::Mode::MainMenu);
         assert!(ui.source.background_level());
         let sim = app.world().resource::<crate::simulation::Simulation>();
         assert!(

@@ -16,3 +16,4 @@ pub mod resources;
 pub mod scheme_fonts;
 pub mod settings;
 pub mod widgets;
+pub mod windows;
