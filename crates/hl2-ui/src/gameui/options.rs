@@ -19,6 +19,7 @@ use super::{
     keys::{self, KeyRow},
     layout::{Align as LayoutAlign, Control, ControlKind},
     menu::MessageBox,
+    placement::{self, Placement},
     resources::{GameUiResources, Image},
     settings::{self, Binding, Choice, Command, Draft, Env, Panel, Value},
     widgets::{
@@ -297,6 +298,11 @@ pub struct OptionsDialog {
     scroll_mode: widgets::ScrollMode,
     key_wheel: widgets::ScrollAccumulator,
     key_bar: widgets::ScrollBarState,
+    /// Where the dialog was dragged (kept while the game runs).
+    placement: Placement,
+    /// Where the open sub-dialog and the confirmation box were dragged (centered on opening).
+    sub_placement: Placement,
+    confirm_placement: Placement,
 }
 
 impl Default for OptionsDialog {
@@ -329,6 +335,9 @@ impl Default for OptionsDialog {
             scroll_mode: widgets::ScrollMode::platform(),
             key_wheel: widgets::ScrollAccumulator::default(),
             key_bar: widgets::ScrollBarState::default(),
+            placement: Placement::default(),
+            sub_placement: Placement::default(),
+            confirm_placement: Placement::default(),
         }
     }
 }
@@ -342,6 +351,32 @@ fn texture(image: &Option<Image>) -> Option<Texture2D> {
 
 fn centered(canvas: Vec2, size: Vec2, scale: f32) -> Vec2 {
     ((canvas - size * scale) * 0.5).round()
+}
+
+/// A dialog layer of `size` (layout units) centered on `canvas`, moveable by its caption.
+fn layer_frame(canvas: Vec2, size: Vec2, close: fn(Vec2) -> Rect) -> placement::Frame {
+    let scale = Painter::scale_for(canvas.y);
+    placement::Frame {
+        origin: centered(canvas, size, scale),
+        size,
+        scale,
+        canvas,
+        min_size: None,
+        close,
+    }
+}
+
+fn main_frame(canvas: Vec2) -> placement::Frame {
+    layer_frame(canvas, DIALOG_SIZE, widgets::close_button_rect)
+}
+
+fn sub_frame(canvas: Vec2, size: Vec2) -> placement::Frame {
+    layer_frame(canvas, size, widgets::close_button_rect)
+}
+
+/// The confirmation box has no title-bar close button.
+fn confirm_frame(canvas: Vec2, size: Vec2) -> placement::Frame {
+    layer_frame(canvas, size, |_| Rect::new(0., 0., 0., 0.))
 }
 
 /// The page area below the tabs, in dialog coordinates.
@@ -571,6 +606,9 @@ impl OptionsDialog {
         self.sub = None;
         self.sub_saved = None;
         self.active_tooltip = None;
+        self.placement.end();
+        self.sub_placement.reset();
+        self.confirm_placement.reset();
     }
 
     pub fn tab(&self) -> Tab {
@@ -615,6 +653,11 @@ impl OptionsDialog {
 
     /// Closes the innermost layer. Returns `false` when the dialog itself closes (Cancel).
     pub fn escape(&mut self) -> bool {
+        // A drag or resize in progress is undone first.
+        if self.confirm_placement.cancel() || self.sub_placement.cancel() || self.placement.cancel()
+        {
+            return true;
+        }
         self.drag = None;
         self.last_armed = None;
         self.active_tooltip = None;
@@ -651,7 +694,7 @@ impl OptionsDialog {
     pub fn tooltip_at(&self, canvas: Vec2, pointer: Vec2) -> Option<String> {
         let panel = self.tab.panel()?;
         let scale = Painter::scale_for(canvas.y);
-        let origin = centered(canvas, DIALOG_SIZE, scale);
+        let origin = self.placement.place(&main_frame(canvas)).origin;
         let dialog_pointer = (pointer - origin) / scale;
         let page = page_rect();
         if !page.contains(dialog_pointer) {
@@ -723,7 +766,18 @@ impl OptionsDialog {
         if let Some(mut confirm) = self.confirm.take() {
             self.occlude(input);
             let layout = confirm.layout(|t| measure.text_width(t, false));
-            let pointer = local(centered(canvas, layout.size, scale));
+            let frame = confirm_frame(canvas, layout.size);
+            if self.confirm_placement.input(
+                &frame,
+                input.pointer,
+                input.click,
+                input.held,
+                input.time,
+            ) {
+                self.confirm = Some(confirm);
+                return OptionsOutcome::None;
+            }
+            let pointer = local(self.confirm_placement.place(&frame).origin);
             let down = input.click || input.held;
             let outcome = confirm.input(
                 &layout,
@@ -759,16 +813,25 @@ impl OptionsDialog {
                     self.log.push(msg);
                 }
             }
-            let pointer = local(centered(canvas, size, scale));
+            let frame = sub_frame(canvas, size);
+            let pointer = local(self.sub_placement.place(&frame).origin);
             // A combo list opened in the sub-dialog is the topmost layer there.
             if let Some(combo) = self.combo.take() {
                 self.occlude(input);
                 self.combo_input(combo, input, pointer);
                 return OptionsOutcome::None;
             }
+            if self
+                .sub_placement
+                .input(&frame, input.pointer, input.click, input.held, input.time)
+            {
+                self.occlude(input);
+                return OptionsOutcome::None;
+            }
             return self.sub_input(sub, size, input, pointer);
         }
-        let pointer = local(centered(canvas, DIALOG_SIZE, scale));
+        let main = main_frame(canvas);
+        let pointer = local(self.placement.place(&main).origin);
         if let Some(row) = self.keys.capture {
             self.occlude(input);
             if let Some(key) = input.binding_keys.iter().find(|k| *k != "Escape") {
@@ -782,6 +845,13 @@ impl OptionsDialog {
         if let Some(combo) = self.combo.take() {
             self.occlude(input);
             self.combo_input(combo, input, pointer);
+            return OptionsOutcome::None;
+        }
+        if self
+            .placement
+            .input(&main, input.pointer, input.click, input.held, input.time)
+        {
+            self.occlude(input);
             return OptionsOutcome::None;
         }
         self.page_input(input, pointer, measure)
@@ -1067,6 +1137,7 @@ impl OptionsDialog {
     }
 
     fn open_sub(&mut self, sub: Sub) {
+        self.sub_placement.reset();
         self.sub_saved = Some(self.draft.config.clone());
         self.sub = Some(sub);
     }
@@ -1104,6 +1175,7 @@ impl OptionsDialog {
             Command::VideoCredits => self.open_sub(Sub::VideoCredits),
             Command::KeyAdvanced => self.open_sub(Sub::KeyboardAdvanced),
             Command::KeyDefaults => {
+                self.confirm_placement.reset();
                 self.confirm = Some(MessageBox::new(
                     loc.text("#GameUI_KeyboardSettings"),
                     loc.text("#GameUI_KeyboardSettingsText"),
@@ -1502,7 +1574,7 @@ impl OptionsDialog {
             origin,
             scale,
         };
-        let p = painter_at(centered(canvas, DIALOG_SIZE, scale));
+        let p = painter_at(self.placement.place(&main_frame(canvas)).origin);
         // Layers drawn over this dialog (sub-dialogs, the confirmation box) are opaque.
         let stacked = base.theme.stacked();
         let loc = &self.res.localization;
@@ -1582,7 +1654,7 @@ impl OptionsDialog {
                 canvas: base.canvas,
                 fonts: base.fonts,
                 theme: &stacked,
-                origin: centered(canvas, size, scale),
+                origin: self.sub_placement.place(&sub_frame(canvas, size)).origin,
                 scale,
             };
             let sub_modal = self.confirm.is_some();
@@ -1616,7 +1688,11 @@ impl OptionsDialog {
             let layout = confirm.layout(|t| p.text_width(t, false));
             let cp = Painter {
                 theme: &stacked,
-                ..painter_at(centered(canvas, layout.size, scale))
+                ..painter_at(
+                    self.confirm_placement
+                        .place(&confirm_frame(canvas, layout.size))
+                        .origin,
+                )
             };
             confirm.draw(&cp, &layout);
         }
@@ -2529,6 +2605,114 @@ mod tests {
             h.dialog.draft().keys.get("loadout").unwrap(),
             "F3",
             "other commands kept"
+        );
+    }
+
+    impl Harness {
+        /// Press at `from`, move with the button held to `to`, release there.
+        fn drag(&mut self, from: Vec2, to: Vec2) {
+            for (pointer, click, held, released) in [
+                (from, true, true, false),
+                (to, false, true, false),
+                (to, false, false, true),
+            ] {
+                self.frame(Input {
+                    pointer: Some(pointer),
+                    click,
+                    held,
+                    released,
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn the_caption_drags_the_dialog_and_its_controls_follow() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        h.dialog.draft.config.mouse.invert = true;
+        // Caption: the top 23 units. Dragging it 100 left and 50 down moves OK with it.
+        h.drag(DIALOG + vec2(100., 10.), DIALOG + vec2(0., 60.));
+        let moved = DIALOG + vec2(-100., 50.);
+        let [ok, _, _] = button_rects();
+        let old_ok = DIALOG + vec2(ok.x + 10., ok.y + 10.);
+        assert_eq!(
+            h.click(old_ok),
+            OptionsOutcome::None,
+            "nothing at the old spot"
+        );
+        let outcome = h.click(moved + vec2(ok.x + 10., ok.y + 10.));
+        assert!(
+            matches!(outcome, OptionsOutcome::Close(Some(_))),
+            "{outcome:?}"
+        );
+        // The placement stays for the next opening.
+        h.dialog.open(Config::default());
+        assert_eq!(
+            h.dialog
+                .placement
+                .place(&main_frame(vec2(1280., 720.)))
+                .origin,
+            moved
+        );
+    }
+
+    #[test]
+    fn escape_undoes_a_drag_and_sub_dialogs_move_alone() {
+        let mut h = Harness::new();
+        h.frame(Input {
+            pointer: Some(DIALOG + vec2(100., 10.)),
+            click: true,
+            held: true,
+            ..Default::default()
+        });
+        h.frame(Input {
+            pointer: Some(DIALOG + vec2(300., 200.)),
+            held: true,
+            ..Default::default()
+        });
+        assert!(h.dialog.escape(), "Escape cancels the drag, not the dialog");
+        let canvas = vec2(1280., 720.);
+        assert_eq!(h.dialog.placement.place(&main_frame(canvas)).origin, DIALOG);
+        // The brightness dialog (290 x 396, at 495, 162) moves without its parent.
+        h.tab(Tab::Video);
+        h.click(page(300., 125.));
+        let gamma = vec2(495., 162.);
+        h.drag(gamma + vec2(50., 10.), gamma + vec2(-150., 10.));
+        let size = h.dialog.sub_frame_size(Sub::Gamma, |_| 0.);
+        let placed = h
+            .dialog
+            .sub_placement
+            .place(&sub_frame(canvas, size))
+            .origin;
+        assert_eq!(placed, gamma + vec2(-200., 0.));
+        assert_eq!(h.dialog.placement.place(&main_frame(canvas)).origin, DIALOG);
+        h.dialog.escape();
+        h.click(page(300., 125.));
+        let placed = h
+            .dialog
+            .sub_placement
+            .place(&sub_frame(canvas, size))
+            .origin;
+        assert_eq!(placed, gamma, "a sub-dialog opens centered again");
+    }
+
+    #[test]
+    fn a_caption_press_with_a_list_open_only_closes_the_list() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        h.click(page(40., 180.));
+        assert!(h.dialog.combo.is_some());
+        h.drag(DIALOG + vec2(100., 10.), DIALOG + vec2(0., 60.));
+        assert!(h.dialog.combo.is_none());
+        assert_eq!(
+            h.dialog
+                .placement
+                .place(&main_frame(vec2(1280., 720.)))
+                .origin,
+            DIALOG,
+            "the press closed the list and did not drag"
         );
     }
 
