@@ -1192,6 +1192,11 @@ impl Console {
 
     /// Escape closes the quit box first, then leaves a menu category, then toggles the menus.
     /// The main menu over a background level has nothing to return to.
+    /// The Options dialog's state for run reports while it is open.
+    pub fn options_report(&self) -> Option<crate::gameui::options::OptionsReport> {
+        (self.mode == Mode::Options).then(|| self.options.report())
+    }
+
     /// Escape went down. When it would close a dialog that has a close button (Options or one
     /// of its sub-dialogs, the console), that button shows pressed until Escape is released and
     /// the dialog closes then (owner request, 2026-10-17; retail closes on the press). Everything

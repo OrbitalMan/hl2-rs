@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Checks: cross-platform UI replays with report assertions
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `scripts/checks/replays.py` (Python, standard library) replaces `runtime_replays.sh`, `runtime_check.sh`, `runtime_capture.sh`, `runtime_resolution_change.sh` and `runtime_window_place.sh`: it builds with `build-bevy.sh` / `build-bevy.ps1`, runs `bin/hl2-bevy[.exe]` with a per-run `--report` and timeout, starts every check from default settings (the user's settings set aside and restored), asserts on the report's labelled states, and sorts checks into shared (background), windowed, macOS-only and Windows-only (`WINDOWED=1`). It adds checks for the existing console, console-map, campaign, dev-overlay and HUD replays and `bevy-save-config.json`, keyboard-focus assertions for the Options replays, and a windowed keyboard Apply of a new resolution (`test-inputs/bevy-options-keyboard-apply-resolution.json`). The run report's console section now carries the Options dialog's state (`OptionsDialog::report`: tab, sub-dialog, focused control, focus drawn, pending changes, open list, editing, key capture). Removed the early pointer-based `bevy-options.json`, `bevy-options-keyboard.json`, `bevy-switch-resolution*.json`, `bevy-switch-to-windowed.json`, `bevy-apply-fullscreen.json` (run once: none reached the Options dialog any more). The Options capture replays end with a settle step.
+
+**Why:** owner request: cross-platform UI tests, merged with the existing replays where they overlap, preferring the more reliable checks, in shared / Windows-only / macOS-only groups.
+
+**Tested how:** macOS (Apple Silicon): all 14 shared checks ok (~5 min, no focus taken), `window` and `window_place` ok; unit test for the Options report; workspace tests, strict clippy, fmt, Windows check. Findings: with the owner's saved settings (fast weapon switch on) the console replay's weapon selection never opened, hence default settings per check; its `menu-resume` step presses Enter with no pause-menu row selected, which does not resume on this branch (Escape clears the menu selection), so those assertions are left out.
+
+**Result:** one cross-platform UI check script with real assertions.
+
+**Still broken or not tested:** not run on Windows or Linux (the `no_border` Windows check has never run); the gameplay replays (movement, weapons, physics, NPCs) are not part of it.
+
+**Next:** owner check; a Windows run.
+
 ## 2026-10-17 Checks: one script for every packaged replay and capture
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

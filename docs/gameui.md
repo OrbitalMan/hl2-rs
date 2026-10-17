@@ -469,7 +469,7 @@ SDK `vgui_controls` (`Button`, `RadioButton`, `Slider`, `ComboBox`, `PropertyShe
   key list's focus and dim selection, focus rings, the held Escape, the resting menu pointer and
   the message box; the owned-install order test. Packaged keyboard-only replays
   `test-inputs/bevy-options-capture-keyboard-*.json` (combo, button, check, radio, slider,
-  entry), captured by `scripts/checks/runtime_replays.sh` (`options`).
+  entry), captured by `scripts/checks/replays.py` (`options`).
 
 ## 7. Plan: host use of the stored settings (milestone 6)
 
@@ -911,5 +911,5 @@ quitting mid-game. Module: `hl2-ui::gameui::chapters`.
   `changelevel_targets_come_from_trigger_changelevel_maps`,
   `loading_a_map_saves_its_chapter_background_for_the_menu`; owned
   `owned_maps_belong_to_their_installed_chapters`; packaged replay
-  `test-inputs/bevy-menu-chapter-return.json` (`d2_coast_01` -> `hl2/background04`, `d3_c17_10a` -> `hl2/background06`) and `scripts/checks/runtime_replays.sh` (`chapter_quit`) (`--map d2_coast_01`, exit
+  `test-inputs/bevy-menu-chapter-return.json` (`d2_coast_01` -> `hl2/background04`, `d3_c17_10a` -> `hl2/background06`) and `scripts/checks/replays.py` (`chapter_quit`) (`--map d2_coast_01`, exit
   mid-game: the saved background goes from `hl2/background01` to `hl2/background04`).

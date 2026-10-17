@@ -106,6 +106,19 @@ impl Tab {
     }
 }
 
+/// [`OptionsDialog::report`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct OptionsReport {
+    pub tab: String,
+    pub sub: Option<String>,
+    pub focus: Option<String>,
+    pub focus_visible: bool,
+    pub changed: bool,
+    pub list_open: bool,
+    pub editing: bool,
+    pub capturing_key: bool,
+}
+
 /// What the owner of the dialog has to do after an input frame.
 #[derive(Clone, Debug, PartialEq)]
 pub enum OptionsOutcome {
@@ -961,6 +974,47 @@ impl OptionsDialog {
             return OptionsOutcome::None;
         }
         self.page_input(input, pointer, measure)
+    }
+
+    /// The dialog's state for run reports: the open tab and sub-dialog, the keyboard focus (a
+    /// control's layout name, `tab`, `ok`, `cancel` or `apply`), whether focus is drawn, and
+    /// whether Apply would change anything.
+    pub fn report(&self) -> OptionsReport {
+        let list = match self.sub {
+            Some(sub) => {
+                let size = self.sub_frame_size(sub, |s| s.chars().count() as f32 * 7.);
+                layout_widgets(
+                    &self.res,
+                    sub.panel(),
+                    Rect::new(0., 0., size.x, size.y),
+                    &self.draft,
+                    &self.applied,
+                )
+            }
+            None => self.tab.panel().map_or_else(Vec::new, |panel| {
+                layout_widgets(&self.res, panel, page_rect(), &self.draft, &self.applied)
+            }),
+        };
+        let focus = self.focus.map(|target| match target {
+            Target::Control(i) => list
+                .get(i)
+                .map_or_else(String::new, |w| w.control.name.clone()),
+            Target::Tab(_) => "tab".into(),
+            Target::Ok => "ok".into(),
+            Target::Cancel => "cancel".into(),
+            Target::Apply => "apply".into(),
+            Target::Close => "close".into(),
+        });
+        OptionsReport {
+            tab: format!("{:?}", self.tab),
+            sub: self.sub.map(|s| format!("{s:?}")),
+            focus,
+            focus_visible: self.focus_visible,
+            changed: self.changed(),
+            list_open: self.combo.is_some(),
+            editing: self.editing.is_some(),
+            capturing_key: self.keys.capture.is_some(),
+        }
     }
 
     /// The Keyboard page's key list as a focus target.
@@ -2914,6 +2968,27 @@ mod tests {
         assert_eq!(fills(&h), 1);
         h.key(Key::Tab);
         assert_eq!(fills(&h), 0);
+    }
+
+    #[test]
+    fn the_report_names_the_tab_focus_and_pending_changes() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        let report = h.dialog.report();
+        assert_eq!(
+            (
+                report.tab.as_str(),
+                report.focus.as_deref(),
+                report.focus_visible
+            ),
+            ("Mouse", Some("tab"), false),
+            "a click focuses without showing it"
+        );
+        h.key(Key::Tab);
+        h.key(Key::Space);
+        let report = h.dialog.report();
+        assert_eq!(report.focus.as_deref(), Some("ReverseMouse"));
+        assert!(report.focus_visible && report.changed && report.sub.is_none());
     }
 
     #[test]

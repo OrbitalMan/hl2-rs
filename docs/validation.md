@@ -2,41 +2,53 @@
 
 ## Local check scripts (2026-10-17)
 
-Bash, no arguments, runnable from any directory; written and run on macOS (Apple Silicon). The
-packaged runs use `bin/hl2-bevy` (the Windows build produces `bin/hl2-bevy.exe`; on Windows run
-them from Git Bash or adapt the executable name). Every packaged run passes `--no-setup`, stops
-itself after a bounded number of frames, has a watchdog, and backs up and restores
-`bin/hl2-config.json` when it changes settings. Logs, captures and reports go to `artifacts/`.
+`scripts/checks/validate.sh` (`cargo test -p hl2-ui`, `-p hl2-bevy`, strict clippy
+`--workspace --all-targets --locked -D warnings` as CI, `cargo fmt --check`) and
+`scripts/checks/check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`
+without linking, from macOS/Linux) are bash.
 
-Replays and captures run in the background (`--background`, 2026-10-17): the game opens no
-operating-system window, so nothing takes focus, appears on the desktop or is slowed down by
-other windows, and the app is stepped at 60 Hz; the window state counts as focused, so gameplay
-does not pause itself. Captures (`--capture`) read the game frame (the full picture, 3D and UI,
-before it is scaled into the window). The checks of the window itself stay windowed and take
-focus: `runtime_check.sh`, `runtime_capture.sh` and `runtime_resolution_change.sh` (these two
-capture the presented window, `--capture-window`) and `runtime_window_place.sh`. Measured on
-macOS: during a background replay the previously active app stayed frontmost; a windowed run
-became the frontmost app at launch (winit activates the app; Bevy offers no setting for it).
+The packaged UI checks are one cross-platform Python script, `scripts/checks/replays.py` (Python
+3.9+, standard library only; `python3 scripts/checks/replays.py`, or `py` / `python` on Windows).
+It builds once (`scripts/build-bevy.sh`, `scripts/build-bevy.ps1` on Windows), runs each check as
+bounded launches of `bin/hl2-bevy` (`bin/hl2-bevy.exe` on Windows) with their own `--report`, and
+asserts on the labelled states the replays record (console mode and output, the Options dialog's
+tab / focused control / pending changes / sub-dialog, loaded maps, saved settings, captures). One
+ok/FAIL line per check; logs, reports and captures in `artifacts/replays/`. Every check starts
+from default settings: `bin/hl2-config.json` is set aside for the run and restored afterwards.
+Environment instead of arguments: `ONLY="console options"` runs those checks, `WINDOWED=1` adds the
+windowed ones of this platform, `NO_BUILD=1` keeps `bin/` as it is.
 
-| Script | What it checks |
-| --- | --- |
-| `scripts/checks/validate.sh` | `cargo test -p hl2-ui`, `-p hl2-bevy`, strict clippy (`--workspace --all-targets --locked -D warnings`, as CI), `cargo fmt --check` |
-| `scripts/checks/check_windows.sh` | strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc` without linking (platform-gated code stays gated) |
-| `scripts/checks/runtime_check.sh` | builds (`scripts/build-bevy.sh`), 300 windowed main-menu frames, exit status and warnings |
-| `scripts/checks/runtime_capture.sh` | builds, captures the presented window to `artifacts/present_check.png` |
-| `scripts/checks/runtime_replays.sh` | every packaged replay and capture check, in the background, building once and restoring the settings before each check; one ok/FAIL line per check (about 5 minutes, logs in `artifacts/replays/`; `ONLY="captions options"` runs a subset): `submenus` (`test-inputs/bevy-menu-submenus.json`: Episode One, back, Half-Life 2, back, Extras, Lost Coast load their backgrounds), `return_menu` (`bevy-menu-return.json`: Episode Two menu, `map d1_trainstation_02`, Return to main menu: back over `hl2/background01`), `chapter_menu` (`bevy-menu-chapter-return.json`: `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06`), `chapter_quit` (`--map d2_coast_01` exited mid-game: the saved background goes from `hl2/background01` to `hl2/background04`), `options` (every `test-inputs/bevy-options-capture*.json` captured to `artifacts/<name>.png`; the `-keyboard-*` ones drive the Options dialog by keyboard only, docs/gameui.md 6c), `captions` (`episodic/ep1_background02` with closed captions on and off, captured and reported), `placement` (a dragged Options dialog is saved and reopens there in a second launch), `bg_compare` (each game's chapter 1 background at 1024x768, FOV 75, to `artifacts/bg_compare/`, for comparison with the installed pre-blurred `materials/console/*.vtf`) |
-| `scripts/checks/runtime_resolution_change.sh` | builds, changes the resolution from the console at the main menu, opens Options from the keyboard and captures `artifacts/resolution_change.png`: the dialog must show at the new size (the picture must not stay on the frame from before the resize) |
-| `scripts/checks/runtime_window_place.sh` | builds, starts the main menu windowed at 2560x1600 and 1024x768 and prints the resize and placement lines: on macOS the window is sized and centred in the screen's visible frame (without the menu bar and Dock) |
+| Check | Category | What it asserts |
+| --- | --- | --- |
+| `submenus` | shared | `test-inputs/bevy-menu-submenus.json`: Episode One, back, Half-Life 2, back, Extras > Lost Coast load `hl2/background01`, `episodic/ep1_background01`, `hl2/background01`, `lostcoast/background01`, ending in the main menu |
+| `return_menu` | shared | `bevy-menu-return.json`: Episode Two menu, `map d1_trainstation_02`, Return to main menu: back over `hl2/background01`, which is saved |
+| `chapter_menu` | shared | `bevy-menu-chapter-return.json`: `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06` |
+| `chapter_quit` | shared | `--map d2_coast_01` quit mid-game: the saved background goes from `hl2/background01` to `hl2/background04` |
+| `options` | shared | every `bevy-options-capture*.json`: Keyboard / Video Advanced sub-dialogs open, the dialog drags, the console states; the `-keyboard-*` replays reach their control by keyboard only (focused control, tab and drawn focus from the report; the text entry edits) |
+| `placement` | shared | a dragged Options dialog is saved and kept when it reopens in a second launch |
+| `captions` | shared | `episodic/ep1_background02`: closed captions on process speech, off process none |
+| `bg_compare` | shared | each game's chapter 1 background loads (FOV 75, 1024x768 captures for comparison with the installed pre-blurred `materials/console/*.vtf`) |
+| `save_config` | shared | `bevy-save-config.json`: `volume`, `sensitivity`, `fov`, `mat_hdr_level` from the console are saved |
+| `console` | shared | `bevy-console.json`: cheats refused then granted, quoted `;` kept, the console freezes the scene, `setpos` / queued `ent_fire`, Unicode input and editing, weapon selection cancelled by Escape before pausing, pause menu, outside click, console over the pause menu and back, unknown commands rejected |
+| `console_map` | shared | `bevy-console-map.json`: two `map` loads, a missing map reported once without losing the player or scene, console state kept across loads |
+| `campaign` | shared | `bevy-campaign.json`: `d1_trainstation_01` > 02 > 03 through their triggers, inventory kept, the clock restarts per map |
+| `dev_overlay` | shared | `bevy-dev-overlay.json`: F1 overlay visible with its five lines and live statistics |
+| `hud` | shared | `bevy-hud.json`: unarmed start, loadout and weapon slots, HUD drawn |
+| `window` | windowed | `bevy-menu-resolution-change.json`: a console resolution change resizes the frame and Options still opens (window captured, `--capture-window`); `bevy-options-keyboard-apply-resolution.json`: Video > Resolution changed and Apply pressed by keyboard only changes the saved resolution and the window |
+| `window_place` | macOS | windowed at 2560x1600 and 1024x768: sized and centred in the screen's visible frame, below the menu bar and above the Dock |
+| `no_border` | Windows | `--borderless`: "Windowed (No Border)" is a borderless window over the monitor (on macOS the same mode is the native full-screen Space, which a replay cannot drive). Not run on this machine |
 
-Report helpers (read `artifacts/bevy-report.json` of the last run): `scripts/checks/show_report.py`
-(loaded maps, campaign state), `show_report_captions.py`, `show_audio.py`, `show_audio_keys.py`.
-Settings helpers used by the scripts: `set_bg_config.py`, `set_captions_config.py`,
-`set_menu_background.py` (environment variables, see each file). Scripted pointer positions in
-the replays are UI canvas pixels of the render resolution, so the capture scripts pin 1024x768.
+Shared checks run in the background (`--background`: no window, nothing takes focus, captures
+read the game frame); windowed ones open a window and take focus. On macOS a windowed run becomes
+the frontmost app at launch (winit activates the app; Bevy offers no switch); on Windows `--no-focus`
+shows the window without activating it (winit `SW_SHOWNOACTIVATE`; not run here).
+
+Verified 2026-10-17 on macOS (Apple Silicon): all 14 shared checks ok (about 5 minutes), `window`
+and `window_place` ok. Not run on Windows or Linux.
 
 ## Closed captions (2026-10-17, macOS Apple Silicon)
 
-`scripts/checks/validate.sh` (hl2-ui 233 passed / 7 ignored, hl2-bevy 86 / 8, strict clippy `--workspace --all-targets -D warnings`, fmt) and `scripts/checks/check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`) pass; `cargo test --locked -p source-assets -p hl2-simulation`: 103 / 30 and 241 / 18. Owned-install tests (`--include-ignored`, installation discovery): the Episode One dictionaries load in search order (episodic 3153, hl2 3970 entries), every `kleinercast01..13.vcd` line resolves its caption, and the Episode One `HudCloseCaption` layout, `Panel.BgColor` and four caption faces load (DejaVu Sans substitutes for the uninstalled Tahoma). A dictionary check found every installed `.txt` token hashed in its `.dat` (ep2: 15 differing values). Packaged release (`scripts/checks/runtime_replays.sh` (`captions`): `episodic/ep1_background02`, closed captions, 1024x768 windowed, 420 frames) exits 0; `artifacts/captions_capture.png` shows `ep_01.kl_fellowcitizens06` in Kleiner's `255,255,200` italics over the translucent rounded box behind the main menu; report `hud.captions`: dictionaries [3153, 3970], 1 processed, nothing missing, no attenuated scene captions. The same run with captions off (`captions_off.png`) shows no panel and 0 processed captions. Not compared with a retail capture; Subtitles mode, captions during gameplay and Windows **not tested** in a packaged run.
+`scripts/checks/validate.sh` (hl2-ui 233 passed / 7 ignored, hl2-bevy 86 / 8, strict clippy `--workspace --all-targets -D warnings`, fmt) and `scripts/checks/check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`) pass; `cargo test --locked -p source-assets -p hl2-simulation`: 103 / 30 and 241 / 18. Owned-install tests (`--include-ignored`, installation discovery): the Episode One dictionaries load in search order (episodic 3153, hl2 3970 entries), every `kleinercast01..13.vcd` line resolves its caption, and the Episode One `HudCloseCaption` layout, `Panel.BgColor` and four caption faces load (DejaVu Sans substitutes for the uninstalled Tahoma). A dictionary check found every installed `.txt` token hashed in its `.dat` (ep2: 15 differing values). Packaged release (`scripts/checks/replays.py` (`captions`): `episodic/ep1_background02`, closed captions, 1024x768 windowed, 420 frames) exits 0; `artifacts/captions_capture.png` shows `ep_01.kl_fellowcitizens06` in Kleiner's `255,255,200` italics over the translucent rounded box behind the main menu; report `hud.captions`: dictionaries [3153, 3970], 1 processed, nothing missing, no attenuated scene captions. The same run with captions off (`captions_off.png`) shows no panel and 0 processed captions. Not compared with a retail capture; Subtitles mode, captions during gameplay and Windows **not tested** in a packaged run.
 
 ## Merge of main into the menu branch (2026-10-16, macOS Apple Silicon)
 
