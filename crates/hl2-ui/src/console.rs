@@ -912,6 +912,11 @@ impl Console {
             return;
         }
         self.loaded_map = Some(GameMap::new(game, map));
+        if !background {
+            // Saved now, not on the way back to the menu, so quitting mid-game still starts
+            // over this chapter's background.
+            self.remember_chapter_background();
+        }
         self.level_loaded(background);
     }
 
@@ -947,14 +952,12 @@ impl Console {
         chapters::assign(&chapters::map_links(root, game), list).remove(&map.to_ascii_lowercase())
     }
 
-    /// The background to show when leaving a map for the main menu: the background of the chapter
-    /// the map belongs to in the running game (`gameui::chapters`), else that game's chapter 1
-    /// background. It becomes the saved menu background (a Half-Life 2 map played from the
-    /// Episode Two menu returns to a Half-Life 2 background). Without a running game, the saved one.
-    fn menu_background_after_game(&mut self) -> Option<GameMap> {
-        let Some(running) = self.loaded_map.clone() else {
-            return self.background();
-        };
+    /// The menu background of the running map: the background of the chapter it belongs to in its
+    /// game (`gameui::chapters`), else that game's chapter 1 background. It becomes the saved menu
+    /// background (written only when it changes), so a Half-Life 2 map played from the Episode
+    /// Two menu returns to, and next launches over, a Half-Life 2 background.
+    fn remember_chapter_background(&mut self) -> Option<GameMap> {
+        let running = self.loaded_map.clone()?;
         let game = running.game;
         let chapter_background = self.chapter_of(&game, &running.map).and_then(|key| {
             let chapters = self.gameui.chapters.get(&game)?;
@@ -963,15 +966,20 @@ impl Console {
                 .find(|c| c.key == key)
                 .map(|c| c.background.clone())
         });
-        let Some(map) =
-            chapter_background.or_else(|| self.gameui.background_maps.get(&game).cloned())
-        else {
-            return self.background();
-        };
+        let map = chapter_background.or_else(|| self.gameui.background_maps.get(&game).cloned())?;
         let background = GameMap::new(game, map);
-        self.set_background(Some(background.clone()));
-        let _ = self.config.save();
+        if self.background().as_ref() != Some(&background) {
+            self.set_background(Some(background.clone()));
+            let _ = self.config.save();
+        }
         Some(background)
+    }
+
+    /// The background to show when leaving a map for the main menu: the running map's chapter
+    /// background (already saved when the map loaded), else the saved one.
+    fn menu_background_after_game(&mut self) -> Option<GameMap> {
+        self.remember_chapter_background()
+            .or_else(|| self.background())
     }
 
     /// Shows a game's menu category over that game's own chapter 1 background, loading it
@@ -4380,7 +4388,7 @@ mod tests {
     }
 
     #[test]
-    fn return_to_main_menu_shows_the_background_of_the_maps_chapter() {
+    fn loading_a_map_saves_its_chapter_background_for_the_menu() {
         use crate::gameui::chapters::{Chapter, ChapterIndex};
         let mut console = installed_console();
         let chapter = |key: &str, start: &str, background: &str| Chapter {
@@ -4406,6 +4414,11 @@ mod tests {
         console.level_loaded_for_map("hl2", "background01", true);
         let _ = console.submit("map d2_coast_01");
         console.level_loaded_for_map("hl2", "d2_coast_01", false);
+        // Saved on load: quitting the game now still starts over this chapter's background.
+        assert_eq!(
+            console.background(),
+            Some(GameMap::new("hl2", "background04"))
+        );
 
         console.escape();
         click_row(&mut console, 5); // Return to main menu

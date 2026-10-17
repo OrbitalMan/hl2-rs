@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **The played chapter's background is saved when a gameplay map loads**, so a mid-game quit relaunches over it (packaged `runtime_chapter_quit.sh`: `hl2/background01` -> `hl2/background04`).
 - **Return to main menu shows the played chapter's background** (`gameui::chapters`, docs/gameui.md section 13): chapters from `chapterbackgrounds.txt`, `cfg/chapter<key>.cfg` and the maps' `trigger_changelevel` targets; `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06` (packaged replay `chapter_menu.json`). Not tried by hand; not checked on Windows.
 - **Dialogs move by their caption; the console resizes by its corners** (shared `gameui::placement`, docs/gameui.md section 12). Packaged replays checked; not tried with a real mouse.
 - **Options dialog position and console position/size are saved** (`dialogs` in the settings) and reset to the default when they would open off screen; packaged two-run check passed.

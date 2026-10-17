@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: save the chapter background when a gameplay map loads
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `Console::level_loaded_for_map` saves the loaded gameplay map's chapter background as the menu background (`remember_chapter_background`, written only when it changes); `menu_background_after_game` uses the same lookup.
+
+**Why:** owner report: quitting the game mid-gameplay relaunched over the previous background, because it was saved only on Return to main menu.
+
+**Tested how:** unit `loading_a_map_saves_its_chapter_background_for_the_menu` (saved right after the load, then shown on return); workspace tests, strict clippy, fmt; packaged `runtime_chapter_quit.sh` (`--map d2_coast_01`, exit after 600 frames: saved background `hl2/background01` -> `hl2/background04`) and `runtime_chapter_menu.sh` (unchanged results).
+
+**Result:** the next launch after a mid-game quit opens over the chapter's background.
+
+**Still broken or not tested:** not tried by hand; not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: main-menu background follows the chapter of the map left
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
