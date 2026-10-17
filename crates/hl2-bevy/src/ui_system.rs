@@ -39,9 +39,30 @@ pub fn resize_canvas(
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiInputSet;
 
+/// Gives the Options dialog the display's resolutions each time it opens, whatever opened it
+/// (pointer, keyboard or a scripted replay).
+pub fn refresh_display_modes(
+    mut was_options: Local<bool>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    monitors: Query<&bevy::window::Monitor, With<PrimaryMonitor>>,
+    ui: Option<ResMut<crate::ui_host::Console>>,
+) {
+    let Some(mut ui) = ui else {
+        return;
+    };
+    let is_options = ui.source.mode == hl2_ui::console::Mode::Options;
+    let opened = is_options && !*was_options;
+    *was_options = is_options;
+    if opened && let Ok(window) = windows.single() {
+        ui.source
+            .set_display_modes(crate::video::display::modes(&monitors, window));
+    }
+}
+
 pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        app.add_systems(Update, refresh_display_modes);
         app.add_systems(
             RunFixedMainLoop,
             update_ui
@@ -61,15 +82,13 @@ type UiInputDevices<'w, 's> = (
     Option<ResMut<'w, bevy::clipboard::Clipboard>>,
 );
 
-type UiDisplayDevices<'w, 's> = (
-    Query<'w, 's, (&'static mut Window, &'static mut CursorOptions), With<PrimaryWindow>>,
-    Query<'w, 's, &'static bevy::window::Monitor, With<PrimaryMonitor>>,
-);
+type UiWindow<'w, 's> =
+    Query<'w, 's, (&'static mut Window, &'static mut CursorOptions), With<PrimaryWindow>>;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_ui(
     (keys, buttons, mut characters, mut wheels, real_time, mut clipboard): UiInputDevices,
-    (mut windows, monitors): UiDisplayDevices,
+    mut windows: UiWindow,
     video_viewport: Option<Res<VideoViewport>>,
     mut sim: ResMut<crate::simulation::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
@@ -174,11 +193,6 @@ pub fn update_ui(
                 *gv = bevy::audio::GlobalVolume::from(bevy::audio::Volume::Linear(
                     ui.source.config.audio.volume,
                 ));
-            }
-            let options = hl2_ui::console::Mode::Options;
-            if before != options && ui.source.mode == options {
-                ui.source
-                    .set_display_modes(crate::video::display::modes(&monitors, &window));
             }
         }
         // Applied video settings (`sim.pending_video_config`) are carried out by

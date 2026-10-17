@@ -618,11 +618,17 @@ Fix (`crates/hl2-bevy/src/video.rs`): stop rendering, resize, then resume.
   presenters' per-frame camera activity) notices that the frame image no longer matches the
   configured resolution and suspends for `SUSPEND_FRAMES` (4) frames. Every camera that renders into
   the frame is deactivated (its previous `is_active` is kept in `SuspendedCamera`). The image is
-  replaced only on a frame when those cameras are already inactive. Rendering resumes after the
+  replaced only on a frame when those cameras are already inactive: the frame becomes a new image
+  at the new resolution, the present material is pointed at it and the old image is released.
+  Resizing the old image in place froze the picture (2026-10-17): the present material's bind
+  group keeps the texture it was built with, so the window went on showing the last frame drawn
+  before the resize while input, sound and the console kept running. Rendering resumes after the
   remaining frames, once the camera target sizes have caught up, and each camera gets its previous
   activity back.
 - While suspended the presentation sprite is hidden, so the window shows black for those few
   frames instead of a stretched stale frame.
+- The Options dialog's resolution list is refreshed whenever the dialog opens
+  (`ui_system::refresh_display_modes`), also when a scripted replay opens it.
 - `apply_video_settings` (Update, chained before `resize_window`) applies pending video settings.
   It used to run inside the menu update, which returns early while a movement script runs, so
   scripted and console changes never reached the window.

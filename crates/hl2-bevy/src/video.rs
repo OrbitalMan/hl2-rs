@@ -731,6 +731,8 @@ pub(crate) fn suspend_for_resize(
     frame: Option<ResMut<GameFrame>>,
     mut images: ResMut<Assets<Image>>,
     mut cameras: SuspendCameras,
+    quads: Query<&bevy::sprite_render::MeshMaterial2d<PresentMaterial>, With<PresentQuad>>,
+    mut materials: ResMut<Assets<PresentMaterial>>,
 ) {
     let Some(mut frame) = frame else {
         return;
@@ -760,15 +762,23 @@ pub(crate) fn suspend_for_resize(
         }
         camera.is_active = false;
     }
-    if frame.suspended == SUSPEND_FRAMES - 1
-        && let Some(mut image) = images.get_mut(&frame.image)
-    {
+    if frame.suspended == SUSPEND_FRAMES - 1 {
         debug!(
             "[video] resizing frame image {:?} -> {}",
-            image.size(),
+            images.get(&frame.image).map(Image::size),
             frame.resolution
         );
-        *image = frame_image(frame.resolution);
+        // A new image rather than the old one resized in place: the present material's bind
+        // group keeps the texture it was built with, so the window would go on showing the old
+        // frame. `present_frame` routes the cameras to the new image.
+        let image = images.add(frame_image(frame.resolution));
+        let old = std::mem::replace(&mut frame.image, image.clone());
+        for handle in &quads {
+            if let Some(mut material) = materials.get_mut(&handle.0) {
+                material.frame = image.clone();
+            }
+        }
+        images.remove(&old);
     }
     frame.suspended -= 1;
     if frame.suspended == 0 {
@@ -1106,7 +1116,8 @@ mod tests {
     fn game_cameras_render_into_the_frame_at_the_configured_resolution() {
         let mut app = App::new();
         app.init_resource::<VideoViewport>()
-            .init_resource::<Assets<Image>>();
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<PresentMaterial>>();
         let image = app
             .world_mut()
             .resource_mut::<Assets<Image>>()
@@ -1149,9 +1160,21 @@ mod tests {
             .world_mut()
             .spawn((PresentCamera, Camera::default(), RenderTarget::default()))
             .id();
+        let present_material = app
+            .world_mut()
+            .resource_mut::<Assets<PresentMaterial>>()
+            .add(PresentMaterial {
+                params: Vec4::ONE,
+                frame: image.clone(),
+            });
         let quad = app
             .world_mut()
-            .spawn((PresentQuad, Transform::default(), Visibility::default()))
+            .spawn((
+                PresentQuad,
+                bevy::sprite_render::MeshMaterial2d(present_material.clone()),
+                Transform::default(),
+                Visibility::default(),
+            ))
             .id();
 
         app.world_mut().run_system_once(present_frame).unwrap();
@@ -1182,10 +1205,13 @@ mod tests {
 
         // The resize: cameras stop first, the image changes only while they are stopped, and
         // they resume with their previous activity once the new size has had time to arrive.
+        // The frame becomes a new image that the window's material shows: a material keeps
+        // the texture it was built with, so resizing the old image in place froze the picture.
+        let frame_handle = |app: &App| app.world().resource::<GameFrame>().image.clone();
         let size = |app: &App| {
             app.world()
                 .resource::<Assets<Image>>()
-                .get(&image)
+                .get(&frame_handle(app))
                 .map(Image::size)
         };
         let active = |app: &App, camera| app.world().get::<Camera>(camera).unwrap().is_active;
@@ -1198,6 +1224,23 @@ mod tests {
             size(&app),
             Some(UVec2::new(1280, 720)),
             "resized while stopped"
+        );
+        let resized = frame_handle(&app);
+        assert_ne!(resized, image, "a new frame image");
+        assert!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&image)
+                .is_none(),
+            "the old one is released"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<Assets<PresentMaterial>>()
+                .get(&present_material)
+                .map(|m| m.frame.clone()),
+            Some(resized.clone()),
+            "the window shows the new image"
         );
         assert!(!active(&app, scene_camera));
         app.world_mut().run_system_once(present_frame).unwrap();
@@ -1214,6 +1257,10 @@ mod tests {
         assert!(active(&app, scene_camera), "rendering resumed");
         assert!(app.world().get::<SuspendedCamera>(scene_camera).is_none());
         app.world_mut().run_system_once(present_frame).unwrap();
+        assert!(
+            matches!(app.world().get::<RenderTarget>(scene_camera).unwrap(), RenderTarget::Image(t) if t.handle == resized),
+            "cameras render into the new image"
+        );
         assert_eq!(
             app.world().get::<Visibility>(quad),
             Some(&Visibility::Inherited)

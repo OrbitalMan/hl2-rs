@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Video: the picture froze after a resolution change
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `video::suspend_for_resize` gives the game frame a new image at the new resolution and points the present material at it (the old image is released), instead of resizing the image in place; `present_frame` routes the cameras to the new image. New `ui_system::refresh_display_modes` fills the Options dialog's resolution list whenever it opens, also when a scripted replay opens it (before, only pointer/keyboard input did, so replays offered a single resolution). New check `scripts/checks/runtime_resolution_change.sh` with `test-inputs/bevy-menu-resolution-change.json`.
+
+**Why:** owner report: after changing the resolution or aspect ratio and pressing OK/Apply the game looked stuck with the button pressed while ambient sound went on. Root cause: since the presented picture is drawn by `PresentMaterial` (brightness, fffb172) its bind group kept the frame texture it was built with; the in-place resize (c91af10) left that material showing a texture nothing rendered into any more, so every frame after a resize showed the last picture before it. Input and the console kept working (a scripted replay reached the Options dialog while the window still showed the bare main menu).
+
+**Tested how:** replay before the fix: console mode Options, capture showed the main menu without the dialog; touching the material alone did not help; after the fix the capture shows the dialog at 1280x720. Extended `game_cameras_render_into_the_frame_at_the_configured_resolution` (new image, old one released, material and cameras on the new image). Workspace tests, strict clippy, fmt, Windows check.
+
+**Result:** resolution and aspect changes from Options or `mat_setvideomode` show the new picture.
+
+**Still broken or not tested:** not tried by hand with the real mouse; not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 Repository: local check scripts in the repository, no outside references
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

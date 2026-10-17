@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **Picture froze after a resolution change: fixed.** The present material kept the frame texture from before an in-place resize; the frame is now a new image the material is pointed at (`video::suspend_for_resize`). Check `scripts/checks/runtime_resolution_change.sh`. Not tried by hand.
 - **Local checks ship with the repository** (`scripts/checks/`, replay inputs in `test-inputs/`, list in docs/validation.md); docs and AGENTS.md reference nothing outside the repository (hard rule 10).
 - **The played chapter's background is saved when a gameplay map loads**, so a mid-game quit relaunches over it (packaged `scripts/checks/runtime_chapter_quit.sh`: `hl2/background01` -> `hl2/background04`).
 - **Return to main menu shows the played chapter's background** (`gameui::chapters`, docs/gameui.md section 13): chapters from `chapterbackgrounds.txt`, `cfg/chapter<key>.cfg` and the maps' `trigger_changelevel` targets; `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06` (packaged replay `test-inputs/bevy-menu-chapter-return.json`). Not tried by hand; not checked on Windows.

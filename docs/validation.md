@@ -21,6 +21,7 @@ itself after a bounded number of frames, has a watchdog, and backs up and restor
 | `scripts/checks/runtime_bg_compare.sh` | builds, captures each game's chapter 1 menu background at 1024x768, FOV 75, to `artifacts/bg_compare/` for comparison with the installed pre-blurred `materials/console/*.vtf` |
 | `scripts/checks/runtime_captions.sh` | builds, runs `episodic/ep1_background02` with closed captions on and off, captures both and prints the caption report |
 | `scripts/checks/runtime_options_capture.sh` | replays every `test-inputs/bevy-options-capture*.json` with the current build (no rebuild) and captures `artifacts/<name>.png` |
+| `scripts/checks/runtime_resolution_change.sh` | builds, changes the resolution from the console at the main menu, opens Options from the keyboard and captures `artifacts/resolution_change.png`: the dialog must show at the new size (the picture must not stay on the frame from before the resize) |
 | `scripts/checks/runtime_placement_persist.sh` | current build: drags the Options dialog, then checks a second run opens it where it was saved |
 
 Report helpers (read `artifacts/bevy-report.json` of the last run): `scripts/checks/show_report.py`
