@@ -608,6 +608,7 @@ fn main() -> Result<()> {
                 console_host::sync_sources,
                 console_host::drain_log,
                 console_host::save_history,
+                console_host::apply_cursor_hint,
             ),
         )
         .add_systems(Last, monitor);

@@ -23,6 +23,18 @@ const SUBMIT_WIDE: f32 = 64.;
 const SUBMIT_INSET: f32 = 7.;
 /// Retail proportional values are relative to a 480-line screen.
 const PROPORTIONAL_BASE: f32 = 480.;
+/// Smallest size the corner grips allow: the SDK `CConsolePanel` minimum (100 x 100), raised so the
+/// entry keeps at least a Submit button's width and the history three entry rows.
+pub const MIN_SIZE: Vec2 = Vec2::new(
+    2. * CLIENT_INSET_X + 3. * INSET + ENTRY_INSET + SUBMIT_WIDE + SUBMIT_INSET + SUBMIT_WIDE,
+    CLIENT_TOP
+        + CLIENT_INSET_Y
+        + 2. * ENTRY_INSET
+        + 2. * INSET
+        + TOP_TALL
+        + ENTRY_TALL
+        + 3. * ENTRY_TALL,
+);
 
 /// Where the console dialog and its controls are. Control rectangles are in layout units
 /// relative to the frame; [`Self::canvas`] maps them to canvas pixels.
@@ -41,7 +53,14 @@ pub struct DialogLayout {
 }
 
 impl DialogLayout {
+    /// The retail placement on `canvas`.
     pub fn new(canvas: Vec2) -> Self {
+        let (origin, size) = Self::default_frame(canvas);
+        Self::at(Painter::scale_for(canvas.y), origin, size)
+    }
+
+    /// The retail frame on `canvas`: top-left in canvas pixels and size in layout units.
+    pub fn default_frame(canvas: Vec2) -> (Vec2, Vec2) {
         let scale = Painter::scale_for(canvas.y);
         let proportional = |value: f32| (value * canvas.y / PROPORTIONAL_BASE).floor();
         let origin = vec2(
@@ -49,10 +68,15 @@ impl DialogLayout {
             proportional(64.),
         )
         .max(Vec2::ZERO);
-        // SDK `CConsolePanel` minimum size.
         let size = (vec2((canvas.x * 0.5).floor(), canvas.y - 2. * proportional(64.)) / scale)
             .round()
-            .max(vec2(100., 100.));
+            .max(MIN_SIZE);
+        (origin, size)
+    }
+
+    /// The layout of a frame at `origin` (canvas pixels) of `size` (layout units).
+    pub fn at(scale: f32, origin: Vec2, size: Vec2) -> Self {
+        let size = size.max(MIN_SIZE);
         // Frame client area (`Frame::GetClientArea`), then the panel's own insets inside it.
         let (cx, cy) = (CLIENT_INSET_X, CLIENT_TOP);
         let (cw, ch) = (
@@ -248,10 +272,19 @@ mod tests {
     }
 
     #[test]
-    fn small_canvases_keep_the_minimum_size() {
+    fn small_canvases_and_resizes_keep_the_minimum_size() {
         let layout = DialogLayout::new(vec2(120., 100.));
-        assert_eq!(layout.size, vec2(100., 100.));
-        assert!(layout.history.h >= 0. && layout.entry.w >= 0.);
+        assert_eq!(layout.size, MIN_SIZE);
+        let smallest = DialogLayout::at(1., Vec2::ZERO, vec2(10., 10.));
+        assert_eq!(smallest.size, MIN_SIZE);
+        assert!(smallest.entry.w >= SUBMIT_WIDE, "{:?}", smallest.entry);
+        assert!(
+            smallest.history.h >= 3. * ENTRY_TALL,
+            "{:?}",
+            smallest.history
+        );
+        assert!(smallest.entry.x + smallest.entry.w < smallest.submit.x);
+        assert!(smallest.submit.x + smallest.submit.w < smallest.size.x);
     }
 
     #[test]

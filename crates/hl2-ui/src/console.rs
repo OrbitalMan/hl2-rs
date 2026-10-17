@@ -8,6 +8,7 @@ use crate::gameui::{
     display::DisplayModes,
     menu::{GameMenu, MenuLayout, MenuOutcome, MessageBox, MessageBoxLayout},
     options::{OptionsDialog, OptionsOutcome},
+    placement::{self, CursorHint, Placement},
     resources::{self, fallback_game_menu, GameUiResources},
     widgets::{
         scheme_color, Align, ButtonState, ButtonTracker, Fonts, HoldRepeat, Painter,
@@ -142,6 +143,12 @@ pub struct Console {
     selection: Option<Selection>,
     /// A drag that started in the history is extending the selection.
     selecting: bool,
+    /// Where the console dialog was dragged or resized (kept while the game runs).
+    console_placement: Placement,
+    /// Where the quit / main-menu box was dragged (centered on opening).
+    quit_placement: Placement,
+    /// The pointer of the latest input frame (cursor hints).
+    pointer: Option<Vec2>,
     /// Text the copy shortcut put on the clipboard, until the host takes it.
     copied: Option<String>,
     /// The dialog's close (×) and Submit buttons.
@@ -166,6 +173,9 @@ pub struct Console {
     /// Each output line's wrapped rows by line number, rebuilt when its shown text or the
     /// history width changes.
     wrapped: Mutex<HashMap<u64, Wrapped>>,
+    /// ASCII advances of the console font at one size (rewrapping on resize measures every
+    /// character of the history).
+    ascii_advances: Mutex<Option<(u32, [f32; 128])>>,
     font: Option<FontFace>,
     menu_font: Option<FontFace>,
     menu_metrics: CellMetrics,
@@ -463,6 +473,9 @@ impl Default for Console {
             output_start: 0,
             selection: None,
             selecting: false,
+            console_placement: Placement::default(),
+            quit_placement: Placement::default(),
+            pointer: None,
             copied: None,
             console_buttons: ButtonTracker::capturing(),
             console_hover: None,
@@ -477,6 +490,7 @@ impl Default for Console {
             con_timestamp: false,
             scroll: 0,
             wrapped: Mutex::default(),
+            ascii_advances: Mutex::default(),
             font: None,
             menu_font: None,
             menu_metrics: CellMetrics::default(),
@@ -1126,6 +1140,12 @@ impl Console {
     /// Escape closes the quit box first, then leaves a menu category, then toggles the menus.
     /// The main menu over a background level has nothing to return to.
     pub fn escape(&mut self) {
+        // A drag or resize in progress is undone first.
+        if self.quit_placement.cancel()
+            || (self.mode == Mode::Console && self.console_placement.cancel())
+        {
+            return;
+        }
         // In the console Escape first ends a history search, then hides the completion list.
         if self.mode == Mode::Console && self.editor.dismiss() {
             return;
@@ -1177,6 +1197,7 @@ impl Console {
     /// Opens or closes the console; it opens only while `con_enable` is on.
     pub fn toggle(&mut self) {
         if self.mode == Mode::Console {
+            self.console_placement.end();
             self.mode = self.previous;
             self.clear_menu_hover();
         } else if self.config.keyboard.developer_console {
@@ -1678,6 +1699,14 @@ impl Console {
     fn confirm_input(&mut self, input: &Input) -> Vec<Effect> {
         let mut effects = Vec::new();
         if let Some((mut confirm, kind)) = self.confirm_box.take() {
+            let frame = self.quit_frame(&confirm);
+            if self
+                .quit_placement
+                .input(&frame, input.pointer, input.click, input.held, input.time)
+            {
+                self.confirm_box = Some((confirm, kind));
+                return effects;
+            }
             let (origin, scale, layout) = self.quit_geometry(&confirm);
             let pointer = input.pointer.map(|p| (p - origin) / scale);
             let down = input.click || input.held;
@@ -1724,8 +1753,20 @@ impl Console {
         if let Some(time) = input.time {
             self.clock = time;
         }
-        if let Some(effects) = self.console_pointer(input) {
-            return effects;
+        // The caption and corner grips own the pointer before the history's row selection.
+        self.pointer = input.pointer;
+        let frame = self.console_frame();
+        let placing = self.console_placement.input(
+            &frame,
+            input.pointer,
+            input.click,
+            input.held,
+            input.time,
+        );
+        if !placing {
+            if let Some(effects) = self.console_pointer(input) {
+                return effects;
+            }
         }
         let ctrl_key = |name: &str| input.ctrl && input.binding_keys.iter().any(|k| k == name);
         let editor = &mut self.editor;
@@ -1936,8 +1977,50 @@ impl Console {
         self.selecting = false;
     }
 
+    /// The console dialog's frame: retail placement and minimum size, sizeable by its corners.
+    fn console_frame(&self) -> placement::Frame {
+        let canvas = vec2(self.canvas.width(), self.canvas.height());
+        let (origin, size) = DialogLayout::default_frame(canvas);
+        placement::Frame {
+            origin,
+            size,
+            scale: Painter::scale_for(canvas.y),
+            canvas,
+            min_size: Some(dialog::MIN_SIZE),
+            close: crate::gameui::widgets::close_button_rect,
+        }
+    }
+
     fn dialog_layout(&self) -> DialogLayout {
-        DialogLayout::new(vec2(self.canvas.width(), self.canvas.height()))
+        let frame = self.console_frame();
+        let placed = self.console_placement.place(&frame);
+        DialogLayout::at(frame.scale, placed.origin, placed.size)
+    }
+
+    /// The quit / main-menu box's frame (centered, moveable, no close button).
+    fn quit_frame(&self, quit: &MessageBox) -> placement::Frame {
+        let scale = Painter::scale_for(self.canvas.height());
+        let measure = self.painter(Vec2::ZERO, 1.);
+        let size = quit.layout(|text| measure.text_width(text, false)).size;
+        let canvas = vec2(self.canvas.width(), self.canvas.height());
+        placement::Frame {
+            origin: ((canvas - size * scale) * 0.5).round(),
+            size,
+            scale,
+            canvas,
+            min_size: None,
+            close: |_| Rect::new(0., 0., 0., 0.),
+        }
+    }
+
+    /// The pointer shape the window should show: a resize cursor over or while dragging one of the
+    /// console's corner grips, otherwise the arrow.
+    pub fn cursor_hint(&self) -> CursorHint {
+        if self.mode != Mode::Console || self.confirm_box.is_some() {
+            return CursorHint::Arrow;
+        }
+        self.console_placement
+            .hint(&self.console_frame(), self.pointer)
     }
 
     /// The output the history shows (`con_filter_enable` 1 hides lines without
@@ -1974,9 +2057,31 @@ impl Console {
         if c == '\t' {
             return TAB_SPACES as f32 * self.console_advance(' ', em);
         }
-        self.mono
-            .as_ref()
-            .map_or(em * NOMINAL_ADVANCE, |font| font.advance_em(c, em))
+        let Some(font) = self.mono.as_ref() else {
+            return em * NOMINAL_ADVANCE;
+        };
+        match self.ascii_table(em) {
+            Some(table) if c.is_ascii() => table[c as usize],
+            _ => font.advance_em(c, em),
+        }
+    }
+
+    /// The console font's ASCII advances at `em` (tab already eight spaces), built once per size.
+    fn ascii_table(&self, em: f32) -> Option<[f32; 128]> {
+        let font = self.mono.as_ref()?;
+        let mut table = self
+            .ascii_advances
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if table.is_none_or(|(size, _)| size != em.to_bits()) {
+            let mut advances = [0.; 128];
+            for (code, advance) in advances.iter_mut().enumerate() {
+                *advance = font.advance_em(char::from(code as u8), em);
+            }
+            advances[usize::from(b'\t')] = TAB_SPACES as f32 * advances[usize::from(b' ')];
+            *table = Some((em.to_bits(), advances));
+        }
+        table.map(|(_, advances)| advances)
     }
 
     /// The rows line `number` wraps to, as byte ranges into its [`Self::shown_text`].
@@ -1988,8 +2093,10 @@ impl Console {
         }) {
             return entry.rows.clone();
         }
-        let rows = wrap(&self.shown_text(line), metrics.width, |c| {
-            self.console_advance(c, metrics.em)
+        let table = self.ascii_table(metrics.em);
+        let rows = wrap(&self.shown_text(line), metrics.width, |c| match table {
+            Some(table) if c.is_ascii() => table[c as usize],
+            _ => self.console_advance(c, metrics.em),
         });
         if cache.len() >= 2 * OUTPUT_LINES {
             cache.retain(|n, _| *n >= self.output_start);
@@ -2079,8 +2186,7 @@ impl Console {
         let scale = Painter::scale_for(self.canvas.height());
         let measure = self.painter(Vec2::ZERO, 1.);
         let layout = quit.layout(|text| measure.text_width(text, false));
-        let canvas = vec2(self.canvas.width(), self.canvas.height());
-        let origin = ((canvas - layout.size * scale) * 0.5).round();
+        let origin = self.quit_placement.place(&self.quit_frame(quit)).origin;
         (origin, scale, layout)
     }
 
@@ -2172,6 +2278,7 @@ impl Console {
             }
             MenuOutcome::ConfirmQuit => {
                 self.reset_menu_interaction();
+                self.quit_placement.reset();
                 self.confirm_box = Some((MessageBox::quit(loc), ConfirmKind::Quit));
             }
             MenuOutcome::NewGame(map) => {
@@ -2181,6 +2288,7 @@ impl Console {
             }
             MenuOutcome::ReturnToMainMenu => {
                 self.reset_menu_interaction();
+                self.quit_placement.reset();
                 self.confirm_box = Some((
                     MessageBox::return_to_main_menu(loc),
                     ConfirmKind::ReturnToMainMenu,
@@ -3281,6 +3389,104 @@ mod tests {
         }
         assert!(stepped.main_menu.selection.is_some());
         assert_eq!(held.main_menu.selection, stepped.main_menu.selection);
+    }
+
+    /// Press at `from`, move held to `to`, release there.
+    fn pointer_drag(console: &mut Console, from: Vec2, to: Vec2) {
+        press(console, from);
+        console.input(&Input {
+            pointer: Some(to),
+            held: true,
+            ..Default::default()
+        });
+        release(console, to);
+    }
+
+    #[test]
+    fn the_console_moves_by_its_caption_and_escape_undoes_a_drag() {
+        let mut console = Console::default();
+        console.canvas.resize(1024., 768.);
+        console.toggle();
+        let start = console.dialog_layout();
+        let caption = start.origin + vec2(100., 10.) * start.scale;
+        pointer_drag(&mut console, caption, caption - vec2(200., 50.));
+        let moved = console.dialog_layout();
+        assert_eq!(moved.origin, start.origin - vec2(200., 50.));
+        assert_eq!(moved.size, start.size);
+        // The caption press is the placement's: no history row selection started.
+        assert_eq!(copy(&mut console), None);
+        // Escape during a drag restores the frame and keeps the console open.
+        let caption = moved.origin + vec2(100., 10.) * moved.scale;
+        press(&mut console, caption);
+        console.input(&Input {
+            pointer: Some(caption + vec2(300., 300.)),
+            held: true,
+            ..Default::default()
+        });
+        console.escape();
+        assert_eq!(console.mode, Mode::Console);
+        assert_eq!(console.dialog_layout().origin, moved.origin);
+        // Closing and reopening keeps the place.
+        console.toggle();
+        console.toggle();
+        assert_eq!(console.dialog_layout().origin, moved.origin);
+    }
+
+    #[test]
+    fn the_console_resizes_by_its_corners_within_limits() {
+        let mut console = Console::default();
+        console.canvas.resize(1024., 768.);
+        console.toggle();
+        let start = console.dialog_layout();
+        let corner = start.origin + start.size * start.scale - Vec2::splat(4.);
+        console.pointer = Some(corner);
+        assert_eq!(console.cursor_hint(), CursorHint::ResizeNwSe);
+        pointer_drag(&mut console, corner, corner + vec2(-100., -60.));
+        let resized = console.dialog_layout();
+        assert_eq!(resized.origin, start.origin, "the top-left stays");
+        assert!((resized.size.x - (start.size.x - 100. / start.scale)).abs() <= 1.);
+        assert!(resized.entry.w > 0. && resized.history.h > 0.);
+        // Way past the minimum: the layout keeps every control.
+        let corner = resized.origin + resized.size * resized.scale - Vec2::splat(4.);
+        pointer_drag(&mut console, corner, start.origin);
+        assert_eq!(console.dialog_layout().size, dialog::MIN_SIZE);
+        // The top-left grip shows the same diagonal; the caption keeps the arrow.
+        console.pointer = Some(console.dialog_layout().origin + Vec2::splat(2.));
+        assert_eq!(console.cursor_hint(), CursorHint::ResizeNwSe);
+        console.pointer = Some(console.dialog_layout().origin + vec2(60., 10.) * start.scale);
+        assert_eq!(console.cursor_hint(), CursorHint::Arrow);
+        // A smaller window never leaves the console larger than it or off it.
+        console.canvas.resize(640., 480.);
+        let small = console.dialog_layout();
+        assert!(small.origin.x >= 0. && small.origin.y >= 0.);
+        assert!(small.origin.x + small.size.x * small.scale <= 640.);
+        assert!(small.origin.y + small.size.y * small.scale <= 480.);
+    }
+
+    #[test]
+    fn the_quit_box_moves_alone_and_opens_centered() {
+        let mut console = Console::default();
+        console.canvas.resize(1280., 720.);
+        console.mode = Mode::MainMenu;
+        let loc = console.gameui.localization.clone();
+        console.quit_placement.reset();
+        console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+        let quit = console.confirm_box.as_ref().unwrap().0.clone();
+        let (origin, _, _) = console.quit_geometry(&quit);
+        pointer_drag(
+            &mut console,
+            origin + vec2(40., 8.),
+            origin + vec2(140., 108.),
+        );
+        assert!(
+            console.confirm_box.is_some(),
+            "dragging does not answer the box"
+        );
+        assert_eq!(console.quit_geometry(&quit).0, origin + vec2(100., 100.));
+        console.escape();
+        assert!(console.confirm_box.is_none());
+        console.quit_placement.reset();
+        assert_eq!(console.quit_geometry(&quit).0, origin);
     }
 
     #[test]

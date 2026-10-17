@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **Dialogs move by their caption; the console resizes by its corners** (shared `gameui::placement`, docs/gameui.md section 12). Packaged replays checked; not tried with a real mouse.
 - **Console completion, suggestions, history (100, saved), Ctrl+R search, editing keys, `con_filter_*`/`con_timestamp`, engine warnings mirrored**: see `docs/gameui.md` section 11. Packaged capture of the completion list checked; paste and log mirroring not exercised by hand; output row copy not ported.
 - **Press-and-hold repeat** (`widgets::HoldRepeat`, `console::KeyRepeat` at the top of `Console::input`): held arrows, Backspace, Delete and Page keys repeat in every UI layer; scroll bar arrows share the timer. Unit-tested; not tried by hand.
 - **Closed captions** (`source_assets::captions`, `hl2_simulation::captions`, `hl2_ui::closecaption`): installed `closecaption_<language>.dat` dictionaries (search-path order, CRC32 lookup), scene speech masters with the 1200-unit caption radius and env_microphone speakers, sound-script/ambient/patch captions from the audio queue, the SDK caption queue and panel from `HudLayout.res`/`ClientScheme.res`, Options > Audio mapping. Unit and owned-install tests; packaged capture `artifacts/captions_capture.png` shows Kleiner's line on `ep1_background02` (`AntigravityPlayground/runtime_captions.sh`). Gaps: VOX sentence captions, `cc_*` commands, retail side-by-side, DejaVu Sans stands in for the uninstalled Tahoma.

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: drag dialogs by the caption, resize the console by its corners
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** new `hl2-ui::gameui::placement` (SDK `Frame` caption and grip geometry, clamping, gestures, cursor hints); the Options dialog, its sub-dialogs and confirmation box (37c7873), the console dialog and the quit / main-menu box use it; `console::dialog::DialogLayout::{default_frame, at}` and a `MIN_SIZE` derived from the panel insets; `Console::cursor_hint`; the console font's ASCII advances are cached per size; `hl2-bevy::console_host::apply_cursor_hint` sets the window's resize cursor. Details in `docs/gameui.md` section 12.
+
+**Why:** owner request: drag dialogs by their title bar and resize the developer console by its corners, UX-safe.
+
+**Tested how:** unit tests (caption vs close button vs body, clamping and window shrink, oversized pinning, Escape undo, missed release, double-click reset, corner resize limits and canvas edges, stored size vs smaller canvas; Options: OK follows the moved dialog, sub-dialog moves alone and reopens centered, a caption press with a list open only closes it; console: drag, Escape, caption beats row selection, resize to the minimum, cursor hints, smaller window; quit box moves and reopens centered); workspace tests, strict clippy, Windows check, fmt; packaged replays `options_capture_drag.json` and `options_capture_console_resize.json` captured and checked by eye; resize cost measured in release (2.6 ms per frame worst case).
+
+**Result:** every interactive dialog moves by its caption and stays on screen; the console resizes by its corners.
+
+**Still broken or not tested:** not tried by hand with a real mouse or on Windows; placements are not saved across runs; the gameplay loading dialog does not move (transient).
+
+**Next:** owner check.
+
 ## 2026-10-17 Console: wrapped history rows
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

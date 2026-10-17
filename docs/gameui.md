@@ -755,3 +755,32 @@ White, `RichText.*`) and Source's own console variables. Code:
 - Not ported: binds, aliases, `exec`, cvar registries for unimplemented engine cvars,
   game-specific commands from other titles, moving and resizing the console dialog (and the
   bounds retail remembers), and character-level selection inside a history row.
+
+## 12. Moving and resizing dialogs (2026-10-17)
+
+Evidence: SDK `vgui_controls/Frame.cpp` (`CaptionGripPanel`, `GripPanel`, `GetCaptionHeight` 23,
+`GetCornerSize` 8, `GetBottomRightSize` 18, clip-to-parent snapping). Code:
+`hl2-ui::gameui::placement` (pure, unit-tested), used by the Options dialog, its sub-dialogs and
+confirmation box, the console dialog and the quit / main-menu box; cursor shapes set by
+`hl2-bevy::console_host::apply_cursor_hint`.
+
+- Dragging: a press on the caption (the top 23 units, the frame width minus 10, never the
+  title-bar close button) moves the dialog while the button is held. The caption keeps the arrow
+  cursor, as retail does. The press and the release belong to the drag: nothing under the pointer
+  is activated or selected (the caption wins over the console's history row selection), and a
+  press on the caption while a drop-down list is open only closes the list.
+- Resizing (console only): the corner grips (8 x 8, the bottom-right one 18 x 18) resize the
+  frame with the opposite corner fixed, showing the diagonal resize cursor. The smallest size is
+  the SDK minimum raised so the entry keeps a Submit button's width and the history three rows
+  (`console::dialog::MIN_SIZE`); a grip pulled past a canvas edge stops at that edge.
+- Safety: the placement is an offset from the default position plus, for the console, a size,
+  both in layout units, re-clamped to the current canvas and scale every frame: a dialog is
+  snapped fully onto the canvas, or to its top-left when it is larger, and a stored size never
+  exceeds the canvas, so window and display-mode changes never leave a dialog out of reach. A
+  gesture ends whenever the button is up (also after a release outside the window), Escape
+  during a gesture undoes it, and a double click on the caption restores the default position
+  and size (HL2-RS additions). The Options dialog and the console keep their placement while the
+  game runs (not saved); sub-dialogs and message boxes open centered.
+- Cost: resizing rewraps the history every frame; measured 2.6 ms per frame (release) with a
+  full 1024-line buffer of 220-character lines and the console font, 0.2 ms without a resize.
+  ASCII advances of the console font are cached per size.
