@@ -99,6 +99,13 @@ pub fn attenuated(listener: Vec3, origins: &[Vec3]) -> bool {
             .all(|origin| origin.distance_squared(listener) > MAX_CAPTION_RADIUS.powi(2))
 }
 
+/// CSoundEmitterSystem::EmitCloseCaption: a sound-script caption is dropped when the sound's
+/// origin is beyond the caption radius of the player (no view-entity retry, unlike scenes).
+/// Unpositioned sounds, and ambient_generic (EmitAmbientSound passes no origins), never are.
+pub fn sound_caption_attenuated(player: Vec3, origin: Option<Vec3>) -> bool {
+    origin.is_some_and(|origin| attenuated(player, &[origin]))
+}
+
 /// An env_microphone as the caption routing needs it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Microphone {
@@ -215,5 +222,13 @@ mod tests {
             ..microphone
         };
         assert_eq!(sound_origins(kleiner, &[far]), [kleiner]);
+    }
+
+    #[test]
+    fn sound_script_captions_attenuate_by_the_player_origin_only() {
+        let player = Vec3::ZERO;
+        assert!(!sound_caption_attenuated(player, None), "unpositioned");
+        assert!(!sound_caption_attenuated(player, Some(Vec3::X * 1200.)));
+        assert!(sound_caption_attenuated(player, Some(Vec3::X * 1201.)));
     }
 }

@@ -494,20 +494,23 @@ pub struct Audio {
 const SOUND_PATCH_CAPTION_LENGTH: f32 = 2.;
 impl Audio {
     /// The CloseCaption message of an emitted sound (CSoundEmitterSystem::EmitCloseCaption):
-    /// its sound script name for `duration` (the chosen wave's length unless given). Raw
-    /// waves, sentences and menu sounds have none. Unpositioned sounds without a speaker are
-    /// the local player's own (weapons, footsteps), which selects `<playerclr>` colors.
+    /// its sound script name for `duration` (the chosen wave's length unless given), unless the
+    /// sound plays at an `origin` beyond the caption radius of the `player`. Raw waves,
+    /// sentences and menu sounds have none. Unpositioned sounds without a speaker are the
+    /// local player's own (weapons, footsteps), which selects `<playerclr>` colors.
     fn caption(
         &self,
         request: &SoundRequest,
         path: &str,
         duration: Option<f32>,
+        (origin, player): (Option<glam::Vec3>, glam::Vec3),
     ) -> Option<hl2_ui::closecaption::Request> {
         if !request.caption
             || request.ui
             || request.stop
             || hl2_simulation::sounds::raw_wave(&request.name)
             || request.name.starts_with(['!', '#'])
+            || hl2_simulation::captions::sound_caption_attenuated(player, origin)
         {
             return None;
         }
@@ -787,7 +790,8 @@ pub fn install(
             ambient.looped,
             (ambient.volume, ambient.pitch, Some(ambient.spatial)),
             (false, Some(id), None),
-        ) && let Some(caption) = audio.caption(&ambient.request, &path, None)
+        ) && let Some(caption) =
+            audio.caption(&ambient.request, &path, None, (None, glam::Vec3::ZERO))
         {
             audio.captions.push(caption);
         }
@@ -824,6 +828,8 @@ pub fn queue(
         audio.muted = settings.mute_losefocus && windows.single().is_ok_and(|w| !w.focused);
     }
     let listener = glam::Vec3::from_array(simulation.view_origin().to_array());
+    // Caption radius checks measure from the player (its eye stands in for its origin).
+    let player = glam::Vec3::from_array(simulation.eye().to_array());
     let paused = !simulation.world_running();
     if paused != audio.paused {
         if paused {
@@ -950,6 +956,7 @@ pub fn queue(
                                 &request,
                                 &path,
                                 Some(SOUND_PATCH_CAPTION_LENGTH),
+                                (request.origin, player),
                             ));
                         }
                     }
@@ -986,8 +993,8 @@ pub fn queue(
                     (paused, Some(id), None),
                 )
             {
-                // EmitAmbientSound captions the start of the sound.
-                captions.extend(audio.caption(&ambient.request, &path, None));
+                // EmitAmbientSound captions the start of the sound, at any distance.
+                captions.extend(audio.caption(&ambient.request, &path, None, (None, player)));
             }
             continue;
         }
@@ -1019,7 +1026,7 @@ pub fn queue(
             )
         } {
             count += 1;
-            captions.extend(audio.caption(&request, &path, None));
+            captions.extend(audio.caption(&request, &path, None, (request.origin, player)));
             // Actor speech drives lip sync from the chosen wave's phonemes.
             if let Some(actor) = request.actor.as_ref().and_then(|a| a.entity) {
                 let time = game.scene.time;

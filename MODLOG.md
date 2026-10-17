@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Closed captions: caption radius for sound scripts, captions-off run
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `hl2_simulation::captions::sound_caption_attenuated`: sound-script and sound patch captions are dropped when the sound plays beyond 1200 units of the player (SDK `EmitCloseCaption`, no view-entity retry); ambient_generic captions are never attenuated (`EmitAmbientSound` passes no origins). The host audio queue measures from the player's eye. Workspace wiki and DESIGN text corrected (the view-entity retry is scene-only).
+
+**Why:** review of the first caption commit: distant positioned sounds (NPC gunfire) captioned in HL2-RS but not in retail.
+
+**Tested how:** unit test of the radius; hl2-ui/hl2-bevy tests, source-assets/hl2-simulation suites, strict clippy, fmt, Windows check; `runtime_captions.sh` now also runs with captions off: `artifacts/captions_off.png` has no panel and the report shows 0 processed captions, while the captions-on pass still shows Kleiner's line.
+
+**Result:** sound-script captions follow the retail caption radius; the Options setting is checked both ways in a packaged run.
+
+**Still broken or not tested:** requests that carry only an actor entity (no origin) are not attenuated; the player's eye stands in for its origin; no packaged run exercises sound-script captions (the menu background only plays scene speech with captions).
+
+**Next:** owner check.
+
 ## 2026-10-17 Closed captions: installed dictionaries, scene and sound captions, HUD panel
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
