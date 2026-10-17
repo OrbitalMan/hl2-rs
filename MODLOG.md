@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Repository: local check scripts in the repository, no outside references
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** the validation script, the Windows-target check, the packaged replay scripts, their report and settings helpers (`scripts/checks/`) and their replay inputs (`test-inputs/bevy-menu-*.json`, `test-inputs/bevy-options-capture*.json`) are now part of the repository, run relative to it and pass `--no-setup`; `.gitignore` admits `scripts/checks/*.sh` and `*.py`. Docs cite them by these paths (`docs/validation.md` lists them); lines that named folders, notes or scripts outside the repository were reworded. New hard rule 10 in `AGENTS.md`: nothing outside the repository is referenced; the Source SDK may be cited by its SDK-relative paths.
+
+**Why:** owner request: maintainers who only have this repository need the checks the docs describe, and the repository must not point outside itself.
+
+**Tested how:** `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh`, `scripts/checks/runtime_check.sh` and `scripts/checks/runtime_chapter_menu.sh` run from their new place.
+
+**Result:** every check the docs cite ships with the repository.
+
+**Still broken or not tested:** the scripts are bash and assume `bin/hl2-bevy`; not tried on Windows. The other packaged replays were moved unchanged apart from paths and `--no-setup` and were not all rerun.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: save the chapter background when a gameplay map loads
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
@@ -8,7 +24,7 @@
 
 **Why:** owner report: quitting the game mid-gameplay relaunched over the previous background, because it was saved only on Return to main menu.
 
-**Tested how:** unit `loading_a_map_saves_its_chapter_background_for_the_menu` (saved right after the load, then shown on return); workspace tests, strict clippy, fmt; packaged `runtime_chapter_quit.sh` (`--map d2_coast_01`, exit after 600 frames: saved background `hl2/background01` -> `hl2/background04`) and `runtime_chapter_menu.sh` (unchanged results).
+**Tested how:** unit `loading_a_map_saves_its_chapter_background_for_the_menu` (saved right after the load, then shown on return); workspace tests, strict clippy, fmt; packaged `scripts/checks/runtime_chapter_quit.sh` (`--map d2_coast_01`, exit after 600 frames: saved background `hl2/background01` -> `hl2/background04`) and `scripts/checks/runtime_chapter_menu.sh` (unchanged results).
 
 **Result:** the next launch after a mid-game quit opens over the chapter's background.
 
@@ -24,7 +40,7 @@
 
 **Why:** owner request: after `map d2_coast_01` and Return to main menu the menu still showed chapter 1's background; the background must come from the chapter the map belongs to, derived from game resources.
 
-**Tested how:** unit tests (stretch and bypass assignment, changelevel targets, console return to the chapter background); owned test over all four installed games (Half-Life 2 chapters 1-13 sample maps including 9a and the `d2_coast_08` detour, Episode One, Episode Two's revisit loop, Lost Coast); workspace tests, strict clippy, Windows check, fmt; packaged replays `runtime_chapter_menu.sh` (`hl2/d2_coast_01` -> `hl2/background04`, `hl2/d3_c17_10a` -> `hl2/background06`) and `runtime_return_menu.sh` (unchanged: `hl2/background01`).
+**Tested how:** unit tests (stretch and bypass assignment, changelevel targets, console return to the chapter background); owned test over all four installed games (Half-Life 2 chapters 1-13 sample maps including 9a and the `d2_coast_08` detour, Episode One, Episode Two's revisit loop, Lost Coast); workspace tests, strict clippy, Windows check, fmt; packaged replays `scripts/checks/runtime_chapter_menu.sh` (`hl2/d2_coast_01` -> `hl2/background04`, `hl2/d3_c17_10a` -> `hl2/background06`) and `scripts/checks/runtime_return_menu.sh` (unchanged: `hl2/background01`).
 
 **Result:** leaving a map returns to its chapter's menu background and saves it.
 
@@ -40,7 +56,7 @@
 
 **Why:** owner request: persist the Options dialog position and the console position and size, resetting them when they would open off screen after a resolution change.
 
-**Tested how:** unit tests (save/restore round trip, an undone drag saves nothing, off-screen reset for a moved and for an oversized frame, console restart restore and small-window reset saved, corrupt settings dropped); workspace tests, strict clippy, Windows check, fmt; packaged two-run check (`runtime_placement_persist.sh`): run 1 drags the Options dialog and saves its offset, run 2 opens it at the saved place.
+**Tested how:** unit tests (save/restore round trip, an undone drag saves nothing, off-screen reset for a moved and for an oversized frame, console restart restore and small-window reset saved, corrupt settings dropped); workspace tests, strict clippy, Windows check, fmt; packaged two-run check (`scripts/checks/runtime_placement_persist.sh`): run 1 drags the Options dialog and saves its offset, run 2 opens it at the saved place.
 
 **Result:** both dialogs come back where they were left; a saved placement that no longer fits opens at the default.
 
@@ -56,7 +72,7 @@
 
 **Why:** owner request: drag dialogs by their title bar and resize the developer console by its corners, UX-safe.
 
-**Tested how:** unit tests (caption vs close button vs body, clamping and window shrink, oversized pinning, Escape undo, missed release, double-click reset, corner resize limits and canvas edges, stored size vs smaller canvas; Options: OK follows the moved dialog, sub-dialog moves alone and reopens centered, a caption press with a list open only closes it; console: drag, Escape, caption beats row selection, resize to the minimum, cursor hints, smaller window; quit box moves and reopens centered); workspace tests, strict clippy, Windows check, fmt; packaged replays `options_capture_drag.json` and `options_capture_console_resize.json` captured and checked by eye; resize cost measured in release (2.6 ms per frame worst case).
+**Tested how:** unit tests (caption vs close button vs body, clamping and window shrink, oversized pinning, Escape undo, missed release, double-click reset, corner resize limits and canvas edges, stored size vs smaller canvas; Options: OK follows the moved dialog, sub-dialog moves alone and reopens centered, a caption press with a list open only closes it; console: drag, Escape, caption beats row selection, resize to the minimum, cursor hints, smaller window; quit box moves and reopens centered); workspace tests, strict clippy, Windows check, fmt; packaged replays `test-inputs/bevy-options-capture-drag.json` and `test-inputs/bevy-options-capture-console-resize.json` captured and checked by eye; resize cost measured in release (2.6 ms per frame worst case).
 
 **Result:** every interactive dialog moves by its caption and stays on screen; the console resizes by its corners.
 
@@ -72,7 +88,7 @@
 
 **Why:** owner report: long console lines (mirrored engine warnings with embedded newlines) were cut off at the history's edge instead of wrapped.
 
-**Tested how:** unit tests for `wrap` (word breaks, exact fit, long words, multi-byte characters, `\n`/`\r\n`/`\r`, empty and trailing newlines, advances) and for the console (rows fit and rejoin to the line, a warning's newline starts a row, row selection copies whole lines including their newlines, timestamps wrap with the text, the filter keeps whole lines, scrolled-back view stays on its rows while wrapped output arrives, Ctrl+Home and Page Up reach the first row); hl2-ui and hl2-bevy tests, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged replay `options_capture_console_wrap.json` (`runtime_options_capture.sh`, 1024x768): `artifacts/options_capture_console_wrap.png` shows an echoed warning-like line wrapped at word boundaries, its embedded newline starting a row, and an over-long unknown command broken inside the word.
+**Tested how:** unit tests for `wrap` (word breaks, exact fit, long words, multi-byte characters, `\n`/`\r\n`/`\r`, empty and trailing newlines, advances) and for the console (rows fit and rejoin to the line, a warning's newline starts a row, row selection copies whole lines including their newlines, timestamps wrap with the text, the filter keeps whole lines, scrolled-back view stays on its rows while wrapped output arrives, Ctrl+Home and Page Up reach the first row); hl2-ui and hl2-bevy tests, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged replay `test-inputs/bevy-options-capture-console-wrap.json` (`scripts/checks/runtime_options_capture.sh`, 1024x768): `artifacts/options_capture_console_wrap.png` shows an echoed warning-like line wrapped at word boundaries, its embedded newline starting a row, and an over-long unknown command broken inside the word.
 
 **Result:** long and multi-line output wraps inside the history instead of being cut off.
 
@@ -88,7 +104,7 @@
 
 **Why:** review of the first caption commit: distant positioned sounds (NPC gunfire) captioned in HL2-RS but not in retail.
 
-**Tested how:** unit test of the radius; hl2-ui/hl2-bevy tests, source-assets/hl2-simulation suites, strict clippy, fmt, Windows check; `runtime_captions.sh` now also runs with captions off: `artifacts/captions_off.png` has no panel and the report shows 0 processed captions, while the captions-on pass still shows Kleiner's line.
+**Tested how:** unit test of the radius; hl2-ui/hl2-bevy tests, source-assets/hl2-simulation suites, strict clippy, fmt, Windows check; `scripts/checks/runtime_captions.sh` now also runs with captions off: `artifacts/captions_off.png` has no panel and the report shows 0 processed captions, while the captions-on pass still shows Kleiner's line.
 
 **Result:** sound-script captions follow the retail caption radius; the Options setting is checked both ways in a packaged run.
 
@@ -104,7 +120,7 @@
 
 **Why:** owner task: real subtitles / closed captions from the installed game data, honoring the Options audio setting.
 
-**Tested how:** unit tests (dictionary parse/lookup/order/malformed input; tag splitting, delay/len/sfx/subtitles, norepeat and same-tick repeats, gendered tokens, wrap and colors, paint growth/fades/popping, quantized durations, Options mapping, font selection; scene master/slave captions, caption radius, microphone routing, a synthetic Kleiner scene with and without its microphone); owned-install tests (Episode One dictionaries in search order, all Kleiner broadcast lines resolve, the Episode One panel layout/scheme/fonts); hl2-ui and hl2-bevy tests, source-assets and hl2-simulation suites, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged run `runtime_captions.sh` on `episodic/ep1_background02` with closed captions (1024x768, 420 frames): `artifacts/captions_capture.png` shows Kleiner's `ep_01.kl_fellowcitizens06` caption in his color and italics in the box behind the main menu; report: dictionaries [3153, 3970], 1 caption processed, no attenuated captions.
+**Tested how:** unit tests (dictionary parse/lookup/order/malformed input; tag splitting, delay/len/sfx/subtitles, norepeat and same-tick repeats, gendered tokens, wrap and colors, paint growth/fades/popping, quantized durations, Options mapping, font selection; scene master/slave captions, caption radius, microphone routing, a synthetic Kleiner scene with and without its microphone); owned-install tests (Episode One dictionaries in search order, all Kleiner broadcast lines resolve, the Episode One panel layout/scheme/fonts); hl2-ui and hl2-bevy tests, source-assets and hl2-simulation suites, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged run `scripts/checks/runtime_captions.sh` on `episodic/ep1_background02` with closed captions (1024x768, 420 frames): `artifacts/captions_capture.png` shows Kleiner's `ep_01.kl_fellowcitizens06` caption in his color and italics in the box behind the main menu; report: dictionaries [3153, 3970], 1 caption processed, no attenuated captions.
 
 **Result:** captions and subtitles show for scene speech and sound scripts from the installed dictionaries, styled by the installed HUD layout and scheme.
 
@@ -136,7 +152,7 @@
 
 **Why:** owner request: keep the Half-Life 2 look of the console; the panel was still an earlier HL2-RS layout, and output row copy was missing.
 
-**Tested how:** unit tests (layout at 1024x768 and the minimum size, selection spans, drag selection and copy, selection stable while lines arrive and leave the buffer, copy under `con_filter_enable`/`con_timestamp`, Ctrl+L clears it, scrolled-back view stays, Submit and close clicks); hl2-ui and hl2-bevy tests, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged capture `runtime_options_capture.sh` (`options_capture_console.png`: the dialog over the main menu with `map d1` and its completion list).
+**Tested how:** unit tests (layout at 1024x768 and the minimum size, selection spans, drag selection and copy, selection stable while lines arrive and leave the buffer, copy under `con_filter_enable`/`con_timestamp`, Ctrl+L clears it, scrolled-back view stays, Submit and close clicks); hl2-ui and hl2-bevy tests, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged capture `scripts/checks/runtime_options_capture.sh` (`options_capture_console.png`: the dialog over the main menu with `map d1` and its completion list).
 
 **Result:** the console reads as the retail VGUI console dialog and output rows can be copied.
 
@@ -200,7 +216,7 @@
 
 **Why:** owner requests: Video > Advanced at 100% opacity; its elements did not fit (on macOS the installed `[$OSX]` footer rows put OK/Cancel and the caption on the Classic Effects combo); the selected tab should share the fill of the page below.
 
-**Tested how:** unit test (macOS rows shift by 38, Windows rows by 0, footer classification); owned test (no two interactive controls overlap in the gamma, Keyboard > Advanced and Video > Advanced installed layouts); workspace tests, strict clippy, Windows check, fmt; packaged captures at 1024x768 (`runtime_options_capture.sh`: Keyboard > Advanced, Video > Advanced) checked by eye.
+**Tested how:** unit test (macOS rows shift by 38, Windows rows by 0, footer classification); owned test (no two interactive controls overlap in the gamma, Keyboard > Advanced and Video > Advanced installed layouts); workspace tests, strict clippy, Windows check, fmt; packaged captures at 1024x768 (`scripts/checks/runtime_options_capture.sh`: Keyboard > Advanced, Video > Advanced) checked by eye.
 
 **Result:** Video > Advanced is opaque and 396 tall on macOS with the footer below Classic Effects; Windows keeps the authored 510 layout. The active tab and its page read as one surface.
 
@@ -309,11 +325,11 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `hl2-simulation`: new `view_control` (`ViewControl`, `View`, `Zoom`); `Scene::view_control`; `point_viewcontrol` `Enable`/`Disable`, `env_zoom` `Zoom`/`UnZoom` inputs; camera `wait` expiry in `Scene::tick`. `hl2-bevy::simulation`: `view_control`, `zoom_fov`, `view_origin`/`view_angles`/`view_fov`, player frozen under `TAKECONTROL`; `camera.rs`, `rendering.rs`, `effects.rs`, `audio.rs`, `monitors.rs` use the view. Playground: `runtime_bg_compare.sh`, `set_bg_config.py`, `dump_bg_cameras.py`, `dump_bg_zoom.py`; `validate.sh` runs clippy like CI (`--workspace --all-targets -D warnings`). Docs: `docs/gameui.md`, `AGENTS.md`, `STATUS.md`, `HL2Wiki/menu_background_camera.md`.
+**Changed:** `hl2-simulation`: new `view_control` (`ViewControl`, `View`, `Zoom`); `Scene::view_control`; `point_viewcontrol` `Enable`/`Disable`, `env_zoom` `Zoom`/`UnZoom` inputs; camera `wait` expiry in `Scene::tick`. `hl2-bevy::simulation`: `view_control`, `zoom_fov`, `view_origin`/`view_angles`/`view_fov`, player frozen under `TAKECONTROL`; `camera.rs`, `rendering.rs`, `effects.rs`, `audio.rs`, `monitors.rs` use the view. Checks: `scripts/checks/runtime_bg_compare.sh`, `scripts/checks/set_bg_config.py`; `scripts/checks/validate.sh` runs clippy like CI (`--workspace --all-targets -D warnings`). Docs: `docs/gameui.md`, `AGENTS.md`, `STATUS.md`.
 
 **Why:** Owner report: on the Episode Two background the view dropped to the ground like a character; asked to match retail position, angles and FOV.
 
-**Tested how:** `cargo test -p hl2-simulation` (171), `-p hl2-ui` (193), `-p hl2-bevy` (75); owned `hl2-bevy` (7); strict workspace clippy `--all-targets -D warnings`, `x86_64-pc-windows-msvc` clippy; fmt; `runtime_submenus.sh`, `runtime_return_menu.sh`; `runtime_bg_compare.sh` captures compared by eye with the retail pre-blurred menu images.
+**Tested how:** `cargo test -p hl2-simulation` (171), `-p hl2-ui` (193), `-p hl2-bevy` (75); owned `hl2-bevy` (7); strict workspace clippy `--all-targets -D warnings`, `x86_64-pc-windows-msvc` clippy; fmt; `scripts/checks/runtime_submenus.sh`, `scripts/checks/runtime_return_menu.sh`; `scripts/checks/runtime_bg_compare.sh` captures compared by eye with the retail pre-blurred menu images.
 
 **Result:** All 15 chapter backgrounds view from their camera; HL2 ones at FOV 75; captures match the retail images' framing.
 
@@ -325,11 +341,11 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `hl2-bevy::simulation`: `Simulation::background_level` (from the console each step), `world_running()`; the world/player/soundscape step uses it and ignores scripted player input on background levels; `step` is `pub(crate)` for tests. `audio.rs`, `effects.rs`, `tonemap.rs` pause on `!world_running()` instead of `paused()`. Playground: `show_audio.py`, `show_audio_keys.py`. Docs: `docs/gameui.md` §4 limitations, `AGENTS.md` startup invariant, `STATUS.md`.
+**Changed:** `hl2-bevy::simulation`: `Simulation::background_level` (from the console each step), `world_running()`; the world/player/soundscape step uses it and ignores scripted player input on background levels; `step` is `pub(crate)` for tests. `audio.rs`, `effects.rs`, `tonemap.rs` pause on `!world_running()` instead of `paused()`. Checks: `scripts/checks/show_audio.py`, `scripts/checks/show_audio_keys.py`. Docs: `docs/gameui.md` §4 limitations, `AGENTS.md` startup invariant, `STATUS.md`.
 
 **Why:** Owner request: background maps should play their ambient sounds like retail. Retail keeps the background level running behind the menu and only ignores player input (SDK `in_main.cpp`, `IsLevelMainMenuBackground`); HL2RS paused it like the gameplay pause menu.
 
-**Tested how:** `cargo test -p hl2-ui` (193), `-p hl2-bevy` (75); owned `hl2-bevy` (7, incl. the new 15-background live run); strict clippy for macOS and `x86_64-pc-windows-msvc`; fmt; packaged plain launch (`runtime_check.sh`) and a `d1_trainstation_02` Escape-pause run; `runtime_submenus.sh`, `runtime_return_menu.sh`.
+**Tested how:** `cargo test -p hl2-ui` (193), `-p hl2-bevy` (75); owned `hl2-bevy` (7, incl. the new 15-background live run); strict clippy for macOS and `x86_64-pc-windows-msvc`; fmt; packaged plain launch (`scripts/checks/runtime_check.sh`) and a `d1_trainstation_02` Escape-pause run; `scripts/checks/runtime_submenus.sh`, `scripts/checks/runtime_return_menu.sh`.
 
 **Result:** Menu over Lost Coast: soundscape active, 4 sinks playing; gameplay pause: 4/4 sinks paused. Submenu and return-to-menu replays unchanged.
 
@@ -341,11 +357,11 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `source-assets::vpk`: `search_paths(root, game)` reads `<game>/gameinfo.txt` `FileSystem/SearchPaths`; `Vfs` is an ordered list of loose folders and VPKs built by `Vfs::mount_game`; `Vfs::mount` mounts `hl2`; removed `mount_expansion` (hardcoded `ep2` -> `episodic`) and the separate custom-folder pass. `hl2-ui::console`: `menu_background_after_game` for Return to main menu. `scripts/build-bevy.sh`: replace the packaged executable instead of overwriting it. Playground: `runtime_return_menu.sh` + `return_menu.json`, `check_search_order.py`. Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
+**Changed:** `source-assets::vpk`: `search_paths(root, game)` reads `<game>/gameinfo.txt` `FileSystem/SearchPaths`; `Vfs` is an ordered list of loose folders and VPKs built by `Vfs::mount_game`; `Vfs::mount` mounts `hl2`; removed `mount_expansion` (hardcoded `ep2` -> `episodic`) and the separate custom-folder pass. `hl2-ui::console`: `menu_background_after_game` for Return to main menu. `scripts/build-bevy.sh`: replace the packaged executable instead of overwriting it. Checks: `scripts/checks/runtime_return_menu.sh` + `test-inputs/bevy-menu-return.json`. Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
 
 **Why:** Owner: read inheritance from `gameinfo.txt` instead of hardcoding it; owner report: after loading `d1_trainstation_02` from the Episode Two menu, Return to main menu still showed Episode Two's background.
 
-**Tested how:** `cargo test -p source-assets` (95), `-p hl2-ui` (193), `-p hl2-bevy` (74); owned-install: `source-assets` 20/20 (with `HL2_ROOT`), `hl2-simulation` + `modkit-core` `--include-ignored`, `hl2-ui` 5, `hl2-bevy` 6; strict clippy for macOS and `x86_64-pc-windows-msvc`; fmt; packaged replays `runtime_return_menu.sh` and `runtime_submenus.sh`.
+**Tested how:** `cargo test -p source-assets` (95), `-p hl2-ui` (193), `-p hl2-bevy` (74); owned-install: `source-assets` 20/20 (with `HL2_ROOT`), `hl2-simulation` + `modkit-core` `--include-ignored`, `hl2-ui` 5, `hl2-bevy` 6; strict clippy for macOS and `x86_64-pc-windows-msvc`; fmt; packaged replays `scripts/checks/runtime_return_menu.sh` and `scripts/checks/runtime_submenus.sh`.
 
 **Result:** Each game mounts its declared search path; the reported case returns to `hl2/background01`.
 
@@ -357,11 +373,11 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `source-assets`: `install::BASE_GAME`, `install::games`, `install::game_for_map` (the game whose own folder ships `maps/<name>.bsp`; in-session names search the running game first, command-line names start at `hl2`), `Vfs::mount_game`; removed `vpk::expansion_for_map`. `hl2-ui`: `console::GameMap`; `Effect::MainMenuMap(GameMap)`; `Console::loaded_map` is a `GameMap`, `pending_map` removed; `start_background_loading`, `level_loaded_for_map`, `background_load_failed_for_map` take the game; `Console::background`, `set_background`, `show_category` (shared by `SwitchExpansion`/`SwitchCategory`); `BackgroundTransitionState::finish_map`/`fail_map` compare `(game, map)`; `GameUiResources` keeps `install_root`, `games`, `category_game`, `main_game`, and keys `background_images` by `(game, image)` (no category or alias copies); config `gameplay.background_game`; removed `Console::expansion_category_for_map` and `start_background_loading_expansion`. `hl2-bevy`: `assets::load`/`load_with_canvas` take the game, `LoadedMap::game`; campaign requests carry a game (menu: given; transitions: running game; bare names: `game_for_map`); `MapLoaded::game`, report `loaded_game`/`last_event_game`; console line `Loaded <game>/<map>`; startup resolves `--background-map` and an unrecorded saved game from assets. Playground: `runtime_submenus.sh` + `submenus.json` cover Extras -> Lost Coast, new `show_report.py`. Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
+**Changed:** `source-assets`: `install::BASE_GAME`, `install::games`, `install::game_for_map` (the game whose own folder ships `maps/<name>.bsp`; in-session names search the running game first, command-line names start at `hl2`), `Vfs::mount_game`; removed `vpk::expansion_for_map`. `hl2-ui`: `console::GameMap`; `Effect::MainMenuMap(GameMap)`; `Console::loaded_map` is a `GameMap`, `pending_map` removed; `start_background_loading`, `level_loaded_for_map`, `background_load_failed_for_map` take the game; `Console::background`, `set_background`, `show_category` (shared by `SwitchExpansion`/`SwitchCategory`); `BackgroundTransitionState::finish_map`/`fail_map` compare `(game, map)`; `GameUiResources` keeps `install_root`, `games`, `category_game`, `main_game`, and keys `background_images` by `(game, image)` (no category or alias copies); config `gameplay.background_game`; removed `Console::expansion_category_for_map` and `start_background_loading_expansion`. `hl2-bevy`: `assets::load`/`load_with_canvas` take the game, `LoadedMap::game`; campaign requests carry a game (menu: given; transitions: running game; bare names: `game_for_map`); `MapLoaded::game`, report `loaded_game`/`last_event_game`; console line `Loaded <game>/<map>`; startup resolves `--background-map` and an unrecorded saved game from assets. Checks: `scripts/checks/runtime_submenus.sh` + `test-inputs/bevy-menu-submenus.json` cover Extras -> Lost Coast, new `scripts/checks/show_report.py`. Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
 
 **Why:** Owner asked for KISS, asset-driven code without map tables; the host still guessed games from map-name prefixes and renamed Lost Coast's `background01` to an invented key.
 
-**Tested how:** `cargo test -p hl2-ui` (192), `cargo test -p hl2-bevy` (74), `cargo test -p source-assets`, owned-install `cargo test -- --ignored` for `source-assets` (game lookup), `hl2-ui` (5) and `hl2-bevy` (6, incl. headless Episode One/Two/Lost Coast background swaps and `background01_loads_from_the_named_game`), strict clippy for macOS and `x86_64-pc-windows-msvc` (`check_windows.sh`), fmt; packaged replay `runtime_submenus.sh`.
+**Tested how:** `cargo test -p hl2-ui` (192), `cargo test -p hl2-bevy` (74), `cargo test -p source-assets`, owned-install `cargo test -- --ignored` for `source-assets` (game lookup), `hl2-ui` (5) and `hl2-bevy` (6, incl. headless Episode One/Two/Lost Coast background swaps and `background01_loads_from_the_named_game`), strict clippy for macOS and `x86_64-pc-windows-msvc` (`scripts/checks/check_windows.sh`), fmt; packaged replay `scripts/checks/runtime_submenus.sh`.
 
 **Result:** Replay loads `hl2/background01`, `episodic/ep1_background01`, `hl2/background01`, `lostcoast/background01`; final report `loaded_game: lostcoast`. A saved `ep2_background01` without a game starts on `ep2/ep2_background01`.
 
@@ -373,7 +389,7 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `hl2-ui::gameui::resources`: `menu_games` (games from `gamemenu.res` `SwitchExpansion` commands), `read_game_text` (reads through the game's own mount); `GameUiResources::load` takes each game's background from its own `scripts/chapterbackgrounds.txt` and New Game map from its own `cfg/chapter1.cfg`; removed `INITIAL_BACKGROUND_MAPS`, `INITIAL_EPISODE_MAPS`, `fallback_background_maps`, `fallback_new_game_maps`. Console tests use explicit test data. New playground script `runtime_submenus.sh` (+ `submenus.json`). Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
+**Changed:** `hl2-ui::gameui::resources`: `menu_games` (games from `gamemenu.res` `SwitchExpansion` commands), `read_game_text` (reads through the game's own mount); `GameUiResources::load` takes each game's background from its own `scripts/chapterbackgrounds.txt` and New Game map from its own `cfg/chapter1.cfg`; removed `INITIAL_BACKGROUND_MAPS`, `INITIAL_EPISODE_MAPS`, `fallback_background_maps`, `fallback_new_game_maps`. Console tests use explicit test data. New check `scripts/checks/runtime_submenus.sh` (+ `test-inputs/bevy-menu-submenus.json`). Docs: `docs/gameui.md` §3, `AGENTS.md`, `STATUS.md`.
 
 **Why:** Owner report: selecting the Half-Life 2 submenu did not update the background. The resources were read through the startup map's mount (the saved background's game), so HL2's chapter files were the episode's.
 
@@ -389,7 +405,7 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `video::PresentMaterial` + `assets/shaders/present.wgsl` replace the present sprite (unit quad scaled by `present_frame`); `video::monitor_gamma_exponent`, `video::update_present_gamma`; `install_frame` takes mesh/material assets. hl2-ui: `OptionsDialog::preview_gamma`, `Console::display_gamma`; `settings::enabled` always enables the brightness button. New playground script `runtime_capture.sh`. Docs: `docs/gameui.md` §6/§8, `README.md`, `STATUS.md`.
+**Changed:** `video::PresentMaterial` + `assets/shaders/present.wgsl` replace the present sprite (unit quad scaled by `present_frame`); `video::monitor_gamma_exponent`, `video::update_present_gamma`; `install_frame` takes mesh/material assets. hl2-ui: `OptionsDialog::preview_gamma`, `Console::display_gamma`; `settings::enabled` always enables the brightness button. New check `scripts/checks/runtime_capture.sh`. Docs: `docs/gameui.md` §6/§8, `README.md`, `STATUS.md`.
 
 **Why:** Owner request: unlock "Adjust brightness levels..." and finish it; gamma was stored but never applied.
 
@@ -469,7 +485,7 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `video::native_fullscreen_sync` (pure) and macOS-only `video::sync_native_fullscreen` (PreUpdate, registered under `cfg(target_os = "macos")` in `main.rs`). Docs: `docs/gameui.md` section 10, `AGENTS.md`, `README.md`, `STATUS.md`, HL2Wiki `video_modes_and_resolution.md`.
+**Changed:** `video::native_fullscreen_sync` (pure) and macOS-only `video::sync_native_fullscreen` (PreUpdate, registered under `cfg(target_os = "macos")` in `main.rs`). Docs: `docs/gameui.md` section 10, `AGENTS.md`, `README.md`, `STATUS.md`.
 
 **Why:** Owner reports: with a Windowed setting in green-button full screen, choosing Full screen did nothing, and after leaving with the green button the game still believed it was full screen. The game never learned about OS transitions; bevy_winit only compares against winit's cached state. Owner decision: the native full-screen Space is the macOS Full screen mode, recognized both ways, mac-only.
 
@@ -681,16 +697,16 @@
   - Simplified `Console::background_texture` to look up textures directly via `blur(key)` and category aliases.
   - Removed `Console::background_texture_for_map_and_category` and updated `Console::draw` to call `self.background_texture(upcoming_map, is_widescreen)`.
   - Updated unit tests to verify `background_texture` map and category lookups.
-- `HL2RS/AGENTS.md`, `RustLife2/AGENTS.md`, `HL2RS/STATUS.md`:
+- `AGENTS.md`, `STATUS.md`:
   - Updated documentation to reflect `blur(map)` resolution and dynamic resource-based background map loading.
 
 **Why:**
 - Eliminated redundant intermediate data structures and hardcoded map reference tables by reading chapter background maps directly from authentic game resources (`chapterbackgrounds.txt`) and deriving blur image names via `blur(map)`.
 
 **Tested how:**
-- `bash AntigravityPlayground/validate.sh`: 166 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
+- `scripts/checks/validate.sh`: 166 `hl2-ui` tests pass, 70 `hl2-bevy` tests pass; clippy clean (0 warnings), fmt clean.
 - `cargo test --locked -p hl2-ui -- --ignored`: 4 owned-install tests pass.
-- Release binary built via `bash AntigravityPlayground/build_release.sh`.
+- Release binary built via `scripts/build-bevy.sh`.
 
 **Result:** Clean, idiomatic, dynamic background map and blur image resolution directly from game resources with zero hardcoded reference arrays.
 
@@ -717,7 +733,7 @@
   - Updated `Console::background_texture` to look up by map name (with or without `.bsp`) as well as category name.
   - Updated `Console::draw` to look up the background texture using `upcoming_map` (`target_map` -> `pending_map` -> `loaded_map` -> category) and `target_cat`, guaranteeing the pre-blurred image always matches the upcoming background.
   - Extended `test_console_background_texture_resolution` to verify map name lookups, `expansion_category_for_map`, and category-context disambiguation.
-- `HL2RS/AGENTS.md`, `RustLife2/AGENTS.md`, `HL2RS/STATUS.md`:
+- `AGENTS.md`, `STATUS.md`:
   - Documented `BackgroundMapReference`, expansion archive priority, and upcoming map blur texture selection.
 
 **Why:**
@@ -741,7 +757,7 @@
 **Agent/model:** Antigravity agentic assistant; Gemini 3.8 Flash model family.
 
 **Changed:**
-- `HL2Wiki/background_map_transitions_and_loading.md`:
+- Research notes:
   - Documented discovery of authored pre-blurred 2D background textures (`materials/console/%s.vtf` and `_widescreen.vtf`) across `hl2_textures_dir.vpk`, `episodic/ep1_pak_dir.vpk`, `ep2/ep2_pak_dir.vpk`, and `lostcoast/lostcoast_pak_dir.vpk`.
   - Documented retail Source GameUI backdrop rendering mechanics: binding the pre-blurred VTF, drawing it full-screen, tinting with `MainMenu.Backdrop` (`rgba(0, 0, 0, 156)` per `sourcescheme.res`), and displaying `CLoadingDiscPanel` without dynamic GPU blur shaders.
 - `hl2-ui::canvas`:
@@ -762,7 +778,7 @@
   - Added method `Console::background_texture(&self, category: &str, widescreen: bool) -> Option<&Texture2D>`.
   - Updated `Console::draw` during active background transitions to draw the pre-blurred background texture quad full-screen followed by the `MainMenu.Backdrop` rectangle.
   - Added unit test `test_console_background_texture_resolution` verifying canonical expansions, category aliases (`hl2ep1`, `hl2ep2`, `hl2lc`), and aspect ratio fallback.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`:
+- `AGENTS.md`:
   - Documented authored pre-blurred background texture loading, backdrop overlay tinting, and removal of synthetic blur code.
 
 **Why:**
@@ -802,7 +818,7 @@
     3. Rapid double switch (Episode One then Lost Coast): stale completion for Episode One is ignored; Lost Coast subtitle applies when finished.
 - `hl2-bevy::campaign`:
   - Updated `step_map_load` to invoke `ui.source.level_loaded_for_map(&loaded.world.name, job.request.background)` and `ui.source.background_load_failed_for_map(&job.request.map, &error.to_string())`.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented transition-state subtitle derivation and timing rules.
+- `AGENTS.md`: documented transition-state subtitle derivation and timing rules.
 - `HL2RS/STATUS.md`: updated status to record submenu subtitle timing resolution.
 
 **Why:**
@@ -831,7 +847,7 @@
   - Added unit test `test_menu_title_and_subtitle_layout_alignment_across_scales_and_resolutions` verifying horizontal alignment (`title2.x == menu.x`) across scale factor 1.0 (480p, x=76), scale factor 2.0 (960p, x=152), and 1280x800 resolution (x=126), and verifying normalization of legacy schemes.
 - `hl2-ui::console`:
   - Updated `Console::new` to load `SourceSchemeBase.res` and `ClientScheme.res` via `Reader::new(vfs)` instead of direct `vfs.read` calls, ensuring the `hl2_complete` anniversary scheme overlay takes precedence over base `hl2`.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented subtitle layout alignment and legacy coordinate normalization.
+- `AGENTS.md`: documented subtitle layout alignment and legacy coordinate normalization.
 - `HL2RS/STATUS.md`: updated status to record submenu subtitle placement resolution.
 
 **Why:**
@@ -867,7 +883,7 @@
   - `OptionsDialog` (main dialog, subdialogs Gamma and Credits): uses `p.frame_with_close` / `sp.frame_with_close` -> shared `FrameSpec` with rounded corners and no outer 3D border.
   - `LoadingDialog` (gameplay map loading): uses `p.frame_with_close` -> shared `FrameSpec` with rounded corners and no outer 3D border.
   - Developer console (`Console` in `console.rs`): developer terminal panel using custom retained border lines, confirmed as developer tool surface rather than GameUI dialog.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented shared frame routing for all dialog-like surfaces.
+- `AGENTS.md`: documented shared frame routing for all dialog-like surfaces.
 - `HL2RS/STATUS.md`: updated status to record background loading plaque styling.
 
 **Why:**
@@ -895,7 +911,7 @@
 - `hl2-bevy::ui_system`:
   - Routed `cursor_to_canvas` through `hl2_ui::viewport::pointer_to_canvas`.
   - Added unit test `cursor_to_canvas_consistent_across_window_modes_and_scale` asserting consistency across window modes and scale factors.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented 3rd-party dependency rules and cursor coordinate conversion invariants.
+- `AGENTS.md`: documented 3rd-party dependency rules and cursor coordinate conversion invariants.
 - `HL2RS/STATUS.md`: updated status to record unified pointer coordinate conversion and window client alignment.
 
 **Why:**
@@ -934,7 +950,7 @@
   - Added unit tests: `background_loading_state_sequence_success`, `background_load_failed_ends_transition_and_cleans_up`, and `generic_loading_failed_on_background_cleans_up`.
 - `hl2-bevy::campaign`:
   - In `step_map_load`, updated background load failure to invoke `ui.source.background_load_failed(&error.to_string())` instead of generic `loading_complete()`, ensuring background map load failures cleanly register as `Failed` in the transition state machine while keeping the menu intact.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented background transition state machine, dimming overlay, and rendering subsystem analysis for 3D scene blur.
+- `AGENTS.md`: documented background transition state machine, dimming overlay, and rendering subsystem analysis for 3D scene blur.
 - `HL2RS/STATUS.md`: updated status to record background transition state sequence and failure cleanup.
 
 **Why:**
@@ -971,7 +987,7 @@
   - Updated `Console::draw` to render subtitle lines using `lostcoast_title_font` (for Lost Coast) or `title_font` (for Episode One / Episode Two) at `geometry.title_tall` with `ClientTitleFont` color `rgba(255, 255, 255, 200)` and `TextOutline::DEFAULT`, falling back to `menu_font` at `geometry.title_tall * 0.55` only if a title font lacks glyphs.
   - In `HL2EP2.ttf` (and `hl2ep1.ttf`), the `'='` character maps to GID 17: a wide horizontal bar decoration rule (not hyphens `---`).
   - Added regression test `test_subtitle_font_selection_and_glyph_decoration` and updated existing title tests.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented authentic subtitle fonts and glyph decorations.
+- `AGENTS.md`: documented authentic subtitle fonts and glyph decorations.
 - `HL2RS/STATUS.md`: updated status with verified subtitle fonts and glyph decorations.
 
 **Why:**
@@ -1004,7 +1020,7 @@
   - Added `Painter::frame_spec(&self, spec: FrameSpec, close: Option<ButtonState>)` and updated `Painter::frame` / `Painter::frame_with_close` to route through it. Removed outer 3D raised border from dialog frames while leaving all non-dialog widgets (push buttons, close button, sliders, tabs, text inputs, checkboxes) with their authentic 3D borders.
   - Added unit test `dialog_frame_style_rounded_corners_and_overflow_clipping` verifying rounding, overflow clipping, outer 3D border removal, hit testing, and non-dialog widget border preservation.
 - `hl2-ui::gameui::options`: updated subdialog credits frame quad lookups in tests to match the rounded frame decomposition.
-- `HL2RS/AGENTS.md` & `RustLife2/AGENTS.md`: documented dialog frame rounded corners and overflow clipping.
+- `AGENTS.md`: documented dialog frame rounded corners and overflow clipping.
 - `HL2RS/STATUS.md`: updated status to record rounded dialog frames and outer 3D border removal.
 
 **Why:**
@@ -2490,7 +2506,7 @@ Per-process recordings: native blip onsets match ours (0, 1.057, 2.102, 2.415, 2
   - Updated `console_effects` to handle `Effect::ApplyConfig`, updating camera FOV, audio volume, and window mode/resolution at runtime.
   - Fixed wgpu attachment size validation crash (`differing sizes: depth (1280, 720, 1) vs color (3456, 2168, 1)`) by refactoring video configuration updates into `apply_video_config_to_window`: prevents stomping `window.resolution` with windowed dimensions when transitioning to or running in `BorderlessFullscreen`.
 - `AGENTS.md`: Documented owner guidance rules, render scaling architecture, and the rule that original in-game implementation behavior strictly overrides current/temporary implementations.
-- `../AGENTS.md` & `../HL2Wiki/video_modes_and_resolution.md`: Established workspace-level reverse engineering strategy and documented Source engine `mat_setvideomode`, display modes, and resolution scaling.
+- Research notes: documented Source engine `mat_setvideomode`, display modes, and resolution scaling.
 
 **Why:** Implement the native Half-Life 2 Main Menu, Options dialog, and settings persistence suite as requested, and fix the wgpu validation crash when switching to fullscreen and applying options.
 

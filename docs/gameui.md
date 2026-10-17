@@ -824,5 +824,5 @@ quitting mid-game. Module: `hl2-ui::gameui::chapters`.
   `changelevel_targets_come_from_trigger_changelevel_maps`,
   `loading_a_map_saves_its_chapter_background_for_the_menu`; owned
   `owned_maps_belong_to_their_installed_chapters`; packaged replay
-  `chapter_menu.json` (`d2_coast_01` -> `hl2/background04`, `d3_c17_10a` -> `hl2/background06`) and `runtime_chapter_quit.sh` (`--map d2_coast_01`, exit
+  `test-inputs/bevy-menu-chapter-return.json` (`d2_coast_01` -> `hl2/background04`, `d3_c17_10a` -> `hl2/background06`) and `scripts/checks/runtime_chapter_quit.sh` (`--map d2_coast_01`, exit
   mid-game: the saved background goes from `hl2/background01` to `hl2/background04`).

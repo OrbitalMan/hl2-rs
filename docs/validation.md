@@ -1,8 +1,37 @@
 # Local validation — 2026-10-05
 
+## Local check scripts (2026-10-17)
+
+Bash, no arguments, runnable from any directory; written and run on macOS (Apple Silicon). The
+packaged runs use `bin/hl2-bevy` (the Windows build produces `bin/hl2-bevy.exe`; on Windows run
+them from Git Bash or adapt the executable name). Every packaged run passes `--no-setup`, stops
+itself after a bounded number of frames, has a watchdog, and backs up and restores
+`bin/hl2-config.json` when it changes settings. Logs, captures and reports go to `artifacts/`.
+
+| Script | What it checks |
+| --- | --- |
+| `scripts/checks/validate.sh` | `cargo test -p hl2-ui`, `-p hl2-bevy`, strict clippy (`--workspace --all-targets --locked -D warnings`, as CI), `cargo fmt --check` |
+| `scripts/checks/check_windows.sh` | strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc` without linking (platform-gated code stays gated) |
+| `scripts/checks/runtime_check.sh` | builds (`scripts/build-bevy.sh`), 300 windowed main-menu frames, exit status and warnings |
+| `scripts/checks/runtime_capture.sh` | builds, captures the presented window to `artifacts/present_check.png` |
+| `scripts/checks/runtime_submenus.sh` | builds, replays `test-inputs/bevy-menu-submenus.json` (Episode One, back, Half-Life 2, back, Extras, Lost Coast), prints the loaded backgrounds |
+| `scripts/checks/runtime_return_menu.sh` | builds, replays `test-inputs/bevy-menu-return.json` (Episode Two menu, `map d1_trainstation_02`, Return to main menu): back over `hl2/background01` |
+| `scripts/checks/runtime_chapter_menu.sh` | builds, replays `test-inputs/bevy-menu-chapter-return.json`: `d2_coast_01` returns to `hl2/background04`, `d3_c17_10a` to `hl2/background06` |
+| `scripts/checks/runtime_chapter_quit.sh` | builds, runs `--map d2_coast_01` and exits mid-game: the saved background goes from `hl2/background01` to `hl2/background04` |
+| `scripts/checks/runtime_bg_compare.sh` | builds, captures each game's chapter 1 menu background at 1024x768, FOV 75, to `artifacts/bg_compare/` for comparison with the installed pre-blurred `materials/console/*.vtf` |
+| `scripts/checks/runtime_captions.sh` | builds, runs `episodic/ep1_background02` with closed captions on and off, captures both and prints the caption report |
+| `scripts/checks/runtime_options_capture.sh` | replays every `test-inputs/bevy-options-capture*.json` with the current build (no rebuild) and captures `artifacts/<name>.png` |
+| `scripts/checks/runtime_placement_persist.sh` | current build: drags the Options dialog, then checks a second run opens it where it was saved |
+
+Report helpers (read `artifacts/bevy-report.json` of the last run): `scripts/checks/show_report.py`
+(loaded maps, campaign state), `show_report_captions.py`, `show_audio.py`, `show_audio_keys.py`.
+Settings helpers used by the scripts: `set_bg_config.py`, `set_captions_config.py`,
+`set_menu_background.py` (environment variables, see each file). Scripted pointer positions in
+the replays are UI canvas pixels of the render resolution, so the capture scripts pin 1024x768.
+
 ## Closed captions (2026-10-17, macOS Apple Silicon)
 
-`bash AntigravityPlayground/validate.sh` (hl2-ui 233 passed / 7 ignored, hl2-bevy 86 / 8, strict clippy `--workspace --all-targets -D warnings`, fmt) and `check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`) pass; `cargo test --locked -p source-assets -p hl2-simulation`: 103 / 30 and 241 / 18. Owned-install tests (`--include-ignored`, installation discovery): the Episode One dictionaries load in search order (episodic 3153, hl2 3970 entries), every `kleinercast01..13.vcd` line resolves its caption, and the Episode One `HudCloseCaption` layout, `Panel.BgColor` and four caption faces load (DejaVu Sans substitutes for the uninstalled Tahoma). A playground check (`check_captions.py`) found every installed `.txt` token hashed in its `.dat` (ep2: 15 differing values). Packaged release (`runtime_captions.sh`: `episodic/ep1_background02`, closed captions, 1024x768 windowed, 420 frames) exits 0; `artifacts/captions_capture.png` shows `ep_01.kl_fellowcitizens06` in Kleiner's `255,255,200` italics over the translucent rounded box behind the main menu; report `hud.captions`: dictionaries [3153, 3970], 1 processed, nothing missing, no attenuated scene captions. The same run with captions off (`captions_off.png`) shows no panel and 0 processed captions. Not compared with a retail capture; Subtitles mode, captions during gameplay and Windows **not tested** in a packaged run.
+`scripts/checks/validate.sh` (hl2-ui 233 passed / 7 ignored, hl2-bevy 86 / 8, strict clippy `--workspace --all-targets -D warnings`, fmt) and `scripts/checks/check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`) pass; `cargo test --locked -p source-assets -p hl2-simulation`: 103 / 30 and 241 / 18. Owned-install tests (`--include-ignored`, installation discovery): the Episode One dictionaries load in search order (episodic 3153, hl2 3970 entries), every `kleinercast01..13.vcd` line resolves its caption, and the Episode One `HudCloseCaption` layout, `Panel.BgColor` and four caption faces load (DejaVu Sans substitutes for the uninstalled Tahoma). A dictionary check found every installed `.txt` token hashed in its `.dat` (ep2: 15 differing values). Packaged release (`scripts/checks/runtime_captions.sh`: `episodic/ep1_background02`, closed captions, 1024x768 windowed, 420 frames) exits 0; `artifacts/captions_capture.png` shows `ep_01.kl_fellowcitizens06` in Kleiner's `255,255,200` italics over the translucent rounded box behind the main menu; report `hud.captions`: dictionaries [3153, 3970], 1 processed, nothing missing, no attenuated scene captions. The same run with captions off (`captions_off.png`) shows no panel and 0 processed captions. Not compared with a retail capture; Subtitles mode, captions during gameplay and Windows **not tested** in a packaged run.
 
 ## Merge of main into the menu branch (2026-10-16, macOS Apple Silicon)
 
