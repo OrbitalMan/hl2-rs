@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **Fixture setup inputs were dropped under a frozen view: fixed.** Since menu backgrounds follow their `point_viewcontrol`, a fixture's `send` / `actor_pose` / `prop_pose` actions were discarded with player input while a camera held the view; `d1_trainstation_01` starts under the intro camera, so Barney's `security_02` / `security_03` scenes in the security-room fixtures never started (attention, face, gesture, audio-scene and Kleiner-monitor fixtures). Entity setup now applies; player controls stay ignored. Found by the gameplay replays: identical outcomes to main afterwards.
 - **UI checks are one cross-platform Python script** (`scripts/checks/replays.py`): shared background checks (14, report assertions, default settings), windowed / macOS / Windows ones with `WINDOWED=1`; macOS all ok, Windows and Linux not run (docs/validation.md).
 - **Replays and captures run in the background** (`--background`: no window, no focus taken; captures read the game frame); window checks stay windowed (docs/validation.md).
 - **Keyboard focus, second pass:** reading-order Tab, focus shown only after Tab, padded rings (check, radio, slider, entry, key list), no default button, key list focus, menu hover only on entering a row (docs/gameui.md 6c).

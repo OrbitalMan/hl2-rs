@@ -63,6 +63,14 @@ pub enum Action {
     },
 }
 impl Action {
+    /// A fixture's entity setup (inputs to named entities, seeded actor and prop poses), not
+    /// player input: it still applies while the player's controls are ignored.
+    pub fn entity_setup(&self) -> bool {
+        matches!(
+            self,
+            Self::Send { .. } | Self::ActorPose { .. } | Self::PropPose { .. }
+        )
+    }
     pub fn valid(&self) -> bool {
         match self {
             Self::ActorPose {

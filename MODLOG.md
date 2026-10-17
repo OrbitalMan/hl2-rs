@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Fixture entity setup applies under a frozen view
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `simulation::Simulation::step`: while a `point_viewcontrol` holds the view (or on a menu background level), a movement script's entity setup actions (`send`, `actor_pose`, `prop_pose`; `gameplay::Action::entity_setup`) still reach the world; player controls (movement, weapons, use) stay ignored. Unit test `a_frozen_view_ignores_player_actions_but_applies_entity_setup`.
+
+**Why:** since menu backgrounds follow their camera (0cecafe), all script actions were dropped under a frozen view. `d1_trainstation_01` starts under the intro camera, so the security-room fixtures' setup and `security_02 Start` never arrived: Barney's scenes did not run in the attention, face, gesture, audio-scene and Kleiner-monitor fixtures.
+
+**Tested how:** the unit test fails without the change; the 11 `d1_trainstation_01` fixtures then give the same scene, gesture and I/O outcomes as main (packaged, background).
+
+**Result:** the security-room fixtures run their scenes again.
+
+**Still broken or not tested:** nothing known.
+
+**Next:** none.
+
 ## 2026-10-17 Checks: cross-platform UI replays with report assertions
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

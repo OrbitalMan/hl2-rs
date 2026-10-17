@@ -419,6 +419,10 @@ impl Simulation {
                     yaw: self.yaw,
                     ..Input::default()
                 };
+                if let Some(game) = game.as_deref_mut() {
+                    game.actions
+                        .extend(c.actions.into_iter().filter(|a| a.entity_setup()));
+                }
             } else if let Some(game) = game.as_deref_mut() {
                 game.buttons(c.primary, c.secondary);
                 game.actions.extend(c.actions);
@@ -969,6 +973,39 @@ mod tests {
         assert!(sim.paused() && !sim.world_running());
         assert_eq!(time, 0.);
         assert_eq!(sim.player.ticks, 0);
+    }
+    #[test]
+    fn a_frozen_view_ignores_player_actions_but_applies_entity_setup() {
+        // d1_trainstation_01 starts under the intro's point_viewcontrol: a fixture's inputs to
+        // map entities still arrive, its weapon actions do not.
+        let script: Vec<Command> = serde_json::from_value(serde_json::json!([{
+            "tick": 1,
+            "actions": [
+                {"action": "loadout"},
+                {"action": "send", "target": "relay", "input": "Trigger"}
+            ]
+        }]))
+        .unwrap();
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "logic_relay".into()),
+                    ("targetname".into(), "relay".into()),
+                ],
+            }],
+            ..Default::default()
+        };
+        let mut game = crate::gameplay::Gameplay::synthetic(world.clone());
+        let mut sim = Simulation::new(&world, glam::Vec3::Z * 128., 0., 0., false, script);
+        sim.view_control = Some(hl2_simulation::view_control::View {
+            origin: glam::Vec3::ZERO,
+            pitch: 0.,
+            yaw: 0.,
+            freeze_player: true,
+        });
+        sim.step(Some(&mut game), None);
+        assert_eq!(game.scene.diagnostics.inputs_delivered, 1);
+        assert!(game.inventory.owned.is_empty());
     }
     #[test]
     fn movement_schedule_uses_fifteen_milliseconds() {
