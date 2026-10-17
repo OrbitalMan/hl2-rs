@@ -680,10 +680,11 @@ White, `RichText.*`) and Source's own console variables. Code:
   `Frame.ClientInsetY` 6) the `CConsolePanel::PerformLayout` insets apply as plain units (the
   panel is not proportional): history at inset 8 + top 4, entry and `#Console_Submit` button
   (64 wide, pulled 7 from the edge, Submit is the default button) 24 tall along the bottom,
-  4 apart. `console::dialog::DialogLayout` is the one geometry for drawing and hit tests.
+  4 apart. Opened over Options it is opaque (`Theme::stacked`). The completion list is as wide
+  as its widest row (at least the entry), up to the canvas edge. `console::dialog::DialogLayout` is the one geometry for drawing and hit tests.
 - History (`RichText`, `DepressedButtonBorder` = sunken `Border.Dark`/`Border.Bright`): background
   `RichText.BgColor`, a vertical scroll bar (arrows, track paging, nob dragging) and the wheel
-  (3 rows a notch). Scrolled back, the view stays on its lines while output arrives; Enter and
+  (`widgets::ScrollMode`: 3 rows a notch on Windows/Linux, accumulated row steps on macOS). Scrolled back, the view stays on its lines while output arrives; Enter and
   Ctrl+End return to the newest. The entry is a sunken `TextEntry` with no prompt (the `] line`
   echo stays in the history); it scrolls to keep the cursor in view.
 - Selection: dragging over the history selects whole rows (`RichText.SelectedBgColor` Orange,

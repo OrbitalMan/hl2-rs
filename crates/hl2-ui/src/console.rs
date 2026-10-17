@@ -10,8 +10,8 @@ use crate::gameui::{
     options::{OptionsDialog, OptionsOutcome},
     resources::{self, fallback_game_menu, GameUiResources},
     widgets::{
-        scheme_color, Align, ButtonState, ButtonTracker, Fonts, Painter, ScrollBarLayout,
-        ScrollBarState, Theme, SCROLLBAR_WIDTH,
+        scheme_color, Align, ButtonState, ButtonTracker, Fonts, Painter, ScrollAccumulator,
+        ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
     },
 };
 use crate::{
@@ -147,6 +147,7 @@ pub struct Console {
     console_buttons: ButtonTracker<ConsoleButton>,
     console_hover: Option<ConsoleButton>,
     history_bar: ScrollBarState,
+    history_wheel: ScrollAccumulator,
     /// The input line: editing, completion, history and reverse search.
     editor: editor::LineEditor,
     /// Names arguments complete from (installed maps, the loaded map's entities), set by the host.
@@ -410,6 +411,7 @@ impl Default for Console {
             console_buttons: ButtonTracker::capturing(),
             console_hover: None,
             history_bar: ScrollBarState::default(),
+            history_wheel: ScrollAccumulator::default(),
             editor: editor::LineEditor::default(),
             completion: complete::Sources::default(),
             clock: 0.,
@@ -1300,7 +1302,7 @@ impl Console {
                 if !args.is_empty() {
                     return Err(usage());
                 }
-                self.output.clear();
+                self.clear_output();
             }
             "echo" => self.log(args.join(" ")),
             "toggleconsole" => {
@@ -1740,10 +1742,7 @@ impl Console {
             self.editor.refresh(&self.completion);
         }
         if ctrl_key("KeyL") {
-            self.output_start += self.output.len() as u64;
-            self.output.clear();
-            self.scroll = 0;
-            self.selection = None;
+            self.clear_output();
         }
         if input.copy {
             self.copied = self.selected_text();
@@ -1765,10 +1764,10 @@ impl Console {
         let down = input.click || input.held;
         let total = self.shown_lines().len();
         let max_scroll = total.saturating_sub(view.rows);
-        if input.wheel != 0. {
-            let steps = (input.wheel * 3.).round() as i64;
-            self.scroll = (self.scroll as i64 + steps).clamp(0, max_scroll as i64) as usize;
-        }
+        let mode = ScrollMode::platform();
+        let steps = self.history_wheel.steps(input.wheel, mode) as i64
+            * mode.rows_per_step(WHEEL_ROWS) as i64;
+        self.scroll = (self.scroll as i64 + steps).clamp(0, max_scroll as i64) as usize;
         self.scroll = self.scroll.min(max_scroll);
         let first = total - view.rows.min(total) - self.scroll;
         let bar = ScrollBarLayout::new(view.bar, first, view.rows, total);
@@ -1849,6 +1848,16 @@ impl Console {
             self.selecting = false;
         }
         None
+    }
+
+    /// Empties the history (`clear`, Ctrl+L). Line numbers keep counting, so nothing printed
+    /// later can take a selected line's number.
+    fn clear_output(&mut self) {
+        self.output_start += self.output.len() as u64;
+        self.output.clear();
+        self.scroll = 0;
+        self.selection = None;
+        self.selecting = false;
     }
 
     fn dialog_layout(&self) -> DialogLayout {
@@ -2354,6 +2363,8 @@ const WARNING_TEXT: Color = Color::new(1.0, 0.8, 0.3, 1.0);
 const ERROR_TEXT: Color = Color::new(1.0, 0.4, 0.35, 1.0);
 /// SDK `CConsolePanel` shows at most this many completion rows, the last one `...` when more.
 const COMPLETION_ROWS: usize = 10;
+/// History rows scrolled per mouse wheel notch.
+const WHEEL_ROWS: usize = 3;
 /// Dialog push buttons play this when they activate.
 const RELEASE_SOUND: &str = "ui/buttonclickrelease.wav";
 /// Console history and completion row height, text size and baseline distance from the row
@@ -2429,7 +2440,16 @@ impl Console {
     fn draw_console(&self, time: f64) {
         let layout = self.dialog_layout();
         let scale = layout.scale;
-        let painter = self.painter(layout.origin, scale);
+        // Over the Options dialog the console is opaque, like every stacked dialog.
+        let stacked = self.theme.stacked();
+        let painter = Painter {
+            theme: if self.previous == Mode::Options {
+                &stacked
+            } else {
+                &self.theme
+            },
+            ..self.painter(layout.origin, scale)
+        };
         let em = (CONSOLE_TEXT * scale) as u16 as f32;
         let text = |content: &str, x: f32, y: f32, color: Color| {
             text(
@@ -2604,6 +2624,20 @@ impl Console {
         if rows.is_empty() {
             return;
         }
+        // Like a VGUI menu, the list is as wide as its widest row (at least the entry), up to
+        // the canvas edge.
+        let widest = rows
+            .iter()
+            .map(|runs| {
+                runs.iter()
+                    .map(|(content, _)| self.console_text_width(content, scale))
+                    .sum::<f32>()
+            })
+            .fold(0., f32::max);
+        let w = w
+            .max(widest + 12. * scale)
+            .min(self.canvas.width() - x)
+            .max(0.);
         let row = CONSOLE_ROW * scale;
         let h = rows.len() as f32 * row + 4. * scale;
         let below = entry_y + entry_h;
@@ -3054,6 +3088,12 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(copy(&mut console), None, "Ctrl+L clears the selection");
+        console.submit("con_filter_enable 0");
+        drag(&mut console, 0, 0);
+        assert!(copy(&mut console).is_some());
+        console.submit("clear");
+        console.log("after clear");
+        assert_eq!(copy(&mut console), None, "clear drops the selection too");
     }
 
     #[test]
@@ -3068,9 +3108,10 @@ mod tests {
             wheel: 2.,
             ..Default::default()
         });
-        assert_eq!(console.scroll, 6);
+        let rows = 2 * ScrollMode::platform().rows_per_step(WHEEL_ROWS);
+        assert_eq!(console.scroll, rows);
         console.log("more");
-        assert_eq!(console.scroll, 7);
+        assert_eq!(console.scroll, rows + 1);
         keys(&mut console, &[Key::Enter]);
         assert_eq!(console.scroll, 0, "submitting returns to the newest output");
     }

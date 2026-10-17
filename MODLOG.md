@@ -4,7 +4,7 @@
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
 
-**Changed:** `hl2-ui::console::dialog` (`DialogLayout`: the SDK `CConsoleDialog`/`CConsolePanel::PerformLayout` geometry at the retail default placement; `Selection` by line number). `Console::draw_console` now draws a `#Console_Title` frame through `Painter::frame_with_close`, a sunken `RichText.BgColor` history with a scroll bar, a sunken entry without prompt and the default `#Console_Submit` button, over what the console was opened from and without dimming the screen. Pointer input: close ×, Submit (both capturing, release-click sound), the history scroll bar, the wheel and dragging over rows to select them (`RichText.Selected*` colors). Scrolled-back output stays put while lines arrive. `Input::copy` (Cmd+C on macOS, Ctrl+C elsewhere, `ui_host::Modifiers::copy`), `Console::take_copied`, written to Bevy `Clipboard` in `ui_system`. `Console_Submit` fallback string. History rows use a smaller console font (12 on 14-unit rows). Details in `docs/gameui.md` section 11.
+**Changed:** `hl2-ui::console::dialog` (`DialogLayout`: the SDK `CConsoleDialog`/`CConsolePanel::PerformLayout` geometry at the retail default placement; `Selection` by line number). `Console::draw_console` now draws a `#Console_Title` frame through `Painter::frame_with_close`, a sunken `RichText.BgColor` history with a scroll bar, a sunken entry without prompt and the default `#Console_Submit` button, over what the console was opened from and without dimming the screen. `clear` and Ctrl+L share one helper that keeps line numbers counting. The wheel uses the shared `widgets::ScrollAccumulator`/`ScrollMode`. Over Options the console uses `Theme::stacked`. The completion list is as wide as its widest row. Pointer input: close ×, Submit (both capturing, release-click sound), the history scroll bar, the wheel and dragging over rows to select them (`RichText.Selected*` colors). Scrolled-back output stays put while lines arrive. `Input::copy` (Cmd+C on macOS, Ctrl+C elsewhere, `ui_host::Modifiers::copy`), `Console::take_copied`, written to Bevy `Clipboard` in `ui_system`. `Console_Submit` fallback string. History rows use a smaller console font (12 on 14-unit rows). Details in `docs/gameui.md` section 11.
 
 **Why:** owner request: keep the Half-Life 2 look of the console; the panel was still an earlier HL2-RS layout, and output row copy was missing.
 
@@ -12,7 +12,7 @@
 
 **Result:** the console reads as the retail VGUI console dialog and output rows can be copied.
 
-**Still broken or not tested:** copying to the system clipboard and the drag selection not exercised by hand in the packaged game; the dialog cannot be moved or resized; selection is by whole rows, not characters.
+**Still broken or not tested:** copying to the system clipboard and the drag selection not exercised by hand in the packaged game; the dialog cannot be moved or resized; selection is by whole rows, not characters; the completion list grows to its widest row but stops at the canvas edge, so a long help line can still be clipped (one letter at 1024x768).
 
 **Next:** owner check.
 
