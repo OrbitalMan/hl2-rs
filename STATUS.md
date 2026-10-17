@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **macOS windowed placement uses the screen visible frame** (menu bar and Dock excluded, `video::DesktopArea`); real window frames read back match (`scripts/checks/runtime_window_place.sh`).
 - **macOS display modes:** Full screen (exclusive), Windowed and Windowed (No Border = native full-screen Space) are all offered; the window sets `borderless_game: false` so the menu bar shows at the top edge in No Border. Exclusive transitions replayed without a hang; menu bar reveal not tried by hand.
 - **Picture froze after a resolution change: fixed.** The present material kept the frame texture from before an in-place resize; the frame is now a new image the material is pointed at (`video::suspend_for_resize`). Check `scripts/checks/runtime_resolution_change.sh`. Not tried by hand.
 - **Local checks ship with the repository** (`scripts/checks/`, replay inputs in `test-inputs/`, list in docs/validation.md); docs and AGENTS.md reference nothing outside the repository (hard rule 10).

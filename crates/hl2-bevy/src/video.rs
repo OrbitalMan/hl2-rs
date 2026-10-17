@@ -165,6 +165,38 @@ pub struct GameFrame {
     pub pending_window: Option<u32>,
     /// Remaining frames of suspended rendering while the frame is resized.
     pub suspended: u32,
+    /// Place the window in the [`DesktopArea`] once a windowed resize is done (macOS).
+    pub recenter: bool,
+}
+
+/// The part of the window's monitor a window may cover (macOS `NSScreen.visibleFrame`: the
+/// screen without the menu bar and Dock), in logical points with the origin at the top-left of
+/// the main display, as winit places windows. Read by [`read_desktop_area`] on macOS only; other
+/// platforms keep centring on the whole monitor.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct DesktopArea {
+    pub visible: Rect,
+    /// Height of the window's title bar in points (outer frame minus client area).
+    pub title_bar: f32,
+}
+
+impl DesktopArea {
+    /// The largest client area, in physical pixels at `scale`, whose window fits the area.
+    pub fn client_room(&self, scale: f32) -> Vec2 {
+        (self.visible.size() - Vec2::new(0., self.title_bar)).max(Vec2::ONE) * scale
+    }
+
+    /// Outer top-left position, in physical pixels at `scale` (what `WindowPosition::At` takes),
+    /// that centres a window with a `client` physical-pixel client area in the area. A window
+    /// larger than the area keeps its top-left corner inside it.
+    pub fn centered(&self, client: UVec2, scale: f32) -> IVec2 {
+        let scale = scale.max(f32::EPSILON);
+        let outer = client.as_vec2() / scale + Vec2::new(0., self.title_bar);
+        let free = (self.visible.size() - outer).max(Vec2::ZERO);
+        ((self.visible.min + free / 2.).round() * scale)
+            .round()
+            .as_ivec2()
+    }
 }
 
 /// The camera presenting the game frame in the window.
@@ -232,6 +264,7 @@ pub(crate) fn install_frame(
         resolution,
         pending_window: windowed.then_some(WINDOW_RESIZE_FRAMES),
         suspended: 0,
+        recenter: windowed,
     });
     commands.spawn((
         PresentCamera,
@@ -474,10 +507,22 @@ pub enum WindowResize {
 
 /// Decides a windowed-mode resize to `resolution` in physical pixels (one frame pixel per display
 /// pixel, also on high-DPI displays), clamped to the monitor.
+#[cfg(test)]
 pub fn window_resize(
     window: &Window,
     monitor: Option<&Monitor>,
     resolution: UVec2,
+) -> WindowResize {
+    window_resize_in(window, monitor, resolution, None)
+}
+
+/// [`window_resize`] with the monitor's usable [`DesktopArea`] when it is known (macOS): the
+/// client size then fits that area exactly instead of the monitor minus [`WINDOW_MARGIN`].
+pub fn window_resize_in(
+    window: &Window,
+    monitor: Option<&Monitor>,
+    resolution: UVec2,
+    area: Option<&DesktopArea>,
 ) -> WindowResize {
     if window.mode != WindowMode::Windowed {
         return WindowResize::Cancel;
@@ -487,12 +532,22 @@ pub fn window_resize(
         return WindowResize::Wait;
     }
     let scale = window.scale_factor().max(1.0);
+    let fit = |room: Vec2| {
+        hl2_ui::viewport::windowed_size(
+            glam::UVec2::new(resolution.x, resolution.y),
+            Some(glam::Vec2::new(room.x, room.y)),
+        )
+    };
     let available = metrics.map(|m| Vec2::new(m.physical_width as f32, m.physical_height as f32));
-    let mut size = hl2_ui::viewport::windowed_size(
-        glam::UVec2::new(resolution.x, resolution.y),
-        available.map(|a| glam::Vec2::new(a.x, a.y)),
-    );
-    if let Some(available) = available
+    let mut size = match (area, available) {
+        (Some(area), _) => fit(area.client_room(scale)),
+        (None, Some(available)) => fit(available),
+        (None, None) => {
+            hl2_ui::viewport::windowed_size(glam::UVec2::new(resolution.x, resolution.y), None)
+        }
+    };
+    if area.is_none()
+        && let Some(available) = available
         && (size.x >= available.x || size.y >= available.y)
     {
         let room = (available - WINDOW_MARGIN * scale).max(Vec2::ONE);
@@ -521,6 +576,7 @@ pub(crate) fn resize_window(
     frame: Option<ResMut<GameFrame>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     monitors: Query<&Monitor, With<PrimaryMonitor>>,
+    area: Option<Res<DesktopArea>>,
 ) {
     let Some(mut frame) = frame else {
         return;
@@ -537,7 +593,8 @@ pub(crate) fn resize_window(
         frame.pending_window = Some(frames - 1);
         return;
     }
-    let decision = window_resize(&window, monitor, frame.resolution);
+    let area = area.as_deref();
+    let decision = window_resize_in(&window, monitor, frame.resolution, area);
     debug!(
         "[video] resize_window frames={frames} mode={:?} window={}x{} px -> {decision:?}",
         window.mode,
@@ -545,11 +602,35 @@ pub(crate) fn resize_window(
         window.resolution.physical_height()
     );
     match decision {
-        WindowResize::Cancel | WindowResize::Done => frame.pending_window = None,
+        WindowResize::Cancel => {
+            frame.pending_window = None;
+            frame.recenter = false;
+        }
+        WindowResize::Done => {
+            frame.pending_window = None;
+            // macOS places the window once it has its size: winit turns a position into AppKit
+            // coordinates with the window's current height, and Bevy applies a position before a
+            // size in the same frame, so a combined request lands off by the height change.
+            if std::mem::take(&mut frame.recenter)
+                && let Some(area) = area
+            {
+                let client = UVec2::new(
+                    window.resolution.physical_width(),
+                    window.resolution.physical_height(),
+                );
+                let at = area.centered(client, window.scale_factor());
+                debug!("[video] window placed in the desktop area {area:?} at {at}");
+                window.position = WindowPosition::At(at);
+            }
+        }
         WindowResize::Wait => {}
         WindowResize::Resize(size) => {
             window.resolution.set_physical_resolution(size.x, size.y);
-            window.position = WindowPosition::Centered(MonitorSelection::Current);
+            if area.is_some() {
+                frame.recenter = true;
+            } else {
+                window.position = WindowPosition::Centered(MonitorSelection::Current);
+            }
             frame.pending_window = frames.checked_sub(1).filter(|left| *left > 0);
         }
     }
@@ -630,6 +711,66 @@ pub(crate) fn sync_native_fullscreen(
             ui.source.log(format!("Could not save settings: {error}"));
         }
     }
+}
+
+/// Reads the [`DesktopArea`] of the window's screen while a windowed resize is pending (macOS:
+/// `NSScreen.visibleFrame` of the screen the window is on, and the window's title bar height).
+#[cfg(target_os = "macos")]
+pub(crate) fn read_desktop_area(
+    _main_thread: bevy::ecs::system::NonSendMarker,
+    mut commands: Commands,
+    frame: Option<Res<GameFrame>>,
+    windows: Query<&bevy::window::RawHandleWrapper, With<PrimaryWindow>>,
+) {
+    if frame.is_none_or(|f| f.pending_window.is_none()) {
+        return;
+    }
+    let Ok(handle) = windows.single() else {
+        return;
+    };
+    let raw_window_handle::RawWindowHandle::AppKit(appkit) = handle.get_window_handle() else {
+        return;
+    };
+    let Some(main_thread) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    match macos_desktop_area(appkit.ns_view, main_thread) {
+        Some(area) => commands.insert_resource(area),
+        None => commands.remove_resource::<DesktopArea>(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_desktop_area(
+    view: std::ptr::NonNull<std::ffi::c_void>,
+    main_thread: objc2::MainThreadMarker,
+) -> Option<DesktopArea> {
+    use objc2_app_kit::{NSScreen, NSView};
+    // SAFETY: the AppKit window handle is the window's content `NSView`, which lives as long as
+    // the window entity it was read from; this runs on the main thread.
+    let view: &NSView = unsafe { view.cast::<NSView>().as_ref() };
+    let window = view.window()?;
+    let screen = window.screen()?;
+    // Window coordinates count down from the top of the main (menu bar) display.
+    let main_height = NSScreen::screens(main_thread)
+        .firstObject()?
+        .frame()
+        .size
+        .height;
+    let visible = screen.visibleFrame();
+    let frame = window.frame();
+    let content = window.contentRectForFrameRect(frame);
+    let top = main_height - visible.origin.y - visible.size.height;
+    let area = DesktopArea {
+        visible: Rect::new(
+            visible.origin.x as f32,
+            top as f32,
+            (visible.origin.x + visible.size.width) as f32,
+            (top + visible.size.height) as f32,
+        ),
+        title_bar: (frame.size.height - content.size.height).max(0.) as f32,
+    };
+    (area.visible.width() >= 1. && area.visible.height() >= 1.).then_some(area)
 }
 
 type FrameCameras<'w, 's> = Query<
@@ -821,6 +962,7 @@ mod tests {
             resolution,
             pending_window: None,
             suspended: 0,
+            recenter: false,
         }
     }
 
@@ -891,6 +1033,65 @@ mod tests {
         assert_eq!(
             no_border,
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        );
+    }
+
+    #[test]
+    fn windowed_mode_fits_and_centres_in_the_desktop_area() {
+        // M1 Pro panel at 2x: 1728x1117 pt, menu bar 37 pt, Dock 70 pt at the bottom.
+        let area = DesktopArea {
+            visible: Rect::new(0., 37., 1728., 1047.),
+            title_bar: 28.,
+        };
+        let retina = monitor(3456, 2234, 2.0);
+        let window = window(2048, 1536, 2.0, WindowMode::Windowed);
+        let bottom =
+            |at: IVec2, client: UVec2| at.y as f32 / 2. + area.title_bar + client.y as f32 / 2.;
+
+        // Small: requested size, centred in the visible area (not the whole screen).
+        let client = UVec2::new(1280, 720);
+        assert_eq!(
+            window_resize_in(&window, Some(&retina), client, Some(&area)),
+            WindowResize::Resize(client)
+        );
+        assert_eq!(area.centered(client, 2.), IVec2::new(1088, 696));
+
+        // Fits only below the Dock: kept, and clear of the Dock.
+        let client = UVec2::new(2560, 1600);
+        assert_eq!(
+            window_resize_in(&window, Some(&retina), client, Some(&area)),
+            WindowResize::Resize(client)
+        );
+        let at = area.centered(client, 2.);
+        assert_eq!(at, IVec2::new(448, 256));
+        assert!(bottom(at, client) <= area.visible.max.y);
+
+        // Taller than the visible area: scaled down to it, top at the menu bar, bottom at the Dock.
+        let WindowResize::Resize(client) =
+            window_resize_in(&window, Some(&retina), UVec2::new(3456, 2160), Some(&area))
+        else {
+            panic!("a resize");
+        };
+        assert_eq!(
+            client.y, 1964,
+            "visible height minus the title bar, in pixels"
+        );
+        let at = area.centered(client, 2.);
+        assert_eq!(at.y, 74, "just below the menu bar");
+        assert!(
+            bottom(at, client) <= area.visible.max.y,
+            "not under the Dock"
+        );
+        assert!(at.x >= 0);
+
+        // A Dock on the left shifts the centre right.
+        let left_dock = DesktopArea {
+            visible: Rect::new(70., 37., 1728., 1117.),
+            title_bar: 28.,
+        };
+        assert_eq!(
+            left_dock.centered(UVec2::new(1280, 720), 2.).x,
+            (70 + (1658 - 640) / 2) * 2
         );
     }
 
@@ -1112,6 +1313,7 @@ mod tests {
             resolution: UVec2::new(1280, 720),
             pending_window: None,
             suspended: 0,
+            recenter: false,
         });
         // Full screen on a Retina panel.
         app.world_mut().spawn((

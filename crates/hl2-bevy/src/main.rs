@@ -619,11 +619,15 @@ fn main() -> Result<()> {
     if options.profile {
         performance::install(&mut app);
     }
-    // macOS native full screen (green button) is the game's Full screen mode there.
+    // macOS: native full screen (green button) is Windowed (No Border) there, and windowed
+    // placement uses the screen's visible frame (without the menu bar and Dock).
     #[cfg(target_os = "macos")]
     app.add_systems(
         PreUpdate,
-        crate::video::sync_native_fullscreen.before(crate::video::present_frame),
+        (
+            crate::video::sync_native_fullscreen.before(crate::video::present_frame),
+            crate::video::read_desktop_area,
+        ),
     );
     let exit = app.run();
     let mut status = status

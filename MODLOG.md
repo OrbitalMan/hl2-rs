@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Video: macOS windowed mode fits and centres between the menu bar and the Dock
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `video::DesktopArea` (usable area and title bar height, with `client_room`/`centered`), `window_resize_in` (fits the client area into it), `resize_window` places the window with `WindowPosition::At` in a second step once the size is applied (`GameFrame::recenter`, also at a windowed startup) when the area is known; macOS-only `read_desktop_area` reads `NSScreen.visibleFrame` and the title bar height through the window's AppKit handle while a windowed resize is pending. macOS-only dependencies on `objc2` 0.6, `objc2-app-kit` 0.3, `objc2-foundation` 0.3 and `raw-window-handle` 0.6, all already in the build (Cargo.lock gains no packages). Windows and Linux are unchanged (monitor minus `WINDOW_MARGIN`, `Centered`). New check `scripts/checks/runtime_window_place.sh`.
+
+**Why:** owner report: a large window was centred on the whole screen and covered by the Dock.
+
+**Tested how:** unit `windowed_mode_fits_and_centres_in_the_desktop_area` (small, Dock-limited and over-tall sizes, a left-hand Dock); packaged runs on an M1 Pro with the real window frame read back from AppKit: 2560x1600 at (224, 128) pt, bottom 960 inside 33..1054; 1024x768 at (608, 336); 3456x2160 scaled to fill 33..1054; workspace tests, strict clippy, fmt, Windows check.
+
+**Result:** windowed windows stay clear of the menu bar and the Dock.
+
+**Still broken or not tested:** a Dock on the left or right and multiple monitors with different scale factors were only unit-tested; a window the user moved is moved again only by the next windowed resize.
+
+**Next:** owner check.
+
 ## 2026-10-17 Video: exclusive full screen and No Border on macOS, menu bar in the full-screen Space
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

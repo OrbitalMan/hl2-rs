@@ -550,7 +550,17 @@ Design (`crates/hl2-bevy/src/video.rs`):
   sized in logical points, which upscaled the frame 2x and made every resolution above the
   desktop's point size unusable in a window.) A size that does not fit the monitor is shrunk
   uniformly to fit, with room left for the title, menu and task bars (scaled to pixels). The
-  window is centred. The request is repeated while a mode transition (leaving full screen)
+  window is centred on the monitor (Windows, Linux). On macOS (2026-10-17) the room and the
+  centre come from the screen's visible frame instead (`video::DesktopArea`, read by the
+  macOS-only `read_desktop_area` from `NSScreen.visibleFrame` and the window's title bar height
+  through the window's AppKit handle): the window fits between the menu bar and the Dock and is
+  centred in that area, so a large window is never covered by the Dock. The position is set once
+  the new size has been applied (`GameFrame::recenter`, also at a windowed startup): winit turns a
+  position into AppKit coordinates with the window's current height and Bevy applies a position
+  before a size in the same frame, so a combined request lands off by the height change. Verified
+  in packaged runs on an M1 Pro (visible area 33..1054 pt, title bar 32 pt): 2560x1600 at
+  (224, 128) pt with its bottom at 960; 1024x768 at (608, 336); 3456x2160 scaled to 1582x1021 pt
+  filling 33..1054 exactly. The request is repeated while a mode transition (leaving full screen)
   finishes, and dropped once the size matches (within one point of OS rounding) or the window
   leaves windowed mode. While the window fills the display in OS full screen it is left alone, and
   the resize resumes when it returns to a normal window. Startup in windowed mode uses the same

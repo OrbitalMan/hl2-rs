@@ -19,3 +19,11 @@ rfd = "0.17.2"
 [[bin]]
 name = "hl2-bevy"
 path = "src/main.rs"
+
+# macOS: the screen's visible frame (without the menu bar and Dock) for windowed placement.
+# All of these are already in the build through Bevy, winit and wgpu.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSGeometry"] }
+raw-window-handle = "0.6"
