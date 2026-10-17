@@ -773,6 +773,21 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Escape);
+        step_input(&mut app);
+        assert_eq!(
+            app.world()
+                .resource::<crate::ui_host::Console>()
+                .source
+                .mode,
+            Mode::Console,
+            "the console closes when Escape is released"
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::Escape);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Space);

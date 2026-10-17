@@ -317,6 +317,11 @@ impl LineEditor {
 
     /// Escape: ends a search, else hides the list. Returns whether it did either (otherwise
     /// Escape closes the console).
+    /// Whether [`Self::dismiss`] would end a search or hide the completion list.
+    pub fn can_dismiss(&self) -> bool {
+        self.search.is_some() || self.popup().is_some()
+    }
+
     pub fn dismiss(&mut self) -> bool {
         if self.search.take().is_some() {
             return true;

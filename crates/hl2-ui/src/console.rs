@@ -154,6 +154,8 @@ pub struct Console {
     /// The dialog's close (×) and Submit buttons.
     console_buttons: ButtonTracker<ConsoleButton>,
     console_hover: Option<ConsoleButton>,
+    /// Escape is held and closes the top dialog on release ([`Console::escape_pressed`]).
+    escape_held: bool,
     history_bar: ScrollBarState,
     history_wheel: ScrollAccumulator,
     key_repeat: KeyRepeat,
@@ -485,6 +487,7 @@ impl Default for Console {
             copied: None,
             console_buttons: ButtonTracker::capturing(),
             console_hover: None,
+            escape_held: false,
             history_bar: ScrollBarState::default(),
             history_wheel: ScrollAccumulator::default(),
             key_repeat: KeyRepeat::default(),
@@ -1189,6 +1192,43 @@ impl Console {
 
     /// Escape closes the quit box first, then leaves a menu category, then toggles the menus.
     /// The main menu over a background level has nothing to return to.
+    /// Escape went down. When it would close a dialog that has a close button (Options or one
+    /// of its sub-dialogs, the console), that button shows pressed until Escape is released and
+    /// the dialog closes then (owner request, 2026-10-17; retail closes on the press). Everything
+    /// else Escape does happens at once.
+    pub fn escape_pressed(&mut self) {
+        if self.escape_closes_dialog() {
+            self.escape_held = true;
+            self.options.escape_held = self.mode == Mode::Options;
+        } else {
+            self.escape();
+        }
+    }
+
+    /// Escape went up: closes the dialog whose close button it held.
+    pub fn escape_released(&mut self) {
+        if std::mem::take(&mut self.escape_held) {
+            self.options.escape_held = false;
+            if self.escape_closes_dialog() {
+                self.escape();
+            }
+        }
+    }
+
+    fn escape_closes_dialog(&self) -> bool {
+        if self.loading_dialog.is_some()
+            || self.confirm_box.is_some()
+            || self.quit_placement.active()
+        {
+            return false;
+        }
+        match self.mode {
+            Mode::Options => self.options.escape_closes(),
+            Mode::Console => !self.console_placement.active() && !self.editor.can_dismiss(),
+            _ => false,
+        }
+    }
+
     pub fn escape(&mut self) {
         // A drag or resize in progress is undone first.
         if self.quit_placement.cancel()
@@ -2224,7 +2264,8 @@ impl Console {
         let hovered = self.console_hover == Some(button);
         ButtonState {
             armed: self.console_buttons.armable(self.console_hover) == Some(button),
-            pressed: hovered && self.console_buttons.is_pressed(button),
+            pressed: (hovered && self.console_buttons.is_pressed(button))
+                || (button == ConsoleButton::Close && self.escape_held),
             enabled: true,
             // SDK `CConsolePanel` makes Submit the default button.
             default: button == ConsoleButton::Submit,
@@ -4444,6 +4485,30 @@ mod tests {
             console.background(),
             Some(GameMap::new("hl2", "background04"))
         );
+    }
+
+    #[test]
+    fn a_held_escape_presses_the_close_button_and_the_release_closes() {
+        let mut console = installed_console();
+        console.mode = Mode::MainMenu;
+        console.options_return = Mode::MainMenu;
+        console.mode = Mode::Options;
+        console.escape_pressed();
+        assert_eq!(console.mode, Mode::Options, "nothing closes on the press");
+        assert!(
+            console.options.escape_held,
+            "the close button shows pressed"
+        );
+        console.escape_released();
+        assert_eq!(
+            console.mode,
+            Mode::MainMenu,
+            "the release closes the dialog"
+        );
+        assert!(!console.options.escape_held);
+        // Escape that does not close a dialog acts at once: the main menu has no dialog to close.
+        console.escape_pressed();
+        assert!(!console.escape_held);
     }
 
     #[test]

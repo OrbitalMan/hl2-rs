@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **Keyboard focus fixes:** readable Tab order on Mouse/Audio/Video (owned-install test), label-only check box focus box, focus boxes on tabs and sliders, Escape closes dialogs on release with the close button held.
 - **Keyboard focus in every dialog** (docs/gameui.md 6c): Tab order from the layouts, Space/Enter, arrows per control, dashed focus box; keyboard-only packaged replays captured. Not tried by hand.
 - **macOS windowed placement uses the screen visible frame** (menu bar and Dock excluded, `video::DesktopArea`); real window frames read back match (`scripts/checks/runtime_window_place.sh`).
 - **macOS display modes:** Full screen (exclusive), Windowed and Windowed (No Border = native full-screen Space) are all offered; the window sets `borderless_game: false` so the menu bar shows at the top edge in No Border. Exclusive transitions replayed without a hang; menu bar reveal not tried by hand.

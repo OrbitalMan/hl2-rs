@@ -421,9 +421,14 @@ Every dialog control can be reached and used from the keyboard, following the SD
   order. A radio group is one stop, its selected button (SDK `RadioButton` keeps its tab position
   only while selected). Retail skips controls with `tabPosition` 0 (the Mouse sensitivity and
   acceleration sliders, the Gamepad sliders, Video > Advanced FOV) and the second of two
-  controls sharing a position; by owner request every enabled control is reachable, so those
-  follow the positioned ones in layout order (`options::control_order`). Disabled controls are
-  skipped.
+  controls sharing a position (the Audio mute check box shares the SFX slider's 1, Video's HUD
+  Aspect Ratio the Aspect Ratio's 3); by owner request every enabled control is reachable, and
+  such a control goes right before the next positioned control of the layout file
+  (`options::control_order`, 2026-10-17): Mouse = Reverse, Filter, sensitivity slider, its text
+  field, Aim-Assist; Audio = SFX, Music, Speakers, Quality, Captions, Language, mute, credits
+  (Captions before Language as the retail positions 6 and 7 say); Video = Resolution, Display
+  mode, Aspect Ratio, Brightness, HUD Aspect Ratio, Advanced, credits, HDR (owned-install test
+  `owned_install_pages_keep_a_readable_tab_order`). Disabled controls are skipped.
 - **Focus.** Nothing has focus when a dialog opens until Tab or a click; a press on a control
   focuses it (SDK `OnMousePressed` → `RequestFocus`). A sub-dialog starts unfocused and gives the
   page's focus back when it closes; a finished key capture hands the keyboard back to the key
@@ -438,18 +443,26 @@ Every dialog control can be reached and used from the keyboard, following the SD
   focused footer button, else OK (Options) or the sub-dialog's OK. The retail slider classes
   (`CCvarSlider`) are not in the SDK: a unit is a hundredth of the range and a tick a tenth
   (unverified). The developer console keeps Tab for completion and is not part of this.
-- **Look.** A focused push button, check box, radio button or link draws the SDK
-  `Button::DrawFocusBorder` dashed 1-pixel box (3, 3)-(wide - 4, tall - 2) in
-  `Button.FocusBorderColor` (Black); a focused push button also takes the key-focus border, and
-  the focused footer button is the default one. A focused combo box shows its text selected
+- **Look.** A focused push button or link draws the SDK `Button::DrawFocusBorder` dashed
+  1-pixel box (3, 3)-(wide - 4, tall - 2) in `Button.FocusBorderColor` (Black); on a check box or
+  radio button the box surrounds the label only, starting after the box or circle (the SDK box
+  would cross it). A focused push button also takes the key-focus border, and the focused footer
+  button is the default one. By owner request (2026-10-17; the SDK shows nothing there) a focused
+  tab and a focused slider draw the same dashed box. A focused combo box shows its text selected
   (`TextEntry.SelectedBgColor` / `SelectedTextColor`); a focused text entry draws
-  `TextEntry.FocusEdgeColor` inside its border. Sliders and tabs show no focus on the desktop
-  (as in the SDK).
+  `TextEntry.FocusEdgeColor` inside its border.
+- **Escape.** When Escape would close a dialog with a close button (Options or one of its
+  sub-dialogs, the developer console), the close button shows pressed while Escape is held and
+  the dialog closes on release (`Console::escape_pressed` / `escape_released`, owner request,
+  2026-10-17; retail closes on the press). Escape that cancels something else (a drag, key
+  capture, open list, text edit, completion list) or opens / leaves the pause menu acts at once.
 - **Tests.** Unit tests for the order (tab positions, disabled, unpositioned), a full Tab cycle
   driving every control kind, tab and radio arrows, a held Space, sub-dialog focus return and the
   message box. Packaged keyboard-only replays `test-inputs/bevy-options-capture-keyboard-combo.json`
   (Video page, Resolution focused: selected text) and `...-keyboard-button.json` ("Advanced..."
-  focused: key-focus border and dashed box), captured by `scripts/checks/runtime_options_capture.sh`.
+  focused: key-focus border and dashed box), `...-keyboard-check.json` (Mouse > Reverse mouse:
+  the box after the check box) and `...-keyboard-slider.json` (Mouse sensitivity slider),
+  captured by `scripts/checks/runtime_options_capture.sh`.
 
 ## 7. Plan: host use of the stored settings (milestone 6)
 

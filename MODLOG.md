@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: keyboard focus fixes (order, focus boxes, Escape)
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `options::control_order` puts a control without `tabPosition` (or repeating an earlier one) right before the next positioned control of the layout file; check box / radio focus boxes surround the label only; focused tabs and sliders draw the dashed box; `Console::escape_pressed` / `escape_released` (host: press and release of Escape) keep a dialog's close button pressed while Escape is held and close on release, with `OptionsDialog::escape_closes` and `LineEditor::can_dismiss` deciding when Escape would close a dialog.
+
+**Why:** owner requests: the check box focus box overlapped the box; the Mouse sensitivity slider came after its text field and the Audio mute check box second; tabs and sliders had no focus box; Escape should show the close button pressed until released.
+
+**Tested how:** unit tests (order with an unpositioned slider and a repeated position, focus box geometry for check box / tab / slider, held Escape on the Options dialog); owned-install `owned_install_pages_keep_a_readable_tab_order` (installed Mouse, Audio, Video orders); workspace tests, strict clippy, fmt, Windows check; packaged keyboard-only captures of the focused check box and slider.
+
+**Result:** the focus order reads like the pages, every focused control is marked, Escape closes on release.
+
+**Still broken or not tested:** not tried by hand; the console's held-Escape look not captured; not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: keyboard focus in every dialog
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

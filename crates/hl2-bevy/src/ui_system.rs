@@ -127,7 +127,10 @@ pub fn update_ui(
         let before = ui.source.mode;
         resize_canvas(&ui.source.canvas, video_viewport.as_deref(), &window);
         if keys.just_pressed(KeyCode::Escape) && !cancel_selection {
-            ui.source.escape();
+            ui.source.escape_pressed();
+        }
+        if keys.just_released(KeyCode::Escape) {
+            ui.source.escape_released();
         }
         if keys.just_pressed(KeyCode::Backquote) {
             ui.source.toggle();

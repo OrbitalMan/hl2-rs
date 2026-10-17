@@ -326,6 +326,8 @@ pub struct OptionsDialog {
     /// The page's focus while a sub-dialog is open, given back when it closes.
     sub_return_focus: Option<Target>,
     key_press: widgets::KeyPress<Target>,
+    /// Escape is held and will close the top dialog on release: its close button shows pressed.
+    pub(crate) escape_held: bool,
 }
 
 impl Default for OptionsDialog {
@@ -364,6 +366,7 @@ impl Default for OptionsDialog {
             focus: None,
             sub_return_focus: None,
             key_press: widgets::KeyPress::default(),
+            escape_held: false,
         }
     }
 }
@@ -585,12 +588,31 @@ fn layout_widgets<'a>(
 }
 
 /// The Tab order of a layer's controls (SDK `FocusNavGroup`): enabled interactive controls by
-/// their layout `tabPosition`, ties in layout order. A radio group is one stop, its selected
-/// button (SDK `RadioButton` keeps the tab position only while selected). Controls the layout
-/// leaves out of the Tab order (`tabPosition` 0, which retail Tab skips) follow, in layout order,
-/// so every control can be reached from the keyboard (owner request, 2026-10-17).
+/// their layout `tabPosition`. A radio group is one stop, its selected button (SDK `RadioButton`
+/// keeps the group's tab position only while selected).
+///
+/// Retail Tab never reaches a control with `tabPosition` 0 nor a second control sharing a
+/// position (the Mouse sensitivity slider, the Audio page's mute check box sharing the SFX
+/// slider's 1). So that every control is reachable (owner request, 2026-10-17), such a control
+/// goes right before the next positioned control of the layout file: the slider before its text
+/// field, the mute check box before the credits link.
 fn control_order(list: &[Widget], config: &Config) -> Vec<Target> {
-    let mut stops: Vec<(bool, u32, usize)> = list
+    let mut taken = Vec::new();
+    let positions: Vec<Option<u32>> = list
+        .iter()
+        .map(|w| {
+            let position = w.control.tab_position;
+            if w.control.kind == ControlKind::RadioButton {
+                // A radio group shares its position on purpose.
+                return (position > 0).then_some(position);
+            }
+            (position > 0 && !taken.contains(&position)).then(|| {
+                taken.push(position);
+                position
+            })
+        })
+        .collect();
+    let mut stops: Vec<(u32, bool, usize)> = list
         .iter()
         .enumerate()
         .filter(|(_, w)| w.enabled && w.interactive())
@@ -598,7 +620,13 @@ fn control_order(list: &[Widget], config: &Config) -> Vec<Target> {
             Some(Binding::Skill(skill)) => skill == config.gameplay.skill,
             _ => true,
         })
-        .map(|(i, w)| (w.control.tab_position == 0, w.control.tab_position, i))
+        .map(|(i, _)| match positions[i] {
+            Some(position) => (position, true, i),
+            None => {
+                let next = positions[i + 1..].iter().flatten().next();
+                (next.copied().unwrap_or(u32::MAX), false, i)
+            }
+        })
         .collect();
     stops.sort_unstable();
     stops
@@ -722,6 +750,18 @@ impl OptionsDialog {
     }
 
     /// Closes the innermost layer. Returns `false` when the dialog itself closes (Cancel).
+    /// Whether Escape would close a dialog with a close button (the sub-dialog, else the Options
+    /// dialog) rather than cancel a drag, key capture, list, text edit or confirmation box.
+    pub fn escape_closes(&self) -> bool {
+        !(self.placement.active()
+            || self.sub_placement.active()
+            || self.confirm_placement.active()
+            || self.keys.capture.is_some()
+            || self.combo.is_some()
+            || self.editing.is_some()
+            || self.confirm.is_some())
+    }
+
     pub fn escape(&mut self) -> bool {
         // A drag or resize in progress is undone first.
         if self.confirm_placement.cancel() || self.sub_placement.cancel() || self.placement.cancel()
@@ -1889,6 +1929,7 @@ impl OptionsDialog {
         };
         let focused = |target: Target| !modal && self.focus == Some(target);
         let (close_armed, close_pressed) = state(Target::Close);
+        let close_pressed = close_pressed || (self.escape_held && self.sub.is_none());
         p.frame_with_close(
             DIALOG_SIZE,
             &loc.text("#GameUI_Options"),
@@ -1921,6 +1962,9 @@ impl OptionsDialog {
             true,
             ButtonState::active(!modal, armed, pressed),
         );
+        if focused(Target::Tab(active)) {
+            p.focus_box(tabs[active]);
+        }
         if let Some(panel) = self.tab.panel() {
             let list = layout_widgets(&self.res, panel, page, &self.draft, &self.applied);
             for (i, widget) in list.iter().enumerate() {
@@ -1967,7 +2011,8 @@ impl OptionsDialog {
             };
             let sub_modal = self.confirm.is_some();
             let sub_close_armed = !sub_modal && self.armed == Some(Target::Close);
-            let sub_close_pressed = !sub_modal && self.pressed == Some(Target::Close);
+            let sub_close_pressed =
+                !sub_modal && (self.pressed == Some(Target::Close) || self.escape_held);
             sp.frame_with_close(
                 size,
                 &loc.text(sub.title()),
@@ -2050,17 +2095,24 @@ impl OptionsDialog {
         (focused, default): (bool, bool),
     ) {
         self.draw_control(p, w, env, (armed, pressed), (focused, default));
-        if focused
-            && w.enabled
-            && matches!(
-                w.control.kind,
-                ControlKind::Button
-                    | ControlKind::UrlButton
-                    | ControlKind::CheckButton
-                    | ControlKind::RadioButton
-            )
-        {
-            p.focus_box(w.rect);
+        if !focused || !w.enabled {
+            return;
+        }
+        match w.control.kind {
+            ControlKind::Button | ControlKind::UrlButton | ControlKind::Slider => {
+                p.focus_box(w.rect)
+            }
+            // Around the label only: the box starts after the check box or radio circle.
+            ControlKind::CheckButton | ControlKind::RadioButton => {
+                let indent = widgets::LABEL_INDENT - 4.;
+                p.focus_box(Rect::new(
+                    w.rect.x + indent,
+                    w.rect.y,
+                    w.rect.w - indent,
+                    w.rect.h,
+                ));
+            }
+            _ => {}
         }
     }
 
@@ -2591,18 +2643,22 @@ mod tests {
 
     #[test]
     fn tab_order_follows_tab_positions_then_unpositioned_controls() {
+        // File order as in the installed Mouse page, plus a check box sharing position 1 the way
+        // the Audio page's mute check box shares the SFX slider's.
         let layout = Layout::parse(
             br##""Resource/OptionsSubMouse.res" {
             "MouseFilter" { "ControlName" "CCvarToggleCheckButton" "fieldName" "MouseFilter"
                 "xpos" "0" "ypos" "0" "wide" "50" "tall" "20" "tabPosition" "2" }
-            "Slider" { "ControlName" "CCvarSlider" "fieldName" "Slider" "xpos" "0" "ypos" "30"
-                "wide" "50" "tall" "20" "tabPosition" "0" }
             "ReverseMouse" { "ControlName" "CCvarNegateCheckButton" "fieldName" "ReverseMouse"
                 "xpos" "0" "ypos" "60" "wide" "50" "tall" "20" "tabPosition" "1" }
-            "Autoaim" { "ControlName" "ComboBox" "fieldName" "Autoaim" "xpos" "0" "ypos" "90"
-                "wide" "50" "tall" "20" "tabPosition" "4" "enabled" "0" }
+            "Slider" { "ControlName" "CCvarSlider" "fieldName" "Slider" "xpos" "0" "ypos" "30"
+                "wide" "50" "tall" "20" "tabPosition" "0" }
             "SensitivityLabel" { "ControlName" "TextEntry" "fieldName" "SensitivityLabel"
                 "xpos" "0" "ypos" "120" "wide" "50" "tall" "20" "tabPosition" "3" }
+            "MouseRaw" { "ControlName" "CCvarToggleCheckButton" "fieldName" "MouseRaw"
+                "xpos" "0" "ypos" "150" "wide" "50" "tall" "20" "tabPosition" "1" }
+            "Autoaim" { "ControlName" "ComboBox" "fieldName" "Autoaim" "xpos" "0" "ypos" "90"
+                "wide" "50" "tall" "20" "tabPosition" "4" "enabled" "0" }
         }"##,
         )
         .unwrap();
@@ -2617,10 +2673,17 @@ mod tests {
                 _ => unreachable!(),
             })
             .collect();
-        // By tabPosition; the disabled combo is skipped; tabPosition 0 comes last.
+        // By tabPosition; the unpositioned slider and the check box repeating position 1 go
+        // before the next positioned control of the file; the disabled combo is skipped.
         assert_eq!(
             names,
-            ["ReverseMouse", "MouseFilter", "SensitivityLabel", "Slider"]
+            [
+                "ReverseMouse",
+                "MouseFilter",
+                "Slider",
+                "SensitivityLabel",
+                "MouseRaw"
+            ]
         );
     }
 
@@ -2759,6 +2822,57 @@ mod tests {
             Some(Target::Ok),
             "one stop for the whole group"
         );
+    }
+
+    #[test]
+    fn focus_boxes_pad_check_boxes_and_mark_tabs_and_sliders() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        let boxes = |h: &Harness| -> Vec<Rect> {
+            drawn(h)
+                .into_iter()
+                .filter(|q| q.color == h.theme.focus_border && q.destination.w == 1.)
+                .map(|q| q.destination)
+                .collect()
+        };
+        let tab = h.dialog.tab_rects(&|t| t.chars().count() as f32 * 7.)[2];
+        assert!(
+            boxes(&h).iter().all(|d| d.y >= DIALOG.y + tab.y),
+            "the focused tab has a box"
+        );
+        assert!(!boxes(&h).is_empty());
+        h.key(Key::Tab);
+        let res = h.dialog.res.clone();
+        let list = layout_widgets(
+            &res,
+            Panel::Mouse,
+            page_rect(),
+            &h.dialog.draft,
+            &h.dialog.applied,
+        );
+        let check = list
+            .iter()
+            .find(|w| w.control.name == "ReverseMouse")
+            .unwrap()
+            .rect;
+        let left = boxes(&h).iter().map(|d| d.x).fold(f32::INFINITY, f32::min);
+        assert!(
+            left >= DIALOG.x + check.x + widgets::CHECK_SIZE + 2.,
+            "the box starts after the check box: {left}"
+        );
+        h.key(Key::Tab);
+        let slider = list
+            .iter()
+            .find(|w| w.control.name == "Slider")
+            .unwrap()
+            .rect;
+        assert!(
+            boxes(&h)
+                .iter()
+                .all(|d| d.y >= DIALOG.y + slider.y && d.y <= DIALOG.y + slider.y + slider.h),
+            "the focused slider has a box"
+        );
+        assert!(!boxes(&h).is_empty());
     }
 
     #[test]
@@ -3013,6 +3127,8 @@ mod tests {
     fn key_list_separates_groups_and_capture_highlights_only_the_key_cell() {
         let mut h = Harness::new();
         h.tab(Tab::Keyboard);
+        // The clicked tab's dashed focus box shares the divider's color and height.
+        h.dialog.focus = None;
         let theme = h.theme.clone();
         // Group separator under the section header row (row 0): one pixel high.
         let quads = drawn(&h);
@@ -3487,6 +3603,48 @@ mod tests {
         };
         assert!(!applied.video.advanced.vsync);
         assert_eq!(applied.video.fov, 110.);
+    }
+
+    #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn owned_install_pages_keep_a_readable_tab_order() {
+        let root = source_assets::install::discover().expect("installed game");
+        let vfs = source_assets::vpk::Vfs::mount(&root).unwrap();
+        let res = GameUiResources::load(&vfs);
+        let draft = Draft::new(Config::default());
+        let order = |panel: Panel| -> Vec<String> {
+            let list = layout_widgets(&res, panel, page_rect(), &draft, &draft.config);
+            control_order(&list, &draft.config)
+                .into_iter()
+                .filter_map(|t| match t {
+                    Target::Control(i) => Some(list[i].control.name.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mouse = order(Panel::Mouse);
+        let slider = mouse.iter().position(|n| n == "Slider").expect("slider");
+        assert_eq!(
+            mouse.get(slider + 1).map(String::as_str),
+            Some("SensitivityLabel"),
+            "the sensitivity slider comes right before its text field: {mouse:?}"
+        );
+        let audio = order(Panel::Audio);
+        let mute = audio
+            .iter()
+            .position(|n| n == "snd_mute_losefocus")
+            .expect("mute");
+        assert_eq!(audio[0], "SFXSlider", "{audio:?}");
+        assert_eq!(audio[1], "MusicSlider", "{audio:?}");
+        assert_eq!(
+            audio.get(mute + 1).map(String::as_str),
+            Some("ThirdPartySoundCredits"),
+            "the mute check box comes before the credits link: {audio:?}"
+        );
+        eprintln!(
+            "mouse {mouse:?}\naudio {audio:?}\nvideo {:?}",
+            order(Panel::Video)
+        );
     }
 
     #[test]
