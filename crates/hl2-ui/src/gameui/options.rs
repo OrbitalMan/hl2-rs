@@ -787,6 +787,11 @@ impl OptionsDialog {
         self.page_input(input, pointer, measure)
     }
 
+    /// The Keyboard page is waiting for a key to bind (held keys must not repeat into it).
+    pub fn capturing_key(&self) -> bool {
+        self.keys.capture.is_some()
+    }
+
     /// A layer above the dialog page owns the pointer this frame.
     fn occlude(&mut self, input: &Input) {
         self.active_tooltip = None;

@@ -81,7 +81,8 @@ impl crate::simulation::Simulation {
         self.console_effects(ui, game, effects);
     }
 }
-pub fn keys(native: &ButtonInput<KeyCode>) -> std::collections::BTreeSet<hl2_ui::console::Key> {
+/// The UI keys and the native keys they come from.
+const UI_KEYS: [(KeyCode, hl2_ui::console::Key); 12] = {
     use hl2_ui::console::Key;
     [
         (KeyCode::ArrowUp, Key::Up),
@@ -97,9 +98,27 @@ pub fn keys(native: &ButtonInput<KeyCode>) -> std::collections::BTreeSet<hl2_ui:
         (KeyCode::PageDown, Key::PageDown),
         (KeyCode::Tab, Key::Tab),
     ]
-    .into_iter()
-    .filter_map(|(n, k)| native.just_pressed(n).then_some(k))
-    .collect()
+};
+
+/// UI keys pressed this frame.
+pub fn keys(native: &ButtonInput<KeyCode>) -> std::collections::BTreeSet<hl2_ui::console::Key> {
+    ui_keys(|code| native.just_pressed(code))
+}
+
+/// UI keys held this frame (for key repeat).
+pub fn held_keys(
+    native: &ButtonInput<KeyCode>,
+) -> std::collections::BTreeSet<hl2_ui::console::Key> {
+    ui_keys(|code| native.pressed(code))
+}
+
+fn ui_keys(
+    mut down: impl FnMut(KeyCode) -> bool,
+) -> std::collections::BTreeSet<hl2_ui::console::Key> {
+    UI_KEYS
+        .into_iter()
+        .filter_map(|(code, key)| down(code).then_some(key))
+        .collect()
 }
 
 /// Wheel steps of this frame; positive scrolls up. Pixel deltas (touchpads) count one step per

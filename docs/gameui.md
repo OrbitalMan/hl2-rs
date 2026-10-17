@@ -329,6 +329,20 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
   anything underneath. Used by the Options key list (`OptionsDialog::key_list_bar`) and every
   popup list (`PopupList::bar_layout`). Before, the bar had no arrows and the key list only
   jumped on release.
+- **Press-and-hold repeat (2026-10-17)**: one timer, `widgets::HoldRepeat` (press, held,
+  release; first repeat after `HOLD_REPEAT_DELAY` 400 ms, then every `HOLD_REPEAT_INTERVAL`
+  50 ms, at most once a frame, never without `Input::time`), drives both the scroll bar arrows
+  and the keyboard. Keyboard repeat is applied once, at the top of `Console::input`
+  (`console::KeyRepeat` over `Input::held_keys`), so every layer that reads `Input::keys` repeats
+  without code of its own: console editing, cursor, completion and history keys, main and pause
+  menu Up/Down, the Options key list, open popup lists and Options text fields (Backspace). Like an operating system, the latest pressed key
+  repeats; any other press takes over, and a key that acts once stops it. Up, Down, Left, Right,
+  Backspace, Delete, PageUp and PageDown repeat; Enter, Tab, Home and End do not. The repeat is
+  cancelled while the Keyboard page captures a key and whenever the UI mode changes. Typed
+  characters keep the system's own repeat (Bevy `KeyboardInput`), and binding names
+  (`Input::binding_keys`) never repeat. Deviation: retail keyboard repeat follows the operating
+  system's delay and rate; HL2-RS uses the scroll bar timing for both. Scripted input has no
+  held keys or times, so replays never repeat.
 
 ### 6b. Popup lists as the topmost input layer (2026-10-15)
 

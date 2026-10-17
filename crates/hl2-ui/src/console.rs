@@ -10,8 +10,8 @@ use crate::gameui::{
     options::{OptionsDialog, OptionsOutcome},
     resources::{self, fallback_game_menu, GameUiResources},
     widgets::{
-        scheme_color, Align, ButtonState, ButtonTracker, Fonts, Painter, ScrollAccumulator,
-        ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
+        scheme_color, Align, ButtonState, ButtonTracker, Fonts, HoldRepeat, Painter,
+        ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
     },
 };
 use crate::{
@@ -148,6 +148,7 @@ pub struct Console {
     console_hover: Option<ConsoleButton>,
     history_bar: ScrollBarState,
     history_wheel: ScrollAccumulator,
+    key_repeat: KeyRepeat,
     /// The input line: editing, completion, history and reverse search.
     editor: editor::LineEditor,
     /// Names arguments complete from (installed maps, the loaded map's entities), set by the host.
@@ -320,10 +321,60 @@ pub enum Key {
     PageDown,
     Tab,
 }
+impl Key {
+    /// Keys that repeat while held: moving through lists and text, deleting. Enter, Tab, Home
+    /// and End act once per press.
+    pub const fn repeats(self) -> bool {
+        matches!(
+            self,
+            Self::Up
+                | Self::Down
+                | Self::Left
+                | Self::Right
+                | Self::Backspace
+                | Self::Delete
+                | Self::PageUp
+                | Self::PageDown
+        )
+    }
+}
+
+/// Keyboard repeat for every UI layer at once, applied to [`Input::keys`] in [`Console::input`]:
+/// like an operating system, the latest pressed key repeats while held ([`HoldRepeat`]), and any
+/// other press takes over or (when it does not repeat) stops it. Typed text already arrives with
+/// the system's own repeat and is left alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct KeyRepeat {
+    key: Option<Key>,
+    timer: HoldRepeat,
+}
+impl KeyRepeat {
+    /// Adds this frame's repeat of the held key to `input.keys`.
+    pub fn apply(&mut self, input: &mut Input) {
+        if let Some(&pressed) = input.keys.iter().next_back() {
+            self.key = pressed.repeats().then_some(pressed);
+            self.timer.press(input.time);
+        } else if let Some(key) = self.key {
+            if !input.held_keys.contains(&key) {
+                self.cancel();
+            } else if self.timer.held(input.time) {
+                input.keys.insert(key);
+            }
+        }
+    }
+
+    /// Stops the repeat until the next press.
+    pub fn cancel(&mut self) {
+        *self = Self::default();
+    }
+}
+
 #[derive(Clone, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Input {
     pub keys: std::collections::BTreeSet<Key>,
+    /// Keys held down this frame (pressed earlier or now); [`KeyRepeat`] repeats them.
+    pub held_keys: std::collections::BTreeSet<Key>,
     pub text: String,
     pub pointer: Option<Vec2>,
     /// Left button went down this frame.
@@ -412,6 +463,7 @@ impl Default for Console {
             console_hover: None,
             history_bar: ScrollBarState::default(),
             history_wheel: ScrollAccumulator::default(),
+            key_repeat: KeyRepeat::default(),
             editor: editor::LineEditor::default(),
             completion: complete::Sources::default(),
             clock: 0.,
@@ -1531,6 +1583,22 @@ impl Console {
     }
     /// Called before gameplay input collection. Opening characters are drained by the host.
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
+        // Held keys repeat for every layer below, except into a key binding being captured.
+        let mut repeated = input.clone();
+        if self.mode == Mode::Options && self.options.capturing_key() {
+            self.key_repeat.cancel();
+        } else {
+            self.key_repeat.apply(&mut repeated);
+        }
+        let mode = self.mode;
+        let effects = self.layer_input(&repeated);
+        if self.mode != mode {
+            self.key_repeat.cancel();
+        }
+        effects
+    }
+
+    fn layer_input(&mut self, input: &Input) -> Vec<Effect> {
         if self.modal_dialog_open() {
             // The menus are occluded: keep their tracker on the physical button so the rest of
             // a click that closes the modal layer is not read as a new menu press.
@@ -3040,6 +3108,87 @@ mod tests {
             ..Default::default()
         });
         console.take_copied()
+    }
+
+    /// One frame at time `t` with `pressed` going down now and `held` keys down.
+    fn key_frame(t: f64, pressed: &[Key], held: &[Key]) -> Input {
+        Input {
+            keys: pressed.iter().copied().collect(),
+            held_keys: held.iter().chain(pressed).copied().collect(),
+            time: Some(t),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn key_repeat_follows_the_latest_press_while_it_is_held() {
+        let mut repeat = KeyRepeat::default();
+        let mut frame = |t: f64, pressed: &[Key], held: &[Key]| {
+            let mut input = key_frame(t, pressed, held);
+            repeat.apply(&mut input);
+            input.keys.into_iter().collect::<Vec<_>>()
+        };
+        assert_eq!(frame(0., &[Key::Down], &[]), [Key::Down]);
+        assert_eq!(frame(0.2, &[], &[Key::Down]), []);
+        assert_eq!(frame(0.4, &[], &[Key::Down]), [Key::Down]);
+        // A newer press takes over; the earlier key, still held, no longer repeats.
+        assert_eq!(frame(0.5, &[Key::Left], &[Key::Down]), [Key::Left]);
+        assert_eq!(frame(0.9, &[], &[Key::Down, Key::Left]), [Key::Left]);
+        // Releasing stops it, and it stays stopped when the key goes down again unpressed.
+        assert_eq!(frame(1.0, &[], &[Key::Down]), []);
+        assert_eq!(frame(2.0, &[], &[Key::Down, Key::Left]), []);
+        // Keys that act once never repeat, and their press stops the repeating key.
+        assert_eq!(frame(3.0, &[Key::Up], &[]), [Key::Up]);
+        assert_eq!(frame(3.1, &[Key::Enter], &[Key::Up]), [Key::Enter]);
+        assert_eq!(frame(4.0, &[], &[Key::Up, Key::Enter]), []);
+        // Scripted input carries no time: nothing repeats.
+        let mut input = key_frame(0., &[Key::Down], &[]);
+        input.time = None;
+        repeat.apply(&mut input);
+        let mut held = Input {
+            held_keys: [Key::Down].into(),
+            ..Default::default()
+        };
+        repeat.apply(&mut held);
+        assert!(held.keys.is_empty());
+    }
+
+    #[test]
+    fn held_keys_repeat_in_the_console_and_the_main_menu() {
+        let mut console = Console::default();
+        console.toggle();
+        console.input(&Input {
+            text: "abcdefghij".into(),
+            ..Default::default()
+        });
+        console.input(&key_frame(0., &[Key::Backspace], &[]));
+        for i in 1..=10 {
+            console.input(&key_frame(i as f64 * 0.1, &[], &[Key::Backspace]));
+        }
+        // One press, then repeats at 0.4, 0.5, ... 1.0.
+        assert_eq!(console.input_line(), "ab");
+        console.input(&key_frame(1.1, &[], &[]));
+        console.input(&key_frame(2.0, &[], &[Key::Backspace]));
+        assert_eq!(
+            console.input_line(),
+            "ab",
+            "released: no repeat until pressed again"
+        );
+
+        // Holding Down on the main menu walks it like three separate presses.
+        let mut stepped = installed_console();
+        stepped.level_loaded(true);
+        for _ in 0..3 {
+            keys(&mut stepped, &[Key::Down]);
+        }
+        let mut held = installed_console();
+        held.level_loaded(true);
+        held.input(&key_frame(0., &[Key::Down], &[]));
+        for t in [0.2, 0.4, 0.45] {
+            held.input(&key_frame(t, &[], &[Key::Down]));
+        }
+        assert!(stepped.main_menu.selection.is_some());
+        assert_eq!(held.main_menu.selection, stepped.main_menu.selection);
     }
 
     #[test]

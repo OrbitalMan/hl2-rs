@@ -151,6 +151,7 @@ pub fn update_ui(
                 paste,
                 copy: modifiers.copy,
                 keys: crate::ui_host::keys(&keys),
+                held_keys: crate::ui_host::held_keys(&keys),
                 pointer,
                 click: buttons.just_pressed(MouseButton::Left),
                 held: buttons.pressed(MouseButton::Left),

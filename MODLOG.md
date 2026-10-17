@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: press-and-hold repeat for keys and scroll bar arrows
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `widgets::HoldRepeat` (one press/held/release repeat timer, `HOLD_REPEAT_DELAY`/`HOLD_REPEAT_INTERVAL`, formerly `SCROLL_REPEAT_*`), now behind `ScrollBarState`'s arrow repeat. `console::KeyRepeat` + `Key::repeats` + `Input::held_keys`: `Console::input` adds the held key's repeats to `Input::keys` before any layer reads them (cancelled during Keyboard-page key capture, `OptionsDialog::capturing_key`, and on mode changes). `hl2-bevy::ui_host` builds pressed and held keys from one `UI_KEYS` table. Details in `docs/gameui.md` 6a; convention in `AGENTS.md`.
+
+**Why:** owner request: holding arrows, Backspace and similar keys should repeat everywhere it makes sense, through one clean mechanism like the scroll bar arrows.
+
+**Tested how:** unit tests (repeat timing, release, no time no repeat; latest press wins, release stops, once-only keys cancel; held Backspace in the console, held Down on the main menu equals three presses); existing scroll bar tests unchanged; hl2-ui and hl2-bevy tests, strict clippy, fmt, Windows check.
+
+**Result:** every UI layer that reads keys repeats them while held, with the scroll bar's timing.
+
+**Still broken or not tested:** not tried by hand in the packaged game (replays cannot hold keys); key capture cancellation has no automated test; repeat timing is fixed, not the operating system's.
+
+**Next:** owner check.
+
 ## 2026-10-17 Console: retail VGUI console dialog, output row selection and copy
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

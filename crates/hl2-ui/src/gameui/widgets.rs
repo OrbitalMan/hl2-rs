@@ -1504,10 +1504,41 @@ pub const MENU_MAX_ROWS: usize = 12;
 /// Scroll bar width (`ScrollBar.Wide` in the installed scheme); the arrow buttons are squares of
 /// this size.
 pub const SCROLLBAR_WIDTH: f32 = 17.;
-/// SDK `ScrollBar` auto-repeat while an arrow button is held: first repeat after this delay,
-/// then one step per interval (seconds).
-pub const SCROLL_REPEAT_DELAY: f64 = 0.4;
-pub const SCROLL_REPEAT_INTERVAL: f64 = 0.05;
+/// Press-and-hold repeat timing (SDK `ScrollBar` arrow buttons), shared by every held control
+/// and key: first repeat after this delay, then one per interval (seconds).
+pub const HOLD_REPEAT_DELAY: f64 = 0.4;
+pub const HOLD_REPEAT_INTERVAL: f64 = 0.05;
+
+/// Repeats a held control: the press acts once, then [`HOLD_REPEAT_DELAY`] later it fires again
+/// and every [`HOLD_REPEAT_INTERVAL`] after that, at most once a frame. Without a frame time
+/// (scripted input) nothing repeats.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HoldRepeat {
+    next: Option<f64>,
+}
+
+impl HoldRepeat {
+    /// The control was pressed at `now`: arm the first repeat.
+    pub fn press(&mut self, now: Option<f64>) {
+        self.next = now.map(|t| t + HOLD_REPEAT_DELAY);
+    }
+
+    /// The control is still held at `now`: whether it fires again this frame.
+    pub fn held(&mut self, now: Option<f64>) -> bool {
+        match (now, self.next) {
+            (Some(t), Some(at)) if t >= at => {
+                self.next = Some(at + HOLD_REPEAT_INTERVAL);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The control was released (or the repeat is cancelled).
+    pub fn release(&mut self) {
+        self.next = None;
+    }
+}
 
 /// A part of a vertical scroll bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1597,16 +1628,15 @@ impl ScrollBarLayout {
 }
 
 /// Pointer gesture on a scroll bar, following SDK `ScrollBar`: an arrow button steps one row on
-/// press and repeats while held ([`SCROLL_REPEAT_DELAY`], then every
-/// [`SCROLL_REPEAT_INTERVAL`]); the nob follows the pointer while dragged; a press on the track
+/// press and repeats while held ([`HoldRepeat`]); the nob follows the pointer while dragged; a press on the track
 /// pages once by the visible rows. The bar owns the pointer until the release.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScrollBarState {
     pressed: Option<ScrollPart>,
     /// Pointer offset from the nob's top edge when the drag started.
     grab: f32,
-    /// When the held arrow button repeats next.
-    repeat_at: Option<f64>,
+    /// The held arrow button's repeat.
+    repeat: HoldRepeat,
 }
 
 impl ScrollBarState {
@@ -1649,14 +1679,14 @@ impl ScrollBarState {
         let target = if click {
             let part = point.and_then(|p| layout.part_at(p));
             self.pressed = part;
-            self.repeat_at = None;
+            self.repeat.release();
             match (part, point) {
                 (Some(ScrollPart::Nob), Some(p)) => {
                     self.grab = p.y - layout.nob.y;
                     None
                 }
                 (Some(part @ (ScrollPart::Up | ScrollPart::Down)), _) => {
-                    self.repeat_at = now.map(|t| t + SCROLL_REPEAT_DELAY);
+                    self.repeat.press(now);
                     Some(step(part))
                 }
                 (Some(part), _) => Some(step(part)),
@@ -1666,13 +1696,7 @@ impl ScrollBarState {
             match (self.pressed, point) {
                 (Some(ScrollPart::Nob), Some(p)) => Some(layout.first_for_nob_top(p.y - self.grab)),
                 (Some(part @ (ScrollPart::Up | ScrollPart::Down)), _) => {
-                    match (now, self.repeat_at) {
-                        (Some(t), Some(at)) if t >= at => {
-                            self.repeat_at = Some(at + SCROLL_REPEAT_INTERVAL);
-                            Some(step(part))
-                        }
-                        _ => None,
-                    }
+                    self.repeat.held(now).then(|| step(part))
                 }
                 _ => None,
             }
@@ -1681,7 +1705,7 @@ impl ScrollBarState {
         };
         if !down {
             self.pressed = None;
-            self.repeat_at = None;
+            self.repeat.release();
         }
         target.filter(|t| *t != first)
     }
@@ -2082,6 +2106,24 @@ pub fn parse_value(text: &str) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hold_repeat_fires_after_the_delay_then_every_interval() {
+        let mut repeat = HoldRepeat::default();
+        repeat.press(Some(10.));
+        assert!(!repeat.held(Some(10.39)), "not before the delay");
+        assert!(repeat.held(Some(10.401)));
+        assert!(!repeat.held(Some(10.42)));
+        assert!(repeat.held(Some(10.451)));
+        // A slow frame fires once; missed repeats follow one per frame.
+        assert!(repeat.held(Some(11.)));
+        assert!(repeat.held(Some(11.)));
+        repeat.release();
+        assert!(!repeat.held(Some(20.)), "released");
+        repeat.press(None);
+        assert!(!repeat.held(None), "no frame time, no repeat");
+        assert!(!repeat.held(Some(20.)));
+    }
 
     #[test]
     fn slider_value_and_fraction_round_trip_and_clamp() {
