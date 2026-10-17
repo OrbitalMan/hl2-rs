@@ -317,6 +317,8 @@ pub struct MessageBox {
     /// Button with keyboard focus: OK when the box opens (SDK `MessageBox` focuses its OK button).
     focus: usize,
     key_press: super::widgets::KeyPress<usize>,
+    /// The focus box shows after Tab / Shift+Tab only.
+    focus_visible: bool,
 }
 
 /// Message box geometry in layout units relative to the box.
@@ -343,6 +345,7 @@ impl MessageBox {
             tracker: ButtonTracker::capturing(),
             focus: 0,
             key_press: super::widgets::KeyPress::default(),
+            focus_visible: false,
         }
     }
 
@@ -479,6 +482,7 @@ impl MessageBox {
             let order: Vec<usize> = (0..count).collect();
             self.focus =
                 super::widgets::focus_step(Some(self.focus), &order, !input.shift).unwrap_or(0);
+            self.focus_visible = true;
             self.key_press.reset();
             return None;
         }
@@ -513,10 +517,10 @@ impl MessageBox {
                     armed: self.armed == Some(index),
                     pressed: self.pressed == Some(index) || self.key_press.pressed() == Some(index),
                     enabled: true,
-                    default: index == self.focus,
+                    default: false,
                 },
             );
-            if index == self.focus {
+            if self.focus_visible && index == self.focus {
                 painter.focus_box(*rect);
             }
         }

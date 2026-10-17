@@ -1325,6 +1325,18 @@ impl Painter<'_> {
         }
     }
 
+    /// A dashed 1-pixel ring on `rect`'s edges: the focus mark around controls whose SDK focus
+    /// look is not a push button's inner box (check boxes, radio buttons, sliders, entries,
+    /// lists; owner request, 2026-10-17).
+    pub fn focus_ring(&self, rect: Rect) {
+        self.focus_box(Rect::new(
+            rect.x - 3.,
+            rect.y - 3.,
+            rect.w + 7.,
+            rect.h + 5.,
+        ));
+    }
+
     pub fn text_entry(&self, rect: Rect, text: &str, enabled: bool, caret: bool) {
         self.fill(rect, self.theme.entry_bg);
         self.sunken(rect);
@@ -2221,7 +2233,35 @@ impl SliderRange {
 pub const NOB_WIDTH: f32 = 8.;
 
 pub fn slider_track(rect: Rect) -> (f32, f32) {
-    (rect.x + NOB_WIDTH * 0.5, rect.x + rect.w - NOB_WIDTH * 0.5)
+    // SDK `Slider::GetTrackRect` leaves the nob's width free at the right end, which keeps the
+    // slider clear of a control placed right after it (the Mouse sensitivity text field).
+    (rect.x + NOB_WIDTH * 0.5, rect.x + rect.w - NOB_WIDTH * 1.5)
+}
+
+/// Space kept between a control's content and its focus ring.
+pub const FOCUS_PAD: f32 = 2.;
+
+/// What a check box or radio button draws: the box or circle and a label `label_width` wide.
+pub fn toggle_content(rect: Rect, label_width: f32) -> Rect {
+    let height = FONT_TALL.max(CHECK_SIZE);
+    let right = (rect.x + LABEL_INDENT + label_width).min(rect.x + rect.w);
+    Rect::new(
+        rect.x + 2.,
+        rect.y + (rect.h - height) * 0.5,
+        right - rect.x - 2.,
+        height,
+    )
+}
+
+/// What a slider draws across: its track with the nob at both ends.
+pub fn slider_content(rect: Rect) -> Rect {
+    let (start, end) = slider_track(rect);
+    Rect::new(
+        start - NOB_WIDTH * 0.5,
+        rect.y,
+        end - start + NOB_WIDTH,
+        rect.h,
+    )
 }
 
 /// Fraction of a pointer x position on a slider track.
@@ -2272,9 +2312,11 @@ mod tests {
         assert_eq!(range.fraction(-5.), 0.);
         assert_eq!(range.fraction(50.), 1.);
         assert_eq!(SliderRange::new(1., 1.).fraction(1.), 0.);
+        // Track 14..106: half a nob in from the left, a nob and a half from the right.
         let rect = Rect::new(10., 0., 108., 20.);
+        assert_eq!(slider_track(rect), (14., 106.));
         assert_eq!(slider_fraction_at(rect, 0.), 0.);
-        assert_eq!(slider_fraction_at(rect, 64.), 0.5);
+        assert_eq!(slider_fraction_at(rect, 60.), 0.5);
         assert_eq!(slider_fraction_at(rect, 500.), 1.);
     }
 

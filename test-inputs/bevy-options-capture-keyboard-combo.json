@@ -170,5 +170,15 @@
    }
   ],
   "label": "focus-resolution"
+ },
+ {
+  "tick": 200,
+  "ui": [
+   {
+    "action": "command",
+    "command": "echo settled"
+   }
+  ],
+  "label": "settle"
  }
 ]

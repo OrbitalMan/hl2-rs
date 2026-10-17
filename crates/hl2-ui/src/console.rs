@@ -2346,7 +2346,9 @@ impl Console {
             .pointer
             .and_then(|p| rows.iter().position(|row| row.contains(p)))
             .filter(|&i| menu.entries().get(i).is_some_and(|e| e.enabled));
-        if let Some(index) = hovered {
+        // Hover selects only when the pointer enters a button, so a pointer resting on a row
+        // does not take the selection back from the arrow keys.
+        if let Some(index) = hovered.filter(|h| Some(*h) != self.last_menu_hover) {
             menu.selection = Some(index);
         }
         if hovered.is_some()
@@ -4484,6 +4486,50 @@ mod tests {
         assert_eq!(
             console.background(),
             Some(GameMap::new("hl2", "background04"))
+        );
+    }
+
+    #[test]
+    fn a_resting_pointer_does_not_take_the_menu_selection_back_from_the_arrows() {
+        let mut console = installed_console();
+        console.mode = Mode::MainMenu;
+        let pointer = row(&console, 0);
+        let _ = console.input(&Input {
+            pointer,
+            ..Default::default()
+        });
+        assert_eq!(
+            console.main_menu.selection,
+            Some(0),
+            "entering a row selects it"
+        );
+        let _ = console.input(&Input {
+            pointer,
+            keys: [Key::Down].into(),
+            ..Default::default()
+        });
+        let after_arrow = console.main_menu.selection;
+        assert_ne!(after_arrow, Some(0));
+        let _ = console.input(&Input {
+            pointer,
+            ..Default::default()
+        });
+        assert_eq!(
+            console.main_menu.selection, after_arrow,
+            "the arrows keep it"
+        );
+        let _ = console.input(&Input {
+            pointer: row(&console, 1),
+            ..Default::default()
+        });
+        let _ = console.input(&Input {
+            pointer,
+            ..Default::default()
+        });
+        assert_eq!(
+            console.main_menu.selection,
+            Some(0),
+            "entering a row again selects it"
         );
     }
 

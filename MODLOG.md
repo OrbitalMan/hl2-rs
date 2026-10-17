@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: keyboard focus, second pass
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** Tab order in reading order (`control_order` rows by top within 12 units, then left to right); focus drawn only after Tab / Shift+Tab (clicks focus silently; message box too); padded dashed `Painter::focus_ring` around the whole check box / radio (box or circle and label), sliders (track and nob), text entries and the key list; slider track leaves a nob width free at the right (SDK `GetTrackRect`); no default button: no default border on OK / sub-dialog OK / message box buttons, Enter acts only on the focused control; the key list takes arrows and Enter only while focused, gets focus back after a capture and shows its selection dim without focus; main and pause menu hover selects a row only on entering it.
+
+**Why:** owner review of the first pass: uneven focus boxes, click flicker, slider and text field touching, random-looking orders on Gamepad / Audio / Video, a confusing default-button border and Enter pressing OK on a focused tab, the key list's selection fighting Tab focus, and menu hover overriding the arrow keys.
+
+**Tested how:** unit tests (reading order, focus rings, click hides focus, Enter on a tab, key list focus and dim selection, resting menu pointer, slider track geometry); owned-install `owned_install_pages_tab_in_reading_order` (Mouse, Audio, Video exact, Gamepad rows); workspace tests, strict clippy, fmt, Windows check; packaged keyboard-only captures (check box, radio, slider, entry, combo, button), with a settle step so the capture follows a presented frame.
+
+**Result:** keyboard focus reads like the pages and looks consistent; mouse users see no focus marks.
+
+**Still broken or not tested:** not tried by hand; the console's Submit button keeps its default border (console not changed); not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: keyboard focus fixes (order, focus boxes, Escape)
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

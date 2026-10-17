@@ -5,6 +5,7 @@
 ## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
+- **Keyboard focus, second pass:** reading-order Tab, focus shown only after Tab, padded rings (check, radio, slider, entry, key list), no default button, key list focus, menu hover only on entering a row (docs/gameui.md 6c).
 - **Keyboard focus fixes:** readable Tab order on Mouse/Audio/Video (owned-install test), label-only check box focus box, focus boxes on tabs and sliders, Escape closes dialogs on release with the close button held.
 - **Keyboard focus in every dialog** (docs/gameui.md 6c): Tab order from the layouts, Space/Enter, arrows per control, dashed focus box; keyboard-only packaged replays captured. Not tried by hand.
 - **macOS windowed placement uses the screen visible frame** (menu bar and Dock excluded, `video::DesktopArea`); real window frames read back match (`scripts/checks/runtime_window_place.sh`).

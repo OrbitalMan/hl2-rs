@@ -410,59 +410,66 @@ only).
 
 ### 6c. Keyboard focus in dialogs (2026-10-17)
 
-Every dialog control can be reached and used from the keyboard, following the SDK `vgui_controls`
-(`FocusNavGroup`, `PropertyDialog`, `PropertySheet`, `Button`, `RadioButton`, `Slider`, `ComboBox`,
-`MessageBox`):
+Every dialog control can be reached and used from the keyboard. The control behaviour follows the
+SDK `vgui_controls` (`Button`, `RadioButton`, `Slider`, `ComboBox`, `PropertySheet`,
+`MessageBox`); the order, the focus look and Enter follow owner decisions (2026-10-17):
 
 - **Order.** Tab / Shift+Tab step through the layer and wrap. In the Options dialog: the active
-  tab, the page's controls, then OK, Cancel and Apply (while enabled), as `PropertyDialog` gives
-  its sheet, OK, Cancel and Apply tab positions 1-4. Page and sub-dialog controls follow the
-  installed layouts' `tabPosition` (parsed into `layout::Control::tab_position`), ties in layout
-  order. A radio group is one stop, its selected button (SDK `RadioButton` keeps its tab position
-  only while selected). Retail skips controls with `tabPosition` 0 (the Mouse sensitivity and
-  acceleration sliders, the Gamepad sliders, Video > Advanced FOV) and the second of two
-  controls sharing a position (the Audio mute check box shares the SFX slider's 1, Video's HUD
-  Aspect Ratio the Aspect Ratio's 3); by owner request every enabled control is reachable, and
-  such a control goes right before the next positioned control of the layout file
-  (`options::control_order`, 2026-10-17): Mouse = Reverse, Filter, sensitivity slider, its text
-  field, Aim-Assist; Audio = SFX, Music, Speakers, Quality, Captions, Language, mute, credits
-  (Captions before Language as the retail positions 6 and 7 say); Video = Resolution, Display
-  mode, Aspect Ratio, Brightness, HUD Aspect Ratio, Advanced, credits, HDR (owned-install test
-  `owned_install_pages_keep_a_readable_tab_order`). Disabled controls are skipped.
-- **Focus.** Nothing has focus when a dialog opens until Tab or a click; a press on a control
-  focuses it (SDK `OnMousePressed` → `RequestFocus`). A sub-dialog starts unfocused and gives the
-  page's focus back when it closes; a finished key capture hands the keyboard back to the key
-  list. The message box focuses OK when it opens (SDK `MessageBox`).
+  tab, the page's controls, then OK, Cancel and Apply (while enabled). Page and sub-dialog
+  controls go in reading order, left to right in rows from top to bottom (controls whose tops are
+  within 12 layout units share a row; `options::control_order`). The installed layouts'
+  `tabPosition` values are parsed (`layout::Control::tab_position`) but not used: they jump
+  around the Audio, Video and Gamepad pages, share positions and leave the Mouse sensitivity
+  slider out. A radio group is one stop, its selected button (SDK `RadioButton`). Disabled
+  controls are skipped. Installed pages (owned test `owned_install_pages_tab_in_reading_order`):
+  Mouse = Reverse, Filter, sensitivity slider, its text field, Aim-Assist; Audio = SFX, Music,
+  Speakers, Quality, Language, Captions, mute, credits; Video = Resolution, Display mode, Aspect
+  Ratio, Brightness, HUD Aspect Ratio, Advanced, HDR, credits; Gamepad top to bottom.
+- **Focus.** Nothing has focus when a dialog opens. A press on a control focuses it (SDK
+  `OnMousePressed` → `RequestFocus`) without drawing the focus; the focus look appears after
+  Tab / Shift+Tab and stays while keys move focus (arrows on tabs and radio groups) until the
+  next click. A sub-dialog starts unfocused and gives the page's focus back when it closes; a
+  finished or cancelled key capture gives focus to the key list. The message box focuses OK when
+  it opens and draws it after Tab.
 - **Keys.** Space or Enter presses the focused push button, check box, radio button or link
   (drawn depressed; activation on release, `widgets::KeyPress`; a one-frame scripted key activates
   at once). Arrows: a radio group moves its selection (wrapping) and its focus; a slider steps by
   one unit (Left/Down, Right/Up) or one tick (Page Down/Up); a closed combo box selects the
   previous / next item (Home / End: first / last) without opening, Alt+Up/Down opens its list and
-  Enter is taken by it; the focused tab switches pages with Left / Right (no wrap). A focused text
-  entry edits at once; Tab commits it. Enter on anything else presses the default button: the
-  focused footer button, else OK (Options) or the sub-dialog's OK. The retail slider classes
-  (`CCvarSlider`) are not in the SDK: a unit is a hundredth of the range and a tick a tenth
-  (unverified). The developer console keeps Tab for completion and is not part of this.
-- **Look.** A focused push button or link draws the SDK `Button::DrawFocusBorder` dashed
-  1-pixel box (3, 3)-(wide - 4, tall - 2) in `Button.FocusBorderColor` (Black); on a check box or
-  radio button the box surrounds the label only, starting after the box or circle (the SDK box
-  would cross it). A focused push button also takes the key-focus border, and the focused footer
-  button is the default one. By owner request (2026-10-17; the SDK shows nothing there) a focused
-  tab and a focused slider draw the same dashed box. A focused combo box shows its text selected
-  (`TextEntry.SelectedBgColor` / `SelectedTextColor`); a focused text entry draws
-  `TextEntry.FocusEdgeColor` inside its border.
+  Enter is taken by it; the focused tab switches pages with Left / Right (no wrap); the key list
+  moves its selected row and Enter edits the key, only while it has focus. A focused text entry
+  edits at once; Tab commits it. Enter acts on the focused control only: there is no default
+  button (retail VGUI presses the dialog's default button, OK, on Enter and draws it with the
+  key-focus border; removed by owner request), so Enter on a tab, a slider or nothing does
+  nothing. The retail slider classes (`CCvarSlider`) are not in the SDK: a unit is a hundredth of
+  the range and a tick a tenth (unverified). The developer console keeps Tab for completion and
+  is not part of this.
+- **Look.** A focused push button, link or tab draws the SDK `Button::DrawFocusBorder` dashed
+  1-pixel box (3, 3)-(wide - 4, tall - 2) in `Button.FocusBorderColor` (Black). Check boxes and
+  radio buttons draw a dashed ring around the whole control, the box or circle and the label,
+  `widgets::FOCUS_PAD` (2) away on every side (`widgets::toggle_content`); sliders around their
+  track and nob (`widgets::slider_content`), text entries and the key list around their frame,
+  with the same padding (`Painter::focus_ring`). A focused combo box shows its text selected
+  (`TextEntry.SelectedBgColor` / `SelectedTextColor`); a text entry being edited draws
+  `TextEntry.FocusEdgeColor` inside its border. The key list's selected row uses the scheme's
+  out-of-focus selection (`SectionedListPanel.OutOfFocusSelectedBgColor`) while the list has no
+  focus. No push button draws the default-button border any more.
+- **Slider spacing.** The slider track ends a nob width short of the control's right edge, as in
+  SDK `Slider::GetTrackRect` (`w = wide - nobSize`), so the Mouse sensitivity slider keeps clear
+  of the text field right after it.
 - **Escape.** When Escape would close a dialog with a close button (Options or one of its
   sub-dialogs, the developer console), the close button shows pressed while Escape is held and
-  the dialog closes on release (`Console::escape_pressed` / `escape_released`, owner request,
-  2026-10-17; retail closes on the press). Escape that cancels something else (a drag, key
-  capture, open list, text edit, completion list) or opens / leaves the pause menu acts at once.
-- **Tests.** Unit tests for the order (tab positions, disabled, unpositioned), a full Tab cycle
-  driving every control kind, tab and radio arrows, a held Space, sub-dialog focus return and the
-  message box. Packaged keyboard-only replays `test-inputs/bevy-options-capture-keyboard-combo.json`
-  (Video page, Resolution focused: selected text) and `...-keyboard-button.json` ("Advanced..."
-  focused: key-focus border and dashed box), `...-keyboard-check.json` (Mouse > Reverse mouse:
-  the box after the check box) and `...-keyboard-slider.json` (Mouse sensitivity slider),
-  captured by `scripts/checks/runtime_options_capture.sh`.
+  the dialog closes on release (`Console::escape_pressed` / `escape_released`; retail closes on
+  the press). Escape that cancels something else (a drag, key capture, open list, text edit,
+  completion list) or opens / leaves the pause menu acts at once.
+- **Menus.** In the main and pause menus the pointer selects a row only when it enters it, so a
+  pointer resting on a row no longer takes the selection back from the arrow keys.
+- **Tests.** Unit tests for the reading order, a full Tab cycle driving every control kind, tab
+  and radio arrows, a held Space, sub-dialog focus return, Enter without a default button, the
+  key list's focus and dim selection, focus rings, the held Escape, the resting menu pointer and
+  the message box; the owned-install order test. Packaged keyboard-only replays
+  `test-inputs/bevy-options-capture-keyboard-*.json` (combo, button, check, radio, slider,
+  entry), captured by `scripts/checks/runtime_options_capture.sh`.
 
 ## 7. Plan: host use of the stored settings (milestone 6)
 

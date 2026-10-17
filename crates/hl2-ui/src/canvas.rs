@@ -60,6 +60,10 @@ impl Rect {
     pub fn size(self) -> Vec2 {
         vec2(self.w, self.h)
     }
+    /// Grown by `by` on every side.
+    pub fn pad(self, by: f32) -> Self {
+        Self::new(self.x - by, self.y - by, self.w + 2. * by, self.h + 2. * by)
+    }
     pub fn center(self) -> Vec2 {
         vec2(self.x + self.w * 0.5, self.y + self.h * 0.5)
     }
