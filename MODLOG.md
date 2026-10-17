@@ -12,7 +12,7 @@
 
 **Result:** the menu, Options and the console work side by side as in the original, each layer receiving only its share of the input.
 
-**Still broken or not tested:** retail hides open windows on Resume and shows them again with the pause menu; here they close. With the menu focused, an unfocused console over an unfocused Options shows Options through it. The console's completion list counts as inside its frame. Windows not tested.
+**Still broken or not tested:** retail probably hides open windows on Resume and shows them again with the pause menu (unverified; GameUI is not in the SDK, nor is OPTIONS activating the open dialog); here they close. With the menu focused, an unfocused console over an unfocused Options shows Options through it. The console's completion list counts as inside its frame. Windows not tested.
 
 **Next:** owner check.
 

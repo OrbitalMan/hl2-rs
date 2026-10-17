@@ -463,6 +463,15 @@ impl Input {
     }
 }
 
+/// The console's completion popup: its rows (colored runs), the highlighted row, how many help
+/// rows lead, and its rectangle in canvas pixels.
+struct Completion {
+    rows: Vec<Vec<(String, Color)>>,
+    highlighted: Option<usize>,
+    help_rows: usize,
+    rect: Rect,
+}
+
 /// The console dialog's push buttons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConsoleButton {
@@ -1239,6 +1248,22 @@ impl Console {
         )
     }
 
+    /// Whether `point` (canvas pixels) is on a window: its frame, or for the console also its
+    /// completion popup, which can reach past the frame.
+    fn window_contains(&self, window: Window, point: Vec2) -> bool {
+        self.window_bounds(window).contains(point)
+            || window == Window::Console
+                && self.completion_bounds().is_some_and(|r| r.contains(point))
+    }
+
+    /// The console's completion popup on the canvas, while it shows.
+    fn completion_bounds(&self) -> Option<Rect> {
+        let layout = self.dialog_layout();
+        let entry = layout.canvas(layout.entry);
+        self.completion(layout.scale, (entry.x, entry.y, entry.w, entry.h))
+            .map(|c| c.rect)
+    }
+
     /// A window's frame on the canvas, in canvas pixels.
     pub fn window_bounds(&self, window: Window) -> Rect {
         match window {
@@ -1284,10 +1309,7 @@ impl Console {
     /// Whether a point in canvas coordinates is covered by a modal dialog or an open window.
     pub fn is_occluded(&self, point: Vec2) -> bool {
         self.modal_bounds().is_some_and(|b| b.contains(point))
-            || self
-                .windows
-                .order()
-                .any(|w| self.window_bounds(w).contains(point))
+            || self.windows.order().any(|w| self.window_contains(w, point))
     }
 
     /// The `mat_monitorgamma` to display: the brightness dialog's live value while it is open,
@@ -1908,6 +1930,7 @@ impl Console {
     fn windows_input(&mut self, input: &Input) -> Vec<Effect> {
         let modal =
             (self.options_open() && self.options.modal_layer_open()).then_some(Window::Options);
+        let completion = self.completion_bounds();
         let bounds: Vec<(Window, Rect)> = self
             .windows
             .order()
@@ -1924,6 +1947,7 @@ impl Console {
             .windows
             .route(pointer, modal, base_takes_pointer, |window, at| {
                 bounds.iter().any(|(w, r)| *w == window && r.contains(at))
+                    || window == Window::Console && completion.is_some_and(|r| r.contains(at))
             });
         self.sync_mode();
         let focus = self.windows.focus();
@@ -3153,12 +3177,12 @@ impl Console {
     /// The completion popup (SDK `CConsolePanel` completion list, VGUI menu colors): a help
     /// line for the command being typed, then up to `COMPLETION_ROWS` items, cvars with their
     /// value. It opens below the entry when it fits, else above it.
-    fn draw_completion(
+    /// The completion popup's rows and where it is drawn, if it shows.
+    fn completion(
         &self,
         scale: f32,
         (x, entry_y, w, entry_h): (f32, f32, f32, f32),
-        text: &dyn Fn(&str, f32, f32, Color),
-    ) {
+    ) -> Option<Completion> {
         let theme = &self.theme;
         let mut rows: Vec<Vec<(String, Color)>> = Vec::new();
         let mut highlighted = None;
@@ -3213,7 +3237,7 @@ impl Console {
             }
         }
         if rows.is_empty() {
-            return;
+            return None;
         }
         // Like a VGUI menu, the list is as wide as its widest row (at least the entry), up to
         // the canvas edge.
@@ -3237,6 +3261,33 @@ impl Console {
         } else {
             (entry_y - h).max(0.)
         };
+        Some(Completion {
+            rows,
+            highlighted,
+            help_rows,
+            rect: Rect::new(x, y, w, h),
+        })
+    }
+
+    /// The completion popup over everything; it can reach past the console's frame.
+    fn draw_completion(
+        &self,
+        scale: f32,
+        entry: (f32, f32, f32, f32),
+        text: &dyn Fn(&str, f32, f32, Color),
+    ) {
+        let theme = &self.theme;
+        let Some(Completion {
+            rows,
+            highlighted,
+            help_rows,
+            rect,
+        }) = self.completion(scale, entry)
+        else {
+            return;
+        };
+        let (x, y, w, h) = (rect.x, rect.y, rect.w, rect.h);
+        let row = CONSOLE_ROW * scale;
         self.canvas.rectangle(
             x,
             y,
@@ -6377,6 +6428,47 @@ mod tests {
             console.options.report().focus.as_deref(),
             Some("tab"),
             "the keyboard follows the focus"
+        );
+    }
+
+    #[test]
+    fn the_console_completion_popup_past_its_frame_is_part_of_the_console() {
+        let mut console = installed_console();
+        console.set_mode(Mode::MainMenu);
+        console.canvas.resize(1280., 720.);
+        console.toggle();
+        // At the top of the canvas, so the list opens below the entry line, past the frame.
+        console.console_placement = Placement::from_saved(Some(crate::config::DialogPlacement {
+            offset: [0., -2000.],
+            size: None,
+        }));
+        console.input(&Input {
+            text: "s".into(),
+            ..Default::default()
+        });
+        let popup = console
+            .completion_bounds()
+            .expect("the completion popup shows");
+        let frame = console.window_bounds(Window::Console);
+        let outside = (0..64)
+            .flat_map(|i| (0..64).map(move |j| (i, j)))
+            .map(|(i, j)| {
+                vec2(
+                    popup.x + popup.w * i as f32 / 64.,
+                    popup.y + popup.h * j as f32 / 64.,
+                )
+            })
+            .find(|p| popup.contains(*p) && !frame.contains(*p));
+        // It opens below the entry line, at the frame's bottom: past the frame.
+        let at = outside.expect("the popup reaches past the frame");
+        assert!(console.is_occluded(at));
+        let effects = gesture(&mut console, at, at, at);
+        assert!(!menu_sounds(&effects), "{effects:?}");
+        assert_eq!(console.last_menu_hover, None);
+        assert_eq!(
+            console.mode(),
+            Mode::Console,
+            "the press stayed with the console"
         );
     }
 

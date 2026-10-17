@@ -945,8 +945,8 @@ as the original does.
   focused the menu takes no keys, and its rows arm only under the pointer. `Console::mode()` is
   the focused layer (`Options`, `Console`, or the base); `Console::set_mode` opens a window on top
   or replaces the base (closing every window), the only way to change it.
-- **Menu actions.** OPTIONS with the dialog open raises it as it is (retail activates the
-  existing dialog; its unapplied edits stay). QUIT shows the confirmation box, modal over every
+- **Menu actions.** OPTIONS with the dialog open raises it as it is (its unapplied edits stay;
+  retail is believed to activate the existing dialog, unverified: GameUI is not in the SDK). QUIT shows the confirmation box, modal over every
   window. Resume and starting a game hide the UI: the windows close (Options without applying).
   A submenu background loading behind the windows keeps them open.
 - **Escape** closes the top window first, whichever layer has the focus; with no window open it
@@ -966,8 +966,12 @@ as the original does.
   a menu press dragged onto Options, a caption drag across the menu at scale 1 and 2, a sub-dialog
   over the menu, the quit box over Options, OPTIONS again keeping the dialog, Resume closing it,
   the overlap of the console and Options and raising by a press, pointerless input, the focus
-  fade, Escape with the menu focused, a submenu background load behind Options). Packaged:
-  `test-inputs/bevy-menu-options-nonmodal.json` (`replays.py` `menu_options`).
-- **Not done:** retail hides open windows on Resume and shows them again with the pause menu;
-  here they close. The console's completion list counts as inside the console frame for hit
-  tests.
+  fade, Escape with the menu focused, a submenu background load behind Options, the completion
+  popup past the console's frame). Packaged: `test-inputs/bevy-menu-options-nonmodal.json` and
+  `bevy-menu-options-list.json` (an open Resolution list: a click on the menu only closes it)
+  (`replays.py` `menu_options`).
+- **Not done:** retail probably hides open windows on Resume and shows them again with the pause
+  menu (unverified); here they close. The console's completion list, which can reach past the
+  console's frame, is part of the console for hit tests (`Console::window_contains`). Scripted
+  replays carry no times, so packaged captures show finished fades; the 0.3 s timing is unit
+  tested (the host feeds input and drawing from the same real-time clock).

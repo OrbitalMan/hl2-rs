@@ -195,6 +195,19 @@ def check_menu_options():
     expect("NEW GAME under the dialog does not start a game", under.get("pending_map"), None)
     expect("Options still open and focused", (under["mode"], under.get("windows")), ("Options", ["Options"]))
     expect("loaded", run.loaded(), ["hl2/background01", "episodic/ep1_background01"])
+    # An open drop-down list takes every click: one on the menu only closes it. (Default
+    # settings again: the drag above saved the dialog's new place.)
+    if CONFIG.exists():
+        CONFIG.unlink()
+    run = game("menu_options-list", *MENU[:-2], "--frames", "400",
+               "--movement-script", "test-inputs/bevy-menu-options-list.json")
+    expect("the Resolution list opened",
+           (run.sample("list-opened")["console"].get("options") or {}).get("list_open"), True)
+    after = run.sample("menu-clicked-with-list")["console"]
+    expect("a click on the menu closed the list",
+           (after.get("options") or {}).get("list_open"), False)
+    expect("and ran nothing", after.get("pending_map"), None)
+    expect("Options kept the focus", (after["mode"], after.get("windows")), ("Options", ["Options"]))
 
 
 def check_chapter_quit():
@@ -470,7 +483,7 @@ GAMEPLAY_MAPS = {**{f: "d1_trainstation_01" for f in STATION_01},
                  **{f: "d1_trainstation_04" for f in STATION_04}}
 # Fixtures used by the UI checks above (by file name stem).
 UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-return",
-               "bevy-menu-options-nonmodal",
+               "bevy-menu-options-nonmodal", "bevy-menu-options-list",
                "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
                "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
