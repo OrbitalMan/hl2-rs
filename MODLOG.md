@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Checks: one script for every packaged replay and capture
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `scripts/checks/runtime_replays.sh` replaces `runtime_submenus.sh`, `runtime_return_menu.sh`, `runtime_chapter_menu.sh`, `runtime_chapter_quit.sh`, `runtime_options_capture.sh`, `runtime_captions.sh`, `runtime_placement_persist.sh`, `runtime_bg_compare.sh` and the `runtime_all.sh` runner. It builds once, backs the settings up once and restores them before each check and at the end, runs each check in the background through one shared launcher with a watchdog, checks the results itself (loaded maps in order, the saved background, captures written) and prints one ok/FAIL line per check; `ONLY=` runs a subset. New helper `scripts/checks/show_menu_background.py`. The windowed checks of the window itself stay separate scripts.
+
+**Why:** owner request: consolidate the near-identical check scripts instead of adding a runner on top of them.
+
+**Tested how:** all 8 checks ok in 292 s with the frontmost app sampled every 2 s (the game never frontmost); a subset run with `ONLY`.
+
+**Result:** one script instead of nine, with real pass/fail results.
+
+**Still broken or not tested:** not run on Windows (bash; the executable name differs there).
+
+**Next:** owner check.
+
 ## 2026-10-17 Host: background runs for replays and captures
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
