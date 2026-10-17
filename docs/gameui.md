@@ -178,9 +178,9 @@ Semantics:
 - Every label is resolved through the game localization; unresolved tokens show their key name.
 - Video: resolutions come from the platform display modes, grouped by aspect bucket; changing the
   aspect ratio selects a valid resolution of that bucket. Nothing changes before OK/Apply.
-- Display mode offers Fullscreen / Windowed / Windowed (No Border). No Border is hidden only on
-  macOS (as in the retail macOS build); a stored No Border value is kept in the file and treated as
-  Fullscreen there (`DisplayMode::effective`). Windows and Linux keep borderless.
+- Display mode offers Fullscreen / Windowed / Windowed (No Border) on every platform (owner
+  decision, 2026-10-17; the retail macOS build hides No Border). On macOS No Border is the native
+  full-screen Space and Fullscreen is exclusive (section 10).
 - Brightness ("Adjust brightness levels...") is enabled in every display mode (2026-10-15, owner
   decision; retail enables it in full screen only because its hardware gamma ramp needs full
   screen). The slider previews live, as in retail (`OptionsDialog::preview_gamma`,
@@ -470,7 +470,7 @@ Steps (one commit):
 - Window: startup uses the stored display mode (`video::mode::startup_mode`, primary monitor) and
   resolution. `--windowed`, `--fullscreen` and `--borderless` override it; runs with `--frames`,
   `--capture`, `--capture-monitor` or `--movement-script` start windowed unless a mode flag is
-  given. On macOS a stored or requested No Border resolves to full screen, as on the Video page.
+  given.
   `launch-bevy-1080p.{cmd,sh}` pass `--windowed` so they still open a 1920x1080 window.
 
 Limitations:
@@ -486,7 +486,7 @@ Limitations:
   inaudible today; it matters for sounds that keep playing (none at present).
 - Full screen keeps the desktop video mode; the game frame is rendered at the configured
   resolution and scaled to it (section 10). Real monitor mode switching is not implemented.
-- `--borderless` on macOS gives full screen (a full-screen window over the desktop mode).
+- `--borderless` on macOS gives the native full-screen Space (Windowed (No Border)).
 
 Verified (2026-10-11, macOS Apple Silicon):
 
@@ -556,18 +556,26 @@ Design (`crates/hl2-bevy/src/video.rs`):
   the resize resumes when it returns to a normal window. Startup in windowed mode uses the same
   path, so a stored resolution larger than the monitor is clamped. Manual resizes are never
   fought: they just change the presented scale.
-- **Full screen.** On Windows and Linux full screen stays `WindowMode::Fullscreen(Current,
-  VideoModeSelection::Current)`: the desktop mode, no mode switch. On macOS full screen is a
-  full-screen window over the desktop mode (`BorderlessFullscreen`). An exclusive mode set there can
-  select an unscaled (1x) panel mode, which shrinks the desktop scaling, and so the mouse cursor,
-  for the session. Stored settings are not rewritten.
-- **macOS native full screen recognition (owner decision, 2026-10-15).** On macOS the game's Full
-  screen mode is the native full-screen Space, so the green title-bar button is treated as a mode
+- **Full screen.** Full screen is exclusive on every platform (owner decision, 2026-10-17, macOS
+  included): `WindowMode::Fullscreen(Current, VideoModeSelection::Current)`, the desktop mode, no
+  mode switch. On macOS winit captures the display for it and runs the panel at scale factor 1
+  while it lasts (3456x2169 on the M1 Pro panel; the cursor may look small); the menu bar and Dock
+  are hidden, and the Retina scale returns on leaving it. A packaged replay went windowed ->
+  exclusive 1280x800 -> exclusive 1024x768 (aspect change) -> windowed without a hang.
+- **Windowed (No Border).** `BorderlessFullscreen`: on Windows and Linux a borderless window over
+  the monitor, on macOS the native full-screen Space. The game window sets
+  `Window::borderless_game: false`: Bevy's default (true, winit's `with_borderless_game`) sets
+  `NSApplicationPresentationHideMenuBar | HideDock` for borderless full screen, so the menu bar and
+  the title bar never appeared until the Space was changed. Without it macOS uses its standard
+  full-screen behavior: they slide in when the pointer reaches the top edge.
+- **macOS native full screen recognition (owner decision, 2026-10-15; since 2026-10-17 the Space is
+  Windowed (No Border)).** On macOS the native full-screen Space is a game display mode, so the
+  green title-bar button is treated as a mode
   switch: `video::sync_native_fullscreen` (macOS only, PreUpdate) reads winit's real full-screen
   state from the main-thread `bevy::winit::WINIT_WINDOWS` (read-only) and, only when that state
   changes, maps it with `native_fullscreen_sync`: entering native full screen from Windowed sets
-  `Window::mode` to `BorderlessFullscreen` and the display mode to Full screen; leaving it sets
-  Windowed. The applied configuration is updated and saved, any pending windowed resize is
+  `Window::mode` to `BorderlessFullscreen` and the display mode to Windowed (No Border); leaving
+  full screen (either kind) sets Windowed. The applied configuration is updated and saved, any pending windowed resize is
   dropped, and Options shows the real mode. Transitions the game starts itself reach winit later
   and then agree with `Window::mode`, so they are not reverted. Root causes fixed: the game never
   learned about green-button transitions, so choosing Full screen while already in native full

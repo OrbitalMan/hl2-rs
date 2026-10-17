@@ -813,10 +813,7 @@ mod tests {
         );
         let modes = Choice::DisplayMode.items(&env, &draft);
         assert_eq!(modes.len(), DisplayMode::choices().len());
-        assert_eq!(
-            modes.contains(&"GameUI_NoWindowBorder".to_owned()),
-            !cfg!(target_os = "macos")
-        );
+        assert!(modes.contains(&"GameUI_NoWindowBorder".to_owned()));
         Choice::Hdr.select(&env, &mut draft, 1);
         assert_eq!(draft.config.video.hdr, HdrMode::Bloom);
         draft.config.audio.language = "french".into();

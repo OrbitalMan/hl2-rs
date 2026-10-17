@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Video: exclusive full screen and No Border on macOS, menu bar in the full-screen Space
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `DisplayMode::choices` offers Full screen, Windowed and Windowed (No Border) on every platform; `video::mode` maps Full screen to exclusive `WindowMode::Fullscreen(Current, VideoModeSelection::Current)` everywhere (the macOS `BorderlessFullscreen` special case is gone) and No Border to `BorderlessFullscreen`, which on macOS is the native full-screen Space; the green button now maps to No Border. The primary window sets `borderless_game: false`.
+
+**Why:** owner requests: exclusive full screen back in the Video options without the macOS check, and the menu bar reachable in the borderless full-screen mode. Bevy's `Window::borderless_game` defaults to true, which makes winit hide the menu bar and Dock outright in borderless full screen (they only came back after changing the Space); with false, macOS keeps its standard auto-hide (the menu bar and title bar slide in at the top edge). Plain Bevy window configuration, no dependency changes.
+
+**Tested how:** unit tests (choices on every platform, mode mapping, green-button mapping); workspace tests, strict clippy, fmt, Windows check; packaged replay at the main menu: windowed 1024x768 -> exclusive 1280x800 -> exclusive 1024x768 -> windowed, exit 0, no hang, Retina scale back after exclusive.
+
+**Result:** macOS offers all three modes; exclusive full screen works through an aspect change.
+
+**Still broken or not tested:** the menu bar reveal in No Border, the green button and the cursor size in exclusive mode were not tried by hand; exclusive runs the panel at scale 1 while active; not checked on Windows (mapping unchanged there).
+
+**Next:** owner check.
+
 ## 2026-10-17 Video: the picture froze after a resolution change
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

@@ -98,10 +98,10 @@ pub mod mode {
 
     /// The Bevy window mode for a configured display mode on this platform.
     ///
-    /// Full screen keeps the desktop's display mode: the game frame renders at the configured
-    /// resolution and is scaled to the display. "Windowed (No Border)" is a borderless window
-    /// covering the current monitor (Windows and Linux); macOS has no such choice and resolves a
-    /// stored value to full screen.
+    /// Full screen is exclusive full screen in the desktop's display mode: the game frame renders
+    /// at the configured resolution and is scaled to the display. "Windowed (No Border)" is a
+    /// borderless window covering the current monitor (on macOS the native full-screen Space,
+    /// where the menu bar and title bar show when the pointer reaches the top edge).
     pub fn desired_mode(mode: DisplayMode) -> WindowMode {
         on_monitor(mode, MonitorSelection::Current)
     }
@@ -113,25 +113,14 @@ pub mod mode {
 
     fn on_monitor(mode: DisplayMode, monitor: MonitorSelection) -> WindowMode {
         match mode.effective() {
-            DisplayMode::Fullscreen => fullscreen(monitor),
+            // The current video mode: the panel keeps its scaling (no 1x mode, normal-sized
+            // cursor on macOS); the game frame is scaled to it.
+            DisplayMode::Fullscreen => {
+                WindowMode::Fullscreen(monitor, bevy::window::VideoModeSelection::Current)
+            }
             DisplayMode::Windowed => WindowMode::Windowed,
             DisplayMode::NoBorder => WindowMode::BorderlessFullscreen(monitor),
         }
-    }
-
-    /// macOS full screen is a full-screen window over the desktop's display mode. An exclusive
-    /// mode change there can pick a non-scaled (1x) mode of the panel, which shrinks the
-    /// desktop scaling for the whole session (a tiny mouse cursor); the game frame is scaled to
-    /// the display instead.
-    #[cfg(target_os = "macos")]
-    fn fullscreen(monitor: MonitorSelection) -> WindowMode {
-        WindowMode::BorderlessFullscreen(monitor)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    fn fullscreen(monitor: MonitorSelection) -> WindowMode {
-        use bevy::window::VideoModeSelection;
-        WindowMode::Fullscreen(monitor, VideoModeSelection::Current)
     }
 }
 
@@ -569,10 +558,9 @@ pub(crate) fn resize_window(
 /// The window mode matching an OS full-screen state the user changed outside the game (macOS
 /// green button), or `None` when the window mode already agrees.
 ///
-/// On macOS the game's Full screen mode is the native full-screen Space
-/// ([`mode::desired_mode`] maps it to `BorderlessFullscreen`), so entering native full screen
-/// from a windowed game means Full screen, and leaving it from a full-screen game means
-/// Windowed.
+/// On macOS "Windowed (No Border)" is the native full-screen Space ([`mode::desired_mode`] maps
+/// it to `BorderlessFullscreen`), so entering native full screen from a windowed game means No
+/// Border, and leaving full screen (either kind) means Windowed.
 #[cfg(any(target_os = "macos", test))]
 pub fn native_fullscreen_sync(mode: WindowMode, native_fullscreen: bool) -> Option<WindowMode> {
     match (mode, native_fullscreen) {
@@ -628,7 +616,7 @@ pub(crate) fn sync_native_fullscreen(
         frame.pending_window = None;
     }
     let display_mode = if native {
-        hl2_ui::config::DisplayMode::Fullscreen
+        hl2_ui::config::DisplayMode::NoBorder
     } else {
         hl2_ui::config::DisplayMode::Windowed
     };
@@ -891,22 +879,19 @@ mod tests {
         );
         let fullscreen = mode::desired_mode(DisplayMode::Fullscreen);
         let no_border = mode::desired_mode(DisplayMode::NoBorder);
-        if cfg!(target_os = "macos") {
-            assert_eq!(
-                fullscreen,
-                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-            );
-            assert_eq!(no_border, fullscreen);
-        } else {
-            assert!(matches!(
-                fullscreen,
-                WindowMode::Fullscreen(MonitorSelection::Current, _)
-            ));
-            assert_eq!(
-                no_border,
-                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-            );
-        }
+        // The same on every platform (macOS included): exclusive full screen in the current
+        // video mode, and a borderless full-screen window.
+        assert_eq!(
+            fullscreen,
+            WindowMode::Fullscreen(
+                MonitorSelection::Current,
+                bevy::window::VideoModeSelection::Current
+            )
+        );
+        assert_eq!(
+            no_border,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        );
     }
 
     #[test]
@@ -1010,12 +995,12 @@ mod tests {
     #[test]
     fn native_full_screen_changes_map_to_the_game_modes() {
         let full = WindowMode::BorderlessFullscreen(MonitorSelection::Current);
-        // Green button on a windowed game: Full screen.
+        // Green button on a windowed game: Windowed (No Border).
         assert_eq!(
             native_fullscreen_sync(WindowMode::Windowed, true),
             Some(full)
         );
-        // Green button out of a full-screen game: Windowed.
+        // Green button out of No Border or exclusive full screen: Windowed.
         assert_eq!(
             native_fullscreen_sync(full, false),
             Some(WindowMode::Windowed)

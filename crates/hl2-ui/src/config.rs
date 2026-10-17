@@ -46,23 +46,19 @@ pub enum DisplayMode {
     #[default]
     Fullscreen,
     Windowed,
-    /// "Windowed (No Border)": a borderless window covering the display. Not offered on macOS.
+    /// "Windowed (No Border)": a borderless window covering the display (on macOS the native
+    /// full-screen Space).
     NoBorder,
 }
 
 impl DisplayMode {
-    /// The choices offered on this platform, in combo order. "Windowed (No Border)" is offered on
-    /// Windows and Linux; the retail macOS build has no borderless mode, so it is omitted there.
+    /// The choices offered, in combo order: the same on every platform.
     pub fn choices() -> &'static [Self] {
-        if cfg!(target_os = "macos") {
-            &[Self::Fullscreen, Self::Windowed]
-        } else {
-            &[Self::Fullscreen, Self::Windowed, Self::NoBorder]
-        }
+        &[Self::Fullscreen, Self::Windowed, Self::NoBorder]
     }
 
-    /// The mode actually used on this platform. A stored `NoBorder` is kept as written (so a
-    /// config shared with a Windows/Linux build keeps it) but behaves as full screen on macOS.
+    /// The mode actually used: a mode that is not offered falls back to full screen. Every mode
+    /// is offered on every platform today.
     pub fn effective(self) -> Self {
         if Self::choices().contains(&self) {
             self
@@ -755,15 +751,18 @@ mod tests {
 
         let borderless = Config::from_json(br#"{ "video": { "borderless": true } }"#).unwrap();
         assert_eq!(borderless.video.display_mode, DisplayMode::NoBorder);
-        let expected = if cfg!(target_os = "macos") {
-            DisplayMode::Fullscreen
-        } else {
-            DisplayMode::NoBorder
-        };
-        assert_eq!(borderless.video.display_mode.effective(), expected);
         assert_eq!(
-            DisplayMode::choices().contains(&DisplayMode::NoBorder),
-            !cfg!(target_os = "macos")
+            borderless.video.display_mode.effective(),
+            DisplayMode::NoBorder
+        );
+        assert_eq!(
+            DisplayMode::choices(),
+            [
+                DisplayMode::Fullscreen,
+                DisplayMode::Windowed,
+                DisplayMode::NoBorder
+            ],
+            "every platform offers all three"
         );
     }
 
