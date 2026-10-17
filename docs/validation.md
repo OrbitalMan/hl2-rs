@@ -20,6 +20,7 @@ became the frontmost app at launch (winit activates the app; Bevy offers no sett
 
 | Script | What it checks |
 | --- | --- |
+| `scripts/checks/runtime_all.sh` | runs every background replay and capture check below in sequence and prints one pass/fail line per check with its duration (full output in `artifacts/runtime_all/`); about 5 minutes, nothing takes focus |
 | `scripts/checks/validate.sh` | `cargo test -p hl2-ui`, `-p hl2-bevy`, strict clippy (`--workspace --all-targets --locked -D warnings`, as CI), `cargo fmt --check` |
 | `scripts/checks/check_windows.sh` | strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc` without linking (platform-gated code stays gated) |
 | `scripts/checks/runtime_check.sh` | builds (`scripts/build-bevy.sh`), 300 windowed main-menu frames, exit status and warnings |
