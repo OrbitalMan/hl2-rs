@@ -13,7 +13,7 @@ BACKUP="artifacts/hl2-config.chapter_menu.backup.json"
 [ -f bin/hl2-config.json ] && cp bin/hl2-config.json "$BACKUP"
 restore() { [ -f "$BACKUP" ] && cp "$BACKUP" bin/hl2-config.json; }
 trap restore EXIT
-RUST_LOG="info" ./bin/hl2-bevy --no-setup --map background01 --main-menu --windowed --frames 4400 \
+RUST_LOG="info" ./bin/hl2-bevy --no-setup --map background01 --main-menu --background --frames 4400 \
   --movement-script test-inputs/bevy-menu-chapter-return.json >"$LOG" 2>&1 &
 PID=$!
 ( sleep 300; kill -9 "$PID" 2>/dev/null ) &
@@ -22,6 +22,8 @@ set +e
 wait "$PID"
 STATUS=$?
 set -e
+# The sleep would otherwise outlive its subshell and hold the output open.
+pkill -P "$WATCHDOG" 2>/dev/null || true
 kill "$WATCHDOG" 2>/dev/null || true
 wait "$WATCHDOG" 2>/dev/null || true
 echo "=== exit status: $STATUS ==="

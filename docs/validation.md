@@ -8,6 +8,16 @@ them from Git Bash or adapt the executable name). Every packaged run passes `--n
 itself after a bounded number of frames, has a watchdog, and backs up and restores
 `bin/hl2-config.json` when it changes settings. Logs, captures and reports go to `artifacts/`.
 
+Replays and captures run in the background (`--background`, 2026-10-17): the game opens no
+operating-system window, so nothing takes focus, appears on the desktop or is slowed down by
+other windows, and the app is stepped at 60 Hz; the window state counts as focused, so gameplay
+does not pause itself. Captures (`--capture`) read the game frame (the full picture, 3D and UI,
+before it is scaled into the window). The checks of the window itself stay windowed and take
+focus: `runtime_check.sh`, `runtime_capture.sh` and `runtime_resolution_change.sh` (these two
+capture the presented window, `--capture-window`) and `runtime_window_place.sh`. Measured on
+macOS: during a background replay the previously active app stayed frontmost; a windowed run
+became the frontmost app at launch (winit activates the app; Bevy offers no setting for it).
+
 | Script | What it checks |
 | --- | --- |
 | `scripts/checks/validate.sh` | `cargo test -p hl2-ui`, `-p hl2-bevy`, strict clippy (`--workspace --all-targets --locked -D warnings`, as CI), `cargo fmt --check` |

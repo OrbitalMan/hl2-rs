@@ -1,5 +1,23 @@
 # MODLOG
 
+## 2026-10-17 Host: background runs for replays and captures
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `--background` runs without an operating-system window (Bevy's `WinitPlugin` disabled, `ScheduleRunnerPlugin` at 60 Hz, the window state counts as focused, implies no setup window); `--capture` (and capture bursts) read the game frame image instead of the window, `--capture-window` keeps the window screenshot. The replay and capture checks (`runtime_submenus`, `runtime_return_menu`, `runtime_chapter_menu`, `runtime_chapter_quit`, `runtime_options_capture`, `runtime_captions`, `runtime_placement_persist`, `runtime_bg_compare`) use `--background`; `runtime_capture` and `runtime_resolution_change` capture the window.
+
+**Why:** owner request: packaged captures and replays must not take focus or be disturbed by working in other apps. A windowed `--no-focus` run still became the frontmost app at launch (winit activates the app on launch; Bevy has no setting for it).
+
+Also fixed: the check scripts' watchdog `sleep` outlived its subshell and kept the scripts' output open, so a script whose output was piped waited out its whole watchdog (180-300 s) after the game had finished; the scripts now kill it (`pkill -P`). `runtime_submenus.sh` pointed at a doubled input name (`bevy-menu-bevy-menu-submenus.json`) since the scripts moved into the repository.
+
+**Tested how:** frontmost app sampled every 2 s during the whole background check suite (8 scripts, 297 s; the game was never frontmost); every replay finished with exit 0 and the expected maps; captures inspected; a background and a windowed run of the same replay take the same time (6.1 s / 6.6 s); workspace tests, strict clippy, fmt, Windows check.
+
+**Result:** replays and captures run without touching the desktop.
+
+**Still broken or not tested:** background runs present nothing, so the window path (presentation, resizing, placement) is covered only by the windowed checks; not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: keyboard focus, second pass
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

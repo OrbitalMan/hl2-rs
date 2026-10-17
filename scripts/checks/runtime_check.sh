@@ -17,6 +17,8 @@ set +e
 wait "$PID"
 STATUS=$?
 set -e
+# The sleep would otherwise outlive its subshell and hold the output open.
+pkill -P "$WATCHDOG" 2>/dev/null || true
 kill "$WATCHDOG" 2>/dev/null || true
 echo "=== exit status: $STATUS ==="
 grep -iE "panic|error|warn" "$LOG" | head -40 || true

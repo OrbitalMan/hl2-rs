@@ -17,7 +17,7 @@ OVERALL=0
 for SCRIPT in test-inputs/bevy-options-capture*.json; do
   NAME="$(basename "$SCRIPT" .json)"
   LOG="artifacts/runtime_$NAME.log"
-  ./bin/hl2-bevy --no-setup --map background01 --main-menu --windowed --width 1024 --height 768 --frames 400 --no-focus \
+  ./bin/hl2-bevy --no-setup --map background01 --main-menu --background --width 1024 --height 768 --frames 400 \
     --movement-script "$SCRIPT" --capture "artifacts/$NAME.png" >"$LOG" 2>&1 &
   PID=$!
   ( sleep 180; kill -9 "$PID" 2>/dev/null ) &
@@ -26,6 +26,8 @@ for SCRIPT in test-inputs/bevy-options-capture*.json; do
   wait "$PID"
   STATUS=$?
   set -e
+  # The sleep would otherwise outlive its subshell and hold the output open.
+  pkill -P "$WATCHDOG" 2>/dev/null || true
   kill "$WATCHDOG" 2>/dev/null || true
   echo "=== $NAME exit status: $STATUS ==="
   grep -iE "panic|error" "$LOG" | head -5 || true

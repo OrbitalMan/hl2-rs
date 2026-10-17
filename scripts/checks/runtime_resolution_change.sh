@@ -18,7 +18,7 @@ rm -f artifacts/resolution_change.png
 RUST_LOG="info,hl2_bevy=debug" ./bin/hl2-bevy --no-setup --map background01 --main-menu --windowed \
   --width 1024 --height 768 --frames 600 --no-focus \
   --movement-script test-inputs/bevy-menu-resolution-change.json \
-  --capture artifacts/resolution_change.png >"$LOG" 2>&1 &
+  --capture-window --capture artifacts/resolution_change.png >"$LOG" 2>&1 &
 PID=$!
 ( sleep 180; kill -9 "$PID" 2>/dev/null ) &
 WATCHDOG=$!
@@ -26,6 +26,8 @@ set +e
 wait "$PID"
 STATUS=$?
 set -e
+# The sleep would otherwise outlive its subshell and hold the output open.
+pkill -P "$WATCHDOG" 2>/dev/null || true
 kill "$WATCHDOG" 2>/dev/null || true
 wait "$WATCHDOG" 2>/dev/null || true
 echo "=== exit status: $STATUS ==="

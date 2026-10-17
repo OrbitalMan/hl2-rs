@@ -13,8 +13,8 @@ cp bin/hl2-config.json "$BACKUP"
 restore() { cp "$BACKUP" bin/hl2-config.json; rm -f "$OPEN"; }
 trap restore EXIT
 run() {
-  ./bin/hl2-bevy --no-setup --map background01 --main-menu --windowed --width 1024 --height 768 --frames 400 \
-    --no-focus --movement-script "$1" --capture "$2" >"artifacts/runtime_placement_persist.log" 2>&1
+  ./bin/hl2-bevy --no-setup --map background01 --main-menu --background --width 1024 --height 768 --frames 400 \
+    --movement-script "$1" --capture "$2" >"artifacts/runtime_placement_persist.log" 2>&1
 }
 run test-inputs/bevy-options-capture-drag.json artifacts/placement_drag.png
 echo "=== saved dialogs ==="

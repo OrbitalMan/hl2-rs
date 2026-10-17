@@ -15,7 +15,7 @@ for pass in closed_captions:captions_capture none:captions_off; do
   CAPTIONS="${pass%%:*}" python3 scripts/checks/set_captions_config.py
   OUT="artifacts/${pass##*:}.png"
   rm -f "$OUT"
-  ./bin/hl2-bevy --no-setup --frames 420 --windowed --width 1024 --height 768 --no-focus --capture "$OUT" \
+  ./bin/hl2-bevy --no-setup --frames 420 --background --width 1024 --height 768 --capture "$OUT" \
     >"artifacts/runtime_${pass##*:}.log" 2>&1 &
   PID=$!
   ( sleep 180; kill -9 "$PID" 2>/dev/null ) &
@@ -24,6 +24,8 @@ for pass in closed_captions:captions_capture none:captions_off; do
   wait "$PID"
   STATUS=$?
   set -e
+  # The sleep would otherwise outlive its subshell and hold the output open.
+  pkill -P "$WATCHDOG" 2>/dev/null || true
   kill "$WATCHDOG" 2>/dev/null || true
   echo "=== captions ${pass%%:*}: exit status $STATUS ==="
   python3 scripts/checks/show_report_captions.py

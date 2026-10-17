@@ -16,7 +16,7 @@ for pair in hl2:background01 episodic:ep1_background01 ep2:ep2_background01 lost
   BG_GAME="${pair%%:*}" BG_MAP="${pair##*:}" BG_FOV=75 python3 scripts/checks/set_bg_config.py
   OUT="artifacts/bg_compare/${pair%%:*}_${pair##*:}.png"
   rm -f "$OUT"
-  ./bin/hl2-bevy --no-setup --frames 300 --windowed --width 1024 --height 768 --no-focus --capture "$OUT" \
+  ./bin/hl2-bevy --no-setup --frames 300 --background --width 1024 --height 768 --capture "$OUT" \
     >"artifacts/bg_compare/${pair%%:*}.log" 2>&1 || echo "exit $? for $pair"
   python3 scripts/checks/show_report.py | grep -E 'loaded_game|loaded_map' | tr '\n' ' '; echo
   ls -la "$OUT" 2>/dev/null || echo "no capture for $pair"

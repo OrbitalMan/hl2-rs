@@ -6,7 +6,7 @@ cd "$(dirname "$0")/../.."
 bash scripts/build-bevy.sh >/dev/null
 mkdir -p artifacts
 LOG="artifacts/runtime_capture.log"
-./bin/hl2-bevy --no-setup --frames 240 --windowed --no-focus --capture artifacts/present_check.png >"$LOG" 2>&1 &
+./bin/hl2-bevy --no-setup --frames 240 --windowed --no-focus --capture-window --capture artifacts/present_check.png >"$LOG" 2>&1 &
 PID=$!
 ( sleep 180; kill -9 "$PID" 2>/dev/null ) &
 WATCHDOG=$!
@@ -14,6 +14,8 @@ set +e
 wait "$PID"
 STATUS=$?
 set -e
+# The sleep would otherwise outlive its subshell and hold the output open.
+pkill -P "$WATCHDOG" 2>/dev/null || true
 kill "$WATCHDOG" 2>/dev/null || true
 echo "=== exit status: $STATUS ==="
 ls -la artifacts/present_check.png

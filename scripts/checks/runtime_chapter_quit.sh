@@ -14,7 +14,7 @@ trap restore EXIT
 BG_GAME=hl2 BG_MAP=background01 python3 scripts/checks/set_menu_background.py
 echo "=== saved menu background before ==="
 grep -E '"background_(game|map)"' bin/hl2-config.json
-RUST_LOG="info" ./bin/hl2-bevy --no-setup --map d2_coast_01 --windowed --frames 600 >"$LOG" 2>&1 &
+RUST_LOG="info" ./bin/hl2-bevy --no-setup --map d2_coast_01 --background --frames 600 >"$LOG" 2>&1 &
 PID=$!
 ( sleep 180; kill -9 "$PID" 2>/dev/null ) &
 WATCHDOG=$!
@@ -22,6 +22,8 @@ set +e
 wait "$PID"
 STATUS=$?
 set -e
+# The sleep would otherwise outlive its subshell and hold the output open.
+pkill -P "$WATCHDOG" 2>/dev/null || true
 kill "$WATCHDOG" 2>/dev/null || true
 wait "$WATCHDOG" 2>/dev/null || true
 echo "=== exit status: $STATUS ==="

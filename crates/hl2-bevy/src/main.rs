@@ -80,6 +80,13 @@ struct Options {
     audio_trace: Option<PathBuf>,
     /// Do not take focus at window creation, so unattended tests leave the desktop usable.
     no_focus: bool,
+    /// Run without an operating-system window (unattended replays and captures): nothing takes
+    /// focus or shows up on the desktop, and the game is stepped at 60 Hz. The game still
+    /// renders its frame, which `--capture` reads.
+    background: bool,
+    /// `--capture` reads the presented window instead of the game frame (checks of the
+    /// presentation itself: scaling, letterboxing, brightness).
+    capture_window: bool,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
     tonemap_scale: Option<f32>,
     /// Show the main menu over the loaded map, treating it as a menu background.
@@ -147,6 +154,8 @@ impl Options {
             volume: config.audio.volume,
             audio_trace: None,
             no_focus: false,
+            background: false,
+            capture_window: false,
             tonemap_scale: None,
             main_menu: false,
             background_map: None,
@@ -214,6 +223,8 @@ impl Options {
                     assets::FRAG_RIGID_BODY.store(false, std::sync::atomic::Ordering::Relaxed)
                 }
                 "--no-focus" => options.no_focus = true,
+                "--background" => options.background = true,
+                "--capture-window" => options.capture_window = true,
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
                     if !(scale.is_finite() && scale > 0.) {
@@ -228,7 +239,7 @@ impl Options {
                         "Installation: auto-detect Steam or use the remembered folder.\n--setup: choose/remember the game folder; --no-setup: fail without opening setup.\n--game PATH and HL2_ROOT override the remembered folder.\n--setup-preview PNG: capture setup and exit without loading a map."
                     );
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --background-map NAME --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; on macOS --borderless is the native full-screen Space)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead; --background-map overrides the background map.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --background-map NAME --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; on macOS --borderless is the native full-screen Space)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead; --background-map overrides the background map.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --background (no window: unattended replays and captures stay off the desktop) --capture-window (capture the presented window, not the game frame) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -281,7 +292,7 @@ impl Options {
             game,
             options.map.as_deref(),
             show_setup || setup_preview.is_some(),
-            no_setup || unattended || options.no_focus,
+            no_setup || unattended || options.no_focus || options.background,
             setup_preview,
         )? {
             Some(path) => path,
@@ -469,7 +480,56 @@ fn main() -> Result<()> {
     } else {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
     };
+    let default_plugins = DefaultPlugins
+        .set(bevy::log::LogPlugin {
+            custom_layer: console_host::log_layer,
+            ..default()
+        })
+        .set(AssetPlugin {
+            file_path: asset_root.to_string_lossy().into_owned(),
+            ..default()
+        })
+        .set(bevy::audio::AudioPlugin {
+            global_volume: bevy::audio::GlobalVolume::from(bevy::audio::Volume::Linear(
+                options.volume,
+            )),
+            ..default()
+        })
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                // A background run has no OS window to lose focus to: it counts as
+                // focused, so gameplay does not pause itself.
+                focused: options.background || !options.no_focus,
+                present_mode: if options.uncapped {
+                    bevy::window::PresentMode::AutoNoVsync
+                } else {
+                    bevy::window::PresentMode::AutoVsync
+                },
+                title: "HL2-RS | Bevy/wgpu migration | gameplay migration preview".into(),
+                resolution: WindowResolution::new(options.width, options.height),
+                mode: video::mode::startup_mode(options.display_mode),
+                // macOS: Bevy's default hides the menu bar and Dock outright in
+                // borderless full screen; without it the native full-screen Space shows
+                // them (and the title bar) when the pointer reaches the top edge.
+                borderless_game: false,
+                ..default()
+            }),
+            ..default()
+        });
+    // Background runs have no operating-system window: without winit nothing is created on the
+    // desktop or activated (winit activates the app on launch), and a fixed-rate loop steps the
+    // app instead of the window's event loop.
+    let default_plugins = if options.background {
+        default_plugins.disable::<bevy::winit::WinitPlugin>()
+    } else {
+        default_plugins
+    };
     let mut app = App::new();
+    if options.background {
+        app.add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(
+            std::time::Duration::from_secs_f64(1. / 60.),
+        ));
+    }
     if let Some(path) = &options.audio_trace {
         app.insert_resource(audio::AudioTrace::create(path)?);
     }
@@ -487,42 +547,7 @@ fn main() -> Result<()> {
         .init_resource::<console_host::MapEntityNames>()
         .init_resource::<crate::video::VideoViewport>()
         .insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(
-            DefaultPlugins
-                .set(bevy::log::LogPlugin {
-                    custom_layer: console_host::log_layer,
-                    ..default()
-                })
-                .set(AssetPlugin {
-                    file_path: asset_root.to_string_lossy().into_owned(),
-                    ..default()
-                })
-                .set(bevy::audio::AudioPlugin {
-                    global_volume: bevy::audio::GlobalVolume::from(bevy::audio::Volume::Linear(
-                        options.volume,
-                    )),
-                    ..default()
-                })
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        focused: !options.no_focus,
-                        present_mode: if options.uncapped {
-                            bevy::window::PresentMode::AutoNoVsync
-                        } else {
-                            bevy::window::PresentMode::AutoVsync
-                        },
-                        title: "HL2-RS | Bevy/wgpu migration | gameplay migration preview".into(),
-                        resolution: WindowResolution::new(options.width, options.height),
-                        mode: video::mode::startup_mode(options.display_mode),
-                        // macOS: Bevy's default hides the menu bar and Dock outright in
-                        // borderless full screen; without it the native full-screen Space shows
-                        // them (and the title bar) when the pointer reaches the top edge.
-                        borderless_game: false,
-                        ..default()
-                    }),
-                    ..default()
-                }),
-        )
+        .add_plugins(default_plugins)
         .add_plugins(MaterialPlugin::<rendering::SourceMaterial>::default())
         .add_plugins(bevy::sprite_render::Material2dPlugin::<
             video::PresentMaterial,
@@ -946,6 +971,7 @@ type ExitResources<'w> = (
     Option<Res<'w, performance::Performance>>,
     Option<Res<'w, bevy::diagnostic::DiagnosticsStore>>,
     Res<'w, studio_decals::StudioDecals>,
+    Option<Res<'w, video::GameFrame>>,
 );
 fn monitor(
     mut commands: Commands,
@@ -954,9 +980,15 @@ fn monitor(
     status: Res<Status>,
     (adapter, pvs, tonemap, source_materials): RenderResources,
     (cameras, draws, map_entities, all_cameras, meshes, images, geometry, two_textures): DiagnosticQueries,
-    (mut exit, performance, render_diagnostics, studio): ExitResources,
+    (mut exit, performance, render_diagnostics, studio, frame): ExitResources,
 ) {
     let _timing = performance::scope(performance.as_deref(), "diagnostics");
+    // Captures read the game frame (the picture before it is scaled into the window), so they do
+    // not depend on the window being shown; `--capture-window` reads the window.
+    let capture_source = || match frame.as_deref() {
+        Some(frame) if !options.capture_window => Screenshot::image(frame.image.clone()),
+        _ => Screenshot::primary_window(),
+    };
     if simulation.loading() {
         return;
     }
@@ -1061,9 +1093,7 @@ fn monitor(
             control.requested = true;
             control.requested_frame = Some(control.frames);
             if options.capture.is_some() {
-                commands
-                    .spawn(Screenshot::primary_window())
-                    .observe(capture_complete);
+                commands.spawn(capture_source()).observe(capture_complete);
             }
             if options.monitor_capture.is_some() {
                 commands
@@ -1085,7 +1115,7 @@ fn monitor(
                 // Scene time per burst frame, so live bursts can be compared over time.
                 info!("capture burst {index} scene_time {:.4}", game.scene.time);
                 commands
-                    .spawn(Screenshot::primary_window())
+                    .spawn(capture_source())
                     .observe(bevy::render::view::screenshot::save_to_disk(burst));
             }
         }
