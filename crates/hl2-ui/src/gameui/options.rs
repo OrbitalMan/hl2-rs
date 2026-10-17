@@ -591,6 +591,24 @@ impl OptionsDialog {
         self.modes = modes;
     }
 
+    /// Restores a placement saved in the settings.
+    pub fn set_placement(&mut self, placement: Placement) {
+        self.placement = placement;
+    }
+
+    /// When the dialog opens on `canvas`: a saved placement that no longer lies fully on it (the
+    /// resolution changed) goes back to the centered default.
+    pub fn reset_placement_if_off_screen(&mut self, canvas: Vec2) {
+        self.placement.reset_if_off_screen(&main_frame(canvas));
+    }
+
+    /// The dialog's placement to save, once after a drag or reset changed it.
+    pub fn take_placement_changed(&mut self) -> Option<Option<crate::config::DialogPlacement>> {
+        self.placement
+            .take_changed()
+            .then(|| self.placement.saved())
+    }
+
     /// Opens the dialog over `config`, keeping the last selected tab.
     pub fn open(&mut self, config: Config) {
         self.draft = Draft::new(config.clone());

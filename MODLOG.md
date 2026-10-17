@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: saved Options and console placements, reset when off screen
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `config::DialogPlacements` (`dialogs.options`, `dialogs.console`: offset and, for the console, size), sanitized in `migrate`; `placement::Placement::{from_saved, saved, take_changed, reset_if_off_screen}`; `Console::load` restores both, opening the Options dialog or the console resets a placement whose saved frame no longer lies fully on the canvas, and `Console::input` saves a changed placement at the end of the frame; settings coming back from the Options dialog keep the current placements. Details in `docs/gameui.md` section 12.
+
+**Why:** owner request: persist the Options dialog position and the console position and size, resetting them when they would open off screen after a resolution change.
+
+**Tested how:** unit tests (save/restore round trip, an undone drag saves nothing, off-screen reset for a moved and for an oversized frame, console restart restore and small-window reset saved, corrupt settings dropped); workspace tests, strict clippy, Windows check, fmt; packaged two-run check (`runtime_placement_persist.sh`): run 1 drags the Options dialog and saves its offset, run 2 opens it at the saved place.
+
+**Result:** both dialogs come back where they were left; a saved placement that no longer fits opens at the default.
+
+**Still broken or not tested:** not tried by hand across a real resolution change; sub-dialogs and message boxes are not saved (they open centered by design).
+
+**Next:** owner check.
+
 ## 2026-10-17 GameUI: drag dialogs by the caption, resize the console by its corners
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

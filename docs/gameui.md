@@ -779,8 +779,13 @@ confirmation box, the console dialog and the quit / main-menu box; cursor shapes
   exceeds the canvas, so window and display-mode changes never leave a dialog out of reach. A
   gesture ends whenever the button is up (also after a release outside the window), Escape
   during a gesture undoes it, and a double click on the caption restores the default position
-  and size (HL2-RS additions). The Options dialog and the console keep their placement while the
-  game runs (not saved); sub-dialogs and message boxes open centered.
+  and size (HL2-RS additions). Sub-dialogs and message boxes open centered.
+- Persistence: the Options dialog's position and the console's position and size are saved in
+  the settings file (`dialogs`: offset from the default position and size, layout units) when a
+  drag, resize or reset ends, and restored at startup. When a dialog opens and its saved frame
+  no longer lies fully on the canvas (the resolution or display mode changed), it opens at its
+  default place instead and that reset is saved; non-finite or non-positive saved values are
+  dropped on load.
 - Cost: resizing rewraps the history every frame; measured 2.6 ms per frame (release) with a
   full 1024-line buffer of 220-character lines and the console font, 0.2 ms without a resize.
   ASCII advances of the console font are cached per size.

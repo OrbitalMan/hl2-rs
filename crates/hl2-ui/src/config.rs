@@ -486,6 +486,25 @@ impl Default for KeyboardSettings {
     }
 }
 
+/// Where a dialog was dragged (and, if sizeable, resized): an offset from its default position
+/// and its size, in layout units.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DialogPlacement {
+    pub offset: [f32; 2],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<[f32; 2]>,
+}
+
+/// Saved dialog placements; unset dialogs open at their default place.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DialogPlacements {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<DialogPlacement>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub console: Option<DialogPlacement>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -495,6 +514,7 @@ pub struct Config {
     pub mouse: MouseSettings,
     pub keyboard: KeyboardSettings,
     pub gamepad: GamepadSettings,
+    pub dialogs: DialogPlacements,
     pub keys: BTreeMap<String, String>,
 }
 
@@ -538,6 +558,7 @@ impl Default for Config {
             mouse: MouseSettings::default(),
             keyboard: KeyboardSettings::default(),
             gamepad: GamepadSettings::default(),
+            dialogs: DialogPlacements::default(),
             keys,
         }
     }
@@ -652,6 +673,17 @@ impl Config {
                 self.gameplay.background_game = Some(game.to_owned());
             }
         }
+        // A hand-edited or corrupt placement opens the dialog at its default place instead.
+        for placement in [&mut self.dialogs.options, &mut self.dialogs.console] {
+            let valid = placement.is_some_and(|p| {
+                p.offset.iter().all(|v| v.is_finite())
+                    && p.size
+                        .is_none_or(|s| s.iter().all(|v| v.is_finite() && *v > 0.))
+            });
+            if !valid {
+                *placement = None;
+            }
+        }
         if self.audio.language.trim().is_empty() {
             self.audio.language = defaults.audio.language;
         }
@@ -746,6 +778,15 @@ mod tests {
         assert_eq!(config.mouse.accel_exponent, 1.0);
         assert_eq!(config.audio.language, "english");
         assert_eq!(config.gamepad.sensitivity_scale, 2.0);
+        let corrupt = Config::from_json(
+            br#"{ "dialogs": { "options": { "offset": [1.0, 2.0] }, "console": { "offset": [0.0, 0.0], "size": [-5.0, 100.0] } } }"#,
+        )
+        .unwrap();
+        assert_eq!(corrupt.dialogs.options.map(|p| p.offset), Some([1., 2.]));
+        assert_eq!(
+            corrupt.dialogs.console, None,
+            "a non-positive size is dropped"
+        );
         assert_eq!(config.gamepad.weapon_selection, WeaponSelectionStyle::Cross);
         assert!(Config::from_json(b"not json").is_none());
         assert_eq!(HdrMode::from_level(1), Some(HdrMode::Bloom));

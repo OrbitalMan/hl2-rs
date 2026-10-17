@@ -592,6 +592,11 @@ impl Console {
             console.log(format!("GameUI resource unavailable: {file}"));
         }
         console.set_resources(gameui);
+        // Saved dialog placements (checked against the canvas when each dialog opens).
+        console.console_placement = Placement::from_saved(console.config.dialogs.console);
+        console
+            .options
+            .set_placement(Placement::from_saved(console.config.dialogs.options));
         if let Some(bytes) = menu_bytes {
             console.menu_metrics = CellMetrics::from_bytes(&bytes).unwrap_or_default();
         }
@@ -1204,6 +1209,8 @@ impl Console {
             self.previous = self.mode;
             self.clear_menu_hover();
             self.mode = Mode::Console;
+            let frame = self.console_frame();
+            self.console_placement.reset_if_off_screen(&frame);
         }
     }
     pub fn log(&mut self, text: impl Into<String>) {
@@ -1613,6 +1620,13 @@ impl Console {
     }
     /// Called before gameplay input collection. Opening characters are drained by the host.
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
+        let effects = self.input_frame(input);
+        // A drag, resize or reset that ended this frame is saved at once.
+        self.save_placements();
+        effects
+    }
+
+    fn input_frame(&mut self, input: &Input) -> Vec<Effect> {
         // Held keys repeat for every layer below, except into a key binding being captured.
         let mut repeated = input.clone();
         if self.mode == Mode::Options && self.options.capturing_key() {
@@ -1688,6 +1702,9 @@ impl Console {
         let Some(config) = config else {
             return effects;
         };
+        // The dialog's copy of the settings predates any drag made while it was open.
+        let mut config = config;
+        config.dialogs = self.config.dialogs;
         if let Err(error) = config.save() {
             self.log(format!("Could not save settings: {error}"));
         }
@@ -1997,6 +2014,25 @@ impl Console {
         DialogLayout::at(frame.scale, placed.origin, placed.size)
     }
 
+    /// Saves the Options dialog's and the console's placement once a drag, resize or reset changed
+    /// it (the previous input frame's).
+    fn save_placements(&mut self) {
+        let mut changed = false;
+        if let Some(options) = self.options.take_placement_changed() {
+            self.config.dialogs.options = options;
+            changed = true;
+        }
+        if self.console_placement.take_changed() {
+            self.config.dialogs.console = self.console_placement.saved();
+            changed = true;
+        }
+        if changed {
+            if let Err(error) = self.config.save() {
+                self.log(format!("Could not save settings: {error}"));
+            }
+        }
+    }
+
     /// The quit / main-menu box's frame (centered, moveable, no close button).
     fn quit_frame(&self, quit: &MessageBox) -> placement::Frame {
         let scale = Painter::scale_for(self.canvas.height());
@@ -2275,6 +2311,8 @@ impl Console {
                 self.mode = Mode::Options;
                 self.reset_menu_interaction();
                 self.options.open(self.config.clone());
+                self.options
+                    .reset_placement_if_off_screen(vec2(self.canvas.width(), self.canvas.height()));
             }
             MenuOutcome::ConfirmQuit => {
                 self.reset_menu_interaction();
@@ -3461,6 +3499,40 @@ mod tests {
         assert!(small.origin.x >= 0. && small.origin.y >= 0.);
         assert!(small.origin.x + small.size.x * small.scale <= 640.);
         assert!(small.origin.y + small.size.y * small.scale <= 480.);
+    }
+
+    #[test]
+    fn console_placement_survives_a_restart_and_resets_off_screen() {
+        let mut console = Console::default();
+        console.canvas.resize(1920., 1080.);
+        console.toggle();
+        let start = console.dialog_layout();
+        let caption = start.origin + vec2(100., 10.) * start.scale;
+        pointer_drag(&mut console, caption, caption - vec2(600., 0.));
+        let corner = console.dialog_layout().origin + console.dialog_layout().size * start.scale
+            - Vec2::splat(4.);
+        pointer_drag(&mut console, corner, corner - vec2(100., 100.));
+        console.input(&Input::default());
+        let saved = console
+            .config
+            .dialogs
+            .console
+            .expect("saved after the gesture");
+        let placed = console.dialog_layout();
+        // The next run restores it.
+        let mut next = Console::default();
+        next.canvas.resize(1920., 1080.);
+        next.console_placement = Placement::from_saved(Some(saved));
+        next.toggle();
+        assert_eq!(next.dialog_layout(), placed);
+        // Opened on a smaller window where it would not fit as saved: the default frame.
+        let mut small = Console::default();
+        small.canvas.resize(800., 600.);
+        small.console_placement = Placement::from_saved(Some(saved));
+        small.toggle();
+        assert_eq!(small.dialog_layout(), DialogLayout::new(vec2(800., 600.)));
+        small.input(&Input::default());
+        assert_eq!(small.config.dialogs.console, None, "the reset is saved");
     }
 
     #[test]

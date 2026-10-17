@@ -15,6 +15,7 @@
 //! size.
 
 use crate::canvas::Rect;
+use crate::config::DialogPlacement;
 use glam::{vec2, Vec2};
 
 /// `Frame::GetCaptionHeight`.
@@ -113,6 +114,8 @@ pub struct Placement {
     active: Option<Active>,
     /// Time of the last caption press, for double clicks.
     last_caption_press: Option<f64>,
+    /// A gesture or reset changed the placement since [`Self::take_changed`].
+    changed: bool,
 }
 
 /// A frame's clamped top-left (canvas pixels, whole) and size (layout units).
@@ -126,6 +129,52 @@ impl Placement {
     /// Back to the default position and size.
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// A placement saved in the settings.
+    pub fn from_saved(saved: Option<DialogPlacement>) -> Self {
+        let Some(saved) = saved else {
+            return Self::default();
+        };
+        Self {
+            offset: Vec2::from_array(saved.offset),
+            size: saved.size.map(Vec2::from_array),
+            ..Self::default()
+        }
+    }
+
+    /// The placement to save; `None` at the default place.
+    pub fn saved(&self) -> Option<DialogPlacement> {
+        (self.offset != Vec2::ZERO || self.size.is_some()).then(|| DialogPlacement {
+            offset: (self.offset * 100.).round().to_array().map(|v| v / 100.),
+            size: self.size.map(|s| s.round().to_array()),
+        })
+    }
+
+    /// Whether a gesture or reset changed the placement since the last call (its owner saves
+    /// it then).
+    pub fn take_changed(&mut self) -> bool {
+        std::mem::take(&mut self.changed)
+    }
+
+    /// When a dialog opens: a placement whose frame, as stored, no longer lies fully on the
+    /// canvas (the resolution or display mode changed since it was saved) goes back to the
+    /// default instead of being pushed to an edge. Returns whether it was reset.
+    pub fn reset_if_off_screen(&mut self, frame: &Frame) -> bool {
+        let size = match frame.min_size {
+            Some(min) => self.size.unwrap_or(frame.size).max(min),
+            None => frame.size,
+        };
+        let origin = frame.origin + self.offset * frame.scale;
+        let end = origin + size * frame.scale;
+        // Half a pixel for the whole-pixel rounding of placed frames.
+        let fits = origin.cmpge(Vec2::splat(-0.5)).all() && end.cmple(frame.canvas + 0.5).all();
+        if fits || self.saved().is_none() {
+            return false;
+        }
+        self.reset();
+        self.changed = true;
+        true
     }
 
     /// Whether a drag or resize owns the pointer.
@@ -232,6 +281,8 @@ impl Placement {
                 // The release (or a release the window missed) ends the gesture; this frame's
                 // pointer is still the gesture's.
                 self.active = None;
+                self.changed |=
+                    self.offset != active.offset || self.size.unwrap_or(Vec2::ZERO) != active.size;
                 return true;
             }
             if let Some(pointer) = pointer {
@@ -258,6 +309,7 @@ impl Placement {
             self.last_caption_press = time;
             if double {
                 self.reset();
+                self.changed = true;
                 return true;
             }
         }
@@ -471,6 +523,43 @@ mod tests {
             Placement::default().hint(&fixed, Some(br)),
             CursorHint::Arrow
         );
+    }
+
+    #[test]
+    fn placements_save_restore_and_reset_when_off_screen() {
+        let f = frame(true);
+        let mut p = Placement::default();
+        assert_eq!(p.saved(), None, "the default place is not saved");
+        p.input(&f, Some(vec2(320., 160.)), true, true, None);
+        p.input(&f, Some(vec2(100., 100.)), false, true, None);
+        assert!(p.cancel());
+        assert!(!p.take_changed(), "an undone drag changes nothing");
+        drag(&mut p, &f, vec2(320., 160.), vec2(220., 160.));
+        assert!(p.take_changed());
+        assert!(!p.take_changed(), "reported once");
+        let saved = p.saved().unwrap();
+        assert_eq!(saved.offset, [-50., 0.]);
+        let mut restored = Placement::from_saved(Some(saved));
+        assert_eq!(restored.place(&f), p.place(&f));
+        assert!(
+            !restored.reset_if_off_screen(&f),
+            "still fully on the canvas"
+        );
+        // A smaller resolution would put the frame partly off screen: back to the default.
+        let small = Frame {
+            canvas: vec2(450., 300.),
+            origin: vec2(25., 50.),
+            ..f
+        };
+        assert!(restored.reset_if_off_screen(&small));
+        assert_eq!(restored.saved(), None);
+        assert!(restored.take_changed(), "the reset is saved too");
+        // A resized frame larger than the new canvas resets as well.
+        let mut big = Placement::from_saved(Some(DialogPlacement {
+            offset: [0., 0.],
+            size: Some([450., 240.]),
+        }));
+        assert!(big.reset_if_off_screen(&f));
     }
 
     #[test]
