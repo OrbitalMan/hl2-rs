@@ -208,6 +208,9 @@ impl FontFace {
     pub(crate) fn face(&self) -> Arc<fontdue::Font> {
         self.font.clone()
     }
+    pub(crate) fn advance_em(&self, c: char, em: f32) -> f32 {
+        self.font.metrics(c, em).advance_width
+    }
     pub(crate) fn width_em(&self, value: &str, em: f32) -> f32 {
         value
             .chars()

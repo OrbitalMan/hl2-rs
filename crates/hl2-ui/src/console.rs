@@ -18,12 +18,13 @@ use crate::{
     canvas::*,
     hud::{FontFace, TextOutline},
 };
-use dialog::{DialogLayout, Selection};
+use dialog::{wrap, DialogLayout, Selection};
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::ops::Range;
+use std::sync::{Arc, Mutex};
 
 /// Output lines kept for scrollback.
 const OUTPUT_LINES: usize = 1024;
@@ -160,7 +161,11 @@ pub struct Console {
     con_filter_text: String,
     /// `con_timestamp`: prefix lines with the time they were printed.
     con_timestamp: bool,
+    /// History rows scrolled back from the newest.
     scroll: usize,
+    /// Each output line's wrapped rows by line number, rebuilt when its shown text or the
+    /// history width changes.
+    wrapped: Mutex<HashMap<u64, Wrapped>>,
     font: Option<FontFace>,
     menu_font: Option<FontFace>,
     menu_metrics: CellMetrics,
@@ -471,6 +476,7 @@ impl Default for Console {
             con_filter_text: String::new(),
             con_timestamp: false,
             scroll: 0,
+            wrapped: Mutex::default(),
             font: None,
             menu_font: None,
             menu_metrics: CellMetrics::default(),
@@ -1193,11 +1199,14 @@ impl Console {
             self.output.pop_front();
             self.output_start += 1;
         }
-        // Scrolled back, the view stays on its lines while new ones arrive below.
-        if self.scroll > 0
-            && (self.con_filter != 1 || self.output.back().is_some_and(|l| self.filter_match(l)))
+        // Scrolled back, the view stays on its rows while new ones arrive below.
+        let number = self.output_start + self.output.len() as u64 - 1;
+        if let Some(line) = self
+            .output
+            .back()
+            .filter(|line| self.scroll > 0 && (self.con_filter != 1 || self.filter_match(line)))
         {
-            self.scroll += 1;
+            self.scroll += self.line_rows(number, line, self.wrap_metrics()).len();
         }
     }
     pub fn submit(&mut self, line: &str) -> Vec<Effect> {
@@ -1779,7 +1788,7 @@ impl Console {
         }
         if input.pressed(Key::Home) {
             if input.ctrl {
-                self.scroll = self.output.len();
+                self.scroll = self.history_rows().len();
             } else {
                 self.editor.home();
             }
@@ -1792,7 +1801,7 @@ impl Console {
             }
         }
         if input.pressed(Key::PageUp) {
-            self.scroll = (self.scroll + 10).min(self.output.len().saturating_sub(1));
+            self.scroll = (self.scroll + 10).min(self.history_rows().len().saturating_sub(1));
         }
         if input.pressed(Key::PageDown) {
             self.scroll = self.scroll.saturating_sub(10);
@@ -1830,7 +1839,8 @@ impl Console {
         let view = HistoryView::new(&layout);
         let point = input.pointer.map(|p| layout.local(p));
         let down = input.click || input.held;
-        let total = self.shown_lines().len();
+        let rows: Vec<u64> = self.history_rows().iter().map(|row| row.number).collect();
+        let total = rows.len();
         let max_scroll = total.saturating_sub(view.rows);
         let mode = ScrollMode::platform();
         let steps = self.history_wheel.steps(input.wheel, mode) as i64
@@ -1891,11 +1901,10 @@ impl Console {
         if let Some(p) = point {
             if input.click && hovered.is_none() && view.text.contains(p) {
                 self.selecting = true;
-                self.selection = view.row_at(p.y, false).and_then(|row| {
-                    self.shown_lines()
-                        .get(first + row)
-                        .map(|(number, _)| Selection::at(*number))
-                });
+                self.selection = view
+                    .row_at(p.y, false)
+                    .and_then(|row| rows.get(first + row))
+                    .map(|number| Selection::at(*number));
             } else if self.selecting && down {
                 // Dragging past the top or bottom scrolls the history a row per frame.
                 if p.y < view.text.y {
@@ -1904,9 +1913,8 @@ impl Console {
                     self.scroll = self.scroll.saturating_sub(1);
                 }
                 let first = total - view.rows.min(total) - self.scroll;
-                let lines = self.shown_lines();
                 let row = view.row_at(p.y, true).unwrap_or(0);
-                let line = lines.get(first + row).or(lines.last()).map(|(n, _)| *n);
+                let line = rows.get(first + row).or(rows.last()).copied();
                 if let (Some(selection), Some(line)) = (self.selection.as_mut(), line) {
                     selection.head = line;
                 }
@@ -1950,7 +1958,69 @@ impl Console {
         }
     }
 
-    /// The selected history rows as text, one line each.
+    /// The history's text width and font size in canvas pixels, which rows wrap to.
+    fn wrap_metrics(&self) -> WrapMetrics {
+        let layout = self.dialog_layout();
+        WrapMetrics {
+            width: layout.canvas(HistoryView::new(&layout).text).w,
+            em: (CONSOLE_TEXT * layout.scale) as u16 as f32,
+            font: self.mono.is_some(),
+        }
+    }
+
+    /// Advance of `c` in the console font. A tab is eight spaces wide (SDK `RichText`); without
+    /// the font every character takes a nominal monospace advance.
+    fn console_advance(&self, c: char, em: f32) -> f32 {
+        if c == '\t' {
+            return TAB_SPACES as f32 * self.console_advance(' ', em);
+        }
+        self.mono
+            .as_ref()
+            .map_or(em * NOMINAL_ADVANCE, |font| font.advance_em(c, em))
+    }
+
+    /// The rows line `number` wraps to, as byte ranges into its [`Self::shown_text`].
+    fn line_rows(&self, number: u64, line: &Line, metrics: WrapMetrics) -> Vec<Range<usize>> {
+        let stamp = self.con_timestamp.then_some(line.time);
+        let mut cache = self.wrapped.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = cache.get(&number).filter(|entry| {
+            entry.metrics == metrics && entry.stamp == stamp && entry.text == line.text
+        }) {
+            return entry.rows.clone();
+        }
+        let rows = wrap(&self.shown_text(line), metrics.width, |c| {
+            self.console_advance(c, metrics.em)
+        });
+        if cache.len() >= 2 * OUTPUT_LINES {
+            cache.retain(|n, _| *n >= self.output_start);
+        }
+        cache.insert(
+            number,
+            Wrapped {
+                metrics,
+                stamp,
+                text: line.text.clone(),
+                rows: rows.clone(),
+            },
+        );
+        rows
+    }
+
+    /// The history's rows: the shown lines wrapped to its width at word boundaries, a row for
+    /// each line of text that holds newlines.
+    fn history_rows(&self) -> Vec<HistoryRow<'_>> {
+        let metrics = self.wrap_metrics();
+        self.shown_lines()
+            .into_iter()
+            .flat_map(|(number, line)| {
+                self.line_rows(number, line, metrics)
+                    .into_iter()
+                    .map(move |text| HistoryRow { number, line, text })
+            })
+            .collect()
+    }
+
+    /// The selected history lines as text, one line each and whole however they wrap.
     fn selected_text(&self) -> Option<String> {
         let selection = self.selection?;
         let lines: Vec<String> = self
@@ -2443,6 +2513,36 @@ const CONSOLE_DESCENT: f32 = 3.;
 /// Space between the history's border and its rows.
 const HISTORY_PAD: f32 = 3.;
 
+/// A tab is this many spaces wide in the history.
+const TAB_SPACES: usize = 8;
+/// Advance per EM of every character when the console font is missing.
+const NOMINAL_ADVANCE: f32 = 0.6;
+
+/// What history rows wrap to: the text width and font size in canvas pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WrapMetrics {
+    width: f32,
+    em: f32,
+    /// Whether the console font measures characters (else they take a nominal advance).
+    font: bool,
+}
+
+/// A line's wrapped rows and what they were wrapped from.
+struct Wrapped {
+    metrics: WrapMetrics,
+    /// The time shown before the text (`con_timestamp`).
+    stamp: Option<f64>,
+    text: String,
+    rows: Vec<Range<usize>>,
+}
+
+/// A history row: a byte range of a shown line's [`Console::shown_text`].
+struct HistoryRow<'a> {
+    number: u64,
+    line: &'a Line,
+    text: Range<usize>,
+}
+
 /// The history's text rows and scroll bar inside its border, in frame layout units.
 struct HistoryView {
     text: Rect,
@@ -2537,44 +2637,36 @@ impl Console {
             Some(self.console_button_state(ConsoleButton::Close)),
         );
 
-        // History (`RichText`, `DepressedButtonBorder`): filtered, scrolled, one color per
-        // level, selected rows highlighted.
+        // History (`RichText`, `DepressedButtonBorder`): filtered, wrapped, scrolled, one color
+        // per level, the rows of selected lines highlighted.
         painter.fill(layout.history, self.style.entry);
         painter.sunken(layout.history);
         let view = HistoryView::new(&layout);
-        let lines = self.shown_lines();
-        let rows = view.rows.min(lines.len());
-        let scroll = self.scroll.min(lines.len() - rows);
-        let first = lines.len() - rows - scroll;
+        let history = self.history_rows();
+        let rows = view.rows.min(history.len());
+        let scroll = self.scroll.min(history.len() - rows);
+        let first = history.len() - rows - scroll;
         let area = layout.canvas(view.text);
         let row = CONSOLE_ROW * scale;
-        for (i, (number, line)) in lines[first..first + rows].iter().enumerate() {
+        for (i, shown) in history[first..first + rows].iter().enumerate() {
             let top = area.y + i as f32 * row;
-            let selected = self.selection.is_some_and(|s| s.contains(*number));
+            let selected = self.selection.is_some_and(|s| s.contains(shown.number));
             let color = if selected {
                 self.canvas
                     .rectangle(area.x, top, area.w, row, self.style.selected_bg);
                 self.style.selected_text
             } else {
-                self.line_color(line)
+                self.line_color(shown.line)
             };
-            // Long lines are clipped to the history; copying takes them whole.
-            let shown = self.shown_text(line);
-            let mut clipped = String::new();
-            for c in shown.chars() {
-                clipped.push(c);
-                if self.console_text_width(&clipped, scale) > area.w {
-                    clipped.pop();
-                    break;
-                }
-            }
-            text(&clipped, area.x, top + row - CONSOLE_DESCENT * scale, color);
+            let content = self.shown_text(shown.line)[shown.text.clone()]
+                .replace('\t', &" ".repeat(TAB_SPACES));
+            text(&content, area.x, top + row - CONSOLE_DESCENT * scale, color);
         }
         painter.scroll_bar(
             view.bar,
             first,
             view.rows,
-            lines.len(),
+            history.len(),
             self.history_bar.pressed(),
         );
 
@@ -3263,6 +3355,177 @@ mod tests {
         assert_eq!(console.scroll, rows + 1);
         keys(&mut console, &[Key::Enter]);
         assert_eq!(console.scroll, 0, "submitting returns to the newest output");
+    }
+
+    /// Characters that fit a history row with the nominal advance of a console without fonts.
+    fn row_chars(console: &Console) -> usize {
+        let metrics = console.wrap_metrics();
+        (metrics.width / (metrics.em * NOMINAL_ADVANCE)) as usize
+    }
+    /// The top history row shown: its line number and text.
+    fn top_row(console: &Console) -> (u64, String) {
+        let rows = HistoryView::new(&console.dialog_layout()).rows;
+        let history = console.history_rows();
+        let shown = rows.min(history.len());
+        let first = history.len() - shown - console.scroll.min(history.len() - shown);
+        let row = &history[first];
+        (
+            row.number,
+            console.shown_text(row.line)[row.text.clone()].to_owned(),
+        )
+    }
+    /// Words long enough to wrap to at least `rows` history rows.
+    fn long_line(console: &Console, rows: usize) -> String {
+        let words = rows * row_chars(console) / 5 + 1;
+        (0..words)
+            .map(|i| format!("w{i:03}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn long_lines_wrap_to_rows_and_newlines_start_rows() {
+        let mut console = Console::default();
+        console.canvas.resize(1024., 768.);
+        console.toggle();
+        console.output.clear();
+        console.output_start = 0;
+        let long = long_line(&console, 3);
+        let warning =
+            "Encountered an error in command `<Enable the debug feature to see the name>`:\n\
+                       Entity despawned: The entity with ID 2224v1 is invalid";
+        console.log("first");
+        console.log(long.clone());
+        console.print(Level::Warning, warning);
+        console.log("last");
+        let metrics = console.wrap_metrics();
+        let history = console.history_rows();
+        let rows: Vec<(u64, String)> = history
+            .iter()
+            .map(|row| {
+                (
+                    row.number,
+                    console.shown_text(row.line)[row.text.clone()].to_owned(),
+                )
+            })
+            .collect();
+        let long_rows = rows.iter().filter(|(n, _)| *n == 1).count();
+        assert!(long_rows >= 3, "{rows:?}");
+        // Rows fit the history and break between words; joined they give the line back.
+        for (_, text) in &rows {
+            let width: f32 = text
+                .chars()
+                .map(|c| console.console_advance(c, metrics.em))
+                .sum();
+            assert!(width <= metrics.width, "{text}");
+            assert!(!text.starts_with(' ') && !text.ends_with(' '), "{text:?}");
+        }
+        let joined: Vec<&str> = rows[1..=long_rows]
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect();
+        assert_eq!(joined.join(" "), long);
+        // The warning wraps, and its newline starts a row.
+        let warning_rows: Vec<&str> = rows
+            .iter()
+            .filter(|(n, _)| *n == 2)
+            .map(|(_, t)| t.as_str())
+            .collect();
+        let count = warning_rows.len();
+        assert!(count >= 3, "{warning_rows:?}");
+        assert!(warning_rows[count - 2].ends_with("name>`:"));
+        assert_eq!(
+            warning_rows[count - 1],
+            "Entity despawned: The entity with ID 2224v1 is invalid"
+        );
+        assert_eq!(rows.last().unwrap(), &(3, "last".to_owned()));
+
+        // Selecting any row of a wrapped line copies the whole line as printed.
+        drag(&mut console, 2, 2);
+        assert_eq!(copy(&mut console).as_deref(), Some(long.as_str()));
+        let warning_row = long_rows + count;
+        drag(&mut console, warning_row, warning_row);
+        assert_eq!(copy(&mut console).as_deref(), Some(warning));
+        drag(&mut console, rows.len() - 1, 0);
+        assert_eq!(
+            copy(&mut console),
+            Some(format!("first\n{long}\n{warning}\nlast"))
+        );
+
+        // Timestamps wrap with the text and copy with it.
+        console.submit("con_timestamp 1");
+        assert_eq!(top_row(&console), (0, "[   0.00] first".to_owned()));
+        drag(&mut console, 2, 2);
+        let copied = copy(&mut console).unwrap();
+        assert!(
+            copied.starts_with("[   0.00] w000") && copied.ends_with(&long),
+            "{copied}"
+        );
+        // The filter keeps or hides whole lines, all their rows.
+        // (Set directly: the echo of a `con_filter_text` command contains its text.)
+        console.submit("con_timestamp 0; con_filter_enable 1");
+        console.con_filter_text = "despawned".into();
+        let shown: Vec<u64> = console.history_rows().iter().map(|r| r.number).collect();
+        assert_eq!(shown, vec![2; count]);
+    }
+
+    #[test]
+    fn scrolled_back_wrapped_history_stays_put_and_reaches_the_top() {
+        let mut console = Console::default();
+        console.canvas.resize(1024., 768.);
+        console.toggle();
+        console.output.clear();
+        console.output_start = 0;
+        let long = long_line(&console, 2);
+        for i in 0..100 {
+            console.log(if i % 2 == 0 {
+                long.clone()
+            } else {
+                format!("line {i}")
+            });
+        }
+        console.input(&Input {
+            wheel: 2.,
+            ..Default::default()
+        });
+        let top = top_row(&console);
+        let scroll = console.scroll;
+        assert!(scroll > 0);
+        // New output below adds its rows to the scroll, so the shown rows stay.
+        console.log(long.clone());
+        let added = console
+            .history_rows()
+            .iter()
+            .filter(|r| r.number == 100)
+            .count();
+        assert!(added >= 2);
+        assert_eq!(console.scroll, scroll + added);
+        console.log("one\ntwo");
+        assert_eq!(console.scroll, scroll + added + 2);
+        assert_eq!(top_row(&console), top);
+        console.input(&Input::default());
+        assert_eq!(top_row(&console), top, "the next frame keeps the view");
+
+        // Ctrl+Home goes to the first row of the first line, Page Up stops there too.
+        console.input(&Input {
+            keys: [Key::Home].into(),
+            ctrl: true,
+            ..Default::default()
+        });
+        console.input(&Input::default());
+        assert_eq!(top_row(&console).0, 0);
+        assert!(long.starts_with(&top_row(&console).1));
+        keys(&mut console, &[Key::PageDown]);
+        keys(&mut console, &[Key::PageUp]);
+        keys(&mut console, &[Key::PageUp]);
+        assert_eq!(top_row(&console).0, 0);
+        assert!(long.starts_with(&top_row(&console).1));
+        console.input(&Input {
+            keys: [Key::End].into(),
+            ctrl: true,
+            ..Default::default()
+        });
+        assert_eq!(console.scroll, 0);
     }
 
     #[test]

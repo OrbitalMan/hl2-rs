@@ -701,14 +701,24 @@ White, `RichText.*`) and Source's own console variables. Code:
   as its widest row (at least the entry), up to the canvas edge. `console::dialog::DialogLayout` is the one geometry for drawing and hit tests.
 - History (`RichText`, `DepressedButtonBorder` = sunken `Border.Dark`/`Border.Bright`): background
   `RichText.BgColor`, a vertical scroll bar (arrows, track paging, nob dragging) and the wheel
-  (`widgets::ScrollMode`: 3 rows a notch on Windows/Linux, accumulated row steps on macOS). Scrolled back, the view stays on its lines while output arrives; Enter and
-  Ctrl+End return to the newest. The entry is a sunken `TextEntry` with no prompt (the `] line`
+  (`widgets::ScrollMode`: 3 rows a notch on Windows/Linux, accumulated row steps on macOS). Scrolled back, the view stays on its rows while output arrives; Enter and
+  Ctrl+End return to the newest, Ctrl+Home goes to the first row.
+- Wrapping (SDK `RichText::RecalculateLineBreaks`, `console::dialog::wrap`): a line wider than the
+  history breaks before the word that overflows (words are separated by whitespace only), or
+  at the overflowing character when that word started the row; a newline in a line (mirrored
+  engine warnings carry them) starts a row (`\r\n` counts once, one trailing newline adds no
+  row); rows continuing a wrapped line skip their leading spaces, rows after a newline keep them;
+  a tab is 8 spaces wide. Rows are measured in canvas pixels with the console font at the
+  drawn size, re-wrapped when the history width or a line's shown text changes (each line's rows
+  are cached by line number). Lines stay whole in the buffer: scrolling, the scroll bar and the
+  wheel count rows, while filtering, coloring, selection and copy work on lines. The entry is a sunken `TextEntry` with no prompt (the `] line`
   echo stays in the history); it scrolls to keep the cursor in view.
-- Selection: dragging over the history selects whole rows (`RichText.SelectedBgColor` Orange,
-  `RichText.SelectedTextColor` Black), scrolling a row per frame past the top or bottom. Cmd+C
-  on macOS, Ctrl+C elsewhere copies the selected rows as the history shows them (the current
-  `con_filter_enable` filter and `con_timestamp` prefix, full lines rather than the clipped
-  view) through Bevy `Clipboard`. Rows are numbered since start, so the selection stays on its
+- Selection: dragging over the history selects the lines under the rows it covers, every row
+  of a wrapped line highlighted (`RichText.SelectedBgColor` Orange, `RichText.SelectedTextColor`
+  Black), scrolling a row per frame past the top or bottom. Cmd+C on macOS, Ctrl+C elsewhere
+  copies the selected lines as printed, one per line with their own newlines kept and no wrap
+  breaks, with the current `con_filter_enable` filter and `con_timestamp` prefix, through Bevy
+  `Clipboard`. Rows are numbered since start, so the selection stays on its
   lines while new output arrives and old lines leave the 1024-line buffer; Ctrl+L clears it.
 
 - Commands and cvars are described once (`console::commands::COMMANDS`: name, help as

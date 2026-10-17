@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 Console: wrapped history rows
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `console::dialog::wrap` (pure, SDK `RichText::RecalculateLineBreaks` rules: break before the overflowing word, or inside a word that started its row; newlines start rows; continuation rows skip leading spaces; at least one character a row). `Console::history_rows` turns the shown lines into rows at the history width (console font at the drawn size, a nominal monospace advance without the font, tabs 8 spaces), caching each line's rows by line number. Scrolling, the wheel, the scroll bar, Page Up, Ctrl+Home, drag selection and drawing count rows; `print` adds a scrolled-back line's row count so the view stays put. Selection and copy stay per line, so copying any row of a wrapped line gives the whole line as printed. `FontFace::advance_em`. `docs/gameui.md` section 11.
+
+**Why:** owner report: long console lines (mirrored engine warnings with embedded newlines) were cut off at the history's edge instead of wrapped.
+
+**Tested how:** unit tests for `wrap` (word breaks, exact fit, long words, multi-byte characters, `\n`/`\r\n`/`\r`, empty and trailing newlines, advances) and for the console (rows fit and rejoin to the line, a warning's newline starts a row, row selection copies whole lines including their newlines, timestamps wrap with the text, the filter keeps whole lines, scrolled-back view stays on its rows while wrapped output arrives, Ctrl+Home and Page Up reach the first row); hl2-ui and hl2-bevy tests, strict clippy `--workspace --all-targets -D warnings`, fmt, Windows check; packaged replay `options_capture_console_wrap.json` (`runtime_options_capture.sh`, 1024x768): `artifacts/options_capture_console_wrap.png` shows an echoed warning-like line wrapped at word boundaries, its embedded newline starting a row, and an over-long unknown command broken inside the word.
+
+**Result:** long and multi-line output wraps inside the history instead of being cut off.
+
+**Still broken or not tested:** drag-select and clipboard copy of wrapped rows not exercised by hand; not compared with a retail console capture; character-level selection inside a row is still not ported.
+
+**Next:** owner check.
+
 ## 2026-10-17 Closed captions: caption radius for sound scripts, captions-off run
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
