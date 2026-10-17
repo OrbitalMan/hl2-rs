@@ -106,6 +106,15 @@ pub struct Theme {
     /// glyph color (`ScrollBarButton.FgColor`).
     pub scrollbar_nob: Color,
     pub scrollbar_arrow: Color,
+    /// Dashed box inside a push button, check box or radio button with keyboard focus
+    /// (`Button.FocusBorderColor`, SDK `Button::DrawFocusBorder`).
+    pub focus_border: Color,
+    /// Selected text of a focused text entry or combo box (`TextEntry.SelectedBgColor` /
+    /// `TextEntry.SelectedTextColor`) and the focused entry's inner edge
+    /// (`TextEntry.FocusEdgeColor`).
+    pub entry_selected_bg: Color,
+    pub entry_selected_text: Color,
+    pub entry_focus_edge: Color,
 }
 
 impl Default for Theme {
@@ -153,6 +162,10 @@ impl Default for Theme {
             selection_text_dim: rgba(0, 0, 0, 255),
             scrollbar_nob: rgba(0, 0, 0, 0),
             scrollbar_arrow: rgba(255, 255, 255, 255),
+            focus_border: rgba(0, 0, 0, 255),
+            entry_selected_bg: rgba(255, 155, 0, 255),
+            entry_selected_text: rgba(0, 0, 0, 255),
+            entry_focus_edge: rgba(0, 0, 0, 196),
         }
     }
 }
@@ -170,7 +183,7 @@ impl Theme {
     /// Reads the scheme colors, keeping defaults for anything missing.
     pub fn from_scheme(root: &Entry) -> Self {
         let mut theme = Self::default();
-        let fields: [(&str, &mut Color); 37] = [
+        let fields: [(&str, &mut Color); 41] = [
             ("Frame.BgColor", &mut theme.frame_bg),
             ("FrameTitleBar.TextColor", &mut theme.title_text),
             ("Label.TextBrightColor", &mut theme.text),
@@ -220,6 +233,13 @@ impl Theme {
                 "SectionedListPanel.OutOfFocusSelectedTextColor",
                 &mut theme.selection_text_dim,
             ),
+            ("Button.FocusBorderColor", &mut theme.focus_border),
+            ("TextEntry.SelectedBgColor", &mut theme.entry_selected_bg),
+            (
+                "TextEntry.SelectedTextColor",
+                &mut theme.entry_selected_text,
+            ),
+            ("TextEntry.FocusEdgeColor", &mut theme.entry_focus_edge),
         ];
         for (name, slot) in fields {
             if let Some(color) = scheme_color(root, name) {
@@ -855,6 +875,78 @@ impl ButtonState {
     }
 }
 
+/// Keyboard focus moves of a dialog layer (SDK `FocusNavGroup::RequestFocusNext/Prev`): Tab and
+/// Shift+Tab step through `order` (the layer's controls by `tabPosition`) and wrap at both ends.
+/// With nothing focused, Tab starts at the first stop and Shift+Tab at the last.
+pub fn focus_step<T: Copy + PartialEq>(
+    current: Option<T>,
+    order: &[T],
+    forward: bool,
+) -> Option<T> {
+    let len = order.len();
+    if len == 0 {
+        return None;
+    }
+    let index = match current.and_then(|c| order.iter().position(|t| *t == c)) {
+        Some(i) if forward => (i + 1) % len,
+        Some(i) => (i + len - 1) % len,
+        None if forward => 0,
+        None => len - 1,
+    };
+    Some(order[index])
+}
+
+/// Space/Enter on a focused button (SDK `Button::OnKeyCodePressed/Released`): the press shows
+/// the button depressed and the release activates it. A press that is not held (a scripted
+/// one-frame key) activates at once; focus moving away drops the press.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KeyPress<T: Copy + PartialEq> {
+    down: Option<(crate::console::Key, T)>,
+}
+
+impl<T: Copy + PartialEq> Default for KeyPress<T> {
+    fn default() -> Self {
+        Self { down: None }
+    }
+}
+
+impl<T: Copy + PartialEq> KeyPress<T> {
+    /// The control shown depressed by a held Space or Enter.
+    pub fn pressed(&self) -> Option<T> {
+        self.down.map(|(_, target)| target)
+    }
+
+    pub fn reset(&mut self) {
+        self.down = None;
+    }
+
+    /// Feeds one frame. `pressed` is a Space or Enter press on `focused` this frame, `held`
+    /// whether a key is still down. Returns the control to activate.
+    pub fn update(
+        &mut self,
+        focused: Option<T>,
+        pressed: Option<crate::console::Key>,
+        held: impl Fn(crate::console::Key) -> bool,
+    ) -> Option<T> {
+        if let Some((key, target)) = self.down {
+            if focused != Some(target) {
+                self.down = None;
+            } else if !held(key) {
+                self.down = None;
+                return Some(target);
+            }
+            return None;
+        }
+        let (key, target) = (pressed?, focused?);
+        if held(key) {
+            self.down = Some((key, target));
+            None
+        } else {
+            Some(target)
+        }
+    }
+}
+
 /// Tracks pointer button press, hold, cancellation and release activation for interactive controls.
 ///
 /// Two drag-off policies exist. The default ([`ButtonTracker::new`]) cancels the press when the
@@ -1213,9 +1305,38 @@ impl Painter<'_> {
     }
 
     /// `TextEntry`: sunken field; `caret` draws the insertion bar after the text.
+    /// SDK `Button::DrawFocusBorder`: a 1-pixel dashed box from (3, 3) to (wide - 4, tall - 2)
+    /// inside a control with keyboard focus.
+    pub fn focus_box(&self, rect: Rect) {
+        let (x0, y0) = (rect.x + 3., rect.y + 3.);
+        let (x1, y1) = (rect.x + rect.w - 4., rect.y + rect.h - 2.);
+        let color = self.theme.focus_border;
+        let mut x = x0;
+        while x < x1 {
+            self.fill(Rect::new(x, y0, 1., 1.), color);
+            self.fill(Rect::new(x, y1 - 1., 1., 1.), color);
+            x += 2.;
+        }
+        let mut y = y0;
+        while y < y1 {
+            self.fill(Rect::new(x0, y, 1., 1.), color);
+            self.fill(Rect::new(x1 - 1., y, 1., 1.), color);
+            y += 2.;
+        }
+    }
+
     pub fn text_entry(&self, rect: Rect, text: &str, enabled: bool, caret: bool) {
         self.fill(rect, self.theme.entry_bg);
         self.sunken(rect);
+        if caret {
+            // SDK `TextEntry`: a focused entry draws its focus edge inside the border.
+            let edge = self.theme.entry_focus_edge;
+            self.border(
+                Rect::new(rect.x + 1., rect.y + 1., rect.w - 2., rect.h - 2.),
+                edge,
+                edge,
+            );
+        }
         let inner = Rect::new(rect.x + 3., rect.y, rect.w - 6., rect.h);
         let color = if enabled {
             self.theme.text
@@ -1229,9 +1350,28 @@ impl Painter<'_> {
         }
     }
 
-    /// `ComboBox`: a text entry with a drop-down arrow button on its right edge.
-    pub fn combo(&self, rect: Rect, text: &str, enabled: bool, armed: bool) {
-        self.text_entry(rect, text, enabled, false);
+    /// `ComboBox`: a text entry with a drop-down arrow button on its right edge. A focused combo
+    /// shows its text selected (SDK `ComboBox` selects all its text on focus).
+    pub fn combo(&self, rect: Rect, text: &str, enabled: bool, armed: bool, focused: bool) {
+        if focused && enabled {
+            self.fill(rect, self.theme.entry_bg);
+            self.sunken(rect);
+            let inner = Rect::new(rect.x + 3., rect.y, rect.w - 6., rect.h);
+            let width = self.text_width(text, false);
+            self.fill(
+                Rect::new(inner.x - 1., rect.y + 3., width + 2., rect.h - 6.),
+                self.theme.entry_selected_bg,
+            );
+            self.text_in(
+                text,
+                inner,
+                Align::Left,
+                self.theme.entry_selected_text,
+                false,
+            );
+        } else {
+            self.text_entry(rect, text, enabled, false);
+        }
         let button = Rect::new(
             rect.x + rect.w - rect.h,
             rect.y + 1.,

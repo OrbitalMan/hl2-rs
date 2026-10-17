@@ -13,6 +13,13 @@
 //! open combo list owns the pointer, the layer below is occluded: it arms, presses, activates and
 //! shows tooltips for nothing, and its button tracker only follows the physical button state.
 //! An open combo list is a [`widgets::PopupList`]: clicks anywhere close or select through it.
+//!
+//! Keyboard focus follows the SDK `FocusNavGroup` / `PropertyDialog` rules: Tab and Shift+Tab step
+//! through the active tab, the page's controls by their layout `tabPosition` and OK / Cancel /
+//! Apply, and wrap; a click focuses the control it presses. Space or Enter presses the focused
+//! button, check box or radio button (activation on release), arrows move a radio group, step a
+//! slider or a combo box and switch tabs; Alt+Up/Down opens a combo box's list; Enter elsewhere
+//! presses the default button (docs/gameui.md section 6c).
 
 use super::{
     display::DisplayModes,
@@ -241,6 +248,17 @@ impl Widget<'_> {
             )
     }
 
+    /// Pressed by Space or Enter while focused (SDK `Button` and its check / radio subclasses).
+    fn pushable(&self) -> bool {
+        matches!(
+            self.binding,
+            Some(Binding::Toggle(_) | Binding::Skill(_) | Binding::Command(_))
+        ) || matches!(
+            self.control.kind,
+            ControlKind::Button | ControlKind::UrlButton
+        )
+    }
+
     /// The area that reacts to the pointer: sliders only along their track band.
     fn hit_rect(&self) -> Rect {
         match self.control.kind {
@@ -303,6 +321,11 @@ pub struct OptionsDialog {
     /// Where the open sub-dialog and the confirmation box were dragged (centered on opening).
     sub_placement: Placement,
     confirm_placement: Placement,
+    /// Keyboard focus of the top layer (page or sub-dialog); none until Tab or a click.
+    focus: Option<Target>,
+    /// The page's focus while a sub-dialog is open, given back when it closes.
+    sub_return_focus: Option<Target>,
+    key_press: widgets::KeyPress<Target>,
 }
 
 impl Default for OptionsDialog {
@@ -338,6 +361,9 @@ impl Default for OptionsDialog {
             placement: Placement::default(),
             sub_placement: Placement::default(),
             confirm_placement: Placement::default(),
+            focus: None,
+            sub_return_focus: None,
+            key_press: widgets::KeyPress::default(),
         }
     }
 }
@@ -558,6 +584,29 @@ fn layout_widgets<'a>(
     widgets
 }
 
+/// The Tab order of a layer's controls (SDK `FocusNavGroup`): enabled interactive controls by
+/// their layout `tabPosition`, ties in layout order. A radio group is one stop, its selected
+/// button (SDK `RadioButton` keeps the tab position only while selected). Controls the layout
+/// leaves out of the Tab order (`tabPosition` 0, which retail Tab skips) follow, in layout order,
+/// so every control can be reached from the keyboard (owner request, 2026-10-17).
+fn control_order(list: &[Widget], config: &Config) -> Vec<Target> {
+    let mut stops: Vec<(bool, u32, usize)> = list
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.enabled && w.interactive())
+        .filter(|(_, w)| match w.binding {
+            Some(Binding::Skill(skill)) => skill == config.gameplay.skill,
+            _ => true,
+        })
+        .map(|(i, w)| (w.control.tab_position == 0, w.control.tab_position, i))
+        .collect();
+    stops.sort_unstable();
+    stops
+        .into_iter()
+        .map(|(_, _, i)| Target::Control(i))
+        .collect()
+}
+
 /// Visible key-list rows below the header.
 /// The key list's scroll bar: along the right edge, below the header.
 fn key_bar_rect(list: Rect) -> Rect {
@@ -627,6 +676,9 @@ impl OptionsDialog {
         self.placement.end();
         self.sub_placement.reset();
         self.confirm_placement.reset();
+        self.focus = None;
+        self.sub_return_focus = None;
+        self.key_press.reset();
     }
 
     pub fn tab(&self) -> Tab {
@@ -679,8 +731,11 @@ impl OptionsDialog {
         self.drag = None;
         self.last_armed = None;
         self.active_tooltip = None;
-        if self.keys.capture.take().is_some()
-            || self.combo.take().is_some()
+        if self.keys.capture.take().is_some() {
+            self.focus = None;
+            return true;
+        }
+        if self.combo.take().is_some()
             || self.editing.take().is_some()
             || self.confirm.take().is_some()
         {
@@ -764,6 +819,10 @@ impl OptionsDialog {
         self.combo = None;
         self.active_tooltip = None;
         self.tracker.reset();
+        self.key_press.reset();
+        if matches!(self.focus, Some(Target::Control(_))) {
+            self.focus = None;
+        }
         self.tab = tab;
     }
 
@@ -797,14 +856,9 @@ impl OptionsDialog {
             }
             let pointer = local(self.confirm_placement.place(&frame).origin);
             let down = input.click || input.held;
-            let outcome = confirm.input(
-                &layout,
-                pointer,
-                down,
-                input.click,
-                input.released,
-                input.pressed(Key::Enter),
-            );
+            let outcome = confirm
+                .input(&layout, pointer, down, input.click, input.released, false)
+                .or_else(|| confirm.keys(input));
             self.sounds.extend(confirm.take_sounds());
             match outcome {
                 Some(true) => self.use_default_keys(),
@@ -857,6 +911,8 @@ impl OptionsDialog {
                     keys::assign(&mut self.draft.config.keys, command, key);
                 }
                 self.keys.capture = None;
+                // The key list leaves its edit mode with the keyboard (arrows and Enter go to it).
+                self.focus = None;
             }
             return OptionsOutcome::None;
         }
@@ -981,6 +1037,11 @@ impl OptionsDialog {
             if !keep_editing {
                 self.commit_entry();
             }
+            // SDK `Button::OnMousePressed` (and the other controls) request focus on a press.
+            if let Some(target) = armed_target.filter(|t| *t != Target::Close) {
+                self.focus = Some(target);
+                self.key_press.reset();
+            }
         }
         let is_slider = matches!(
             hit,
@@ -1029,8 +1090,25 @@ impl OptionsDialog {
             (Target::Close, widgets::close_button_rect(DIALOG_SIZE)),
         ]);
         let was_editing = self.editing.is_some();
+        let active = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
+        let mut order = vec![Target::Tab(active)];
+        order.extend(control_order(&list, &self.draft.config));
+        order.extend([Target::Ok, Target::Cancel]);
+        if self.changed() {
+            order.push(Target::Apply);
+        }
+        if let Some(outcome) = self.focus_keys(&list, &order, input) {
+            return outcome;
+        }
+        let key_list_focus = match self.focus {
+            None => true,
+            Some(Target::Control(i)) => {
+                matches!(list.get(i).and_then(|w| w.binding), Some(Binding::KeyList))
+            }
+            Some(_) => false,
+        };
         if self.tab == Tab::Keyboard {
-            self.key_list_keys(input, &list);
+            self.key_list_keys(input, &list, key_list_focus);
             if self.key_list_bar(input, pointer, &list) {
                 return OptionsOutcome::None;
             }
@@ -1056,6 +1134,7 @@ impl OptionsDialog {
             Some(Target::Tab(i)) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 self.select_tab(Tab::ALL[i]);
+                self.focus = Some(Target::Tab(i));
             }
             Some(Target::Ok) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
@@ -1079,7 +1158,8 @@ impl OptionsDialog {
             }
             None => {}
         }
-        let keyboard_selection = self.tab == Tab::Keyboard && self.keys.selected.is_some();
+        let keyboard_selection =
+            self.tab == Tab::Keyboard && key_list_focus && self.keys.selected.is_some();
         if input.pressed(Key::Enter) && !was_editing && !keyboard_selection && clicked.is_none() {
             self.sounds.push("ui/buttonclickrelease.wav".to_string());
             return self.ok();
@@ -1132,21 +1212,7 @@ impl OptionsDialog {
                     });
                 }
             }
-            Some(Binding::Choice(choice)) => {
-                let env = Env {
-                    localization: &self.res.localization,
-                    languages: &self.res.spoken_languages,
-                    modes: &self.modes,
-                };
-                let items = choice.items(&env, &self.draft);
-                let selected = choice.selected(&env, &self.draft);
-                let popup = widgets::PopupList::below(widget.rect, items.len(), selected);
-                self.combo = Some(OpenCombo {
-                    choice,
-                    items,
-                    popup,
-                });
-            }
+            Some(Binding::Choice(choice)) => self.open_combo(choice, widget.rect),
             Some(Binding::Command(command)) => return self.command(command),
             Some(Binding::KeyList) => self.key_list_click(widget.rect, pointer),
             Some(Binding::ValueLabel(_)) | None => {}
@@ -1154,10 +1220,212 @@ impl OptionsDialog {
         OptionsOutcome::None
     }
 
+    fn open_combo(&mut self, choice: Choice, rect: Rect) {
+        let env = Env {
+            localization: &self.res.localization,
+            languages: &self.res.spoken_languages,
+            modes: &self.modes,
+        };
+        let items = choice.items(&env, &self.draft);
+        let selected = choice.selected(&env, &self.draft);
+        let popup = widgets::PopupList::below(rect, items.len(), selected);
+        self.combo = Some(OpenCombo {
+            choice,
+            items,
+            popup,
+        });
+    }
+
+    /// Keyboard focus keys of the top layer, before the pointer: Tab / Shift+Tab, the focused
+    /// control's own keys and Space / Enter on a focused button. Returns an outcome when the
+    /// frame's keys were consumed. Text being edited keeps every key but Tab.
+    fn focus_keys(
+        &mut self,
+        list: &[Widget],
+        order: &[Target],
+        input: &Input,
+    ) -> Option<OptionsOutcome> {
+        if self.focus.is_some_and(|f| !order.contains(&f)) {
+            self.focus = None;
+            self.key_press.reset();
+        }
+        if input.pressed(Key::Tab) {
+            self.commit_entry();
+            self.key_press.reset();
+            self.focus = widgets::focus_step(self.focus, order, !input.shift);
+            if let Some(Target::Control(i)) = self.focus {
+                if let Some(
+                    widget @ Widget {
+                        binding: Some(Binding::Entry(_)),
+                        ..
+                    },
+                ) = list.get(i)
+                {
+                    // A focused text entry edits at once (SDK `TextEntry` takes the caret).
+                    let _ = self.activate(widget, widget.rect.center());
+                }
+            }
+            return Some(OptionsOutcome::None);
+        }
+        if self.editing.is_some() {
+            return None;
+        }
+        let focus = self.focus?;
+        let widget = match focus {
+            Target::Control(i) => list.get(i),
+            _ => None,
+        };
+        // SDK `RadioButton`: arrows select the previous / next button of the group (wrapping).
+        if let Some(Binding::Skill(skill)) = widget.and_then(|w| w.binding) {
+            let step = if input.pressed(Key::Up) || input.pressed(Key::Left) {
+                -1
+            } else if input.pressed(Key::Down) || input.pressed(Key::Right) {
+                1
+            } else {
+                0
+            };
+            if step != 0 {
+                let mut group: Vec<(u32, usize, u8)> = list
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, w)| match w.binding {
+                        Some(Binding::Skill(s)) if w.enabled => {
+                            Some((w.control.sub_tab_position, i, s))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                group.sort_unstable();
+                if let Some(at) = group.iter().position(|(_, _, s)| *s == skill) {
+                    let next = (at as i32 + step).rem_euclid(group.len() as i32) as usize;
+                    let (_, index, next_skill) = group[next];
+                    self.draft.config.gameplay.skill = next_skill;
+                    self.focus = Some(Target::Control(index));
+                }
+                return Some(OptionsOutcome::None);
+            }
+        }
+        let pushable = match focus {
+            Target::Ok | Target::Cancel | Target::Apply => true,
+            Target::Control(_) => widget.is_some_and(|w| w.pushable()),
+            Target::Tab(_) | Target::Close => false,
+        };
+        if pushable || self.key_press.pressed().is_some() {
+            let key = [Key::Space, Key::Enter]
+                .into_iter()
+                .find(|k| pushable && input.pressed(*k));
+            let pressed = self.key_press.pressed();
+            if let Some(target) = self
+                .key_press
+                .update(Some(focus), key, |k| input.held_keys.contains(&k))
+            {
+                self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                return Some(match target {
+                    Target::Ok => self.ok(),
+                    Target::Cancel => OptionsOutcome::Close(None),
+                    Target::Apply => self.apply(),
+                    Target::Control(i) => match list.get(i) {
+                        Some(widget) => self.activate(widget, widget.rect.center()),
+                        None => OptionsOutcome::None,
+                    },
+                    Target::Tab(_) | Target::Close => OptionsOutcome::None,
+                });
+            }
+            if key.is_some() || pressed.is_some() {
+                return Some(OptionsOutcome::None);
+            }
+        }
+        match (focus, widget.and_then(|w| w.binding)) {
+            // SDK `PropertySheet`: Left / Right on the focused tab switch pages.
+            (Target::Tab(i), _) => {
+                let next = if input.pressed(Key::Left) {
+                    i.checked_sub(1)
+                } else if input.pressed(Key::Right) {
+                    Some(i + 1).filter(|n| *n < Tab::ALL.len())
+                } else {
+                    return None;
+                };
+                if let Some(next) = next {
+                    self.sounds.push("ui/buttonclickrelease.wav".to_string());
+                    self.select_tab(Tab::ALL[next]);
+                    self.focus = Some(Target::Tab(next));
+                }
+                Some(OptionsOutcome::None)
+            }
+            // SDK `Slider`: Left / Down and Right / Up step by one unit, Page Down / Up by a tick.
+            // The retail slider classes are not in the SDK; a unit is a hundredth of the range
+            // and a tick a tenth (unverified).
+            (Target::Control(_), Some(Binding::Slider(value))) => {
+                let step = if input.pressed(Key::Left) || input.pressed(Key::Down) {
+                    -0.01
+                } else if input.pressed(Key::Right) || input.pressed(Key::Up) {
+                    0.01
+                } else if input.pressed(Key::PageDown) {
+                    -0.1
+                } else if input.pressed(Key::PageUp) {
+                    0.1
+                } else {
+                    return None;
+                };
+                let range = value.slider_range(widget?.control.range);
+                let fraction = range.fraction(value.get(&self.draft.config));
+                value.set(
+                    &mut self.draft.config,
+                    range.value((fraction + step).clamp(0., 1.)),
+                );
+                Some(OptionsOutcome::None)
+            }
+            // SDK `ComboBox`: Up / Down (and Home / End) select without opening the list;
+            // Alt+Up / Down opens it; Enter is taken by the combo box.
+            (Target::Control(_), Some(Binding::Choice(choice))) => {
+                let vertical = input.pressed(Key::Up) || input.pressed(Key::Down);
+                if input.alt && vertical {
+                    self.open_combo(choice, widget?.rect);
+                    return Some(OptionsOutcome::None);
+                }
+                let env = Env {
+                    localization: &self.res.localization,
+                    languages: &self.res.spoken_languages,
+                    modes: &self.modes,
+                };
+                let count = choice.items(&env, &self.draft).len();
+                let selected = choice.selected(&env, &self.draft);
+                let last = count.checked_sub(1)?;
+                let next = if input.pressed(Key::Up) {
+                    selected.map_or(0, |s| s.saturating_sub(1))
+                } else if input.pressed(Key::Down) {
+                    selected.map_or(0, |s| (s + 1).min(last))
+                } else if input.pressed(Key::Home) {
+                    0
+                } else if input.pressed(Key::End) {
+                    last
+                } else if input.pressed(Key::Enter) {
+                    return Some(OptionsOutcome::None);
+                } else {
+                    return None;
+                };
+                if Some(next) != selected {
+                    choice.select(&env, &mut self.draft, next);
+                }
+                Some(OptionsOutcome::None)
+            }
+            _ => None,
+        }
+    }
+
     fn open_sub(&mut self, sub: Sub) {
         self.sub_placement.reset();
         self.sub_saved = Some(self.draft.config.clone());
         self.sub = Some(sub);
+        self.sub_return_focus = self.focus.take();
+        self.key_press.reset();
+    }
+
+    /// Focus goes back to the page control that opened the closed sub-dialog.
+    fn close_sub(&mut self) {
+        self.sub = None;
+        self.focus = self.sub_return_focus.take();
+        self.key_press.reset();
     }
 
     /// Cancel, Escape or the title-bar close of a sub-dialog: its edits are dropped.
@@ -1165,7 +1433,7 @@ impl OptionsDialog {
         if let Some(saved) = self.sub_saved.take() {
             self.draft.config = saved;
         }
-        self.sub = None;
+        self.close_sub();
     }
 
     /// OK of a sub-dialog: its edits stay in the draft, and an advanced dialog applies its own
@@ -1173,9 +1441,10 @@ impl OptionsDialog {
     fn ok_sub(&mut self) -> OptionsOutcome {
         self.commit_entry();
         self.sub_saved = None;
-        let Some(sub) = self.sub.take() else {
+        let Some(sub) = self.sub else {
             return OptionsOutcome::None;
         };
+        self.close_sub();
         let mut applied = self.applied.clone();
         if sub.apply_on_ok(&self.draft.config, &mut applied) && applied != self.applied {
             self.applied = applied;
@@ -1289,8 +1558,9 @@ impl OptionsDialog {
             .map(|w| w.rect)
     }
 
-    /// Keyboard navigation, wheel scrolling and Enter-to-edit on the Keyboard page.
-    fn key_list_keys(&mut self, input: &Input, list: &[Widget]) {
+    /// Wheel scrolling and, while the list has keyboard focus (or nothing has), arrow navigation
+    /// and Enter-to-edit on the Keyboard page.
+    fn key_list_keys(&mut self, input: &Input, list: &[Widget], focused: bool) {
         let Some(rect) = Self::key_list_rect(list) else {
             return;
         };
@@ -1301,6 +1571,9 @@ impl OptionsDialog {
             let rows = self.scroll_mode.rows_per_step(WHEEL_ROWS) as i32;
             let steps = self.key_wheel.steps(input.wheel, self.scroll_mode) * rows;
             self.keys.first = (self.keys.first as i32 - steps).clamp(0, max_first as i32) as usize;
+        }
+        if !focused {
+            return;
         }
         let step = if input.pressed(Key::Up) {
             -1
@@ -1376,6 +1649,10 @@ impl OptionsDialog {
         let area = Rect::new(0., 0., size.x, size.y);
         let list = layout_widgets(&res, sub.panel(), area, &self.draft, &self.applied);
         let was_editing = self.editing.is_some();
+        let order = control_order(&list, &self.draft.config);
+        if let Some(outcome) = self.focus_keys(&list, &order, input) {
+            return outcome;
+        }
         let close_rect = widgets::close_button_rect(size);
         let extra = [(Target::Close, close_rect)];
         match self.track(&list, &extra, pointer, input) {
@@ -1572,7 +1849,8 @@ impl OptionsDialog {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 self.command(Command::SubCancel);
             }
-            _ if input.pressed(Key::Enter) => {
+            // The close button is the dialog's only control and has focus (Space or Enter).
+            _ if input.pressed(Key::Enter) || input.pressed(Key::Space) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
                 self.command(Command::SubCancel);
             }
@@ -1605,9 +1883,11 @@ impl OptionsDialog {
         let state = |target: Target| {
             (
                 !modal && self.armed == Some(target),
-                !modal && self.pressed == Some(target),
+                !modal
+                    && (self.pressed == Some(target) || self.key_press.pressed() == Some(target)),
             )
         };
+        let focused = |target: Target| !modal && self.focus == Some(target);
         let (close_armed, close_pressed) = state(Target::Close);
         p.frame_with_close(
             DIALOG_SIZE,
@@ -1645,23 +1925,33 @@ impl OptionsDialog {
             let list = layout_widgets(&self.res, panel, page, &self.draft, &self.applied);
             for (i, widget) in list.iter().enumerate() {
                 let (armed, pressed) = state(Target::Control(i));
-                self.draw_widget(&p, widget, &env, armed, pressed);
+                let focus = focused(Target::Control(i));
+                self.draw_widget(&p, widget, &env, (armed, pressed), (focus, focus));
             }
         }
+        // The focused footer button is the default one (SDK `FocusNavGroup`), else OK.
+        let default = match self.focus {
+            Some(target @ (Target::Ok | Target::Cancel | Target::Apply)) => target,
+            _ => Target::Ok,
+        };
         let labels = ["#GameUI_OK", "#GameUI_Cancel", "#GameUI_Apply"];
         let targets = [Target::Ok, Target::Cancel, Target::Apply];
         for ((rect, label), target) in button_rects().into_iter().zip(labels).zip(targets) {
             let (armed, pressed) = state(target);
+            let enabled = target != Target::Apply || self.changed();
             p.button(
                 rect,
                 &loc.text(label),
                 ButtonState {
                     armed,
                     pressed,
-                    enabled: target != Target::Apply || self.changed(),
-                    default: target == Target::Ok,
+                    enabled,
+                    default: target == default,
                 },
             );
+            if enabled && focused(target) {
+                p.focus_box(rect);
+            }
         }
         if self.sub.is_none() {
             self.draw_combo(&p);
@@ -1693,11 +1983,21 @@ impl OptionsDialog {
             } else {
                 let area = Rect::new(0., 0., size.x, size.y);
                 let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
+                // A focused push button is the sub-dialog's default; else its OK.
+                let button_focused = matches!(
+                    self.focus,
+                    Some(Target::Control(i)) if list.get(i).is_some_and(|w| w.control.kind == ControlKind::Button)
+                );
                 for (i, widget) in list.iter().enumerate() {
                     let target = Some(Target::Control(i));
                     let armed = !sub_modal && self.armed == target;
-                    let pressed = !sub_modal && self.pressed == target;
-                    self.draw_widget(&sp, widget, &env, armed, pressed);
+                    let pressed = !sub_modal
+                        && (self.pressed == target || self.key_press.pressed() == target);
+                    let focus = !sub_modal && self.focus == target;
+                    let default = focus
+                        || (!button_focused
+                            && widget.binding == Some(Binding::Command(Command::SubOk)));
+                    self.draw_widget(&sp, widget, &env, (armed, pressed), (focus, default));
                 }
                 self.draw_combo(&sp);
             }
@@ -1740,7 +2040,38 @@ impl OptionsDialog {
         }
     }
 
-    fn draw_widget(&self, p: &Painter, w: &Widget, env: &Env, armed: bool, pressed: bool) {
+    /// Draws a control; `focus` is (keyboard focus, default button).
+    fn draw_widget(
+        &self,
+        p: &Painter,
+        w: &Widget,
+        env: &Env,
+        (armed, pressed): (bool, bool),
+        (focused, default): (bool, bool),
+    ) {
+        self.draw_control(p, w, env, (armed, pressed), (focused, default));
+        if focused
+            && w.enabled
+            && matches!(
+                w.control.kind,
+                ControlKind::Button
+                    | ControlKind::UrlButton
+                    | ControlKind::CheckButton
+                    | ControlKind::RadioButton
+            )
+        {
+            p.focus_box(w.rect);
+        }
+    }
+
+    fn draw_control(
+        &self,
+        p: &Painter,
+        w: &Widget,
+        env: &Env,
+        (armed, pressed): (bool, bool),
+        (focused, default): (bool, bool),
+    ) {
         let loc = &self.res.localization;
         let c = w.control;
         let label = loc.localize(&c.label);
@@ -1801,9 +2132,10 @@ impl OptionsDialog {
                     &choice.text(env, &self.draft),
                     w.enabled,
                     armed || open,
+                    focused,
                 )
             }
-            (ControlKind::ComboBox, _) => p.combo(w.rect, "", false, false),
+            (ControlKind::ComboBox, _) => p.combo(w.rect, "", false, false, false),
             (ControlKind::Slider, binding) => {
                 let fraction = match binding {
                     Some(Binding::Slider(value)) => {
@@ -1831,14 +2163,14 @@ impl OptionsDialog {
                 };
                 p.text_entry(w.rect, &text, w.enabled, caret)
             }
-            (ControlKind::Button, binding) => p.button(
+            (ControlKind::Button, _) => p.button(
                 w.rect,
                 &label,
                 ButtonState {
                     armed,
                     pressed,
                     enabled: w.enabled,
-                    default: binding == Some(Binding::Command(Command::SubOk)),
+                    default,
                 },
             ),
             (ControlKind::UrlButton, _) => p.url(
@@ -2045,6 +2377,14 @@ mod tests {
         "ClearKeyButton" { "ControlName" "Button" "fieldName" "ClearKeyButton" "xpos" "384"
             "ypos" "276" "wide" "105" "tall" "24" "labelText" "#GameUI_ClearKey" }
     }"##;
+    const DIFFICULTY: &str = r##""Resource/OptionsSubDifficulty.res" {
+        "Skill1Radio" { "ControlName" "RadioButton" "fieldName" "Skill1Radio" "xpos" "20"
+            "ypos" "20" "wide" "200" "tall" "24" "tabPosition" "1" "SubTabPosition" "1" }
+        "Skill2Radio" { "ControlName" "RadioButton" "fieldName" "Skill2Radio" "xpos" "20"
+            "ypos" "60" "wide" "200" "tall" "24" "tabPosition" "1" "SubTabPosition" "2" }
+        "Skill3Radio" { "ControlName" "RadioButton" "fieldName" "Skill3Radio" "xpos" "20"
+            "ypos" "100" "wide" "200" "tall" "24" "tabPosition" "1" "SubTabPosition" "3" }
+    }"##;
     const KEYBOARD_ADVANCED: &str = r##""resource/OptionsSubKeyboardAdvancedDlg.res" {
         "FastSwitchCheck" { "ControlName" "CheckButton" "fieldName" "FastSwitchCheck" "xpos" "20"
             "ypos" "38" "wide" "240" "tall" "24" "labelText" "#GameUI_FastSwitchCheck" }
@@ -2119,6 +2459,7 @@ mod tests {
             ("optionssubkeyboardadvanceddlg", KEYBOARD_ADVANCED),
             ("optionssubvideoadvanceddlg", VIDEO_ADVANCED),
             ("optionssubgamepad", GAMEPAD),
+            ("optionssubdifficulty", DIFFICULTY),
         ] {
             layouts.insert(name.to_owned(), Layout::parse(text.as_bytes()).unwrap());
         }
@@ -2223,6 +2564,260 @@ mod tests {
             let rect = button_rects()[index];
             self.click(DIALOG + vec2(rect.x + 4., rect.y + 4.))
         }
+    }
+
+    /// Name of the focused control of `panel` (page layers).
+    fn focused_name(h: &Harness, panel: Panel) -> Option<String> {
+        let list = layout_widgets(
+            &h.dialog.res,
+            panel,
+            page_rect(),
+            &h.dialog.draft,
+            &h.dialog.applied,
+        );
+        match h.dialog.focus {
+            Some(Target::Control(i)) => list.get(i).map(|w| w.control.name.clone()),
+            _ => None,
+        }
+    }
+
+    fn shift_tab(h: &mut Harness) -> OptionsOutcome {
+        h.frame(Input {
+            keys: [Key::Tab].into(),
+            shift: true,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn tab_order_follows_tab_positions_then_unpositioned_controls() {
+        let layout = Layout::parse(
+            br##""Resource/OptionsSubMouse.res" {
+            "MouseFilter" { "ControlName" "CCvarToggleCheckButton" "fieldName" "MouseFilter"
+                "xpos" "0" "ypos" "0" "wide" "50" "tall" "20" "tabPosition" "2" }
+            "Slider" { "ControlName" "CCvarSlider" "fieldName" "Slider" "xpos" "0" "ypos" "30"
+                "wide" "50" "tall" "20" "tabPosition" "0" }
+            "ReverseMouse" { "ControlName" "CCvarNegateCheckButton" "fieldName" "ReverseMouse"
+                "xpos" "0" "ypos" "60" "wide" "50" "tall" "20" "tabPosition" "1" }
+            "Autoaim" { "ControlName" "ComboBox" "fieldName" "Autoaim" "xpos" "0" "ypos" "90"
+                "wide" "50" "tall" "20" "tabPosition" "4" "enabled" "0" }
+            "SensitivityLabel" { "ControlName" "TextEntry" "fieldName" "SensitivityLabel"
+                "xpos" "0" "ypos" "120" "wide" "50" "tall" "20" "tabPosition" "3" }
+        }"##,
+        )
+        .unwrap();
+        let mut res = (*resources()).clone();
+        res.layouts.insert("optionssubmouse".into(), layout);
+        let draft = Draft::new(Config::default());
+        let list = layout_widgets(&res, Panel::Mouse, page_rect(), &draft, &draft.config);
+        let names: Vec<&str> = control_order(&list, &draft.config)
+            .into_iter()
+            .map(|t| match t {
+                Target::Control(i) => list[i].control.name.as_str(),
+                _ => unreachable!(),
+            })
+            .collect();
+        // By tabPosition; the disabled combo is skipped; tabPosition 0 comes last.
+        assert_eq!(
+            names,
+            ["ReverseMouse", "MouseFilter", "SensitivityLabel", "Slider"]
+        );
+    }
+
+    #[test]
+    fn tab_walks_the_tab_strip_page_and_footer_and_keys_drive_each_control() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        assert_eq!(
+            h.dialog.focus,
+            Some(Target::Tab(2)),
+            "a click focuses the tab"
+        );
+        h.key(Key::Tab);
+        assert_eq!(
+            focused_name(&h, Panel::Mouse).as_deref(),
+            Some("ReverseMouse")
+        );
+        let invert = h.dialog.draft().mouse.invert;
+        h.key(Key::Space);
+        assert_ne!(
+            h.dialog.draft().mouse.invert,
+            invert,
+            "Space toggles a check box"
+        );
+        h.key(Key::Enter);
+        assert_eq!(
+            h.dialog.draft().mouse.invert,
+            invert,
+            "so does Enter, not OK"
+        );
+
+        h.key(Key::Tab);
+        assert_eq!(focused_name(&h, Panel::Mouse).as_deref(), Some("Slider"));
+        let sensitivity = h.dialog.draft().mouse.sensitivity;
+        h.key(Key::Right);
+        assert!(
+            h.dialog.draft().mouse.sensitivity > sensitivity,
+            "Right raises a slider"
+        );
+        h.key(Key::PageDown);
+        assert!(
+            h.dialog.draft().mouse.sensitivity < sensitivity,
+            "Page Down lowers a tick"
+        );
+
+        h.key(Key::Tab);
+        assert_eq!(
+            focused_name(&h, Panel::Mouse).as_deref(),
+            Some("SensitivityLabel")
+        );
+        assert!(h.dialog.editing.is_some(), "a focused text entry edits");
+        h.frame(Input {
+            keys: [Key::Backspace].into(),
+            ..Default::default()
+        });
+        h.key(Key::Tab);
+        assert!(h.dialog.editing.is_none(), "Tab commits the entry");
+        assert_eq!(focused_name(&h, Panel::Mouse).as_deref(), Some("Autoaim"));
+        let aim = h.dialog.draft().mouse.aim_assist;
+        h.key(Key::Down);
+        assert_ne!(
+            h.dialog.draft().mouse.aim_assist,
+            aim,
+            "Down selects the next item"
+        );
+        assert!(h.dialog.combo.is_none(), "without opening the list");
+        h.frame(Input {
+            keys: [Key::Down].into(),
+            alt: true,
+            ..Default::default()
+        });
+        assert!(h.dialog.combo.is_some(), "Alt+Down opens it");
+        h.key(Key::Enter);
+        assert!(h.dialog.combo.is_none());
+
+        h.key(Key::Tab);
+        assert_eq!(
+            focused_name(&h, Panel::Mouse).as_deref(),
+            Some("MouseFilter")
+        );
+        h.key(Key::Tab);
+        assert_eq!(h.dialog.focus, Some(Target::Ok));
+        h.key(Key::Tab);
+        assert_eq!(h.dialog.focus, Some(Target::Cancel));
+        h.key(Key::Tab);
+        assert_eq!(
+            h.dialog.focus,
+            Some(Target::Apply),
+            "Apply is a stop while enabled"
+        );
+        h.key(Key::Tab);
+        assert_eq!(
+            h.dialog.focus,
+            Some(Target::Tab(2)),
+            "wraps to the tab strip"
+        );
+        shift_tab(&mut h);
+        assert_eq!(h.dialog.focus, Some(Target::Apply));
+        assert!(matches!(h.key(Key::Enter), OptionsOutcome::Apply(_)));
+        assert!(!h.dialog.changed());
+        h.frame(Input::default());
+        assert_eq!(h.dialog.focus, None, "Apply left the order once disabled");
+    }
+
+    #[test]
+    fn arrows_switch_tabs_and_move_a_radio_group() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        h.key(Key::Left);
+        assert_eq!(h.dialog.tab(), Tab::Keyboard);
+        assert_eq!(h.dialog.focus, Some(Target::Tab(1)));
+        h.key(Key::Left);
+        assert_eq!(h.dialog.tab(), Tab::Gameplay);
+        h.key(Key::Left);
+        assert_eq!(h.dialog.tab(), Tab::Gameplay, "no wrap at the first tab");
+        h.dialog.draft.config.gameplay.skill = 2;
+        h.key(Key::Tab);
+        assert_eq!(
+            focused_name(&h, Panel::Gameplay).as_deref(),
+            Some("Skill2Radio"),
+            "the group's stop is its selected button"
+        );
+        h.key(Key::Down);
+        assert_eq!(h.dialog.draft().gameplay.skill, 3);
+        assert_eq!(
+            focused_name(&h, Panel::Gameplay).as_deref(),
+            Some("Skill3Radio")
+        );
+        h.key(Key::Right);
+        assert_eq!(h.dialog.draft().gameplay.skill, 1, "the group wraps");
+        h.key(Key::Up);
+        assert_eq!(h.dialog.draft().gameplay.skill, 3);
+        h.key(Key::Tab);
+        assert_eq!(
+            h.dialog.focus,
+            Some(Target::Ok),
+            "one stop for the whole group"
+        );
+    }
+
+    #[test]
+    fn a_held_space_presses_the_button_and_the_release_activates_it() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+        shift_tab(&mut h);
+        assert_eq!(
+            h.dialog.focus,
+            Some(Target::Cancel),
+            "Apply is disabled: not a stop"
+        );
+        let down = Input {
+            keys: [Key::Space].into(),
+            held_keys: [Key::Space].into(),
+            ..Default::default()
+        };
+        assert_eq!(h.frame(down), OptionsOutcome::None);
+        assert_eq!(
+            h.dialog.key_press.pressed(),
+            Some(Target::Cancel),
+            "drawn depressed"
+        );
+        let hold = Input {
+            held_keys: [Key::Space].into(),
+            ..Default::default()
+        };
+        assert_eq!(h.frame(hold), OptionsOutcome::None);
+        assert_eq!(
+            h.frame(Input::default()),
+            OptionsOutcome::Close(None),
+            "the release activates Cancel"
+        );
+    }
+
+    #[test]
+    fn a_sub_dialog_takes_focus_and_gives_it_back() {
+        let mut h = Harness::new();
+        h.tab(Tab::Video);
+        while focused_name(&h, Panel::Video).as_deref() != Some("AdvancedButton") {
+            h.key(Key::Tab);
+        }
+        h.key(Key::Space);
+        assert_eq!(h.dialog.sub, Some(Sub::VideoAdvanced));
+        assert_eq!(h.dialog.focus, None, "the sub-dialog starts unfocused");
+        h.key(Key::Tab);
+        assert!(matches!(h.dialog.focus, Some(Target::Control(_))));
+        assert!(h.dialog.escape());
+        assert_eq!(h.dialog.sub, None);
+        assert_eq!(
+            focused_name(&h, Panel::Video).as_deref(),
+            Some("AdvancedButton")
+        );
+        assert_eq!(
+            h.key(Key::Enter),
+            OptionsOutcome::None,
+            "Enter presses the button"
+        );
+        assert_eq!(h.dialog.sub, Some(Sub::VideoAdvanced));
     }
 
     #[test]

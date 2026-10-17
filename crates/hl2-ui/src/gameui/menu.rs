@@ -314,6 +314,9 @@ pub struct MessageBox {
     last_armed: Option<usize>,
     sounds: Vec<String>,
     tracker: ButtonTracker<usize>,
+    /// Button with keyboard focus: OK when the box opens (SDK `MessageBox` focuses its OK button).
+    focus: usize,
+    key_press: super::widgets::KeyPress<usize>,
 }
 
 /// Message box geometry in layout units relative to the box.
@@ -338,6 +341,8 @@ impl MessageBox {
             last_armed: None,
             sounds: Vec::new(),
             tracker: ButtonTracker::capturing(),
+            focus: 0,
+            key_press: super::widgets::KeyPress::default(),
         }
     }
 
@@ -464,6 +469,29 @@ impl MessageBox {
         }
     }
 
+    /// Keyboard: Tab / Shift+Tab move focus between the buttons (wrapping), Space or Enter
+    /// presses the focused one (activation on release, SDK `Button`). Returns `Some(true)` for OK,
+    /// `Some(false)` for Cancel.
+    pub fn keys(&mut self, input: &crate::console::Input) -> Option<bool> {
+        use crate::console::Key;
+        let count = 1 + usize::from(self.cancel.is_some());
+        if input.keys.contains(&Key::Tab) {
+            let order: Vec<usize> = (0..count).collect();
+            self.focus =
+                super::widgets::focus_step(Some(self.focus), &order, !input.shift).unwrap_or(0);
+            self.key_press.reset();
+            return None;
+        }
+        let key = [Key::Space, Key::Enter]
+            .into_iter()
+            .find(|k| input.keys.contains(k));
+        let activated = self
+            .key_press
+            .update(Some(self.focus), key, |k| input.held_keys.contains(&k))?;
+        self.sounds.push("ui/buttonclickrelease.wav".to_string());
+        Some(activated == 0)
+    }
+
     pub fn draw(&self, painter: &Painter, layout: &MessageBoxLayout) {
         let close_state = layout.close.map(|_| {
             let close_index = layout.buttons.len();
@@ -483,11 +511,14 @@ impl MessageBox {
                 label,
                 ButtonState {
                     armed: self.armed == Some(index),
-                    pressed: self.pressed == Some(index),
+                    pressed: self.pressed == Some(index) || self.key_press.pressed() == Some(index),
                     enabled: true,
-                    default: index == 0,
+                    default: index == self.focus,
                 },
             );
+            if index == self.focus {
+                painter.focus_box(*rect);
+            }
         }
     }
 }
@@ -755,6 +786,32 @@ mod tests {
 
     fn labels(menu: &GameMenu) -> Vec<&str> {
         menu.entries().iter().map(|e| e.label.as_str()).collect()
+    }
+
+    #[test]
+    fn message_box_buttons_take_keyboard_focus() {
+        use crate::console::{Input, Key};
+        let mut quit = MessageBox::new("T".into(), "x".into(), "OK".into(), Some("Cancel".into()));
+        let key = |k: Key, shift: bool| Input {
+            keys: [k].into(),
+            shift,
+            ..Default::default()
+        };
+        assert_eq!(quit.keys(&key(Key::Tab, false)), None);
+        assert_eq!(
+            quit.keys(&key(Key::Enter, false)),
+            Some(false),
+            "Cancel has focus"
+        );
+        assert_eq!(quit.keys(&key(Key::Tab, true)), None);
+        assert_eq!(quit.keys(&key(Key::Space, false)), Some(true), "back on OK");
+        let held = Input {
+            keys: [Key::Enter].into(),
+            held_keys: [Key::Enter].into(),
+            ..Default::default()
+        };
+        assert_eq!(quit.keys(&held), None, "a held Enter waits for the release");
+        assert_eq!(quit.keys(&Input::default()), Some(true));
     }
 
     #[test]

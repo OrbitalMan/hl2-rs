@@ -142,6 +142,10 @@ pub struct Control {
     pub range: Option<(f32, f32)>,
     /// The control a label names (`associate`); the label follows its enabled state.
     pub associate: String,
+    /// Keyboard focus order (`tabPosition`, SDK `FocusNavGroup`); 0 = not in the Tab order.
+    pub tab_position: u32,
+    /// Order inside a radio button group (`SubTabPosition`; the group shares `tabPosition`).
+    pub sub_tab_position: u32,
 }
 
 impl Control {
@@ -240,6 +244,12 @@ fn control(entry: &Entry) -> Option<Control> {
             .and_then(|(min, max)| Some((min.parse::<f32>().ok()?, max.parse::<f32>().ok()?)))
             .filter(|(min, max)| min.is_finite() && max.is_finite() && min < max),
         associate: text("associate").unwrap_or_default().to_owned(),
+        tab_position: text("tabPosition")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        sub_tab_position: text("SubTabPosition")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
     })
 }
 

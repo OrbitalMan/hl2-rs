@@ -167,6 +167,7 @@ pub fn update_ui(
                 },
                 ctrl: modifiers.ctrl,
                 shift: modifiers.shift,
+                alt: modifiers.alt,
                 paste,
                 copy: modifiers.copy,
                 keys: crate::ui_host::keys(&keys),

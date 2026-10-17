@@ -337,6 +337,8 @@ pub enum Key {
     PageUp,
     PageDown,
     Tab,
+    /// Presses the focused dialog button, check box or radio button (SDK `Button`).
+    Space,
 }
 impl Key {
     /// Keys that repeat while held: moving through lists and text, deleting. Enter, Tab, Home
@@ -412,6 +414,8 @@ pub struct Input {
     pub ctrl: bool,
     /// Shift is held (Shift+Tab steps the completion list back).
     pub shift: bool,
+    /// Alt (Option) is held: Alt+Up/Down opens a focused combo box's list (SDK `ComboBox`).
+    pub alt: bool,
     /// Text pasted this frame (the host reads the clipboard on its paste shortcut).
     pub paste: Option<String>,
     /// The copy shortcut (Cmd+C on macOS, Ctrl+C elsewhere) was pressed this frame.
@@ -1768,14 +1772,9 @@ impl Console {
             let (origin, scale, layout) = self.quit_geometry(&confirm);
             let pointer = input.pointer.map(|p| (p - origin) / scale);
             let down = input.click || input.held;
-            let outcome = confirm.input(
-                &layout,
-                pointer,
-                down,
-                input.click,
-                input.released,
-                input.pressed(Key::Enter),
-            );
+            let outcome = confirm
+                .input(&layout, pointer, down, input.click, input.released, false)
+                .or_else(|| confirm.keys(input));
             for sound in confirm.take_sounds() {
                 effects.push(Effect::PlaySound(sound));
             }

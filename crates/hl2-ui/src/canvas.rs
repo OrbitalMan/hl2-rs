@@ -60,6 +60,9 @@ impl Rect {
     pub fn size(self) -> Vec2 {
         vec2(self.w, self.h)
     }
+    pub fn center(self) -> Vec2 {
+        vec2(self.x + self.w * 0.5, self.y + self.h * 0.5)
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterMode {

@@ -82,7 +82,7 @@ impl crate::simulation::Simulation {
     }
 }
 /// The UI keys and the native keys they come from.
-const UI_KEYS: [(KeyCode, hl2_ui::console::Key); 12] = {
+const UI_KEYS: [(KeyCode, hl2_ui::console::Key); 13] = {
     use hl2_ui::console::Key;
     [
         (KeyCode::ArrowUp, Key::Up),
@@ -97,6 +97,7 @@ const UI_KEYS: [(KeyCode, hl2_ui::console::Key); 12] = {
         (KeyCode::PageUp, Key::PageUp),
         (KeyCode::PageDown, Key::PageDown),
         (KeyCode::Tab, Key::Tab),
+        (KeyCode::Space, Key::Space),
     ]
 };
 
@@ -142,6 +143,7 @@ pub fn wheel_steps<'a>(events: impl Iterator<Item = &'a bevy::input::mouse::Mous
 pub struct Modifiers {
     pub ctrl: bool,
     pub shift: bool,
+    pub alt: bool,
     pub command: bool,
     pub paste: bool,
     pub copy: bool,
@@ -158,6 +160,7 @@ pub fn modifiers(native: &ButtonInput<KeyCode>) -> Modifiers {
     Modifiers {
         ctrl,
         shift: native.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+        alt: native.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
         command,
         paste: clipboard_modifier && native.just_pressed(KeyCode::KeyV),
         copy: clipboard_modifier && native.just_pressed(KeyCode::KeyC),

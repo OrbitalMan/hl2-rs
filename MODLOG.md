@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-17 GameUI: keyboard focus in every dialog
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `layout::Control` keeps `tabPosition` / `SubTabPosition`; `console::Key::Space` and `Input::alt` (host and replay); `widgets::focus_step`, `widgets::KeyPress`, `Painter::focus_box`, focused combo / entry looks and four scheme colors (`Button.FocusBorderColor`, `TextEntry.SelectedBgColor`/`SelectedTextColor`/`FocusEdgeColor`); the Options dialog (pages, footer, tab strip, sub-dialogs) gets a focus order (`control_order`), per-control keys (`focus_keys`), click-to-focus, focus return after sub-dialogs and key capture, and draws focus and the default button; `MessageBox::keys` for the Options confirmation and the quit / return-to-menu boxes; the credits dialog takes Space. Details in `docs/gameui.md` 6c.
+
+**Why:** owner request: every dialog element reachable and usable from the keyboard (arrows, Tab, Enter) as in the original game.
+
+**Tested how:** unit tests (order by tab position with disabled and unpositioned controls, a full Tab cycle driving check box / slider / entry / combo / footer, Alt+Down, tab and radio arrows, held Space, sub-dialog focus return, message box focus); owned-install `hl2-ui` tests; workspace tests, strict clippy, fmt, Windows check; packaged keyboard-only replays captured (focused Resolution combo shows selected text; focused "Advanced..." shows the key-focus border and the dashed box).
+
+**Result:** the Options dialog, its sub-dialogs and the confirmation boxes work without a mouse.
+
+**Still broken or not tested:** retail-exact details unverified where GameUI code is not public (slider step sizes, initial focus); controls retail leaves out of the Tab order are reachable here by owner request; not tried by hand; not checked on Windows.
+
+**Next:** owner check.
+
 ## 2026-10-17 Video: macOS windowed mode fits and centres between the menu bar and the Dock
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
