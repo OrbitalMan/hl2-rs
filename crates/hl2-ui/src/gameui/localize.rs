@@ -6,6 +6,10 @@
 //!
 //! Fallback policy (owner requirement): an unresolved token renders as its **key name** (without
 //! the `#`), never as empty text, so missing translations stay visible and diagnosable.
+//!
+//! Text that only HL2RS shows (no installed token) uses the temporary [`placeholders`].
+
+pub mod placeholders;
 
 use source_assets::keyvalues::{self, Entry};
 use std::collections::HashMap;
@@ -52,13 +56,14 @@ impl Localization {
             .or_insert_with(|| unescape(text));
     }
 
-    /// The translated text of a token, if defined in loaded resources or the central fallback table.
+    /// The translated text of a token, if defined in loaded resources, the temporary
+    /// [`placeholders`] or the central fallback table.
     pub fn lookup(&self, token: &str) -> Option<&str> {
         let key = token.trim().trim_start_matches('#');
         if let Some(text) = self.tokens.get(&key.to_ascii_lowercase()) {
             return Some(text.as_str());
         }
-        fallback_lookup(key)
+        placeholders::lookup(key).or_else(|| fallback_lookup(key))
     }
 
     /// The translated text of `token`, else the token's key name (never empty for a non-empty token).
@@ -141,11 +146,10 @@ pub fn unescape(s: &str) -> String {
     out
 }
 
-/// Central English fallback table for user-visible strings when game resources are missing or unresolved.
+/// Central English fallback table for installed-game tokens, used when game resources are missing
+/// or unresolved. HL2RS-only text belongs in [`placeholders`] instead.
 pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     ("GameUI_Console", "Console"),
-    // Ctrl+R history search prompt in the console (no installed token).
-    ("HL2RS_Console_ReverseSearch", "reverse-i-search"),
     ("Console_Title", "Console"),
     ("Console_Submit", "Submit"),
     ("GameUI_ConfirmMainMenu_Title", "RETURN TO MAIN MENU"),

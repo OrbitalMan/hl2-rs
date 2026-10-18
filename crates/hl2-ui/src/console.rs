@@ -3130,7 +3130,8 @@ impl Console {
         painter.sunken(layout.entry);
         let (line, cursor) = match self.editor.search() {
             Some((query, found)) => {
-                let label = localization.text("#HL2RS_Console_ReverseSearch");
+                let label = localization
+                    .text(crate::gameui::localize::placeholders::CONSOLE_REVERSE_SEARCH);
                 let line = format!("({label})`{query}': {}", found.unwrap_or_default());
                 let cursor = line.chars().count();
                 (line, cursor)

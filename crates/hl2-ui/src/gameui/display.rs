@@ -13,15 +13,18 @@
 //! desktop in pixels, since a windowed game shows one frame pixel per display pixel (retail hides
 //! resolutions larger than the desktop in windowed mode).
 //!
-//! The aspect buckets follow the retail Video page grouping: ratios below 1.5 are
-//! "Normal (4:3)" (this also takes 5:4), ratios within 0.05 of 1.6 are 16:10, everything wider is
-//! 16:9, including ultrawide 21:9 and 32:9 modes (the installed GameUI has no other aspect
-//! choice or label). When the host reports no usable mode, the current window size is offered so the list is
-//! never empty.
+//! The aspect buckets follow the retail Video page grouping (ratios below 1.5 are "Normal (4:3)",
+//! which also takes 5:4; ratios within 0.05 of 1.6 are 16:10; the rest up to 2.1 is 16:9) and
+//! add two HL2RS choices for wider displays: 21:9 (2560x1080, 3440x1440, ...) below 3.0 and 32:9
+//! above. The installed GameUI has no ultrawide choice, so their labels are temporary
+//! [`placeholders`]. The bounds are in the data file too ([`AspectRatio::of`]). When the host
+//! reports no usable mode, the current window size is offered so the list is never empty.
 
 use std::{collections::BTreeMap, sync::LazyLock};
 
 use serde::{Deserialize, Serialize};
+
+use super::localize::placeholders;
 
 /// The display-mode data embedded from `assets/display/modes.json`.
 #[derive(Debug, Deserialize)]
@@ -30,7 +33,8 @@ struct ModeData {
     min_size: (u32, u32),
     /// Both sides of a [`native_fits`] mode are multiples of this.
     native_fit_step: u32,
-    /// The exact ratio of each aspect choice ([`AspectRatio::exact_ratio`]).
+    /// The exact ratio and bucket bounds of each aspect choice ([`AspectRatio::exact_ratio`],
+    /// [`AspectRatio::of`]), narrowest bucket first.
     aspect_ratios: Vec<AspectEntry>,
     /// Standard resolutions grouped by ratio label (the labels only document the file).
     standard_modes: BTreeMap<String, Vec<(u32, u32)>>,
@@ -40,6 +44,18 @@ struct ModeData {
 struct AspectEntry {
     aspect: AspectRatio,
     ratio: (u32, u32),
+    /// The bucket takes ratios below this (the last bucket has no bound).
+    #[serde(default)]
+    below: Option<f32>,
+    /// A window bucket instead: ratios this close to the exact ratio, checked first.
+    #[serde(default)]
+    tolerance: Option<f32>,
+}
+
+impl AspectEntry {
+    fn exact(&self) -> f32 {
+        self.ratio.0 as f32 / self.ratio.1 as f32
+    }
 }
 
 fn data() -> &'static ModeData {
@@ -96,21 +112,37 @@ pub enum AspectRatio {
     Wide16x9,
     /// `#GameUI_AspectWide16x10`.
     Wide16x10,
+    /// 21:9 displays; placeholder label [`placeholders::ASPECT_ULTRAWIDE_21X9`].
+    Ultrawide21x9,
+    /// 32:9 displays; placeholder label [`placeholders::ASPECT_ULTRAWIDE_32X9`].
+    Ultrawide32x9,
 }
 
 impl AspectRatio {
-    pub const ALL: [Self; 3] = [Self::Normal, Self::Wide16x9, Self::Wide16x10];
+    /// Combo order: the retail choices, then the ultrawide ones.
+    pub const ALL: [Self; 5] = [
+        Self::Normal,
+        Self::Wide16x9,
+        Self::Wide16x10,
+        Self::Ultrawide21x9,
+        Self::Ultrawide32x9,
+    ];
 
-    /// Bucket of a width/height pair.
+    /// Bucket of a width/height pair: a window bucket (`tolerance`) around its exact ratio wins,
+    /// otherwise the first bucket whose `below` bound exceeds the ratio.
     pub fn of(width: u32, height: u32) -> Self {
         let ratio = width as f32 / height.max(1) as f32;
-        if ratio < 1.5 {
-            Self::Normal
-        } else if (ratio - 1.6).abs() < 0.05 {
-            Self::Wide16x10
-        } else {
-            Self::Wide16x9
-        }
+        let entries = &data().aspect_ratios;
+        entries
+            .iter()
+            .find(|e| e.tolerance.is_some_and(|t| (ratio - e.exact()).abs() < t))
+            .or_else(|| {
+                entries
+                    .iter()
+                    .filter(|e| e.tolerance.is_none())
+                    .find(|e| e.below.is_none_or(|below| ratio < below))
+            })
+            .map_or_else(Self::default, |e| e.aspect)
     }
 
     /// The exact width:height ratio of this choice, from the mode data.
@@ -128,6 +160,8 @@ impl AspectRatio {
             Self::Normal => "#GameUI_AspectNormal",
             Self::Wide16x9 => "#GameUI_AspectWide16x9",
             Self::Wide16x10 => "#GameUI_AspectWide16x10",
+            Self::Ultrawide21x9 => placeholders::ASPECT_ULTRAWIDE_21X9,
+            Self::Ultrawide32x9 => placeholders::ASPECT_ULTRAWIDE_32X9,
         }
     }
 }
@@ -282,6 +316,11 @@ mod tests {
                 "{aspect:?} ratio is in its bucket"
             );
         }
+        let last = data().aspect_ratios.iter().rfind(|e| e.tolerance.is_none());
+        assert!(
+            last.is_some_and(|e| e.below.is_none()),
+            "the widest bucket is unbounded"
+        );
         assert!(data().native_fit_step > 0);
     }
 
@@ -300,10 +339,15 @@ mod tests {
             "1.54 is wider than 16:10's window"
         );
         assert_eq!(AspectRatio::of(1920, 1080), AspectRatio::Wide16x9);
-        assert_eq!(AspectRatio::of(3440, 1440), AspectRatio::Wide16x9);
+        assert_eq!(AspectRatio::of(2160, 1080), AspectRatio::Wide16x9, "2:1");
+        for (w, h) in [(2560, 1080), (3440, 1440), (3840, 1600), (5120, 2160)] {
+            assert_eq!(AspectRatio::of(w, h), AspectRatio::Ultrawide21x9, "{w}x{h}");
+        }
+        assert_eq!(AspectRatio::of(3840, 1080), AspectRatio::Ultrawide32x9);
+        assert_eq!(AspectRatio::of(5120, 1440), AspectRatio::Ultrawide32x9);
         assert_eq!(
             AspectRatio::of(10, 0),
-            AspectRatio::Wide16x9,
+            AspectRatio::Ultrawide32x9,
             "zero height is safe"
         );
     }
@@ -425,18 +469,20 @@ mod tests {
     }
 
     #[test]
-    fn ultrawide_panels_get_their_modes_under_widescreen() {
-        let modes = usable_modes([], Some(r(3440, 1440)), r(1920, 1080));
-        let wide = resolution_choices(&modes, AspectRatio::Wide16x9);
+    fn ultrawide_panels_get_their_own_aspect_choices() {
+        let modes = usable_modes([r(3440, 1440)], Some(r(3440, 1440)), r(1920, 1080));
+        let wide = resolution_choices(&modes, AspectRatio::Ultrawide21x9);
         assert_eq!(wide[0], r(3440, 1440));
         assert!(wide.contains(&r(2560, 1080)));
         assert!(!modes.contains(&r(5120, 1440)), "larger than the panel");
-        let super_wide = usable_modes([], Some(r(5120, 1440)), r(1920, 1080));
         assert_eq!(
-            resolution_choices(&super_wide, AspectRatio::Wide16x9)[0],
-            r(5120, 1440)
+            resolution_choices(&modes, AspectRatio::Wide16x9)[0],
+            r(2560, 1440),
+            "16:9 no longer lists ultrawide modes"
         );
-        assert!(super_wide.contains(&r(3840, 1080)));
+        let super_wide = usable_modes([], Some(r(5120, 1440)), r(1920, 1080));
+        let thirty_two = resolution_choices(&super_wide, AspectRatio::Ultrawide32x9);
+        assert_eq!(thirty_two, [r(5120, 1440), r(3840, 1080)]);
         assert_eq!(
             resolution_choices(&super_wide, AspectRatio::Normal)[0],
             r(1920, 1440),

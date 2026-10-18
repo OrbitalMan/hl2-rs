@@ -2,9 +2,11 @@
   "min_size": [640, 480],
   "native_fit_step": 8,
   "aspect_ratios": [
-    { "aspect": "normal", "ratio": [4, 3] },
-    { "aspect": "wide16x9", "ratio": [16, 9] },
-    { "aspect": "wide16x10", "ratio": [16, 10] }
+    { "aspect": "normal", "ratio": [4, 3], "below": 1.5 },
+    { "aspect": "wide16x10", "ratio": [16, 10], "tolerance": 0.05 },
+    { "aspect": "wide16x9", "ratio": [16, 9], "below": 2.1 },
+    { "aspect": "ultrawide21x9", "ratio": [64, 27], "below": 3.0 },
+    { "aspect": "ultrawide32x9", "ratio": [32, 9] }
   ],
   "standard_modes": {
     "4:3": [

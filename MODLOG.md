@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 Video: ultrawide aspect choices with temporary placeholder labels
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** the Aspect Ratio combo gains Ultrawide 21:9 and Super Ultrawide 32:9 (`AspectRatio::Ultrawide21x9` / `Ultrawide32x9`); `AspectRatio::of` reads its bucket bounds from `assets/display/modes.json` (16:9 up to 2.1, 21:9 below 3.0, 32:9 beyond; 4:3 and 16:10 as before). New `gameui::localize::placeholders`: `HL2RS_` token constants with temporary English text (`PLACEHOLDER_STRINGS`) for UI text the installed game has no token for, consulted after loaded resources and before `FALLBACK_STRINGS`; the console's reverse-search prompt moved there. Documented as temporary until HL2RS-owned, plugin-extensible localization resources exist.
+
+**Why:** owner request: ultrawide aspect ratios were missing (listed under 16:9); placeholder labels kept apart and ready for a resource/plugin localization system.
+
+**Tested how:** unit tests (bucket bounds for 21:9 and 32:9 modes, 2:1 stays 16:9, ultrawide panels' lists, placeholder tokens and resource override); the validation suite and the Windows-target check.
+
+**Result:** ultrawide displays get their own aspect choices and resolution lists.
+
+**Still broken or not tested:** no ultrawide display tested; ultrawide FOV framing not verified; placeholder labels are English only.
+
+**Next:** HL2RS localization resources replacing the placeholder table.
+
 ## 2026-10-18 Video: resolution data moved to a data file
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

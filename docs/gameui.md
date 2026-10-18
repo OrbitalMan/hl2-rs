@@ -804,6 +804,32 @@ Owner report: with Normal (4:3) selected, a Retina display offered nothing large
   modes are not checked on an ultrawide display, and how the game frames ultrawide pictures (FOV)
   is not verified.
 
+### 10d. Ultrawide aspect choices; temporary placeholder labels (2026-10-18)
+
+Owner request: add the missing ultrawide aspect ratios, with temporary placeholder labels.
+
+- The Aspect Ratio combo gains **Ultrawide 21:9** and **Super Ultrawide 32:9** after the three
+  retail choices (`AspectRatio::Ultrawide21x9` / `Ultrawide32x9`). The 16:9 bucket now ends at
+  2.1 (2:1 panels stay 16:9); 21:9 takes ratios below 3.0 (2560x1080, 3440x1440, 3840x1600,
+  5120x2160) and 32:9 everything wider (3840x1080, 5120x1440). Their native fits use 64:27 and
+  32:9. Buckets, exact ratios and bounds are all in `crates/hl2-ui/assets/display/modes.json`
+  (`below` = upper bound, `tolerance` = window around the exact ratio, checked first, for 16:10).
+- The installed GameUI has no token for these choices, so their labels are temporary
+  placeholders in `gameui::localize::placeholders`: `HL2RS_`-prefixed token constants
+  (`ASPECT_ULTRAWIDE_21X9`, `ASPECT_ULTRAWIDE_32X9`, and the console's
+  `CONSOLE_REVERSE_SEARCH`, moved there from `FALLBACK_STRINGS`) and their English text in
+  `PLACEHOLDER_STRINGS`. `Localization::lookup` checks loaded resources first, then the
+  placeholders, then `FALLBACK_STRINGS`, so a resource defining the token already wins.
+- Planned replacement: HL2RS-owned localization resources (`hl2rs_<language>.txt` in the game's
+  `"lang" { "Tokens" { ... } }` format, loaded with `Localization::add_resource`), which plugins
+  or users can add to or override per language. The placeholder entries then move into
+  `hl2rs_english.txt`, the table is deleted and the token constants stay.
+- Tests: `aspect_buckets_match_the_video_page_grouping`, `ultrawide_panels_get_their_own_aspect_choices`
+  (renamed from `ultrawide_panels_get_their_modes_under_widescreen`; 16:9 no longer lists
+  ultrawide modes), `mode_data_parses_and_every_entry_is_usable` (the widest bucket is
+  unbounded), placeholder tests in `localize::placeholders`. No ultrawide display tested; the HUD
+  Aspect Ratio choices (installed `GameUI_HUDAspectRatio_*`) are unchanged.
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed
