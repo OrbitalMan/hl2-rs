@@ -228,6 +228,31 @@ def check_video_8k():
             "1920 x 1080", "1600 x 900", "1366 x 768", "1280 x 720"])
 
 
+def check_resolution_stress():
+    """Resolution changes never stall or crash (background, faked 8K monitor): Options Apply of
+    7680 x 4320, the smallest and largest sizes the console accepts, and four changes on
+    consecutive ticks (full screen and windowed mixed), where the last one wins. Each labelled
+    sample reports the size of the frame image being rendered."""
+    if CONFIG.exists():
+        CONFIG.unlink()
+    run = game("resolution_stress", *MENU[:-2], "--frames", "1200", "--fake-monitor", EIGHT_K,
+               "--movement-script", "test-inputs/bevy-menu-resolution-stress.json")
+    frame = lambda label: run.sample(label).get("frame")
+    expect("the 8K row was picked from the list",
+           (run.sample("picked-8k")["console"].get("options") or {}).get("changed"), True)
+    expect("Options Apply rendered 7680 x 4320", frame("after-options-apply"), [7680, 4320])
+    expect("OK closed Options", run.sample("options-closed")["console"]["mode"], "MainMenu")
+    expect("the smallest console size", frame("smallest"), [320, 240])
+    expect("consecutive changes: the last one wins", frame("rapid"), [1280, 720])
+    expect("the largest console size", frame("largest"), [8192, 8192])
+    expect("back to 1024 x 768", frame("final"), [1024, 768])
+    expect("the capture follows", run.report["render"]["capture_size"], [1024, 768])
+    video = saved()["video"]
+    expect("saved", (video["width"], video["height"], video["display_mode"]), (1024, 768, "windowed"))
+    ticks = [run.sample(l)["host_tick"] for l in ("smallest", "rapid", "largest", "final", "settle")]
+    holds("the game kept running", ticks == sorted(ticks) and len(set(ticks)) == len(ticks), ticks)
+
+
 def check_chapter_quit():
     """Loading a gameplay map saves its chapter's background, so a mid-game quit relaunches over it."""
     settings(gameplay={"background_game": "hl2", "background_map": "background01"})
@@ -504,7 +529,8 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-options-nonmodal", "bevy-menu-options-list",
                "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
                "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud",
-               "bevy-menu-video-8k")
+               "bevy-menu-video-8k", "bevy-menu-resolution-stress",
+               "bevy-menu-resolution-stress-windowed")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -929,6 +955,20 @@ def check_window():
     video = saved()["video"]
     holds("Space on Apply changed the resolution", (video["width"], video["height"]) != (1024, 768), video)
     holds("the window took it", "[video] apply" in run.log)
+    # Windowed resolution changes on a real window never stall: the smallest and largest sizes
+    # the console accepts and four changes on consecutive ticks (the last one wins).
+    if CONFIG.exists():
+        CONFIG.unlink()
+    settings(video={"display_mode": "windowed", "width": 1024, "height": 768})
+    run = game("window-resolution-stress", "--map", "background01", "--main-menu", "--windowed",
+               "--width", "1024", "--height", "768", "--frames", "1200", "--capture-window",
+               "--movement-script", "test-inputs/bevy-menu-resolution-stress-windowed.json",
+               background=False)
+    for label, size in (("hd", [1920, 1080]), ("smallest", [320, 240]), ("rapid", [1280, 720]),
+                        ("largest", [8192, 8192]), ("final", [1024, 768])):
+        expect(f"windowed frame at {label}", run.sample(label).get("frame"), size)
+    ticks = [run.sample(l)["host_tick"] for l in ("hd", "smallest", "rapid", "largest", "final", "settle")]
+    holds("the game kept running", ticks == sorted(ticks) and len(set(ticks)) == len(ticks), ticks)
 
 
 def check_window_place():
@@ -969,6 +1009,7 @@ CHECKS = [
     Check("menu_options", check_menu_options, "shared"),
     Check("options", check_options, "shared"),
     Check("video_8k", check_video_8k, "shared"),
+    Check("resolution_stress", check_resolution_stress, "shared"),
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),
     Check("bg_compare", check_bg_compare, "shared"),

@@ -849,6 +849,13 @@ Owner question: what an 8K display would offer, and a way to test it here.
 - Tests: `an_8k_panel_offers_every_aspect_up_to_its_size`, `monitor_specs_parse_from_the_command_line`,
   `a_bad_fake_monitor_fails_the_launch`; packaged replay `video_8k` (docs/validation.md). No real
   8K display tested.
+- Resolution changes must never stall or crash. Report samples now carry `frame`, the size of the
+  frame image being rendered (`Simulation::frame_size`, kept by `video::record_frame_size`), so
+  replays check that each change was carried out. `resolution_stress` (background, faked 8K):
+  Options Apply of 7680 x 4320, 320 x 240 and 8192 x 8192 (the console's limits), four changes on
+  consecutive ticks mixing full screen and windowed (the last wins). The `window` check adds the
+  windowed-only sequence on a real window. Exclusive full screen on a real display is not part of
+  the automated checks (it changes the desktop's display mode).
 
 ## 11. Developer console (2026-10-17)
 

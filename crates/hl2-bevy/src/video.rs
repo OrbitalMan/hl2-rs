@@ -920,6 +920,20 @@ pub(crate) fn suspend_for_resize(
     }
 }
 
+/// Keeps [`crate::simulation::Simulation::frame_size`] on the size of the frame image.
+pub(crate) fn record_frame_size(
+    frame: Option<Res<GameFrame>>,
+    images: Res<Assets<Image>>,
+    mut sim: ResMut<crate::simulation::Simulation>,
+) {
+    let size = frame
+        .and_then(|frame| images.get(&frame.image).map(Image::size))
+        .map(|size| [size.x, size.y]);
+    if sim.frame_size != size {
+        sim.frame_size = size;
+    }
+}
+
 /// Source horizontal 4:3 field of view (degrees) to Bevy's vertical field of view.
 pub(crate) fn vertical_fov(degrees: f32) -> f32 {
     2. * ((degrees.to_radians() / 2.).tan() / (4. / 3.)).atan()

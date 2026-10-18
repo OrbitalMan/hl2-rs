@@ -587,7 +587,12 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
-            crate::video::suspend_for_resize.after(TransformSystems::Propagate),
+            (
+                crate::video::suspend_for_resize,
+                crate::video::record_frame_size,
+            )
+                .chain()
+                .after(TransformSystems::Propagate),
         )
         .add_systems(
             RunFixedMainLoop,

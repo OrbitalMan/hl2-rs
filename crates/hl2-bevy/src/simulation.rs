@@ -98,6 +98,8 @@ struct Sample {
     /// Awake dynamic bodies after the step (props that never sleep at idle).
     awake_bodies: usize,
     console: Option<serde_json::Value>,
+    /// Size of the game frame image rendered at the time (`frame_size`).
+    frame: Option<[u32; 2]>,
 }
 #[derive(Resource)]
 pub struct Simulation {
@@ -137,6 +139,9 @@ pub struct Simulation {
     /// Window settings last given to the window: startup values (after command-line overrides)
     /// or the last queued apply. `None` applies the next configuration unconditionally.
     pub applied_window: Option<WindowSettings>,
+    /// Size of the game frame image being rendered, kept by `video::record_frame_size` (reports
+    /// show whether a resolution change was carried out).
+    pub frame_size: Option<[u32; 2]>,
     /// PlayerDeathThink: every button must be released before one press respawns.
     death_buttons_released: bool,
 }
@@ -176,6 +181,7 @@ impl Simulation {
             dev_overlay: false,
             pending_video_config: None,
             applied_window: None,
+            frame_size: None,
             death_buttons_released: true,
         }
     }
@@ -583,6 +589,7 @@ impl Simulation {
                 physics_ms: self.physics.last_step_ms,
                 step_ms: self.last_step_ms,
                 awake_bodies: self.physics.awake_bodies(),
+                frame: self.frame_size,
                 ray_entity: self
                     .physics
                     .ray(

@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 Video: resolution change stress checks
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** report samples carry `frame`, the size of the game frame image being rendered (`Simulation::frame_size`, kept by the new `video::record_frame_size` after `suspend_for_resize`). New packaged replays: `test-inputs/bevy-menu-resolution-stress.json` (check `resolution_stress`, background, faked 8K monitor) and `bevy-menu-resolution-stress-windowed.json` (part of the windowed `window` check).
+
+**Why:** owner request: resolution changes must never get stuck or crash.
+
+**Tested how:** `resolution_stress`: Options Apply of 7680 x 4320 from the 8K list, `mat_setvideomode` 320 x 240 and 8192 x 8192, four changes on consecutive ticks mixing full screen and windowed (last wins: 1280 x 720), back to 1024 x 768; every step reached the rendered frame, ticks kept advancing, no errors or warnings in the log. Windowed `window` check on a real window: the windowed-only sequence passed (one winit warning about a destroyed window id at shutdown). All UI replays, the validation suite and the Windows-target check.
+
+**Result:** every resolution change in these sequences is carried out and the game keeps running.
+
+**Still broken or not tested:** exclusive full screen on a real display is not automated (it changes the desktop's display mode); no real 8K display; the 8192 x 8192 frame was only rendered on this Mac's GPU.
+
+**Next:** none.
+
 ## 2026-10-18 Video: --fake-monitor for testing other displays; 8K checks
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.
