@@ -282,6 +282,42 @@ def check_video_keep():
     expect("escape: saved reverted", saved_size(), [1280, 720])
 
 
+def check_narrow_layout():
+    """Menu rows and the developer console on screens narrower than the UI design, and on
+    landscape as the reference: rows keep a readable size and fit the width, the console is
+    bounded to the design area and stays unchanged on landscape (report `console.menu`,
+    `console.console_frame`)."""
+    sizes = {"portrait": (1080, 1920), "square": (1080, 1080), "landscape": (1920, 1080)}
+    for name, (w, h) in sizes.items():
+        if CONFIG.exists():
+            CONFIG.unlink()
+        run = game(f"narrow_{name}", "--map", "background01", "--main-menu", "--width", str(w),
+                   "--height", str(h), "--frames", "200",
+                   "--movement-script", "test-inputs/bevy-console-open.json")
+        console = run.sample("console")["console"]
+        menu, frame = console["menu"], console["console_frame"]
+        design = min(h, w / 1.25)
+        holds(f"{name}: menu rows fit the width", menu["x"] + menu["row_wide"] <= w, menu)
+        if name == "landscape":
+            p = lambda units: units * h // 480
+            holds("landscape: retail origin", (round(frame[0]), round(frame[1])) == (w // 2 - p(16), p(64)), frame)
+            holds("landscape: half the screen wide", abs(frame[2] - w // 2) <= 3, frame)
+            holds("landscape: down to 64 units above the bottom", abs(frame[1] + frame[3] - (h - p(64))) <= 3, frame)
+        else:
+            holds(f"{name}: menu text is not shrunk with the width", menu["font_tall"] >= 16, menu)
+            holds(f"{name}: the console spans the width", frame[0] > 0 and frame[0] + frame[2] > w * 0.9
+                  and frame[0] + frame[2] < w, frame)
+            holds(f"{name}: the console stays in the design area", frame[1] + frame[3] <= design, frame)
+    portrait_menu = game_report("narrow_portrait")["menu"]
+    holds("portrait: rows are larger than at the design height", portrait_menu["item_tall"] > 38, portrait_menu)
+
+
+def game_report(name: str) -> dict:
+    """The console state of the last sample of a finished run `name`."""
+    report = json.loads((OUT / f"{name}.json").read_text(encoding="utf-8"))
+    return [s for s in report["render"]["simulation"]["samples"] if s.get("label")][-1]["console"]
+
+
 def check_resolution_stress():
     """Resolution changes never stall or crash (background, faked 8K monitor): Options Apply of
     7680 x 4320, the smallest and largest sizes the console accepts, and four changes on
@@ -585,7 +621,8 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud",
                "bevy-menu-video-8k", "bevy-menu-resolution-stress",
                "bevy-menu-resolution-stress-windowed", "bevy-menu-video-portrait",
-               "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape")
+               "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
+               "bevy-console-open")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1066,6 +1103,7 @@ CHECKS = [
     Check("video_8k", check_video_8k, "shared"),
     Check("video_portrait", check_video_portrait, "shared"),
     Check("video_keep", check_video_keep, "shared"),
+    Check("narrow_layout", check_narrow_layout, "shared"),
     Check("resolution_stress", check_resolution_stress, "shared"),
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),

@@ -628,24 +628,24 @@ pub struct MenuGeometry {
     pub title_tall: f32,
     pub font_tall: f32,
     pub item_tall: f32,
+    /// Width of a row's hit area.
+    pub row_wide: f32,
 }
 
 impl MenuGeometry {
     /// Canvas hit rectangle for menu row `index`.
-    pub fn row_rect(&self, index: usize, canvas_height: f32) -> Rect {
+    pub fn row_rect(&self, index: usize) -> Rect {
         Rect::new(
             self.menu.x,
             self.menu.y + index as f32 * self.item_tall,
-            MENU_ROW_BASE_WIDTH * canvas_height / BASE_SCREEN_HEIGHT,
+            self.row_wide,
             self.item_tall,
         )
     }
 
     /// Hit rectangles for all menu rows up to `count`.
-    pub fn row_rects(&self, count: usize, canvas_height: f32) -> Vec<Rect> {
-        (0..count)
-            .map(|i| self.row_rect(i, canvas_height))
-            .collect()
+    pub fn row_rects(&self, count: usize) -> Vec<Rect> {
+        (0..count).map(|i| self.row_rect(i)).collect()
     }
 
     /// Canvas position for vertically centering the text inside row `index`.
@@ -661,6 +661,23 @@ impl MenuGeometry {
 impl MenuLayout {
     pub fn geometry(&self, height: f32) -> MenuGeometry {
         self.geometry_scaled(height, 1.0)
+    }
+
+    /// The geometry on a `canvas`. The titles and the menu's position follow the UI's design
+    /// height ([`crate::proportional::design_height`]), which on a screen narrower than the
+    /// design shrinks to fit the width. The rows' text and spacing keep following the screen
+    /// height there (so they do not shrink with it), and the hit width is limited to what fits
+    /// beside the menu's margin.
+    pub fn geometry_for(&self, canvas: Vec2) -> MenuGeometry {
+        let design = crate::proportional::design_height(canvas);
+        let mut geometry = self.geometry(design);
+        if design < canvas.y {
+            let rows = self.geometry(canvas.y);
+            geometry.font_tall = rows.font_tall;
+            geometry.item_tall = rows.item_tall;
+            geometry.row_wide = rows.row_wide.min(canvas.x - 2. * geometry.menu.x);
+        }
+        geometry
     }
 
     /// Computes geometry taking into account logical height and display scale factor.
@@ -687,6 +704,7 @@ impl MenuLayout {
             title_tall: (self.title_tall * scale).round(),
             font_tall,
             item_tall,
+            row_wide: MENU_ROW_BASE_WIDTH * scale,
         }
     }
 
@@ -1228,17 +1246,50 @@ mod tests {
         assert_eq!(at_retina.item_tall, 77.);
 
         // Verify row rects and text position helpers
-        let rects = at_480.row_rects(3, 480.);
+        let rects = at_480.row_rects(3);
         assert_eq!(rects.len(), 3);
         assert_eq!(rects[0], Rect::new(76., 240., 250., 28.));
         assert_eq!(rects[1], Rect::new(76., 268., 250., 28.));
         assert_eq!(at_480.row_text_pos(0), vec2(76., 246.));
 
         // Regression assertion: 800p row rect height is 36. and text is centered with 20px spacing
-        let rects_800 = at_800.row_rects(2, 800.);
+        let rects_800 = at_800.row_rects(2);
         assert_eq!(rects_800[0].h, 36.);
         assert_eq!(rects_800[1].h, 36.);
         assert_eq!(at_800.row_text_pos(0), vec2(126., 410.));
+    }
+
+    #[test]
+    fn narrow_screens_keep_row_text_by_height_and_fit_the_hit_width() {
+        let layout = MenuLayout::default();
+        // Landscape from 5:4 up: the same as the height-only geometry.
+        for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
+            assert_eq!(
+                layout.geometry_for(canvas),
+                layout.geometry(canvas.y),
+                "{canvas}"
+            );
+        }
+        // 9:16: titles and position by the design height, rows by the screen height.
+        let canvas = vec2(1080., 1920.);
+        let narrow = layout.geometry_for(canvas);
+        let design = layout.geometry(864.);
+        let rows = layout.geometry(1920.);
+        assert_eq!(
+            (narrow.title, narrow.menu, narrow.title_tall),
+            (design.title, design.menu, design.title_tall)
+        );
+        assert_eq!(
+            (narrow.font_tall, narrow.item_tall),
+            (rows.font_tall, rows.item_tall)
+        );
+        assert!(
+            narrow.font_tall > design.font_tall,
+            "not shrunk with the width"
+        );
+        let hit = narrow.row_rect(0);
+        assert_eq!(hit.w, canvas.x - 2. * narrow.menu.x, "limited to what fits");
+        assert!(hit.x + hit.w <= canvas.x);
     }
 
     #[test]

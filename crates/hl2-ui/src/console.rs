@@ -1168,11 +1168,6 @@ impl Console {
         vec2(self.canvas.width(), self.canvas.height())
     }
 
-    /// The height the menu scales by ([`crate::proportional::design_height`]).
-    fn design_height(&self) -> f32 {
-        crate::proportional::design_height(self.canvas_size())
-    }
-
     pub fn modal_dialog_open(&self) -> bool {
         self.confirm_box.is_some()
             || self
@@ -1218,6 +1213,24 @@ impl Console {
     /// The open windows, bottom to top.
     pub fn open_windows(&self) -> Vec<Window> {
         self.windows.order().collect()
+    }
+
+    /// The main menu's geometry on this canvas, for run reports.
+    pub fn menu_report(&self) -> serde_json::Value {
+        let g = self.menu_layout.geometry_for(self.canvas_size());
+        serde_json::json!({
+            "x": g.menu.x, "y": g.menu.y, "font_tall": g.font_tall, "item_tall": g.item_tall,
+            "row_wide": g.row_wide, "canvas": [self.canvas.width(), self.canvas.height()],
+        })
+    }
+
+    /// The developer console's frame `[x, y, width, height]` in canvas pixels while it is open,
+    /// for run reports.
+    pub fn console_frame_report(&self) -> Option<[f32; 4]> {
+        self.console_open().then(|| {
+            let r = self.window_bounds(Window::Console);
+            [r.x, r.y, r.w, r.h]
+        })
     }
 
     /// The developer console is open (focused or not).
@@ -2610,8 +2623,8 @@ impl Console {
     /// One hit rectangle per menu row (spacers included), in canvas pixels.
     fn menu_rows(&self, count: usize) -> Vec<Rect> {
         self.menu_layout
-            .geometry(self.design_height())
-            .row_rects(count, self.design_height())
+            .geometry_for(self.canvas_size())
+            .row_rects(count)
     }
 
     fn painter(&self, origin: Vec2, scale: f32) -> Painter<'_> {
@@ -2852,17 +2865,7 @@ impl Console {
             } else if self.background_transition.is_active() {
                 let (w, h) = (self.canvas.width(), self.canvas.height());
                 if let Some(tex) = bg_tex {
-                    draw_texture_ex(
-                        &self.canvas,
-                        tex,
-                        0.,
-                        0.,
-                        WHITE,
-                        DrawTextureParams {
-                            dest_size: Some(vec2(w, h)),
-                            ..Default::default()
-                        },
-                    );
+                    crate::gameui::loading::draw_background_texture(&self.canvas, tex);
                 }
                 self.canvas.rectangle(
                     0.,
@@ -2872,7 +2875,7 @@ impl Console {
                     crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
                 );
             }
-            let geometry = self.menu_layout.geometry(self.design_height());
+            let geometry = self.menu_layout.geometry_for(self.canvas_size());
             let title = self.current_title();
             if let Some(face) = &self.title_face {
                 let em = geometry.title_tall * self.title_metrics.em_per_cell;
@@ -4297,7 +4300,7 @@ mod tests {
 
     /// Pointer position at the middle of menu row `index`.
     fn row(console: &Console, index: usize) -> Option<Vec2> {
-        let geometry = console.menu_layout.geometry(console.design_height());
+        let geometry = console.menu_layout.geometry_for(console.canvas_size());
         Some(geometry.menu + vec2(5., geometry.item_tall * (index as f32 + 0.5)))
     }
     fn click_row(console: &mut Console, index: usize) -> Vec<Effect> {
@@ -5917,7 +5920,7 @@ mod tests {
         });
 
         let default_border = Color::new(0.0, 0.0, 0.0, 0.45);
-        let geometry = console.menu_layout.geometry(console.design_height());
+        let geometry = console.menu_layout.geometry_for(console.canvas_size());
 
         for title_font_enabled in [false, true] {
             if title_font_enabled {
@@ -6131,7 +6134,7 @@ mod tests {
 
         console.draw(0.0);
         let quads = console.canvas.drain();
-        let geometry = console.menu_layout.geometry(console.design_height());
+        let geometry = console.menu_layout.geometry_for(console.canvas_size());
         let subtitle_quads: Vec<_> = quads
             .iter()
             .filter(|q| {

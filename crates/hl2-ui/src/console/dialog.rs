@@ -4,7 +4,11 @@
 //! client area holds the history (`RichText`, `DepressedButtonBorder`), the entry and the Submit
 //! button along the bottom. The panel is not proportional, so its insets are plain layout units.
 //! The default placement is the retail one: proportional offsets (480-line basis) of 16 and 64
-//! put the frame at `(w/2 - 16, 64)`, half the screen wide and `h - 2 * 64` tall.
+//! put the frame at `(w/2 - 16, 64)`, half the screen wide and `h - 2 * 64` tall. On a screen
+//! narrower than the UI design (square, portrait) half the width is too narrow and the full
+//! height too tall, so the frame spans the width between the 16 margins and ends where the
+//! design area ends ([`crate::proportional::design_height`]), keeping the proportions of the
+//! retail frame on a 5:4 screen.
 
 use crate::canvas::Rect;
 use crate::gameui::widgets::{close_button_rect, Painter, CLIENT_INSET_X, CLIENT_TOP};
@@ -62,18 +66,29 @@ impl DialogLayout {
     /// The retail frame on `canvas`: top-left in canvas pixels and size in layout units.
     pub fn default_frame(canvas: Vec2) -> (Vec2, Vec2) {
         let scale = Painter::scale_for_canvas(canvas);
-        let proportional = |value: f32| {
-            (value * crate::proportional::design_height(canvas) / PROPORTIONAL_BASE).floor()
+        let design = crate::proportional::design_height(canvas);
+        let proportional = |value: f32| (value * design / PROPORTIONAL_BASE).floor();
+        let (origin, extent) = if design < canvas.y {
+            (
+                vec2(proportional(16.), proportional(64.)),
+                vec2(
+                    canvas.x - 2. * proportional(16.),
+                    design - 2. * proportional(64.),
+                ),
+            )
+        } else {
+            (
+                vec2(
+                    (canvas.x * 0.5).floor() - proportional(16.),
+                    proportional(64.),
+                ),
+                vec2((canvas.x * 0.5).floor(), canvas.y - 2. * proportional(64.)),
+            )
         };
-        let origin = vec2(
-            (canvas.x * 0.5).floor() - proportional(16.),
-            proportional(64.),
+        (
+            (origin).max(Vec2::ZERO),
+            (extent / scale).round().max(MIN_SIZE),
         )
-        .max(Vec2::ZERO);
-        let size = (vec2((canvas.x * 0.5).floor(), canvas.y - 2. * proportional(64.)) / scale)
-            .round()
-            .max(MIN_SIZE);
-        (origin, size)
     }
 
     /// The layout of a frame at `origin` (canvas pixels) of `size` (layout units).
@@ -271,6 +286,44 @@ mod tests {
         let submit = layout.canvas(layout.submit);
         let centre = vec2(submit.x + submit.w * 0.5, submit.y + submit.h * 0.5);
         assert!(layout.submit.contains(layout.local(centre)));
+    }
+
+    #[test]
+    fn landscape_frames_are_the_retail_ones_and_narrow_screens_get_a_bounded_frame() {
+        for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
+            let (origin, size) = DialogLayout::default_frame(canvas);
+            let scale = Painter::scale_for_canvas(canvas);
+            let p = |v: f32| (v * canvas.y / PROPORTIONAL_BASE).floor();
+            assert_eq!(
+                origin,
+                vec2((canvas.x * 0.5).floor() - p(16.), p(64.)),
+                "{canvas}"
+            );
+            assert_eq!(
+                size,
+                (vec2((canvas.x * 0.5).floor(), canvas.y - 2. * p(64.)) / scale).round(),
+                "{canvas}"
+            );
+        }
+        for canvas in [vec2(1080., 1080.), vec2(1080., 1920.), vec2(720., 1280.)] {
+            let (origin, size) = DialogLayout::default_frame(canvas);
+            let scale = Painter::scale_for_canvas(canvas);
+            let (right, bottom) = (origin.x + size.x * scale, origin.y + size.y * scale);
+            let design = crate::proportional::design_height(canvas);
+            assert!(
+                origin.x > 0. && right < canvas.x,
+                "{canvas}: spans the width"
+            );
+            assert!(right > canvas.x * 0.9, "{canvas}: {right}");
+            assert!(
+                bottom <= design,
+                "{canvas}: ends in the design area, not at the bottom"
+            );
+            assert!(
+                bottom < canvas.y * 0.8 || canvas.y == canvas.x,
+                "{canvas}: {bottom}"
+            );
+        }
     }
 
     #[test]

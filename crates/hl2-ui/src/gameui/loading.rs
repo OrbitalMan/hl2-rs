@@ -386,6 +386,49 @@ pub struct LoadingDialog {
     pub transition: BackgroundTransitionState,
 }
 
+/// Width / height of the screen a 4:3 pre-blurred background texture is made for (the texture
+/// itself is a squeezed square).
+const BACKGROUND_TEXTURE_ASPECT: f32 = 4. / 3.;
+
+/// The part of a pre-blurred background texture to draw on a `canvas`, in texture pixels
+/// (`texture` is its size). The whole texture, stretched to the screen as in retail, except on a
+/// screen narrower than the UI design (square, portrait): there it fills the screen without
+/// stretching (iOS `scaleAspectFill`): the centre of the image at its own aspect, cropped at the
+/// sides.
+pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> crate::canvas::Rect {
+    let aspect = canvas.x / canvas.y.max(1.);
+    if crate::proportional::design_height(canvas) < canvas.y && aspect < BACKGROUND_TEXTURE_ASPECT {
+        let kept = aspect / BACKGROUND_TEXTURE_ASPECT;
+        crate::canvas::Rect::new(
+            texture.x * (1. - kept) * 0.5,
+            0.,
+            texture.x * kept,
+            texture.y,
+        )
+    } else {
+        crate::canvas::Rect::new(0., 0., texture.x, texture.y)
+    }
+}
+
+/// Draws a pre-blurred background texture over the whole canvas ([`background_source`]).
+pub fn draw_background_texture(canvas: &crate::canvas::Canvas, texture: &crate::canvas::Texture2D) {
+    let size = glam::vec2(canvas.width(), canvas.height());
+    crate::canvas::draw_texture_ex(
+        canvas,
+        texture,
+        0.,
+        0.,
+        crate::canvas::WHITE,
+        crate::canvas::DrawTextureParams {
+            source: Some(background_source(
+                size,
+                glam::vec2(texture.width(), texture.height()),
+            )),
+            dest_size: Some(size),
+        },
+    );
+}
+
 impl LoadingDialog {
     /// Creates a new loading dialog for the given map name.
     pub fn new(map: impl Into<String>) -> Self {
@@ -560,17 +603,7 @@ impl LoadingDialog {
         }
         let (w, h) = (canvas.width(), canvas.height());
         if let Some(tex) = bg_texture {
-            crate::canvas::draw_texture_ex(
-                canvas,
-                tex,
-                0.,
-                0.,
-                crate::canvas::WHITE,
-                crate::canvas::DrawTextureParams {
-                    dest_size: Some(glam::vec2(w, h)),
-                    ..Default::default()
-                },
-            );
+            draw_background_texture(canvas, tex);
         }
         canvas.rectangle(0., 0., w, h, BackgroundTransitionState::MAIN_MENU_BACKDROP);
     }
@@ -637,6 +670,55 @@ impl LoadingDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_overlay_draws_the_cropped_texture_over_the_whole_screen() {
+        use crate::canvas::{Canvas, Texture2D};
+        let texture = Texture2D::from_rgba8(2, 2, &[255; 16]);
+        let canvas = Canvas::default();
+        for (w, h, source_w) in [(1080., 1920., 2. * 0.5625 * 0.75), (1280., 1024., 2.)] {
+            canvas.resize(w, h);
+            draw_background_texture(&canvas, &texture);
+            let quads = canvas.drain();
+            assert_eq!(quads.len(), 1);
+            assert_eq!(quads[0].destination, crate::canvas::Rect::new(0., 0., w, h));
+            assert!(
+                (quads[0].source.w - source_w).abs() < 1e-3,
+                "{w}x{h}: {:?}",
+                quads[0].source
+            );
+            assert_eq!(quads[0].source.h, 2.);
+        }
+    }
+
+    #[test]
+    fn narrow_screens_fill_with_the_centre_of_the_background_and_others_stretch() {
+        use glam::vec2;
+        let texture = vec2(512., 512.);
+        for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
+            assert_eq!(
+                background_source(canvas, texture),
+                crate::canvas::Rect::new(0., 0., 512., 512.),
+                "{canvas}: stretched as in retail"
+            );
+        }
+        let square = background_source(vec2(1080., 1080.), texture);
+        assert_eq!(square.h, 512.);
+        assert!(
+            (square.w - 384.).abs() < 1e-3,
+            "{square:?}: 3/4 of the width"
+        );
+        assert!((square.x - 64.).abs() < 1e-3, "centred");
+        let portrait = background_source(vec2(1080., 1920.), texture);
+        assert!(
+            (portrait.w - 512. * 0.5625 * 0.75).abs() < 1e-3,
+            "{portrait:?}"
+        );
+        assert!(
+            (portrait.x * 2. + portrait.w - 512.).abs() < 1e-3,
+            "centred"
+        );
+    }
 
     #[test]
     fn loading_dialog_initial_state_and_progress_updates() {

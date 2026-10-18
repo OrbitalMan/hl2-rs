@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 GameUI: portrait menu, console, background and view
+
+**Agent/model:** Claude Code desktop; claude-sonnet-5-5.
+
+**Changed:** `MenuLayout::geometry_for(canvas)`: on screens narrower than the design the menu rows' font and spacing follow the screen height and the hit width (`MenuGeometry::row_wide`) is limited to fit; `DialogLayout::default_frame`: the console spans the width and ends in the design area on narrow screens (landscape unchanged); `loading::background_source` / `draw_background_texture`: the pre-blurred background aspect-fills (cropped at the sides) on narrow screens; `video::vertical_fov_for`: frames narrower than 4:3 keep the 4:3 horizontal view (world, sky, menu backgrounds, viewmodel), wider frames unchanged. Reports gain `console.menu` and `console.console_frame`. New replay `bevy-console-open.json`, check `narrow_layout`.
+
+**Why:** owner list: buttons too small on 9:16, console stretched to the bottom, background stretched, first-person view and weapon cropped in portrait.
+
+**Tested how:** unit tests for each rule (landscape unchanged, narrow screens fixed), the real overlay draw function, `narrow_layout` and the video / options replays, the full UI group, the validation suite and the Windows-target check; captures inspected at 1080x1920 (menu, Episode One submenu, console, gameplay) and 1080x1080.
+
+**Result:** the menu is readable and fits, the console no longer runs to the bottom, the background fills without stretching, and the weapon is whole in portrait and square frames.
+
+**Still broken or not tested:** the background overlay itself was not captured (the load finishes too fast); viewmodel not seen on a real portrait display; Vert+ shows more floor and ceiling than 4:3.
+
+**Next:** owner check of the portrait view.
+
 ## 2026-10-18 GameUI: UI fits narrow screens; keep-or-revert after an aspect change
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

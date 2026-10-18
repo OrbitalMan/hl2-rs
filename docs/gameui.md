@@ -911,6 +911,46 @@ kept and reverts on its own (Cancel does the same).
   1080 x 1920 frame) and `video_keep` (timeout, OK, Escape). Captures inspected: Options on
   1080 x 1920, the keep box over Options, the HUD of `bevy-hud.json` at 1080 x 1920.
 
+### 10h. Portrait menu, console, background and view (2026-10-18)
+
+Owner list after the narrow-screen scaling of 10g: the menu buttons became too small on 9:16, the
+console ran to the bottom, the pre-blurred background stretched, and the first-person view was a
+thin slice with the weapon cut off. Landscape from 5:4 up is unchanged by all four.
+
+- **Main and sub menu.** `MenuLayout::geometry_for(canvas)`: the titles and the menu's position
+  follow the UI design height (10g), but on a screen narrower than the design the rows' font and
+  spacing follow the real screen height, as retail would on a screen that tall (1080x1920: 44 px
+  text and 92 px rows instead of 16 and 38). The row hit width is the retail 250 units, limited to
+  `canvas width - 2 * menu x` so it fits beside the margin (`MenuGeometry::row_wide`, 808 of 1080
+  px on 9:16). Square screens get the same rule (their height-based font equals the design one at
+  1080x1080).
+- **Developer console.** `DialogLayout::default_frame`: on a narrow screen the frame spans the
+  width between the 16-unit margins and ends where the design area ends (64 units above
+  `design_height`), instead of half the width and down to the bottom; landscape keeps the retail
+  placement (half the screen wide, `h - 2 * 64` tall). A saved placement still wins.
+- **Pre-blurred background.** `loading::background_source` / `draw_background_texture` (both draw
+  sites): on a screen narrower than the design the texture fills the screen without stretching,
+  the centre of the 4:3 image cropped at the sides (iOS `scaleAspectFill`); no new texture is
+  needed. 5:4 and wider keep the retail stretch. The overlay only shows while a background map
+  loads, which here finishes within about 25 frames, so it was checked through the real draw
+  function (`the_overlay_draws_the_cropped_texture_over_the_whole_screen`), not a capture.
+- **View and viewmodel.** `video::vertical_fov_for(degrees, aspect)`: Source's FOV is horizontal
+  at 4:3. A frame at least as wide as 4:3 keeps the vertical view of 4:3 (retail Hor+, bit for bit
+  as before); a narrower frame keeps the 4:3 horizontal view and shows more above and below
+  (Vert+). The world, sky (copies the world camera), menu background maps (env_zoom goes through
+  the same call) and the viewmodel camera all use it, so on 1:1 and 9:16 the weapon is whole and
+  sits where it does in a 4:3 frame instead of leaving the screen. The viewmodel's attachment
+  size factor stays a ratio of the two FOVs.
+- Tests: `narrow_screens_keep_row_text_by_height_and_fit_the_hit_width`,
+  `landscape_frames_are_the_retail_ones_and_narrow_screens_get_a_bounded_frame`,
+  `narrow_screens_fill_with_the_centre_of_the_background_and_others_stretch`,
+  `narrow_frames_keep_the_four_by_three_horizontal_view`; packaged `narrow_layout` (1080x1920,
+  1080x1080 and 1920x1080 through the report's `console.menu` and `console.console_frame`).
+  Captures inspected at 1080x1920 (menu, Episode One submenu, console, gameplay with the SMG) and
+  1080x1080.
+- Not verified: how the viewmodel looks on a real portrait display; the world's wider vertical
+  view shows more floor and ceiling than a designer may like (it is the 4:3 horizontal view).
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed

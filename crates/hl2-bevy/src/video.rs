@@ -934,9 +934,26 @@ pub(crate) fn record_frame_size(
     }
 }
 
-/// Source horizontal 4:3 field of view (degrees) to Bevy's vertical field of view.
+/// Source's field of view is horizontal at 4:3. Wider screens keep the vertical view of 4:3 and
+/// show more at the sides (as in retail); screens narrower than 4:3 (square, portrait) keep the
+/// 4:3 horizontal view and show more above and below, so the view and the viewmodel are never
+/// cropped at the sides. Returns Bevy's vertical field of view (radians) for `aspect`
+/// (width / height) of the game frame.
+pub(crate) fn vertical_fov_for(degrees: f32, aspect: f32) -> f32 {
+    2. * ((degrees.to_radians() / 2.).tan() / aspect.min(4. / 3.)).atan()
+}
+
+/// [`vertical_fov_for`] on a 4:3 frame.
+#[cfg(test)]
 pub(crate) fn vertical_fov(degrees: f32) -> f32 {
-    2. * ((degrees.to_radians() / 2.).tan() / (4. / 3.)).atan()
+    vertical_fov_for(degrees, 4. / 3.)
+}
+
+/// Width / height of the game frame (4:3 before the frame exists).
+pub(crate) fn frame_aspect(frame: Option<&GameFrame>) -> f32 {
+    frame.map_or(4. / 3., |f| {
+        f.resolution.x as f32 / f.resolution.y.max(1) as f32
+    })
 }
 
 #[cfg(test)]
