@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 Video: square and portrait aspect choices
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** the Aspect Ratio combo gains Square 1:1, Portrait 3:4, Portrait 10:16 and Portrait 9:16 (`AspectRatio` variants, placeholder labels, bucket bounds and standard modes in `assets/display/modes.json`). `min_size` applies in either orientation (`Resolution::at_least`), so portrait modes and a rotated monitor (`--fake-monitor 1080x1920`) work. New replay `test-inputs/bevy-menu-video-portrait.json`, check `video_portrait`.
+
+**Why:** owner request: square and vertical aspect ratios.
+
+**Tested how:** unit tests (buckets for 1:1, 3:4, 4:5, 10:16, 9:16 and a phone ratio; a rotated 1080x1920 monitor offers portrait and landscape modes); packaged replays `video_portrait`, `video_8k`, `resolution_stress` and the full UI group; the validation suite and the Windows-target check.
+
+**Result:** square and portrait displays get their own aspect choices and resolution lists, and the game renders portrait frames.
+
+**Still broken or not tested:** the UI scales by screen height, so on a portrait frame the Options dialog is wider than the screen (Video tab, Cancel and Apply cut off in the 1080 x 1920 capture); awaiting an owner decision on portrait UI scaling. No portrait or square display tested.
+
+**Next:** portrait UI scaling, once decided.
+
 ## 2026-10-18 Video: resolution change stress checks
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

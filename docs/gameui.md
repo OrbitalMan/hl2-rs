@@ -857,6 +857,30 @@ Owner question: what an 8K display would offer, and a way to test it here.
   windowed-only sequence on a real window. Exclusive full screen on a real display is not part of
   the automated checks (it changes the desktop's display mode).
 
+### 10f. Square and portrait aspect choices (2026-10-18)
+
+Owner request: add square and vertical aspect ratios (10:16, 9:16, 3:4).
+
+- The Aspect Ratio combo gains **Square 1:1**, **Portrait 3:4**, **Portrait 10:16** and
+  **Portrait 9:16** after the ultrawide choices (`AspectRatio::Square1x1`, `Portrait3x4`,
+  `Portrait10x16`, `Portrait9x16`; temporary placeholder labels, section 10d). Buckets in
+  `modes.json`: 9:16 below 0.59, 10:16 below 0.69, 3:4 below 0.875 (4:5 joins it), 1:1 below
+  1.125, then Normal (4:3, with 5:4) below 1.5 as before. Standard modes per ratio were added
+  (720x720 .. 2160x2160, 768x1024 .. 1536x2048, 800x1280 .. 1600x2560, 720x1280 .. 2160x3840) and
+  every monitor gets a native fit for each.
+- `min_size` (640x480) now applies in either orientation (`Resolution::at_least`): a portrait
+  mode is measured with its sides swapped, so a rotated 1080x1920 monitor can be faked and
+  offers portrait and landscape modes.
+- Tests: `aspect_buckets_match_the_video_page_grouping`, `a_rotated_monitor_offers_portrait_and_landscape_modes`;
+  packaged replay `video_portrait` (faked 1080x1920 monitor at 1080 x 1920: by keyboard, the
+  Aspect Ratio list opens with Portrait 9:16 selected, the Resolution choices are its 9:16 modes,
+  the frame renders in portrait).
+- **Known problem (not fixed):** the UI scales by screen height (Source's 480-line design), so on
+  a portrait frame the Options dialog is wider than the screen: in the 1080 x 1920 capture the
+  Video tab, Cancel and Apply are cut off at the right and the dialog covers the main menu.
+  Retail never ran on portrait screens; how to scale the UI there (by width when narrower than
+  4:3, or otherwise) is an open owner decision.
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed

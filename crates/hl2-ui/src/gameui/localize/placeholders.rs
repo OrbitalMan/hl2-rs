@@ -20,6 +20,14 @@
 pub const ASPECT_ULTRAWIDE_21X9: &str = "#HL2RS_AspectUltrawide21x9";
 /// Aspect Ratio choice for 32:9 displays (the installed GameUI has no such choice).
 pub const ASPECT_ULTRAWIDE_32X9: &str = "#HL2RS_AspectUltrawide32x9";
+/// Aspect Ratio choice for square displays (no installed choice).
+pub const ASPECT_SQUARE_1X1: &str = "#HL2RS_AspectSquare1x1";
+/// Aspect Ratio choice for 3:4 portrait displays (no installed choice).
+pub const ASPECT_PORTRAIT_3X4: &str = "#HL2RS_AspectPortrait3x4";
+/// Aspect Ratio choice for 10:16 portrait displays (no installed choice).
+pub const ASPECT_PORTRAIT_10X16: &str = "#HL2RS_AspectPortrait10x16";
+/// Aspect Ratio choice for 9:16 portrait displays (no installed choice).
+pub const ASPECT_PORTRAIT_9X16: &str = "#HL2RS_AspectPortrait9x16";
 /// Ctrl+R history search prompt in the console (no installed token).
 pub const CONSOLE_REVERSE_SEARCH: &str = "#HL2RS_Console_ReverseSearch";
 
@@ -28,6 +36,10 @@ pub const PLACEHOLDER_STRINGS: &[(&str, &str)] = &[
     // Worded like the installed "Widescreen 16:9" / "Widescreen 16:10" choices.
     ("HL2RS_AspectUltrawide21x9", "Ultrawide 21:9"),
     ("HL2RS_AspectUltrawide32x9", "Super Ultrawide 32:9"),
+    ("HL2RS_AspectSquare1x1", "Square 1:1"),
+    ("HL2RS_AspectPortrait3x4", "Portrait 3:4"),
+    ("HL2RS_AspectPortrait10x16", "Portrait 10:16"),
+    ("HL2RS_AspectPortrait9x16", "Portrait 9:16"),
     ("HL2RS_Console_ReverseSearch", "reverse-i-search"),
 ];
 
@@ -49,6 +61,10 @@ mod tests {
         for token in [
             ASPECT_ULTRAWIDE_21X9,
             ASPECT_ULTRAWIDE_32X9,
+            ASPECT_SQUARE_1X1,
+            ASPECT_PORTRAIT_3X4,
+            ASPECT_PORTRAIT_10X16,
+            ASPECT_PORTRAIT_9X16,
             CONSOLE_REVERSE_SEARCH,
         ] {
             assert!(token.starts_with("#HL2RS_"), "{token}");

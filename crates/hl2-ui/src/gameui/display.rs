@@ -13,11 +13,12 @@
 //! desktop in pixels, since a windowed game shows one frame pixel per display pixel (retail hides
 //! resolutions larger than the desktop in windowed mode).
 //!
-//! The aspect buckets follow the retail Video page grouping (ratios below 1.5 are "Normal (4:3)",
-//! which also takes 5:4; ratios within 0.05 of 1.6 are 16:10; the rest up to 2.1 is 16:9) and
-//! add two HL2RS choices for wider displays: 21:9 (2560x1080, 3440x1440, ...) below 3.0 and 32:9
-//! above. The installed GameUI has no ultrawide choice, so their labels are temporary
-//! [`placeholders`]. The bounds are in the data file too ([`AspectRatio::of`]). When the host
+//! The aspect buckets follow the retail Video page grouping ("Normal (4:3)" also takes 5:4;
+//! ratios within 0.05 of 1.6 are 16:10; the rest up to 2.1 is 16:9) and add HL2RS choices for
+//! other displays: 21:9 (2560x1080, 3440x1440, ...) below 3.0 and 32:9 above, and, narrower than
+//! 4:3, square 1:1 (0.875..1.125) and portrait 3:4, 10:16 and 9:16 (rotated monitors, phones).
+//! The installed GameUI has none of these choices, so their labels are temporary
+//! [`placeholders`]. Portrait modes count against [`min_size`] with their sides swapped. The bounds are in the data file too ([`AspectRatio::of`]). When the host
 //! reports no usable mode, the current window size is offered so the list is never empty.
 
 use std::{collections::BTreeMap, sync::LazyLock};
@@ -116,16 +117,28 @@ pub enum AspectRatio {
     Ultrawide21x9,
     /// 32:9 displays; placeholder label [`placeholders::ASPECT_ULTRAWIDE_32X9`].
     Ultrawide32x9,
+    /// Square displays; placeholder label [`placeholders::ASPECT_SQUARE_1X1`].
+    Square1x1,
+    /// 3:4 portrait displays; placeholder label [`placeholders::ASPECT_PORTRAIT_3X4`].
+    Portrait3x4,
+    /// 10:16 portrait displays; placeholder label [`placeholders::ASPECT_PORTRAIT_10X16`].
+    Portrait10x16,
+    /// 9:16 portrait displays; placeholder label [`placeholders::ASPECT_PORTRAIT_9X16`].
+    Portrait9x16,
 }
 
 impl AspectRatio {
-    /// Combo order: the retail choices, then the ultrawide ones.
-    pub const ALL: [Self; 5] = [
+    /// Combo order: the retail choices, then the wider ones, then the narrower ones.
+    pub const ALL: [Self; 9] = [
         Self::Normal,
         Self::Wide16x9,
         Self::Wide16x10,
         Self::Ultrawide21x9,
         Self::Ultrawide32x9,
+        Self::Square1x1,
+        Self::Portrait3x4,
+        Self::Portrait10x16,
+        Self::Portrait9x16,
     ];
 
     /// Bucket of a width/height pair: a window bucket (`tolerance`) around its exact ratio wins,
@@ -162,6 +175,10 @@ impl AspectRatio {
             Self::Wide16x10 => "#GameUI_AspectWide16x10",
             Self::Ultrawide21x9 => placeholders::ASPECT_ULTRAWIDE_21X9,
             Self::Ultrawide32x9 => placeholders::ASPECT_ULTRAWIDE_32X9,
+            Self::Square1x1 => placeholders::ASPECT_SQUARE_1X1,
+            Self::Portrait3x4 => placeholders::ASPECT_PORTRAIT_3X4,
+            Self::Portrait10x16 => placeholders::ASPECT_PORTRAIT_10X16,
+            Self::Portrait9x16 => placeholders::ASPECT_PORTRAIT_9X16,
         }
     }
 }
@@ -184,6 +201,13 @@ impl Resolution {
 
     pub fn label(self) -> String {
         format!("{} x {}", self.width, self.height)
+    }
+
+    /// Whether this resolution is at least `min` in either orientation (a portrait mode is
+    /// measured with its sides swapped).
+    pub fn at_least(self, min: Resolution) -> bool {
+        let (long, short) = (self.width.max(self.height), self.width.min(self.height));
+        long >= min.width.max(min.height) && short >= min.width.min(min.height)
     }
 
     /// Whether this resolution fits inside `bounds` in both dimensions.
@@ -235,7 +259,7 @@ impl std::str::FromStr for MonitorSpec {
             .collect::<anyhow::Result<Vec<Resolution>>>()?;
         let size = reported[0];
         anyhow::ensure!(
-            min_size().fits(size),
+            size.at_least(min_size()),
             "the monitor must be at least {}",
             min_size().label()
         );
@@ -260,7 +284,7 @@ pub fn usable_modes(
         .into_iter()
         .chain(standard_modes().iter().copied())
         .chain(monitor.into_iter().flat_map(native_fits))
-        .filter(|m| min.fits(*m))
+        .filter(|m| m.at_least(min))
         .filter(|m| monitor.is_none_or(|max| m.fits(max)))
         .collect();
     modes.sort_by(|a, b| b.cmp(a));
@@ -357,7 +381,10 @@ mod tests {
         let min = min_size();
         let modes = standard_modes();
         assert!(!modes.is_empty());
-        assert!(modes.iter().all(|m| min.fits(*m)), "every mode >= min_size");
+        assert!(
+            modes.iter().all(|m| m.at_least(min)),
+            "every mode >= min_size"
+        );
         let mut unique = modes.to_vec();
         unique.sort();
         unique.dedup();
@@ -399,6 +426,16 @@ mod tests {
             assert_eq!(AspectRatio::of(w, h), AspectRatio::Ultrawide21x9, "{w}x{h}");
         }
         assert_eq!(AspectRatio::of(3840, 1080), AspectRatio::Ultrawide32x9);
+        assert_eq!(AspectRatio::of(1080, 1080), AspectRatio::Square1x1);
+        assert_eq!(AspectRatio::of(768, 1024), AspectRatio::Portrait3x4);
+        assert_eq!(AspectRatio::of(1080, 1350), AspectRatio::Portrait3x4, "4:5");
+        assert_eq!(AspectRatio::of(1200, 1920), AspectRatio::Portrait10x16);
+        assert_eq!(AspectRatio::of(1080, 1920), AspectRatio::Portrait9x16);
+        assert_eq!(
+            AspectRatio::of(1170, 2532),
+            AspectRatio::Portrait9x16,
+            "phone"
+        );
         assert_eq!(AspectRatio::of(5120, 1440), AspectRatio::Ultrawide32x9);
         assert_eq!(
             AspectRatio::of(10, 0),
@@ -432,10 +469,15 @@ mod tests {
                 r(1280, 720),
                 r(1152, 864),
                 r(1024, 768),
+                r(1000, 1000),
                 r(800, 600),
+                r(744, 992),
+                r(720, 720),
                 r(640, 480),
+                r(560, 896),
+                r(504, 896),
             ],
-            "reported and standard modes up to the monitor, largest first, no duplicates"
+            "reported, standard and native-fit modes up to the monitor, largest first, no duplicates"
         );
         assert_eq!(
             usable_modes([], Some(r(320, 240)), r(320, 240)),
@@ -565,6 +607,30 @@ mod tests {
             modes.choices(true),
             all,
             "every mode fits an 8K desktop in pixels"
+        );
+    }
+
+    #[test]
+    fn a_rotated_monitor_offers_portrait_and_landscape_modes() {
+        let panel = r(1080, 1920);
+        let modes = usable_modes([panel], Some(panel), r(1080, 1920));
+        let top = |aspect| resolution_choices(&modes, aspect)[0];
+        assert_eq!(top(AspectRatio::Portrait9x16), r(1080, 1920));
+        assert_eq!(top(AspectRatio::Portrait10x16), r(1050, 1680));
+        assert_eq!(top(AspectRatio::Portrait3x4), r(1080, 1440));
+        assert_eq!(top(AspectRatio::Square1x1), r(1080, 1080));
+        assert_eq!(top(AspectRatio::Normal), r(1056, 792), "landscape fits too");
+        assert!(modes
+            .iter()
+            .all(|m| m.fits(panel) && m.at_least(min_size())));
+        assert!(
+            r(480, 640).at_least(min_size()) && !r(480, 480).at_least(min_size()),
+            "portrait counts with its sides swapped"
+        );
+        assert_eq!(
+            "1080x1920".parse::<MonitorSpec>().unwrap().size,
+            panel,
+            "portrait monitors can be faked"
         );
     }
 

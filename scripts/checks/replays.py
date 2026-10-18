@@ -228,6 +228,26 @@ def check_video_8k():
             "1920 x 1080", "1600 x 900", "1366 x 768", "1280 x 720"])
 
 
+def check_video_portrait():
+    """A rotated 1080 x 1920 monitor (--fake-monitor) running at 1080 x 1920: the menu and
+    Options work on a portrait frame; by keyboard, Video > Aspect Ratio opens with Portrait 9:16
+    selected and the Resolution choices are the 9:16 modes up to the panel."""
+    if CONFIG.exists():
+        CONFIG.unlink()
+    settings(video={"display_mode": "windowed", "width": 1080, "height": 1920})
+    run = game("video_portrait", "--map", "background01", "--main-menu", "--width", "1080",
+               "--height", "1920", "--frames", "400", "--fake-monitor", "1080x1920",
+               "--movement-script", "test-inputs/bevy-menu-video-portrait.json")
+    options = run.sample("aspect-open")["console"].get("options") or {}
+    expect("Video tab", options.get("tab"), "Video")
+    expect("Aspect Ratio focused", options.get("focus"), "AspectRatio")
+    holds("its list is open", options.get("list_open") is True)
+    expect("9:16 choices of the panel", options.get("resolutions"),
+           ["1080 x 1920", "900 x 1600", "768 x 1366", "720 x 1280"])
+    expect("rendered in portrait", run.sample("settle").get("frame"), [1080, 1920])
+    expect("the capture follows", run.report["render"]["capture_size"], [1080, 1920])
+
+
 def check_resolution_stress():
     """Resolution changes never stall or crash (background, faked 8K monitor): Options Apply of
     7680 x 4320, the smallest and largest sizes the console accepts, and four changes on
@@ -530,7 +550,7 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
                "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud",
                "bevy-menu-video-8k", "bevy-menu-resolution-stress",
-               "bevy-menu-resolution-stress-windowed")
+               "bevy-menu-resolution-stress-windowed", "bevy-menu-video-portrait")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1009,6 +1029,7 @@ CHECKS = [
     Check("menu_options", check_menu_options, "shared"),
     Check("options", check_options, "shared"),
     Check("video_8k", check_video_8k, "shared"),
+    Check("video_portrait", check_video_portrait, "shared"),
     Check("resolution_stress", check_resolution_stress, "shared"),
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),
