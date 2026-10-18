@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 Video: --fake-monitor for testing other displays; 8K checks
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** new hl2-bevy launch option `--fake-monitor WxH[,WxH...]`: the Video page lists resolutions for that panel size and those reported modes instead of the host monitor's (`gameui::display::MonitorSpec`, `Resolution: FromStr`; `video::display::modes` takes the spec). The Options report gains `resolutions` (the Resolution combo's current choices; `settings::offered_resolutions` shared with the combo). New replay `test-inputs/bevy-menu-video-8k.json`, check `video_8k`.
+
+**Why:** owner request: show and test what an 8K display would offer.
+
+**Tested how:** unit tests (8K panel: every aspect up to the panel, windowed lists equal full screen; spec parsing and rejection; a bad `--fake-monitor` fails the launch); packaged replay `video_8k` (16:9 list from 7680 x 4320, list open in the capture, inspected); the validation suite and the Windows-target check.
+
+**Result:** the Video page can be checked for any display size without that display.
+
+**Still broken or not tested:** only the list is faked: window placement and display mode changes use the real monitor; no real 8K display tested.
+
+**Next:** none.
+
 ## 2026-10-18 Video: ultrawide aspect choices with temporary placeholder labels
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

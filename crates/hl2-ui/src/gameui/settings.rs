@@ -41,9 +41,13 @@ pub struct Env<'a> {
 impl Env<'_> {
     /// Resolutions offered for the draft's display mode (windowed ones must fit the desktop).
     pub fn resolutions(&self, draft: &Draft) -> Vec<Resolution> {
-        self.modes
-            .choices(draft.config.video.display_mode.effective() == DisplayMode::Windowed)
+        offered_resolutions(self.modes, draft)
     }
+}
+
+/// Resolutions `modes` offers for the draft's display mode (windowed ones must fit the desktop).
+pub fn offered_resolutions(modes: &DisplayModes, draft: &Draft) -> Vec<Resolution> {
+    modes.choices(draft.config.video.display_mode.effective() == DisplayMode::Windowed)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -89,6 +89,9 @@ struct Options {
     capture_window: bool,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
     tonemap_scale: Option<f32>,
+    /// `--fake-monitor`: the Video page lists resolutions for this monitor instead of the
+    /// host's (window placement and display mode changes still use the real monitor).
+    fake_monitor: Option<hl2_ui::gameui::display::MonitorSpec>,
     /// Show the main menu over the loaded map, treating it as a menu background.
     main_menu: bool,
     /// Override the startup main-menu background map.
@@ -157,6 +160,7 @@ impl Options {
             background: false,
             capture_window: false,
             tonemap_scale: None,
+            fake_monitor: None,
             main_menu: false,
             background_map: None,
         };
@@ -232,6 +236,13 @@ impl Options {
                     }
                     options.tonemap_scale = Some(scale);
                 }
+                "--fake-monitor" => {
+                    let spec = next(&mut args)?;
+                    options.fake_monitor = Some(
+                        spec.parse()
+                            .with_context(|| format!("--fake-monitor {spec}"))?,
+                    );
+                }
                 "--main-menu" => options.main_menu = true,
                 "--background-map" => options.background_map = Some(next(&mut args)?),
                 "--help" | "-h" => {
@@ -239,7 +250,7 @@ impl Options {
                         "Installation: auto-detect Steam or use the remembered folder.\n--setup: choose/remember the game folder; --no-setup: fail without opening setup.\n--game PATH and HL2_ROOT override the remembered folder.\n--setup-preview PNG: capture setup and exit without loading a map."
                     );
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --background-map NAME --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; on macOS --borderless is the native full-screen Space)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead; --background-map overrides the background map.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --background (no window: unattended replays and captures stay off the desktop) --capture-window (capture the presented window, not the game frame) --tonemap-scale S (fixed HDR exposure)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --background-map NAME --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; on macOS --borderless is the native full-screen Space)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead; --background-map overrides the background map.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --background (no window: unattended replays and captures stay off the desktop) --capture-window (capture the presented window, not the game frame) --tonemap-scale S (fixed HDR exposure) --fake-monitor WxH[,WxH...] (the Video page lists resolutions for this panel size and these reported modes instead of the real monitor's)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -1228,6 +1239,14 @@ mod tests {
             startup_display_mode(Fullscreen, Some(Windowed), false),
             Windowed
         );
+    }
+    #[test]
+    fn a_bad_fake_monitor_fails_the_launch() {
+        for spec in ["8k", "320x240", "1920x1080,3840x2160"] {
+            let args = ["--fake-monitor".to_owned(), spec.to_owned()];
+            let error = Options::parse_from(args).err().expect(spec).to_string();
+            assert!(error.contains("--fake-monitor"), "{error}");
+        }
     }
     #[test]
     fn startup_parses_background_map_override() {

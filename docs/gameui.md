@@ -830,6 +830,26 @@ Owner request: add the missing ultrawide aspect ratios, with temporary placehold
   unbounded), placeholder tests in `localize::placeholders`. No ultrawide display tested; the HUD
   Aspect Ratio choices (installed `GameUI_HUDAspectRatio_*`) are unchanged.
 
+### 10e. Testing other displays: `--fake-monitor` (2026-10-18)
+
+Owner question: what an 8K display would offer, and a way to test it here.
+
+- `--fake-monitor WxH[,WxH...]` (hl2-bevy) makes the Video page list resolutions for that
+  panel instead of the host monitor: the first entry is the panel size (and desktop size), all
+  entries are reported modes (`display::MonitorSpec`, parsed and validated in hl2-ui: at least
+  the minimum size, reported modes fit the panel). Only the list is faked: window placement and
+  display mode changes still use the real monitor, so applying a mode larger than it is not a
+  test of that display.
+- The Options report lists the Resolution combo's current choices (`options.resolutions`), so
+  replays assert on the list rather than on a capture alone.
+- On a 7680x4320 panel each aspect choice reaches the panel: 5760x4320 (4:3), 7680x4320 (16:9),
+  6912x4320 (16:10), 7680x3240 (21:9), 7680x2160 (32:9); every standard mode fits, and windowed
+  lists equal the full-screen ones because the desktop is measured in pixels (display scaling
+  does not shrink it).
+- Tests: `an_8k_panel_offers_every_aspect_up_to_its_size`, `monitor_specs_parse_from_the_command_line`,
+  `a_bad_fake_monitor_fails_the_launch`; packaged replay `video_8k` (docs/validation.md). No real
+  8K display tested.
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed

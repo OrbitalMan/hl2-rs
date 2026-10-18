@@ -45,6 +45,7 @@ pub fn refresh_display_modes(
     mut was_options: Local<bool>,
     windows: Query<&Window, With<PrimaryWindow>>,
     monitors: Query<&bevy::window::Monitor, With<PrimaryMonitor>>,
+    options: Option<Res<crate::Options>>,
     ui: Option<ResMut<crate::ui_host::Console>>,
 ) {
     let Some(mut ui) = ui else {
@@ -54,8 +55,9 @@ pub fn refresh_display_modes(
     let opened = is_options && !*was_options;
     *was_options = is_options;
     if opened && let Ok(window) = windows.single() {
+        let fake = options.as_ref().and_then(|o| o.fake_monitor.as_ref());
         ui.source
-            .set_display_modes(crate::video::display::modes(&monitors, window));
+            .set_display_modes(crate::video::display::modes(&monitors, window, fake));
     }
 }
 

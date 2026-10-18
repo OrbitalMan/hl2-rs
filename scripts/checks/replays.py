@@ -210,6 +210,24 @@ def check_menu_options():
     expect("Options kept the focus", (after["mode"], after.get("windows")), ("Options", ["Options"]))
 
 
+EIGHT_K = "7680x4320,3840x2160,2560x1440,1920x1080,1280x720"
+
+
+def check_video_8k():
+    """Options > Video on a faked 8K monitor (--fake-monitor): the Resolution list (16:9 by
+    default) starts at the panel's 7680 x 4320 and is shown open in the capture."""
+    if CONFIG.exists():
+        CONFIG.unlink()
+    run = game("video_8k", *MENU, "--fake-monitor", EIGHT_K,
+               "--movement-script", "test-inputs/bevy-menu-video-8k.json")
+    options = run.sample("resolution-open")["console"].get("options") or {}
+    expect("Video tab", options.get("tab"), "Video")
+    holds("the Resolution list is open", options.get("list_open") is True)
+    expect("16:9 choices of an 8K panel", options.get("resolutions"),
+           ["7680 x 4320", "5120 x 2880", "3840 x 2160", "3200 x 1800", "2560 x 1440",
+            "1920 x 1080", "1600 x 900", "1366 x 768", "1280 x 720"])
+
+
 def check_chapter_quit():
     """Loading a gameplay map saves its chapter's background, so a mid-game quit relaunches over it."""
     settings(gameplay={"background_game": "hl2", "background_map": "background01"})
@@ -485,7 +503,8 @@ GAMEPLAY_MAPS = {**{f: "d1_trainstation_01" for f in STATION_01},
 UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-return",
                "bevy-menu-options-nonmodal", "bevy-menu-options-list",
                "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
-               "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud")
+               "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud",
+               "bevy-menu-video-8k")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -949,6 +968,7 @@ CHECKS = [
     Check("chapter_quit", check_chapter_quit, "shared"),
     Check("menu_options", check_menu_options, "shared"),
     Check("options", check_options, "shared"),
+    Check("video_8k", check_video_8k, "shared"),
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),
     Check("bg_compare", check_bg_compare, "shared"),

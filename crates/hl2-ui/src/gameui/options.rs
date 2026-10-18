@@ -22,7 +22,7 @@
 //! presses the default button (docs/gameui.md section 6c).
 
 use super::{
-    display::DisplayModes,
+    display::{self, DisplayModes, Resolution},
     keys::{self, KeyRow},
     layout::{Align as LayoutAlign, Control, ControlKind},
     menu::MessageBox,
@@ -117,6 +117,8 @@ pub struct OptionsReport {
     pub list_open: bool,
     pub editing: bool,
     pub capturing_key: bool,
+    /// The Resolution combo's choices for the draft's display mode and aspect ratio.
+    pub resolutions: Vec<String>,
 }
 
 /// What the owner of the dialog has to do after an input frame.
@@ -1014,7 +1016,17 @@ impl OptionsDialog {
             list_open: self.combo.is_some(),
             editing: self.editing.is_some(),
             capturing_key: self.keys.capture.is_some(),
+            resolutions: self.resolution_labels(),
         }
+    }
+
+    /// The Resolution combo's choices as shown (for the report).
+    fn resolution_labels(&self) -> Vec<String> {
+        let offered = settings::offered_resolutions(&self.modes, &self.draft);
+        display::resolution_choices(&offered, self.draft.aspect)
+            .into_iter()
+            .map(Resolution::label)
+            .collect()
     }
 
     /// The Keyboard page's key list as a focus target.

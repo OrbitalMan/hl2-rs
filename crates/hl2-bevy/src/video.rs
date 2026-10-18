@@ -70,21 +70,26 @@ pub mod display {
     /// the standard list, filtered and sorted by [`hl2_ui::gameui::display::usable_modes`], and
     /// the desktop size in pixels that windowed choices must fit (windowed mode shows one frame
     /// pixel per display pixel). Falls back to the current window size when nothing is usable.
+    /// A `--fake-monitor` spec replaces the monitor's size and reported modes.
     pub fn modes(
         monitors: &Query<&Monitor, With<PrimaryMonitor>>,
         window: &Window,
+        fake: Option<&hl2_ui::gameui::display::MonitorSpec>,
     ) -> hl2_ui::gameui::display::DisplayModes {
         use hl2_ui::gameui::display::{DisplayModes, Resolution, usable_modes};
+        let current = Resolution::new(
+            window.resolution.physical_width(),
+            window.resolution.physical_height(),
+        );
+        if let Some(fake) = fake {
+            return fake.display_modes(current);
+        }
         let monitor = monitors.iter().next();
         let reported = monitor
             .into_iter()
             .flat_map(|m| m.video_modes.iter())
             .map(|mode| Resolution::new(mode.physical_size.x, mode.physical_size.y));
         let size = monitor.map(|m| Resolution::new(m.physical_width, m.physical_height));
-        let current = Resolution::new(
-            window.resolution.physical_width(),
-            window.resolution.physical_height(),
-        );
         DisplayModes {
             fullscreen: usable_modes(reported, size, current),
             desktop: size,

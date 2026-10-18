@@ -192,6 +192,61 @@ impl Resolution {
     }
 }
 
+impl std::str::FromStr for Resolution {
+    type Err = anyhow::Error;
+
+    /// `WIDTHxHEIGHT`, e.g. `7680x4320`.
+    fn from_str(text: &str) -> anyhow::Result<Self> {
+        let (width, height) = text
+            .trim()
+            .split_once(['x', 'X'])
+            .ok_or_else(|| anyhow::anyhow!("expected WIDTHxHEIGHT, got {text:?}"))?;
+        Ok(Self::new(width.parse()?, height.parse()?))
+    }
+}
+
+/// A monitor described on the command line instead of queried from the host (testing the Video
+/// page as another display would show it): `SIZE[,MODE...]`, e.g. `7680x4320,3840x2160`. The
+/// first entry is the panel's size and also a reported mode; the others are further reported
+/// modes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonitorSpec {
+    pub size: Resolution,
+    pub reported: Vec<Resolution>,
+}
+
+impl MonitorSpec {
+    /// The modes the Video page offers on this monitor, with the panel as the desktop.
+    pub fn display_modes(&self, current: Resolution) -> DisplayModes {
+        DisplayModes {
+            fullscreen: usable_modes(self.reported.iter().copied(), Some(self.size), current),
+            desktop: Some(self.size),
+        }
+    }
+}
+
+impl std::str::FromStr for MonitorSpec {
+    type Err = anyhow::Error;
+
+    fn from_str(text: &str) -> anyhow::Result<Self> {
+        let reported = text
+            .split(',')
+            .map(str::parse)
+            .collect::<anyhow::Result<Vec<Resolution>>>()?;
+        let size = reported[0];
+        anyhow::ensure!(
+            min_size().fits(size),
+            "the monitor must be at least {}",
+            min_size().label()
+        );
+        anyhow::ensure!(
+            reported.iter().all(|m| m.fits(size)),
+            "reported modes must fit the monitor"
+        );
+        Ok(Self { size, reported })
+    }
+}
+
 /// Usable modes, deduplicated and sorted largest first: the reported modes plus
 /// [`standard_modes`] and the monitor's [`native_fits`]. Modes smaller than [`min_size`] or
 /// larger than the monitor (when known) are dropped. Falls back to `current` when nothing remains.
@@ -488,6 +543,50 @@ mod tests {
             r(1920, 1440),
             "4:3 up to the panel's height"
         );
+    }
+
+    #[test]
+    fn an_8k_panel_offers_every_aspect_up_to_its_size() {
+        let panel = r(7680, 4320);
+        let reported = [r(7680, 4320), r(3840, 2160), r(1920, 1080), r(1280, 720)];
+        let modes = DisplayModes {
+            fullscreen: usable_modes(reported, Some(panel), r(3840, 2160)),
+            desktop: Some(panel),
+        };
+        let top = |aspect| resolution_choices(&modes.choices(false), aspect)[0];
+        assert_eq!(top(AspectRatio::Normal), r(5760, 4320));
+        assert_eq!(top(AspectRatio::Wide16x9), r(7680, 4320));
+        assert_eq!(top(AspectRatio::Wide16x10), r(6912, 4320));
+        assert_eq!(top(AspectRatio::Ultrawide21x9), r(7680, 3240));
+        assert_eq!(top(AspectRatio::Ultrawide32x9), r(7680, 2160));
+        let all = modes.choices(false);
+        assert!(all.contains(&r(5120, 2880)) && all.contains(&r(640, 480)));
+        assert_eq!(
+            modes.choices(true),
+            all,
+            "every mode fits an 8K desktop in pixels"
+        );
+    }
+
+    #[test]
+    fn monitor_specs_parse_from_the_command_line() {
+        let spec: MonitorSpec = "7680x4320,3840X2160".parse().unwrap();
+        assert_eq!(spec.size, r(7680, 4320));
+        assert_eq!(spec.reported, [r(7680, 4320), r(3840, 2160)]);
+        assert_eq!(
+            spec.display_modes(r(1024, 768)).fullscreen[0],
+            r(7680, 4320)
+        );
+        for bad in [
+            "",
+            "7680",
+            "7680x",
+            "x4320",
+            "320x240",
+            "1920x1080,3840x2160",
+        ] {
+            assert!(bad.parse::<MonitorSpec>().is_err(), "{bad:?}");
+        }
     }
 
     #[test]
