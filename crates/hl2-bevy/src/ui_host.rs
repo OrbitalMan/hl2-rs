@@ -28,7 +28,7 @@ impl Console {
         }
     }
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"mode":self.source.mode(),"background_level":self.source.background_level(),"sv_cheats":self.source.cheats,"input":self.source.input_line(),"output":self.source.output,"pending_map":self.map_request,"pending_game":self.map_request_game,"options":self.source.options_report(),"windows":self.source.open_windows()})
+        serde_json::json!({"mode":self.source.mode(),"background_level":self.source.background_level(),"sv_cheats":self.source.cheats,"input":self.source.input_line(),"output":self.source.output,"pending_map":self.map_request,"pending_game":self.map_request_game,"options":self.source.options_report(),"windows":self.source.open_windows(),"confirm":self.source.confirm_report()})
     }
 }
 #[derive(Clone, Deserialize)]

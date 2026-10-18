@@ -875,11 +875,41 @@ Owner request: add square and vertical aspect ratios (10:16, 9:16, 3:4).
   packaged replay `video_portrait` (faked 1080x1920 monitor at 1080 x 1920: by keyboard, the
   Aspect Ratio list opens with Portrait 9:16 selected, the Resolution choices are its 9:16 modes,
   the frame renders in portrait).
-- **Known problem (not fixed):** the UI scales by screen height (Source's 480-line design), so on
-  a portrait frame the Options dialog is wider than the screen: in the 1080 x 1920 capture the
-  Video tab, Cancel and Apply are cut off at the right and the dialog covers the main menu.
-  Retail never ran on portrait screens; how to scale the UI there (by width when narrower than
-  4:3, or otherwise) is an open owner decision.
+- The UI was too wide on portrait frames (the Options dialog cut off at the right); fixed in
+  section 10g.
+
+### 10g. UI that fits narrow screens; keep-or-revert after an aspect change (2026-10-18)
+
+Owner decisions: the UI also fits the width on narrow screens; an aspect ratio change asks to be
+kept and reverts on its own (Cancel does the same).
+
+- **Scaling.** Source scales its 480-line design by the screen height, which fits every screen
+  at least as wide as 5:4. `proportional::design_height(canvas)` is the screen height limited to
+  `width / narrowest_design_aspect` (5:4, `crates/hl2-ui/assets/ui/tuning.json`); on 5:4 to
+  ultrawide screens it is the height, so nothing changes there. Dialogs
+  (`Painter::scale_for_canvas`), the main menu (`MenuLayout::geometry`), the console window,
+  HUD fonts and panels and the caption panel scale by it. HUD panels and the caption panel keep
+  their vertical place by the full height (`proportional::y_scale`), so bottom panels stay at the
+  bottom while their size follows the width. Never scale UI by the raw canvas height.
+- **Keep-or-revert.** `gameui::video_confirm`: applying an Options change whose aspect bucket
+  differs (`VideoConfirm::needed`) applies at once and opens a modal box (`ConfirmKind::KeepVideo`)
+  over everything, opaque over a window. Text: installed `#GameUI_Confirm` title, `#GameUI_OK` /
+  `#GameUI_Cancel`, the installed `#vgui_TimeLeftSecondsRemaining` / `#vgui_TimeLeftSecondRemaining`
+  countdown, and the temporary placeholder question `HL2RS_KeepVideoSettings` (no installed
+  token). OK keeps; Cancel (focused by default), the close button, Escape and the timeout put
+  back the previous width, height and display mode (saved and applied; an open Options dialog
+  shows them). The timeout is `video_confirm_seconds` (15) in `tuning.json`: common practice is
+  a 10 to 15 second countdown that reverts by default (Windows, GNOME, KDE; one Xfce report
+  found 10 s too short while a display resyncs). Retail Source has no such box. The countdown
+  runs on `Console::tick`, called every frame with real time, also while a replay drives the
+  input; a background map load does not close the box. Console `mat_setvideomode` does not ask.
+- Reports: `options.frame` (placed dialog), `console.confirm` (`kind`, `text`).
+- Tests: `proportional`, `tuning`, `video_confirm` unit tests, `the_dialog_fits_square_and_portrait_screens`,
+  console `an_aspect_change_applies_and_asks_to_keep_it`,
+  `the_keep_video_box_counts_down_and_reverts_at_the_timeout`,
+  `ok_keeps_the_change_and_cancel_escape_revert_it`; packaged `video_portrait` (dialog inside the
+  1080 x 1920 frame) and `video_keep` (timeout, OK, Escape). Captures inspected: Options on
+  1080 x 1920, the keep box over Options, the HUD of `bevy-hud.json` at 1080 x 1920.
 
 ## 11. Developer console (2026-10-17)
 

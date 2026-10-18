@@ -10,6 +10,7 @@ use crate::gameui::{
     options::{OptionsDialog, OptionsOutcome},
     placement::{self, CursorHint, Placement},
     resources::{self, fallback_game_menu, GameUiResources},
+    video_confirm::{VideoConfirm, VideoMode},
     widgets::{
         scheme_color, Align, ButtonState, ButtonTracker, Fonts, HoldRepeat, Painter,
         ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
@@ -126,10 +127,12 @@ impl GameMap {
 }
 
 /// Action to perform upon confirming a message box dialog.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConfirmKind {
     Quit,
     ReturnToMainMenu,
+    /// Keep an aspect ratio change, else revert it (counts down on [`Console::tick`]).
+    KeepVideo(VideoConfirm),
 }
 
 pub struct Console {
@@ -206,6 +209,11 @@ pub struct Console {
     /// The in-game (pause) menu.
     pause_menu: GameMenu,
     pub(crate) confirm_box: Option<(MessageBox, ConfirmKind)>,
+    /// UI clock in seconds (real time), set every frame by [`Console::tick`].
+    ui_clock: f64,
+    /// Effects of calls that return none ([`Console::escape`]), handed out by the next
+    /// [`Console::tick`] or [`Console::input`].
+    deferred: Vec<Effect>,
     pub loading_dialog: Option<crate::gameui::loading::LoadingDialog>,
     pub background_transition: crate::gameui::loading::BackgroundTransitionState,
     /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
@@ -563,6 +571,8 @@ impl Default for Console {
             main_menu,
             pause_menu,
             confirm_box: None,
+            ui_clock: 0.,
+            deferred: Vec::new(),
             loading_dialog: None,
             background_transition: crate::gameui::loading::BackgroundTransitionState::Idle,
             background_level: false,
@@ -936,7 +946,10 @@ impl Console {
         self.loading_dialog = None;
         crate::gameui::loading::reset_progress();
         self.background_level = background;
-        self.confirm_box = None;
+        // A pending keep-video confirmation outlives the load: closing it would keep the change.
+        if !matches!(self.confirm_box, Some((_, ConfirmKind::KeepVideo(_)))) {
+            self.confirm_box = None;
+        }
         if !background {
             self.main_menu.back(&self.gameui.localization);
         }
@@ -1150,6 +1163,16 @@ impl Console {
 
     /// A modal dialog is up: the quit / return confirmation box or a game loading dialog. It
     /// takes every click; the Options dialog and the console are not modal (see [`Windows`]).
+    /// The canvas size in pixels.
+    fn canvas_size(&self) -> Vec2 {
+        vec2(self.canvas.width(), self.canvas.height())
+    }
+
+    /// The height the menu scales by ([`crate::proportional::design_height`]).
+    fn design_height(&self) -> f32 {
+        crate::proportional::design_height(self.canvas_size())
+    }
+
     pub fn modal_dialog_open(&self) -> bool {
         self.confirm_box.is_some()
             || self
@@ -1286,7 +1309,7 @@ impl Console {
     pub fn modal_bounds(&self) -> Option<Rect> {
         if let Some(loading) = &self.loading_dialog {
             if !loading.is_background() {
-                let scale = Painter::scale_for(self.canvas.height());
+                let scale = Painter::scale_for_canvas(self.canvas_size());
                 let canvas = vec2(self.canvas.width(), self.canvas.height());
                 let (origin, _) =
                     crate::gameui::loading::LoadingDialog::layout_geometry(canvas, scale);
@@ -1352,7 +1375,13 @@ impl Console {
     /// The main menu over a background level has nothing to return to.
     /// The Options dialog's state for run reports while it is open.
     pub fn options_report(&self) -> Option<crate::gameui::options::OptionsReport> {
-        self.options_open().then(|| self.options.report())
+        self.options_open().then(|| {
+            let bounds = self.options.frame_bounds(self.canvas_size());
+            crate::gameui::options::OptionsReport {
+                frame: Some([bounds.x, bounds.y, bounds.w, bounds.h]),
+                ..self.options.report()
+            }
+        })
     }
 
     /// Escape went down. When it would close a dialog that has a close button (Options or one
@@ -1411,8 +1440,12 @@ impl Console {
             }
             return;
         }
-        if self.confirm_box.take().is_some() {
+        if let Some((_, kind)) = self.confirm_box.take() {
             self.reset_menu_interaction();
+            if let ConfirmKind::KeepVideo(keep) = kind {
+                let effect = self.revert_video(keep.previous);
+                self.deferred.push(effect);
+            }
             return;
         }
         // Escape closes the top window first, whichever layer has the focus.
@@ -1875,8 +1908,56 @@ impl Console {
             .then(|| self.editor.history().to_vec())
     }
     /// Called before gameplay input collection. Opening characters are drained by the host.
+    /// Advances the UI clock to `now` (real seconds), once per frame whatever drives the input
+    /// (scripted replays too): a keep-video confirmation counts down and reverts at its timeout.
+    pub fn tick(&mut self, now: f64) -> Vec<Effect> {
+        self.ui_clock = now;
+        if let Some((confirm, ConfirmKind::KeepVideo(keep))) = &mut self.confirm_box {
+            if keep.expired(now) {
+                let previous = keep.previous;
+                self.confirm_box = None;
+                self.reset_menu_interaction();
+                let effect = self.revert_video(previous);
+                self.deferred.push(effect);
+            } else {
+                confirm.set_text(VideoConfirm::text(
+                    &self.gameui.localization,
+                    keep.remaining(now),
+                ));
+            }
+        }
+        std::mem::take(&mut self.deferred)
+    }
+
+    /// Puts back the video mode an unconfirmed change replaced, and applies it.
+    fn revert_video(&mut self, previous: VideoMode) -> Effect {
+        previous.restore(&mut self.config.video);
+        if let Err(error) = self.config.save() {
+            self.log(format!("Could not save settings: {error}"));
+        }
+        self.options.reset_applied(self.config.clone());
+        self.log(format!(
+            "Video mode reverted to {}x{}",
+            previous.width, previous.height
+        ));
+        Effect::ApplyConfig(Box::new(self.config.clone()))
+    }
+
+    /// The open message box for run reports: its kind and text.
+    pub fn confirm_report(&self) -> Option<serde_json::Value> {
+        self.confirm_box.as_ref().map(|(confirm, kind)| {
+            let kind = match kind {
+                ConfirmKind::Quit => "quit",
+                ConfirmKind::ReturnToMainMenu => "return_to_main_menu",
+                ConfirmKind::KeepVideo(_) => "keep_video",
+            };
+            serde_json::json!({"kind": kind, "text": confirm.text})
+        })
+    }
+
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
-        let effects = self.input_frame(input);
+        let mut effects = std::mem::take(&mut self.deferred);
+        effects.extend(self.input_frame(input));
         // A drag, resize or reset that ended this frame is saved at once.
         self.save_placements();
         effects
@@ -2009,14 +2090,30 @@ impl Console {
         let Some(config) = config else {
             return effects;
         };
+        effects.extend(self.apply_settings(config));
+        effects
+    }
+
+    /// Saves and applies settings from the Options dialog. An aspect ratio change opens the
+    /// keep-or-revert confirmation ([`VideoConfirm`]).
+    fn apply_settings(&mut self, config: crate::config::Config) -> Vec<Effect> {
+        let mut effects = Vec::new();
         // The dialog's copy of the settings predates any drag made while it was open.
         let mut config = config;
         config.dialogs = self.config.dialogs;
         if let Err(error) = config.save() {
             self.log(format!("Could not save settings: {error}"));
         }
+        let confirm = VideoConfirm::needed(&self.config.video, &config.video)
+            .then(|| VideoConfirm::new(VideoMode::of(&self.config.video), self.ui_clock));
         self.config = config.clone();
         effects.push(Effect::ApplyConfig(Box::new(config)));
+        if let Some(keep) = confirm {
+            self.reset_menu_interaction();
+            self.quit_placement.reset();
+            let message = keep.message_box(&self.gameui.localization, self.ui_clock);
+            self.confirm_box = Some((message, ConfirmKind::KeepVideo(keep)));
+        }
         effects
     }
 
@@ -2046,6 +2143,10 @@ impl Console {
                         effects.push(Effect::Quit);
                         return effects;
                     }
+                    ConfirmKind::KeepVideo(_) => {
+                        self.reset_menu_interaction();
+                        return effects;
+                    }
                     ConfirmKind::ReturnToMainMenu => {
                         self.set_mode(Mode::MainMenu);
                         self.clear_menu_hover();
@@ -2061,6 +2162,9 @@ impl Console {
                 },
                 Some(false) => {
                     self.reset_menu_interaction();
+                    if let ConfirmKind::KeepVideo(keep) = kind {
+                        effects.push(self.revert_video(keep.previous));
+                    }
                 }
                 None => self.confirm_box = Some((confirm, kind)),
             }
@@ -2303,7 +2407,7 @@ impl Console {
         placement::Frame {
             origin,
             size,
-            scale: Painter::scale_for(canvas.y),
+            scale: Painter::scale_for_canvas(canvas),
             canvas,
             min_size: Some(dialog::MIN_SIZE),
             close: crate::gameui::widgets::close_button_rect,
@@ -2337,7 +2441,7 @@ impl Console {
 
     /// The quit / main-menu box's frame (centered, moveable, no close button).
     fn quit_frame(&self, quit: &MessageBox) -> placement::Frame {
-        let scale = Painter::scale_for(self.canvas.height());
+        let scale = Painter::scale_for_canvas(self.canvas_size());
         let measure = self.painter(Vec2::ZERO, 1.);
         let size = quit.layout(|text| measure.text_width(text, false)).size;
         let canvas = vec2(self.canvas.width(), self.canvas.height());
@@ -2506,8 +2610,8 @@ impl Console {
     /// One hit rectangle per menu row (spacers included), in canvas pixels.
     fn menu_rows(&self, count: usize) -> Vec<Rect> {
         self.menu_layout
-            .geometry(self.canvas.height())
-            .row_rects(count, self.canvas.height())
+            .geometry(self.design_height())
+            .row_rects(count, self.design_height())
     }
 
     fn painter(&self, origin: Vec2, scale: f32) -> Painter<'_> {
@@ -2522,7 +2626,7 @@ impl Console {
 
     /// Canvas origin, scale and layout of the open quit box (centered on the canvas).
     fn quit_geometry(&self, quit: &MessageBox) -> (Vec2, f32, MessageBoxLayout) {
-        let scale = Painter::scale_for(self.canvas.height());
+        let scale = Painter::scale_for_canvas(self.canvas_size());
         let measure = self.painter(Vec2::ZERO, 1.);
         let layout = quit.layout(|text| measure.text_width(text, false));
         let origin = self.quit_placement.place(&self.quit_frame(quit)).origin;
@@ -2706,7 +2810,7 @@ impl Console {
         }
         if self.mode == Mode::Gameplay {
             if let Some(loading) = &self.loading_dialog {
-                let scale = Painter::scale_for(self.canvas.height());
+                let scale = Painter::scale_for_canvas(self.canvas_size());
                 loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
             }
             return;
@@ -2768,7 +2872,7 @@ impl Console {
                     crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
                 );
             }
-            let geometry = self.menu_layout.geometry(self.canvas.height());
+            let geometry = self.menu_layout.geometry(self.design_height());
             let title = self.current_title();
             if let Some(face) = &self.title_face {
                 let em = geometry.title_tall * self.title_metrics.em_per_cell;
@@ -2945,12 +3049,20 @@ impl Console {
             }
         }
         // The confirmation box is modal over every window.
+        // Over a window it is opaque, like every dialog stacked over another.
         if let Some((confirm, _)) = &self.confirm_box {
             let (origin, scale, layout) = self.quit_geometry(confirm);
-            confirm.draw(&self.painter(origin, scale), &layout);
+            let painter = self.painter(origin, scale);
+            let stacked = painter.theme.stacked();
+            let theme = if self.windows.top().is_some() {
+                &stacked
+            } else {
+                painter.theme
+            };
+            confirm.draw(&Painter { theme, ..painter }, &layout);
         }
         if let Some(loading) = &self.loading_dialog {
-            let scale = Painter::scale_for(self.canvas.height());
+            let scale = Painter::scale_for_canvas(self.canvas_size());
             loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
         }
     }
@@ -4185,7 +4297,7 @@ mod tests {
 
     /// Pointer position at the middle of menu row `index`.
     fn row(console: &Console, index: usize) -> Option<Vec2> {
-        let geometry = console.menu_layout.geometry(console.canvas.height());
+        let geometry = console.menu_layout.geometry(console.design_height());
         Some(geometry.menu + vec2(5., geometry.item_tall * (index as f32 + 0.5)))
     }
     fn click_row(console: &mut Console, index: usize) -> Vec<Effect> {
@@ -4750,6 +4862,109 @@ mod tests {
             console.background(),
             Some(GameMap::new("hl2", "background04"))
         );
+    }
+
+    /// A main-menu console at 1280x720 whose Options applied a change to `width` x `height`
+    /// at UI time 10; returns the applied effects.
+    fn applied_video_change(width: u32, height: u32) -> (Console, Vec<Effect>) {
+        let mut console = installed_console();
+        console.set_mode(Mode::MainMenu);
+        console.config.video.width = 1280;
+        console.config.video.height = 720;
+        let _ = console.tick(10.);
+        let mut config = console.config.clone();
+        config.video.width = width;
+        config.video.height = height;
+        let effects = console.apply_settings(config);
+        (console, effects)
+    }
+
+    fn applied_size(effects: &[Effect]) -> Option<(u32, u32)> {
+        effects.iter().find_map(|e| match e {
+            Effect::ApplyConfig(c) => Some((c.video.width, c.video.height)),
+            _ => None,
+        })
+    }
+
+    fn keep_video_open(console: &Console) -> bool {
+        matches!(console.confirm_box, Some((_, ConfirmKind::KeepVideo(_))))
+    }
+
+    #[test]
+    fn an_aspect_change_applies_and_asks_to_keep_it() {
+        let (console, effects) = applied_video_change(1024, 768);
+        assert_eq!(applied_size(&effects), Some((1024, 768)), "applied at once");
+        assert!(keep_video_open(&console));
+        assert!(console.modal_dialog_open());
+        let (mut loaded, _) = applied_video_change(1024, 768);
+        loaded.level_loaded(true);
+        assert!(
+            keep_video_open(&loaded),
+            "a background load does not decide it"
+        );
+        let (same_aspect, _) = applied_video_change(1920, 1080);
+        assert!(
+            same_aspect.confirm_box.is_none(),
+            "16:9 to 16:9 needs no confirmation"
+        );
+    }
+
+    #[test]
+    fn the_keep_video_box_counts_down_and_reverts_at_the_timeout() {
+        let (mut console, _) = applied_video_change(1024, 768);
+        let seconds = crate::tuning::video_confirm_seconds();
+        let text = |c: &Console| c.confirm_box.as_ref().unwrap().0.text.clone();
+        let first = text(&console);
+        assert!(
+            first.contains(&format!("{}", seconds.ceil() as u32)),
+            "{first}"
+        );
+        assert!(console.tick(10. + seconds - 2.5).is_empty());
+        assert!(text(&console).contains('3'), "{}", text(&console));
+        let effects = console.tick(10. + seconds);
+        assert_eq!(applied_size(&effects), Some((1280, 720)), "reverted");
+        assert!(console.confirm_box.is_none());
+        assert_eq!(
+            (console.config.video.width, console.config.video.height),
+            (1280, 720)
+        );
+        assert_eq!(
+            console.options.draft().video.width,
+            1280,
+            "Options shows it too"
+        );
+    }
+
+    #[test]
+    fn ok_keeps_the_change_and_cancel_escape_revert_it() {
+        let enter = |console: &mut Console| {
+            let mut effects = console.input(&Input {
+                keys: [Key::Enter].into(),
+                held_keys: [Key::Enter].into(),
+                ..Default::default()
+            });
+            effects.extend(console.input(&Input::default()));
+            effects
+        };
+        // Cancel has the focus: Enter reverts.
+        let (mut console, _) = applied_video_change(1024, 768);
+        assert_eq!(applied_size(&enter(&mut console)), Some((1280, 720)));
+        assert!(console.confirm_box.is_none());
+        // Tab to OK, Enter keeps it: nothing reverts later.
+        let (mut console, _) = applied_video_change(1024, 768);
+        let _ = console.input(&Input {
+            keys: [Key::Tab].into(),
+            ..Default::default()
+        });
+        assert_eq!(applied_size(&enter(&mut console)), None);
+        assert!(console.confirm_box.is_none());
+        assert!(console.tick(1000.).is_empty(), "no timeout after OK");
+        assert_eq!(console.config.video.width, 1024);
+        // Escape reverts; the effect comes with the next tick.
+        let (mut console, _) = applied_video_change(1080, 1920);
+        console.escape();
+        assert!(console.confirm_box.is_none());
+        assert_eq!(applied_size(&console.tick(11.)), Some((1280, 720)));
     }
 
     #[test]
@@ -5702,7 +5917,7 @@ mod tests {
         });
 
         let default_border = Color::new(0.0, 0.0, 0.0, 0.45);
-        let geometry = console.menu_layout.geometry(console.canvas.height());
+        let geometry = console.menu_layout.geometry(console.design_height());
 
         for title_font_enabled in [false, true] {
             if title_font_enabled {
@@ -5916,7 +6131,7 @@ mod tests {
 
         console.draw(0.0);
         let quads = console.canvas.drain();
-        let geometry = console.menu_layout.geometry(console.canvas.height());
+        let geometry = console.menu_layout.geometry(console.design_height());
         let subtitle_quads: Vec<_> = quads
             .iter()
             .filter(|q| {
@@ -6185,7 +6400,7 @@ mod tests {
     /// A point of the Options dialog, from layout units inside its frame.
     fn in_options(console: &Console, local: Vec2) -> Vec2 {
         let bounds = console.window_bounds(Window::Options);
-        let scale = Painter::scale_for(console.canvas.height());
+        let scale = Painter::scale_for_canvas(console.canvas_size());
         vec2(bounds.x, bounds.y) + local * scale
     }
 

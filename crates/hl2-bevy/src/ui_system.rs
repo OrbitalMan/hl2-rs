@@ -114,6 +114,18 @@ pub fn update_ui(
         .map(|s| s.as_str())
         .collect();
     let wheel = crate::ui_host::wheel_steps(wheels.read());
+    // The UI clock runs every frame, also while a script drives the input (a keep-video
+    // confirmation reverts at its timeout).
+    if let (Some(ui), Some(game), Some(now)) = (
+        ui.as_deref_mut(),
+        game.as_deref_mut(),
+        real_time.as_deref().map(Time::elapsed_secs_f64),
+    ) {
+        let effects = ui.source.tick(now);
+        if !effects.is_empty() {
+            sim.console_effects(ui, game, effects);
+        }
+    }
     if !sim.commands.is_empty() {
         return;
     }

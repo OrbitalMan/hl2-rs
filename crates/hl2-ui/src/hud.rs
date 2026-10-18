@@ -447,7 +447,7 @@ impl HudFont {
         Self { face, ranges }
     }
     fn size(&self) -> f32 {
-        let height = self.face.canvas.height();
+        let height = self.design_height();
         let range = self
             .ranges
             .iter()
@@ -456,8 +456,14 @@ impl HudFont {
             r.tall * if r.proportional { height / 480. } else { 1. }
         })
     }
+    fn design_height(&self) -> f32 {
+        crate::proportional::design_height(vec2(
+            self.face.canvas.width(),
+            self.face.canvas.height(),
+        ))
+    }
     fn effects(&self) -> (u16, u16) {
-        let height = self.face.canvas.height();
+        let height = self.design_height();
         let range = self
             .ranges
             .iter()
@@ -519,15 +525,18 @@ impl PanelLayout {
             ),
         }
     }
-    fn rect(&self, scale: f32, viewport_width: f32) -> Rect {
-        let x = panel_axis(&self.x, viewport_width, scale).unwrap_or(0.);
-        Rect::new(x, self.y * scale, self.width * scale, self.height * scale)
+    /// Panel rectangle: sizes and x offsets by `scale`, the y position by the full screen
+    /// height ([`crate::proportional::y_scale`]).
+    fn rect(&self, scale: f32, viewport: Vec2) -> Rect {
+        let x = panel_axis(&self.x, viewport.x, scale).unwrap_or(0.);
+        let y = self.y * crate::proportional::y_scale(viewport);
+        Rect::new(x, y, self.width * scale, self.height * scale)
     }
     fn rect_for(&self, viewport: Vec2) -> Rect {
-        let scale = viewport.y / 480.;
+        let scale = crate::proportional::scale(viewport);
         Rect::new(
             panel_axis(&self.x, viewport.x, scale).unwrap_or(0.),
-            self.y * scale,
+            self.y * crate::proportional::y_scale(viewport),
             self.width * scale,
             self.height * scale,
         )
@@ -782,14 +791,19 @@ impl NumericProperty {
             if parts.len() != 2 || viewport.x <= 0. || viewport.y <= 0. {
                 return None;
             }
-            let scale = viewport.y / 480.;
+            let scale = crate::proportional::scale(viewport);
+            let y_scale = if self == Self::Position {
+                crate::proportional::y_scale(viewport)
+            } else {
+                scale
+            };
             let extent = if self == Self::Position {
                 viewport
             } else {
                 Vec2::ZERO
             };
             let x = panel_axis(parts[0], extent.x, scale)?;
-            let y = panel_axis(parts[1], extent.y, scale)?;
+            let y = panel_axis(parts[1], extent.y, y_scale)?;
             if self == Self::Size && (x < 0. || y < 0.) {
                 return None;
             }
@@ -1561,6 +1575,10 @@ pub struct WeaponHud {
 }
 
 impl WeaponHud {
+    /// The canvas size in pixels.
+    fn canvas_size(&self) -> Vec2 {
+        vec2(self.canvas.width(), self.canvas.height())
+    }
     /// Local-player warnings emitted by QuickInfo's false-to-true threshold latches.
     /// Drain after draw_status and forward these owned sound-script names to the scene.
     pub fn drain_sounds(&self) -> Vec<String> {
@@ -1806,7 +1824,7 @@ impl WeaponHud {
                 color(background),
             );
         }
-        let scale = size.1 / 480.;
+        let scale = crate::proportional::scale(vec2(size.0, size.1));
         for run in &paint.runs {
             let Some((face, tall)) = self.captions.face(run.style, scale) else {
                 continue;
@@ -1934,7 +1952,7 @@ impl WeaponHud {
             self.canvas.rectangle(0., 0., width, height, rgba(full, 1.));
         }
         // Proportional values are truncated to VGUI integers.
-        let scale = height / 480.;
+        let scale = crate::proportional::scale(vec2(width, height));
         let [xpos, ypos, wide, tall1, tall2] = self.damage_layout.map(|v| (v * scale).trunc());
         let high = high_right[3] > right[3] || high_left[3] > left[3];
         let inset = ((tall1 - tall2) / 2.).trunc();
@@ -1978,7 +1996,7 @@ impl WeaponHud {
     fn rounded_box(&self, rect: Rect, color: Color) {
         self.canvas.additive(false);
         // Retail Panel::GetCornerTextureSize uses max(scaled 8 / 2, 8).
-        let corner = ((8. * self.canvas.height() / 480.).round() / 2.)
+        let corner = ((8. * crate::proportional::scale(self.canvas_size())).round() / 2.)
             .floor()
             .max(8.)
             .min(rect.w / 2.)
@@ -2065,7 +2083,7 @@ impl WeaponHud {
         if !inv.suit || inv.health <= 0. || selection.fast_switch || time > selection.until {
             return;
         }
-        let scale = self.canvas.height() / 480.;
+        let scale = crate::proportional::scale(self.canvas_size());
         let small = number(&self.layout, "SmallBoxSize", 32.) * scale;
         let wide = number(&self.layout, "LargeBoxWide", 112.) * scale;
         let tall = number(&self.layout, "LargeBoxTall", 84.) * scale;
@@ -2210,10 +2228,10 @@ impl WeaponHud {
         }
         let background = effects.color(NumericProperty::Background);
         let foreground = effects.color(NumericProperty::Foreground);
-        let scale = self.canvas.height() / 480.;
+        let scale = crate::proportional::scale(self.canvas_size());
         let rect = effects
             .rect()
-            .unwrap_or_else(|| panel.rect(scale, self.canvas.width()));
+            .unwrap_or_else(|| panel.rect(scale, self.canvas_size()));
         self.rounded_box(rect, background);
         self.canvas.additive(true);
         self.labels.draw(
@@ -2338,10 +2356,10 @@ impl WeaponHud {
         effects: PanelEffects,
     ) {
         if let Some(icon) = icon.filter(|_| effects.opacity() > 0.) {
-            let scale = self.canvas.height() / 480.;
+            let scale = crate::proportional::scale(self.canvas_size());
             let rect = effects
                 .rect()
-                .unwrap_or_else(|| panel.rect(scale, self.canvas.width()));
+                .unwrap_or_else(|| panel.rect(scale, self.canvas_size()));
             let x = rect.x
                 + panel.text.x * scale
                 + (self.labels.width(label) - self.ammo_icon_font.width(icon)) * 0.5;

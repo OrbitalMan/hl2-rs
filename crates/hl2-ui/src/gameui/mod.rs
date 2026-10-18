@@ -15,5 +15,6 @@ pub mod placement;
 pub mod resources;
 pub mod scheme_fonts;
 pub mod settings;
+pub mod video_confirm;
 pub mod widgets;
 pub mod windows;

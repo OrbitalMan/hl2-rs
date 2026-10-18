@@ -28,6 +28,9 @@ pub const ASPECT_PORTRAIT_3X4: &str = "#HL2RS_AspectPortrait3x4";
 pub const ASPECT_PORTRAIT_10X16: &str = "#HL2RS_AspectPortrait10x16";
 /// Aspect Ratio choice for 9:16 portrait displays (no installed choice).
 pub const ASPECT_PORTRAIT_9X16: &str = "#HL2RS_AspectPortrait9x16";
+/// Question of the keep-or-revert box after an aspect ratio change (no installed token; the
+/// title, buttons and countdown are installed tokens).
+pub const KEEP_VIDEO_SETTINGS: &str = "#HL2RS_KeepVideoSettings";
 /// Ctrl+R history search prompt in the console (no installed token).
 pub const CONSOLE_REVERSE_SEARCH: &str = "#HL2RS_Console_ReverseSearch";
 
@@ -40,6 +43,7 @@ pub const PLACEHOLDER_STRINGS: &[(&str, &str)] = &[
     ("HL2RS_AspectPortrait3x4", "Portrait 3:4"),
     ("HL2RS_AspectPortrait10x16", "Portrait 10:16"),
     ("HL2RS_AspectPortrait9x16", "Portrait 9:16"),
+    ("HL2RS_KeepVideoSettings", "Keep these display settings?"),
     ("HL2RS_Console_ReverseSearch", "reverse-i-search"),
 ];
 
@@ -65,6 +69,7 @@ mod tests {
             ASPECT_PORTRAIT_3X4,
             ASPECT_PORTRAIT_10X16,
             ASPECT_PORTRAIT_9X16,
+            KEEP_VIDEO_SETTINGS,
             CONSOLE_REVERSE_SEARCH,
         ] {
             assert!(token.starts_with("#HL2RS_"), "{token}");

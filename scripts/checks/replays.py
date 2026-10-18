@@ -245,7 +245,41 @@ def check_video_portrait():
     expect("9:16 choices of the panel", options.get("resolutions"),
            ["1080 x 1920", "900 x 1600", "768 x 1366", "720 x 1280"])
     expect("rendered in portrait", run.sample("settle").get("frame"), [1080, 1920])
+    x, y, w, h = options.get("frame") or [0, 0, 1e9, 1e9]
+    holds("the Options dialog fits the portrait screen", x >= 0 and y >= 0 and x + w <= 1080 and y + h <= 1920,
+          options.get("frame"))
     expect("the capture follows", run.report["render"]["capture_size"], [1080, 1920])
+
+
+def check_video_keep():
+    """Options > Video: a new aspect ratio (Normal 4:3 by keyboard on a faked 1920 x 1080
+    monitor, so 1440 x 1080) applies at once and asks to keep it. The timeout and Escape put
+    back 1280 x 720; OK keeps the change past the timeout."""
+    def run(name):
+        if CONFIG.exists():
+            CONFIG.unlink()
+        result = game(f"video_keep_{name}", *MENU[:-2], "--frames", "2000", "--fake-monitor", "1920x1080",
+                      "--movement-script", f"test-inputs/bevy-menu-video-keep-{name}.json")
+        asked = result.sample("asked")
+        expect(f"{name}: Normal picked", (result.sample("picked-normal")["console"].get("options") or {}).get("changed"), True)
+        expect(f"{name}: the keep box asks", (asked["console"].get("confirm") or {}).get("kind"), "keep_video")
+        expect(f"{name}: the change is shown at once", asked.get("frame"), [1440, 1080])
+        return result
+    def saved_size():
+        video = saved().get("video", {})
+        return [video.get("width"), video.get("height")]
+    timeout = run("timeout")
+    expect("timeout: the box closed", timeout.sample("reverted")["console"].get("confirm"), None)
+    expect("timeout: reverted", timeout.sample("reverted").get("frame"), [1280, 720])
+    expect("timeout: saved reverted", saved_size(), [1280, 720])
+    ok = run("ok")
+    expect("ok: the box closed", ok.sample("kept")["console"].get("confirm"), None)
+    expect("ok: kept past the timeout", ok.sample("still-kept").get("frame"), [1440, 1080])
+    expect("ok: saved", saved_size(), [1440, 1080])
+    escape = run("escape")
+    expect("escape: the box closed", escape.sample("escaped")["console"].get("confirm"), None)
+    expect("escape: reverted", escape.sample("reverted").get("frame"), [1280, 720])
+    expect("escape: saved reverted", saved_size(), [1280, 720])
 
 
 def check_resolution_stress():
@@ -550,7 +584,8 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-resolution-change", "bevy-options-keyboard-apply-resolution", "bevy-save-config",
                "bevy-console", "bevy-console-map", "bevy-campaign", "bevy-dev-overlay", "bevy-hud",
                "bevy-menu-video-8k", "bevy-menu-resolution-stress",
-               "bevy-menu-resolution-stress-windowed", "bevy-menu-video-portrait")
+               "bevy-menu-resolution-stress-windowed", "bevy-menu-video-portrait",
+               "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1030,6 +1065,7 @@ CHECKS = [
     Check("options", check_options, "shared"),
     Check("video_8k", check_video_8k, "shared"),
     Check("video_portrait", check_video_portrait, "shared"),
+    Check("video_keep", check_video_keep, "shared"),
     Check("resolution_stress", check_resolution_stress, "shared"),
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),

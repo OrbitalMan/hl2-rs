@@ -447,6 +447,12 @@ impl Painter<'_> {
         (canvas_height / 720.).max(1.)
     }
 
+    /// The dialog scale for a canvas: [`Self::scale_for`] its
+    /// [`crate::proportional::design_height`], so dialogs fit narrow (square, portrait) screens.
+    pub fn scale_for_canvas(canvas: Vec2) -> f32 {
+        Self::scale_for(crate::proportional::design_height(canvas))
+    }
+
     /// Computes the dialog scale for a given window logical height and display scale factor.
     pub fn scale_for_window(logical_height: f32, scale_factor: f32) -> f32 {
         Self::scale_for(logical_height * scale_factor.max(1.0))

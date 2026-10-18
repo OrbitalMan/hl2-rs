@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 GameUI: UI fits narrow screens; keep-or-revert after an aspect change
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** new `proportional` (design height = screen height limited to width / 5:4) and `tuning` (`assets/ui/tuning.json`: narrowest design aspect, keep timeout 15 s) modules. Dialogs (`Painter::scale_for_canvas`), the main menu, the console window, HUD fonts/panels and captions scale by the design height; HUD and caption panels keep their vertical place by the full height. New `gameui::video_confirm` and `ConfirmKind::KeepVideo`: an Options apply that changes the aspect bucket opens a keep box with a countdown (installed `#GameUI_Confirm`, `#GameUI_OK`, `#GameUI_Cancel`, `#vgui_TimeLeftSecond(s)Remaining`; placeholder question `HL2RS_KeepVideoSettings`), Cancel focused; Cancel, close, Escape and the timeout revert width, height and display mode. `Console::tick` (host, every frame, real time) runs the countdown; `Console::escape` effects come out through it. `MessageBox::with_focus` / `with_layout_text` / `set_text`; `OptionsDialog::reset_applied`; reports `options.frame` and `console.confirm`. New replays `bevy-menu-video-keep-{timeout,ok,escape}.json` (check `video_keep`); `video_portrait` asserts the dialog fits.
+
+**Why:** owner request: the UI also fits the width on narrow screens; a safety confirmation that reverts an aspect ratio change unless kept.
+
+**Tested how:** unit tests (design height on landscape/square/portrait, the Options frame inside square and portrait canvases, countdown, text from installed tokens, restore, console flow: ask, timeout revert, OK keep, Cancel/Escape revert, survives a background load); packaged `video_keep`, `video_portrait`, `video_8k`, `resolution_stress`, `menu_options` and the full UI group; captures inspected (Options on 1080 x 1920, keep box over Options, HUD at 1080 x 1920); the validation suite and the Windows-target check.
+
+**Result:** square and portrait screens show the whole UI; an unwanted aspect ratio reverts by itself after 15 s.
+
+**Still broken or not tested:** the main menu sits in the upper part of a portrait screen (480-line positions from the top); console `mat_setvideomode` does not ask; no real portrait display tested.
+
+**Next:** owner check of the portrait layout.
+
 ## 2026-10-18 Video: square and portrait aspect choices
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

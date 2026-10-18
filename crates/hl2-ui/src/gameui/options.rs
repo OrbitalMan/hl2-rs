@@ -119,6 +119,9 @@ pub struct OptionsReport {
     pub capturing_key: bool,
     /// The Resolution combo's choices for the draft's display mode and aspect ratio.
     pub resolutions: Vec<String>,
+    /// The placed dialog on the canvas, `[x, y, width, height]` in pixels (filled by the
+    /// console, which knows the canvas).
+    pub frame: Option<[f32; 4]>,
 }
 
 /// What the owner of the dialog has to do after an input frame.
@@ -403,7 +406,7 @@ fn centered(canvas: Vec2, size: Vec2, scale: f32) -> Vec2 {
 
 /// A dialog layer of `size` (layout units) centered on `canvas`, moveable by its caption.
 fn layer_frame(canvas: Vec2, size: Vec2, close: fn(Vec2) -> Rect) -> placement::Frame {
-    let scale = Painter::scale_for(canvas.y);
+    let scale = Painter::scale_for_canvas(canvas);
     placement::Frame {
         origin: centered(canvas, size, scale),
         size,
@@ -716,6 +719,14 @@ impl OptionsDialog {
         self.key_press.reset();
     }
 
+    /// The settings were changed outside the dialog (an unconfirmed video change reverted): the
+    /// applied state and the draft follow them.
+    pub fn reset_applied(&mut self, config: Config) {
+        self.draft = Draft::new(config.clone());
+        self.applied = config;
+        self.combo = None;
+    }
+
     pub fn tab(&self) -> Tab {
         self.tab
     }
@@ -813,7 +824,7 @@ impl OptionsDialog {
     /// Returns the tooltip text that should be shown for the given pointer position on the active tab, if any.
     pub fn tooltip_at(&self, canvas: Vec2, pointer: Vec2) -> Option<String> {
         let panel = self.tab.panel()?;
-        let scale = Painter::scale_for(canvas.y);
+        let scale = Painter::scale_for_canvas(canvas);
         let origin = self.placement.place(&main_frame(canvas)).origin;
         let dialog_pointer = (pointer - origin) / scale;
         let page = page_rect();
@@ -885,7 +896,7 @@ impl OptionsDialog {
     pub fn input(&mut self, input: &Input, measure: &Painter) -> OptionsOutcome {
         self.now = input.time;
         let canvas = vec2(measure.canvas.width(), measure.canvas.height());
-        let scale = Painter::scale_for(canvas.y);
+        let scale = Painter::scale_for_canvas(canvas);
         let local = |origin: Vec2| input.pointer.map(|p| (p - origin) / scale);
         if let Some(mut confirm) = self.confirm.take() {
             self.occlude(input);
@@ -1017,6 +1028,7 @@ impl OptionsDialog {
             editing: self.editing.is_some(),
             capturing_key: self.keys.capture.is_some(),
             resolutions: self.resolution_labels(),
+            frame: None,
         }
     }
 
@@ -1908,7 +1920,7 @@ impl OptionsDialog {
         canvas: Vec2,
         measure_w: impl Fn(&str) -> f32,
     ) -> bool {
-        let scale = Painter::scale_for(canvas.y);
+        let scale = Painter::scale_for_canvas(canvas);
         let size = self.sub_frame_size(sub, measure_w);
         size.x * scale <= canvas.x && size.y * scale <= canvas.y
     }
@@ -1991,7 +2003,7 @@ impl OptionsDialog {
 
     pub fn draw(&self, base: &Painter) {
         let canvas = vec2(base.canvas.width(), base.canvas.height());
-        let scale = Painter::scale_for(canvas.y);
+        let scale = Painter::scale_for_canvas(canvas);
         let painter_at = |origin: Vec2| Painter {
             canvas: base.canvas,
             fonts: base.fonts,
@@ -2722,6 +2734,26 @@ mod tests {
             shift: true,
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn the_dialog_fits_square_and_portrait_screens() {
+        let h = Harness::new();
+        for canvas in [
+            vec2(1024., 768.),
+            vec2(1080., 1080.),
+            vec2(1080., 1920.),
+            vec2(720., 1280.),
+        ] {
+            let bounds = h.dialog.frame_bounds(canvas);
+            assert!(
+                bounds.x >= 0.
+                    && bounds.y >= 0.
+                    && bounds.x + bounds.w <= canvas.x
+                    && bounds.y + bounds.h <= canvas.y,
+                "{canvas}: {bounds:?}"
+            );
+        }
     }
 
     #[test]

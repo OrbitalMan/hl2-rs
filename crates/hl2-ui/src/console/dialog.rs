@@ -56,13 +56,15 @@ impl DialogLayout {
     /// The retail placement on `canvas`.
     pub fn new(canvas: Vec2) -> Self {
         let (origin, size) = Self::default_frame(canvas);
-        Self::at(Painter::scale_for(canvas.y), origin, size)
+        Self::at(Painter::scale_for_canvas(canvas), origin, size)
     }
 
     /// The retail frame on `canvas`: top-left in canvas pixels and size in layout units.
     pub fn default_frame(canvas: Vec2) -> (Vec2, Vec2) {
-        let scale = Painter::scale_for(canvas.y);
-        let proportional = |value: f32| (value * canvas.y / PROPORTIONAL_BASE).floor();
+        let scale = Painter::scale_for_canvas(canvas);
+        let proportional = |value: f32| {
+            (value * crate::proportional::design_height(canvas) / PROPORTIONAL_BASE).floor()
+        };
         let origin = vec2(
             (canvas.x * 0.5).floor() - proportional(16.),
             proportional(64.),

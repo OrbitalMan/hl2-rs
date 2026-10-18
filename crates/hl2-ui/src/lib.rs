@@ -9,4 +9,6 @@ pub mod hud;
 pub mod input;
 #[cfg(windows)]
 mod native_font;
+pub mod proportional;
+pub mod tuning;
 pub mod viewport;

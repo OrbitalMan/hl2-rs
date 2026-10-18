@@ -1105,12 +1105,13 @@ impl CaptionHud {
     /// Lays out the panel for a canvas `size` in pixels; None while there is nothing to draw
     /// or the fonts are missing.
     pub fn paint(&self, size: (f32, f32), time: f64) -> Option<(crate::canvas::Rect, Paint)> {
-        let scale = size.1 / 480.;
+        let canvas = glam::vec2(size.0, size.1);
+        let scale = crate::proportional::scale(canvas);
         let measure = self.measure(scale)?;
         let x = crate::hud::panel_axis(&self.layout.xpos, size.0, scale).unwrap_or(0.);
         let rect = crate::canvas::Rect::new(
             x.trunc(),
-            (self.layout.ypos * scale).trunc(),
+            (self.layout.ypos * crate::proportional::y_scale(canvas)).trunc(),
             (self.layout.wide * scale).trunc(),
             (self.layout.tall * scale).trunc(),
         );

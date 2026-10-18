@@ -319,6 +319,8 @@ pub struct MessageBox {
     key_press: super::widgets::KeyPress<usize>,
     /// The focus box shows after Tab / Shift+Tab only.
     focus_visible: bool,
+    /// Text the box is sized for, when it differs from the shown text.
+    layout_text: Option<String>,
 }
 
 /// Message box geometry in layout units relative to the box.
@@ -346,6 +348,7 @@ impl MessageBox {
             focus: 0,
             key_press: super::widgets::KeyPress::default(),
             focus_visible: false,
+            layout_text: None,
         }
     }
 
@@ -358,6 +361,23 @@ impl MessageBox {
     /// Drains any queued UI sound cues (e.g. rollover or release activation).
     pub fn take_sounds(&mut self) -> Vec<String> {
         std::mem::take(&mut self.sounds)
+    }
+
+    /// Starts with the keyboard focus on button `index` (0 = OK, 1 = Cancel).
+    pub fn with_focus(mut self, index: usize) -> Self {
+        self.focus = index;
+        self
+    }
+
+    /// Sizes the box for `text` instead of the shown text (a countdown keeps its size).
+    pub fn with_layout_text(mut self, text: String) -> Self {
+        self.layout_text = Some(text);
+        self
+    }
+
+    /// Replaces the shown text, keeping the box's state.
+    pub fn set_text(&mut self, text: String) {
+        self.text = text;
     }
 
     /// The Quit confirmation (`#GameUI_QuitConfirmationTitle`/`Text`, `#GameUI_Quit`, `#GameUI_Cancel`).
@@ -384,7 +404,12 @@ impl MessageBox {
     /// the buttons plus 30; buttons sit at the quarter points, 15 above the client bottom (the SDK
     /// `vgui::MessageBox::PerformLayout` rules).
     pub fn layout(&self, measure: impl Fn(&str) -> f32) -> MessageBoxLayout {
-        let lines: Vec<&str> = self.text.lines().collect();
+        let lines: Vec<&str> = self
+            .layout_text
+            .as_deref()
+            .unwrap_or(&self.text)
+            .lines()
+            .collect();
         let line_count = lines.len().max(1);
         let text_w = lines.iter().map(|l| measure(l)).fold(0.0, f32::max).ceil();
         let button = |label: &str| {
