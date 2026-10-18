@@ -29,6 +29,7 @@
 !/crates/hl2-ui/assets/fonts/ProggyClean.ttf
 !/crates/hl2-ui/assets/fonts/LICENSE.txt
 !/crates/hl2-ui/assets/fonts/README.md
+!/crates/hl2-ui/assets/display/modes.json
 # Generated/private directories remain closed to all extensions.
 **/target/
 /bin/

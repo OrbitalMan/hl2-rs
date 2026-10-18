@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 Video: resolution data moved to a data file
+
+**Agent/model:** Claude Code desktop; claude-opus-5-5.
+
+**Changed:** `gameui::display` no longer holds inline resolution numbers: the standard modes, each aspect choice's exact ratio, the minimum size and the native-fit step are read from `crates/hl2-ui/assets/display/modes.json` (embedded, parsed once). `STANDARD_MODES` / `MIN_SIZE` became `standard_modes()` / `min_size()`, and `AspectRatio::exact_ratio()` gives `native_fits` its ratios; the offered modes are unchanged. The file is whitelisted in `.gitignore`.
+
+**Why:** owner rule: no hardcoded strings or numbers in code; data goes in resource files.
+
+**Tested how:** new unit test `mode_data_parses_and_every_entry_is_usable` (parses, every mode at least the minimum, no duplicates, every aspect ratio in its bucket); existing display tests unchanged; the validation suite (tests, strict clippy, fmt) and the Windows-target check.
+
+**Result:** same Video page resolutions, data editable without touching code.
+
+**Still broken or not tested:** the aspect bucket thresholds in `AspectRatio::of` (1.5, 1.6 +- 0.05) stay in code as grouping logic.
+
+**Next:** none.
+
 ## 2026-10-18 Video: every aspect choice up to the panel's size; ultrawide resolutions
 
 **Agent/model:** Claude Code desktop; claude-opus-5-5.

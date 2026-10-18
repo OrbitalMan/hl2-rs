@@ -1,8 +1,11 @@
 //! Display-mode choices for the Video page: aspect-ratio buckets and resolution filtering.
 //!
 //! Resolutions are the host's monitor query (Bevy `Monitor::video_modes`) merged with
-//! [`STANDARD_MODES`] and, for each aspect choice, the largest exact mode of that ratio that fits
-//! the monitor ([`native_fits`]; a 3456x2234 Retina panel gets 2976x2232 for 4:3). The game renders into an offscreen frame of the configured size and scales
+//! [`standard_modes`] and, for each aspect choice, the largest exact mode of that ratio that fits
+//! the monitor ([`native_fits`]; a 3456x2234 Retina panel gets 2976x2232 for 4:3). The numbers
+//! (standard modes grouped by ratio, the exact ratio of each aspect choice, the minimum size and
+//! the native-fit step) live in the crate's `assets/display/modes.json`, embedded at build time
+//! and parsed once. The game renders into an offscreen frame of the configured size and scales
 //! it to the window or display, so a resolution does not need to be a mode the panel can switch
 //! to. Some displays report only a few modes: Apple Retina panels list nothing below 1920x1200
 //! pixels and nothing 4:3, which would leave the Normal (4:3) bucket and small sizes empty.
@@ -16,61 +19,68 @@
 //! choice or label). When the host reports no usable mode, the current window size is offered so the list is
 //! never empty.
 
+use std::{collections::BTreeMap, sync::LazyLock};
+
 use serde::{Deserialize, Serialize};
 
+/// The display-mode data embedded from `assets/display/modes.json`.
+#[derive(Debug, Deserialize)]
+struct ModeData {
+    /// Smallest mode the Video page offers (Source rejects smaller desktop modes as well).
+    min_size: (u32, u32),
+    /// Both sides of a [`native_fits`] mode are multiples of this.
+    native_fit_step: u32,
+    /// The exact ratio of each aspect choice ([`AspectRatio::exact_ratio`]).
+    aspect_ratios: Vec<AspectEntry>,
+    /// Standard resolutions grouped by ratio label (the labels only document the file).
+    standard_modes: BTreeMap<String, Vec<(u32, u32)>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AspectEntry {
+    aspect: AspectRatio,
+    ratio: (u32, u32),
+}
+
+fn data() -> &'static ModeData {
+    static DATA: LazyLock<ModeData> = LazyLock::new(|| {
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/display/modes.json"
+        )))
+        .expect("embedded display mode data is valid")
+    });
+    &DATA
+}
+
 /// Smallest mode the Video page offers (Source rejects smaller desktop modes as well).
-pub const MIN_SIZE: (u32, u32) = (640, 480);
+pub fn min_size() -> Resolution {
+    let (width, height) = data().min_size;
+    Resolution::new(width, height)
+}
 
 /// Common 4:3, 5:4, 16:9, 16:10 and ultrawide (21:9, 32:9) resolutions offered on every display
-/// that is large enough.
-pub const STANDARD_MODES: [Resolution; 35] = [
-    Resolution::new(640, 480),
-    Resolution::new(800, 600),
-    Resolution::new(1024, 768),
-    Resolution::new(1152, 864),
-    Resolution::new(1280, 960),
-    Resolution::new(1400, 1050),
-    Resolution::new(1600, 1200),
-    Resolution::new(1920, 1440),
-    Resolution::new(2048, 1536),
-    Resolution::new(2560, 1920),
-    Resolution::new(2800, 2100),
-    Resolution::new(3200, 2400),
-    Resolution::new(1280, 1024),
-    Resolution::new(2560, 2048),
-    Resolution::new(1280, 720),
-    Resolution::new(1366, 768),
-    Resolution::new(1600, 900),
-    Resolution::new(1920, 1080),
-    Resolution::new(2560, 1440),
-    Resolution::new(3200, 1800),
-    Resolution::new(3840, 2160),
-    Resolution::new(5120, 2880),
-    Resolution::new(1280, 800),
-    Resolution::new(1440, 900),
-    Resolution::new(1680, 1050),
-    Resolution::new(1920, 1200),
-    Resolution::new(2560, 1600),
-    Resolution::new(2880, 1800),
-    Resolution::new(3840, 2400),
-    // Ultrawide: 21:9 panels (64:27, 43:18, 12:5) and 32:9.
-    Resolution::new(2560, 1080),
-    Resolution::new(3440, 1440),
-    Resolution::new(3840, 1600),
-    Resolution::new(5120, 2160),
-    Resolution::new(3840, 1080),
-    Resolution::new(5120, 1440),
-];
-
-/// The ratio of each aspect choice, for [`native_fits`].
-const ASPECT_RATIOS: [(u32, u32); 3] = [(4, 3), (16, 9), (16, 10)];
+/// that is large enough, in no particular order.
+pub fn standard_modes() -> &'static [Resolution] {
+    static MODES: LazyLock<Vec<Resolution>> = LazyLock::new(|| {
+        data()
+            .standard_modes
+            .values()
+            .flatten()
+            .map(|&(width, height)| Resolution::new(width, height))
+            .collect()
+    });
+    &MODES
+}
 
 /// For each aspect choice, the largest mode of exactly that ratio inside `monitor`, both sides
-/// multiples of 8: displays that report few modes (Retina panels list no 4:3 mode at all) still
-/// get every aspect choice up to the panel's size.
+/// multiples of the data file's `native_fit_step`: displays that report few modes (Retina panels
+/// list no 4:3 mode at all) still get every aspect choice up to the panel's size.
 pub fn native_fits(monitor: Resolution) -> impl Iterator<Item = Resolution> {
-    ASPECT_RATIOS.into_iter().filter_map(move |(w, h)| {
-        let k = (monitor.width / w).min(monitor.height / h) / 8 * 8;
+    let step = data().native_fit_step;
+    AspectRatio::ALL.into_iter().filter_map(move |aspect| {
+        let (w, h) = aspect.exact_ratio();
+        let k = (monitor.width / w).min(monitor.height / h) / step * step;
         (k > 0).then(|| Resolution::new(w * k, h * k))
     })
 }
@@ -101,6 +111,16 @@ impl AspectRatio {
         } else {
             Self::Wide16x9
         }
+    }
+
+    /// The exact width:height ratio of this choice, from the mode data.
+    pub fn exact_ratio(self) -> (u32, u32) {
+        data()
+            .aspect_ratios
+            .iter()
+            .find(|entry| entry.aspect == self)
+            .map(|entry| entry.ratio)
+            .expect("mode data has a ratio for every aspect choice")
     }
 
     pub fn token(self) -> &'static str {
@@ -139,18 +159,19 @@ impl Resolution {
 }
 
 /// Usable modes, deduplicated and sorted largest first: the reported modes plus
-/// [`STANDARD_MODES`] and the monitor's [`native_fits`]. Modes smaller than [`MIN_SIZE`] or larger than the monitor (when known)
-/// are dropped. Falls back to `current` when nothing remains.
+/// [`standard_modes`] and the monitor's [`native_fits`]. Modes smaller than [`min_size`] or
+/// larger than the monitor (when known) are dropped. Falls back to `current` when nothing remains.
 pub fn usable_modes(
     reported: impl IntoIterator<Item = Resolution>,
     monitor: Option<Resolution>,
     current: Resolution,
 ) -> Vec<Resolution> {
+    let min = min_size();
     let mut modes: Vec<_> = reported
         .into_iter()
-        .chain(STANDARD_MODES)
+        .chain(standard_modes().iter().copied())
         .chain(monitor.into_iter().flat_map(native_fits))
-        .filter(|m| m.width >= MIN_SIZE.0 && m.height >= MIN_SIZE.1)
+        .filter(|m| min.fits(*m))
         .filter(|m| monitor.is_none_or(|max| m.fits(max)))
         .collect();
     modes.sort_by(|a, b| b.cmp(a));
@@ -240,6 +261,28 @@ mod tests {
 
     fn r(width: u32, height: u32) -> Resolution {
         Resolution::new(width, height)
+    }
+
+    #[test]
+    fn mode_data_parses_and_every_entry_is_usable() {
+        let min = min_size();
+        let modes = standard_modes();
+        assert!(!modes.is_empty());
+        assert!(modes.iter().all(|m| min.fits(*m)), "every mode >= min_size");
+        let mut unique = modes.to_vec();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), modes.len(), "no duplicate modes");
+        assert_eq!(data().aspect_ratios.len(), AspectRatio::ALL.len());
+        for aspect in AspectRatio::ALL {
+            let (w, h) = aspect.exact_ratio();
+            assert_eq!(
+                AspectRatio::of(w, h),
+                aspect,
+                "{aspect:?} ratio is in its bucket"
+            );
+        }
+        assert!(data().native_fit_step > 0);
     }
 
     #[test]

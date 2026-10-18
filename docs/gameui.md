@@ -794,6 +794,11 @@ Owner report: with Normal (4:3) selected, a Retina display offered nothing large
   `Wide16x10`; `GameUI.dll` references no other), and retail groups every ratio wider than
   16:10 under Widescreen 16:9, so ultrawide resolutions are listed there. A separate ultrawide
   choice would need a label the game does not have.
+- Data: the standard modes (grouped by ratio label), the exact ratio of each aspect choice, the
+  minimum size (640x480) and the native-fit step (8) live in `crates/hl2-ui/assets/display/modes.json`,
+  embedded with `include_str!` and parsed once; `display::standard_modes()` / `min_size()` read it.
+  `mode_data_parses_and_every_entry_is_usable` checks that it parses, that every mode is at least
+  the minimum, that no mode repeats and that each aspect ratio falls in its own bucket.
 - Tests: `every_aspect_choice_reaches_the_panel_size`, `ultrawide_panels_get_their_modes_under_widescreen`.
   Packaged windowed capture on the 3456x2234 panel: the 4:3 list starts at 2976x2232. Ultrawide
   modes are not checked on an ultrawide display, and how the game frames ultrawide pictures (FOV)
