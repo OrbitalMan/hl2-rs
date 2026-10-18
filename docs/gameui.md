@@ -951,6 +951,55 @@ thin slice with the weapon cut off. Landscape from 5:4 up is unchanged by all fo
 - Not verified: how the viewmodel looks on a real portrait display; the world's wider vertical
   view shows more floor and ceiling than a designer may like (it is the 4:3 horizontal view).
 
+### 10i. Vertical and viewmodel FOV sliders, wide-screen menu, portrait menu background (2026-10-18)
+
+Owner list after 10h.
+
+- **Sliders.** Video > Advanced gains **Vertical FOV** (under Field of view) and **Viewmodel FOV**
+  (next to it), so view model problems at portrait and ultrawide ratios can be tuned by hand.
+  - `video.vertical_fov` (degrees, 0 = **Auto**, the slider's low end; explicit values
+    `vertical_fov_range` 40..120). Auto is the derived vertical field of view of 10h. An explicit
+    value replaces it for the player's default FOV, and weapon zoom or `env_zoom` scale it in
+    proportion (`video::vertical_fov_with`), so the crossbow still zooms. A main-menu background
+    ignores it. The vertical field of view is a real thing: games such as Source expose a horizontal
+    one (`fov_desired`, horizontal at 4:3) and the vertical one follows from the aspect ratio; the
+    slider overrides that.
+  - `video.viewmodel_fov` (`viewmodel_fov`, 4:3 horizontal degrees, default 54, range
+    `viewmodel_fov_range` 30..110) replaces the retail 54 in `viewmodel_fov(base, default, fov)`
+    for the viewmodel camera and its attached effects; zoom still subtracts the FOV offset, so a
+    base above 54 + (default - zoom FOV) keeps the viewmodel visible when zoomed (retail hides it).
+  - Both are applied by the sub-dialog's OK (`Sub::apply_on_ok`) and saved in `hl2-config.json`
+    (out-of-range values are clamped on load). Ranges and the other numbers are in
+    `assets/ui/tuning.json`.
+  - The installed dialog has no such controls, so they come from an HL2-RS layout addendum,
+    `assets/ui/optionssubvideoadvanceddlg_extra.res` (`resources::LAYOUT_ADDENDA`, appended to the
+    installed layout on load): controls in the free band under the Field of view slider (y 302..352,
+    above the divider), the same on both platform layouts. Their labels `associate` their sliders so
+    the footer reflow (which moves unbound labels near the buttons down with them) leaves them
+    alone. Texts: the **Auto** value is the installed `#Spec_Auto`; the two slider names have no
+    installed token and are temporary placeholders `HL2RS_VerticalFov` / `HL2RS_ViewmodelFov`.
+    The keyboard focus order gained two stops after the FOV slider (the `keyboard-fov` replay
+    now presses Shift+Tab seven times).
+  - The report's samples carry `camera`, the vertical degrees of the world and viewmodel cameras.
+- **Wide-screen menu.** Above 16:9 the menu grows with the extra width up to 1.35x
+  (`proportional::widescreen_menu_scale`, `widescreen_menu_scale_max`), titles, rows and text
+  alike, and grows upward: the bottom of the seven-row stack (`menu_stack_rows`) stays where it
+  was, so it never runs off the screen. 21:9 grows 1.33x, 32:9 the cap. Up to 16:9, 16:10 and
+  5:4 nothing changes; portrait keeps 10h. The console keeps the retail half-width placement.
+- **Menu background in portrait.** A main-menu background level keeps the 4:3 vertical view on
+  every frame (`camera::world_aspect`), so a narrow frame crops the left and right of the image
+  (like the pre-blurred overlay) instead of showing more above and below; the game itself still
+  uses the Vert+ view of 10h. The vertical override does not apply to backgrounds.
+- Tests: `Value` and label tests (settings), `the_vertical_and_viewmodel_fov_sliders_are_added_and_apply_on_ok`
+  (also proves the labels stay out of the footer), `wide_screens_grow_the_menu_upward_within_the_screen`,
+  `the_menu_grows_only_on_screens_wider_than_16_by_9`, `an_explicit_vertical_fov_replaces_the_derived_one_and_scales_with_zoom`,
+  `menu_backgrounds_crop_the_sides_and_the_game_shows_more_above_and_below`; packaged
+  `fov_settings` (defaults, explicit values and portrait through the camera report) and
+  `narrow_layout` (now with 21:9 and 32:9 and the background FOV). Captures inspected: the
+  Advanced dialog, the menu at 3440x1440, 5120x1440 and 1080x1920.
+- Not verified: how each weapon looks at extreme values on a real portrait or ultrawide display
+  (the sliders exist for exactly that); the vertical slider's keyboard stepping at the Auto end.
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed

@@ -168,6 +168,7 @@ pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     ),
     ("GameUI_Quit", "Quit"),
     ("GameUI_Confirm", "CONFIRM"),
+    ("Spec_Auto", "Auto"),
     ("vgui_TimeLeftSecondsRemaining", "%s1 seconds remaining"),
     ("vgui_TimeLeftSecondRemaining", "%s1 second remaining"),
     ("GameUI_OK", "OK"),

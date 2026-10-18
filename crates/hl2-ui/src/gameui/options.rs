@@ -190,6 +190,8 @@ impl Sub {
             Self::VideoAdvanced => {
                 to.video.advanced = from.video.advanced.clone();
                 to.video.fov = from.video.fov;
+                to.video.vertical_fov = from.video.vertical_fov;
+                to.video.viewmodel_fov = from.video.viewmodel_fov;
             }
             Self::Gamma | Self::AudioCredits | Self::VideoCredits => return false,
         }
@@ -2224,7 +2226,7 @@ impl OptionsDialog {
                     LayoutAlign::East => Align::Right,
                     _ => Align::Left,
                 };
-                let text = format!("{:.0}", value.get(config));
+                let text = value.label(config, loc);
                 p.label(&text, w.rect, align, w.enabled);
             }
             (ControlKind::Label, _) => {
@@ -3841,6 +3843,72 @@ mod tests {
         };
         assert!(!applied.video.advanced.vsync);
         assert_eq!(applied.video.fov, 110.);
+    }
+
+    #[test]
+    fn the_vertical_and_viewmodel_fov_sliders_are_added_and_apply_on_ok() {
+        let mut res = (*resources()).clone();
+        crate::gameui::resources::apply_layout_addenda(&mut res.layouts);
+        let draft = Draft::new(Config::default());
+        let widgets = layout_widgets(
+            &res,
+            Panel::VideoAdvanced,
+            Rect::new(0., 0., 482., 510.),
+            &draft,
+            &draft.config,
+        );
+        let find = |name: &str| {
+            widgets
+                .iter()
+                .find(|w| w.control.name == name)
+                .unwrap_or_else(|| panic!("{name}"))
+        };
+        for (slider, label, value) in [
+            (
+                "VerticalFovSlider",
+                "VerticalFovValueLabel",
+                Value::VerticalFov,
+            ),
+            (
+                "ViewmodelFovSlider",
+                "ViewmodelFovValueLabel",
+                Value::ViewmodelFov,
+            ),
+        ] {
+            assert_eq!(find(slider).binding, Some(Binding::Slider(value)));
+            assert!(find(slider).interactive());
+            assert_eq!(find(label).binding, Some(Binding::ValueLabel(value)));
+            assert!(
+                !find(label).interactive(),
+                "the value label is display only"
+            );
+        }
+        // They sit under the Field of view slider and clear of the divider at 352.
+        let fov = find("FovSlider").control.rect((482., 510.));
+        let vertical = find("VerticalFovSlider").control.rect((482., 510.));
+        assert!(vertical.1 >= fov.1 + find("FovSlider").control.tall);
+        assert!(vertical.1 + find("VerticalFovSlider").control.tall <= 352.);
+        // Their labels are content, not footer captions: the footer reflow must not move them.
+        let controls: Vec<&Control> = res.layouts["optionssubvideoadvanceddlg"]
+            .controls
+            .iter()
+            .collect();
+        let (shift, footer) = footer_reflow(Panel::VideoAdvanced, &controls, (482., 358.));
+        for (control, is_footer) in controls.iter().zip(&footer) {
+            if control.name.to_ascii_lowercase().contains("fov") {
+                assert!(!is_footer, "{} is not footer", control.name);
+            }
+        }
+        assert!(
+            shift > 0.,
+            "the dialog grows to hold the new sliders on the short layout"
+        );
+        let mut from = Config::default();
+        from.video.vertical_fov = 90.;
+        from.video.viewmodel_fov = 70.;
+        let mut to = Config::default();
+        assert!(Sub::VideoAdvanced.apply_on_ok(&from, &mut to));
+        assert_eq!((to.video.vertical_fov, to.video.viewmodel_fov), (90., 70.));
     }
 
     #[test]

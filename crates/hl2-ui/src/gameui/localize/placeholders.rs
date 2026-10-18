@@ -31,6 +31,10 @@ pub const ASPECT_PORTRAIT_9X16: &str = "#HL2RS_AspectPortrait9x16";
 /// Question of the keep-or-revert box after an aspect ratio change (no installed token; the
 /// title, buttons and countdown are installed tokens).
 pub const KEEP_VIDEO_SETTINGS: &str = "#HL2RS_KeepVideoSettings";
+/// Label of the Video > Advanced vertical field of view slider (no installed token).
+pub const VERTICAL_FOV: &str = "#HL2RS_VerticalFov";
+/// Label of the Video > Advanced viewmodel field of view slider (no installed token).
+pub const VIEWMODEL_FOV: &str = "#HL2RS_ViewmodelFov";
 /// Ctrl+R history search prompt in the console (no installed token).
 pub const CONSOLE_REVERSE_SEARCH: &str = "#HL2RS_Console_ReverseSearch";
 
@@ -44,6 +48,8 @@ pub const PLACEHOLDER_STRINGS: &[(&str, &str)] = &[
     ("HL2RS_AspectPortrait10x16", "Portrait 10:16"),
     ("HL2RS_AspectPortrait9x16", "Portrait 9:16"),
     ("HL2RS_KeepVideoSettings", "Keep these display settings?"),
+    ("HL2RS_VerticalFov", "Vertical FOV"),
+    ("HL2RS_ViewmodelFov", "Viewmodel FOV"),
     ("HL2RS_Console_ReverseSearch", "reverse-i-search"),
 ];
 
@@ -70,6 +76,8 @@ mod tests {
             ASPECT_PORTRAIT_10X16,
             ASPECT_PORTRAIT_9X16,
             KEEP_VIDEO_SETTINGS,
+            VERTICAL_FOV,
+            VIEWMODEL_FOV,
             CONSOLE_REVERSE_SEARCH,
         ] {
             assert!(token.starts_with("#HL2RS_"), "{token}");

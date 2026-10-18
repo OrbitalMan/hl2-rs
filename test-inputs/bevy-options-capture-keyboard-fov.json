@@ -210,6 +210,34 @@
           "shift": true
         }
       }
+    ]
+  },
+  {
+    "tick": 120,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "tab"
+          ],
+          "shift": true
+        }
+      }
+    ]
+  },
+  {
+    "tick": 122,
+    "ui": [
+      {
+        "action": "input",
+        "input": {
+          "keys": [
+            "tab"
+          ],
+          "shift": true
+        }
+      }
     ],
     "label": "focus-fov"
   },

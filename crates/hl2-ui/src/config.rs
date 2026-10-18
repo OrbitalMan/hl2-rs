@@ -221,6 +221,12 @@ pub struct VideoSettings {
     pub height: u32,
     pub display_mode: DisplayMode,
     pub fov: f32,
+    /// Vertical field of view in degrees (Video > Advanced); 0 is automatic: derived from
+    /// `fov` and the screen's aspect ratio. An explicit value replaces the derived one and scales
+    /// with weapon zoom.
+    pub vertical_fov: f32,
+    /// `viewmodel_fov`: the viewmodel's horizontal 4:3 field of view in degrees.
+    pub viewmodel_fov: f32,
     pub hdr: HdrMode,
     pub hud_aspect: HudAspect,
     /// `mat_monitorgamma` (1.6 bright to 2.6 dark).
@@ -239,6 +245,8 @@ impl Default for VideoSettings {
             height: 720,
             display_mode: DisplayMode::Fullscreen,
             fov: 75.0,
+            vertical_fov: 0.0,
+            viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,
             hdr: HdrMode::None,
             hud_aspect: HudAspect::Fit,
             gamma: 2.2,
@@ -639,6 +647,22 @@ impl Config {
             defaults.gamepad.aim_assist_scale,
         );
         clamp(&mut self.video.fov, 50., 120., defaults.video.fov);
+        let (vertical_min, vertical_max) = crate::tuning::vertical_fov_range();
+        if self.video.vertical_fov != 0. {
+            clamp(
+                &mut self.video.vertical_fov,
+                vertical_min,
+                vertical_max,
+                defaults.video.vertical_fov,
+            );
+        }
+        let (viewmodel_min, viewmodel_max) = crate::tuning::viewmodel_fov_range();
+        clamp(
+            &mut self.video.viewmodel_fov,
+            viewmodel_min,
+            viewmodel_max,
+            defaults.video.viewmodel_fov,
+        );
         self.gameplay.skill = self.gameplay.skill.clamp(1, 3);
         if let Some(map) = self.gameplay.background_map.take() {
             let clean = map

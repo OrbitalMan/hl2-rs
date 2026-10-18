@@ -31,6 +31,7 @@
 !/crates/hl2-ui/assets/fonts/README.md
 !/crates/hl2-ui/assets/display/modes.json
 !/crates/hl2-ui/assets/ui/tuning.json
+!/crates/hl2-ui/assets/ui/*.res
 # Generated/private directories remain closed to all extensions.
 **/target/
 /bin/

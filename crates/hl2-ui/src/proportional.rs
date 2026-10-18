@@ -15,6 +15,16 @@ pub fn design_height(canvas: Vec2) -> f32 {
         .min(canvas.x / crate::tuning::narrowest_design_aspect())
 }
 
+/// How much the main menu grows on a screen wider than the widest design aspect
+/// ([`crate::tuning::widest_design_aspect`], 16:9): a wide screen has the height of a 16:9 one, so
+/// the menu would look small beside all that width. It grows in proportion to the extra width up
+/// to [`crate::tuning::widescreen_menu_scale_max`]; 1 on every screen up to 16:9.
+pub fn widescreen_menu_scale(canvas: Vec2) -> f32 {
+    let aspect = canvas.x / canvas.y.max(1.);
+    (aspect / crate::tuning::widest_design_aspect())
+        .clamp(1., crate::tuning::widescreen_menu_scale_max())
+}
+
 /// Pixels per 480-line design unit for sizes and horizontal offsets.
 pub fn scale(canvas: Vec2) -> f32 {
     design_height(canvas) / BASE_SCREEN_HEIGHT
@@ -31,6 +41,28 @@ pub fn y_scale(canvas: Vec2) -> f32 {
 mod tests {
     use super::*;
     use glam::vec2;
+
+    #[test]
+    fn the_menu_grows_only_on_screens_wider_than_16_by_9() {
+        for size in [
+            vec2(1080., 1920.),
+            vec2(1280., 1024.),
+            vec2(1920., 1080.),
+            vec2(1920., 1200.),
+        ] {
+            assert_eq!(widescreen_menu_scale(size), 1., "{size}");
+        }
+        let ultrawide = widescreen_menu_scale(vec2(3440., 1440.));
+        assert!(
+            (ultrawide - (3440. / 1440.) / (16. / 9.)).abs() < 1e-5,
+            "{ultrawide}"
+        );
+        assert_eq!(
+            widescreen_menu_scale(vec2(5120., 1440.)),
+            crate::tuning::widescreen_menu_scale_max(),
+            "capped"
+        );
+    }
 
     #[test]
     fn landscape_screens_keep_the_height_and_narrow_ones_follow_the_width() {

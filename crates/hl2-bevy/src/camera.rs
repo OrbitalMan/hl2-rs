@@ -12,6 +12,18 @@ pub fn punched(yaw: f32, pitch: f32, punch: glam::Vec3) -> (f32, f32) {
     (yaw + punch.y.to_radians(), pitch - punch.x.to_radians())
 }
 
+/// The aspect ratio the world camera derives its field of view from. A main-menu background
+/// level keeps the vertical view of 4:3 on frames narrower than that and so crops the sides (like
+/// the pre-blurred overlay); the game itself shows more above and below instead
+/// ([`crate::video::vertical_fov_for`]).
+pub fn world_aspect(aspect: f32, background_level: bool) -> f32 {
+    if background_level {
+        aspect.max(4. / 3.)
+    } else {
+        aspect
+    }
+}
+
 /// CViewRender::SetUpView: the viewmodel's FOV is `viewmodel_fov - (default_fov - fov)`. At or
 /// below zero the view has moved past the viewmodel, which is then not drawn: returns the
 /// vertical FOV and near plane for the viewmodel camera given its far plane and the frame's
@@ -43,6 +55,7 @@ pub(crate) fn present_player_view(
     let player_fov = game.map_or(sim.fov, |game| game.inventory.view_fov(game.scene.time));
     if let (Some(game), Ok(mut projection)) = (game, viewmodel.single_mut()) {
         let degrees = hl2_simulation::viewmodel_effects::viewmodel_fov(
+            sim.viewmodel_fov,
             game.inventory.fov.default_fov,
             player_fov,
         );
@@ -64,12 +77,45 @@ pub(crate) fn present_player_view(
             crate::source_to_bevy(crate::source_direction(yaw, pitch)),
             Vec3::Y,
         );
-        let fov = crate::video::vertical_fov_for(sim.view_fov(player_fov), aspect);
+        // The vertical override is the player's own setting, not a menu background's.
+        let vertical = if sim.background_level {
+            0.
+        } else {
+            sim.vertical_fov
+        };
+        let fov = crate::video::vertical_fov_with(
+            sim.view_fov(player_fov),
+            sim.fov,
+            world_aspect(aspect, sim.background_level),
+            vertical,
+        );
         if let Projection::Perspective(perspective) = &mut *projection
             && perspective.fov != fov
         {
             perspective.fov = fov;
         }
+    }
+}
+
+/// Keeps [`crate::simulation::Simulation::camera_fov`] on the vertical fields of view the world
+/// and viewmodel cameras use.
+pub(crate) fn record_camera_fov(
+    world: Query<&Projection, (With<crate::FlyCamera>, Without<ViewmodelCamera>)>,
+    viewmodel: Query<&Projection, (With<ViewmodelCamera>, Without<crate::FlyCamera>)>,
+    mut sim: ResMut<crate::simulation::Simulation>,
+) {
+    let degrees = |projection: &Projection| match projection {
+        Projection::Perspective(p) => Some(p.fov.to_degrees()),
+        _ => None,
+    };
+    let fov = world
+        .single()
+        .ok()
+        .and_then(degrees)
+        .zip(viewmodel.single().ok().and_then(degrees))
+        .map(|(world, viewmodel)| [world, viewmodel]);
+    if sim.camera_fov != fov {
+        sim.camera_fov = fov;
     }
 }
 
@@ -94,6 +140,31 @@ mod tests {
         assert_eq!((fov, near), (crate::video::vertical_fov(54.), 0.1));
         let (_, near) = viewmodel_projection(0., 1000., 4. / 3.);
         assert_eq!(near, 500., "near plane beyond any viewmodel");
+    }
+
+    #[test]
+    fn menu_backgrounds_crop_the_sides_and_the_game_shows_more_above_and_below() {
+        use crate::video::vertical_fov_for;
+        for aspect in [4. / 3., 16. / 9., 64. / 27.] {
+            assert_eq!(
+                world_aspect(aspect, true),
+                aspect,
+                "{aspect}: wide frames unchanged"
+            );
+            assert_eq!(world_aspect(aspect, false), aspect);
+        }
+        for aspect in [1., 9. / 16.] {
+            assert_eq!(world_aspect(aspect, false), aspect);
+            assert_eq!(
+                vertical_fov_for(75., world_aspect(aspect, true)),
+                vertical_fov_for(75., 4. / 3.),
+                "{aspect}: a menu background keeps the 4:3 vertical view"
+            );
+            assert!(
+                vertical_fov_for(75., world_aspect(aspect, false))
+                    > vertical_fov_for(75., world_aspect(aspect, true))
+            );
+        }
     }
 
     #[test]

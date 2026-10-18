@@ -97,6 +97,10 @@ pub enum Value {
     Gamma,
     /// `fov_desired` (Video > Advanced).
     Fov,
+    /// Vertical field of view (Video > Advanced); the slider's low end is automatic.
+    VerticalFov,
+    /// `viewmodel_fov` (Video > Advanced).
+    ViewmodelFov,
     /// `sc_sensitivity_scale` (Gamepad).
     JoystickScale,
     /// `sc_autoaim_scale` (Gamepad).
@@ -117,6 +121,23 @@ impl Value {
             }
             Self::Gamma => SliderRange::new(1.6, 2.6),
             Self::Fov => SliderRange::new(75., 110.),
+            // The low end of the vertical slider is automatic (0), then the explicit range.
+            Self::VerticalFov => SliderRange::new(0., crate::tuning::vertical_fov_range().1),
+            Self::ViewmodelFov => {
+                let (min, max) = crate::tuning::viewmodel_fov_range();
+                SliderRange::new(min, max)
+            }
+        }
+    }
+
+    /// The text of a value label: the number, or the installed "Auto" for an automatic vertical
+    /// field of view.
+    pub fn label(self, c: &Config, loc: &Localization) -> String {
+        let value = self.get(c);
+        if self == Self::VerticalFov && value == 0. {
+            loc.text("#Spec_Auto")
+        } else {
+            format!("{value:.0}")
         }
     }
 
@@ -134,6 +155,8 @@ impl Value {
             Self::AimAssistScale => c.mouse.aim_assist_scale,
             Self::Gamma => c.video.gamma,
             Self::Fov => c.video.fov,
+            Self::VerticalFov => c.video.vertical_fov,
+            Self::ViewmodelFov => c.video.viewmodel_fov,
             Self::JoystickScale => c.gamepad.sensitivity_scale,
             Self::GamepadAimAssistScale => c.gamepad.aim_assist_scale,
         }
@@ -147,6 +170,15 @@ impl Value {
         }
         let value = match self {
             Self::Sensitivity => value.clamp(0.1, 20.),
+            // Below the smallest explicit field of view the slider means automatic.
+            Self::VerticalFov => {
+                let (min, max) = crate::tuning::vertical_fov_range();
+                if value < min * 0.5 {
+                    0.
+                } else {
+                    value.clamp(min, max)
+                }
+            }
             _ => self.range().clamp(value),
         };
         *match self {
@@ -157,6 +189,8 @@ impl Value {
             Self::AimAssistScale => &mut c.mouse.aim_assist_scale,
             Self::Gamma => &mut c.video.gamma,
             Self::Fov => &mut c.video.fov,
+            Self::VerticalFov => &mut c.video.vertical_fov,
+            Self::ViewmodelFov => &mut c.video.viewmodel_fov,
             Self::JoystickScale => &mut c.gamepad.sensitivity_scale,
             Self::GamepadAimAssistScale => &mut c.gamepad.aim_assist_scale,
         } = value;
@@ -608,6 +642,10 @@ pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
         (Panel::KeyboardAdvanced, "consolecheck") => Toggle(self::Toggle::DeveloperConsole),
         (Panel::VideoAdvanced, "fovslider") => Slider(Value::Fov),
         (Panel::VideoAdvanced, "fovvaluelabel") => ValueLabel(Value::Fov),
+        (Panel::VideoAdvanced, "verticalfovslider") => Slider(Value::VerticalFov),
+        (Panel::VideoAdvanced, "verticalfovvaluelabel") => ValueLabel(Value::VerticalFov),
+        (Panel::VideoAdvanced, "viewmodelfovslider") => Slider(Value::ViewmodelFov),
+        (Panel::VideoAdvanced, "viewmodelfovvaluelabel") => ValueLabel(Value::ViewmodelFov),
         (Panel::VideoAdvanced, name) => Choice(self::Choice::Advanced(advanced_choice(name)?)),
         (Panel::Gamma, "okbutton") => Command(self::Command::SubOk),
         (Panel::Gamma, "button1") => Command(self::Command::SubCancel),
@@ -868,6 +906,34 @@ mod tests {
         );
         let mut c = Config::default();
         Value::Fov.set(&mut c, 130.);
+        // The vertical field of view: automatic at the slider's low end, else an explicit
+        // value in the tuned range.
+        let (vertical_min, vertical_max) = crate::tuning::vertical_fov_range();
+        let mut v = Config::default();
+        assert_eq!(Value::VerticalFov.get(&v), 0., "automatic by default");
+        Value::VerticalFov.set(&mut v, vertical_min - 1.);
+        assert_eq!(
+            v.video.vertical_fov, vertical_min,
+            "just below the range clamps up"
+        );
+        Value::VerticalFov.set(&mut v, vertical_min * 0.4);
+        assert_eq!(v.video.vertical_fov, 0., "the low end is automatic");
+        Value::VerticalFov.set(&mut v, 999.);
+        assert_eq!(v.video.vertical_fov, vertical_max);
+        let mut loc = Localization::default();
+        loc.insert("#Spec_Auto", "Auto");
+        Value::VerticalFov.set(&mut v, 0.);
+        assert_eq!(Value::VerticalFov.label(&v, &loc), "Auto");
+        Value::VerticalFov.set(&mut v, 90.);
+        assert_eq!(Value::VerticalFov.label(&v, &loc), "90");
+        assert_eq!(Value::Fov.label(&v, &loc), "75");
+        // The viewmodel field of view keeps to its tuned range.
+        let (view_min, view_max) = crate::tuning::viewmodel_fov_range();
+        assert_eq!(Value::ViewmodelFov.get(&v), 54., "retail default");
+        Value::ViewmodelFov.set(&mut v, 1.);
+        assert_eq!(v.video.viewmodel_fov, view_min);
+        Value::ViewmodelFov.set(&mut v, 500.);
+        assert_eq!(v.video.viewmodel_fov, view_max);
         assert_eq!(c.video.fov, 110.);
     }
 

@@ -287,7 +287,8 @@ def check_narrow_layout():
     landscape as the reference: rows keep a readable size and fit the width, the console is
     bounded to the design area and stays unchanged on landscape (report `console.menu`,
     `console.console_frame`)."""
-    sizes = {"portrait": (1080, 1920), "square": (1080, 1080), "landscape": (1920, 1080)}
+    sizes = {"portrait": (1080, 1920), "square": (1080, 1080), "landscape": (1920, 1080),
+             "ultrawide": (3440, 1440), "super_ultrawide": (5120, 1440)}
     for name, (w, h) in sizes.items():
         if CONFIG.exists():
             CONFIG.unlink()
@@ -298,11 +299,15 @@ def check_narrow_layout():
         menu, frame = console["menu"], console["console_frame"]
         design = min(h, w / 1.25)
         holds(f"{name}: menu rows fit the width", menu["x"] + menu["row_wide"] <= w, menu)
-        if name == "landscape":
+        # A menu background keeps the vertical view of 4:3 on every frame (the sides are cropped on
+        # narrow ones), so its world camera is the same 59.84 degrees (75 horizontal at 4:3) everywhere.
+        holds(f"{name}: the menu background keeps the 4:3 vertical view",
+              abs(run.sample("console")["camera"][0] - 59.84) < 0.05, run.sample("console")["camera"])
+        if name in ("landscape", "ultrawide", "super_ultrawide"):
             p = lambda units: units * h // 480
-            holds("landscape: retail origin", (round(frame[0]), round(frame[1])) == (w // 2 - p(16), p(64)), frame)
-            holds("landscape: half the screen wide", abs(frame[2] - w // 2) <= 3, frame)
-            holds("landscape: down to 64 units above the bottom", abs(frame[1] + frame[3] - (h - p(64))) <= 3, frame)
+            holds(f"{name}: retail console origin", (round(frame[0]), round(frame[1])) == (w // 2 - p(16), p(64)), frame)
+            holds(f"{name}: half the screen wide", abs(frame[2] - w // 2) <= 3, frame)
+            holds(f"{name}: down to 64 units above the bottom", abs(frame[1] + frame[3] - (h - p(64))) <= 3, frame)
         else:
             holds(f"{name}: menu text is not shrunk with the width", menu["font_tall"] >= 16, menu)
             holds(f"{name}: the console spans the width", frame[0] > 0 and frame[0] + frame[2] > w * 0.9
@@ -310,12 +315,40 @@ def check_narrow_layout():
             holds(f"{name}: the console stays in the design area", frame[1] + frame[3] <= design, frame)
     portrait_menu = game_report("narrow_portrait")["menu"]
     holds("portrait: rows are larger than at the design height", portrait_menu["item_tall"] > 38, portrait_menu)
+    # Wide screens: the menu grows (relative to the height) and stays inside the screen.
+    retail = game_report("narrow_landscape")["menu"]
+    for name, (w, h) in (("ultrawide", sizes["ultrawide"]), ("super_ultrawide", sizes["super_ultrawide"])):
+        menu = game_report(f"narrow_{name}")["menu"]
+        holds(f"{name}: rows are larger relative to the height than on 16:9",
+              menu["item_tall"] / h > 1.15 * retail["item_tall"] / 1080, (menu, retail))
+        holds(f"{name}: the stack stays inside the screen", 0 < menu["y"] and menu["y"] + 7 * menu["item_tall"] <= h, menu)
 
 
 def game_report(name: str) -> dict:
     """The console state of the last sample of a finished run `name`."""
     report = json.loads((OUT / f"{name}.json").read_text(encoding="utf-8"))
     return [s for s in report["render"]["simulation"]["samples"] if s.get("label")][-1]["console"]
+
+
+def check_fov_settings():
+    """The Video > Advanced vertical and viewmodel field of view settings reach the cameras
+    (report sample `camera`: vertical degrees of the world and viewmodel cameras): automatic by
+    default (59.84 degrees on 4:3 or wider frames, more on narrow ones), an explicit vertical value
+    replaces it, the viewmodel value moves the viewmodel camera."""
+    def camera(name, size, **video):
+        if CONFIG.exists():
+            CONFIG.unlink()
+        settings(video=video)
+        run = game(name, "--map", "d1_trainstation_02", "--width", str(size[0]), "--height", str(size[1]),
+                   "--movement-script", "test-inputs/bevy-hud.json")
+        return run.sample("hud-final")["camera"]
+    near = lambda got, want: all(abs(a - b) < 0.05 for a, b in zip(got, want))
+    default = camera("fov_default", (1920, 1080))
+    holds("default: 59.84 degrees vertical, 41.83 for the viewmodel", near(default, [59.84, 41.83]), default)
+    custom = camera("fov_custom", (1920, 1080), vertical_fov=90.0, viewmodel_fov=70.0)
+    holds("custom: 90 degrees vertical, 55.41 for the viewmodel", near(custom, [90.0, 55.41]), custom)
+    portrait = camera("fov_portrait", (1080, 1920))
+    holds("portrait: more above and below than 4:3", near(portrait, [107.51, 84.34]), portrait)
 
 
 def check_resolution_stress():
@@ -360,7 +393,7 @@ KEYBOARD_FOCUS = {
     "keyboard-radio": ("focus-skill-radio", "Gameplay", "Skill2Radio"),
     "keyboard-combo": ("focus-resolution", "Video", "Resolution"),
     "keyboard-button": ("focus-advanced", "Video", "AdvancedButton"),
-    "keyboard-fov": ("focus-fov", "Video", "FovSlider"),  # in Video > Advanced
+    "keyboard-fov": ("focus-fov", "Video", "FovSlider"),  # in Video > Advanced: 7 Shift+Tab from the end (the two HL2-RS sliders come after it)
 }
 OPTIONS_STATES = {
     # replay suffix: (label, what the report must show there)
@@ -1104,6 +1137,7 @@ CHECKS = [
     Check("video_portrait", check_video_portrait, "shared"),
     Check("video_keep", check_video_keep, "shared"),
     Check("narrow_layout", check_narrow_layout, "shared"),
+    Check("fov_settings", check_fov_settings, "shared"),
     Check("resolution_stress", check_resolution_stress, "shared"),
     Check("placement", check_placement, "shared"),
     Check("captions", check_captions, "shared"),

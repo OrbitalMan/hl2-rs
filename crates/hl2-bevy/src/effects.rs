@@ -537,7 +537,7 @@ fn viewmodel_quads(
     let matrices =
         vm::viewmodel_matrices(rig, clip, time, &game.inventory.viewmodel_pose_values(rig));
     let fov = game.inventory.view_fov(game.scene.time);
-    let viewmodel_fov = vm::viewmodel_fov(game.inventory.fov.default_fov, fov);
+    let viewmodel_fov = vm::viewmodel_fov(sim.viewmodel_fov, game.inventory.fov.default_fov, fov);
     // DoLoadEffect -> "CrossbowLoad" (client c_weapon_crossbow.cpp): FX_ElectricSpark at
     // viewmodel attachment 1, a world position from FormatViewModelAttachment (right/up
     // offsets scaled by tan(fov / 2) / tan(viewmodel fov / 2), depth kept).

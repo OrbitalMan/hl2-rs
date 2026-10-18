@@ -472,6 +472,8 @@ fn main() -> Result<()> {
         movement_commands,
     );
     simulation.fov = loaded.console.config.video.fov;
+    simulation.vertical_fov = loaded.console.config.video.vertical_fov;
+    simulation.viewmodel_fov = loaded.console.config.video.viewmodel_fov;
     simulation.applied_window = Some(simulation::WindowSettings::new(
         options.width,
         options.height,
@@ -590,6 +592,7 @@ fn main() -> Result<()> {
             (
                 crate::video::suspend_for_resize,
                 crate::video::record_frame_size,
+                crate::camera::record_camera_fov,
             )
                 .chain()
                 .after(TransformSystems::Propagate),

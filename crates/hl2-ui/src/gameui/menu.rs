@@ -676,6 +676,19 @@ impl MenuLayout {
             geometry.font_tall = rows.font_tall;
             geometry.item_tall = rows.item_tall;
             geometry.row_wide = rows.row_wide.min(canvas.x - 2. * geometry.menu.x);
+        } else if crate::proportional::widescreen_menu_scale(canvas) > 1. {
+            // A wide screen is not taller: grow the whole block by the widescreen factor and let
+            // it grow upward, the bottom of the (tallest) row stack staying where it was.
+            let grown = self.geometry(design * crate::proportional::widescreen_menu_scale(canvas));
+            let rows = crate::tuning::menu_stack_rows();
+            let bottom = |g: &MenuGeometry| g.menu.y + rows * g.item_tall;
+            let shift = bottom(&geometry) - bottom(&grown);
+            geometry = MenuGeometry {
+                title: grown.title + vec2(0., shift),
+                title2: grown.title2 + vec2(0., shift),
+                menu: grown.menu + vec2(0., shift),
+                ..grown
+            };
         }
         geometry
     }
@@ -1260,10 +1273,47 @@ mod tests {
     }
 
     #[test]
+    fn wide_screens_grow_the_menu_upward_within_the_screen() {
+        let layout = MenuLayout::default();
+        let rows = crate::tuning::menu_stack_rows();
+        // Up to 16:9 nothing changes (including 16:10 and 5:4).
+        for canvas in [vec2(1280., 1024.), vec2(1680., 1050.), vec2(1920., 1080.)] {
+            assert_eq!(
+                layout.geometry_for(canvas),
+                layout.geometry(canvas.y),
+                "{canvas}"
+            );
+        }
+        for canvas in [
+            vec2(2560., 1080.),
+            vec2(3440., 1440.),
+            vec2(3840., 1080.),
+            vec2(5120., 1440.),
+            vec2(5120., 2160.),
+        ] {
+            let retail = layout.geometry(canvas.y);
+            let wide = layout.geometry_for(canvas);
+            assert!(wide.font_tall > retail.font_tall, "{canvas}: larger text");
+            assert!(wide.item_tall > retail.item_tall, "{canvas}: larger rows");
+            let bottom = |g: &MenuGeometry| g.menu.y + rows * g.item_tall;
+            assert!(
+                (bottom(&wide) - bottom(&retail)).abs() < 1.,
+                "{canvas}: bottom stays"
+            );
+            assert!(
+                wide.title.y > 0. && wide.title.y < retail.title.y,
+                "{canvas}: grows upward"
+            );
+            assert!(bottom(&wide) <= canvas.y, "{canvas}: inside the screen");
+            assert!(wide.row_rect(0).x + wide.row_wide <= canvas.x);
+        }
+    }
+
+    #[test]
     fn narrow_screens_keep_row_text_by_height_and_fit_the_hit_width() {
         let layout = MenuLayout::default();
-        // Landscape from 5:4 up: the same as the height-only geometry.
-        for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
+        // Landscape from 5:4 up to 16:9: the same as the height-only geometry.
+        for canvas in [vec2(1280., 1024.), vec2(1920., 1080.)] {
             assert_eq!(
                 layout.geometry_for(canvas),
                 layout.geometry(canvas.y),

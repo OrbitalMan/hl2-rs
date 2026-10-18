@@ -243,13 +243,14 @@ pub fn anchor_position(rig: &Rig, matrices: &[Mat4], anchor: &Anchor) -> Option<
 /// with the world FOV, keeping its depth, and the world pass draws them at their world
 /// size. Drawn in the viewmodel camera instead, sizes and widths scale by
 /// tan(viewmodel FOV / 2) / tan(world FOV / 2) (Source 4:3 horizontal degrees).
-/// viewmodel_fov (the host's viewmodel camera, Source 4:3 horizontal degrees).
+/// The retail `viewmodel_fov` (the host's viewmodel camera, Source 4:3 horizontal degrees).
 pub const VIEWMODEL_FOV: f32 = 54.;
 /// CViewRender::SetUpView: the viewmodel FOV follows any FOV offset of the view
-/// (`viewmodel_fov - (default_fov - fov)`), so the crossbow zoom (FOV 20) drives it to
-/// -1 and the view moves past the viewmodel; at or below 0 it is not drawn.
-pub fn viewmodel_fov(default_fov: f32, fov: f32) -> f32 {
-    VIEWMODEL_FOV - (default_fov - fov)
+/// (`viewmodel_fov - (default_fov - fov)`, `base` being the `viewmodel_fov` setting), so the
+/// retail crossbow zoom (FOV 20) drives it to -1 and the view moves past the viewmodel; at or
+/// below 0 it is not drawn.
+pub fn viewmodel_fov(base: f32, default_fov: f32, fov: f32) -> f32 {
+    base - (default_fov - fov)
 }
 pub fn attachment_size_factor(viewmodel_fov: f32, world_fov: f32) -> f32 {
     let world = (world_fov.to_radians() * 0.5).tan();
@@ -360,8 +361,13 @@ mod tests {
         let f = super::attachment_size_factor(54., 75.);
         assert!((f - 0.664).abs() < 0.001, "{f}");
         assert!(super::attachment_size_factor(54., 20.) > 2.8);
-        assert_eq!(super::viewmodel_fov(75., 75.), 54.);
-        assert_eq!(super::viewmodel_fov(75., 20.), -1.);
+        assert_eq!(super::viewmodel_fov(VIEWMODEL_FOV, 75., 75.), 54.);
+        assert_eq!(super::viewmodel_fov(VIEWMODEL_FOV, 75., 20.), -1.);
+        assert_eq!(
+            super::viewmodel_fov(70., 75., 75.),
+            70.,
+            "a larger viewmodel_fov setting"
+        );
     }
     use super::*;
 

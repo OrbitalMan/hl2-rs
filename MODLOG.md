@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-18 Video: vertical and viewmodel FOV sliders, wide-screen menu, portrait menu background
+
+**Agent/model:** Claude Code desktop; claude-sonnet-5-5.
+
+**Changed:** Video > Advanced gains Vertical FOV (0 = Auto, else 40..120 replacing the derived vertical field of view, scaling with zoom) and Viewmodel FOV (30..110, default 54) sliders: config `video.vertical_fov` / `video.viewmodel_fov`, `Value::VerticalFov` / `ViewmodelFov`, an HL2-RS layout addendum `assets/ui/optionssubvideoadvanceddlg_extra.res` appended to the installed dialog, `viewmodel_fov(base, default, fov)`, `video::vertical_fov_with`, `Simulation::vertical_fov` / `viewmodel_fov`, report sample `camera`. The Auto text is the installed `#Spec_Auto`; two slider names are placeholders. The menu grows with the width above 16:9 (`proportional::widescreen_menu_scale`, up to 1.35x, growing upward with the row stack's bottom fixed). A main-menu background level keeps the 4:3 vertical view on narrow frames (`camera::world_aspect`), cropping the sides. New numbers in `assets/ui/tuning.json`. Replays: new `fov_settings`; `narrow_layout` extended; `keyboard-fov` now presses Shift+Tab seven times (two more focus stops).
+
+**Why:** owner request: tune view model FOV combinations by hand, a menu that does not look tiny on ultra wide screens, a portrait menu background that crops the sides.
+
+**Tested how:** unit tests (values, labels, layout addendum and its footer handling, FOV maths incl. zoom, widescreen geometry, background aspect rule); packaged `narrow_layout`, `fov_settings` and `options`; captures inspected: the Advanced dialog, the menu at 3440x1440, 5120x1440 and 1080x1920; the validation suite, the Windows-target check and the UI replays.
+
+**Result:** the two sliders work end to end (report `camera`), the ultrawide menu is larger and inside the screen, the portrait background crops the sides.
+
+**Still broken or not tested:** view models at extreme values on real portrait or ultrawide displays; the vertical slider's keyboard stepping near Auto; the macOS and Windows layouts of the new sliders were only seen on the macOS (short) layout.
+
+**Next:** owner tuning of FOV combinations; possible per-weapon viewmodel offsets if the sliders are not enough.
+
 ## 2026-10-18 GameUI: portrait menu, console, background and view
 
 **Agent/model:** Claude Code desktop; claude-sonnet-5-5.

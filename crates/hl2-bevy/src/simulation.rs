@@ -100,6 +100,8 @@ struct Sample {
     console: Option<serde_json::Value>,
     /// Size of the game frame image rendered at the time (`frame_size`).
     frame: Option<[u32; 2]>,
+    /// Vertical field of view of the world and viewmodel cameras at the time (`camera_fov`).
+    camera: Option<[f32; 2]>,
 }
 #[derive(Resource)]
 pub struct Simulation {
@@ -142,6 +144,12 @@ pub struct Simulation {
     /// Size of the game frame image being rendered, kept by `video::record_frame_size` (reports
     /// show whether a resolution change was carried out).
     pub frame_size: Option<[u32; 2]>,
+    /// Vertical field of view (degrees) of the world and viewmodel cameras, kept by
+    /// `camera::present_player_view` (reports show what the cameras use).
+    pub camera_fov: Option<[f32; 2]>,
+    /// `video.vertical_fov` (0 = automatic) and `video.viewmodel_fov` of the applied settings.
+    pub vertical_fov: f32,
+    pub viewmodel_fov: f32,
     /// PlayerDeathThink: every button must be released before one press respawns.
     death_buttons_released: bool,
 }
@@ -182,6 +190,9 @@ impl Simulation {
             pending_video_config: None,
             applied_window: None,
             frame_size: None,
+            camera_fov: None,
+            vertical_fov: 0.,
+            viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,
             death_buttons_released: true,
         }
     }
@@ -345,6 +356,8 @@ impl Simulation {
                 Effect::Quit => ui.quit_requested = true,
                 Effect::ApplyConfig(cfg) => {
                     self.fov = cfg.video.fov;
+                    self.vertical_fov = cfg.video.vertical_fov;
+                    self.viewmodel_fov = cfg.video.viewmodel_fov;
                     // Only a resolution or display mode change touches the window, so applying
                     // a mouse or audio setting never resizes, re-centres or re-modes it. The
                     // comparison is against what the window was last given: the console has
@@ -590,6 +603,7 @@ impl Simulation {
                 step_ms: self.last_step_ms,
                 awake_bodies: self.physics.awake_bodies(),
                 frame: self.frame_size,
+                camera: self.camera_fov,
                 ray_entity: self
                     .physics
                     .ray(

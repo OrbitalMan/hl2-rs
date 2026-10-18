@@ -1,4 +1,9 @@
 {
   "narrowest_design_aspect": [5, 4],
-  "video_confirm_seconds": 15
+  "widest_design_aspect": [16, 9],
+  "widescreen_menu_scale_max": 1.35,
+  "menu_stack_rows": 7,
+  "video_confirm_seconds": 15,
+  "vertical_fov_range": [40, 120],
+  "viewmodel_fov_range": [30, 110]
 }
