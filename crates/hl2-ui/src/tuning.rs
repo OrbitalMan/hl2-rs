@@ -22,6 +22,17 @@ struct Tuning {
     vertical_fov_range: (f32, f32),
     /// Smallest and largest viewmodel field of view of the Video > Advanced slider.
     viewmodel_fov_range: (f32, f32),
+    /// Width:height of each centered HUD aspect of Video > HUD Aspect Ratio
+    /// ([`crate::proportional::hud_frame`]).
+    hud_aspects: HudAspects,
+}
+
+/// The centered HUD aspects, width:height, named like [`crate::config::HudAspect`].
+#[derive(Debug, Deserialize)]
+struct HudAspects {
+    normal: (u32, u32),
+    wide16x9: (u32, u32),
+    wide16x10: (u32, u32),
 }
 
 fn data() -> &'static Tuning {
@@ -72,6 +83,18 @@ pub fn viewmodel_fov_range() -> (f32, f32) {
     data().viewmodel_fov_range
 }
 
+/// Width / height the HUD is laid out in on a wider screen, or `None` for Fit Display.
+pub fn hud_aspect_ratio(aspect: crate::config::HudAspect) -> Option<f32> {
+    use crate::config::HudAspect;
+    let (width, height) = match aspect {
+        HudAspect::Fit => return None,
+        HudAspect::Normal => data().hud_aspects.normal,
+        HudAspect::Wide16x9 => data().hud_aspects.wide16x9,
+        HudAspect::Wide16x10 => data().hud_aspects.wide16x10,
+    };
+    Some(width as f32 / height as f32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,6 +105,13 @@ mod tests {
         assert!(video_confirm_seconds() >= 5.0, "time to read and answer");
         assert!(widest_design_aspect() > narrowest_design_aspect());
         assert!(widescreen_menu_scale_max() >= 1.0 && menu_stack_rows() >= 1.0);
+        assert_eq!(hud_aspect_ratio(crate::config::HudAspect::Fit), None);
+        for aspect in &crate::config::HudAspect::ALL[1..] {
+            assert!(
+                hud_aspect_ratio(*aspect).is_some_and(|r| r >= 1.),
+                "{aspect:?}"
+            );
+        }
         for (min, max) in [vertical_fov_range(), viewmodel_fov_range()] {
             assert!(0. < min && min < max && max < 180., "{min} {max}");
         }

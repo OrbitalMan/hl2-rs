@@ -153,7 +153,7 @@ impl Hud {
         let state = captions.state.borrow();
         let captions = serde_json::json!({"dictionaries":captions.captions.dictionaries.iter().map(|d| d.len()).collect::<Vec<_>>(),
             "errors":captions.errors,"processed":state.processed,"queued":state.streams().collect::<Vec<_>>(),"recent":state.recent,"missing":state.missing});
-        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"captions":captions})
+        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "frame":self.source.frame(), "panels":self.source.panel_rects(), "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"captions":captions})
     }
     pub fn new(source: hl2_ui::hud::WeaponHud) -> Self {
         Self {
@@ -301,6 +301,7 @@ pub fn present(
         .map(|vp| (vp.target_resolution.x as f32, vp.target_resolution.y as f32))
         .unwrap_or_else(|| (window.width(), window.height()));
     hud.source.canvas.resize(width, height);
+    hud.source.aspect = ui.source.config.video.hud_aspect;
     // Client order: queued ScreenFade/Damage messages, the fade over the 3D view, HUD.
     let time = game.scene.time;
     for fade in std::mem::take(&mut game.player_damage.fades)

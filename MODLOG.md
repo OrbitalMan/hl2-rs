@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-19 Video: HUD Aspect Ratio takes effect
+
+**Agent/model:** Claude Code desktop; claude-sonnet-5-5.
+
+**Changed:** `video.hud_aspect` was only stored. The HUD now lays out in a centered frame of the chosen aspect (Centered 4:3 / 16:9 / 16:10) on wider screens: `proportional::hud_frame`, ratios in `assets/ui/tuning.json` (`tuning::hud_aspect_ratio`), `Canvas::set_frame` / `clear_frame` / `screen_size` / `screen_rectangle`, `WeaponHud::aspect` / `framed` / `frame` / `panel_rects`, set each frame from the config in the HUD host. Panels, quick info, weapon selection, damage sides and captions use the frame; crosshair, fades, the full-screen damage flash, world and menus do not. Fit Display and screens no wider than the aspect are unchanged. Report `hud.frame`, `hud.panels`; new check `hud_aspect`; docs/gameui.md 10j.
+
+**Why:** owner question whether the setting works; ultrawide screens stretched the HUD to the edges.
+
+**Tested how:** unit tests (frame maths, canvas frame, an owned-install test comparing Centered 16:9 at 1920x1080 with Fit bit for bit and the ultrawide panels with a 2560x1440 layout moved by 440); packaged `hud` and `hud_aspect` replays; the 3440x1440 Centered 4:3 capture inspected; the validation suite, the Windows-target check and the UI replays.
+
+**Result:** the setting changes the HUD layout as described.
+
+**Still broken or not tested:** the exact retail treatment of each element (the installed client only gives the convar's help text; **not verified**), including whether the damage flash and captions sit inside the frame; real ultrawide hardware; the sliding ammo panel mid-animation is covered by the shared layout code but not asserted in the report.
+
+**Next:** compare against a retail ultrawide capture if one becomes available.
+
 ## 2026-10-18 Video: vertical and viewmodel FOV sliders, wide-screen menu, portrait menu background
 
 **Agent/model:** Claude Code desktop; claude-sonnet-5-5.

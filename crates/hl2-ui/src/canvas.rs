@@ -130,6 +130,9 @@ pub struct Quad {
 }
 struct State {
     viewport: Vec2,
+    /// The horizontal span HUD drawing is laid out in, `(x, width)`: [`Canvas::width`] is its
+    /// width and every drawn quad moves right by its x. `None`: the whole viewport.
+    frame: Option<(f32, f32)>,
     additive: bool,
     commands: Vec<Quad>,
 }
@@ -139,6 +142,7 @@ impl Default for Canvas {
     fn default() -> Self {
         Self(Arc::new(Mutex::new(State {
             viewport: vec2(1280., 720.),
+            frame: None,
             additive: false,
             commands: vec![],
         })))
@@ -148,8 +152,30 @@ impl Canvas {
     pub fn resize(&self, width: f32, height: f32) {
         self.0.lock().expect("HUD canvas").viewport = vec2(width, height);
     }
+    /// The width drawing is laid out in: the frame's, or the viewport's.
     pub fn width(&self) -> f32 {
-        self.0.lock().expect("HUD canvas").viewport.x
+        let state = self.0.lock().expect("HUD canvas");
+        state.frame.map_or(state.viewport.x, |(_, width)| width)
+    }
+    /// The whole viewport, whatever the frame.
+    pub fn screen_size(&self) -> Vec2 {
+        self.0.lock().expect("HUD canvas").viewport
+    }
+    /// Lays out the following drawing in the span starting at `x` and `width` wide (centered HUD
+    /// aspects); [`Self::clear_frame`] returns to the whole viewport.
+    pub fn set_frame(&self, x: f32, width: f32) {
+        self.0.lock().expect("HUD canvas").frame = Some((x, width));
+    }
+    pub fn clear_frame(&self) {
+        self.0.lock().expect("HUD canvas").frame = None;
+    }
+    /// The frame's left edge in screen pixels (0 without a frame).
+    pub fn frame_x(&self) -> f32 {
+        self.0
+            .lock()
+            .expect("HUD canvas")
+            .frame
+            .map_or(0., |(x, _)| x)
     }
     pub fn height(&self) -> f32 {
         self.0.lock().expect("HUD canvas").viewport.y
@@ -166,6 +192,15 @@ impl Canvas {
         }
         let mut state = self.0.lock().expect("HUD canvas");
         let additive = state.additive;
+        let destination = match state.frame {
+            Some((x, _)) => Rect::new(
+                destination.x + x,
+                destination.y,
+                destination.w,
+                destination.h,
+            ),
+            None => destination,
+        };
         state.commands.push(Quad {
             texture,
             source,
@@ -181,9 +216,13 @@ impl Canvas {
         if vertices.iter().all(|(_, c)| c.a <= 0.) {
             return;
         }
+        let mut state = self.0.lock().expect("HUD canvas");
+        let vertices = match state.frame {
+            Some((x, _)) => vertices.map(|(p, c)| (p + vec2(x, 0.), c)),
+            None => vertices,
+        };
         let min = vertices.iter().fold(Vec2::MAX, |m, (p, _)| m.min(*p));
         let max = vertices.iter().fold(Vec2::MIN, |m, (p, _)| m.max(*p));
-        let mut state = self.0.lock().expect("HUD canvas");
         let additive = state.additive;
         state.commands.push(Quad {
             texture: None,
@@ -208,6 +247,13 @@ impl Canvas {
             modulate: true,
             vertices: None,
         });
+    }
+    /// A rectangle over the whole viewport, outside the frame.
+    pub fn screen_rectangle(&self, color: Color) {
+        let frame = self.0.lock().expect("HUD canvas").frame.take();
+        let screen = self.screen_size();
+        self.rectangle(0., 0., screen.x, screen.y, color);
+        self.0.lock().expect("HUD canvas").frame = frame;
     }
     pub fn rectangle(&self, x: f32, y: f32, w: f32, h: f32, color: Color) {
         self.quad(
@@ -256,4 +302,44 @@ pub fn texture(vfs: &source_assets::vpk::Vfs, name: &str) -> anyhow::Result<Text
         image.height,
         &image.rgba,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn white() -> Color {
+        Color::new(1., 1., 1., 1.)
+    }
+
+    #[test]
+    fn a_frame_narrows_the_width_and_shifts_every_quad() {
+        let canvas = Canvas::default();
+        canvas.resize(3440., 1440.);
+        canvas.rectangle(10., 20., 30., 40., white());
+        canvas.set_frame(440., 2560.);
+        assert_eq!((canvas.width(), canvas.frame_x()), (2560., 440.));
+        assert_eq!(canvas.screen_size(), vec2(3440., 1440.));
+        canvas.rectangle(10., 20., 30., 40., white());
+        canvas.polygon([
+            (vec2(0., 0.), white()),
+            (vec2(0., 10.), white()),
+            (vec2(5., 10.), white()),
+            (vec2(5., 0.), white()),
+        ]);
+        canvas.screen_rectangle(white());
+        canvas.clear_frame();
+        assert_eq!((canvas.width(), canvas.frame_x()), (3440., 0.));
+        let quads = canvas.drain();
+        assert_eq!(quads[0].destination.x, 10., "before the frame");
+        assert_eq!(quads[1].destination.x, 450., "inside the frame");
+        assert_eq!(quads[2].destination.x, 440.);
+        assert_eq!(quads[2].vertices.unwrap()[2].0, vec2(445., 10.));
+        let full = quads[3].destination;
+        assert_eq!(
+            (full.x, full.w),
+            (0., 3440.),
+            "screen rectangles ignore the frame"
+        );
+    }
 }

@@ -1000,6 +1000,28 @@ Owner list after 10h.
 - Not verified: how each weapon looks at extreme values on a real portrait or ultrawide display
   (the sliders exist for exactly that); the vertical slider's keyboard stepping at the Auto end.
 
+### 10j. HUD Aspect Ratio (2026-10-19)
+
+Options > Video > HUD Aspect Ratio (`video.hud_aspect`, `config::HudAspect`: Fit Display, Centered
+4:3, Centered 16:9, Centered 16:10) lays the HUD out in a centered span of that aspect instead of the
+whole screen. Evidence: the installed client registers the `hud_aspect` convar, help text "Force the
+aspect ratio of the hud. 0 to disable."; the Source SDK has no such variable, so the exact retail
+treatment of every element is **not verified**; this is the conservative reading of the setting.
+
+- `proportional::hud_frame(screen, aspect) -> (x, width)`: a screen wider than `aspect` gets a
+  span of `height * aspect`, centered, full height; a narrower screen and Fit Display use the whole
+  width. The ratios are data (`assets/ui/tuning.json` `hud_aspects`, `tuning::hud_aspect_ratio`).
+- `Canvas::set_frame` / `clear_frame`: while a frame is set, `Canvas::width()` is the frame's width and
+  every quad and polygon moves right by the frame's x, so the existing panel layout code (right and
+  center aligned `xpos`, animations, scale from `proportional::scale`) works unchanged inside the frame.
+  `WeaponHud::framed()` sets it for one draw; with Fit Display, or a screen no wider than the chosen aspect,
+  nothing is set and the output is bit for bit what it was.
+- Inside the frame: health, suit, ammo and secondary ammo panels, the quick info, the weapon selection,
+  the damage indicator sides and the closed captions. Outside it: the crosshair (view center), screen
+  fades, the full-screen damage flash, the world view and every menu.
+- The report (`hud.frame` = `[x, width]`, `hud.panels` = health, suit, ammo, secondary ammo rectangles in
+  screen pixels at rest) shows the result; packaged check `hud_aspect`.
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed

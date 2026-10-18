@@ -1529,7 +1529,18 @@ fn default_crosshair_rects(viewport: Vec2, atlas: Rect, texture_size: Vec2) -> (
     (destination, source)
 }
 
+/// Lays the HUD out in the Video > HUD Aspect Ratio frame until dropped
+/// ([`WeaponHud::framed`]).
+struct FrameGuard<'a>(&'a Canvas);
+impl Drop for FrameGuard<'_> {
+    fn drop(&mut self) {
+        self.0.clear_frame();
+    }
+}
+
 pub struct WeaponHud {
+    /// Options > Video > HUD Aspect Ratio: the span of a wide screen the HUD panels use.
+    pub aspect: crate::config::HudAspect,
     corners: Vec<Texture2D>,
     pub canvas: Canvas,
     icons: HudFont,
@@ -1575,6 +1586,43 @@ pub struct WeaponHud {
 }
 
 impl WeaponHud {
+    /// Draws what follows inside the HUD aspect frame ([`crate::proportional::hud_frame`]):
+    /// panels, selection, captions and the damage sides. The crosshair, which belongs to the
+    /// view center, and the screen fades stay on the whole screen. Fit Display, and a screen
+    /// no wider than the chosen aspect, leave the canvas untouched.
+    fn framed(&self) -> FrameGuard<'_> {
+        let screen = self.canvas.screen_size();
+        let (x, width) =
+            crate::proportional::hud_frame(screen, crate::tuning::hud_aspect_ratio(self.aspect));
+        if width < screen.x {
+            self.canvas.set_frame(x, width);
+        }
+        FrameGuard(&self.canvas)
+    }
+    /// The HUD frame in screen pixels, `(x, width)`.
+    pub fn frame(&self) -> (f32, f32) {
+        crate::proportional::hud_frame(
+            self.canvas.screen_size(),
+            crate::tuning::hud_aspect_ratio(self.aspect),
+        )
+    }
+    /// The rectangles the numeric panels occupy in screen pixels: health, suit, ammo, secondary
+    /// ammo (their layout, before animations).
+    pub fn panel_rects(&self) -> [[f32; 4]; 4] {
+        let screen = self.canvas.screen_size();
+        let (x, width) = self.frame();
+        let inside = vec2(width, screen.y);
+        [
+            &self.health_panel,
+            &self.suit_panel,
+            &self.ammo_panel,
+            &self.secondary_ammo_panel,
+        ]
+        .map(|panel| {
+            let rect = panel.rect_for(inside);
+            [rect.x + x, rect.y, rect.w, rect.h]
+        })
+    }
     /// The canvas size in pixels.
     fn canvas_size(&self) -> Vec2 {
         vec2(self.canvas.width(), self.canvas.height())
@@ -1741,6 +1789,7 @@ impl WeaponHud {
         let ammo_label = loc.text("#Valve_Hud_AMMO");
         let alt_label = loc.text("#Valve_Hud_AMMO_ALT");
         Ok(Self {
+            aspect: crate::config::HudAspect::default(),
             corners,
             canvas,
             icons: HudFont::read(fonts, "WeaponIcons", face.clone(), 64.),
@@ -1813,6 +1862,7 @@ impl WeaponHud {
         if !settings.closecaption {
             return;
         }
+        let _frame = self.framed();
         let size = (self.canvas.width(), self.canvas.height());
         let Some((panel, paint)) = self.captions.paint(size, time) else {
             return;
@@ -1949,7 +1999,7 @@ impl WeaponHud {
             Color::from_rgba(c[0] as u8, c[1] as u8, c[2] as u8, (c[3] * alpha) as u8)
         };
         if full[3] > 0. {
-            self.canvas.rectangle(0., 0., width, height, rgba(full, 1.));
+            self.canvas.screen_rectangle(rgba(full, 1.));
         }
         // Proportional values are truncated to VGUI integers.
         let scale = crate::proportional::scale(vec2(width, height));
@@ -2077,6 +2127,7 @@ impl WeaponHud {
         let Some(pending) = selection.pending.as_deref() else {
             return;
         };
+        let _frame = self.framed();
         let Some(selected_weapon) = weapons.get(pending) else {
             return;
         };
@@ -2273,6 +2324,7 @@ impl WeaponHud {
         _selection: &Selection,
         time: f64,
     ) {
+        let _frame = self.framed();
         let mut effects = self.numeric_effects.borrow_mut();
         effects.configure_layouts(
             [
@@ -2488,6 +2540,54 @@ mod tests {
                 assert_eq!(dots, [(-1, -8), (-11, 0), (-1, 0), (9, 0), (-1, 8)]);
             }
         }
+    }
+
+    #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn owned_hud_aspect_moves_the_panels_into_a_centered_frame() {
+        use crate::config::HudAspect;
+        let root = source_assets::install::discover().expect("installed game");
+        let vfs = Vfs::mount(&root).unwrap();
+        let canvas = Canvas::default();
+        let mut hud = WeaponHud::load(&vfs, canvas.clone()).unwrap();
+        let weapons = hl2_simulation::gameplay::definitions(&vfs).unwrap();
+        let mut inventory = Inventory::default();
+        inventory.health = 100.;
+        inventory.suit = true;
+        inventory.give("weapon_smg1", &weapons, 0.);
+        inventory.active = "weapon_smg1".into();
+        inventory.refill_ammo(&weapons);
+        let selection = Selection::new();
+        let signature = |hud: &WeaponHud, size: Vec2, inventory: &Inventory| {
+            canvas.resize(size.x, size.y);
+            hud.draw_status(inventory, &weapons, &selection, 0.);
+            let quads = canvas.drain();
+            assert_eq!(canvas.width(), size.x, "the frame never outlives a draw");
+            quads
+                .iter()
+                .map(|q| (q.destination, q.source, q.color, q.additive))
+                .collect::<Vec<_>>()
+        };
+        // 16:9 with Centered 16:9 is bit for bit the Fit Display layout.
+        let fit = signature(&hud, vec2(1920., 1080.), &inventory);
+        hud.aspect = HudAspect::Wide16x9;
+        assert_eq!(signature(&hud, vec2(1920., 1080.), &inventory), fit);
+        // On an ultrawide screen the panels are the 16:9 ones moved into the centered frame.
+        let reference = signature(&hud, vec2(2560., 1440.), &inventory);
+        let wide = signature(&hud, vec2(3440., 1440.), &inventory);
+        assert_eq!(wide.len(), reference.len());
+        for (wide, reference) in wide.iter().zip(&reference) {
+            assert_eq!(wide.0.x, reference.0.x + 440., "{wide:?}");
+            assert_eq!(
+                (wide.0.y, wide.0.w, wide.0.h),
+                (reference.0.y, reference.0.w, reference.0.h)
+            );
+        }
+        // Fit Display spans the whole width: the health panel hugs the left edge, ammo the right.
+        hud.aspect = HudAspect::Fit;
+        canvas.resize(3440., 1440.);
+        let [health, _, ammo, _] = hud.panel_rects();
+        assert!(health[0] < 100. && ammo[0] + ammo[2] > 3340.);
     }
 
     #[test]

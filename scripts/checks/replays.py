@@ -613,6 +613,44 @@ def check_hud():
     holds("HUD quads drawn", run.report["render"]["presentation"]["hud"]["quads"] > 0)
 
 
+def check_hud_aspect():
+    """Options > Video > HUD Aspect Ratio: the HUD panels sit inside a centered frame of the chosen
+    aspect (report `hud.frame` = [x, width] and `hud.panels` = health, suit, ammo, secondary ammo
+    rectangles in screen pixels), Fit Display spans the screen, and 16:9 is unchanged."""
+    def hud(name: str, aspect: str, width: int, height: int) -> dict:
+        if CONFIG.exists():
+            CONFIG.unlink()
+        settings(video={"hud_aspect": aspect})
+        run = game(f"hud_aspect_{name}", "--map", "d1_trainstation_02", "--width", str(width),
+                   "--height", str(height), "--movement-script", "test-inputs/bevy-hud.json")
+        return run.report["render"]["presentation"]["hud"]
+    h = 1440
+    fit = hud("fit_ultrawide", "fit", 3440, h)
+    expect("fit frame", fit["frame"], [0, 3440])
+    holds("fit: health at the left edge, ammo at the right",
+          fit["panels"][0][0] < 100 and fit["panels"][2][0] + fit["panels"][2][2] > 3440 - 100, fit["panels"])
+    for aspect, ratio in (("normal", 4 / 3), ("wide16x9", 16 / 9), ("wide16x10", 16 / 10)):
+        report = hud(f"{aspect}_ultrawide", aspect, 3440, h)
+        x, width = report["frame"]
+        holds(f"{aspect}: centered {ratio:.3f} frame", abs(width - h * ratio) < 1 and abs(x * 2 + width - 3440) < 1,
+              report["frame"])
+        health, _, ammo, _ = report["panels"]
+        holds(f"{aspect}: panels inside the frame", health[0] >= x and ammo[0] + ammo[2] <= x + width + 1,
+              report["panels"])
+        # Same layout as a 16:9 style screen of the frame's size, moved right by the frame's x.
+        holds(f"{aspect}: health keeps its distance from the frame edge",
+              abs((health[0] - x) - fit["panels"][0][0]) < 1, (health, x))
+        holds(f"{aspect}: ammo keeps its distance from the frame edge",
+              abs((x + width) - (ammo[0] + ammo[2]) - (3440 - (fit["panels"][2][0] + fit["panels"][2][2]))) < 1, ammo)
+    # A screen no wider than the chosen aspect is unchanged, bit for bit.
+    plain = hud("fit_16x9", "fit", 1920, 1080)
+    centered = hud("wide16x9_16x9", "wide16x9", 1920, 1080)
+    expect("16:9 frame", centered["frame"], plain["frame"])
+    expect("16:9 panels", centered["panels"], plain["panels"])
+    expect("16:9 quads", centered["quads"], plain["quads"])
+    CONFIG.unlink()
+
+
 # ---- gameplay replays (background) ---------------------------------------------------------
 #
 # Every other movement-script fixture in test-inputs/ runs on its map with the generic checks
@@ -1148,6 +1186,7 @@ CHECKS = [
     Check("campaign", check_campaign, "shared"),
     Check("dev_overlay", check_dev_overlay, "shared"),
     Check("hud", check_hud, "shared"),
+    Check("hud_aspect", check_hud_aspect, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),
