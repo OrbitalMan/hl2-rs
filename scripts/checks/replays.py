@@ -299,10 +299,11 @@ def check_narrow_layout():
         menu, frame = console["menu"], console["console_frame"]
         design = min(h, w / 1.25)
         holds(f"{name}: menu rows fit the width", menu["x"] + menu["row_wide"] <= w, menu)
-        # A menu background keeps the vertical view of 4:3 on every frame (the sides are cropped on
-        # narrow ones), so its world camera is the same 59.84 degrees (75 horizontal at 4:3) everywhere.
-        holds(f"{name}: the menu background keeps the 4:3 vertical view",
-              abs(run.sample("console")["camera"][0] - 59.84) < 0.05, run.sample("console")["camera"])
+        # A menu background keeps the vertical view of 4:3 up to 16:9 (cropping the sides below
+        # 4:3), and cuts the top and bottom of the 16:9 frame on ultrawide screens.
+        expected_bg_fov = {"ultrawide": 46.37, "super_ultrawide": 32.11}.get(name, 59.84)
+        holds(f"{name}: menu background vertical FOV is {expected_bg_fov} degrees",
+              abs(run.sample("console")["camera"][0] - expected_bg_fov) < 0.05, run.sample("console")["camera"])
         if name in ("landscape", "ultrawide", "super_ultrawide"):
             p = lambda units: units * h // 480
             holds(f"{name}: retail console origin", (round(frame[0]), round(frame[1])) == (w // 2 - p(16), p(64)), frame)

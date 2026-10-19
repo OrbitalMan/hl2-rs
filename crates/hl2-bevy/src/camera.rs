@@ -12,15 +12,26 @@ pub fn punched(yaw: f32, pitch: f32, punch: glam::Vec3) -> (f32, f32) {
     (yaw + punch.y.to_radians(), pitch - punch.x.to_radians())
 }
 
-/// The aspect ratio the world camera derives its field of view from. A main-menu background
-/// level keeps the vertical view of 4:3 on frames narrower than that and so crops the sides (like
-/// the pre-blurred overlay); the game itself shows more above and below instead
-/// ([`crate::video::vertical_fov_for`]).
-pub fn world_aspect(aspect: f32, background_level: bool) -> f32 {
+/// The vertical field of view (radians) of the world camera.
+///
+/// A main-menu background level keeps the vertical view of 4:3 on frames up to 16:9 (cropping
+/// the sides below 4:3 and expanding horizontally up to 16:9) and keeps the 16:9 horizontal
+/// view on ultrawide frames above [`hl2_ui::tuning::widest_design_aspect`] (cutting the top and
+/// bottom of the 16:9 frame, like the pre-blurred overlay). Gameplay uses
+/// [`crate::video::vertical_fov_with`].
+pub fn world_fov(
+    view_degrees: f32,
+    default_degrees: f32,
+    aspect: f32,
+    vertical: f32,
+    background_level: bool,
+) -> f32 {
     if background_level {
-        aspect.max(4. / 3.)
+        let widest = hl2_ui::tuning::widest_design_aspect();
+        let scale = (aspect / widest).max(1.);
+        2. * ((view_degrees.to_radians() / 2.).tan() / ((4. / 3.) * scale)).atan()
     } else {
-        aspect
+        crate::video::vertical_fov_with(view_degrees, default_degrees, aspect, vertical)
     }
 }
 
@@ -77,17 +88,12 @@ pub(crate) fn present_player_view(
             crate::source_to_bevy(crate::source_direction(yaw, pitch)),
             Vec3::Y,
         );
-        // The vertical override is the player's own setting, not a menu background's.
-        let vertical = if sim.background_level {
-            0.
-        } else {
-            sim.vertical_fov
-        };
-        let fov = crate::video::vertical_fov_with(
+        let fov = world_fov(
             sim.view_fov(player_fov),
             sim.fov,
-            world_aspect(aspect, sim.background_level),
-            vertical,
+            aspect,
+            sim.vertical_fov,
+            sim.background_level,
         );
         if let Projection::Perspective(perspective) = &mut *projection
             && perspective.fov != fov
@@ -143,26 +149,43 @@ mod tests {
     }
 
     #[test]
-    fn menu_backgrounds_crop_the_sides_and_the_game_shows_more_above_and_below() {
+    fn menu_backgrounds_crop_sides_when_narrow_and_top_and_bottom_when_ultrawide() {
         use crate::video::vertical_fov_for;
-        for aspect in [4. / 3., 16. / 9., 64. / 27.] {
-            assert_eq!(
-                world_aspect(aspect, true),
-                aspect,
-                "{aspect}: wide frames unchanged"
+        let horizontal = |vertical: f32, aspect: f32| 2. * ((vertical / 2.).tan() * aspect).atan();
+        let v_4_3 = vertical_fov_for(75., 4. / 3.);
+        for aspect in [4. / 3., 16. / 10., 16. / 9.] {
+            assert!(
+                (world_fov(75., 75., aspect, 90., true) - v_4_3).abs() < 1e-6,
+                "{aspect}: 4:3..=16:9 menu backgrounds keep the 4:3 vertical view and ignore vertical_fov"
             );
-            assert_eq!(world_aspect(aspect, false), aspect);
         }
         for aspect in [1., 9. / 16.] {
-            assert_eq!(world_aspect(aspect, false), aspect);
+            let bg = world_fov(75., 75., aspect, 0., true);
+            let game = world_fov(75., 75., aspect, 0., false);
             assert_eq!(
-                vertical_fov_for(75., world_aspect(aspect, true)),
-                vertical_fov_for(75., 4. / 3.),
-                "{aspect}: a menu background keeps the 4:3 vertical view"
+                bg, v_4_3,
+                "{aspect}: a narrow menu background keeps the 4:3 vertical view (crops sides)"
             );
             assert!(
-                vertical_fov_for(75., world_aspect(aspect, false))
-                    > vertical_fov_for(75., world_aspect(aspect, true))
+                game > bg,
+                "{aspect}: gameplay shows more above and below on narrow frames"
+            );
+        }
+        let h_16_9 = horizontal(world_fov(75., 75., 16. / 9., 0., true), 16. / 9.);
+        for aspect in [3440. / 1440., 64. / 27., 32. / 9.] {
+            let bg = world_fov(75., 75., aspect, 0., true);
+            assert!(
+                bg < v_4_3,
+                "{aspect}: ultrawide menu background cuts top and bottom of the 16:9 frame"
+            );
+            assert!(
+                (horizontal(bg, aspect) - h_16_9).abs() < 1e-5,
+                "{aspect}: ultrawide menu background keeps the 16:9 horizontal view"
+            );
+            assert_eq!(
+                world_fov(75., 75., aspect, 0., false),
+                v_4_3,
+                "{aspect}: gameplay keeps the 4:3 vertical view and expands horizontally"
             );
         }
     }

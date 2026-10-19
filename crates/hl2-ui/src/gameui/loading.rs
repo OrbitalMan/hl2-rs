@@ -391,12 +391,13 @@ pub struct LoadingDialog {
 const BACKGROUND_TEXTURE_ASPECT: f32 = 4. / 3.;
 
 /// The part of a pre-blurred background texture to draw on a `canvas`, in texture pixels
-/// (`texture` is its size). The whole texture, stretched to the screen as in retail, except on a
-/// screen narrower than the UI design (square, portrait): there it fills the screen without
-/// stretching (iOS `scaleAspectFill`): the centre of the image at its own aspect, cropped at the
-/// sides.
+/// (`texture` is its size). The whole texture on 5:4 through 16:9 as in retail; on narrower
+/// screens (square, portrait) it keeps the full height and crops the sides of the 4:3 image, and
+/// on screens wider than 16:9 ([`crate::tuning::widest_design_aspect`]) it keeps the full width
+/// and crops the top and bottom of the 16:9 widescreen image, so neither stretches.
 pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> crate::canvas::Rect {
     let aspect = canvas.x / canvas.y.max(1.);
+    let widest = crate::tuning::widest_design_aspect();
     if crate::proportional::design_height(canvas) < canvas.y && aspect < BACKGROUND_TEXTURE_ASPECT {
         let kept = aspect / BACKGROUND_TEXTURE_ASPECT;
         crate::canvas::Rect::new(
@@ -404,6 +405,14 @@ pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> crate::canv
             0.,
             texture.x * kept,
             texture.y,
+        )
+    } else if aspect > widest {
+        let kept = widest / aspect;
+        crate::canvas::Rect::new(
+            0.,
+            texture.y * (1. - kept) * 0.5,
+            texture.x,
+            texture.y * kept,
         )
     } else {
         crate::canvas::Rect::new(0., 0., texture.x, texture.y)
@@ -676,30 +685,39 @@ mod tests {
         use crate::canvas::{Canvas, Texture2D};
         let texture = Texture2D::from_rgba8(2, 2, &[255; 16]);
         let canvas = Canvas::default();
-        for (w, h, source_w) in [(1080., 1920., 2. * 0.5625 * 0.75), (1280., 1024., 2.)] {
+        for (w, h, source_w, source_h) in [
+            (1080., 1920., 2. * 0.5625 * 0.75, 2.),
+            (1280., 1024., 2., 2.),
+            (5120., 1440., 2., 1.),
+        ] {
             canvas.resize(w, h);
             draw_background_texture(&canvas, &texture);
             let quads = canvas.drain();
             assert_eq!(quads.len(), 1);
             assert_eq!(quads[0].destination, crate::canvas::Rect::new(0., 0., w, h));
             assert!(
-                (quads[0].source.w - source_w).abs() < 1e-3,
+                (quads[0].source.w - source_w).abs() < 1e-3
+                    && (quads[0].source.h - source_h).abs() < 1e-3,
                 "{w}x{h}: {:?}",
                 quads[0].source
             );
-            assert_eq!(quads[0].source.h, 2.);
         }
     }
 
     #[test]
-    fn narrow_screens_fill_with_the_centre_of_the_background_and_others_stretch() {
+    fn narrow_and_ultrawide_screens_fill_with_the_centre_of_the_background() {
         use glam::vec2;
         let texture = vec2(512., 512.);
-        for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
+        for canvas in [
+            vec2(1280., 1024.),
+            vec2(1024., 768.),
+            vec2(1920., 1200.),
+            vec2(1920., 1080.),
+        ] {
             assert_eq!(
                 background_source(canvas, texture),
                 crate::canvas::Rect::new(0., 0., 512., 512.),
-                "{canvas}: stretched as in retail"
+                "{canvas}: whole texture as in retail"
             );
         }
         let square = background_source(vec2(1080., 1080.), texture);
@@ -717,6 +735,22 @@ mod tests {
         assert!(
             (portrait.x * 2. + portrait.w - 512.).abs() < 1e-3,
             "centred"
+        );
+        let ultrawide = background_source(vec2(3440., 1440.), texture);
+        assert_eq!((ultrawide.x, ultrawide.w), (0., 512.));
+        assert!(
+            (ultrawide.h - 512. * (16. / 9.) / (3440. / 1440.)).abs() < 1e-3,
+            "{ultrawide:?}"
+        );
+        assert!(
+            (ultrawide.y * 2. + ultrawide.h - 512.).abs() < 1e-3,
+            "centred"
+        );
+        let super_ultrawide = background_source(vec2(5120., 1440.), texture);
+        assert_eq!(
+            super_ultrawide,
+            crate::canvas::Rect::new(0., 128., 512., 256.),
+            "32:9 keeps the middle half of the 16:9 image"
         );
     }
 

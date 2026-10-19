@@ -951,9 +951,9 @@ thin slice with the weapon cut off. Landscape from 5:4 up is unchanged by all fo
 - Not verified: how the viewmodel looks on a real portrait display; the world's wider vertical
   view shows more floor and ceiling than a designer may like (it is the 4:3 horizontal view).
 
-### 10i. Vertical and viewmodel FOV sliders, wide-screen menu, portrait menu background (2026-10-18)
+### 10i. Vertical and viewmodel FOV sliders, wide-screen menu, portrait and ultrawide menu backgrounds (2026-10-18, updated 2026-10-19)
 
-Owner list after 10h.
+Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre-blurred overlay cropping.
 
 - **Sliders.** Video > Advanced gains **Vertical FOV** (under Field of view) and **Viewmodel FOV**
   (next to it), so view model problems at portrait and ultrawide ratios can be tuned by hand.
@@ -986,16 +986,21 @@ Owner list after 10h.
   alike, and grows upward: the bottom of the seven-row stack (`menu_stack_rows`) stays where it
   was, so it never runs off the screen. 21:9 grows 1.33x, 32:9 the cap. Up to 16:9, 16:10 and
   5:4 nothing changes; portrait keeps 10h. The console keeps the retail half-width placement.
-- **Menu background in portrait.** A main-menu background level keeps the 4:3 vertical view on
-  every frame (`camera::world_aspect`), so a narrow frame crops the left and right of the image
-  (like the pre-blurred overlay) instead of showing more above and below; the game itself still
-  uses the Vert+ view of 10h. The vertical override does not apply to backgrounds.
+- **Menu background in portrait and ultrawide.** A main-menu background level (`camera::world_fov`)
+  keeps the 4:3 vertical view on frames up to 16:9 (cropping the left and right below 4:3 and
+  expanding horizontally up to 16:9) and keeps the 16:9 horizontal view on ultrawide frames above
+  `tuning::widest_design_aspect` (`16:9`), cutting the top and bottom of the 16:9 frame rather
+  than adding left and right portions to it. The pre-blurred loading overlay
+  (`loading::background_source`) applies the same vertical center-crop above 16:9 so the 16:9
+  widescreen image is never stretched horizontally on 21:9 or 32:9 screens. Gameplay still uses the
+  Vert+ view below 4:3 and Hor+ at 4:3 and wider.
 - Tests: `Value` and label tests (settings), `the_vertical_and_viewmodel_fov_sliders_are_added_and_apply_on_ok`
   (also proves the labels stay out of the footer), `wide_screens_grow_the_menu_upward_within_the_screen`,
   `the_menu_grows_only_on_screens_wider_than_16_by_9`, `an_explicit_vertical_fov_replaces_the_derived_one_and_scales_with_zoom`,
-  `menu_backgrounds_crop_the_sides_and_the_game_shows_more_above_and_below`; packaged
+  `menu_backgrounds_crop_sides_when_narrow_and_top_and_bottom_when_ultrawide`,
+  `narrow_and_ultrawide_screens_fill_with_the_centre_of_the_background`; packaged
   `fov_settings` (defaults, explicit values and portrait through the camera report) and
-  `narrow_layout` (now with 21:9 and 32:9 and the background FOV). Captures inspected: the
+  `narrow_layout` (now with 21:9 and 32:9 and the cropped background FOV). Captures inspected: the
   Advanced dialog, the menu at 3440x1440, 5120x1440 and 1080x1920.
 - Not verified: how each weapon looks at extreme values on a real portrait or ultrawide display
   (the sliders exist for exactly that); the vertical slider's keyboard stepping at the Auto end.

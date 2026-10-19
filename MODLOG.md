@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-19 Video: ultrawide menu background and loading overlay crop top and bottom
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:** On ultrawide screens above 16:9 (`tuning::widest_design_aspect`), both the 3D main-menu background camera (`camera::world_fov`) and the pre-blurred loading overlay (`loading::background_source`) now keep the 16:9 horizontal view and cut the top and bottom of the 16:9 frame rather than adding left/right portions or stretching horizontally. `scripts/checks/replays.py` (`narrow_layout`) and `docs/gameui.md` 10i updated.
+
+**Why:** owner request: crop top and bottom of the 16:9 menu background and pre-blurred loading overlay on ultrawide/super-ultrawide screens instead of expanding or stretching horizontally.
+
+**Tested how:** unit tests (`loading::tests::narrow_and_ultrawide_screens_fill_with_the_centre_of_the_background`, `loading::tests::the_overlay_draws_the_cropped_texture_over_the_whole_screen`, `camera::tests::menu_backgrounds_crop_sides_when_narrow_and_top_and_bottom_when_ultrawide`); `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh`, and packaged replay `narrow_layout` (`narrow_ultrawide.png` at 3440x1440 and `narrow_super_ultrawide.png` at 5120x1440 inspected).
+
+**Result:** ultrawide and super-ultrawide menu backgrounds and loading overlays lock to the 16:9 horizontal view and crop top and bottom cleanly.
+
+**Still broken or not tested:** the pre-blurred loading overlay during a live transition was verified via the draw unit test rather than a screenshot capture; physical ultrawide hardware not tested.
+
+**Next:** owner visual check of ultrawide menu backgrounds.
+
 ## 2026-10-19 Video: HUD Aspect Ratio takes effect
 
 **Agent/model:** Claude Code desktop; claude-sonnet-5-5.
