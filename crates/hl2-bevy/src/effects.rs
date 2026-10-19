@@ -501,6 +501,7 @@ fn viewmodel_quads(
     game: &Gameplay,
     effects: &mut Effects,
     sim: &Simulation,
+    aspect: f32,
 ) -> Vec<hl2_simulation::projectile_visuals::Quad> {
     use hl2_simulation::viewmodel_effects as vm;
     let mut described = game.inventory.viewmodel_effects(game.scene.time);
@@ -537,7 +538,15 @@ fn viewmodel_quads(
     let matrices =
         vm::viewmodel_matrices(rig, clip, time, &game.inventory.viewmodel_pose_values(rig));
     let fov = game.inventory.view_fov(game.scene.time);
-    let viewmodel_fov = vm::viewmodel_fov(sim.viewmodel_fov, game.inventory.fov.default_fov, fov);
+    let framing = hl2_ui::tuning::viewmodel_framing(&game.inventory.active, aspect);
+    let raw_viewmodel_fov =
+        vm::viewmodel_fov(sim.viewmodel_fov, game.inventory.fov.default_fov, fov);
+    let viewmodel_fov = if raw_viewmodel_fov > 0. {
+        (raw_viewmodel_fov + framing.fov_offset).clamp(1., 160.)
+    } else {
+        raw_viewmodel_fov
+    };
+    let offset = glam::Vec3::from_array(framing.offset);
     // DoLoadEffect -> "CrossbowLoad" (client c_weapon_crossbow.cpp): FX_ElectricSpark at
     // viewmodel attachment 1, a world position from FormatViewModelAttachment (right/up
     // offsets scaled by tan(fov / 2) / tan(viewmodel fov / 2), depth kept).
@@ -551,6 +560,7 @@ fn viewmodel_quads(
         if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
             && viewmodel_fov > 0.
         {
+            let local = local + offset;
             let world = eye + forward * local.x - right * local.y * factor + up * local.z * factor;
             effects.source.spawn_sparks(world, game.scene.time);
         }
@@ -580,11 +590,10 @@ fn viewmodel_quads(
         if game.scene.time - at < 0.1 && viewmodel_fov > 0. {
             let d = end - eye;
             described.beams.push(vm::ViewmodelBeam {
-                start: vm::Anchor::Local(glam::Vec3::new(
-                    d.dot(forward),
-                    -d.dot(right) / factor,
-                    d.dot(up) / factor,
-                )),
+                start: vm::Anchor::Local(
+                    glam::Vec3::new(d.dot(forward), -d.dot(right) / factor, d.dot(up) / factor)
+                        - offset,
+                ),
                 end: vm::Anchor::Index(1),
                 material: "sprites/orangelight1",
                 width: 6.4,
@@ -617,6 +626,7 @@ pub fn present(
     mut effects: ResMut<Effects>,
     game: Res<Gameplay>,
     sim: Res<Simulation>,
+    frame: Option<Res<crate::video::GameFrame>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut draws: Query<(&mut Transform, &mut Visibility)>,
 ) {
@@ -640,7 +650,8 @@ pub fn present(
     draw_pool(&mut commands, &mut meshes, pool, &quads, materials, None);
     effects.source.quads = quads;
     // Sprites and beams on the viewmodel (CSprite/CBeam viewmodel attachments).
-    let viewmodel = viewmodel_quads(&game, &mut effects, &sim);
+    let aspect = crate::video::frame_aspect(frame.as_deref());
+    let viewmodel = viewmodel_quads(&game, &mut effects, &sim, aspect);
     effects.viewmodel_draws = viewmodel.len();
     let Effects {
         materials,

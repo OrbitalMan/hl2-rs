@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-19 Video: aspect-adaptive and per-weapon viewmodel framing for portrait and ultrawide
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:** Added data-driven aspect-adaptive and per-weapon viewmodel framing (`tuning::ViewmodelFraming`, `tuning::viewmodel_framing`, `assets/ui/tuning.json` `viewmodel`) outside the retail `5:4..=16:9` aspect range (`narrowest_design_aspect..=widest_design_aspect`). Below `5:4` down to `9:16` (`portrait_aspect`), framing interpolates smoothly toward each weapon's (or `default`) `portrait` profile; above `16:9` up to `32:9` (`ultrawide_aspect`), it interpolates toward `ultrawide`. Standard `5:4..=16:9` aspects return `ViewmodelFraming::ZERO` and are untouched. `camera::viewmodel_projection` and `camera::present_player_view` apply `fov_offset` and translate `ViewmodelCamera` by `-source_to_bevy(offset)` so all layer-1 weapon meshes, sprites and beams shift together; `effects::viewmodel_quads` applies the same framing to world-to-viewmodel spark and beam projections (`CrossbowLoad`, `weapon_physcannon` launch beam) and sprite sizing. Per-weapon overrides fix `weapon_physcannon` in portrait (`offset: [0, 0, -10.0]` hides the severed left arm stump below the bottom bezel without narrowing horizontal FOV) and `weapon_rpg` in both portrait (`fov_offset: +16`, `offset: [0, 4.0, -12.0]` brings the right-mounted tube into the narrow frame while keeping the left arm stump below the bottom bezel) and ultrawide (`fov_offset: -18`, `offset: [-5.0, -4.5, -3.0]` keeps the unmodeled rear cutoff outside the right edge). Updated `scripts/checks/replays.py` (`fov_settings`) and `docs/gameui.md` 10i.
+
+**Why:** owner request: combine aspect-adaptive automatic viewmodel framing (Solution 3) and per-weapon/per-aspect configuration (Solution 4) in `tuning.json` so first-person arms and weapons work across portrait (`9:16`..`1:1`) and ultrawide (`21:9`..`32:9`) aspect ratios without exposing unmodeled arm/tube ends or clipping off-screen.
+
+**Tested how:** unit tests (`tuning::tests::viewmodel_framing_leaves_retail_aspects_untouched_and_adapts_portrait_and_ultrawide`, `camera::tests::viewmodel_framing_keeps_physcannon_and_rpg_in_frame_across_portrait_and_ultrawide`, `camera::tests::viewmodel_is_hidden_past_its_fov`); `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh`, packaged `fov_settings` replay, and packaged captures of `weapon_physcannon` and `weapon_rpg` at `1080x1920` (`9:16`) and `5120x1440` (`32:9`).
+
+**Result:** retail `5:4..=16:9` viewmodels are unchanged; portrait and ultrawide viewmodels adapt smoothly per weapon and switch cleanly when changing weapons.
+
+**Still broken or not tested:** physical portrait or super-ultrawide display hardware not tested.
+
+**Next:** owner visual check and any per-weapon fine-tuning in `assets/ui/tuning.json`.
+
 ## 2026-10-19 Video: ultrawide menu background and loading overlay crop top and bottom
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

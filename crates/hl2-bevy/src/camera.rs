@@ -37,18 +37,23 @@ pub fn world_fov(
 
 /// CViewRender::SetUpView: the viewmodel's FOV is `viewmodel_fov - (default_fov - fov)`. At or
 /// below zero the view has moved past the viewmodel, which is then not drawn: returns the
-/// vertical FOV and near plane for the viewmodel camera given its far plane and the frame's
-/// aspect ratio.
-pub fn viewmodel_projection(viewmodel_degrees: f32, far: f32, aspect: f32) -> (f32, f32) {
+/// vertical FOV and near plane for the viewmodel camera given its far plane, aspect-adaptive
+/// `fov_offset` (degrees), and the frame's aspect ratio.
+pub fn viewmodel_projection(
+    viewmodel_degrees: f32,
+    fov_offset: f32,
+    far: f32,
+    aspect: f32,
+) -> (f32, f32) {
     if viewmodel_degrees > 0. {
-        (
-            crate::video::vertical_fov_for(viewmodel_degrees, aspect),
-            0.1,
-        )
+        let degrees = (viewmodel_degrees + fov_offset).clamp(1., 160.);
+        (crate::video::vertical_fov_for(degrees, aspect), 0.1)
     } else {
         (crate::video::vertical_fov_for(1., aspect), far * 0.5)
     }
 }
+
+type ViewmodelCameraFilter = (With<ViewmodelCamera>, Without<crate::FlyCamera>);
 
 /// Publishes the view after the fixed simulation loop: a point_viewcontrol camera or env_zoom
 /// when active, otherwise the player's eye with the weapon punch and SetFOV zoom. Character
@@ -57,25 +62,31 @@ pub(crate) fn present_player_view(
     sim: Res<crate::simulation::Simulation>,
     game: Option<Res<crate::gameplay::Gameplay>>,
     mut cameras: Query<(&mut Transform, &mut Projection), With<crate::FlyCamera>>,
-    mut viewmodel: Query<&mut Projection, (With<ViewmodelCamera>, Without<crate::FlyCamera>)>,
+    mut viewmodel: Query<(&mut Transform, &mut Projection), ViewmodelCameraFilter>,
     frame: Option<Res<crate::video::GameFrame>>,
 ) {
     let game = game.as_deref();
     let aspect = crate::video::frame_aspect(frame.as_deref());
     // The player's own FOV, including SetFOV ramps (crossbow zoom).
     let player_fov = game.map_or(sim.fov, |game| game.inventory.view_fov(game.scene.time));
-    if let (Some(game), Ok(mut projection)) = (game, viewmodel.single_mut()) {
+    if let (Some(game), Ok((mut transform, mut projection))) = (game, viewmodel.single_mut()) {
+        let framing = hl2_ui::tuning::viewmodel_framing(&game.inventory.active, aspect);
         let degrees = hl2_simulation::viewmodel_effects::viewmodel_fov(
             sim.viewmodel_fov,
             game.inventory.fov.default_fov,
             player_fov,
         );
         if let Projection::Perspective(p) = &mut *projection {
-            let (fov, near) = viewmodel_projection(degrees, p.far, aspect);
+            let (fov, near) = viewmodel_projection(degrees, framing.fov_offset, p.far, aspect);
             if p.fov != fov || p.near != near {
                 p.fov = fov;
                 p.near = near;
             }
+        }
+        let camera_translation = -crate::source_to_bevy(Vec3::from_array(framing.offset));
+        if transform.translation != camera_translation {
+            *transform =
+                Transform::from_translation(camera_translation).looking_to(Vec3::X, Vec3::Y);
         }
     }
     if let Ok((mut camera, mut projection)) = cameras.single_mut() {
@@ -142,10 +153,42 @@ mod tests {
 
     #[test]
     fn viewmodel_is_hidden_past_its_fov() {
-        let (fov, near) = viewmodel_projection(54., 1000., 4. / 3.);
+        let (fov, near) = viewmodel_projection(54., 0., 1000., 4. / 3.);
         assert_eq!((fov, near), (crate::video::vertical_fov(54.), 0.1));
-        let (_, near) = viewmodel_projection(0., 1000., 4. / 3.);
-        assert_eq!(near, 500., "near plane beyond any viewmodel");
+        let (_, near) = viewmodel_projection(0., 20., 1000., 9. / 16.);
+        assert_eq!(
+            near, 500.,
+            "near plane beyond any viewmodel even when portrait fov_offset > 0"
+        );
+    }
+
+    #[test]
+    fn viewmodel_framing_keeps_physcannon_and_rpg_in_frame_across_portrait_and_ultrawide() {
+        let project = |p: [f32; 3], weapon: &str, aspect: f32| {
+            let framing = hl2_ui::tuning::viewmodel_framing(weapon, aspect);
+            let (fov_v, _) = viewmodel_projection(54., framing.fov_offset, 1000., aspect);
+            let x = (p[0] + framing.offset[0]).max(0.1);
+            let y = p[1] + framing.offset[1];
+            let z = p[2] + framing.offset[2];
+            let tan_v = (fov_v * 0.5).tan();
+            let tan_h = aspect * tan_v;
+            ((-y / x) / tan_h, (z / x) / tan_v)
+        };
+        // Gravity Gun left arm stump (X=24.5, Y=2.4, Z=-21.4) stays below the bottom screen edge
+        // (ndc_y < -1.0) on 9:16 portrait just like on 16:9.
+        let (_, stump_16_9) = project([24.5, 2.4, -21.4], "weapon_physcannon", 16. / 9.);
+        let (_, stump_9_16) = project([24.5, 2.4, -21.4], "weapon_physcannon", 9. / 16.);
+        assert!(stump_16_9 < -1.0 && stump_9_16 < -1.0);
+
+        // Rocket Launcher mid-tube (X=30, Y=-14, Z=-8) is well inside the right screen edge
+        // (ndc_x < 0.7) on 9:16 portrait, while its unmodeled rear cutoff (X=16.1, Y=-14, Z=-5)
+        // stays outside the right screen edge (ndc_x > 1.0) on 21:9 and 32:9 ultrawide.
+        let (mid_9_16, _) = project([30.0, -14.0, -8.0], "weapon_rpg", 9. / 16.);
+        assert!(mid_9_16 < 0.7, "{mid_9_16}");
+        for aspect in [16. / 9., 64. / 27., 32. / 9.] {
+            let (rear_x, _) = project([16.1, -14.0, -5.0], "weapon_rpg", aspect);
+            assert!(rear_x > 1.0, "RPG rear cutoff hidden at {aspect}: {rear_x}");
+        }
     }
 
     #[test]

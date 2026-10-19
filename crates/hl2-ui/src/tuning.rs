@@ -25,6 +25,8 @@ struct Tuning {
     /// Width:height of each centered HUD aspect of Video > HUD Aspect Ratio
     /// ([`crate::proportional::hud_frame`]).
     hud_aspects: HudAspects,
+    /// Aspect-adaptive and per-weapon viewmodel framing outside `5:4..=16:9`.
+    viewmodel: ViewmodelTuning,
 }
 
 /// The centered HUD aspects, width:height, named like [`crate::config::HudAspect`].
@@ -33,6 +35,52 @@ struct HudAspects {
     normal: (u32, u32),
     wide16x9: (u32, u32),
     wide16x10: (u32, u32),
+}
+
+/// Aspect-adaptive viewmodel framing outside `narrowest_design_aspect..=widest_design_aspect`
+/// (`5:4..=16:9`), with a default profile and per-weapon overrides.
+#[derive(Debug, Deserialize)]
+struct ViewmodelTuning {
+    /// Width:height where the portrait framing reaches full strength (e.g. `9:16`).
+    portrait_aspect: (u32, u32),
+    /// Width:height where the ultrawide framing reaches full strength (e.g. `32:9`).
+    ultrawide_aspect: (u32, u32),
+    /// Framing applied to weapons without a per-weapon entry.
+    default: ViewmodelWeaponTuning,
+    /// Per-weapon framing keyed by weapon classname (e.g. `"weapon_physcannon"`, `"weapon_rpg"`).
+    weapons: std::collections::BTreeMap<String, ViewmodelWeaponTuning>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct ViewmodelWeaponTuning {
+    portrait: ViewmodelFraming,
+    ultrawide: ViewmodelFraming,
+}
+
+/// Additive viewmodel field-of-view offset (degrees) and local camera-space translation offset
+/// (`[forward, left, up]` in Source units) for frames narrower than `5:4` or wider than `16:9`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+pub struct ViewmodelFraming {
+    pub fov_offset: f32,
+    pub offset: [f32; 3],
+}
+
+impl ViewmodelFraming {
+    pub const ZERO: Self = Self {
+        fov_offset: 0.0,
+        offset: [0.0; 3],
+    };
+
+    fn scale(self, t: f32) -> Self {
+        if t <= 0.0 {
+            Self::ZERO
+        } else {
+            Self {
+                fov_offset: self.fov_offset * t,
+                offset: self.offset.map(|c| c * t),
+            }
+        }
+    }
 }
 
 fn data() -> &'static Tuning {
@@ -95,6 +143,39 @@ pub fn hud_aspect_ratio(aspect: crate::config::HudAspect) -> Option<f32> {
     Some(width as f32 / height as f32)
 }
 
+/// Aspect-adaptive viewmodel framing (`fov_offset` and Source `[forward, left, up]` offset) for
+/// `weapon` at `aspect` (`width / height`).
+///
+/// Inside `narrowest_design_aspect()..=widest_design_aspect()` (`5:4..=16:9`) this is
+/// [`ViewmodelFraming::ZERO`] so standard retail aspects are untouched. Below `5:4` it
+/// interpolates linearly toward the weapon's (or default) `portrait` framing at
+/// `portrait_aspect` (`9:16`); above `16:9` it interpolates linearly toward the `ultrawide`
+/// framing at `ultrawide_aspect` (`32:9`).
+pub fn viewmodel_framing(weapon: &str, aspect: f32) -> ViewmodelFraming {
+    if !aspect.is_finite() || aspect <= 0.0 {
+        return ViewmodelFraming::ZERO;
+    }
+    let vm = &data().viewmodel;
+    let profile = vm.weapons.get(weapon).copied().unwrap_or(vm.default);
+    let narrow = narrowest_design_aspect();
+    let wide = widest_design_aspect();
+    if aspect < narrow {
+        let (pw, ph) = vm.portrait_aspect;
+        let portrait = pw as f32 / ph as f32;
+        let span = (narrow - portrait).max(f32::EPSILON);
+        let t = ((narrow - aspect) / span).clamp(0.0, 1.0);
+        profile.portrait.scale(t)
+    } else if aspect > wide {
+        let (uw, uh) = vm.ultrawide_aspect;
+        let ultrawide = uw as f32 / uh as f32;
+        let span = (ultrawide - wide).max(f32::EPSILON);
+        let t = ((aspect - wide) / span).clamp(0.0, 1.0);
+        profile.ultrawide.scale(t)
+    } else {
+        ViewmodelFraming::ZERO
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +196,33 @@ mod tests {
         for (min, max) in [vertical_fov_range(), viewmodel_fov_range()] {
             assert!(0. < min && min < max && max < 180., "{min} {max}");
         }
+    }
+
+    #[test]
+    fn viewmodel_framing_leaves_retail_aspects_untouched_and_adapts_portrait_and_ultrawide() {
+        for aspect in [5. / 4., 4. / 3., 16. / 10., 16. / 9.] {
+            for weapon in ["weapon_crowbar", "weapon_physcannon", "weapon_rpg"] {
+                assert_eq!(
+                    viewmodel_framing(weapon, aspect),
+                    ViewmodelFraming::ZERO,
+                    "{weapon} at {aspect} is untouched"
+                );
+            }
+        }
+        // Gravity Gun in portrait shifts down (negative Z) to hide the severed left arm stump
+        // without narrowing horizontal FOV.
+        let phys_portrait = viewmodel_framing("weapon_physcannon", 9. / 16.);
+        assert_eq!(phys_portrait.fov_offset, 0.0);
+        assert!(phys_portrait.offset[2] < -5.0, "{phys_portrait:?}");
+
+        // Rocket Launcher in portrait widens FOV and shifts left (+Y) so the right-mounted tube
+        // stays inside the narrow frame; in ultrawide it narrows FOV and shifts back/right/down
+        // so the unmodeled rear cutoff stays outside the right edge.
+        let rpg_portrait = viewmodel_framing("weapon_rpg", 9. / 16.);
+        assert!(rpg_portrait.fov_offset > 15.0 && rpg_portrait.offset[1] > 0.0);
+        let rpg_21_9 = viewmodel_framing("weapon_rpg", 64. / 27.);
+        let rpg_32_9 = viewmodel_framing("weapon_rpg", 32. / 9.);
+        assert!(rpg_21_9.fov_offset < 0.0 && rpg_32_9.fov_offset < rpg_21_9.fov_offset);
+        assert!(rpg_32_9.offset[0] < 0.0 && rpg_32_9.offset[1] < 0.0);
     }
 }

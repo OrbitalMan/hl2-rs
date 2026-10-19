@@ -6,5 +6,23 @@
   "video_confirm_seconds": 15,
   "vertical_fov_range": [40, 120],
   "viewmodel_fov_range": [30, 110],
-  "hud_aspects": {"normal": [4, 3], "wide16x9": [16, 9], "wide16x10": [16, 10]}
+  "hud_aspects": {"normal": [4, 3], "wide16x9": [16, 9], "wide16x10": [16, 10]},
+  "viewmodel": {
+    "portrait_aspect": [9, 16],
+    "ultrawide_aspect": [32, 9],
+    "default": {
+      "portrait": {"fov_offset": 8.0, "offset": [0.0, 0.0, -5.0]},
+      "ultrawide": {"fov_offset": -8.0, "offset": [-1.5, -1.0, -1.0]}
+    },
+    "weapons": {
+      "weapon_physcannon": {
+        "portrait": {"fov_offset": 0.0, "offset": [0.0, 0.0, -10.0]},
+        "ultrawide": {"fov_offset": -6.0, "offset": [0.0, 0.0, 0.0]}
+      },
+      "weapon_rpg": {
+        "portrait": {"fov_offset": 16.0, "offset": [0.0, 4.0, -12.0]},
+        "ultrawide": {"fov_offset": -18.0, "offset": [-5.0, -4.5, -3.0]}
+      }
+    }
+  }
 }

@@ -968,7 +968,24 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
     `viewmodel_fov_range` 30..110) replaces the retail 54 in `viewmodel_fov(base, default, fov)`
     for the viewmodel camera and its attached effects; zoom still subtracts the FOV offset, so a
     base above 54 + (default - zoom FOV) keeps the viewmodel visible when zoomed (retail hides it).
-  - Both are applied by the sub-dialog's OK (`Sub::apply_on_ok`) and saved in `hl2-config.json`
+  - Outside `5:4..=16:9` (`tuning::narrowest_design_aspect()..=tuning::widest_design_aspect()`),
+    `tuning::viewmodel_framing(weapon, aspect)` (`assets/ui/tuning.json` `viewmodel`) applies a
+    smoothly interpolated additive `fov_offset` (degrees) and camera-space `offset` (`[forward, left, up]`
+    in Source units, applied to `ViewmodelCamera` and viewmodel attachment effects) from a `default`
+    profile or a per-weapon override (`weapons`):
+    - **Portrait (`< 5:4` down to `9:16`)**: `weapon_physcannon` shifts down (`offset: [0, 0, -10.0]`)
+      so its severed left arm stump stays below the bottom bezel without narrowing horizontal FOV;
+      `weapon_rpg` widens FOV (`+16°`) and shifts left/down (`offset: [0, 4.0, -12.0]`) so its
+      right-mounted tube fits inside the narrow frame while its left arm stump stays below the bottom
+      bezel; other weapons use `default.portrait` (`+8°`, `[0, 0, -5.0]`).
+    - **Ultrawide (`> 16:9` up to `32:9`)**: `weapon_rpg` narrows FOV (`-18°`) and shifts
+      back/right/down (`offset: [-5.0, -4.5, -3.0]`) so the unmodeled rear cutoff of the launcher
+      tube stays outside the right edge; `weapon_physcannon` (`-6°`) and other weapons
+      (`default.ultrawide`: `-8°`, `[-1.5, -1.0, -1.0]`) use gentle ultrawide framing.
+    - Standard `5:4`, `4:3`, `16:10`, and `16:9` frames receive `ViewmodelFraming::ZERO` and are
+      untouched. Because framing is looked up from `game.inventory.active`, switching weapons
+      applies the new weapon's framing immediately as its draw animation begins.
+  - Both sliders are applied by the sub-dialog's OK (`Sub::apply_on_ok`) and saved in `hl2-config.json`
     (out-of-range values are clamped on load). Ranges and the other numbers are in
     `assets/ui/tuning.json`.
   - The installed dialog has no such controls, so they come from an HL2-RS layout addendum,
@@ -997,13 +1014,16 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
 - Tests: `Value` and label tests (settings), `the_vertical_and_viewmodel_fov_sliders_are_added_and_apply_on_ok`
   (also proves the labels stay out of the footer), `wide_screens_grow_the_menu_upward_within_the_screen`,
   `the_menu_grows_only_on_screens_wider_than_16_by_9`, `an_explicit_vertical_fov_replaces_the_derived_one_and_scales_with_zoom`,
+  `viewmodel_framing_leaves_retail_aspects_untouched_and_adapts_portrait_and_ultrawide`,
+  `viewmodel_framing_keeps_physcannon_and_rpg_in_frame_across_portrait_and_ultrawide`,
   `menu_backgrounds_crop_sides_when_narrow_and_top_and_bottom_when_ultrawide`,
   `narrow_and_ultrawide_screens_fill_with_the_centre_of_the_background`; packaged
-  `fov_settings` (defaults, explicit values and portrait through the camera report) and
+  `fov_settings` (defaults, explicit values, portrait and super-ultrawide through the camera report) and
   `narrow_layout` (now with 21:9 and 32:9 and the cropped background FOV). Captures inspected: the
-  Advanced dialog, the menu at 3440x1440, 5120x1440 and 1080x1920.
-- Not verified: how each weapon looks at extreme values on a real portrait or ultrawide display
-  (the sliders exist for exactly that); the vertical slider's keyboard stepping at the Auto end.
+  Advanced dialog, the menu at 3440x1440, 5120x1440 and 1080x1920, and `weapon_physcannon` /
+  `weapon_rpg` at 1080x1920 and 5120x1440.
+- Not verified: physical portrait or ultrawide displays; the vertical slider's keyboard stepping at
+  the Auto end.
 
 ### 10j. HUD Aspect Ratio (2026-10-19)
 
