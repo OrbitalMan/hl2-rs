@@ -95,7 +95,7 @@ pub fn standard_modes() -> &'static [Resolution] {
 /// list no 4:3 mode at all) still get every aspect choice up to the panel's size.
 pub fn native_fits(monitor: Resolution) -> impl Iterator<Item = Resolution> {
     let step = data().native_fit_step;
-    AspectRatio::ALL.into_iter().filter_map(move |aspect| {
+    AspectRatio::FIXED.into_iter().filter_map(move |aspect| {
         let (w, h) = aspect.exact_ratio();
         let k = (monitor.width / w).min(monitor.height / h) / step * step;
         (k > 0).then(|| Resolution::new(w * k, h * k))
@@ -125,11 +125,32 @@ pub enum AspectRatio {
     Portrait10x16,
     /// 9:16 portrait displays; placeholder label [`placeholders::ASPECT_PORTRAIT_9X16`].
     Portrait9x16,
+    /// The frame takes the aspect ratio of the window or display, letterboxed or pillarboxed
+    /// only beyond the supported `9:16..=32:9` range ([`crate::tuning::clamp_supported_aspect`]);
+    /// the resolution sets the frame's detail (its short side). Labelled with the installed
+    /// `#GameUI_HUDAspectRatio_FitDisplay` ("Fit Display"). Not a bucket: no resolution falls in
+    /// it, so it is stored as [`crate::config::VideoSettings::flexible_aspect`].
+    Flexible,
 }
 
 impl AspectRatio {
-    /// Combo order: the retail choices, then the wider ones, then the narrower ones.
-    pub const ALL: [Self; 9] = [
+    /// Combo order: the retail choices, then the wider ones, then the narrower ones, then the
+    /// flexible frame (appended so the fixed choices keep their positions).
+    pub const ALL: [Self; 10] = [
+        Self::Normal,
+        Self::Wide16x9,
+        Self::Wide16x10,
+        Self::Ultrawide21x9,
+        Self::Ultrawide32x9,
+        Self::Square1x1,
+        Self::Portrait3x4,
+        Self::Portrait10x16,
+        Self::Portrait9x16,
+        Self::Flexible,
+    ];
+
+    /// The fixed-ratio buckets of the mode data (every choice but [`Self::Flexible`]).
+    pub const FIXED: [Self; 9] = [
         Self::Normal,
         Self::Wide16x9,
         Self::Wide16x10,
@@ -158,12 +179,18 @@ impl AspectRatio {
             .map_or_else(Self::default, |e| e.aspect)
     }
 
-    /// The exact width:height ratio of this choice, from the mode data.
+    /// The exact width:height ratio of this choice, from the mode data. [`Self::Flexible`] has
+    /// none and reports the default bucket's ratio.
     pub fn exact_ratio(self) -> (u32, u32) {
+        let aspect = if self == Self::Flexible {
+            Self::default()
+        } else {
+            self
+        };
         data()
             .aspect_ratios
             .iter()
-            .find(|entry| entry.aspect == self)
+            .find(|entry| entry.aspect == aspect)
             .map(|entry| entry.ratio)
             .expect("mode data has a ratio for every aspect choice")
     }
@@ -179,6 +206,7 @@ impl AspectRatio {
             Self::Portrait3x4 => placeholders::ASPECT_PORTRAIT_3X4,
             Self::Portrait10x16 => placeholders::ASPECT_PORTRAIT_10X16,
             Self::Portrait9x16 => placeholders::ASPECT_PORTRAIT_9X16,
+            Self::Flexible => "#GameUI_HUDAspectRatio_FitDisplay",
         }
     }
 }
@@ -334,8 +362,12 @@ impl DisplayModes {
     }
 }
 
-/// Modes of one aspect bucket, keeping the largest-first order.
+/// Modes of one aspect bucket, keeping the largest-first order. [`AspectRatio::Flexible`] takes
+/// every mode: there the resolution only sets the frame's detail.
 pub fn modes_for(modes: &[Resolution], aspect: AspectRatio) -> Vec<Resolution> {
+    if aspect == AspectRatio::Flexible {
+        return modes.to_vec();
+    }
     modes
         .iter()
         .copied()
@@ -389,8 +421,8 @@ mod tests {
         unique.sort();
         unique.dedup();
         assert_eq!(unique.len(), modes.len(), "no duplicate modes");
-        assert_eq!(data().aspect_ratios.len(), AspectRatio::ALL.len());
-        for aspect in AspectRatio::ALL {
+        assert_eq!(data().aspect_ratios.len(), AspectRatio::FIXED.len());
+        for aspect in AspectRatio::FIXED {
             let (w, h) = aspect.exact_ratio();
             assert_eq!(
                 AspectRatio::of(w, h),
@@ -653,6 +685,28 @@ mod tests {
         ] {
             assert!(bad.parse::<MonitorSpec>().is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn the_flexible_choice_lists_every_mode_and_keeps_the_resolution() {
+        let modes = [r(1920, 1080), r(1680, 1050), r(1024, 768), r(1080, 1920)];
+        assert_eq!(resolution_choices(&modes, AspectRatio::Flexible), modes);
+        assert_eq!(
+            choose_after_aspect_change(&modes, AspectRatio::Flexible, r(1024, 768)),
+            Some(r(1024, 768))
+        );
+        assert_eq!(AspectRatio::ALL.last(), Some(&AspectRatio::Flexible));
+        assert_eq!(
+            AspectRatio::ALL[..AspectRatio::FIXED.len()],
+            AspectRatio::FIXED,
+            "the fixed choices keep their combo positions"
+        );
+        assert!(!AspectRatio::FIXED.contains(&AspectRatio::Flexible));
+        assert!(AspectRatio::FIXED
+            .iter()
+            .all(
+                |&a| AspectRatio::of(a.exact_ratio().0, a.exact_ratio().1) != AspectRatio::Flexible
+            ));
     }
 
     #[test]

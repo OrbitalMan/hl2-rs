@@ -17,7 +17,8 @@ use crate::config::{
 };
 
 /// The options being edited: the draft configuration plus the Video page's aspect filter, which
-/// is page state rather than a stored setting (retail derives it from the resolution).
+/// is page state rather than a stored setting (retail derives it from the resolution), except
+/// for the flexible choice, stored as [`crate::config::VideoSettings::flexible_aspect`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Draft {
     pub config: Config,
@@ -26,7 +27,11 @@ pub struct Draft {
 
 impl Draft {
     pub fn new(config: Config) -> Self {
-        let aspect = AspectRatio::of(config.video.width, config.video.height);
+        let aspect = if config.video.flexible_aspect {
+            AspectRatio::Flexible
+        } else {
+            AspectRatio::of(config.video.width, config.video.height)
+        };
         Self { config, aspect }
     }
 }
@@ -483,6 +488,7 @@ impl Choice {
                     return;
                 }
                 draft.aspect = aspect;
+                c.video.flexible_aspect = aspect == AspectRatio::Flexible;
                 let current = Resolution::new(c.video.width, c.video.height);
                 if let Some(r) = display::choose_after_aspect_change(&resolutions, aspect, current)
                 {

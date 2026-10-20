@@ -19,6 +19,7 @@ pub struct VideoMode {
     pub width: u32,
     pub height: u32,
     pub display_mode: DisplayMode,
+    pub flexible_aspect: bool,
 }
 
 impl VideoMode {
@@ -27,6 +28,7 @@ impl VideoMode {
             width: video.width,
             height: video.height,
             display_mode: video.display_mode,
+            flexible_aspect: video.flexible_aspect,
         }
     }
 
@@ -35,10 +37,15 @@ impl VideoMode {
         video.width = self.width;
         video.height = self.height;
         video.display_mode = self.display_mode;
+        video.flexible_aspect = self.flexible_aspect;
     }
 
     fn aspect(self) -> AspectRatio {
-        AspectRatio::of(self.width, self.height)
+        if self.flexible_aspect {
+            AspectRatio::Flexible
+        } else {
+            AspectRatio::of(self.width, self.height)
+        }
     }
 }
 
@@ -119,6 +126,19 @@ mod tests {
         assert!(!VideoConfirm::needed(&video(1280, 720), &video(1920, 1080)));
         assert!(VideoConfirm::needed(&video(1280, 720), &video(1024, 768)));
         assert!(VideoConfirm::needed(&video(1920, 1080), &video(1080, 1920)));
+        let flexible = VideoSettings {
+            flexible_aspect: true,
+            ..video(1920, 1080)
+        };
+        assert!(VideoConfirm::needed(&video(1920, 1080), &flexible));
+        assert!(VideoConfirm::needed(&flexible, &video(1920, 1080)));
+        assert!(!VideoConfirm::needed(
+            &flexible,
+            &VideoSettings {
+                flexible_aspect: true,
+                ..video(1024, 768)
+            }
+        ));
     }
 
     #[test]
@@ -148,7 +168,9 @@ mod tests {
         let previous = VideoMode::of(&video(1280, 720));
         let mut now = video(1080, 1920);
         now.gamma = 1.8;
+        now.flexible_aspect = true;
         previous.restore(&mut now);
         assert_eq!((now.width, now.height, now.gamma), (1280, 720, 1.8));
+        assert!(!now.flexible_aspect, "the flexible choice reverts too");
     }
 }

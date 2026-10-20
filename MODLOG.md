@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-20 Video: dynamic aspect ratio "Fit Display" and universal aspect math
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:** Added dynamic/flexible aspect ratio option to Options > Video > Aspect Ratio (`AspectRatio::Flexible`, persisted in `VideoSettings::flexible_aspect` and labelled with installed `#GameUI_HUDAspectRatio_FitDisplay` "Fit Display"). Centralized universal aspect-ratio math functions in `hl2-ui::tuning` (`min_supported_aspect`, `max_supported_aspect`, `clamp_supported_aspect`, `cubic_bezier_ease`, `aspect_factors`) providing $C^1$-smooth cubic Bézier transitions between known aspect ratios without kinks at plateau boundaries, driving both `world_fov_offset` and `viewmodel_framing`. Implemented dynamic frame resolution and viewport calculation in `hl2-ui::viewport` (`flexible_frame_resolution`, `flexible_windowed_size`, `ViewportBounds::compute_with_mode`) and `hl2-bevy::video` (`VideoViewport::compute_with_mode`, `GameFrame::size_for`, `window_resize_in`), filling 100% of the window/display without letterbox/pillarbox bars in `9:16..=32:9` and clamping/letterboxing only outside that range. Windowed mode clamps width and height independently to desktop room and live window resizes dynamically reshape the rendering frame. Updated `docs/gameui.md` 10k.
+
+**Why:** owner request: add dynamic/flexible aspect ratio option in Video options fitting the window, display or workspace bounds, only enabling letter/pillarboxing when exceeding the 9:16..32:9 range, with universal math functions using cubic Bézier extrapolation between tuning values of known aspect ratios.
+
+**Tested how:** unit tests (`tuning::tests::aspect_math_clamps_to_the_supported_range_and_blends_smoothly`, `display::tests::the_flexible_choice_lists_every_mode_and_keeps_the_resolution`, `video_confirm::tests::only_an_aspect_change_needs_confirming`, `viewport::tests::flexible_frames_follow_the_window_within_the_supported_range`, `viewport::tests::flexible_windowed_size_limits_each_side_and_the_aspect`, `video::tests::windowed_mode_fits_and_centres_in_the_desktop_area`); `scripts/checks/validate.sh` (unit tests, clippy `-D warnings`, fmt), `scripts/checks/check_windows.sh` (strict Windows MSVC clippy from macOS), release build (`build-bevy.sh`), and the full packaged replay suite (`replays.py`: all 93 checks passed, 0 failed).
+
+**Result:** Video > Aspect Ratio offers "Fit Display", dynamically sizing the rendering frame and active viewport to window and display bounds within 9:16..=32:9 without black bars, smoothly interpolating FOV and viewmodel tunings, and letterboxing/pillarboxing beyond the supported range.
+
+**Still broken or not tested:** physical ultrawide or rotated portrait monitors not tested.
+
+**Next:** owner visual check.
+
 ## 2026-10-20 Video: aspect-adaptive automatic world/vertical FOV for portrait and ultrawide
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

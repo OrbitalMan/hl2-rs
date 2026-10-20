@@ -2,7 +2,17 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
+## Current session: dynamic aspect ratio & FOV/viewmodel framing (2026-10-20, branch `orbitalman/hl2-ui`)
+
+- **Dynamic/flexible aspect ratio ("Fit Display"):** Options > Video > Aspect Ratio adds "Fit Display" (`AspectRatio::Flexible`, `video.flexible_aspect`), dynamically shaping the game frame to window, display, or workspace bounds.
+  - Universal aspect-ratio math (`hl2-ui::tuning`): `min_supported_aspect` (9:16) and `max_supported_aspect` (32:9); `clamp_supported_aspect`; `cubic_bezier_ease` ($3t^2 - 2t^3$) providing $C^1$-smooth extrapolation between known aspect ratios with zero slope at plateau boundaries; `aspect_factors` smoothly blending portrait and ultrawide strengths for world FOV and viewmodel framing.
+  - Dynamic frame resolution & viewport (`hl2-ui::viewport`, `hl2-bevy::video`): `flexible_frame_resolution` sizes the frame to the active window/display within 9:16..=32:9 at the detail level of the configured short side; `ViewportBounds::compute_with_mode` and `VideoViewport::compute_with_mode` fill 100% of the active window/display with 0 black bars in 9:16..=32:9 and letterbox/pillarbox only outside that range.
+  - Windowed mode: `flexible_windowed_size` limits each dimension independently to workspace bounds (`DesktopArea::client_room` on macOS, monitor bounds on Windows/Linux) without forcing uniform aspect shrinking; live window resizes dynamically reshape the rendering frame.
+  - All 93 checks in `replays.py` passed; `validate.sh` and `check_windows.sh` passed.
+- **Aspect-adaptive automatic world/vertical FOV:** `tuning::world_fov_offset(aspect)` tunes automatic world FOV outside 5:4..=16:9 (`world_fov_offset` in `tuning.json`: portrait -17°, ultrawide -11°), reducing vertical fish-eye distortion on portrait (down to 9:16) and peripheral horizontal stretching on ultrawide (up to 32:9).
+- **Aspect-adaptive and per-weapon viewmodel framing:** `tuning::viewmodel_framing` adapts first-person arms and weapons outside 5:4..=16:9 using per-weapon and default profiles in `tuning.json` (offsets and FOV adjustments for gravity gun, RPG, crowbar).
+
+## Previous session: developer console (2026-10-17, branch `orbitalman/main-menu-2`)
 
 Claude Code desktop, claude-opus-5-5.
 - **Resolution lists:** each aspect choice reaches the panel's size (Retina 4:3 up to 2976x2232), ultrawide 21:9 / 32:9 modes under Widescreen 16:9 (docs/gameui.md 10c). Ultrawide displays not tested.

@@ -151,67 +151,94 @@ pub fn hud_aspect_ratio(aspect: crate::config::HudAspect) -> Option<f32> {
     Some(width as f32 / height as f32)
 }
 
-/// Aspect-adaptive additive world 4:3 base FOV offset (degrees) at `aspect` (`width / height`).
-///
-/// Inside `narrowest_design_aspect()..=widest_design_aspect()` (`5:4..=16:9`) this is `0.0` so
-/// standard retail aspects are untouched. Below `5:4` it interpolates linearly toward
-/// `world_fov_offset.portrait` at `9:16` (reducing vertical fish-eye distortion); above `16:9` it
-/// interpolates linearly toward `world_fov_offset.ultrawide` at `32:9` (reducing peripheral
-/// horizontal stretching).
-pub fn world_fov_offset(aspect: f32) -> f32 {
+/// Width / height of the narrowest supported frame (`9:16`): the portrait tuning reaches full
+/// strength here, and a flexible frame letterboxes below it.
+pub fn min_supported_aspect() -> f32 {
+    let (width, height) = data().viewmodel.portrait_aspect;
+    width as f32 / height.max(1) as f32
+}
+
+/// Width / height of the widest supported frame (`32:9`): the ultrawide tuning reaches full
+/// strength here, and a flexible frame pillarboxes above it.
+pub fn max_supported_aspect() -> f32 {
+    let (width, height) = data().viewmodel.ultrawide_aspect;
+    width as f32 / height.max(1) as f32
+}
+
+/// `aspect` limited to `min_supported_aspect()..=max_supported_aspect()` (non-finite or
+/// non-positive values give the narrowest design aspect, `5:4`).
+pub fn clamp_supported_aspect(aspect: f32) -> f32 {
     if !aspect.is_finite() || aspect <= 0.0 {
-        return 0.0;
+        return narrowest_design_aspect();
     }
-    let d = data();
+    aspect.clamp(min_supported_aspect(), max_supported_aspect())
+}
+
+/// Ease of the 1D cubic Bézier with control values `0, 0, 1, 1` (`3t² - 2t³`, smoothstep) on
+/// `t` clamped to `0..=1`. It keeps the end values `0` and `1` and the midpoint `0.5` of a linear
+/// ramp, but starts and ends with zero slope, so a tuning blended by it has no visible kink where
+/// it leaves the untouched `5:4..=16:9` plateau or where it saturates at `9:16` / `32:9`.
+pub fn cubic_bezier_ease(t: f32) -> f32 {
+    let t = if t.is_finite() {
+        t.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Strengths `(portrait, ultrawide)` in `0..=1` of the aspect-adaptive tunings at `aspect`
+/// (`width / height`). Both are `0` inside `narrowest_design_aspect()..=widest_design_aspect()`
+/// (`5:4..=16:9`, retail aspects untouched). Below `5:4` the portrait strength rises to `1` at
+/// [`min_supported_aspect`]; above `16:9` the ultrawide strength rises to `1` at
+/// [`max_supported_aspect`]; past them both stay saturated. The ramp is the linear position
+/// between the known aspects eased by [`cubic_bezier_ease`], so every aspect in between (the
+/// flexible frame takes any) gets a smooth blend of the tuning values of the known ones.
+pub fn aspect_factors(aspect: f32) -> (f32, f32) {
+    if !aspect.is_finite() || aspect <= 0.0 {
+        return (0.0, 0.0);
+    }
     let narrow = narrowest_design_aspect();
     let wide = widest_design_aspect();
     if aspect < narrow {
-        let (pw, ph) = d.viewmodel.portrait_aspect;
-        let portrait = pw as f32 / ph as f32;
-        let span = (narrow - portrait).max(f32::EPSILON);
-        let t = ((narrow - aspect) / span).clamp(0.0, 1.0);
-        d.world_fov_offset.portrait * t
+        let span = (narrow - min_supported_aspect()).max(f32::EPSILON);
+        (cubic_bezier_ease((narrow - aspect) / span), 0.0)
     } else if aspect > wide {
-        let (uw, uh) = d.viewmodel.ultrawide_aspect;
-        let ultrawide = uw as f32 / uh as f32;
-        let span = (ultrawide - wide).max(f32::EPSILON);
-        let t = ((aspect - wide) / span).clamp(0.0, 1.0);
-        d.world_fov_offset.ultrawide * t
+        let span = (max_supported_aspect() - wide).max(f32::EPSILON);
+        (0.0, cubic_bezier_ease((aspect - wide) / span))
     } else {
-        0.0
+        (0.0, 0.0)
     }
+}
+
+/// Aspect-adaptive additive world 4:3 base FOV offset (degrees) at `aspect` (`width / height`).
+///
+/// Inside `narrowest_design_aspect()..=widest_design_aspect()` (`5:4..=16:9`) this is `0.0` so
+/// standard retail aspects are untouched. Below `5:4` it blends toward
+/// `world_fov_offset.portrait` at `9:16` (reducing vertical fish-eye distortion); above `16:9`
+/// toward `world_fov_offset.ultrawide` at `32:9` (reducing peripheral horizontal stretching),
+/// with the strengths of [`aspect_factors`].
+pub fn world_fov_offset(aspect: f32) -> f32 {
+    let (portrait, ultrawide) = aspect_factors(aspect);
+    let offsets = data().world_fov_offset;
+    offsets.portrait * portrait + offsets.ultrawide * ultrawide
 }
 
 /// Aspect-adaptive viewmodel framing (`fov_offset` and Source `[forward, left, up]` offset) for
 /// `weapon` at `aspect` (`width / height`).
 ///
 /// Inside `narrowest_design_aspect()..=widest_design_aspect()` (`5:4..=16:9`) this is
-/// [`ViewmodelFraming::ZERO`] so standard retail aspects are untouched. Below `5:4` it
-/// interpolates linearly toward the weapon's (or default) `portrait` framing at
-/// `portrait_aspect` (`9:16`); above `16:9` it interpolates linearly toward the `ultrawide`
-/// framing at `ultrawide_aspect` (`32:9`).
+/// [`ViewmodelFraming::ZERO`] so standard retail aspects are untouched. Below `5:4` it blends
+/// toward the weapon's (or default) `portrait` framing at `portrait_aspect` (`9:16`); above
+/// `16:9` toward the `ultrawide` framing at `ultrawide_aspect` (`32:9`), with the strengths of
+/// [`aspect_factors`].
 pub fn viewmodel_framing(weapon: &str, aspect: f32) -> ViewmodelFraming {
-    if !aspect.is_finite() || aspect <= 0.0 {
-        return ViewmodelFraming::ZERO;
-    }
     let vm = &data().viewmodel;
     let profile = vm.weapons.get(weapon).copied().unwrap_or(vm.default);
-    let narrow = narrowest_design_aspect();
-    let wide = widest_design_aspect();
-    if aspect < narrow {
-        let (pw, ph) = vm.portrait_aspect;
-        let portrait = pw as f32 / ph as f32;
-        let span = (narrow - portrait).max(f32::EPSILON);
-        let t = ((narrow - aspect) / span).clamp(0.0, 1.0);
-        profile.portrait.scale(t)
-    } else if aspect > wide {
-        let (uw, uh) = vm.ultrawide_aspect;
-        let ultrawide = uw as f32 / uh as f32;
-        let span = (ultrawide - wide).max(f32::EPSILON);
-        let t = ((aspect - wide) / span).clamp(0.0, 1.0);
-        profile.ultrawide.scale(t)
-    } else {
-        ViewmodelFraming::ZERO
+    match aspect_factors(aspect) {
+        (portrait, _) if portrait > 0.0 => profile.portrait.scale(portrait),
+        (_, ultrawide) if ultrawide > 0.0 => profile.ultrawide.scale(ultrawide),
+        _ => ViewmodelFraming::ZERO,
     }
 }
 
@@ -272,5 +299,45 @@ mod tests {
         let rpg_32_9 = viewmodel_framing("weapon_rpg", 32. / 9.);
         assert!(rpg_21_9.fov_offset > 0.0 && rpg_32_9.fov_offset > rpg_21_9.fov_offset);
         assert!(rpg_21_9.offset[1] < 0.0 && rpg_32_9.offset[1] < rpg_21_9.offset[1]);
+    }
+
+    #[test]
+    fn aspect_math_clamps_to_the_supported_range_and_blends_smoothly() {
+        let (min, max) = (min_supported_aspect(), max_supported_aspect());
+        assert!((min - 9. / 16.).abs() < 1e-6 && (max - 32. / 9.).abs() < 1e-6);
+        assert_eq!(clamp_supported_aspect(0.3), min);
+        assert_eq!(clamp_supported_aspect(5.0), max);
+        assert_eq!(clamp_supported_aspect(1.5), 1.5);
+        assert_eq!(clamp_supported_aspect(f32::NAN), narrowest_design_aspect());
+
+        assert_eq!(cubic_bezier_ease(0.), 0.);
+        assert_eq!(cubic_bezier_ease(1.), 1.);
+        assert_eq!(cubic_bezier_ease(0.5), 0.5);
+        assert_eq!(cubic_bezier_ease(-1.), 0.);
+        assert_eq!(cubic_bezier_ease(2.), 1.);
+
+        assert_eq!(aspect_factors(16. / 10.), (0., 0.));
+        assert_eq!(aspect_factors(min), (1., 0.));
+        assert_eq!(aspect_factors(0.4), (1., 0.), "saturated below 9:16");
+        assert_eq!(aspect_factors(max), (0., 1.));
+        assert_eq!(aspect_factors(6.), (0., 1.), "saturated above 32:9");
+
+        // Monotonic and without jumps across every aspect a flexible frame can take.
+        let mut previous = world_fov_offset(min);
+        let steps = 2000;
+        for i in 1..=steps {
+            let aspect = min + (max - min) * i as f32 / steps as f32;
+            let offset = world_fov_offset(aspect);
+            assert!(
+                (offset - previous).abs() < 0.1,
+                "{aspect}: {previous} -> {offset}"
+            );
+            previous = offset;
+        }
+        // Zero slope where the tuning leaves the retail plateau.
+        let edge = widest_design_aspect();
+        assert!(world_fov_offset(edge + 0.01).abs() < 0.01);
+        let edge = narrowest_design_aspect();
+        assert!(world_fov_offset(edge - 0.01).abs() < 0.02);
     }
 }

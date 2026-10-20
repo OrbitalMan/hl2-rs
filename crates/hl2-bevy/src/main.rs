@@ -72,6 +72,8 @@ struct Options {
     /// Window mode at startup: the stored Video setting, or `--windowed` / `--fullscreen` /
     /// `--borderless`. Unattended runs without a flag start windowed.
     display_mode: hl2_ui::config::DisplayMode,
+    /// Video > Aspect Ratio "Fit Display": the game frame follows the window's aspect ratio.
+    flexible_aspect: bool,
     fly: bool,
     movement_script: Option<PathBuf>,
     /// Master volume, like Source's `volume` convar (0..1).
@@ -152,6 +154,7 @@ impl Options {
             width: config.video.width,
             height: config.video.height,
             display_mode: config.video.display_mode,
+            flexible_aspect: config.video.flexible_aspect,
             fly: false,
             movement_script: None,
             volume: config.audio.volume,
@@ -474,11 +477,10 @@ fn main() -> Result<()> {
     simulation.fov = loaded.console.config.video.fov;
     simulation.vertical_fov = loaded.console.config.video.vertical_fov;
     simulation.viewmodel_fov = loaded.console.config.video.viewmodel_fov;
-    simulation.applied_window = Some(simulation::WindowSettings::new(
-        options.width,
-        options.height,
-        options.display_mode,
-    ));
+    simulation.applied_window = Some(
+        simulation::WindowSettings::new(options.width, options.height, options.display_mode)
+            .with_flexible_aspect(options.flexible_aspect),
+    );
     simulation.run_after_script = options.capture_live;
     if options.map.is_some() {
         simulation.loading = true;
@@ -805,6 +807,7 @@ fn setup(
         &mut meshes,
         &mut present_materials,
         UVec2::new(options.width, options.height),
+        options.flexible_aspect,
         options.display_mode.effective() == hl2_ui::config::DisplayMode::Windowed,
     );
     commands.spawn((

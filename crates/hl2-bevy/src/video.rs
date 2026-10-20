@@ -164,14 +164,42 @@ const SUSPEND_FRAMES: u32 = 4;
 #[derive(Resource, Clone, Debug)]
 pub struct GameFrame {
     pub image: Handle<Image>,
-    /// Configured video resolution, in frame pixels.
+    /// Frame size in pixels: the configured video resolution, or for a flexible frame the size
+    /// [`hl2_ui::viewport::flexible_frame_resolution`] derives from it and the window.
     pub resolution: UVec2,
-    /// Remaining frames to size a windowed-mode window to `resolution`.
+    /// Configured video resolution, in frame pixels (also the requested windowed size).
+    pub configured: UVec2,
+    /// The frame follows the window's aspect ratio (Video > Aspect Ratio "Fit Display").
+    pub flexible: bool,
+    /// Remaining frames to size a windowed-mode window to `configured`.
     pub pending_window: Option<u32>,
     /// Remaining frames of suspended rendering while the frame is resized.
     pub suspended: u32,
     /// Place the window in the [`DesktopArea`] once a windowed resize is done (macOS).
     pub recenter: bool,
+}
+
+impl GameFrame {
+    /// The frame size for `window`: the configured resolution, or for a flexible frame the
+    /// window-shaped size of the same detail. A window with no area (minimized) keeps the
+    /// current size.
+    pub fn size_for(&self, window: &Window) -> UVec2 {
+        let physical = UVec2::new(
+            window.resolution.physical_width(),
+            window.resolution.physical_height(),
+        );
+        if !self.flexible {
+            self.configured.max(UVec2::ONE)
+        } else if physical.x == 0 || physical.y == 0 {
+            self.resolution
+        } else {
+            let size = hl2_ui::viewport::flexible_frame_resolution(
+                glam::UVec2::new(self.configured.x, self.configured.y),
+                glam::UVec2::new(physical.x, physical.y),
+            );
+            UVec2::new(size.x, size.y)
+        }
+    }
 }
 
 /// The part of the window's monitor a window may cover (macOS `NSScreen.visibleFrame`: the
@@ -253,13 +281,15 @@ pub fn frame_image(resolution: UVec2) -> Image {
 }
 
 /// Creates the game frame and its presentation. `windowed` sizes the window to the frame
-/// (clamped to the monitor) once the monitor is known.
+/// (clamped to the monitor) once the monitor is known; `flexible` makes the frame follow the
+/// window's aspect ratio from the first presented frame on.
 pub(crate) fn install_frame(
     commands: &mut Commands,
     images: &mut Assets<Image>,
     meshes: &mut Assets<Mesh>,
     present: &mut Assets<PresentMaterial>,
     resolution: UVec2,
+    flexible: bool,
     windowed: bool,
 ) {
     let resolution = resolution.max(UVec2::ONE);
@@ -267,6 +297,8 @@ pub(crate) fn install_frame(
     commands.insert_resource(GameFrame {
         image: image.clone(),
         resolution,
+        configured: resolution,
+        flexible,
         pending_window: windowed.then_some(WINDOW_RESIZE_FRAMES),
         suspended: 0,
         recenter: windowed,
@@ -362,15 +394,28 @@ impl Default for VideoViewport {
 
 impl VideoViewport {
     /// Computes where a frame of the target resolution is presented inside a window.
+    #[allow(dead_code)]
     pub fn compute(target_w: u32, target_h: u32, window: &Window) -> Self {
+        Self::compute_with_mode(target_w, target_h, window, false)
+    }
+
+    /// [`Self::compute`] for a fixed or flexible frame
+    /// ([`hl2_ui::viewport::ViewportBounds::compute_with_mode`]).
+    pub fn compute_with_mode(
+        target_w: u32,
+        target_h: u32,
+        window: &Window,
+        flexible: bool,
+    ) -> Self {
         let win_w = window.resolution.physical_width().max(1);
         let win_h = window.resolution.physical_height().max(1);
         let scale = window.scale_factor().max(1.0);
 
-        let bounds = hl2_ui::viewport::ViewportBounds::compute(
+        let bounds = hl2_ui::viewport::ViewportBounds::compute_with_mode(
             glam::UVec2::new(target_w, target_h),
             glam::UVec2::new(win_w, win_h),
             scale,
+            flexible,
         );
 
         let physical_rect = Viewport {
@@ -446,7 +491,9 @@ pub(crate) fn apply_video_config_to_window(
         window.mode = target_mode;
     }
     if let Some(frame) = frame {
-        frame.resolution = UVec2::new(cfg.width, cfg.height).max(UVec2::ONE);
+        frame.configured = UVec2::new(cfg.width, cfg.height).max(UVec2::ONE);
+        frame.flexible = cfg.flexible_aspect;
+        frame.resolution = frame.size_for(window);
         frame.pending_window =
             (target_mode == WindowMode::Windowed).then_some(WINDOW_RESIZE_FRAMES);
     }
@@ -518,16 +565,19 @@ pub fn window_resize(
     monitor: Option<&Monitor>,
     resolution: UVec2,
 ) -> WindowResize {
-    window_resize_in(window, monitor, resolution, None)
+    window_resize_in(window, monitor, resolution, None, false)
 }
 
 /// [`window_resize`] with the monitor's usable [`DesktopArea`] when it is known (macOS): the
 /// client size then fits that area exactly instead of the monitor minus [`WINDOW_MARGIN`].
+/// A `flexible` frame fits each side on its own ([`hl2_ui::viewport::flexible_windowed_size`])
+/// instead of shrinking the requested shape uniformly.
 pub fn window_resize_in(
     window: &Window,
     monitor: Option<&Monitor>,
     resolution: UVec2,
     area: Option<&DesktopArea>,
+    flexible: bool,
 ) -> WindowResize {
     if window.mode != WindowMode::Windowed {
         return WindowResize::Cancel;
@@ -537,29 +587,28 @@ pub fn window_resize_in(
         return WindowResize::Wait;
     }
     let scale = window.scale_factor().max(1.0);
-    let fit = |room: Vec2| {
-        hl2_ui::viewport::windowed_size(
-            glam::UVec2::new(resolution.x, resolution.y),
-            Some(glam::Vec2::new(room.x, room.y)),
-        )
+    let sized = |room: Option<Vec2>| {
+        let resolution = glam::UVec2::new(resolution.x, resolution.y);
+        let room = room.map(|room| glam::Vec2::new(room.x, room.y));
+        let size = if flexible {
+            hl2_ui::viewport::flexible_windowed_size(resolution, room)
+        } else {
+            hl2_ui::viewport::windowed_size(resolution, room)
+        };
+        Vec2::new(size.x, size.y)
     };
     let available = metrics.map(|m| Vec2::new(m.physical_width as f32, m.physical_height as f32));
     let mut size = match (area, available) {
-        (Some(area), _) => fit(area.client_room(scale)),
-        (None, Some(available)) => fit(available),
-        (None, None) => {
-            hl2_ui::viewport::windowed_size(glam::UVec2::new(resolution.x, resolution.y), None)
-        }
+        (Some(area), _) => sized(Some(area.client_room(scale))),
+        (None, Some(available)) => sized(Some(available)),
+        (None, None) => sized(None),
     };
     if area.is_none()
         && let Some(available) = available
         && (size.x >= available.x || size.y >= available.y)
     {
         let room = (available - WINDOW_MARGIN * scale).max(Vec2::ONE);
-        size = hl2_ui::viewport::windowed_size(
-            glam::UVec2::new(resolution.x, resolution.y),
-            Some(glam::Vec2::new(room.x, room.y)),
-        );
+        size = sized(Some(room));
     }
     let size = UVec2::new(size.x as u32, size.y as u32).max(UVec2::ONE);
     let current = UVec2::new(
@@ -599,7 +648,7 @@ pub(crate) fn resize_window(
         return;
     }
     let area = area.as_deref();
-    let decision = window_resize_in(&window, monitor, frame.resolution, area);
+    let decision = window_resize_in(&window, monitor, frame.configured, area, frame.flexible);
     debug!(
         "[video] resize_window frames={frames} mode={:?} window={}x{} px -> {decision:?}",
         window.mode,
@@ -789,19 +838,33 @@ type FrameCameras<'w, 's> = Query<
 >;
 
 /// Routes every game camera into the game frame and places the presented frame in the window.
+/// A flexible frame takes the window's current shape here first, so live window resizes (and
+/// display changes) reshape it; [`suspend_for_resize`] then resizes the image safely.
 pub(crate) fn present_frame(
-    frame: Option<Res<GameFrame>>,
+    frame: Option<ResMut<GameFrame>>,
     mut video_viewport: ResMut<VideoViewport>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: FrameCameras,
     mut quads: Query<(&mut Transform, &mut Visibility), With<PresentQuad>>,
 ) {
-    let Some(frame) = frame else {
+    let Some(mut frame) = frame else {
         return;
     };
     let Ok(window) = windows.single() else {
         return;
     };
+    if frame.flexible {
+        let size = frame.size_for(window);
+        if frame.resolution != size {
+            debug!(
+                "[video] flexible frame {} -> {size} for window {}x{} px",
+                frame.resolution,
+                window.resolution.physical_width(),
+                window.resolution.physical_height()
+            );
+            frame.resolution = size;
+        }
+    }
     for (mut camera, mut target) in &mut cameras {
         let routed = matches!(&*target, RenderTarget::Image(t) if t.handle == frame.image);
         if !routed {
@@ -811,7 +874,12 @@ pub(crate) fn present_frame(
             camera.viewport = None;
         }
     }
-    let computed = VideoViewport::compute(frame.resolution.x, frame.resolution.y, window);
+    let computed = VideoViewport::compute_with_mode(
+        frame.resolution.x,
+        frame.resolution.y,
+        window,
+        frame.flexible,
+    );
     if *video_viewport != computed {
         debug!(
             "[video] viewport updated: target={}x{} window={}x{} px (scale {}) -> physical_rect={:?} logical_offset={:?} logical_size={:?}",
@@ -1059,6 +1127,8 @@ mod tests {
         GameFrame {
             image: Handle::default(),
             resolution,
+            configured: resolution,
+            flexible: false,
             pending_window: None,
             suspended: 0,
             recenter: false,
@@ -1150,7 +1220,7 @@ mod tests {
         // Small: requested size, centred in the visible area (not the whole screen).
         let client = UVec2::new(1280, 720);
         assert_eq!(
-            window_resize_in(&window, Some(&retina), client, Some(&area)),
+            window_resize_in(&window, Some(&retina), client, Some(&area), false),
             WindowResize::Resize(client)
         );
         assert_eq!(area.centered(client, 2.), IVec2::new(1088, 696));
@@ -1158,7 +1228,7 @@ mod tests {
         // Fits only below the Dock: kept, and clear of the Dock.
         let client = UVec2::new(2560, 1600);
         assert_eq!(
-            window_resize_in(&window, Some(&retina), client, Some(&area)),
+            window_resize_in(&window, Some(&retina), client, Some(&area), false),
             WindowResize::Resize(client)
         );
         let at = area.centered(client, 2.);
@@ -1166,15 +1236,37 @@ mod tests {
         assert!(bottom(at, client) <= area.visible.max.y);
 
         // Taller than the visible area: scaled down to it, top at the menu bar, bottom at the Dock.
-        let WindowResize::Resize(client) =
-            window_resize_in(&window, Some(&retina), UVec2::new(3456, 2160), Some(&area))
-        else {
+        let WindowResize::Resize(client) = window_resize_in(
+            &window,
+            Some(&retina),
+            UVec2::new(3456, 2160),
+            Some(&area),
+            false,
+        ) else {
             panic!("a resize");
         };
         assert_eq!(
             client.y, 1964,
             "visible height minus the title bar, in pixels"
         );
+        let at = area.centered(client, 2.);
+        assert_eq!(at.y, 74, "just below the menu bar");
+        assert!(bottom(at, client) <= area.visible.max.y);
+
+        // Flexible frame: each side is limited to the area on its own without scaling the aspect ratio.
+        let WindowResize::Resize(client) = window_resize_in(
+            &window,
+            Some(&retina),
+            UVec2::new(3456, 2160),
+            Some(&area),
+            true,
+        ) else {
+            panic!("a resize");
+        };
+        assert_eq!(client, UVec2::new(3456, 1964));
+        let at = area.centered(client, 2.);
+        assert_eq!(at, IVec2::new(0, 74), "fills width and sits below menu bar");
+        assert!(bottom(at, client) <= area.visible.max.y);
         let at = area.centered(client, 2.);
         assert_eq!(at.y, 74, "just below the menu bar");
         assert!(
@@ -1410,6 +1502,8 @@ mod tests {
         app.insert_resource(GameFrame {
             image: image.clone(),
             resolution: UVec2::new(1280, 720),
+            configured: UVec2::new(1280, 720),
+            flexible: false,
             pending_window: None,
             suspended: 0,
             recenter: false,

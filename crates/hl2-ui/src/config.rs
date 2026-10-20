@@ -220,6 +220,10 @@ pub struct VideoSettings {
     pub width: u32,
     pub height: u32,
     pub display_mode: DisplayMode,
+    /// Video > Aspect Ratio "Fit Display": the game frame takes the window's or display's
+    /// aspect ratio (within `9:16..=32:9`) and `width`/`height` only set its detail and the
+    /// requested windowed size.
+    pub flexible_aspect: bool,
     pub fov: f32,
     /// Vertical field of view in degrees (Video > Advanced); 0 is automatic: derived from
     /// `fov` and the screen's aspect ratio. An explicit value replaces the derived one and scales
@@ -244,6 +248,7 @@ impl Default for VideoSettings {
             width: 1280,
             height: 720,
             display_mode: DisplayMode::Fullscreen,
+            flexible_aspect: false,
             fov: 75.0,
             vertical_fov: 0.0,
             viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,

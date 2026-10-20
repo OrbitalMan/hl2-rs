@@ -1056,6 +1056,21 @@ treatment of every element is **not verified**; this is the conservative reading
 - The report (`hud.frame` = `[x, width]`, `hud.panels` = health, suit, ammo, secondary ammo rectangles in
   screen pixels at rest) shows the result; packaged check `hud_aspect`.
 
+### 10k. Dynamic aspect ratio: Fit Display (2026-10-20)
+
+Options > Video > Aspect Ratio adds **Fit Display** (`AspectRatio::Flexible`, persisted in `video.flexible_aspect` and labelled with the installed token `#GameUI_HUDAspectRatio_FitDisplay` "Fit Display"), allowing the rendering frame to follow the shape of the window, display, or workspace bounds dynamically.
+
+- **Universal aspect ratio math (`tuning`):**
+  - `min_supported_aspect()` (9:16, 0.5625) and `max_supported_aspect()` (32:9, 3.5556) define the supported rendering bounds derived from `viewmodel.portrait_aspect` and `viewmodel.ultrawide_aspect`.
+  - `clamp_supported_aspect(aspect)` clamps any aspect ratio to `min_supported_aspect()..=max_supported_aspect()`.
+  - `cubic_bezier_ease(t)` evaluates smooth 1D cubic Bézier ease with zero slope at endpoints ($3t^2 - 2t^3$), preventing slope kinks where tunings leave the untouched 5:4..=16:9 plateau or saturate at 9:16 / 32:9.
+  - `aspect_factors(aspect) -> (portrait, ultrawide)` smoothly blends tuning values between known aspect ratios; drives both `world_fov_offset(aspect)` and `viewmodel_framing(weapon, aspect)`.
+- **Viewport and resolution:**
+  - `viewport::flexible_frame_resolution(configured, physical_window_size)`: the frame adopts the window's aspect ratio (clamped to 9:16..=32:9). The configured resolution sets detail (the short side: 1080 lines in landscape, 1080 columns in portrait), rendering 1:1 on smaller windows and upscaling cleanly on high-DPI/larger displays.
+  - `ViewportBounds::compute_with_mode(..., flexible)` / `VideoViewport::compute_with_mode(..., flexible)`: fills 100% of the active window/display without letterbox or pillarbox bars when within 9:16..=32:9; letterboxes below 9:16 and pillarboxes above 32:9.
+  - In windowed mode, `viewport::flexible_windowed_size(resolution, bounds)` limits each dimension independently to workspace bounds (`DesktopArea::client_room` on macOS, available screen on Windows/Linux) without forcing uniform aspect scaling, only narrowing/shortening if exceeding 9:16..=32:9. Live window resizes adapt `GameFrame::resolution` dynamically on presented frames.
+  - Switching to Fit Display in Options lists all usable resolutions so the current resolution is retained, and `VideoConfirm` prompts to keep or revert the mode.
+
 ## 11. Developer console (2026-10-17)
 
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed

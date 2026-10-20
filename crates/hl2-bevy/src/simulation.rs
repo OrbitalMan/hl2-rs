@@ -663,6 +663,8 @@ pub struct WindowSettings {
     pub width: u32,
     pub height: u32,
     pub display_mode: hl2_ui::config::DisplayMode,
+    /// The game frame follows the window's aspect ratio (Video > Aspect Ratio "Fit Display").
+    pub flexible_aspect: bool,
 }
 
 impl WindowSettings {
@@ -671,11 +673,21 @@ impl WindowSettings {
             width,
             height,
             display_mode: display_mode.effective(),
+            flexible_aspect: false,
+        }
+    }
+
+    /// These settings with a flexible-aspect frame or not.
+    pub fn with_flexible_aspect(self, flexible_aspect: bool) -> Self {
+        Self {
+            flexible_aspect,
+            ..self
         }
     }
 
     pub fn of(video: &hl2_ui::config::VideoSettings) -> Self {
         Self::new(video.width, video.height, video.display_mode)
+            .with_flexible_aspect(video.flexible_aspect)
     }
 }
 
