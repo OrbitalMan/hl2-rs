@@ -10,6 +10,8 @@
 
 **Tested how / Result:** unit tests (combine shoot/hunt/cover/reload, companion attack/rest/reload/danger, tactical node searches, soldier-vs-rebel runtime, companion regulator, preload/acttable sync, NaN ramp, AR2 effect parameters); hl2-simulation 308 passed; workspace release tests pass except the two known release-only should_panic image tests; strict Clippy and fmt clean; owned tests 52 pass; regression batch artifacts/s22-regression (weapons 17/17, attention 26/26, movement 25/26 known doll01; diffs vs s21b explained in STATUS session 22). Packaged d1_trainstation_02 F4 fight (artifacts/s22/f4-d): foe SMG1 soldier vs friendly SMG1 female rebel; both fire (85 SMG1 shots), the soldier turns to the attacker, tries cover, returns fire and dies at ~9 s; the rebel reloads and engages the map cops. Earlier runs f4-a/f4-c: rebel never fired (no attack clips: preload, then the female-model loader bug); f4-b left no report (cause not determined).
 
+**Shove sound (owner report):** NPC_Metropolice.Shove was requested but never preloaded (dropped); now preloaded, packaged plaza walk-up plays flesh_impact_hard3/4.wav.
+
 **Still broken or not tested:** native comparison of soldier/citizen combat; squads, grenades, AR2 ball, kick, crouch, readiness, follow/standoff/actbusy, speech, medics, monk, vortigaunt, non-combat actors' base AI; the NaN child-cycle behavior of retail; muzzle-flash elights (engine.dll conversion to research); AR2 look vs native; stunstick tesla arcs; the metrocop shove sound.
 
 **Next:** muzzle elight research in engine.dll, then native per-class combat captures (npc_create_aimed npc_combine_s / npc_citizen with ORACLE_SETUP equipment), then the DESIGN 14n leftovers in campaign order.

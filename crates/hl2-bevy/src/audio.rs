@@ -371,6 +371,9 @@ impl PreparedAudio {
                 // Metrocop baton hits (weapon_stunstick.txt SoundData melee_hit/melee_miss).
                 "Weapon_StunStick.Melee_Hit",
                 "Weapon_StunStick.Melee_Miss",
+                // npc_metropolice.cpp OnAnimEventShove (owner report: shoves were silent;
+                // the request was dropped because the cue was never preloaded).
+                "NPC_Metropolice.Shove",
             ]
             .into_iter()
             .map(str::to_owned),
