@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-20: publish accumulated research documentation
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Commit the six reviewed research documentation files accumulated across the October16/18 campaign-scene handoffs and October20 Frida work. Restore newest-first log order and distinguish historical revision-bound checks from current publication acceptance. Keep private binaries, native bodies, databases, tools and captures outside Git.
+
+**Tested how / Result:** Documentation diff and whitelist checks; all149 sealed scene-start research files; native static/runtime component verifiers; consolidated first-map metadata verifier. No new gameplay replay, Cargo tests, Clippy or build for this documentation-only publication.
+
+**Still broken or not tested:** Existing private-evidence gaps and rejected captures remain unchanged. This commit adds no gameplay behavior or Rust parity claim.
+
+**Next:** Keep subsequent reviewed research documentation in dedicated commits. Current acceptance: ../../work/publishing/docs-publication-20261020/validate.py.
+
+## 2026-10-20: controlled native scene-start gate observation
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Private static value-flow and Frida research tests one unresolved busy-actor start decision; documentation records the result. Six exact native bodies and a fresh496-byte CheckActors dossier preserve pass14 path/hash/address/baseline/original identity. No Rust implementation or Git mutation.
+
+**Tested how / Result:** Native policy1 scene-with-speech query returned true for201 failed actor checks over3.015game seconds, then false after owner cancellation; acceptance, OnStart and cleared wait state followed. Duplicate pending Start was ignored. Policy0 accepted concurrently without the query. A fresh never-attached HL2 process reproduced the output order for both. Both processes closed, selected module hashes and six installed cfg identities unchanged. Private verify_static.py and verify_runtime.py pass. Research-time root verification passed; its document/revision guard remains historical. Current publication validation checks the same sealed file set and native components without changing that guard. Static trace remains depth0/truncated164nodes/166edges with43unknowns.
+
+**Still broken or not tested:** Seeded citizen/literal Barney fixture only; two missing gestures, two rejected periodic clock races and earlier failed/partial captures remain recorded. Actual audibility, separate expresser IsSpeaking, ordinary campaign, general ABI and Rust parity not tested. Historical lifecycle full checker fails its changed Rust-source binding; native identity is independently rechecked.
+
+**Next:** Naturally triggered first-map controller with genuine actor/model. Private checkpoint: ../../work/publishing/research-scene-start-frida-continuation-20261020.md. No builds, staging, commit, push or implementation handoff message.
+
 ## 2026-10-20 session 23: Breen's broadcast eyes, muzzle elights (parked), stunstick melee on NPCs, combine kick, NPCs react to being hit (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_baseactor.cpp MaintainLookTargets, scripted.cpp SequenceDone/PostIdleDone, ai_basenpc.cpp CheckPVSCondition/OnTakeDamage_Alive/IsLight/HeavyDamage/GetFlinchActivity, util.cpp FindClientInPVS, c_baseanimating.cpp ProcessMuzzleFlashEvent/CalcAttachments, fx_hl2_tracers.cpp, c_te_legacytempents.cpp MuzzleFlash_Combine_NPC, weapon_stunstick.cpp, basecombatcharacter.cpp CheckTraceHullAttack/CTraceFilterMelee, npc_metropolice.cpp SelectCombatSchedule, npc_combine.cpp HandleAnimEvent/MeleeAttack1Conditions/grenade checks); retail engine.dll (private Ghidra headless, work/hl2-decompiled/muzzle-elight-20261020); a native 60 fps pistol recording (oracle + gdigrab).
@@ -29,6 +53,30 @@
 **Still broken or not tested:** native comparison of soldier/citizen combat; squads, grenades, AR2 ball, kick, crouch, readiness, follow/standoff/actbusy, speech, medics, monk, vortigaunt, non-combat actors' base AI; the NaN child-cycle behavior of retail; muzzle-flash elights (engine.dll conversion to research); AR2 look vs native; stunstick tesla arcs; the metrocop shove sound.
 
 **Next:** muzzle elight research in engine.dll, then native per-class combat captures (npc_create_aimed npc_combine_s / npc_citizen with ORACLE_SETUP equipment), then the DESIGN 14n leftovers in campaign order.
+
+## 2026-10-18: consolidated first-map controller and resource handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material inherited-model workers: inventory_review (model closure and independent arrival audit),scene_lifecycle (scheduler/intro audit/queue),scripted_sequences (response/speaker); exact identifiers unavailable.
+
+**Changed/why:** one private query entry joins all66 first-map controllers to actor/I/O/event/resource/native references,with progression groups and explicit gaps for Claude. DESIGN records finalized model dependencies,camera/arrival ownership and response-context contracts. No implementation changes.
+
+**Tested how/result:** all66 source joins/62resource plans/11 query cases pass;parent reruns of model,response,arrival,baseline16h and additive drift acceptance pass;separate intro/arrival audits pass. The original16h child strict closure still fails as documented. Model closure:37MDL/23ANI,416 requested sequence nodes/322autolayer edges/58blocks. Empty/conditional bindings and missing exact procedures remain explicit.
+
+**Still broken/not tested:** native execution,ABI,audio/animation/camera playback,ordinary traversal and Rust parity not tested. Queue/speaker/package finalization now passes;preseal cinematic actor-query failure was corrected and retained. The first-map handoff carries16 explicit gaps;SpeakerThink remains missing/SDK-only for recurrence. **Next:** finalize the first-map handoff,then advance detailed research to trainstation02 while carrying open runtime questions.
+
+
+## 2026-10-18: first-map scene handoff continuation (research only)
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. Material research workers: inventory_review, scene_lifecycle and scripted_sequences, inherited model; exact identifiers not exposed.
+
+**Changed:** DESIGN and research/status/validation notes for first-map scheduler/SECTION speech dependencies, customs actbusy release and trigger-time acquisition, plus opening camera state and authored relay timing. Sealed intro-camera separately; preserved older closed-set drift and rejected parser/index attempts.
+
+**Why:** give Claude reusable first-map requirements in campaign order without guessed timers, actors or copied native implementation.
+
+**Tested how/result:** parent reruns of16j scheduler, actor-eligibility, intro-camera and additive16h acceptance pass; the original16h child closure still fails as documented. Native/ABI/ordinary campaign/Rust parity **not tested**. Animation dependency finalization and independent camera audit remain pending. No Rust/build/Git/installed-game changes.
+
+**Next:** finish pending checks and response/context prerequisites, then deliver the first-map implementation/replay checklist before detailed trainstation02 research.
+
 
 ## 2026-10-16 session 21 (cont.): NPC-vs-NPC enemies, ai_relationship, gunfire sounds, chase repath, dynamic graph links, path simplification/turn rate (`wip/npc-ai-20261014`)
 
@@ -61,6 +109,24 @@
 **Still broken or not tested:** variance of the native kill time (one run); move-and-shoot, npc_metropolice's own pistol schedules, hint-group navigation, graph routes on maps with info_node_link controllers, aiscripted path modes 4/5 and interruptability 1/2, rally sequences/force crouch/urgent movement, squads; the player hitboxes use the idle01 pose only (no player animation states).
 
 **Next:** native variance rerun, then DESIGN 14n per-class AI or the first-map aiscripted/scene work per the owner's order; merge step 14 to main after the remaining checklist.
+
+## 2026-10-16: campaign-order NPC scene research and Claude handoff
+
+**Agent/model:** Codex Desktop, GPT-6 family; exact model identifier unavailable. Material research subagents: `scene_lifecycle` (scene lifecycle/event controls), `scripted_sequences` (cinematic sequences/resource paths/first-map AI paths), `inventory_review` (independent installed-data/guide/first-map checks); same inherited model family, exact identifiers unavailable. Claude's concurrent implementation changes are separate work.
+
+**Changed:** DESIGN records the owner's first-map-to-last research order and actionable static contracts. AGENTS/STATUS record the expected native `d2_coast_02` gap. Private `campaign-scenes-20261016h` holds the all-map roadmap, canonical guide-v3 cards, read-only queries, first-map dossier and exact native evidence; research/validation documentation points to the handoff. No implementation changes.
+
+**Why:** Let Claude reconstruct the campaign from authored data and common scheduler/controller contracts while research advances from `d1_trainstation_01`, avoiding guessed per-map timers or unsupported completeness claims.
+
+**Tested how / Result:** Independent installed-byte inventory and canonical derivation audits passed: 71 parsed inputs (69 numbered maps plus intro/credits), 1,837 cache records, 760 scene instances and 26,488 output connections. Independent first-map metadata audit passed 275 checks. Native evidence lanes check full database identities and selected PE bytes; root freeze and documentation acceptance commands are in docs/validation.md/private handoff. Earlier parser failures, prefix-setting misclassification, rejected listings and missing exact input body are preserved.
+
+**Still broken or not tested:** No native game execution, Rust build/runtime tests, ABI, ordinary campaign or Rust/native parity in this pass. Later maps have inventories only; first-map path/replay/model dependencies still require bounded research and matched runtime validation.
+
+**Next:** Finish first-map prerequisites and use its authored intro/ambient/customs/escort/monitor/storage/exit checklist with equivalent unpaused native and packaged Rust traces; advance detailed research to trainstation02 afterwards. The whole-cache census does not establish campaign completion.
+
+**Continued first-map followup16i:** Four more exact native bodies and selected PE spans establish persistent per-event processing state across LOOP rewinds, with Start flag-before-callback and End callback-before-clear ordering. DESIGN distinguishes continuing enabled pointing events from speech/gestures that can start on later crossings; inactive AI_AIM stays inactive. The sealed successor's verifier and parent read-only rerun pass. Multi-loop/long-frame ordering and audible replay remain unresolved/not tested. Root16h freeze remains unchanged; latest private handoff is research-campaign-firstmap-loop-continuation-20261016i.md.
+
+**16j continuation correction:** A resumed subagent acted on a stale completed assignment and added11 files to16h first-map-path-completion. Parent stopped the old assignment and audited the actual bytes: original27 lane/566 parent records unchanged, but old lane closure check fails. Additions were copied to a new private drift audit and remain unpromoted; additive acceptance passes while explicitly retaining the closure failure. No prior seal was rewritten. Subsequent research is confined to new first-map scheduler, actor-eligibility, animation-dependency and intro-camera roots. Owner's stop condition is near98% of the five-hour window; work continues below that threshold.
 
 ## 2026-10-15/16 session 20: F4 overlay redesign, AI on by default + ai_disable, citizen heads, DX-level VMT blocks, RPG launch flash, grate fences/gates, combine ball rules (`wip/npc-ai-20261014`)
 
