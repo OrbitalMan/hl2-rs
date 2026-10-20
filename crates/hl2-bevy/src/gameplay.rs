@@ -23,6 +23,8 @@ use std::{collections::BTreeMap, sync::Arc};
 #[derive(Clone, Debug)]
 pub enum ShotEffect {
     NpcFlash(hl2_simulation::muzzle_effects::MuzzleKind, glam::Mat4),
+    /// A muzzle elight (operator id, origin, MuzzleFlash_Combine_NPC blue).
+    MuzzleLight(usize, glam::Vec3, bool),
     /// Start, end, AR2Tracer.
     NpcTracer(Vec3, Vec3, bool),
     /// Start (ComputeTracerStartPosition), end, the view's right axis, AR2Tracer.
@@ -971,6 +973,22 @@ impl Gameplay {
                 )
             }) {
                 self.push_shot_effect(ShotEffect::NpcFlash(kind, frame));
+                if kind == hl2_simulation::muzzle_effects::MuzzleKind::Combine {
+                    self.push_shot_effect(ShotEffect::MuzzleLight(
+                        npc,
+                        frame.w_axis.truncate(),
+                        true,
+                    ));
+                }
+            }
+        }
+        // DoMuzzleFlash -> the weapon world model's ProcessMuzzleFlashEvent at attachment 1.
+        for npc in std::mem::take(&mut self.ai.weapon_muzzle_flashes) {
+            if let Some(frame) = self.ai.weapon_world_model(npc).and_then(|model| {
+                self.scene
+                    .merged_attachment_frame(&self.world, npc, &format!("{model}#0"), None, 1)
+            }) {
+                self.push_shot_effect(ShotEffect::MuzzleLight(npc, frame.w_axis.truncate(), false));
             }
         }
         for (start, end, right, ar2) in std::mem::take(&mut self.inventory.tracer_requests) {

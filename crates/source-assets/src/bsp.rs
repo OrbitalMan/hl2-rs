@@ -92,10 +92,23 @@ impl Bsp {
     }
     /// Leaf ambient samples, world lights and the leaf tree for model lighting.
     pub fn model_lighting(&self) -> Result<modkit_core::lighting::LightingData> {
-        crate::model_lighting::read(&self.lumps, &self.lump_versions)
+        let mut data = crate::model_lighting::read(&self.lumps, &self.lump_versions)?;
+        data.dynamic_minlight = self.dynamic_minlight();
+        Ok(data)
     }
     pub fn model_lighting_with(&self, hdr: bool) -> Result<modkit_core::lighting::LightingData> {
-        crate::model_lighting::read_with(&self.lumps, &self.lump_versions, hdr)
+        let mut data = crate::model_lighting::read_with(&self.lumps, &self.lump_versions, hdr)?;
+        data.dynamic_minlight = self.dynamic_minlight();
+        Ok(data)
+    }
+    /// LUMP_MAP_FLAGS (59) and the BSP version select the dynamic-light minlight floor.
+    fn dynamic_minlight(&self) -> f32 {
+        let flags = self
+            .lumps
+            .get(59)
+            .and_then(|l| l.get(..4))
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        modkit_core::lighting::dynamic_minlight_floor(self.version, flags)
     }
     pub fn visibility_index(&self) -> Result<crate::visibility::VisibilityIndex> {
         crate::visibility::VisibilityIndex::new(&self.lumps, self.lump_versions[10])

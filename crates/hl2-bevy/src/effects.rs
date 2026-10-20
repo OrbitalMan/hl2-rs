@@ -249,6 +249,10 @@ pub struct Effects {
     /// newest viewmodel fire animation given its AE_MUZZLEFLASH.
     shot_serial: u64,
     player_flash: f64,
+    /// The newest Inventory::muzzle_flash_count given its viewmodel elight.
+    player_muzzle_lights: u64,
+    /// Scene time of the last elight decay (CL_DecayLights runs once per frame).
+    elight_time: f64,
     model_errors: Vec<String>,
     draws: usize,
     grenade_draws: usize,
@@ -396,6 +400,8 @@ pub fn install(
         launch_sparks: f64::NEG_INFINITY,
         shot_serial: 0,
         player_flash: f64::NEG_INFINITY,
+        player_muzzle_lights: 0,
+        elight_time: 0.,
         model_errors: loaded.effects.model_errors.clone(),
         draws: 0,
         grenade_draws: 0,
@@ -555,12 +561,16 @@ fn viewmodel_quads(
         .emitters
         .iter()
         .any(|e| e.first_person);
+    // CBasePlayer::DoMuzzleFlash -> the viewmodel's ProcessMuzzleFlashEvent elight.
+    let muzzle_light_due = game.inventory.muzzle_flash_count != effects.player_muzzle_lights;
     if described.sprites.is_empty()
         && described.beams.is_empty()
         && new_load.is_none()
         && flash_due.is_none()
         && !first_person_live
+        && !muzzle_light_due
     {
+        effects.player_muzzle_lights = game.inventory.muzzle_flash_count;
         return Vec::new();
     }
     let Some(rig) = game.weapons.get(&game.inventory.active).and_then(|w| {
@@ -592,6 +602,29 @@ fn viewmodel_quads(
     let up = right.cross(forward);
     let factor = (fov.to_radians() * 0.5).tan() / (viewmodel_fov.to_radians() * 0.5).tan();
     let eye = glam::Vec3::from_array(sim.eye().to_array());
+    if muzzle_light_due {
+        effects.player_muzzle_lights = game.inventory.muzzle_flash_count;
+        // GetAttachment(1) on the viewmodel is FormatViewModelAttachment'ed into the world.
+        if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
+            && viewmodel_fov > 0.
+        {
+            let world = eye + forward * local.x - right * local.y * factor + up * local.z * factor;
+            let rng = &mut effects.rng;
+            let mut random = || {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                (*rng >> 40) as f32 / (1u32 << 24) as f32
+            };
+            effects.source.muzzle.elights.muzzle_flash(
+                VIEWMODEL_LIGHT_KEY,
+                world,
+                false,
+                game.scene.time,
+                &mut random,
+            );
+        }
+    }
     if let Some(at) = new_load {
         effects.load_sparks = at;
         if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
@@ -692,6 +725,19 @@ fn viewmodel_quads(
     quads
 }
 /// New muzzle flashes and tracers from the simulation's shot effect log.
+/// The viewmodel's entity index in muzzle elight keys (any index no map entity uses).
+const VIEWMODEL_LIGHT_KEY: usize = 0xF_FFFF;
+impl Effects {
+    /// Live entity lights (elights) as dworldlight_t for model lighting.
+    pub(crate) fn elights(&self, floor: f32) -> Vec<modkit_core::lighting::WorldLight> {
+        self.source
+            .muzzle
+            .elights
+            .active()
+            .map(|l| l.dynamic_light().world_light(floor))
+            .collect()
+    }
+}
 fn shot_effects(game: &Gameplay, effects: &mut Effects) {
     use crate::gameplay::ShotEffect;
     use hl2_simulation::muzzle_effects as fx;
@@ -715,6 +761,12 @@ fn shot_effects(game: &Gameplay, effects: &mut Effects) {
         match effect {
             ShotEffect::NpcFlash(kind, frame) => {
                 source.muzzle.flash(*kind, false, *frame, *at, &mut random)
+            }
+            ShotEffect::MuzzleLight(npc, origin, combine) => {
+                source
+                    .muzzle
+                    .elights
+                    .muzzle_flash(*npc, *origin, *combine, *at, &mut random)
             }
             ShotEffect::NpcTracer(start, end, ar2) => source.muzzle.tracer(if *ar2 {
                 fx::npc_ar2_tracer(*start, *end, *at, &mut random)
@@ -749,6 +801,14 @@ pub fn present(
     mut draws: Query<(&mut Transform, &mut Visibility)>,
 ) {
     let direction = glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
+    // CL_DecayLights before this frame's new elights.
+    let frametime = (game.scene.time - effects.elight_time).max(0.) as f32;
+    effects.elight_time = game.scene.time;
+    effects
+        .source
+        .muzzle
+        .elights
+        .decay(game.scene.time, frametime);
     shot_effects(&game, &mut effects);
     effects.source.frame(
         &game.projectiles,

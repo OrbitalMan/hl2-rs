@@ -221,6 +221,9 @@ pub struct AiRuntime {
     /// AE_NPC_MUZZLEFLASH events (NPC, options) for the host's effects.
     #[serde(skip)]
     pub muzzle_flashes: Vec<(usize, String)>,
+    /// Operators whose weapon called DoMuzzleFlash this tick (CBaseCombatCharacter ->
+    /// the active weapon's world model: every NPC gun except the AR2).
+    pub weapon_muzzle_flashes: Vec<usize>,
     /// Hits on the player for the host to apply.
     pub player_hits: Vec<PlayerHit>,
     pub diagnostics: Diagnostics,
@@ -413,6 +416,7 @@ impl AiRuntime {
             weapon_defs,
             shots: Vec::new(),
             muzzle_flashes: Vec::new(),
+            weapon_muzzle_flashes: Vec::new(),
             player_hits: Vec::new(),
             diagnostics: Diagnostics::default(),
             random: 0x9e37_79b9_7f4a_7c15,
@@ -1266,6 +1270,10 @@ impl AiRuntime {
                         WeaponEvent::Fired => {
                             fired = true;
                             self.diagnostics.shots_fired += 1;
+                            // CWeaponAR2::FireNPCPrimaryAttack leaves DoMuzzleFlash out.
+                            if weapon.as_ref().is_some_and(|w| w.class != "weapon_ar2") {
+                                self.weapon_muzzle_flashes.push(id);
+                            }
                             // Operator_HandleAnimEvent: InsertSound(SOUND_COMBAT |
                             // SOUND_CONTEXT_GUNFIRE, operator origin, SOUNDENT_VOLUME_*, 0.2).
                             if let Some(volume) =

@@ -346,6 +346,11 @@ pub struct Inventory {
     pub ar2_impacts: Vec<(Vec3, Vec3)>,
     #[serde(skip)]
     tracer_count: u32,
+    /// CBasePlayer::DoMuzzleFlash calls (the viewmodel's muzzle-flash parity, which
+    /// lights models through an elight): pistol, SMG1, AR2 and 357 primary attacks,
+    /// both shotgun attacks and the AR2 ball launch (DelayedAttack).
+    #[serde(skip)]
+    pub muzzle_flash_count: u64,
     #[serde(skip)]
     /// Bullet/melee hits with whether melee and the shot direction.
     pub impacts: Vec<(crate::physics::RayHit, bool, Vec3)>,
@@ -442,6 +447,7 @@ impl Default for Inventory {
             tracer_requests: Vec::new(),
             ar2_impacts: Vec::new(),
             tracer_count: 0,
+            muzzle_flash_count: 0,
             impacts: Vec::new(),
             blood: Vec::new(),
             projectile_spawns: Vec::new(),
@@ -1167,6 +1173,12 @@ impl Inventory {
         self.last_shot = scene.time;
         self.soonest_attack = scene.time + 0.1;
         self.shots += rounds as u64;
+        if matches!(
+            self.active.as_str(),
+            "weapon_pistol" | "weapon_smg1" | "weapon_ar2" | "weapon_357" | "weapon_shotgun"
+        ) {
+            self.muzzle_flash_count += 1;
+        }
         self.animate(fire_animation(&self.active, self.burst), scene.time);
         let spread_cone = match self.active.as_str() {
             "weapon_pistol" => {
@@ -1271,6 +1283,7 @@ impl Inventory {
         self.next_attack = scene.time + duration(world, w, "altfire");
         self.last_shot = scene.time;
         self.shots += 1;
+        self.muzzle_flash_count += 1;
         self.animate("altfire", scene.time);
         let direction = direction.normalize_or_zero();
         // CWeaponShotgun::SecondaryAttack fires a fixed twelve pellets, rather
@@ -1368,6 +1381,9 @@ impl Inventory {
         play_sound(scene, weapon, "double_shot", world, "");
         self.animate(animation, scene.time);
         self.shots += 1;
+        if ball {
+            self.muzzle_flash_count += 1;
+        }
         self.last_shot = scene.time;
         self.set_ammo(
             &weapon.secondary_ammo_type,

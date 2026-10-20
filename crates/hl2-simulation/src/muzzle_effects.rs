@@ -580,12 +580,133 @@ impl Tracer {
     }
 }
 
+/// One entity light (dlight_t through IVEfx::CL_AllocElight): it lights models only.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Elight {
+    pub key: i64,
+    pub origin: Vec3,
+    pub radius: f32,
+    pub decay: f32,
+    pub die: f64,
+    pub color: [u8; 3],
+    pub exponent: i8,
+}
+impl Elight {
+    pub fn dynamic_light(&self) -> modkit_core::lighting::DynamicLight {
+        modkit_core::lighting::DynamicLight {
+            origin: self.origin,
+            radius: self.radius,
+            color: self.color,
+            exponent: self.exponent,
+            minlight: 0.,
+        }
+    }
+}
+/// The engine's 64 elight slots (retail engine.dll 0x1048b3f0, reviewed privately).
+pub const MAX_ELIGHTS: usize = 64;
+/// LIGHT_INDEX_MUZZLEFLASH (dlight.h); keys add the entity index.
+pub const LIGHT_INDEX_MUZZLEFLASH: i64 = 0x100000;
+#[derive(Clone, Debug)]
+pub struct Elights {
+    pub slots: [Option<Elight>; MAX_ELIGHTS],
+    pub allocated: u64,
+}
+impl Default for Elights {
+    fn default() -> Self {
+        Self {
+            slots: [None; MAX_ELIGHTS],
+            allocated: 0,
+        }
+    }
+}
+impl Elights {
+    /// CL_AllocElight (retail 0x100de1a0): the slot with the same nonzero key, else the
+    /// first dead one (die < now), else slot 0; cleared and keyed.
+    pub fn alloc(&mut self, key: i64, now: f64) -> &mut Elight {
+        let index = (key != 0)
+            .then(|| {
+                self.slots
+                    .iter()
+                    .position(|s| s.is_some_and(|l| l.key == key))
+            })
+            .flatten()
+            .or_else(|| {
+                self.slots
+                    .iter()
+                    .position(|s| s.is_none_or(|l| l.die < now))
+            })
+            .unwrap_or(0);
+        self.allocated += 1;
+        self.slots[index].insert(Elight {
+            key,
+            origin: Vec3::ZERO,
+            radius: 0.,
+            decay: 0.,
+            die: 0.,
+            color: [0; 3],
+            exponent: 0,
+        })
+    }
+    /// C_BaseAnimating::ProcessMuzzleFlashEvent (attachment 1 of the flashing model):
+    /// (255, 192, 64) exponent 5, radius RandomInt(32, 64) shrinking to 0 in 0.05 s.
+    /// CTempEnts::MuzzleFlash_Combine_NPC: (64, 128, 255), radius RandomInt(32, 128).
+    pub fn muzzle_flash(
+        &mut self,
+        entity: usize,
+        origin: Vec3,
+        combine: bool,
+        now: f64,
+        r: &mut impl Random,
+    ) {
+        let radius = if combine {
+            r.int(32, 128)
+        } else {
+            r.int(32, 64)
+        } as f32;
+        let light = self.alloc(LIGHT_INDEX_MUZZLEFLASH + entity as i64, now);
+        light.origin = origin;
+        light.radius = radius;
+        light.decay = radius / 0.05;
+        light.die = now + 0.05;
+        light.color = if combine {
+            [64, 128, 255]
+        } else {
+            [255, 192, 64]
+        };
+        light.exponent = 5;
+    }
+    /// CL_DecayLights for elights (retail 0x100de690), once per rendered frame:
+    /// radius -= frametime * decay, cleared after `die` or at 0.
+    pub fn decay(&mut self, now: f64, frametime: f32) {
+        if frametime <= 0. {
+            return;
+        }
+        for slot in &mut self.slots {
+            if let Some(light) = slot {
+                if now > light.die {
+                    *slot = None;
+                    continue;
+                }
+                light.radius -= frametime * light.decay;
+                if light.radius <= 0. {
+                    *slot = None;
+                }
+            }
+        }
+    }
+    /// Lights with a radius left, as the model-lighting pass reads them.
+    pub fn active(&self) -> impl Iterator<Item = &Elight> {
+        self.slots.iter().flatten().filter(|l| l.radius > 0.)
+    }
+}
+
 /// Live muzzle emitters and tracers.
 #[derive(Clone, Debug, Default)]
 pub struct MuzzleEffects {
     pub emitters: Vec<Emitter>,
     pub tracers: Vec<Tracer>,
     pub surface_quads: Vec<SurfaceQuad>,
+    pub elights: Elights,
     pub flashes: u64,
     pub tracers_made: u64,
 }
@@ -744,6 +865,40 @@ fn billboard(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn muzzle_elights_alloc_by_key_and_decay_like_the_engine() {
+        let mut lights = Elights::default();
+        let mut half = || 0.5;
+        lights.muzzle_flash(7, Vec3::X, false, 1., &mut half);
+        let first = *lights.active().next().unwrap();
+        // RandomInt(32, 64) at 0.5 -> 48; 255/192/64 exponent 5; decay radius / 0.05.
+        assert_eq!(first.radius, 48.);
+        assert_eq!(first.decay, 960.);
+        assert_eq!(first.color, [255, 192, 64]);
+        assert_eq!(first.key, LIGHT_INDEX_MUZZLEFLASH + 7);
+        // Same key reuses the slot (the Combine NPC flash overrides the weapon's).
+        lights.muzzle_flash(7, Vec3::Y, true, 1.01, &mut half);
+        assert_eq!(lights.active().count(), 1);
+        assert_eq!(lights.active().next().unwrap().color, [64, 128, 255]);
+        lights.muzzle_flash(8, Vec3::Y, false, 1.01, &mut half);
+        assert_eq!(lights.active().count(), 2);
+        // 1/60 s frames: 48 -> 32 -> 16 -> gone (radius 0 at 0.05 s).
+        let mut radii = Vec::new();
+        for frame in 1..=4 {
+            lights.decay(1.01 + frame as f64 / 60., 1. / 60.);
+            radii.push(
+                lights
+                    .slots
+                    .iter()
+                    .flatten()
+                    .find(|l| l.key == LIGHT_INDEX_MUZZLEFLASH + 8)
+                    .map(|l| l.radius),
+            );
+        }
+        assert!((radii[0].unwrap() - 32.).abs() < 1e-3);
+        assert!((radii[1].unwrap() - 16.).abs() < 1e-3);
+        assert!(radii[2].is_none_or(|r| r < 1e-3) && radii[3].is_none());
+    }
     #[test]
     fn options_kinds_and_sdk_particle_sets() {
         assert_eq!(

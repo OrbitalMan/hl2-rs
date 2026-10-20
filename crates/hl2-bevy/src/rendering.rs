@@ -174,6 +174,8 @@ pub struct ModelLit {
     scale: f32,
     half_lambert: bool,
     last: Option<(glam::Vec3, bool)>,
+    /// Entity lights (muzzle elights) lit this draw last time: relight once they end.
+    dynamic: bool,
 }
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct MaterialKey {
@@ -693,10 +695,12 @@ pub fn present_entities(
     }
 }
 /// Recompute each lit model's light state when its illumination origin moves
-/// (retail light cache at origin + rotation * illumposition * scale).
+/// (retail light cache at origin + rotation * illumposition * scale), and every frame
+/// while an entity light (muzzle elight) reaches it (ComputeDynamicLighting).
 pub fn present_lighting(
     game: Res<crate::gameplay::Gameplay>,
     sim: Res<crate::movement::Simulation>,
+    effects: Option<Res<crate::effects::Effects>>,
     mut draws: Query<(
         &mut ModelLit,
         &MeshMaterial3d<SourceMaterial>,
@@ -709,6 +713,9 @@ pub fn present_lighting(
     let Some(data) = game.world.lighting.as_deref() else {
         return;
     };
+    let elights = effects
+        .as_deref()
+        .map_or_else(Vec::new, |e| e.elights(data.dynamic_minlight));
     let mut states =
         BTreeMap::<Option<usize>, (glam::Vec3, modkit_core::lighting::LightState)>::new();
     // The view model camera sits at the origin looking down +X; map that space onto the
@@ -744,17 +751,26 @@ pub fn present_lighting(
             }
             None => glam::Vec3::from_array(sim.eye().to_array()),
         };
+        let lit_dynamic = elights
+            .iter()
+            .any(|l| modkit_core::lighting::dynamic_reaches(origin, l));
         if lit.entity.is_some()
+            && !lit_dynamic
+            && !lit.dynamic
             && lit.last.is_some_and(|(last, hl)| {
                 last.distance_squared(origin) < 1. && hl == lit.half_lambert
             })
         {
             continue;
         }
+        lit.dynamic = lit_dynamic;
         let (_, state) = states.entry(lit.entity).or_insert_with(|| {
             let mut state = data.state_at(origin);
             if illumination.ambient_boost() {
                 data.boost(&mut state, origin);
+            }
+            for light in &elights {
+                data.add_dynamic(&mut state, origin, light);
             }
             (origin, state)
         });
@@ -1439,6 +1455,7 @@ pub fn spawn_map(
                 scale,
                 half_lambert: definition.half_lambert,
                 last: None,
+                dynamic: false,
             });
         }
         if let Some(animation) = animation {

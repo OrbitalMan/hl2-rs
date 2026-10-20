@@ -431,6 +431,7 @@ fn main() -> Result<()> {
             PostUpdate,
             rendering::present_lighting
                 .after(rendering::present_entities)
+                .after(effects::present)
                 .before(TransformSystems::Propagate),
         )
         .add_systems(

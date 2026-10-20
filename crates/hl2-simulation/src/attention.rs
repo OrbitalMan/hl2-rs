@@ -394,7 +394,8 @@ pub fn think(
             forward,
             right: state.rotation * Vec3::NEG_Y,
             up: state.rotation * Vec3::Z,
-            scripted: state.scripted_by.is_some(),
+            // GetState() != NPC_STATE_SCRIPT, including a scripted post idle.
+            scripted: state.scripted_by.is_some() || state.script_post_idle.is_some(),
         };
         let origin = state.origin;
         let candidates = || {

@@ -143,6 +143,12 @@ pub struct State {
     movement_animation: Option<MovementAnimation>,
     script_actor: Option<usize>,
     pub scripted_by: Option<usize>,
+    /// The scripted_sequence whose post idle holds this actor in NPC_STATE_SCRIPT
+    /// (SDK SCRIPT_POST_IDLE: m_hCine stays set until PostIdleDone's CineCleanup; with
+    /// SF_SCRIPT_LOOP_IN_POST_IDLE that is never, until cancelled or another script
+    /// takes the actor). Only the random look queue reads it; scene ownership stays
+    /// with `scripted_by`.
+    pub script_post_idle: Option<usize>,
     script_finish: Option<f64>,
     post_idle_done: Option<(f64, usize)>,
     shuffle: Vec<usize>,
@@ -436,6 +442,7 @@ impl Scene {
             movement_animation: None,
             script_actor: None,
             scripted_by: None,
+            script_post_idle: None,
             script_finish: None,
             post_idle_done: None,
             shuffle: Vec::new(),
@@ -2888,6 +2895,8 @@ impl Scene {
             self.unsupported_input("scripted_sequence", &format!("movement:{movement}"));
             return;
         }
+        // Another script takes the actor: the old post idle ends (m_hNextCine).
+        self.states[actor].script_post_idle = None;
         let play = script.get("m_iszPlay").unwrap_or("");
         if play.is_empty() {
             // Retail StartSequence completes a null action immediately, allowing the authored post idle.
@@ -2944,6 +2953,13 @@ impl Scene {
         }
     }
     fn end_sequence(&mut self, world: &World, id: usize, cancel: bool) {
+        if cancel {
+            for state in &mut self.states {
+                if state.script_post_idle == Some(id) {
+                    state.script_post_idle = None;
+                }
+            }
+        }
         let actor = self.states[id].script_actor.take();
         self.states[id].script_finish = None;
         self.states[id].post_idle_done = None;
@@ -3006,6 +3022,9 @@ impl Scene {
                     0.
                 };
                 self.states[id].post_idle_done = Some((self.time + duration as f64, actor));
+                if duration > 0. {
+                    self.states[actor].script_post_idle = Some(id);
+                }
             }
         }
     }
@@ -3059,6 +3078,12 @@ impl Scene {
             if let Some((due, actor)) = self.states[id].post_idle_done {
                 if due <= self.time {
                     self.states[id].post_idle_done = None;
+                    // PostIdleDone: CineCleanup unless the script loops its post idle.
+                    if number(e, "spawnflags", 0.) as u32 & 256 == 0
+                        && self.states[actor].script_post_idle == Some(id)
+                    {
+                        self.states[actor].script_post_idle = None;
+                    }
                     self.fire(id, "OnPostIdleEndSequence", actor);
                 }
             }
@@ -5058,6 +5083,24 @@ mod tests {
         assert!(scene.states[1].scripted_by.is_none());
         let post = scene.states[0].post_idle_done.unwrap().0;
         assert!((post - scene.time - 2.).abs() < 0.0001);
+        // SCRIPT_POST_IDLE keeps the actor in NPC_STATE_SCRIPT until PostIdleDone.
+        assert_eq!(scene.states[1].script_post_idle, Some(0));
+        scene.tick(&world, Vec3::ZERO, 2.1);
+        assert!(scene.states[1].script_post_idle.is_none());
+        // SF_SCRIPT_LOOP_IN_POST_IDLE (256) holds it until the script is cancelled.
+        let mut looping = world.clone();
+        looping.entities[0]
+            .properties
+            .push(("spawnflags".into(), "256".into()));
+        let mut scene = Scene::new(&looping);
+        scene.send(0, "BeginSequence", "");
+        for _ in 0..4 {
+            scene.tick(&looping, Vec3::ZERO, 2.1);
+        }
+        assert_eq!(scene.states[1].script_post_idle, Some(0));
+        scene.send(0, "CancelSequence", "");
+        scene.tick(&looping, Vec3::ZERO, 0.015);
+        assert!(scene.states[1].script_post_idle.is_none());
         world.entities[1]
             .properties
             .push(("DefaultAnim".into(), "authored_missing".into()));
