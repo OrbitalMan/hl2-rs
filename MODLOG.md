@@ -1,5 +1,17 @@
 # MODLOG
 
+## 2026-10-20: first-map completion audit and genuine native scene starts
+
+**Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. One subagent from the same family independently reviewed completion scope,public REA updates and retained native bytes;its exact model identifier is unavailable.
+
+**Changed / Why:** Rechecked whether d1_trainstation_01 is finished before advancing. Retained a new private first-map lane and handoff with two genuine map scene-start observations and a fresh process without Frida. Public documentation distinguishes complete authored metadata from incomplete runtime research. Rust/source implementation was not changed.
+
+**Tested how / Result:** Eleven existing metadata/static checks pass,including311 independent query cases. New acceptance checks six exact bodies,six PE hook prologues,1672 selected events/834 paired calls,raw source clocks,actor/model generations,input/output attribution and cleanup. Genuine intro policy0 and train endline policy1 accepted. Fresh native snapshots corroborate G-Man playing then later cleared. Live REA6.7.0/207tools confirmed. All owned games closed;checked installed settings/modules unchanged. See docs/validation.md for the exact repeat command.
+
+**Still broken or not tested:** First map not finished;ordinary traversal/exit,full scene playback and current Rust parity unverified. Preserved original16 gaps,missing native bodies and historical closure failure. Failed model decoding,pre-window events,transport overflow and a forward rehearsal without measured movement remain recorded. Public Scale AI collaboration scope remains unverified.
+
+**Next:** Stay on first-map player control/ordinary triggers and downstream genuine actors. No second-map promotion,Rust builds,staging,commits or pushes in this research pass.
+
 ## 2026-10-20: publish accumulated research documentation
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
