@@ -83,6 +83,8 @@ pub struct PlayerHit {
     pub impulse: Vec3,
     pub fade: Option<crate::player_damage::ScreenFade>,
 }
+/// CNPC_Combine's reload animation event (combine_soldier_anims reload / reload_low).
+const COMBINE_AE_RELOAD: i32 = 2;
 /// CNPC_Combine's kick animation event.
 const COMBINE_AE_KICK: i32 = 3;
 /// CNPC_Combine's grenade toss animation event.
@@ -107,9 +109,8 @@ pub fn vec_check_throw(
     velocity.z += GRAVITY * time * 0.5;
     let mut apex = start + delta * 0.5;
     apex.z += 0.5 * GRAVITY * (time * 0.5) * (time * 0.5);
-    (physics.projectile_ray(start, apex, &[id]).is_none()
-        && physics.projectile_ray(target, apex, &[id]).is_none())
-    .then_some(velocity)
+    (trace_clear(physics, start, apex, id) && trace_clear(physics, target, apex, id))
+        .then_some(velocity)
 }
 /// VecCheckToss (h_ai.cpp) with no height ratio limit, gravity 1 and the randomized
 /// target (`jitter`: four [0, 1) draws): the apex is the midpoint raised up to 300 units
@@ -147,9 +148,22 @@ pub fn vec_check_toss(
     velocity.z = GRAVITY * time1;
     let mut apex = start + velocity * time1;
     apex.z = mid.z;
-    (physics.projectile_ray(start, apex, &[id]).is_none()
-        && physics.projectile_ray(target, apex, &[id]).is_none())
-    .then_some(velocity)
+    (trace_clear(physics, start, apex, id) && trace_clear(physics, target, apex, id))
+        .then_some(velocity)
+}
+/// A throw trace's `fraction == 1`: Source ignores the solid a trace starts on or in
+/// (startsolid) and only fails on a surface it enters. The flush target is the enemy's
+/// last seen feet position, on the floor, where our ray reports a hit at its own start
+/// (before this, every packaged flush toss failed).
+fn trace_clear(physics: &Physics, from: Vec3, to: Vec3, id: usize) -> bool {
+    match physics.projectile_ray(from, to, &[id]) {
+        None => true,
+        Some(hit) if hit.position.distance(from) < 0.5 => {
+            let step = (to - from).normalize_or_zero();
+            physics.projectile_ray(from + step, to, &[id]).is_none()
+        }
+        Some(_) => false,
+    }
 }
 /// A melee swing that struck an NPC (CTraceFilterMelee: DMG_CLUB on a hated NPC); the
 /// host applies it through the shared hit path.
@@ -266,10 +280,15 @@ pub struct AiActor {
     events_until: f64,
     /// The ACT_IDLE -> ACT_IDLE_ANGRY translation input at the last think.
     idle_angry: bool,
+    /// The last think interval: the weapon's m_flAnimTime - m_flPrevAnimTime, which
+    /// Operator_FrameUpdate advances once per think (WeaponSoundRealtime's estimate).
+    think_dt: f32,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Diagnostics {
     pub thinks: u64,
+    /// CNPC_Combine flush-grenade checks by outcome (out_of_range, moving, no_toss, ready).
+    pub grenade_checks: BTreeMap<String, u32>,
     /// Melee swings that struck an NPC.
     pub npc_melee_hits: u64,
     pub scripted_skips: u64,
@@ -322,6 +341,10 @@ pub struct AiRuntime {
     pub melee_hits: Vec<MeleeHit>,
     /// Combine grenade tosses this tick: (thrower, position, velocity, spin).
     pub grenade_tosses: Vec<(usize, Vec3, Vec3, Vec3)>,
+    /// WeaponSound(SINGLE_NPC, soundtime) requests that start later (WeaponSoundRealtime
+    /// schedules a machine gun's second sound ahead of the next think).
+    #[serde(skip)]
+    delayed_sounds: Vec<(f64, crate::sounds::SoundRequest)>,
     pub diagnostics: Diagnostics,
     random: u64,
     /// Debug (F4): the AI does not sense the player (ai_ignoreplayers / notarget).
@@ -528,6 +551,7 @@ impl AiRuntime {
             player_hits: Vec::new(),
             melee_hits: Vec::new(),
             grenade_tosses: Vec::new(),
+            delayed_sounds: Vec::new(),
             diagnostics: Diagnostics::default(),
             random: 0x9e37_79b9_7f4a_7c15,
         }
@@ -1167,7 +1191,17 @@ impl AiRuntime {
             goal: None,
             events_until: 0.,
             idle_angry: false,
+            think_dt: THINK_INTERVAL as f32,
         })
+    }
+    /// The NumGrenades keyvalue of a spawned CNPC_Combine (F4; DESIGN 14r would set it
+    /// on the new entity before Spawn). Other classes ignore it.
+    pub fn set_grenades(&mut self, id: usize, grenades: i32) {
+        if let Some(AiClass::Humanoid(h)) = self.actors.get_mut(&id).map(|a| &mut a.class) {
+            if h.kind == humanoid::Kind::Combine {
+                h.grenades = grenades.max(0);
+            }
+        }
     }
     /// CAI_BaseNPC::Spawn: `additionalequipment` (not empty or "0") becomes the active
     /// weapon for classes with bits_CAP_USE_WEAPONS (Weapon_Equip; Spawn does not run
@@ -1200,6 +1234,11 @@ impl AiRuntime {
             .cloned()
             .or_else(|| npc_weapons::builtin(class))?
             .fire?;
+        // CNPC_Combine never adds bits_CAP_USE_SHOT_REGULATOR: its TASK_RANGE_ATTACK1
+        // fires GetRandomBurst() shots itself (Humanoid::start_task).
+        if npc_class.eq_ignore_ascii_case("npc_combine_s") {
+            return None;
+        }
         let rule = match (npc_class, class.as_str()) {
             ("npc_metropolice", "weapon_pistol") => npc_weapons::RegulatorRule::MetropolicePistol,
             ("npc_citizen" | "npc_barney" | "npc_alyx", _) => {
@@ -1278,6 +1317,14 @@ impl AiRuntime {
         if let Some(value) = self.stunstick_damage {
             super::metropolice::STUNSTICK_DAMAGE.with(|d| d.set(value));
         }
+        let due = scene.time + 1e-9;
+        let (now_due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.delayed_sounds)
+            .into_iter()
+            .partition(|(at, _)| *at <= due);
+        self.delayed_sounds = later;
+        scene
+            .sounds
+            .extend(now_due.into_iter().map(|(_, request)| request));
         self.inputs(world, scene, controller);
         if !self.enabled {
             if self.was_enabled {
@@ -1361,8 +1408,15 @@ impl AiRuntime {
                 };
                 let npc_class = world.entities.get(id).map_or("", |e| e.class());
                 let actor = self.actors.get_mut(&id).expect("actor");
-                let AiActor { class, weapon, .. } = actor;
+                let AiActor {
+                    npc,
+                    class,
+                    weapon,
+                    think_dt,
+                    ..
+                } = actor;
                 let mut fired = false;
+                let mut shot_sound_times = Vec::new();
                 let mut reloaded = false;
                 for (name, event) in events {
                     if !(3000..4000).contains(&event) {
@@ -1372,7 +1426,24 @@ impl AiRuntime {
                         } else if let AiClass::Humanoid(h) = class {
                             // CNPC_Combine::HandleAnimEvent COMBINE_AE_KICK (3); the other
                             // humanoid AE_* events are not modeled yet.
-                            if h.kind == humanoid::Kind::Combine && event == COMBINE_AE_KICK {
+                            if h.kind == humanoid::Kind::Combine && event == COMBINE_AE_RELOAD {
+                                // "We never actually run out of ammo, just need to refill
+                                // the clip": RELOAD_NPC, both clips full, the ammo
+                                // conditions cleared. Without it a soldier's clip stayed
+                                // empty and he reloaded forever.
+                                if let (Some(w), Some(d)) = (weapon.as_mut(), def.as_ref()) {
+                                    w.clip1 = d.max_clip1;
+                                    reloaded = true;
+                                }
+                                for c in [
+                                    COND_LOW_PRIMARY_AMMO,
+                                    COND_NO_PRIMARY_AMMO,
+                                    COND_NO_SECONDARY_AMMO,
+                                ] {
+                                    npc.conditions.clear(c);
+                                }
+                            } else if h.kind == humanoid::Kind::Combine && event == COMBINE_AE_KICK
+                            {
                                 let yaw = ctx.yaw.to_radians();
                                 h.requests.push(CopRequest::Kick {
                                     start: ctx.origin + Vec3::Z * 36.,
@@ -1409,6 +1480,19 @@ impl AiRuntime {
                         WeaponEvent::Reloaded | WeaponEvent::ReloadSound => reloaded = true,
                         WeaponEvent::Fired => {
                             fired = true;
+                            if let (Some(w), Some(spec)) =
+                                (weapon.as_mut(), def.as_ref().and_then(|d| d.fire))
+                            {
+                                if npc_weapons::machine_gun(&w.class) {
+                                    shot_sound_times.extend(w.realtime_sound_times(
+                                        now,
+                                        *think_dt,
+                                        spec.fire_rate,
+                                    ));
+                                } else {
+                                    shot_sound_times.push(now);
+                                }
+                            }
                             self.diagnostics.shots_fired += 1;
                             // CWeaponAR2::FireNPCPrimaryAttack leaves DoMuzzleFlash out.
                             if weapon.as_ref().is_some_and(|w| w.class != "weapon_ar2") {
@@ -1433,17 +1517,39 @@ impl AiRuntime {
                     }
                 }
                 self.random = self.random.wrapping_add(0x9e37_79b9_7f4a_7c15) | 1;
-                // WeaponSound(SINGLE_NPC / RELOAD_NPC) at the operator.
-                for (played, key) in [(fired, "single_shot_npc"), (reloaded, "reload_npc")] {
-                    if let Some(cue) = def
-                        .as_ref()
-                        .and_then(|d| d.sounds.get(key))
-                        .filter(|_| played)
-                    {
-                        scene.sounds.push(crate::sounds::SoundRequest {
-                            origin: Some(scene.states[id].origin + Vec3::Z * 55.),
+                // WeaponSound(SINGLE_NPC / RELOAD_NPC) at the operator; a machine gun's
+                // later realtime sounds wait in `delayed_sounds`.
+                if fired && shot_sound_times.is_empty() {
+                    shot_sound_times.push(now);
+                }
+                let origin = scene.states[id].origin + Vec3::Z * 55.;
+                for (times, key) in [
+                    (shot_sound_times, "single_shot_npc"),
+                    (if reloaded { vec![now] } else { Vec::new() }, "reload_npc"),
+                ] {
+                    let Some(cue) = def.as_ref().and_then(|d| d.sounds.get(key)) else {
+                        continue;
+                    };
+                    for at in times {
+                        let mut requests = vec![crate::sounds::SoundRequest {
+                            origin: Some(origin),
                             ..cue.clone().into()
-                        });
+                        }];
+                        // SINGLE_NPC plays on CHAN_WEAPON of the operator: a new shot
+                        // sound replaces the previous one (native recording: run levels
+                        // match a single attack, not stacked tails).
+                        if key == "single_shot_npc" {
+                            let emitter = crate::sounds::entity_emitter(id);
+                            requests[0].emitter = Some(emitter);
+                            requests.insert(0, crate::sounds::SoundRequest::stop(cue, emitter));
+                        }
+                        for request in requests {
+                            if at <= now + 1e-9 {
+                                scene.sounds.push(request);
+                            } else {
+                                self.delayed_sounds.push((at, request));
+                            }
+                        }
                     }
                 }
                 self.apply_requests(id, world, scene, physics, player);
@@ -1516,12 +1622,13 @@ impl AiRuntime {
             .enemy
             .and_then(|e| actor.npc.enemies.find(Some(e)))
             .map(|m| m.last_known);
-        let weapon_range = actor
+        let fire = actor
             .weapon
             .as_ref()
             .and_then(|w| self.weapon_def(&w.class))
-            .and_then(|d| d.fire)
-            .map(|f| (f.min_range, f.max_range));
+            .and_then(|d| d.fire);
+        let weapon_range = fire.map(|f| (f.min_range, f.max_range));
+        let weapon_burst = fire.map(|f| (f.min_burst, f.max_burst, f.fire_rate));
         let is_cop = actor.class.cop().is_some();
         let cop_target = actor.class.cop().and_then(|c| c.target_entity);
         let random = self.random();
@@ -1542,6 +1649,7 @@ impl AiRuntime {
             enemy_eye,
             enemy_lkp,
             weapon_range,
+            weapon_burst,
             best_sound_volume: 0.,
             // m_flDistTooFar (SF_NPC_LONG_RANGE is not read yet).
             dist_too_far: 1024.,
@@ -1958,9 +2066,12 @@ impl AiRuntime {
                     && current.distance(last_seen) <= 256.
                 {
                     let distance = last_seen.distance(origin);
-                    if !(128. ..=1024.).contains(&distance) {
+                    let outcome = if !(128. ..=1024.).contains(&distance) {
                         h.next_grenade_check = now + 1.;
-                    } else if !moving {
+                        "out_of_range"
+                    } else if moving {
+                        "moving"
+                    } else {
                         let in_view = senses::in_view_cone(&viewer, last_seen)
                             && sight.visible(eye, last_seen, &[id]);
                         let bits = ((now * 1000.) as u64) ^ (id as u64).wrapping_mul(0x9e37_79b9);
@@ -1985,8 +2096,22 @@ impl AiRuntime {
                         if let Some(velocity) = toss {
                             h.toss_velocity = velocity;
                             h.grenade_ready = true;
+                            if in_view {
+                                "ready_throw"
+                            } else {
+                                "ready_toss"
+                            }
+                        } else if in_view {
+                            "no_throw"
+                        } else {
+                            "no_toss"
                         }
-                    }
+                    };
+                    *self
+                        .diagnostics
+                        .grenade_checks
+                        .entry(outcome.into())
+                        .or_default() += 1;
                 }
             }
         }
@@ -2043,6 +2168,9 @@ impl AiRuntime {
         }
         let dt = (now - actor.last_think).clamp(0., 0.2) as f32;
         actor.last_think = now;
+        if dt > 0. {
+            actor.think_dt = dt;
+        }
         actor.origin = origin.to_array();
         actor.yaw = yaw_of(scene, id);
         actor.next_think = now + THINK_INTERVAL;
@@ -2077,6 +2205,7 @@ impl AiRuntime {
             yaw_speed,
             idle_angry,
             weapon: actor.weapon.as_ref().map(|w| w.class.clone()),
+            combine: matches!(&actor.class, AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine),
             weapon_activity: None,
             blocked_moves: &mut self.diagnostics.blocked_moves,
         };

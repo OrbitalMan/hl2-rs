@@ -981,4 +981,24 @@ mod tests {
         let quad = q.quad(0.).unwrap();
         assert!(quad.positions.iter().all(|p| p.z.abs() < 1e-4));
     }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_ar2_tracer_blends_alpha_add_not_opaque() {
+        let vfs =
+            source_assets::vpk::Vfs::mount(&source_assets::install::discover().unwrap()).unwrap();
+        let tracer = crate::projectile_visuals::load_sprite(&vfs, AR2_TRACER_MATERIAL).unwrap();
+        assert_eq!(tracer.kind, crate::projectile_visuals::KIND_ALPHA_ADD);
+        for name in MATERIALS
+            .iter()
+            .filter(|name| **name != AR2_TRACER_MATERIAL)
+        {
+            assert_ne!(
+                crate::projectile_visuals::load_sprite(&vfs, name)
+                    .unwrap()
+                    .kind,
+                0,
+                "{name}"
+            );
+        }
+    }
 }

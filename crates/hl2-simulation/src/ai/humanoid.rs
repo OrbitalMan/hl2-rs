@@ -240,6 +240,11 @@ pub struct Humanoid {
     /// traces).
     #[serde(skip)]
     pub grenade_ready: bool,
+    /// CNPC_Combine TASK_RANGE_ATTACK1: m_nShots left in the burst, m_flShotDelay
+    /// (GetFireRate) and m_flNextAttack.
+    pub shots: i32,
+    shot_delay: f32,
+    next_attack: f64,
     /// The class's random stream (random->RandomInt in the class code).
     seed: u64,
 }
@@ -259,7 +264,18 @@ impl Humanoid {
             next_grenade_check: 0.,
             toss_velocity: Vec3::ZERO,
             grenade_ready: false,
+            shots: 0,
+            shot_delay: 0.,
+            next_attack: 0.,
         }
+    }
+    /// random->RandomInt(min, max).
+    fn random_int(&mut self, min: u32, max: u32) -> u32 {
+        self.seed ^= self.seed << 13;
+        self.seed ^= self.seed >> 7;
+        self.seed ^= self.seed << 17;
+        let span = u64::from(max.saturating_sub(min)) + 1;
+        min + ((self.seed >> 11) % span) as u32
     }
     /// random->RandomInt(0, 1) == 1.
     fn coin(&mut self) -> bool {
@@ -582,6 +598,18 @@ impl Behavior for Humanoid {
                 }
                 _ => TaskStatus::Failed,
             },
+            // CNPC_Combine::StartTask: a burst of GetRandomBurst() shots, the first now;
+            // no shot regulator.
+            "TASK_RANGE_ATTACK1" if self.kind == Kind::Combine => {
+                let (min, max, rate) = ctx.weapon_burst.unwrap_or((1, 1, 0.1));
+                self.shots = self.random_int(min, max) as i32;
+                self.shot_delay = rate;
+                self.next_attack = ctx.now + f64::from(rate) - 0.1;
+                self.last_attack = ctx.now;
+                npc.activity = "ACT_RANGE_ATTACK1".into();
+                motor.set_activity("ACT_RANGE_ATTACK1");
+                TaskStatus::Running
+            }
             "TASK_RANGE_ATTACK1" => {
                 self.last_attack = ctx.now;
                 return None;
@@ -603,6 +631,25 @@ impl Behavior for Humanoid {
                     return Some(status);
                 }
             }
+        }
+        // CNPC_Combine::RunTask: keep facing the LKP; once the shot's activity ends and
+        // m_flNextAttack passed, shoot again until the burst is spent.
+        if task == "TASK_RANGE_ATTACK1" && self.kind == Kind::Combine {
+            if let Some(lkp) = ctx.enemy_lkp.or(ctx.enemy.map(|e| e.1)) {
+                motor.face(super::schedule::Goal::Position(lkp));
+            }
+            if ctx.now >= self.next_attack && motor.activity_finished() {
+                self.shots -= 1;
+                if self.shots > 0 {
+                    npc.activity = "ACT_RANGE_ATTACK1".into();
+                    motor.set_activity("ACT_RANGE_ATTACK1");
+                    self.last_attack = ctx.now;
+                    self.next_attack = ctx.now + f64::from(self.shot_delay) - 0.1;
+                } else {
+                    return Some(TaskStatus::Complete);
+                }
+            }
+            return Some(TaskStatus::Running);
         }
         if task == "TASK_RANGE_ATTACK1" {
             self.last_attack = ctx.now;
@@ -796,5 +843,48 @@ mod tests {
         assert!(!h.idle_angry(NpcState::Combat, 10.));
         h.last_attack = 8.;
         assert!(h.idle_angry(NpcState::Combat, 10.));
+    }
+    #[test]
+    fn combine_range_attack_fires_its_own_burst_without_a_regulator() {
+        // CNPC_Combine::StartTask/RunTask TASK_RANGE_ATTACK1 with an SMG1 (burst 2-5, fire
+        // rate 0.075): a shot now, another each time the activity ends, then complete.
+        for seed in 1..40 {
+            let mut h = Humanoid::new(Kind::Combine, true, seed);
+            let mut npc = AiNpc::new(1);
+            let mut motor = FakeMotor::default();
+            let ctx = |now: f64| Context {
+                now,
+                enemy: Some((2, Vec3::X * 300.)),
+                weapon_burst: Some((2, 5, 0.075)),
+                ..Default::default()
+            };
+            let arg = TaskArg::Number(0.);
+            assert_eq!(
+                h.start_task(&mut npc, "TASK_RANGE_ATTACK1", &arg, &ctx(0.), &mut motor),
+                Some(TaskStatus::Running)
+            );
+            let burst = h.shots;
+            assert!((2..=5).contains(&burst), "{burst}");
+            motor.finished = true;
+            let mut now = 0.;
+            let status = loop {
+                now += 0.1;
+                let status =
+                    h.run_task(&mut npc, "TASK_RANGE_ATTACK1", &arg, &ctx(now), &mut motor);
+                if status != Some(TaskStatus::Running) {
+                    break status;
+                }
+            };
+            assert_eq!(status, Some(TaskStatus::Complete));
+            let shots = motor
+                .activities
+                .iter()
+                .filter(|a| *a == "ACT_RANGE_ATTACK1")
+                .count();
+            assert_eq!(shots as i32, burst);
+            // One think per shot after the first (the 0.133 s shoot sequence finishes at
+            // its first frame advance), then the completing think.
+            assert!((now - 0.1 * f64::from(burst)).abs() < 1e-6, "{now} {burst}");
+        }
     }
 }

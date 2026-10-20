@@ -388,6 +388,8 @@ pub struct NpcWeapon {
     pub shots: u32,
     /// The world model's current sequence (Weapon_SetActivity).
     pub sequence: Option<WeaponSequence>,
+    /// CHLMachineGun::m_flNextSoundTime (WeaponSoundRealtime).
+    pub next_sound_time: f64,
 }
 /// A weapon world-model sequence started by Weapon_SetActivity: its events are
 /// dispatched to the operator (CBaseCombatWeapon::Operator_FrameUpdate), with the
@@ -413,7 +415,29 @@ impl NpcWeapon {
             clip1,
             shots: 0,
             sequence: None,
+            next_sound_time: 0.,
         }
+    }
+    /// CHLMachineGun::WeaponSoundRealtime(SINGLE_NPC), which FireNPCPrimaryAttack of
+    /// weapon_smg1 and weapon_ar2 calls once per shot event: "make enough sound events to
+    /// fill up the next estimated think interval" `dt` (the weapon's last animation
+    /// interval, clamped to 0.2 s): up to two SINGLE_NPC sounds GetFireRate apart from
+    /// m_flNextSoundTime (clamped to now). Returns their start times; later ones play
+    /// ahead of the next think (WeaponSound's soundtime). Only one bullet is fired (the
+    /// SDK's FIXME), so an NPC burst sounds faster than it shoots.
+    pub fn realtime_sound_times(&mut self, now: f64, dt: f32, fire_rate: f32) -> Vec<f64> {
+        if self.next_sound_time < now {
+            self.next_sound_time = now;
+        }
+        let until = now + f64::from(dt.clamp(0., 0.2));
+        let mut times = Vec::new();
+        for _ in 0..2 {
+            if self.next_sound_time < until {
+                times.push(self.next_sound_time);
+                self.next_sound_time += f64::from(fire_rate);
+            }
+        }
+        times
     }
     /// Weapon_SetActivity(weapon activity, NPC sequence duration): the world model's
     /// sequence for the activity, ACT_VM_IDLE when the model has none
@@ -470,6 +494,11 @@ impl NpcWeapon {
             .map(|e| (e.name.clone(), e.id, e.options.clone()))
             .collect()
     }
+}
+/// CHLMachineGun subclasses (their NPC shots use WeaponSoundRealtime; the shotgun and
+/// pistol call WeaponSound(SINGLE_NPC) once).
+pub fn machine_gun(class: &str) -> bool {
+    matches!(class, "weapon_smg1" | "weapon_ar2")
 }
 /// The rig key of a weapon world model in `World::rigs`.
 pub fn rig_key(world_model: &str) -> String {
@@ -783,6 +812,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn machine_gun_npc_shots_fill_the_think_interval_with_realtime_sounds() {
+        let mut smg = NpcWeapon::equip(&builtin("weapon_smg1").unwrap());
+        // A soldier's shot every 0.21 s (shootSMG1s, 0.133 s, ends at the second think):
+        // two sounds 0.075 apart per shot.
+        let close = |a: &[f64], b: &[f64]| {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
+        };
+        assert!(close(
+            &smg.realtime_sound_times(1., 0.105, 0.075),
+            &[1., 1.075]
+        ));
+        assert!(close(
+            &smg.realtime_sound_times(1.21, 0.105, 0.075),
+            &[1.21, 1.285]
+        ));
+        // A cop's shot every think (shoot_smg1, 0.1 s): the pending time continues.
+        assert!(close(
+            &smg.realtime_sound_times(1.315, 0.105, 0.075),
+            &[1.36]
+        ));
+        assert!(close(
+            &smg.realtime_sound_times(1.42, 0.105, 0.075),
+            &[1.435, 1.51]
+        ));
+        // dt clamps to 0.2; the AR2 (0.1 s) still fits two in a 0.105 s think.
+        let mut ar2 = NpcWeapon::equip(&builtin("weapon_ar2").unwrap());
+        assert!(close(&ar2.realtime_sound_times(2., 0.105, 0.1), &[2., 2.1]));
+        assert!(close(&ar2.realtime_sound_times(3., 5., 0.1), &[3., 3.1]));
+        assert!(machine_gun("weapon_smg1") && machine_gun("weapon_ar2"));
+        assert!(!machine_gun("weapon_shotgun") && !machine_gun("weapon_pistol"));
+    }
     #[test]
     fn metropolice_pistol_regulator_scales_with_distance() {
         let spec = fire_spec("weapon_pistol").unwrap();

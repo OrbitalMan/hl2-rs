@@ -32,6 +32,9 @@ pub struct SceneMotor<'a> {
     pub idle_angry: bool,
     /// The active weapon's class (Weapon_TranslateActivity).
     pub weapon: Option<String>,
+    /// CNPC_Combine::NPC_TranslateActivity: ACT_RANGE_ATTACK2 is the grenade throw
+    /// (ACT_COMBINE_THROW_GRENADE; combine_soldier has no ACT_RANGE_ATTACK2 sequence).
+    pub combine: bool,
     /// Weapon_SetActivity requests of this think: (weapon activity, NPC sequence
     /// duration), applied by the runtime to the weapon's world model.
     pub weapon_activity: Option<(String, f32)>,
@@ -71,6 +74,8 @@ impl Motor for SceneMotor<'_> {
         let weapon = self.weapon.as_deref().unwrap_or("");
         let activity = if self.idle_angry && activity == "ACT_IDLE" {
             "ACT_IDLE_ANGRY"
+        } else if self.combine && activity == "ACT_RANGE_ATTACK2" {
+            "ACT_COMBINE_THROW_GRENADE"
         } else {
             activity
         };
@@ -82,7 +87,8 @@ impl Motor for SceneMotor<'_> {
             .ai_set_activity(self.world, self.entity, activity)
             && self.weapon.is_some()
         {
-            let duration = self.scene.ai_sequence_remaining(self.entity) as f32;
+            // Weapon_SetActivity(weapon activity, SequenceDuration).
+            let duration = self.scene.ai_sequence_duration(self.world, self.entity);
             self.weapon_activity = Some((activity.to_owned(), duration));
         }
     }

@@ -132,9 +132,28 @@ pub fn load_sprite(vfs: &Vfs, material: &str) -> Result<Sprite> {
         ) {
             3
         } else {
-            material_kind(vfs, material)
+            sprite_kind(vfs, material)
         },
     })
+}
+/// Kind 5: src + dest * (1 - a), the sum of sprite_dx9.cpp's two kRenderTransAlphaAdd
+/// passes (src*a + dest*(1-a), then src*(1-a) + dest).
+pub const KIND_ALPHA_ADD: usize = 5;
+/// "Sprite" shader materials blend by $spriterendermode (sprite_dx9.cpp): kRenderGlow,
+/// kRenderTransAdd and kRenderWorldGlow add src*a; kRenderTransAlphaAdd (8:
+/// effects/gunshiptracer) is premultiplied. Before this, the AR2 tracer drew opaque and
+/// showed its texture's black background.
+fn sprite_kind(vfs: &Vfs, name: &str) -> usize {
+    let mode = vfs
+        .material_value(name, "$spriterendermode")
+        .ok()
+        .flatten()
+        .and_then(|value| value.trim().parse::<i32>().ok());
+    match mode {
+        Some(3 | 5 | 9) => 3,
+        Some(8) => KIND_ALPHA_ADD,
+        _ => material_kind(vfs, name),
+    }
 }
 /// Preserves the retained host's exact legacy flag precedence.
 pub fn material_kind(vfs: &Vfs, name: &str) -> usize {

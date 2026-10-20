@@ -484,6 +484,9 @@ impl Gameplay {
                         .set_equipment(id, &request.classname, &request.equipment);
                     self.ai
                         .set_player_disposition(id, request.allegiance.disposition());
+                    if let Some(grenades) = request.grenades {
+                        self.ai.set_grenades(id, grenades);
+                    }
                     // The new weapon's idle (Weapon_TranslateActivity of ACT_IDLE); the AI
                     // picks its own activities from here when it runs this class.
                     let idle = hl2_simulation::entities::weapon_idle_activity(&request.equipment);

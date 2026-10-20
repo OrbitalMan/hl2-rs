@@ -191,6 +191,14 @@ fn effect_blend(kind: usize) -> Option<BlendState> {
             },
             alpha: BlendComponent::OVER,
         }),
+        hl2_simulation::projectile_visuals::KIND_ALPHA_ADD => Some(BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent::OVER,
+        }),
         4 => Some(BlendState {
             color: BlendComponent {
                 src_factor: BlendFactor::Dst,
@@ -298,7 +306,12 @@ pub fn install(
             effects.add(EffectMaterial {
                 texture,
                 parameters: Vec4::new(
-                    if sprite.kind == 1 { 0.5 } else { 0.001 },
+                    // kRenderTransAlphaAdd still adds the colour of zero-alpha texels.
+                    match sprite.kind {
+                        1 => 0.5,
+                        hl2_simulation::projectile_visuals::KIND_ALPHA_ADD => -1.,
+                        _ => 0.001,
+                    },
                     f32::from(sprite.kind == 0),
                     1.,
                     0.,

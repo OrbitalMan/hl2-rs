@@ -1299,15 +1299,14 @@ impl Scene {
         if !self.animate(world, id, activity, false) {
             return false;
         }
-        let duration = world
+        let finish = world
             .model_instances
             .iter()
             .find(|i| i.entity == Some(id))
             .and_then(|i| world.rigs.get(&i.asset_key()))
             .and_then(|rig| rig.clips.get(&self.states[id].animation))
-            .map_or(0., |clip| clip.duration().max(0.015));
-        self.ai_sequence_end
-            .insert(id, self.time + f64::from(duration));
+            .map_or(0., sequence_finish);
+        self.ai_sequence_end.insert(id, self.time + finish);
         true
     }
     /// Animation events (name, id) of the actor's current sequence whose time falls in
@@ -1326,22 +1325,32 @@ impl Scene {
             return Vec::new();
         };
         let duration = f64::from(clip.duration().max(0.015));
+        // DispatchAnimEvents: once a non-looping sequence is finished (flEnd = 1.01),
+        // its remaining events all fire.
+        let finished = state.animation_started + sequence_finish(clip);
         clip.events
             .iter()
             .filter(|e| {
-                let at = state.animation_started + f64::from(e.cycle) * duration;
+                let mut at = state.animation_started + f64::from(e.cycle) * duration;
+                if !clip.looping {
+                    at = at.min(finished);
+                }
                 at > from && at <= to
             })
             .map(|e| (e.name.clone(), e.id))
             .collect()
     }
-    /// Seconds until the AI's current sequence has played once.
-    pub fn ai_sequence_remaining(&self, id: usize) -> f64 {
-        self.ai_sequence_end
-            .get(&id)
-            .map_or(0., |end| (end - self.time).max(0.))
+    /// SequenceDuration of the actor's current sequence (0 without a clip).
+    pub fn ai_sequence_duration(&self, world: &World, id: usize) -> f32 {
+        world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|rig| rig.clips.get(&self.states.get(id)?.animation))
+            .map_or(0., |clip| clip.duration().max(0.015))
     }
-    /// The AI's current sequence has played once (m_fSequenceFinished).
+    /// The AI's current sequence is finished (m_bSequenceFinished, `sequence_finish`).
     pub fn ai_activity_finished(&self, id: usize) -> bool {
         self.ai_sequence_end
             .get(&id)
@@ -3288,9 +3297,44 @@ pub(crate) fn glob(pattern: &str, value: &str) -> bool {
         pattern == value
     }
 }
+/// Seconds after its start when CBaseAnimating::StudioFrameAdvanceInternal marks a
+/// sequence finished (m_bSequenceFinished, read by IsActivityFinished): at its end, or
+/// for a non-looping sequence once the cycle passes GetLastVisibleCycle (one minus
+/// fadeouttime times the cycle rate), i.e. fadeouttime (0.2 s on the HL2 shoot/reload
+/// sequences) before the end; a sequence shorter than its fade-out finishes at the first frame advance. Native
+/// NPCs therefore restart 0.1-0.28 s shoot sequences every think (0.1 s), not once
+/// they play through.
+pub fn sequence_finish(clip: &modkit_core::animation::Clip) -> f64 {
+    let duration = clip.duration().max(0.015);
+    if clip.looping {
+        f64::from(duration)
+    } else {
+        f64::from((duration - clip.layer.fade_out).max(0.001))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sequences_finish_at_the_last_visible_cycle_like_studio_frame_advance() {
+        let clip = |frames: usize, fps: f32, looping: bool| modkit_core::animation::Clip {
+            events: Vec::new(),
+            fps,
+            looping,
+            frames: vec![Vec::new(); frames],
+            layer: modkit_core::animation::ClipLayer {
+                fade_out: 0.2,
+                ..Default::default()
+            },
+        };
+        // shootSMG1s (5 frames at 30 fps, 0.133 s): finished at the first advance.
+        assert!((sequence_finish(&clip(5, 30., false)) - 0.001).abs() < 1e-6);
+        // reload (66 frames at 30 fps, 2.167 s): 0.2 s before the end.
+        assert!((sequence_finish(&clip(66, 30., false)) - (65. / 30. - 0.2)).abs() < 1e-5);
+        // Looping sequences finish when they wrap.
+        assert!((sequence_finish(&clip(66, 30., true)) - 65. / 30.).abs() < 1e-5);
+    }
     #[test]
     fn runtime_entities_append_after_map_entities() {
         // Synthetic: one map entity, then a spawned cop.

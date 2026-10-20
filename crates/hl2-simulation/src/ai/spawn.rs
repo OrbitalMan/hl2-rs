@@ -232,6 +232,9 @@ pub struct SpawnRequest {
     pub allegiance: Allegiance,
     /// The overlay entry (citizen variants); empty: `classname`.
     pub variant: String,
+    /// The F4 NumGrenades keyvalue for classes that read it (CNPC_Combine); None: the
+    /// entity's own value (npc_create: none, so 0 like native).
+    pub grenades: Option<i32>,
 }
 impl SpawnRequest {
     /// The pool entry this request draws from.
@@ -332,6 +335,7 @@ impl Console {
                     aimed: c == "npc_create_aimed",
                     allegiance: Allegiance::Default,
                     variant,
+                    grenades: None,
                 })))
             }
             _ => Ok(None),
@@ -425,6 +429,8 @@ enum OptionRow {
     /// A weapon ("" = none).
     Weapon(String),
     Allegiance,
+    /// NumGrenades (classes that read it).
+    Grenades,
     Notarget,
     Ai,
 }
@@ -442,6 +448,13 @@ pub struct Panel {
     pub classes: Vec<PanelRow>,
     pub options: Vec<PanelRow>,
 }
+/// The F4 grenade counts Enter cycles through (a developer choice: native npc_create
+/// spawns soldiers with NumGrenades 0, so they never throw; maps set it per soldier).
+pub const GRENADE_CHOICES: &[i32] = &[0, 1, 2, 3, 5, 10, 99];
+/// Classes whose spawn reads the NumGrenades keyvalue (CNPC_Combine::KeyValue).
+pub fn reads_num_grenades(class: &str) -> bool {
+    class.eq_ignore_ascii_case("npc_combine_s")
+}
 /// Class rows shown at once; the list scrolls to keep the selection visible.
 pub const VISIBLE_CLASSES: usize = 14;
 
@@ -457,6 +470,8 @@ pub struct Overlay {
     /// The chosen weapon ("" = none).
     pub weapon: String,
     pub allegiance: Allegiance,
+    /// The NumGrenades given to classes that read it (`reads_num_grenades`).
+    pub grenades: i32,
     /// Usable weapons per class (bits_CAP_USE_WEAPONS + Weapon_CanUse on the model the
     /// spawn uses); classes missing here have none.
     usable: std::collections::BTreeMap<String, Vec<String>>,
@@ -484,7 +499,11 @@ impl Overlay {
                 .cloned()
                 .map(OptionRow::Weapon),
         );
-        rows.extend([OptionRow::Allegiance, OptionRow::Notarget, OptionRow::Ai]);
+        rows.push(OptionRow::Allegiance);
+        if reads_num_grenades(self.class_name()) {
+            rows.push(OptionRow::Grenades);
+        }
+        rows.extend([OptionRow::Notarget, OptionRow::Ai]);
         rows
     }
     fn select_class(&mut self, class: usize) {
@@ -537,6 +556,14 @@ impl Overlay {
                             self.allegiance = self.allegiance.next();
                             return None;
                         }
+                        OptionRow::Grenades => {
+                            let next = GRENADE_CHOICES
+                                .iter()
+                                .position(|&n| n == self.grenades)
+                                .map_or(0, |i| (i + 1) % GRENADE_CHOICES.len());
+                            self.grenades = GRENADE_CHOICES[next];
+                            return None;
+                        }
                         OptionRow::Notarget => return Some(OverlayCommand::ToggleNotarget),
                         OptionRow::Ai => return Some(OverlayCommand::ToggleAi),
                         OptionRow::Weapon(_) => {}
@@ -557,6 +584,7 @@ impl Overlay {
             aimed: true,
             allegiance: self.allegiance,
             variant: self.label().into(),
+            grenades: reads_num_grenades(self.class_name()).then_some(self.grenades),
         }
     }
     /// The panel to draw; `ai` and `notarget` are the host's live switches.
@@ -616,6 +644,9 @@ impl Overlay {
                     ),
                     OptionRow::Allegiance => {
                         (format!("allegiance: {}", self.allegiance.label()), false)
+                    }
+                    OptionRow::Grenades => {
+                        (format!("grenades: {} (NumGrenades)", self.grenades), false)
                     }
                     OptionRow::Notarget => (
                         format!("notarget: {}", if notarget { "ON" } else { "off" }),
@@ -878,5 +909,33 @@ mod tests {
             o.key(OverlayKey::Down);
         }
         assert_eq!(o.request().equipment, "weapon_smg1");
+        assert_eq!(o.request().grenades, Some(0));
+        // Their options add NumGrenades after the allegiance; Enter cycles the count.
+        let texts: Vec<String> = o
+            .panel(true, false)
+            .options
+            .into_iter()
+            .map(|r| r.text)
+            .collect();
+        assert_eq!(texts[3], "allegiance: foe (hates the player)");
+        assert_eq!(texts[4], "grenades: 0 (NumGrenades)");
+        o.key(OverlayKey::Right);
+        for _ in 0..3 {
+            o.key(OverlayKey::Down);
+        }
+        for expected in [1, 2, 3, 5, 10, 99, 0, 1] {
+            assert_eq!(o.key(OverlayKey::Enter), None);
+            assert_eq!(o.grenades, expected);
+        }
+        assert_eq!(o.request().grenades, Some(1));
+        // Classes that never read NumGrenades neither show nor send it.
+        o.key(OverlayKey::Left);
+        o.key(OverlayKey::Up);
+        assert!(o
+            .panel(true, false)
+            .options
+            .iter()
+            .all(|r| !r.text.starts_with("grenades")));
+        assert_eq!(o.request().grenades, None);
     }
 }

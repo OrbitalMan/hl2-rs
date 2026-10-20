@@ -169,6 +169,8 @@ pub struct Context {
     pub enemy_lkp: Option<Vec3>,
     /// The active weapon's (min, max) range (MIN/MAX of m_fMin/MaxRange1/2).
     pub weapon_range: Option<(f32, f32)>,
+    /// The active weapon's GetMinBurst, GetMaxBurst and GetFireRate.
+    pub weapon_burst: Option<(u32, u32, f32)>,
     /// The best sound's volume (CSound::Volume), with `best_sound`.
     pub best_sound_volume: f32,
     /// m_flDistTooFar (1024; SF_NPC_LONG_RANGE: 1e9).
@@ -416,13 +418,14 @@ impl AiNpc {
             ..Default::default()
         }
     }
-    /// The enemy's current position, else its last known position from memory.
+    /// GetEnemyLKP: the enemy's last known position from memory (which follows the enemy
+    /// while seen and for AI_FREE_KNOWLEDGE_DURATION after), else its current position.
+    /// The face and attack tasks aim here; before, they tracked an unseen enemy forever.
     fn enemy_position(&self, ctx: &Context) -> Option<Vec3> {
-        ctx.enemy.map(|e| e.1).or_else(|| {
-            self.enemy
-                .and_then(|e| self.enemies.find(Some(e)))
-                .map(|m| m.last_known)
-        })
+        self.enemy
+            .and_then(|e| self.enemies.find(Some(e)))
+            .map(|m| m.last_known)
+            .or(ctx.enemy.map(|e| e.1))
     }
     /// SetSchedule from outside the selection (scripted schedules).
     pub fn force_schedule(&mut self, name: &str) {
@@ -539,10 +542,20 @@ impl AiNpc {
             let current = self.schedule.as_ref().and_then(|n| schedules.0.get(n));
             let failed = self.conditions.has(COND_TASK_FAILED);
             let custom = behavior.custom_interrupts(self);
+            let resting = self
+                .shot_regulator
+                .as_ref()
+                .is_some_and(|r| r.is_in_rest_interval(ctx.now));
             let valid = current.is_some_and(|s| {
+                let mut interrupts = s.interrupts.union(custom);
+                // CAI_BaseHumanoid::BuildScheduleTestBits: COND_CAN_RANGE_ATTACK1 does not
+                // interrupt while the shot regulator rests.
+                if resting {
+                    interrupts.clear(COND_CAN_RANGE_ATTACK1);
+                }
                 !failed
                     && !self.conditions.has(COND_SCHEDULE_DONE)
-                    && !self.conditions.intersects(s.interrupts.union(custom))
+                    && !self.conditions.intersects(interrupts)
             });
             if !valid {
                 let next = if failed {
@@ -735,7 +748,8 @@ impl AiNpc {
                 Complete
             }
             "TASK_STORE_ENEMY_POSITION_IN_SAVEPOSITION" => {
-                self.save_position = self.enemy_position(ctx);
+                // GetEnemy()->GetAbsOrigin(), not the LKP.
+                self.save_position = ctx.enemy.map(|e| e.1);
                 Complete
             }
             "TASK_STORE_BESTSOUND_REACTORIGIN_IN_SAVEPOSITION" => {
@@ -975,8 +989,20 @@ impl AiNpc {
             "TASK_RANGE_ATTACK1" if self.shot_regulator.is_some() => {
                 self.run_regulated_attack(ctx, motor).unwrap_or(Complete)
             }
+            "TASK_RELOAD" => {
+                if motor.activity_finished() {
+                    // RunAttackTask: a reload ends with GetShotRegulator()->Reset(false),
+                    // a fresh burst after a rest.
+                    if let Some(regulator) = self.shot_regulator.as_mut() {
+                        regulator.reset(false, ctx.now);
+                    }
+                    Complete
+                } else {
+                    Running
+                }
+            }
             "TASK_PLAY_SEQUENCE" | "TASK_RANGE_ATTACK1" | "TASK_RANGE_ATTACK2"
-            | "TASK_MELEE_ATTACK1" | "TASK_MELEE_ATTACK2" | "TASK_RELOAD" | "TASK_BIG_FLINCH"
+            | "TASK_MELEE_ATTACK1" | "TASK_MELEE_ATTACK2" | "TASK_BIG_FLINCH"
             | "TASK_SMALL_FLINCH" => {
                 if motor.activity_finished() {
                     Complete
