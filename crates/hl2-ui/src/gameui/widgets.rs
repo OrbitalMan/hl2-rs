@@ -10,6 +10,8 @@
 //! 1:1 screen pixels, which becomes unreadably small on high-resolution canvases (documented
 //! deviation).
 
+use std::borrow::Cow;
+
 use crate::canvas::{draw_texture_ex, Canvas, Color, DrawTextureParams, Rect, Texture2D, WHITE};
 use crate::hud::FontFace;
 use glam::{vec2, Vec2};
@@ -539,6 +541,11 @@ impl Painter<'_> {
                     .fold(0.0, f32::max)
             },
         )
+    }
+
+    /// Truncates `text` with an ellipsis so its width fits within `max_w` using the current font.
+    pub fn truncate_ellipsis<'a>(&self, text: &'a str, max_w: f32, bold: bool) -> Cow<'a, str> {
+        truncate_ellipsis(text, max_w, |s| self.text_width(s, bold))
     }
 
     /// Draws text with its cell top-left at a layout position. Multi-line text is split on newlines.
@@ -1393,14 +1400,17 @@ impl Painter<'_> {
                 edge,
             );
         }
-        let inner = Rect::new(rect.x + 3., rect.y, rect.w - 6., rect.h);
+        let inner = Rect::new(rect.x + 3., rect.y, (rect.w - 6.).max(0.), rect.h);
         let color = if enabled {
             self.theme.text
         } else {
             self.theme.text_disabled
         };
-        self.text_in(text, inner, Align::Left, color, false);
-        if caret {
+        if !caret {
+            let display = self.truncate_ellipsis(text, inner.w, false);
+            self.text_in(&display, inner, Align::Left, color, false);
+        } else {
+            self.text_in(text, inner, Align::Left, color, false);
             let x = inner.x + self.text_width(text, false) + 1.;
             self.fill(Rect::new(x, rect.y + 4., 1., rect.h - 8.), self.theme.text);
         }
@@ -1408,32 +1418,51 @@ impl Painter<'_> {
 
     /// `ComboBox`: a text entry with a drop-down arrow button on its right edge. A focused combo
     /// shows its text selected (SDK `ComboBox` selects all its text on focus).
+    ///
+    /// The text field is strictly bounded before the arrow button (`SetDrawWidth(wide - bwide)`
+    /// per Source SDK `ComboBox`), truncating overflowing strings with an ellipsis (`...`) so text
+    /// and selection highlights never collide with the arrow or exceed the control bounds.
     pub fn combo(&self, rect: Rect, text: &str, enabled: bool, armed: bool, focused: bool) {
+        let button_w = rect.h;
+        let button = Rect::new(
+            rect.x + rect.w - button_w,
+            rect.y + 1.,
+            button_w - 1.,
+            rect.h - 2.,
+        );
+        let text_inset = 3.;
+        let text_padding_right = 2.;
+        let max_text_w = (button.x - text_padding_right - (rect.x + text_inset)).max(0.);
+        let inner = Rect::new(rect.x + text_inset, rect.y, max_text_w, rect.h);
+
+        let display_text = self.truncate_ellipsis(text, max_text_w, false);
+        let display_w = self.text_width(&display_text, false);
+
+        self.fill(rect, self.theme.entry_bg);
+        self.sunken(rect);
+
         if focused && enabled {
-            self.fill(rect, self.theme.entry_bg);
-            self.sunken(rect);
-            let inner = Rect::new(rect.x + 3., rect.y, rect.w - 6., rect.h);
-            let width = self.text_width(text, false);
+            let sel_w = (display_w + 2.).min(max_text_w + 1.);
             self.fill(
-                Rect::new(inner.x - 1., rect.y + 3., width + 2., rect.h - 6.),
+                Rect::new(inner.x - 1., rect.y + 3., sel_w, rect.h - 6.),
                 self.theme.entry_selected_bg,
             );
             self.text_in(
-                text,
+                &display_text,
                 inner,
                 Align::Left,
                 self.theme.entry_selected_text,
                 false,
             );
         } else {
-            self.text_entry(rect, text, enabled, false);
+            let color = if enabled {
+                self.theme.text
+            } else {
+                self.theme.text_disabled
+            };
+            self.text_in(&display_text, inner, Align::Left, color, false);
         }
-        let button = Rect::new(
-            rect.x + rect.w - rect.h,
-            rect.y + 1.,
-            rect.h - 1.,
-            rect.h - 2.,
-        );
+
         let color = if !enabled {
             self.theme.text_disabled
         } else if armed {
@@ -1470,6 +1499,12 @@ impl Painter<'_> {
         self.fill(rect, self.theme.menu_bg);
         self.raised(rect);
         let rows = (rect.h / MENU_ROW).floor() as usize;
+        let has_scroll = items.len() > rows;
+        let max_item_w = if has_scroll {
+            (rect.w - 2. - 12. - SCROLLBAR_WIDTH).max(0.)
+        } else {
+            (rect.w - 2. - 12.).max(0.)
+        };
         for (row, (index, item)) in items.iter().enumerate().skip(first).take(rows).enumerate() {
             let line = Rect::new(
                 rect.x + 1.,
@@ -1483,10 +1518,11 @@ impl Painter<'_> {
             } else {
                 self.theme.text
             };
-            let text = Rect::new(line.x + 6., line.y, line.w - 12., line.h);
-            self.text_in(item, text, Align::Left, color, false);
+            let text_rect = Rect::new(line.x + 6., line.y, max_item_w, line.h);
+            let display = self.truncate_ellipsis(item, max_item_w, false);
+            self.text_in(&display, text_rect, Align::Left, color, false);
         }
-        if items.len() > rows {
+        if has_scroll {
             self.scroll_bar(
                 Rect::new(
                     rect.x + rect.w - SCROLLBAR_WIDTH,
@@ -2250,6 +2286,61 @@ pub fn wrap(text: &str, width: f32, measure: impl Fn(&str) -> f32) -> Vec<String
         lines.push(line);
     }
     lines
+}
+
+/// Truncates `text` with an ellipsis (`"..."`) so that its measured width does not exceed `max_w`
+/// (Source SDK `TextEntry::NeedsEllipses`).
+///
+/// If `text` fits within `max_w`, it is returned unchanged without allocation (`Cow::Borrowed`).
+/// If `max_w` cannot even fit the ellipsis, as many characters as can fit without an ellipsis are returned.
+pub fn truncate_ellipsis<'a>(
+    text: &'a str,
+    max_w: f32,
+    measure: impl Fn(&str) -> f32,
+) -> Cow<'a, str> {
+    if max_w <= 0. || text.is_empty() {
+        return if max_w <= 0. && !text.is_empty() {
+            Cow::Borrowed("")
+        } else {
+            Cow::Borrowed(text)
+        };
+    }
+    if measure(text) <= max_w {
+        return Cow::Borrowed(text);
+    }
+
+    const ELLIPSIS: &str = "...";
+    let dots_w = measure(ELLIPSIS);
+
+    if max_w >= dots_w {
+        let budget = max_w - dots_w;
+        let mut last_valid_end = 0;
+        for (i, ch) in text.char_indices() {
+            let next_end = i + ch.len_utf8();
+            if measure(&text[..next_end]) <= budget {
+                last_valid_end = next_end;
+            } else {
+                break;
+            }
+        }
+        if last_valid_end == 0 {
+            Cow::Borrowed(ELLIPSIS)
+        } else {
+            Cow::Owned(format!("{}{}", &text[..last_valid_end], ELLIPSIS))
+        }
+    } else {
+        // Not even the ellipsis fits. Fit as many characters as possible without it.
+        let mut last_valid_end = 0;
+        for (i, ch) in text.char_indices() {
+            let next_end = i + ch.len_utf8();
+            if measure(&text[..next_end]) <= max_w {
+                last_valid_end = next_end;
+            } else {
+                break;
+            }
+        }
+        Cow::Borrowed(&text[..last_valid_end])
+    }
 }
 
 /// Continuous slider model: maps a value range to the track and back.
@@ -3365,5 +3456,248 @@ mod tests {
         let scale_800_1x = Painter::scale_for_window(800., 1.0);
         assert_eq!(scale_800_1x, Painter::scale_for(800.));
         assert_eq!(scale_800_1x, 800. / 720.);
+    }
+
+    #[test]
+    fn truncate_ellipsis_truncates_long_strings_with_ellipsis() {
+        let char_measure = |s: &str| s.chars().count() as f32 * 10.;
+
+        // 1. String fitting within bounds is returned unchanged without allocation (Cow::Borrowed)
+        let fits = truncate_ellipsis("1920 x 1080", 150., char_measure);
+        assert_eq!(fits, "1920 x 1080");
+        assert!(matches!(fits, Cow::Borrowed(_)));
+
+        // 2. Exact fit is returned unchanged
+        let exact = truncate_ellipsis("12345", 50., char_measure);
+        assert_eq!(exact, "12345");
+        assert!(matches!(exact, Cow::Borrowed(_)));
+
+        // 3. Overflowing string is truncated with ellipsis, total width <= max_w
+        let truncated = truncate_ellipsis("Fit Display (1920 x 1080)", 100., char_measure);
+        assert_eq!(truncated, "Fit Dis...");
+        assert_eq!(char_measure(&truncated), 100.);
+        assert!(matches!(truncated, Cow::Owned(_)));
+
+        // 4. Multi-byte UTF-8 string with umlauts and symbols truncates on valid character boundaries
+        let utf8_str = "Überragende Auflösung © 2026";
+        let utf8_trunc = truncate_ellipsis(utf8_str, 80., char_measure);
+        assert!(utf8_trunc.ends_with("..."));
+        assert!(char_measure(&utf8_trunc) <= 80.);
+
+        // 5. Width only allows the ellipsis itself
+        let only_dots = truncate_ellipsis("Hello World", 30., char_measure);
+        assert_eq!(only_dots, "...");
+        assert!(matches!(only_dots, Cow::Borrowed(_)));
+
+        // 6. Width smaller than ellipsis width: fits as many characters as possible without ellipsis
+        let small = truncate_ellipsis("Hello World", 20., char_measure);
+        assert_eq!(small, "He");
+        assert_eq!(char_measure(&small), 20.);
+        assert!(matches!(small, Cow::Borrowed(_)));
+
+        // 7. Zero width returns empty string
+        let zero = truncate_ellipsis("Hello", 0., char_measure);
+        assert_eq!(zero, "");
+
+        // 8. Negative width returns empty string
+        let neg = truncate_ellipsis("Hello", -10., char_measure);
+        assert_eq!(neg, "");
+
+        // 9. Empty string returns empty string
+        let empty = truncate_ellipsis("", 50., char_measure);
+        assert_eq!(empty, "");
+    }
+
+    #[test]
+    fn combobox_text_and_selection_never_overlap_arrow_or_overflow_bounds() {
+        let canvas = Canvas::default();
+        let font_bytes =
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/ProggyClean.ttf"));
+        let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
+        let fonts = Fonts {
+            text: Some(font),
+            bold: None,
+        };
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        let rect = Rect::new(36., 48., 160., 24.);
+        let button_w = rect.h;
+        let button_x = rect.x + rect.w - button_w; // 36 + 160 - 24 = 172.
+
+        let long_text = "Fit Display (1920 x 1080)";
+        assert!(
+            painter.text_width(long_text, false) > button_x - rect.x - 5.,
+            "long_text width must exceed available combobox text width"
+        );
+
+        // 1. Focused combobox: selection rectangle and text glyphs must stay strictly before button
+        painter.combo(rect, long_text, true, false, true);
+        let quads_focused = canvas.drain();
+        assert!(!quads_focused.is_empty());
+
+        let sel_quads: Vec<_> = quads_focused
+            .iter()
+            .filter(|q| q.color == theme.entry_selected_bg)
+            .collect();
+        assert_eq!(sel_quads.len(), 1, "exactly one selection highlight quad");
+        let sel = sel_quads[0];
+        assert!(
+            sel.destination.x >= rect.x,
+            "selection starts inside combobox"
+        );
+        assert!(
+            sel.destination.x + sel.destination.w <= button_x,
+            "selection right edge ({}) must not overlap button.x ({})",
+            sel.destination.x + sel.destination.w,
+            button_x
+        );
+        assert!(
+            sel.destination.x + sel.destination.w <= rect.x + rect.w,
+            "selection right edge must not exceed combobox bounds"
+        );
+
+        let glyph_quads_focused: Vec<_> = quads_focused
+            .iter()
+            .filter(|q| q.texture.is_some())
+            .collect();
+        assert!(
+            !glyph_quads_focused.is_empty(),
+            "focused combobox emits glyph quads"
+        );
+        for quad in &glyph_quads_focused {
+            assert!(quad.destination.x >= rect.x, "glyph starts inside combobox");
+            assert!(
+                quad.destination.x + quad.destination.w <= button_x,
+                "glyph right edge ({}) must not overlap button.x ({})",
+                quad.destination.x + quad.destination.w,
+                button_x
+            );
+            assert!(
+                quad.destination.x + quad.destination.w <= rect.x + rect.w,
+                "glyph right edge must not exceed combobox bounds"
+            );
+        }
+
+        // 2. Unfocused combobox: text glyphs must stay strictly before button
+        painter.combo(rect, long_text, true, false, false);
+        let quads_unfocused = canvas.drain();
+        let glyph_quads_unfocused: Vec<_> = quads_unfocused
+            .iter()
+            .filter(|q| q.texture.is_some())
+            .collect();
+        assert!(
+            !glyph_quads_unfocused.is_empty(),
+            "unfocused combobox emits glyph quads"
+        );
+        for quad in &glyph_quads_unfocused {
+            assert!(
+                quad.destination.x + quad.destination.w <= button_x,
+                "unfocused glyph right edge ({}) must not overlap button.x ({})",
+                quad.destination.x + quad.destination.w,
+                button_x
+            );
+            assert!(
+                quad.destination.x + quad.destination.w <= rect.x + rect.w,
+                "unfocused glyph right edge must not exceed combobox bounds"
+            );
+        }
+
+        // 3. Disabled combobox: text glyphs stay strictly before button and use disabled color
+        painter.combo(rect, long_text, false, false, false);
+        let quads_disabled = canvas.drain();
+        let glyph_quads_disabled: Vec<_> = quads_disabled
+            .iter()
+            .filter(|q| q.texture.is_some())
+            .collect();
+        assert!(
+            !glyph_quads_disabled.is_empty(),
+            "disabled combobox emits glyph quads"
+        );
+        for quad in &glyph_quads_disabled {
+            assert_eq!(quad.color, theme.text_disabled);
+            assert!(
+                quad.destination.x + quad.destination.w <= button_x,
+                "disabled glyph right edge ({}) must not overlap button.x ({})",
+                quad.destination.x + quad.destination.w,
+                button_x
+            );
+        }
+    }
+
+    #[test]
+    fn menu_list_items_never_overlap_scrollbar_or_overflow_bounds() {
+        let canvas = Canvas::default();
+        let font_bytes =
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/ProggyClean.ttf"));
+        let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
+        let fonts = Fonts {
+            text: Some(font),
+            bold: None,
+        };
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        let rect = Rect::new(36., 72., 160., 80.);
+        let long_item = "3840 x 2160 (16:9 Widescreen Ultra High Definition 4K)".to_string();
+        let items = vec![
+            long_item.clone(),
+            "1920 x 1080".to_string(),
+            "1280 x 720".to_string(),
+            "1024 x 768".to_string(),
+            "800 x 600".to_string(),
+            "640 x 480".to_string(),
+        ];
+
+        // 1. List with scrollbar (items.len() > rows): glyphs must not overlap scrollbar
+        let rows = (rect.h / MENU_ROW).floor() as usize;
+        assert!(items.len() > rows);
+        let scrollbar_x = rect.x + rect.w - SCROLLBAR_WIDTH;
+
+        painter.menu_list(rect, &items, 0, Some(0), None);
+        let quads_scroll = canvas.drain();
+        let glyphs_scroll: Vec<_> = quads_scroll
+            .iter()
+            .filter(|q| q.texture.is_some())
+            .collect();
+        assert!(!glyphs_scroll.is_empty());
+        for quad in &glyphs_scroll {
+            assert!(
+                quad.destination.x + quad.destination.w <= scrollbar_x,
+                "menu list item glyph ({}) must not overlap scrollbar_x ({})",
+                quad.destination.x + quad.destination.w,
+                scrollbar_x
+            );
+        }
+
+        // 2. List without scrollbar: glyphs must not exceed rect bounds
+        let short_items = vec![long_item, "1920 x 1080".to_string()];
+        painter.menu_list(rect, &short_items, 0, None, None);
+        let quads_no_scroll = canvas.drain();
+        let glyphs_no_scroll: Vec<_> = quads_no_scroll
+            .iter()
+            .filter(|q| q.texture.is_some())
+            .collect();
+        assert!(!glyphs_no_scroll.is_empty());
+        for quad in &glyphs_no_scroll {
+            assert!(
+                quad.destination.x + quad.destination.w <= rect.x + rect.w,
+                "menu list item glyph ({}) must not exceed rect.x + rect.w ({})",
+                quad.destination.x + quad.destination.w,
+                rect.x + rect.w
+            );
+        }
     }
 }
