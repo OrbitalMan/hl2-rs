@@ -91,6 +91,10 @@ const COMBINE_PLAYER: [&str; 2] = ["effects/combinemuzzle1_noz", "effects/combin
 const COMBINE_NPC: [&str; 2] = ["effects/combinemuzzle1", "effects/combinemuzzle2"];
 const DUST: &str = "particle/particle_smokegrenade";
 pub const TRACER_MATERIAL: &str = "effects/spark";
+/// The AR2Tracer line material (FX_PlayerAR2Tracer / FX_AR2Tracer, fx_hl2_tracers.cpp).
+pub const AR2_TRACER_MATERIAL: &str = "effects/gunshiptracer";
+/// AR2ImpactCallback's FX_AddQuad material.
+pub const AR2_IMPACT_MATERIAL: &str = "effects/combinemuzzle2_nocull";
 /// C_WeaponStunStick::DrawModel halo material.
 pub const STUNSTICK_GLOW: &str = "effects/stunstick";
 /// Every sprite material these effects draw (preloaded with the projectile sprites).
@@ -109,6 +113,8 @@ pub const MATERIALS: &[&str] = &[
     "effects/combinemuzzle1",
     "effects/combinemuzzle2",
     AR2_CORE,
+    AR2_TRACER_MATERIAL,
+    AR2_IMPACT_MATERIAL,
 ];
 /// m_pSpriteMuzzleFlash[0] (CTempEnts::LevelInit).
 const AR2_CORE: &str = "sprites/ar2_muzzle1";
@@ -388,6 +394,7 @@ pub struct Tracer {
     pub clip: f32,
     pub width: f32,
     pub life: f32,
+    pub material: &'static str,
 }
 /// TRACER_SPEED.
 const TRACER_SPEED: f32 = 5000.;
@@ -419,7 +426,117 @@ pub fn player_tracer(
         clip: 0.,
         width: r.float(0.5, 0.75),
         life: 0.01,
+        material: TRACER_MATERIAL,
     })
+}
+/// FX_PlayerAR2Tracer (AR2TracerCallback for the local player, same start offset as
+/// FX_PlayerTracer): none under 128 units; a static line from U(0, 8) along the shot,
+/// MIN(length, U(256, 1024)) long, half-width U(6, 12), 0.01 s, effects/gunshiptracer.
+pub fn player_ar2_tracer(
+    start: Vec3,
+    end: Vec3,
+    right: Vec3,
+    now: f64,
+    r: &mut impl Random,
+) -> Option<Tracer> {
+    let start = start + right * 4. - Vec3::Z * 0.5;
+    let delta = end - start;
+    let length = delta.length();
+    if length < 128. {
+        return None;
+    }
+    let direction = delta / length;
+    let from = start + direction * r.float(0., 8.);
+    let segment = length.min(r.float(256., 1024.));
+    Some(Tracer {
+        start: from,
+        direction,
+        born: now,
+        speed: 0.,
+        length: segment,
+        clip: 0.,
+        width: r.float(6., 12.),
+        life: 0.01,
+        material: AR2_TRACER_MATERIAL,
+    })
+}
+/// FX_AR2Tracer (UTIL_Tracer passes no velocity: the 8000 default): none under 128
+/// units; a U(128, 256) unit line moving at 8000, clipped to the end, half-width
+/// U(0.5, 1.5), alive until its tail passes the end.
+pub fn npc_ar2_tracer(start: Vec3, end: Vec3, now: f64, r: &mut impl Random) -> Option<Tracer> {
+    const AR2_TRACER_SPEED: f32 = 8000.;
+    let delta = end - start;
+    let distance = delta.length();
+    if distance < 128. {
+        return None;
+    }
+    let length = r.float(128., 256.);
+    Some(Tracer {
+        start,
+        direction: delta / distance,
+        born: now,
+        speed: AR2_TRACER_SPEED,
+        length,
+        clip: distance,
+        width: r.float(0.5, 1.5),
+        life: (distance + length) / AR2_TRACER_SPEED,
+        material: AR2_TRACER_MATERIAL,
+    })
+}
+/// An AR2Impact quad (CWeaponAR2::DoImpactEffect -> AR2ImpactCallback -> FX_AddQuad):
+/// on the surface 1 unit out along its normal, size U(24, 32) -> 0 with bias 0.75, alpha
+/// 1 -> 0 with bias 0.4, random yaw, white, 0.25 s, FXQUAD_BIAS_SCALE | FXQUAD_BIAS_ALPHA.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceQuad {
+    pub origin: Vec3,
+    pub normal: Vec3,
+    pub born: f64,
+    pub start_size: f32,
+    pub yaw_degrees: f32,
+}
+const AR2_IMPACT_LIFE: f32 = 0.25;
+/// mathlib Bias: x^(ln b / ln 0.5).
+fn bias(x: f32, amount: f32) -> f32 {
+    x.powf(amount.ln() / 0.5f32.ln())
+}
+impl SurfaceQuad {
+    pub fn ar2_impact(origin: Vec3, normal: Vec3, now: f64, r: &mut impl Random) -> Self {
+        Self {
+            origin,
+            normal: normal.normalize_or(Vec3::Z),
+            born: now,
+            start_size: r.float(24., 32.),
+            yaw_degrees: r.int(0, 360) as f32,
+        }
+    }
+    /// CFXQuad::Draw at `now`: (size, alpha), None once its life is over.
+    pub fn sample(&self, now: f64) -> Option<(f32, f32)> {
+        let age = (now - self.born) as f32;
+        if !(0. ..=AR2_IMPACT_LIFE).contains(&age) {
+            return None;
+        }
+        let t = age / AR2_IMPACT_LIFE;
+        let size = self.start_size * (1. - bias(t, 0.75));
+        let alpha = (1. - bias(t, 0.4)).clamp(0., 1.);
+        (alpha > 0.).then_some((size, alpha))
+    }
+    /// The quad's corners (VectorVectors of the normal rotated by the yaw), additive.
+    pub fn quad(&self, now: f64) -> Option<Quad> {
+        let (size, alpha) = self.sample(now)?;
+        let (right, up) = crate::npc_weapons::vector_vectors(self.normal);
+        let yaw = self.yaw_degrees.to_radians();
+        let quarter = (self.yaw_degrees + 90.).to_radians();
+        let r = (right * yaw.cos() - up * yaw.sin()) * (size * 0.5);
+        let u = (right * quarter.cos() - up * quarter.sin()) * (size * 0.5);
+        let o = self.origin;
+        let c = (255. * alpha).round() as u8;
+        Some(Quad {
+            material: AR2_IMPACT_MATERIAL.into(),
+            positions: [o + r - u, o - r - u, o - r + u, o + r + u],
+            color: [c, c, c, 255],
+            uv: [[1., 1.], [0., 1.], [0., 0.], [1., 0.]],
+        })
+    }
 }
 /// FX_Tracer: none under 256 units; a 64-128 unit line moving at TRACER_SPEED, clipped
 /// to the end, width U(0.75, 0.9), alive until its tail passes the end.
@@ -439,6 +556,7 @@ pub fn npc_tracer(start: Vec3, end: Vec3, now: f64, r: &mut impl Random) -> Opti
         clip: distance,
         width: r.float(0.75, 0.9),
         life: (distance + length) / TRACER_SPEED,
+        material: TRACER_MATERIAL,
     })
 }
 impl Tracer {
@@ -467,6 +585,7 @@ impl Tracer {
 pub struct MuzzleEffects {
     pub emitters: Vec<Emitter>,
     pub tracers: Vec<Tracer>,
+    pub surface_quads: Vec<SurfaceQuad>,
     pub flashes: u64,
     pub tracers_made: u64,
 }
@@ -504,6 +623,7 @@ impl MuzzleEffects {
         });
         self.tracers
             .retain(|t| ((now - t.born) as f32) <= t.life.max(0.016));
+        self.surface_quads.retain(|q| q.sample(now).is_some());
     }
     /// Camera-facing particle quads for the emitters of one space (`first_person`):
     /// `right`/`up` are that space's view axes; `scale` multiplies sizes and offsets.
@@ -553,12 +673,13 @@ impl MuzzleEffects {
                 let (a, b) = t.segment(now)?;
                 let cross = (b - a).cross(b - eye).normalize_or_zero() * t.width;
                 (cross != Vec3::ZERO).then(|| Quad {
-                    material: TRACER_MATERIAL.into(),
+                    material: t.material.into(),
                     positions: [a - cross, a + cross, b + cross, b - cross],
                     color: [255, 255, 255, 255],
                     uv: [[1., 0.], [0., 0.], [0., 1.], [1., 1.]],
                 })
             })
+            .chain(self.surface_quads.iter().filter_map(|q| q.quad(now)))
             .collect()
     }
 }
@@ -681,5 +802,28 @@ mod tests {
             "{p:?}"
         );
         assert!(player_tracer(Vec3::ZERO, Vec3::X * 100., Vec3::NEG_Y, 0., &mut half).is_none());
+    }
+    #[test]
+    fn ar2_tracers_and_impact_quads_follow_the_sdk_parameters() {
+        let mut half = || 0.5;
+        let p = player_ar2_tracer(Vec3::ZERO, Vec3::X * 1000., Vec3::NEG_Y, 0., &mut half).unwrap();
+        assert_eq!(p.material, AR2_TRACER_MATERIAL);
+        assert!((p.width - 9.).abs() < 1e-4 && (p.length - 640.).abs() < 1e-3);
+        assert!(
+            player_ar2_tracer(Vec3::ZERO, Vec3::X * 100., Vec3::NEG_Y, 0., &mut half).is_none()
+        );
+        let n = npc_ar2_tracer(Vec3::ZERO, Vec3::X * 800., 0., &mut half).unwrap();
+        assert_eq!(n.speed, 8000.);
+        assert!((n.life - (800. + 192.) / 8000.).abs() < 1e-6);
+        let q = SurfaceQuad::ar2_impact(Vec3::ZERO, Vec3::Z, 0., &mut half);
+        assert_eq!(q.start_size, 28.);
+        let (size, alpha) = q.sample(0.).unwrap();
+        assert!((size - 28.).abs() < 1e-4 && (alpha - 1.).abs() < 1e-6);
+        // Half-way: Bias(0.5, b) = b.
+        let (size, alpha) = q.sample(0.125).unwrap();
+        assert!((size - 28. * 0.25).abs() < 1e-3 && (alpha - 0.6).abs() < 1e-4);
+        assert!(q.sample(0.3).is_none());
+        let quad = q.quad(0.).unwrap();
+        assert!(quad.positions.iter().all(|p| p.z.abs() < 1e-4));
     }
 }

@@ -6,6 +6,7 @@ pub mod assault;
 pub mod conditions;
 pub mod default_schedules;
 pub mod host;
+pub mod humanoid;
 pub mod memory;
 pub mod metropolice;
 pub mod police;

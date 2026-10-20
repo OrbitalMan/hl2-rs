@@ -233,10 +233,15 @@ impl AutoLayer {
         } else {
             weight * s
         };
-        Ok(Some((
-            (cycle - self.start) / (self.end - self.start),
-            weight,
-        )))
+        // An all-NaN ramp (retail female_shared.mdl layer_walk_p_aiming) passes every
+        // SDK comparison above at full weight, and the SDK hands the NaN child cycle to
+        // AccumulatePose; what retail then does is not established, so the child is
+        // skipped here (open question, STATUS).
+        let child_cycle = (cycle - self.start) / (self.end - self.start);
+        if !child_cycle.is_finite() || !weight.is_finite() {
+            return Ok(None);
+        }
+        Ok(Some((child_cycle, weight)))
     }
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -1313,6 +1318,14 @@ mod tests {
         constant.end = constant.start;
         assert_eq!(constant.sample(0.9, 0.7), Ok(Some((0.9, 0.7))));
         assert!(ramp(autolayer_flags::POSE).sample(0.5, 1.).is_err());
+        let nan = AutoLayer {
+            start: f32::NAN,
+            peak: f32::NAN,
+            tail: f32::NAN,
+            end: f32::NAN,
+            ..ramp(0)
+        };
+        assert_eq!(nan.sample(0.5, 1.), Ok(None));
     }
     fn layered_rig() -> Rig {
         let bone = Bone {

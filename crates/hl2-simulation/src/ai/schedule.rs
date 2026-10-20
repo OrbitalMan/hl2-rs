@@ -131,6 +131,22 @@ pub trait Motor {
     /// Build a route; false when there is none.
     fn path_to(&mut self, goal: Vec3, run: bool) -> bool;
     fn movement(&self) -> MoveStatus;
+    /// CAI_TacticalServices::FindCoverPos(threat, threat eye, min, max) from the NPC: a
+    /// graph node the threat's eye cannot see. None when there is none (or no graph).
+    fn find_cover(
+        &mut self,
+        _threat: Vec3,
+        _threat_eye: Vec3,
+        _min: f32,
+        _max: f32,
+    ) -> Option<Vec3> {
+        None
+    }
+    /// CAI_TacticalServices::FindLos(threat, threat eye, min, max): a graph node in range
+    /// of the threat from which the weapon sees the threat's eye.
+    fn find_los(&mut self, _threat: Vec3, _threat_eye: Vec3, _min: f32, _max: f32) -> Option<Vec3> {
+        None
+    }
 }
 
 /// Per-think facts the class and the generic tasks read.
@@ -147,6 +163,16 @@ pub struct Context {
     pub yaw: f32,
     /// A uniform [0, 1) draw for this think (random waits, sentence choice).
     pub random: f32,
+    /// The enemy's EyePosition (its feet plus view offset), with `enemy`.
+    pub enemy_eye: Option<Vec3>,
+    /// The enemy's last known position (enemy memory), with `enemy`.
+    pub enemy_lkp: Option<Vec3>,
+    /// The active weapon's (min, max) range (MIN/MAX of m_fMin/MaxRange1/2).
+    pub weapon_range: Option<(f32, f32)>,
+    /// The best sound's volume (CSound::Volume), with `best_sound`.
+    pub best_sound_volume: f32,
+    /// m_flDistTooFar (1024; SF_NPC_LONG_RANGE: 1e9).
+    pub dist_too_far: f32,
 }
 
 /// A class's schedule hooks (SelectSchedule, TranslateSchedule, StartTask/RunTask).
@@ -154,7 +180,9 @@ pub trait Behavior {
     fn select_schedule(&mut self, npc: &mut AiNpc, ctx: &Context) -> String {
         default_select_schedule(npc, ctx)
     }
-    fn translate_schedule(&mut self, name: &str) -> String {
+    /// TranslateSchedule (the class reads the NPC's conditions and enemy, like the SDK's
+    /// member function).
+    fn translate_schedule(&mut self, name: &str, _npc: &AiNpc, _ctx: &Context) -> String {
         name.to_owned()
     }
     /// BuildScheduleTestBits: class interrupts added to the current schedule's.
@@ -252,6 +280,87 @@ pub fn default_select_schedule(npc: &AiNpc, ctx: &Context) -> String {
         NpcState::Dead => "SCHED_DIE",
         NpcState::Script => "SCHED_AISCRIPT",
         _ => "SCHED_IDLE_STAND",
+    }
+    .into()
+}
+
+/// CAI_BaseNPC::SelectSchedule for a class that inherits it: the idle/alert/dead/script
+/// branches of `default_select_schedule` and, in combat, `base_combat_schedule`.
+pub fn base_select_schedule(npc: &mut AiNpc, ctx: &Context, armed: bool) -> String {
+    if npc.state == NpcState::Combat {
+        return base_combat_schedule(npc, ctx, armed);
+    }
+    default_select_schedule(npc, ctx)
+}
+/// CAI_BaseNPC::SelectCombatSchedule for an NPC with a gun (`armed`: GetActiveWeapon)
+/// and no innate attacks (the humanoids; innate classes come with DESIGN 14n step 4).
+/// Not modeled: forced interactions, flinches, D_FR enemies (FearSound/RUN_FROM_ENEMY)
+/// and squad attack slots (no squads: every slot is free).
+pub fn base_combat_schedule(npc: &mut AiNpc, ctx: &Context, armed: bool) -> String {
+    let c = npc.conditions;
+    if c.has(COND_NEW_ENEMY)
+        && npc
+            .enemy
+            .and_then(|e| npc.enemies.find(Some(e)))
+            .is_some_and(|m| ctx.now - m.time_first_seen < 2.)
+    {
+        return "SCHED_WAKE_ANGRY".into();
+    }
+    if c.has(COND_ENEMY_DEAD) {
+        // SetEnemy(NULL) + ChooseEnemy happened in the runtime's gather; another enemy
+        // reselects, none goes alert.
+        npc.conditions.clear(COND_ENEMY_DEAD);
+        if npc.enemy.is_some() {
+            return base_combat_schedule(npc, ctx, armed);
+        }
+        npc.state = NpcState::Alert;
+        return default_select_schedule(npc, ctx);
+    }
+    if c.has(COND_LOW_PRIMARY_AMMO) || c.has(COND_NO_PRIMARY_AMMO) {
+        return "SCHED_HIDE_AND_RELOAD".into();
+    }
+    if !c.has(COND_SEE_ENEMY) {
+        return if !c.has(COND_ENEMY_OCCLUDED) {
+            "SCHED_COMBAT_FACE"
+        } else if armed {
+            "SCHED_ESTABLISH_LINE_OF_FIRE"
+        } else {
+            "SCHED_TAKE_COVER_FROM_ENEMY"
+        }
+        .into();
+    }
+    if c.has(COND_TOO_CLOSE_TO_ATTACK) {
+        return "SCHED_BACK_AWAY_FROM_ENEMY".into();
+    }
+    if c.has(COND_WEAPON_PLAYER_IN_SPREAD)
+        || c.has(COND_WEAPON_BLOCKED_BY_FRIEND)
+        || c.has(COND_WEAPON_SIGHT_OCCLUDED)
+    {
+        return "SCHED_ESTABLISH_LINE_OF_FIRE".into();
+    }
+    if npc
+        .shot_regulator
+        .as_ref()
+        .is_some_and(|r| r.is_in_rest_interval(ctx.now))
+        && c.has(COND_CAN_RANGE_ATTACK1)
+    {
+        return "SCHED_COMBAT_FACE".into();
+    }
+    for (cond, schedule) in [
+        (COND_CAN_RANGE_ATTACK1, "SCHED_RANGE_ATTACK1"),
+        (COND_CAN_RANGE_ATTACK2, "SCHED_RANGE_ATTACK2"),
+        (COND_CAN_MELEE_ATTACK1, "SCHED_MELEE_ATTACK1"),
+        (COND_CAN_MELEE_ATTACK2, "SCHED_MELEE_ATTACK2"),
+        (COND_NOT_FACING_ATTACK, "SCHED_COMBAT_FACE"),
+    ] {
+        if c.has(cond) {
+            return schedule.into();
+        }
+    }
+    if armed {
+        "SCHED_MOVE_TO_WEAPON_RANGE"
+    } else {
+        "SCHED_TAKE_COVER_FROM_ENEMY"
     }
     .into()
 }
@@ -443,7 +552,7 @@ impl AiNpc {
                     // GetNewSchedule: SelectIdealState is applied by the caller each think.
                     behavior.select_schedule(self, ctx)
                 };
-                let next = behavior.translate_schedule(&next);
+                let next = behavior.translate_schedule(&next, self, ctx);
                 let next = if schedules.0.contains_key(&next) {
                     next
                 } else {
@@ -583,7 +692,7 @@ impl AiNpc {
             }
             "TASK_SET_SCHEDULE" => {
                 if let TaskArg::Schedule(s) = arg {
-                    let s = behavior.translate_schedule(s);
+                    let s = behavior.translate_schedule(s, self, ctx);
                     self.set_schedule(s);
                     // The new schedule starts on the next loop iteration.
                     self.task_started = false;
@@ -644,11 +753,78 @@ impl AiNpc {
                 }
                 _ => Failed,
             },
-            "TASK_GET_PATH_TO_ENEMY_LOS" | "TASK_GET_PATH_TO_RANGE_ENEMY_LKP_LOS" => {
-                match ctx.enemy {
-                    Some((_, p)) if motor.path_to(p, true) => Complete,
+            "TASK_GET_PATH_TO_RANGE_ENEMY_LKP_LOS" => match ctx.enemy {
+                Some((_, p)) if motor.path_to(p, true) => Complete,
+                _ => Failed,
+            },
+            "TASK_GET_PATH_TO_ENEMY_LOS" | "TASK_GET_PATH_TO_ENEMY_LKP_LOS" => {
+                // FindLos from the enemy's origin (LKP for the _LKP_ task) and eye, within
+                // the weapon's range (2000 without one) capped by m_flDistTooFar; the
+                // lateral LOS probe is not modeled.
+                let Some((_, origin)) = ctx.enemy else {
+                    return Failed;
+                };
+                let (min, max) = ctx.weapon_range.unwrap_or((0., 2000.));
+                let max = max.min(if ctx.dist_too_far > 0. {
+                    ctx.dist_too_far
+                } else {
+                    1024.
+                });
+                let threat = if task == "TASK_GET_PATH_TO_ENEMY_LOS" {
+                    origin
+                } else {
+                    ctx.enemy_lkp.unwrap_or(origin)
+                };
+                let eye = threat + (ctx.enemy_eye.unwrap_or(origin + Vec3::Z * 64.) - origin);
+                match motor.find_los(threat, eye, min, max) {
+                    Some(goal) if motor.path_to(goal, true) => Complete,
                     _ => Failed,
                 }
+            }
+            "TASK_GET_PATH_TO_ENEMY_LKP" => match ctx.enemy_lkp.or(ctx.enemy.map(|e| e.1)) {
+                Some(p) if motor.path_to(p, true) => Complete,
+                _ => Failed,
+            },
+            "TASK_FIND_COVER_FROM_ENEMY" | "TASK_FIND_COVER_FROM_ORIGIN" => {
+                // FindCoverFromEnemy -> FindCoverPos(enemy origin, enemy eye, 0,
+                // CoverRadius 1024) (self when there is no enemy; FROM_ORIGIN: from the
+                // NPC's own origin and eye). FindLateralCover is not modeled.
+                let (threat, eye) = match (task, ctx.enemy) {
+                    ("TASK_FIND_COVER_FROM_ENEMY", Some((_, p))) => {
+                        (p, ctx.enemy_eye.unwrap_or(p + Vec3::Z * 64.))
+                    }
+                    _ => (ctx.origin, ctx.origin + Vec3::Z * 64.),
+                };
+                match motor.find_cover(threat, eye, 0., 1024.) {
+                    Some(goal) if motor.path_to(goal, true) => {
+                        // m_flMoveWaitFinished = now + flTaskData.
+                        Complete
+                    }
+                    _ => Failed,
+                }
+            }
+            "TASK_FIND_COVER_FROM_BEST_SOUND" => {
+                // FindCoverPos(sound react origin, same, MIN(volume, 120), 1024).
+                match ctx.best_sound {
+                    Some(sound) => {
+                        let min = ctx.best_sound_volume.min(120.);
+                        match motor.find_cover(sound, sound, min, 1024.) {
+                            Some(goal) if motor.path_to(goal, true) => Complete,
+                            _ => Failed,
+                        }
+                    }
+                    None => Failed,
+                }
+            }
+            "TASK_RUN_PATH_TIMED" => {
+                self.activity = "ACT_RUN".into();
+                motor.set_activity("ACT_RUN");
+                self.wait_until = ctx.now + f64::from(arg.number());
+                Running
+            }
+            "TASK_WAIT_FACE_ENEMY_RANDOM" => {
+                self.wait_until = ctx.now + f64::from(ctx.random * arg.number());
+                self.run_task(behavior, task, arg, ctx, motor)
             }
             "TASK_GET_PATH_TO_TARGET" => match ctx.target {
                 Some(p) if motor.path_to(p, true) => Complete,
@@ -730,7 +906,16 @@ impl AiNpc {
                     Running
                 }
             }
-            "TASK_WAIT_FACE_ENEMY" => {
+            "TASK_RUN_PATH_TIMED" => {
+                if ctx.now >= self.wait_until
+                    || matches!(motor.movement(), MoveStatus::Idle | MoveStatus::Arrived)
+                {
+                    Complete
+                } else {
+                    Running
+                }
+            }
+            "TASK_WAIT_FACE_ENEMY" | "TASK_WAIT_FACE_ENEMY_RANDOM" => {
                 if let Some((_, p)) = ctx.enemy {
                     motor.face(Goal::Position(p));
                 }

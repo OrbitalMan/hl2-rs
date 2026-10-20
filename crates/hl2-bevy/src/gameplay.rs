@@ -23,9 +23,12 @@ use std::{collections::BTreeMap, sync::Arc};
 #[derive(Clone, Debug)]
 pub enum ShotEffect {
     NpcFlash(hl2_simulation::muzzle_effects::MuzzleKind, glam::Mat4),
-    NpcTracer(Vec3, Vec3),
-    /// Start (ComputeTracerStartPosition), end and the view's right axis.
-    PlayerTracer(Vec3, Vec3, Vec3),
+    /// Start, end, AR2Tracer.
+    NpcTracer(Vec3, Vec3, bool),
+    /// Start (ComputeTracerStartPosition), end, the view's right axis, AR2Tracer.
+    PlayerTracer(Vec3, Vec3, Vec3, bool),
+    /// AR2Impact origin and surface normal.
+    Ar2Impact(Vec3, Vec3),
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
@@ -933,7 +936,10 @@ impl Gameplay {
             }
             // ComputeTracerStartPosition: an NPC's tracer starts at its weapon's first
             // attachment (the muzzle), else at the shoot position.
-            for (attacker, start, end) in bullets.tracers {
+            for (origin, normal) in std::mem::take(&mut bullets.ar2_impacts) {
+                self.push_shot_effect(ShotEffect::Ar2Impact(origin, normal));
+            }
+            for (attacker, start, end, ar2) in bullets.tracers {
                 let start = self
                     .ai
                     .weapon_world_model(attacker)
@@ -947,7 +953,7 @@ impl Gameplay {
                         )
                     })
                     .map_or(start, |frame| frame.w_axis.truncate());
-                self.push_shot_effect(ShotEffect::NpcTracer(start, end));
+                self.push_shot_effect(ShotEffect::NpcTracer(start, end, ar2));
             }
         }
         // AE_NPC_MUZZLEFLASH: the weapon world model's named attachment on its owner.
@@ -967,8 +973,11 @@ impl Gameplay {
                 self.push_shot_effect(ShotEffect::NpcFlash(kind, frame));
             }
         }
-        for (start, end, right) in std::mem::take(&mut self.inventory.tracer_requests) {
-            self.push_shot_effect(ShotEffect::PlayerTracer(start, end, right));
+        for (start, end, right, ar2) in std::mem::take(&mut self.inventory.tracer_requests) {
+            self.push_shot_effect(ShotEffect::PlayerTracer(start, end, right, ar2));
+        }
+        for (origin, normal) in std::mem::take(&mut self.inventory.ar2_impacts) {
+            self.push_shot_effect(ShotEffect::Ar2Impact(origin, normal));
         }
         self.stunstick_glows = self
             .ai

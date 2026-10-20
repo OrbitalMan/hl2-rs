@@ -159,6 +159,34 @@ impl Motor for SceneMotor<'_> {
         }
         !matches!(status, GoalState::Blocked(_) | GoalState::Canceled)
     }
+    /// FindCoverNode with CAI_BaseNPC::IsCoverPosition (the threat's eye cannot see the
+    /// node's eye point: feet + the standing eye offset, MASK_BLOCKLOS ignoring this NPC).
+    fn find_cover(&mut self, threat: Vec3, threat_eye: Vec3, min: f32, max: f32) -> Option<Vec3> {
+        let sight = PhysicsSight {
+            physics: self.physics,
+            world: self.world,
+        };
+        let me = self.entity;
+        let origin = self.scene.states[me].origin;
+        self.controller
+            .find_cover_node(origin, threat, min, max, |feet| {
+                !sight.visible(threat_eye, feet + Vec3::Z * EYE_HEIGHT, &[me])
+            })
+    }
+    /// FindLosNode with TestShootPosition (WeaponLOSCondition from the node's
+    /// Weapon_ShootPosition, m_HackedGunPos 55 above the feet, to the threat's eye).
+    fn find_los(&mut self, threat: Vec3, threat_eye: Vec3, min: f32, max: f32) -> Option<Vec3> {
+        let sight = PhysicsSight {
+            physics: self.physics,
+            world: self.world,
+        };
+        let me = self.entity;
+        let origin = self.scene.states[me].origin;
+        self.controller
+            .find_los_node(origin, threat, min, max, |feet| {
+                sight.visible(feet + Vec3::Z * GUN_HEIGHT, threat_eye, &[me])
+            })
+    }
     fn movement(&self) -> MoveStatus {
         let Some(key) = *self.goal else {
             return MoveStatus::Idle;
@@ -204,6 +232,9 @@ impl SightWorld for PhysicsSight<'_> {
 pub struct PhysicsPlacement<'a> {
     pub physics: &'a Physics,
 }
+/// The humanoids' standing eye offset and m_HackedGunPos height (units above the feet).
+pub const EYE_HEIGHT: f32 = 64.;
+pub const GUN_HEIGHT: f32 = 55.;
 const HUMAN_MINS: Vec3 = Vec3::new(-13., -13., 0.);
 const HUMAN_MAXS: Vec3 = Vec3::new(13., 13., 72.);
 impl super::spawn::PlacementWorld for PhysicsPlacement<'_> {

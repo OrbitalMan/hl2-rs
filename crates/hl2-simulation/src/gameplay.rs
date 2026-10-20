@@ -340,7 +340,10 @@ pub struct Inventory {
     /// the pistol, SMG1 and AR2 (CBaseCombatWeapon / CHLMachineGun::PrimaryAttack),
     /// none for the 357 and shotgun; ComputeTracerStartPosition's player offset.
     #[serde(skip)]
-    pub tracer_requests: Vec<(Vec3, Vec3, Vec3)>,
+    /// Tracer requests (start, end, view right, AR2Tracer: the weapon_ar2 type).
+    pub tracer_requests: Vec<(Vec3, Vec3, Vec3, bool)>,
+    /// CWeaponAR2::DoImpactEffect AR2Impact requests (origin, surface normal).
+    pub ar2_impacts: Vec<(Vec3, Vec3)>,
     #[serde(skip)]
     tracer_count: u32,
     #[serde(skip)]
@@ -437,6 +440,7 @@ impl Default for Inventory {
     fn default() -> Self {
         Self {
             tracer_requests: Vec::new(),
+            ar2_impacts: Vec::new(),
             tracer_count: 0,
             impacts: Vec::new(),
             blood: Vec::new(),
@@ -1206,7 +1210,8 @@ impl Inventory {
                         let end = hit
                             .as_ref()
                             .map_or(eye + aim * MAX_TRACE_LENGTH, |h| h.position);
-                        self.tracer_requests.push((start, end, right));
+                        self.tracer_requests
+                            .push((start, end, right, w.class == "weapon_ar2"));
                     }
                     self.tracer_count = self.tracer_count.wrapping_add(1);
                 }
@@ -1601,6 +1606,12 @@ impl Inventory {
         // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
         // WeaponSound(MELEE_HIT) is the NPC-operator path.
         self.impacts.push((hit, melee, direction));
+        // CBasePlayer::DoImpactEffect -> the active weapon's: the AR2 adds AR2Impact at
+        // endpos + normal before the base impact.
+        if weapon.class == "weapon_ar2" && !melee {
+            self.ar2_impacts
+                .push((hit.position + hit.normal, hit.normal));
+        }
         if melee {
             self.animate("hitcenter1", scene.time);
         }
@@ -2056,8 +2067,10 @@ pub struct NpcBullets {
     pub blood: Vec<(crate::physics::RayHit, BloodColor)>,
     /// (attacker origin, damage) per pellet that struck the player.
     pub player_hits: Vec<(Vec3, f32)>,
-    /// Tracer segments (shooter, start, end).
-    pub tracers: Vec<(usize, Vec3, Vec3)>,
+    /// Tracer segments (shooter, start, end, AR2Tracer).
+    pub tracers: Vec<(usize, Vec3, Vec3, bool)>,
+    /// AR2Impact requests (CAI_BaseNPC::DoImpactEffect -> CWeaponAR2): origin, normal.
+    pub ar2_impacts: Vec<(Vec3, Vec3)>,
     /// (victim, attacker) per pellet that struck an NPC.
     pub npc_hits: Vec<(usize, usize)>,
 }
@@ -2158,8 +2171,12 @@ pub fn npc_fire_bullets(
         if let Some(t) = player_distance.filter(|t| *t < world_distance) {
             out.player_hits.push((shot.origin, shot.damage));
             if shot.tracer {
-                out.tracers
-                    .push((shot.attacker, shot.origin, shot.origin + direction * t));
+                out.tracers.push((
+                    shot.attacker,
+                    shot.origin,
+                    shot.origin + direction * t,
+                    shot.weapon == "weapon_ar2",
+                ));
             }
             continue;
         }
@@ -2168,6 +2185,7 @@ pub fn npc_fire_bullets(
                 shot.attacker,
                 shot.origin,
                 shot.origin + direction * world_distance.min(8192.),
+                shot.weapon == "weapon_ar2",
             ));
         }
         if let Some(hit) = hit {
@@ -2177,6 +2195,10 @@ pub fn npc_fire_bullets(
                 .is_some_and(|e| e.class().starts_with("npc_"))
             {
                 out.npc_hits.push((hit.entity, shot.attacker));
+            }
+            if shot.weapon == "weapon_ar2" {
+                out.ar2_impacts
+                    .push((hit.position + hit.normal, hit.normal));
             }
             out.impacts.push((hit, direction));
             apply_hit(

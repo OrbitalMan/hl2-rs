@@ -659,7 +659,7 @@ impl Behavior for Metropolice {
             .unwrap_or_else(|| "SCHED_FAIL".into())
     }
     /// TranslateSchedule.
-    fn translate_schedule(&mut self, name: &str) -> String {
+    fn translate_schedule(&mut self, name: &str, _npc: &AiNpc, _ctx: &Context) -> String {
         let running = self.running_behavior || self.running_assault;
         let name = match name {
             "SCHED_CHASE_ENEMY" if !running => "SCHED_METROPOLICE_CHASE_ENEMY",

@@ -716,15 +716,26 @@ fn shot_effects(game: &Gameplay, effects: &mut Effects) {
             ShotEffect::NpcFlash(kind, frame) => {
                 source.muzzle.flash(*kind, false, *frame, *at, &mut random)
             }
-            ShotEffect::NpcTracer(start, end) => {
+            ShotEffect::NpcTracer(start, end, ar2) => source.muzzle.tracer(if *ar2 {
+                fx::npc_ar2_tracer(*start, *end, *at, &mut random)
+            } else {
+                fx::npc_tracer(*start, *end, *at, &mut random)
+            }),
+            ShotEffect::PlayerTracer(start, end, right, ar2) => source.muzzle.tracer(if *ar2 {
+                fx::player_ar2_tracer(*start, *end, *right, *at, &mut random)
+            } else {
+                fx::player_tracer(*start, *end, *right, *at, &mut random)
+            }),
+            ShotEffect::Ar2Impact(origin, normal) => {
                 source
                     .muzzle
-                    .tracer(fx::npc_tracer(*start, *end, *at, &mut random))
-            }
-            ShotEffect::PlayerTracer(start, end, right) => {
-                source
-                    .muzzle
-                    .tracer(fx::player_tracer(*start, *end, *right, *at, &mut random))
+                    .surface_quads
+                    .push(fx::SurfaceQuad::ar2_impact(
+                        *origin,
+                        *normal,
+                        *at,
+                        &mut random,
+                    ))
             }
         }
     }

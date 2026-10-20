@@ -66,12 +66,19 @@ impl Proficiency {
         self as usize
     }
 }
-/// CalcWeaponProficiency. npc_metropolice: pistol poor, SMG1 very good; the base class
-/// (and classes not reconstructed yet) average.
+/// CalcWeaponProficiency. npc_metropolice: pistol poor, SMG1 very good; npc_combine_s:
+/// AR2/SMG1 good, shotgun perfect; the companions: AR2 very good, else perfect; the base
+/// class (and classes not reconstructed yet) average.
 pub fn proficiency(npc_class: &str, weapon: &str) -> Proficiency {
     match (npc_class, weapon) {
         ("npc_metropolice", "weapon_pistol") => Proficiency::Poor,
         ("npc_metropolice", "weapon_smg1") => Proficiency::VeryGood,
+        // CNPC_Combine (HL2, not episodic).
+        ("npc_combine_s", "weapon_ar2" | "weapon_smg1") => Proficiency::Good,
+        ("npc_combine_s", "weapon_shotgun") => Proficiency::Perfect,
+        // CNPC_PlayerCompanion.
+        ("npc_citizen" | "npc_barney" | "npc_alyx", "weapon_ar2") => Proficiency::VeryGood,
+        ("npc_citizen" | "npc_barney" | "npc_alyx", _) => Proficiency::Perfect,
         _ => Proficiency::Average,
     }
 }
@@ -479,8 +486,14 @@ pub enum RegulatorRule {
     /// CNPC_MetroPolice::OnUpdateShotRegulator with a pistol (burst mode inactive): burst
     /// sizes and rests scaled by the distance to the enemy, shots U(0.2, 0.5) s apart.
     MetropolicePistol,
+    /// CNPC_PlayerCompanion::OnUpdateShotRegulator (HL2, not episodic): the base ranges,
+    /// then within PC_LARGER_BURST_RANGE (120 units) of an enemy it can range attack the
+    /// remaining burst doubles and the rest interval bounds scale by 0.6.
+    PlayerCompanion,
 }
 
+/// npc_playercompanion.cpp PC_LARGER_BURST_RANGE (10 feet).
+const PC_LARGER_BURST_RANGE: f32 = 12. * 10.;
 /// npc_metropolice.cpp MIN/MAX_PISTOL_MODIFY_DIST (units).
 const PISTOL_MODIFY_DIST: (f32, f32) = (15. * 12., 150. * 12.);
 
@@ -545,6 +558,13 @@ impl ShotRegulator {
                 self.max_rest = 1.4;
             }
             (self.min_burst_interval, self.max_burst_interval) = (0.2, 0.5);
+        }
+        if self.rule == RegulatorRule::PlayerCompanion
+            && enemy_distance.is_some_and(|d| d <= PC_LARGER_BURST_RANGE)
+        {
+            self.burst_remaining *= 2;
+            self.min_rest *= 0.6;
+            self.max_rest *= 0.6;
         }
     }
     fn unit(&mut self) -> f32 {
@@ -994,5 +1014,22 @@ mod tests {
         );
         assert!(citizen.starts_with(&["weapon_smg1".to_owned()]));
         assert!(usable("npc_zombie", "models/zombie/classic.mdl").is_empty());
+    }
+    #[test]
+    fn humanoid_model_preloads_cover_every_acttable_result_of_their_weapons() {
+        let preloaded = source_assets::models::HUMANOID_AI_ACTIVITIES;
+        for weapon in [
+            "weapon_smg1",
+            "weapon_ar2",
+            "weapon_shotgun",
+            "weapon_pistol",
+            "weapon_rpg",
+            "weapon_alyxgun",
+            "weapon_crowbar",
+        ] {
+            for (_, to, _) in acttable(weapon) {
+                assert!(preloaded.contains(to), "{weapon}: {to} not preloaded");
+            }
+        }
     }
 }

@@ -513,15 +513,22 @@ fn autolayer_records(data: &[u8], at: usize) -> Result<Vec<RawAutoLayer>> {
                 child: usize::try_from(i16le(data, at)?).context("negative autolayer sequence")?,
                 pose: i16le(data, at + 2)?,
                 flags: u32le(data, at + 4)?,
+                // Read raw like the SDK's mstudioautolayer_t: retail female_shared.mdl
+                // has an all-NaN ramp (layer_walk_p_aiming), and rejecting it dropped
+                // every clip of every female citizen.
                 ramp: [
-                    f32le(data, at + 8)?,
-                    f32le(data, at + 12)?,
-                    f32le(data, at + 16)?,
-                    f32le(data, at + 20)?,
+                    raw_f32(data, at + 8)?,
+                    raw_f32(data, at + 12)?,
+                    raw_f32(data, at + 16)?,
+                    raw_f32(data, at + 20)?,
                 ],
             })
         })
         .collect()
+}
+/// A float as stored, NaN/infinity included.
+fn raw_f32(data: &[u8], at: usize) -> Result<f32> {
+    Ok(f32::from_le_bytes(bytes(data, at, 4)?.try_into()?))
 }
 /// `mdlkeyvalue { faceposer { ... } }` from the sequence keyvalue text. Text that does
 /// not parse is treated as absent, like a failed KeyValues load.
@@ -1045,14 +1052,15 @@ mod tests {
             [auto.start, auto.peak, auto.tail, auto.end],
             [0.1, 0.3, 0.7, 0.9]
         );
-        // Out-of-table child, negative child, nonfinite ramp and weight are rejected.
+        // Out-of-table and negative children are rejected; ramps are kept as stored
+        // (retail female_shared.mdl has an all-NaN one), non-finite weights rejected.
         assert!(sequence_layer(&data, 0, &bones, &remap, 1, 0).is_err());
         let mut bad = data.clone();
         bad[480..482].copy_from_slice(&(-2i16).to_le_bytes());
         assert!(autolayer_records(&bad, 0).is_err());
-        let mut bad = data.clone();
-        bad[492..496].copy_from_slice(&f32::INFINITY.to_le_bytes());
-        assert!(autolayer_records(&bad, 0).is_err());
+        let mut nan = data.clone();
+        nan[492..496].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(autolayer_records(&nan, 0).unwrap()[0].ramp[1].is_nan());
         for field in [524, 108] {
             let mut bad = data.clone();
             bad[field..field + 4].copy_from_slice(&f32::NAN.to_le_bytes());

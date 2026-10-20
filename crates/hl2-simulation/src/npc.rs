@@ -548,6 +548,115 @@ impl Controller {
         self.ai_only.insert(entity);
         Ok(())
     }
+    /// Usable node feet and the usable ground links of each node (the graph search's
+    /// filters); None without a graph or beyond the native node limit.
+    fn usable_graph(&self) -> Option<UsableGraph> {
+        let graph = self.graph.as_ref()?;
+        let restrictions = &self.restrictions;
+        let count = graph.nodes.len();
+        if count == 0 || count > 1500 {
+            return None;
+        }
+        let positions: Vec<_> = (0..count)
+            .map(|n| node_feet(graph, n, restrictions))
+            .collect();
+        let mut adjacent = vec![Vec::new(); count];
+        for (index, link) in graph.links.iter().enumerate() {
+            if link.source < count
+                && link.destination < count
+                && link.accepted_move_types[0] & 1 != 0
+                && !restrictions.unusable_links.contains(&index)
+                && !restrictions.off_links.contains(&index)
+                && positions[link.source].is_some()
+                && positions[link.destination].is_some()
+            {
+                adjacent[link.source].push(link.destination);
+                adjacent[link.destination].push(link.source);
+            }
+        }
+        Some((positions, adjacent))
+    }
+    /// CAI_TacticalServices::FindCoverNode: from the usable node nearest `near` (the
+    /// NPC), visit nodes nearest-first by straight distance from `near` and return the
+    /// feet of the first whose distance lies in [min, max) and that `is_cover` accepts.
+    /// A neighbor joins the list only while it is nearer to `near` than 1.5 x its
+    /// squared distance to the threat (keeps cover searches from running toward the
+    /// threat). Node locks, hint cover activities and climb nodes are not modeled.
+    pub fn find_cover_node(
+        &self,
+        near: Vec3,
+        threat: Vec3,
+        min: f32,
+        max: f32,
+        mut is_cover: impl FnMut(Vec3) -> bool,
+    ) -> Option<Vec3> {
+        let (positions, adjacent) = self.usable_graph()?;
+        let count = positions.len();
+        let start = nearest_usable(&positions, near)?;
+        let max = if max <= 0. { 784. } else { max };
+        let min = min.min(0.5 * max);
+        let (min_sq, max_sq) = (min * min, max * max);
+        let mut visited = vec![false; count];
+        visited[start] = true;
+        let mut open = vec![(start, 0f32)];
+        while let Some(node) = pop_nearest(&mut open) {
+            let feet = positions[node].expect("usable");
+            let distance = feet.distance_squared(near);
+            if distance >= min_sq && distance < max_sq && is_cover(feet) {
+                return Some(feet);
+            }
+            for &next in &adjacent[node] {
+                if visited[next] {
+                    continue;
+                }
+                let p = positions[next].expect("usable");
+                let d = p.distance_squared(near);
+                if d < p.distance_squared(threat) * 1.5 {
+                    open.push((next, d));
+                }
+                visited[next] = true;
+            }
+        }
+        None
+    }
+    /// CAI_TacticalServices::FindLosNode (FLANKTYPE_NONE): from the usable node nearest
+    /// `origin` (the NPC), visit nodes nearest-first by distance from `origin`, skipping
+    /// the start node, and return the feet of the first whose distance to `threat` lies
+    /// in (min, max) and that `can_shoot` accepts (TestShootPosition).
+    pub fn find_los_node(
+        &self,
+        origin: Vec3,
+        threat: Vec3,
+        min: f32,
+        max: f32,
+        mut can_shoot: impl FnMut(Vec3) -> bool,
+    ) -> Option<Vec3> {
+        let (positions, adjacent) = self.usable_graph()?;
+        let count = positions.len();
+        let start = nearest_usable(&positions, origin)?;
+        let mut visited = vec![false; count];
+        visited[start] = true;
+        let mut open = vec![(start, 0f32)];
+        while let Some(node) = pop_nearest(&mut open) {
+            let feet = positions[node].expect("usable");
+            if node != start {
+                let threat_distance = feet.distance(threat);
+                if threat_distance < max && threat_distance > min && can_shoot(feet) {
+                    return Some(feet);
+                }
+            }
+            for &next in &adjacent[node] {
+                if !visited[next] {
+                    visited[next] = true;
+                    open.push((
+                        next,
+                        positions[next].expect("usable").distance_squared(origin),
+                    ));
+                }
+            }
+        }
+        None
+    }
     pub fn has_actor(&self, entity: usize) -> bool {
         self.actors.contains_key(&entity)
     }
@@ -1001,6 +1110,22 @@ fn advance<W: NpcCollisionWorld>(
     Err(GoalBlockReason::SearchBudget)
 }
 
+/// Usable node feet and each node's usable neighbors.
+type UsableGraph = (Vec<Option<Vec3>>, Vec<Vec<usize>>);
+/// NearestNodeToPoint over the usable nodes.
+fn nearest_usable(positions: &[Option<Vec3>], point: Vec3) -> Option<usize> {
+    positions
+        .iter()
+        .enumerate()
+        .filter_map(|(n, p)| p.map(|p| (n, p.distance_squared(point))))
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+        .map(|(n, _)| n)
+}
+/// CNodeList::ElementAtHead + RemoveAtHead: the open node with the least key.
+fn pop_nearest(open: &mut Vec<(usize, f32)>) -> Option<usize> {
+    let best = (0..open.len()).min_by(|&a, &b| open[a].1.total_cmp(&open[b].1))?;
+    Some(open.swap_remove(best).0)
+}
 fn node_feet(graph: &Graph, node: usize, restrictions: &NavRestrictions) -> Option<Vec3> {
     let value = graph.nodes.get(node)?;
     if value.node_type != 2 || value.info != 0 || restrictions.unusable_nodes.contains(&node) {
@@ -1802,5 +1927,29 @@ mod tests {
             assert!((track.duration().unwrap() - duration).abs() < 0.00001);
             println!("{style:?}: central owned root distance={distance}, duration={duration}");
         }
+    }
+    #[test]
+    fn tactical_searches_pick_the_nearest_cover_and_line_of_fire_nodes() {
+        // Synthetic chain of nodes along +X; node 0 under the NPC.
+        let points: Vec<Vec3> = (0..6).map(|i| Vec3::new(i as f32 * 100., 0., 0.)).collect();
+        let edges: Vec<(usize, usize)> = (0..5).map(|i| (i, i + 1)).collect();
+        let controller = Controller::new(Some(graph(&points, &edges)), NavRestrictions::default());
+        // Threat far behind (-X): every node is "cover" past x 250; the nearest wins.
+        let threat = Vec3::new(-1000., 0., 0.);
+        let cover = controller.find_cover_node(Vec3::ZERO, threat, 0., 1024., |p| p.x > 250.);
+        assert_eq!(cover, Some(Vec3::new(300., 0., 0.)));
+        // A threat ahead (+X 450): nodes nearer to it than 1/1.5 of their distance to us
+        // are not expanded, so the search cannot run through the threat.
+        let ahead = Vec3::new(450., 0., 0.);
+        let cover = controller.find_cover_node(Vec3::ZERO, ahead, 0., 1024., |p| p.x > 450.);
+        assert_eq!(cover, None);
+        // Line of fire: skips the start node, needs (min, max) to the threat.
+        let los = controller.find_los_node(Vec3::ZERO, ahead, 0., 300., |_| true);
+        assert_eq!(los, Some(Vec3::new(200., 0., 0.)));
+        let los = controller.find_los_node(Vec3::ZERO, ahead, 0., 1024., |p| p.x >= 500.);
+        assert_eq!(los, Some(Vec3::new(500., 0., 0.)));
+        assert!(Controller::new(None, NavRestrictions::default())
+            .find_los_node(Vec3::ZERO, ahead, 0., 1024., |_| true)
+            .is_none());
     }
 }

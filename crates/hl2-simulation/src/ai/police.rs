@@ -287,7 +287,7 @@ impl Behavior for Policing {
     fn select_schedule(&mut self, npc: &mut AiNpc, ctx: &Context) -> String {
         self.select(npc, ctx).into()
     }
-    fn translate_schedule(&mut self, name: &str) -> String {
+    fn translate_schedule(&mut self, name: &str, _npc: &AiNpc, _ctx: &Context) -> String {
         name.to_owned()
     }
     fn custom_interrupts(&self, npc: &AiNpc) -> Conditions {
