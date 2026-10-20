@@ -6,6 +6,10 @@
   "video_confirm_seconds": 15,
   "vertical_fov_range": [40, 120],
   "viewmodel_fov_range": [30, 110],
+  "world_fov_offset": {
+    "portrait": -17.0,
+    "ultrawide": -11.0
+  },
   "hud_aspects": {"normal": [4, 3], "wide16x9": [16, 9], "wide16x10": [16, 10]},
   "viewmodel": {
     "portrait_aspect": [9, 16],

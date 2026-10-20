@@ -541,11 +541,18 @@ fn viewmodel_quads(
     let framing = hl2_ui::tuning::viewmodel_framing(&game.inventory.active, aspect);
     let raw_viewmodel_fov =
         vm::viewmodel_fov(sim.viewmodel_fov, game.inventory.fov.default_fov, fov);
-    let viewmodel_fov = if raw_viewmodel_fov > 0. {
-        (raw_viewmodel_fov + framing.fov_offset).clamp(1., 160.)
-    } else {
-        raw_viewmodel_fov
-    };
+    let viewmodel_fov =
+        crate::camera::viewmodel_projection(raw_viewmodel_fov, framing.fov_offset, 1000., aspect)
+            .0
+            .to_degrees();
+    let world_fov = crate::camera::world_fov(
+        sim.view_fov(fov),
+        sim.fov,
+        aspect,
+        sim.vertical_fov,
+        sim.background_level,
+    )
+    .to_degrees();
     let offset = glam::Vec3::from_array(framing.offset);
     // DoLoadEffect -> "CrossbowLoad" (client c_weapon_crossbow.cpp): FX_ElectricSpark at
     // viewmodel attachment 1, a world position from FormatViewModelAttachment (right/up
@@ -553,12 +560,12 @@ fn viewmodel_quads(
     let forward = glam::Vec3::from_array(crate::source_direction(sim.yaw, sim.pitch).to_array());
     let right = forward.cross(glam::Vec3::Z).normalize_or(glam::Vec3::Y);
     let up = right.cross(forward);
-    let factor = (fov.to_radians() * 0.5).tan() / (viewmodel_fov.to_radians() * 0.5).tan();
+    let factor = (world_fov.to_radians() * 0.5).tan() / (viewmodel_fov.to_radians() * 0.5).tan();
     let eye = glam::Vec3::from_array(sim.eye().to_array());
     if let Some(at) = new_load {
         effects.load_sparks = at;
         if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
-            && viewmodel_fov > 0.
+            && raw_viewmodel_fov > 0.
         {
             let local = local + offset;
             let world = eye + forward * local.x - right * local.y * factor + up * local.z * factor;
@@ -587,7 +594,7 @@ fn viewmodel_quads(
                 .source
                 .spawn_gauss_sparks(end - shot * 4., direction, game.scene.time);
         }
-        if game.scene.time - at < 0.1 && viewmodel_fov > 0. {
+        if game.scene.time - at < 0.1 && raw_viewmodel_fov > 0. {
             let d = end - eye;
             described.beams.push(vm::ViewmodelBeam {
                 start: vm::Anchor::Local(
@@ -618,7 +625,7 @@ fn viewmodel_quads(
         &|anchor| vm::anchor_position(rig, &matrices, anchor),
         &|material| sprites.get(material).map(|s| f32::from(s.image.width)),
         &mut random,
-        vm::attachment_size_factor(viewmodel_fov, fov),
+        vm::attachment_size_factor(viewmodel_fov, world_fov),
     )
 }
 pub fn present(

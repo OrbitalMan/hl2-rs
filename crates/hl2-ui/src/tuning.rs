@@ -22,11 +22,19 @@ struct Tuning {
     vertical_fov_range: (f32, f32),
     /// Smallest and largest viewmodel field of view of the Video > Advanced slider.
     viewmodel_fov_range: (f32, f32),
+    /// Aspect-adaptive additive world 4:3 base FOV offset (degrees) outside `5:4..=16:9`.
+    world_fov_offset: WorldFovOffset,
     /// Width:height of each centered HUD aspect of Video > HUD Aspect Ratio
     /// ([`crate::proportional::hud_frame`]).
     hud_aspects: HudAspects,
     /// Aspect-adaptive and per-weapon viewmodel framing outside `5:4..=16:9`.
     viewmodel: ViewmodelTuning,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct WorldFovOffset {
+    portrait: f32,
+    ultrawide: f32,
 }
 
 /// The centered HUD aspects, width:height, named like [`crate::config::HudAspect`].
@@ -143,6 +151,37 @@ pub fn hud_aspect_ratio(aspect: crate::config::HudAspect) -> Option<f32> {
     Some(width as f32 / height as f32)
 }
 
+/// Aspect-adaptive additive world 4:3 base FOV offset (degrees) at `aspect` (`width / height`).
+///
+/// Inside `narrowest_design_aspect()..=widest_design_aspect()` (`5:4..=16:9`) this is `0.0` so
+/// standard retail aspects are untouched. Below `5:4` it interpolates linearly toward
+/// `world_fov_offset.portrait` at `9:16` (reducing vertical fish-eye distortion); above `16:9` it
+/// interpolates linearly toward `world_fov_offset.ultrawide` at `32:9` (reducing peripheral
+/// horizontal stretching).
+pub fn world_fov_offset(aspect: f32) -> f32 {
+    if !aspect.is_finite() || aspect <= 0.0 {
+        return 0.0;
+    }
+    let d = data();
+    let narrow = narrowest_design_aspect();
+    let wide = widest_design_aspect();
+    if aspect < narrow {
+        let (pw, ph) = d.viewmodel.portrait_aspect;
+        let portrait = pw as f32 / ph as f32;
+        let span = (narrow - portrait).max(f32::EPSILON);
+        let t = ((narrow - aspect) / span).clamp(0.0, 1.0);
+        d.world_fov_offset.portrait * t
+    } else if aspect > wide {
+        let (uw, uh) = d.viewmodel.ultrawide_aspect;
+        let ultrawide = uw as f32 / uh as f32;
+        let span = (ultrawide - wide).max(f32::EPSILON);
+        let t = ((aspect - wide) / span).clamp(0.0, 1.0);
+        d.world_fov_offset.ultrawide * t
+    } else {
+        0.0
+    }
+}
+
 /// Aspect-adaptive viewmodel framing (`fov_offset` and Source `[forward, left, up]` offset) for
 /// `weapon` at `aspect` (`width / height`).
 ///
@@ -196,6 +235,11 @@ mod tests {
         for (min, max) in [vertical_fov_range(), viewmodel_fov_range()] {
             assert!(0. < min && min < max && max < 180., "{min} {max}");
         }
+        for aspect in [5. / 4., 4. / 3., 16. / 10., 16. / 9.] {
+            assert_eq!(world_fov_offset(aspect), 0.0, "{aspect}");
+        }
+        assert!(world_fov_offset(9. / 16.) < -10.0);
+        assert!(world_fov_offset(32. / 9.) < -5.0);
     }
 
     #[test]

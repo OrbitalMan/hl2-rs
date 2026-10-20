@@ -217,6 +217,7 @@ mod tests {
         let h_16_9 = horizontal(world_fov(75., 75., 16. / 9., 0., true), 16. / 9.);
         for aspect in [3440. / 1440., 64. / 27., 32. / 9.] {
             let bg = world_fov(75., 75., aspect, 0., true);
+            let game = world_fov(75., 75., aspect, 0., false);
             assert!(
                 bg < v_4_3,
                 "{aspect}: ultrawide menu background cuts top and bottom of the 16:9 frame"
@@ -225,10 +226,14 @@ mod tests {
                 (horizontal(bg, aspect) - h_16_9).abs() < 1e-5,
                 "{aspect}: ultrawide menu background keeps the 16:9 horizontal view"
             );
-            assert_eq!(
-                world_fov(75., 75., aspect, 0., false),
-                v_4_3,
-                "{aspect}: gameplay keeps the 4:3 vertical view and expands horizontally"
+            assert!(
+                bg < game && game < v_4_3,
+                "{aspect}: ultrawide gameplay trims vertical FOV to reduce peripheral stretching"
+            );
+            assert!(
+                horizontal(game, aspect) > h_16_9
+                    && horizontal(game, aspect) < horizontal(v_4_3, aspect),
+                "{aspect}: ultrawide gameplay expands horizontally beyond 16:9 without full 4:3 fish-eye"
             );
         }
     }

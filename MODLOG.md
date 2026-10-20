@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-20 Video: aspect-adaptive automatic world/vertical FOV for portrait and ultrawide
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:** Added `tuning::world_fov_offset(aspect)` (`assets/ui/tuning.json` `world_fov_offset`: `portrait: -17.0`, `ultrawide: -11.0`) and wired it into `video::vertical_fov_with` when `vertical <= 0.` (Auto) as well as `effects::viewmodel_quads`. Standard `5:4..=16:9` frames return `0.0` (`59.84°` vertical at default `75°` 4:3 FOV, unchanged). Below `5:4` down to `9:16` portrait, the automatic world FOV interpolates toward `89.16°` vertical (`58.0°` horizontal) instead of `107.51°` to prevent vertical fish-eye distortion; above `16:9` up to `32:9` super-ultrawide, it interpolates toward `50.22°` vertical (`116.19°` horizontal) instead of `127.69°` to tame peripheral horizontal stretching. Weapon zoom (`view_degrees`) scales proportionally and an explicit `Vertical FOV` slider value still overrides Auto directly. Updated `scripts/checks/replays.py` (`fov_settings`), `docs/gameui.md` 10i, and `docs/validation.md`.
+
+**Why:** owner request: tune automatic world/vertical FOV outside `5:4..=16:9` so default FOV settings from Options > Video > Advanced work out of the box without vertical fish-eye on portrait (`9:16`) or extreme peripheral stretching on super-ultrawide (`32:9`).
+
+**Tested how:** unit tests (`tuning::tests::tuning_data_parses_with_usable_values`, `video::tests::an_explicit_vertical_fov_replaces_the_derived_one_and_scales_with_zoom`, `camera::tests::menu_backgrounds_crop_sides_when_narrow_and_top_and_bottom_when_ultrawide`); `scripts/checks/validate.sh`, `scripts/checks/check_windows.sh`, packaged `fov_settings` replay, and packaged captures at `1080x1920` (`9:16`) and `5120x1440` (`32:9`).
+
+**Result:** default FOV settings work across `9:16`..`32:9` out of the box while keeping `5:4..=16:9` and explicit `Vertical FOV` overrides unchanged.
+
+**Still broken or not tested:** physical portrait or super-ultrawide display hardware not tested.
+
+**Next:** owner visual check.
+
 ## 2026-10-19 Video: aspect-adaptive and per-weapon viewmodel framing for portrait and ultrawide
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

@@ -334,9 +334,10 @@ def game_report(name: str) -> dict:
 def check_fov_settings():
     """The Video > Advanced vertical and viewmodel field of view settings reach the cameras
     (report sample `camera`: vertical degrees of the world and viewmodel cameras): automatic by
-    default (59.84 degrees on 4:3 or wider frames, more on narrow ones), an explicit vertical value
-    replaces it, the viewmodel value moves the viewmodel camera, and aspect-adaptive framing in
-    `tuning.json` adjusts the viewmodel outside 5:4..=16:9."""
+    default (59.84 degrees on 5:4..=16:9 frames, aspect-tuned outside that range to avoid
+    vertical fish-eye on portrait and peripheral stretching on ultrawide), an explicit vertical
+    value replaces it, the viewmodel value moves the viewmodel camera, and aspect-adaptive
+    framing in `tuning.json` adjusts the viewmodel outside 5:4..=16:9."""
     def camera(name, size, **video):
         if CONFIG.exists():
             CONFIG.unlink()
@@ -350,11 +351,11 @@ def check_fov_settings():
     custom = camera("fov_custom", (1920, 1080), vertical_fov=90.0, viewmodel_fov=70.0)
     holds("custom: 90 degrees vertical, 55.41 for the viewmodel", near(custom, [90.0, 55.41]), custom)
     portrait = camera("fov_portrait", (1080, 1920))
-    holds("portrait: more above and below than 4:3, plus default portrait viewmodel framing",
-          near(portrait, [107.51, 93.78]), portrait)
+    holds("portrait: taller vertical view without extreme fish-eye (89.16), plus portrait viewmodel framing",
+          near(portrait, [89.16, 93.78]), portrait)
     ultrawide = camera("fov_ultrawide", (5120, 1440))
-    holds("super-ultrawide: world keeps 59.84 vertical, viewmodel widens with ultrawide framing",
-          near(ultrawide, [59.84, 68.09]), ultrawide)
+    holds("super-ultrawide: world trims to 50.22 vertical (116.19 horizontal), viewmodel widens with ultrawide framing",
+          near(ultrawide, [50.22, 68.09]), ultrawide)
 
 
 def check_resolution_stress():

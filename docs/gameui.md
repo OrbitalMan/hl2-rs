@@ -958,12 +958,17 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
 - **Sliders.** Video > Advanced gains **Vertical FOV** (under Field of view) and **Viewmodel FOV**
   (next to it), so view model problems at portrait and ultrawide ratios can be tuned by hand.
   - `video.vertical_fov` (degrees, 0 = **Auto**, the slider's low end; explicit values
-    `vertical_fov_range` 40..120). Auto is the derived vertical field of view of 10h. An explicit
-    value replaces it for the player's default FOV, and weapon zoom or `env_zoom` scale it in
-    proportion (`video::vertical_fov_with`), so the crossbow still zooms. A main-menu background
-    ignores it. The vertical field of view is a real thing: games such as Source expose a horizontal
-    one (`fov_desired`, horizontal at 4:3) and the vertical one follows from the aspect ratio; the
-    slider overrides that.
+    `vertical_fov_range` 40..120). On `5:4..=16:9` frames Auto is the derived vertical field of
+    view of 10h (`59.84°` at default `75°` 4:3 FOV). Outside `5:4..=16:9`, Auto smoothly applies
+    `tuning::world_fov_offset(aspect)` (`assets/ui/tuning.json` `world_fov_offset`: `-17.0°` at
+    `9:16` portrait -> `89.16°` vertical / `58.0°` horizontal instead of `107.51°`, avoiding
+    extreme vertical fish-eye; `-11.0°` at `32:9` super-ultrawide -> `50.22°` vertical / `116.19°`
+    horizontal instead of `127.69°`, taming peripheral horizontal stretching). An explicit slider
+    value replaces Auto for the player's default FOV, and weapon zoom or `env_zoom` scale either
+    one in proportion (`video::vertical_fov_with`), so the crossbow still zooms. A main-menu
+    background ignores it. The vertical field of view is a real thing: games such as Source expose
+    a horizontal one (`fov_desired`, horizontal at 4:3) and the vertical one follows from the
+    aspect ratio; the slider overrides that.
   - `video.viewmodel_fov` (`viewmodel_fov`, 4:3 horizontal degrees, default 54, range
     `viewmodel_fov_range` 30..110) replaces the retail 54 in `viewmodel_fov(base, default, fov)`
     for the viewmodel camera and its attached effects; zoom still subtracts the FOV offset, so a

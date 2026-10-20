@@ -943,9 +943,12 @@ pub(crate) fn vertical_fov_for(degrees: f32, aspect: f32) -> f32 {
     2. * ((degrees.to_radians() / 2.).tan() / aspect.min(4. / 3.)).atan()
 }
 
-/// [`vertical_fov_for`] with an explicit vertical field of view: `vertical` degrees (0 =
-/// automatic) replace the derived one for the player's default field of view, and the weapon
-/// zoom or camera field of view `view_degrees` scales it in proportion.
+/// [`vertical_fov_for`] with an explicit vertical field of view or automatic aspect tuning:
+/// when `vertical > 0.`, `vertical` degrees replace the derived one for the player's default
+/// field of view; when `vertical <= 0.` (automatic), [`hl2_ui::tuning::world_fov_offset`]
+/// adjusts `default_degrees` outside `5:4..=16:9` so portrait frames avoid vertical fish-eye
+/// and ultrawide frames avoid peripheral horizontal stretching. Weapon zoom or camera field of
+/// view `view_degrees` scales the tangent in proportion.
 pub(crate) fn vertical_fov_with(
     view_degrees: f32,
     default_degrees: f32,
@@ -953,11 +956,17 @@ pub(crate) fn vertical_fov_with(
     vertical: f32,
 ) -> f32 {
     let derived = vertical_fov_for(view_degrees, aspect);
-    if vertical <= 0. {
-        return derived;
-    }
     let base = vertical_fov_for(default_degrees, aspect);
-    let tangent = (derived / 2.).tan() * (vertical.to_radians() / 2.).tan() / (base / 2.).tan();
+    let target_base = if vertical > 0. {
+        vertical.to_radians()
+    } else {
+        let offset = hl2_ui::tuning::world_fov_offset(aspect);
+        if offset == 0. {
+            return derived;
+        }
+        vertical_fov_for((default_degrees + offset).clamp(1., 160.), aspect)
+    };
+    let tangent = (derived / 2.).tan() * (target_base / 2.).tan() / (base / 2.).tan();
     2. * tangent.atan()
 }
 
@@ -982,22 +991,35 @@ mod tests {
 
     #[test]
     fn an_explicit_vertical_fov_replaces_the_derived_one_and_scales_with_zoom() {
-        for aspect in [9. / 16., 1., 4. / 3., 16. / 9., 32. / 9.] {
-            let derived = vertical_fov_for(75., aspect);
+        for aspect in [5. / 4., 4. / 3., 16. / 10., 16. / 9.] {
             assert_eq!(
                 vertical_fov_with(75., 75., aspect, 0.),
-                derived,
-                "automatic"
+                vertical_fov_for(75., aspect),
+                "retail aspects are untouched in automatic mode"
             );
+        }
+        // Outside 5:4..=16:9, automatic mode applies `world_fov_offset` to tame vertical fish-eye
+        // in portrait and horizontal peripheral stretching in ultrawide.
+        assert!(vertical_fov_with(75., 75., 9. / 16., 0.) < vertical_fov_for(75., 9. / 16.));
+        assert!(vertical_fov_with(75., 75., 9. / 16., 0.) > vertical_fov_for(75., 4. / 3.));
+        assert!(vertical_fov_with(75., 75., 32. / 9., 0.) < vertical_fov_for(75., 32. / 9.));
+
+        for aspect in [9. / 16., 1., 4. / 3., 16. / 9., 32. / 9.] {
+            let derived = vertical_fov_for(75., aspect);
+            let auto = vertical_fov_with(75., 75., aspect, 0.);
             let explicit = vertical_fov_with(75., 75., aspect, 90.);
             assert!(
                 (explicit.to_degrees() - 90.).abs() < 1e-3,
                 "{aspect}: {explicit}"
             );
-            // Zoom (a smaller view FOV) narrows it in the same proportion as the derived one.
+            // Zoom (a smaller view FOV) narrows both automatic and explicit vertical FOV in the
+            // same proportion as the derived one.
+            let derived_ratio = (vertical_fov_for(20., aspect) / 2.).tan() / (derived / 2.).tan();
+            let auto_zoomed = vertical_fov_with(20., 75., aspect, 0.);
+            let auto_ratio = (auto_zoomed / 2.).tan() / (auto / 2.).tan();
+            assert!((auto_ratio - derived_ratio).abs() < 1e-5, "{aspect}");
             let zoomed = vertical_fov_with(20., 75., aspect, 90.);
             let ratio = (zoomed / 2.).tan() / (explicit / 2.).tan();
-            let derived_ratio = (vertical_fov_for(20., aspect) / 2.).tan() / (derived / 2.).tan();
             assert!((ratio - derived_ratio).abs() < 1e-5, "{aspect}");
             assert!(zoomed < explicit);
         }
