@@ -361,11 +361,7 @@ impl Choice {
                     let current = env.modes.current.unwrap_or_else(|| {
                         Resolution::new(draft.config.video.width, draft.config.video.height)
                     });
-                    vec![format!(
-                        "{} ({})",
-                        loc.text(draft.aspect.token()),
-                        current.without_stripes_for_flexible().label()
-                    )]
+                    vec![current.without_stripes_for_flexible().label()]
                 } else {
                     display::resolution_choices(&env.resolutions(draft), draft.aspect)
                         .into_iter()
@@ -1054,17 +1050,11 @@ mod tests {
         assert_eq!(draft.aspect, AspectRatio::Flexible);
         assert!(draft.config.video.flexible_aspect);
 
-        // Resolution is now disabled and shows "Fit Display (1600 x 900)"
+        // Resolution is now disabled and shows "1600 x 900"
         assert!(!enabled(res_binding, true, &draft, &draft.config));
-        assert_eq!(
-            Choice::Resolution.items(&env, &draft),
-            ["Fit Display (1600 x 900)"]
-        );
+        assert_eq!(Choice::Resolution.items(&env, &draft), ["1600 x 900"]);
         assert_eq!(Choice::Resolution.selected(&env, &draft), Some(0));
-        assert_eq!(
-            Choice::Resolution.text(&env, &draft),
-            "Fit Display (1600 x 900)"
-        );
+        assert_eq!(Choice::Resolution.text(&env, &draft), "1600 x 900");
 
         // Selecting resolution while flexible is a no-op
         Choice::Resolution.select(&env, &mut draft, 0);
@@ -1082,11 +1072,11 @@ mod tests {
         };
         assert_eq!(
             Choice::Resolution.items(&env_pillarbox, &draft),
-            ["Fit Display (3556 x 1000)"]
+            ["3556 x 1000"]
         );
         assert_eq!(
             Choice::Resolution.text(&env_pillarbox, &draft),
-            "Fit Display (3556 x 1000)"
+            "3556 x 1000"
         );
 
         // Window taller than 9:16 has letterbox black stripes; reading excludes them (500x2000 -> 500x889)
@@ -1102,12 +1092,9 @@ mod tests {
         };
         assert_eq!(
             Choice::Resolution.items(&env_letterbox, &draft),
-            ["Fit Display (500 x 889)"]
+            ["500 x 889"]
         );
-        assert_eq!(
-            Choice::Resolution.text(&env_letterbox, &draft),
-            "Fit Display (500 x 889)"
-        );
+        assert_eq!(Choice::Resolution.text(&env_letterbox, &draft), "500 x 889");
 
         // Switch back to 16:9
         let wide_idx = AspectRatio::ALL
