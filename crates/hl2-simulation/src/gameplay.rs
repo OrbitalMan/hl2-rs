@@ -1960,6 +1960,7 @@ pub fn apply_hit(
         sneak_attack: sneak,
     });
     scene.states[id].value -= damage;
+    scene.npc_damage.push((id, attacker.player, damage));
     scene.fire(id, "OnDamaged", usize::MAX);
     if scene.states[id].value <= 0. {
         scene.fire(id, "OnDeath", usize::MAX);

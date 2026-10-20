@@ -188,6 +188,12 @@ pub struct AiActor {
     pub yaw: f32,
     /// An NPC that shot this one since the last think (OnTakeDamage: the attacker).
     pub damaged_by: Option<usize>,
+    /// The largest single hit since the last think (IsLightDamage > 0, IsHeavyDamage > 20).
+    #[serde(skip)]
+    damage_taken: f32,
+    /// The player hit this NPC since the last think.
+    #[serde(skip)]
+    damaged_by_player: bool,
     #[serde(skip)]
     goal: Option<GoalKey>,
     /// Animation events up to this time were handled.
@@ -1083,6 +1089,8 @@ impl AiRuntime {
             origin: [0.; 3],
             yaw: 0.,
             damaged_by: None,
+            damage_taken: 0.,
+            damaged_by_player: false,
             goal: None,
             events_until: 0.,
             idle_angry: false,
@@ -1187,6 +1195,13 @@ impl AiRuntime {
         transients: &[ActorHull],
         player: PlayerState,
     ) {
+        // OnTakeDamage_Alive: hits since the last tick, per victim.
+        for (victim, by_player, damage) in std::mem::take(&mut scene.npc_damage) {
+            if let Some(actor) = self.actors.get_mut(&victim) {
+                actor.damage_taken = actor.damage_taken.max(damage);
+                actor.damaged_by_player |= by_player;
+            }
+        }
         if let Some(value) = self.stunstick_damage {
             super::metropolice::STUNSTICK_DAMAGE.with(|d| d.set(value));
         }
@@ -1649,6 +1664,25 @@ impl AiRuntime {
         // behavior made its enemy with SetEnemy (native: the cop falls back to alert).
         if player.noclip && actor.npc.enemy == Some(PLAYER) {
             actor.npc.enemy = None;
+        }
+        // CAI_BaseNPC::OnTakeDamage_Alive: any damage is light, more than 20 heavy; a
+        // hated player attacker is remembered (UpdateEnemyMemory) and becomes the enemy
+        // when there is none.
+        let damage_taken = std::mem::take(&mut actor.damage_taken);
+        if damage_taken > 0. {
+            actor.npc.conditions.set(COND_LIGHT_DAMAGE);
+        }
+        if damage_taken > 20. {
+            actor.npc.conditions.set(COND_HEAVY_DAMAGE);
+        }
+        if std::mem::take(&mut actor.damaged_by_player) && hates && !player.noclip {
+            actor
+                .npc
+                .enemies
+                .update(Some(PLAYER), player.feet, 0., true, now);
+            if actor.npc.enemy.is_none() {
+                actor.npc.enemy = Some(PLAYER);
+            }
         }
         // Damage from an NPC: COND_LIGHT_DAMAGE, the attacker remembered where it stands and
         // made the enemy when there is none (unless liked).
@@ -2982,6 +3016,44 @@ mod tests {
             (r.ai.melee_hits[0].victim, r.ai.melee_hits[0].damage),
             (1, 10.)
         );
+    }
+    #[test]
+    fn player_hits_give_damage_conditions_and_make_the_player_the_enemy() {
+        let world = World {
+            entities: vec![entity(&[
+                ("classname", "npc_combine_s"),
+                ("origin", "0 0 0"),
+                ("angles", "0 0 0"),
+                ("additionalequipment", "weapon_smg1"),
+            ])],
+            ..Default::default()
+        };
+        let scene = Scene::new(&world);
+        let physics = Physics::new(&world);
+        let ai = AiRuntime::new(&world, None);
+        let mut r = Rig {
+            world,
+            scene,
+            physics,
+            controller: Controller::new(None, Default::default()),
+            ai,
+        };
+        r.ai.enabled = true;
+        // The player stands behind the soldier (outside his view cone).
+        let behind = player_at(-300.);
+        run(&mut r, 10, behind);
+        assert_eq!(r.ai.actors[&0].npc.enemy, None);
+        // A 357 round (more than 20): light and heavy damage, the player remembered.
+        r.scene.npc_damage.push((0, true, 40.));
+        run(&mut r, 1, behind);
+        for _ in 0..10 {
+            if r.ai.actors[&0].npc.enemy.is_some() {
+                break;
+            }
+            run(&mut r, 1, behind);
+        }
+        assert_eq!(r.ai.actors[&0].npc.enemy, Some(PLAYER));
+        assert!(r.scene.npc_damage.is_empty());
     }
     #[test]
     fn set_police_goal_enables_policing_warnings_and_goal_outputs() {
