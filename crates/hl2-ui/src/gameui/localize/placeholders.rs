@@ -37,6 +37,10 @@ pub const VERTICAL_FOV: &str = "#HL2RS_VerticalFov";
 pub const VIEWMODEL_FOV: &str = "#HL2RS_ViewmodelFov";
 /// Ctrl+R history search prompt in the console (no installed token).
 pub const CONSOLE_REVERSE_SEARCH: &str = "#HL2RS_Console_ReverseSearch";
+/// Description and usage for `cl_software_cursor` in the console (matches retail Source SDK / client.dll).
+pub const CMD_CL_SOFTWARE_CURSOR: &str = "#HL2RS_Cmd_ClSoftwareCursor";
+pub const CMD_CL_SOFTWARE_CURSOR_HELP: &str =
+    "cl_software_cursor [0|1]: switches the game to use a larger software cursor instead of the normal OS cursor";
 
 /// Temporary English text of each placeholder token (keys without the `#`).
 pub const PLACEHOLDER_STRINGS: &[(&str, &str)] = &[
@@ -51,6 +55,7 @@ pub const PLACEHOLDER_STRINGS: &[(&str, &str)] = &[
     ("HL2RS_VerticalFov", "Vertical FOV"),
     ("HL2RS_ViewmodelFov", "Viewmodel FOV"),
     ("HL2RS_Console_ReverseSearch", "reverse-i-search"),
+    ("HL2RS_Cmd_ClSoftwareCursor", CMD_CL_SOFTWARE_CURSOR_HELP),
 ];
 
 /// The placeholder text of `token` (with or without `#`, any case).
@@ -79,6 +84,7 @@ mod tests {
             VERTICAL_FOV,
             VIEWMODEL_FOV,
             CONSOLE_REVERSE_SEARCH,
+            CMD_CL_SOFTWARE_CURSOR,
         ] {
             assert!(token.starts_with("#HL2RS_"), "{token}");
             assert!(lookup(token).is_some_and(|t| !t.is_empty()), "{token}");

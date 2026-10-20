@@ -4,6 +4,12 @@
  
 ## Current session: dynamic aspect ratio & FOV/viewmodel framing (2026-10-20, branch `orbitalman/hl2-ui`)
 
+- **Software cursor in fullscreen (`cl_software_cursor`):**
+  - Added dedicated `hl2-bevy::software_cursor` module for integer-scaled 2D software cursor rendering (`Arrow`, `ResizeNwSe`, `ResizeNeSw`) with nearest-neighbor filtering and scale caching.
+  - Active exclusively when `cl_software_cursor` is enabled in `WindowMode::Fullscreen(..)`, window is focused, and UI is active (`sim.paused`), hiding the hardware cursor and drawing the scaled cursor directly in the UI presentation pass.
+  - Registered `software_cursor: bool` in `MouseSettings`, `cl_software_cursor` in console and commands, and `#HL2RS_Cmd_ClSoftwareCursor` placeholder token matching retail Source SDK (`view.cpp`) description.
+  - Verified with unit tests, audit test, `validate.sh`, and `check_windows.sh`.
+
 - **Viewmodel sequence transitions & cross-fading (fix crowbar swing twitch/hop):**
   - In `hl2-simulation::viewmodel_effects`, added `ViewmodelAnimationState` (`Playing`, `Transition`, `Idle`), `viewmodel_animation_state`, `viewmodel_state_matrices`, and `Inventory::viewmodel_matrices`.
   - Finishing non-looping sequences (such as crowbar `misscenter1`, pistol `fire`, shotgun `fire01`/`pump`) now cross-fade smoothly into the active weapon's idle animation over `fade_time = min(clip.fade_out, idle.fade_in)` (default 0.2s) using Source SDK `MaintainSequenceTransitions` smoothstep spline blending ($s = 3s^2 - 2s^3$), holding the finished sequence at its final frame while advancing idle.

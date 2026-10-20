@@ -402,6 +402,8 @@ pub struct MouseSettings {
     pub aim_assist: AimAssist,
     /// `m_autoaim_scale`.
     pub aim_assist_scale: f32,
+    /// `cl_software_cursor`: switches the game to use a software cursor in fullscreen.
+    pub software_cursor: bool,
 }
 
 impl Default for MouseSettings {
@@ -415,6 +417,7 @@ impl Default for MouseSettings {
             accel_exponent: 1.05,
             aim_assist: AimAssist::Off,
             aim_assist_scale: 1.0,
+            software_cursor: false,
         }
     }
 }

@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-20 UI: software cursor in fullscreen mode (`cl_software_cursor`)
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Software cursor module (`hl2-bevy::software_cursor`): added crisp integer-scaled 2D software cursor rasterization and rendering for `CursorHint::Arrow` (16×20), `ResizeNwSe` (16×16), and `ResizeNeSw` (16×16) with nearest-neighbor filtering and scale clamping (1x..=4x, matching monitor scale factor). Added `SoftwareCursorCache` caching rasterized textures and drawing directly onto the UI canvas.
+- Fullscreen-only activation (`software_cursor::is_active`): software cursor activates only when `cl_software_cursor` is enabled, in `WindowMode::Fullscreen(..)`, when the window is focused, and when UI is active (`sim.paused`). In `ui_system::update_ui`, hardware OS cursor is hidden when software cursor is active (`cursor.visible = sim.paused && !sw_active`). In `canvas_renderer::present`, software cursor draws at canvas pointer position using the primary monitor's integer scale factor.
+- Console & cvar registration (`hl2-ui::config`, `console`, `console::commands`, `gameui::localize::placeholders`): added `software_cursor: bool` to `MouseSettings`; added `cl_software_cursor [0|1]` execution and query in `Console`; added `CMD_CL_SOFTWARE_CURSOR` (`"#HL2RS_Cmd_ClSoftwareCursor"`) and `CMD_CL_SOFTWARE_CURSOR_HELP` in `placeholders` matching retail Source SDK (`view.cpp`) / `client.dll` wording (`"cl_software_cursor [0|1]: switches the game to use a larger software cursor instead of the normal OS cursor"`).
+
+**Why:** owner request: implement `cl_software_cursor` to activate a software cursor exclusively in full screen mode (scaling to match Retina high-DPI displays where macOS drops the hardware cursor point size to 1x in exclusive full screen), avoiding god modules and adhering to AGENTS.md localization rules.
+
+**Tested how:**
+- Unit tests in `software_cursor::tests` (`test_is_active_conditions`, `test_rasterize_dimensions_and_scaling`, `test_draw_queues_quad_on_canvas`).
+- Console tests in `console::tests::cheats_are_gated_in_order_and_queries_do_not_change_them` verifying query and setting of `cl_software_cursor`.
+- Localization audit: `cargo test -p hl2-ui audit_no_hardcoded_user_visible_strings_in_ui_code_outside_fallback_constants`.
+- Full workspace validation suite via `scripts/checks/validate.sh` (340 `hl2-ui` tests, 96 `hl2-bevy` tests, strict clippy with `-D warnings`, `cargo fmt --check`).
+- Windows cross-check via `scripts/checks/check_windows.sh`.
+
+**Result:** `cl_software_cursor` enables an integer-scaled software cursor exclusively during fullscreen UI sessions with correct hotspots and scaling.
+
+**Still broken or not tested:** manual gameplay test in exclusive fullscreen on macOS display.
+
+**Next:** owner manual test.
+
 ## 2026-10-20 Viewmodel: smooth sequence transitions into idle (fix crowbar swing twitch/hop)
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

@@ -16,7 +16,7 @@ use bevy::{
     },
     shader::ShaderRef,
     sprite_render::{AlphaMode2d, Material2d, Material2dKey},
-    window::PrimaryWindow,
+    window::{Monitor, PrimaryMonitor, PrimaryWindow},
 };
 use hl2_ui::canvas::{FilterMode, Quad, Texture2D};
 use std::collections::HashMap;
@@ -287,9 +287,11 @@ pub fn present(
     mut game: ResMut<crate::gameplay::Gameplay>,
     (ui, clock, sim, status, performance): HudResources,
     windows: Query<&Window, With<PrimaryWindow>>,
+    monitors: Query<&Monitor, With<PrimaryMonitor>>,
     video_viewport: Option<Res<crate::video::VideoViewport>>,
     (mut images, mut materials, mut meshes): HudAssets,
     mut draws: DrawQuery,
+    mut cursor_cache: Local<crate::software_cursor::SoftwareCursorCache>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "hud");
     let Ok(window) = windows.single() else {
@@ -363,6 +365,26 @@ pub fn present(
         ui.source.draw_debug(&hud.debug_lines);
     }
     ui.source.draw(clock.elapsed_secs_f64());
+    let sw_active = crate::software_cursor::is_active(
+        ui.source.config.mouse.software_cursor,
+        &window.mode,
+        window.focused,
+        ui.source.paused(),
+    );
+    if sw_active {
+        let scale = monitors
+            .iter()
+            .next()
+            .map(|m| m.scale_factor.round().clamp(1.0, 4.0) as u32)
+            .unwrap_or(1);
+        if let Some(pointer) = crate::ui_system::cursor_to_canvas(
+            window.cursor_position(),
+            video_viewport.as_deref(),
+            window,
+        ) {
+            cursor_cache.draw(&hud.source.canvas, ui.source.cursor_hint(), pointer, scale);
+        }
+    }
     game.scene
         .sounds
         .extend(hud.source.drain_sounds().into_iter().map(Into::into));

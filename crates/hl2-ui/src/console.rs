@@ -1767,6 +1767,20 @@ impl Console {
                     return Err(usage());
                 }
             }
+            "cl_software_cursor" => match args {
+                [] => {
+                    let val = u8::from(self.config.mouse.software_cursor);
+                    self.log(format!("\"cl_software_cursor\" = \"{val}\""));
+                }
+                [value] => {
+                    let enabled = boolean(value).ok_or_else(usage)?;
+                    self.config.mouse.software_cursor = enabled;
+                    let _ = self.config.save();
+                    self.log(format!("cl_software_cursor {}", u8::from(enabled)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                }
+                _ => return Err(usage()),
+            },
             "fov" => {
                 if args.is_empty() {
                     self.log(format!("\"fov\" = \"{:.0}\"", self.config.video.fov));
@@ -1888,6 +1902,7 @@ impl Console {
             "sv_cheats" => u8::from(self.cheats).to_string(),
             "volume" => format!("{:.2}", c.audio.volume),
             "sensitivity" => format!("{:.2}", c.mouse.sensitivity),
+            "cl_software_cursor" => u8::from(c.mouse.software_cursor).to_string(),
             "fov" => format!("{:.0}", c.video.fov),
             "mat_hdr_level" => c.video.hdr.level().to_string(),
             "background_map" => self.background_map()?.to_owned(),
@@ -4570,6 +4585,23 @@ mod tests {
         assert_eq!(console.config.video.fov, 90.0);
         assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
         assert_eq!(effects.len(), 4);
+
+        assert_eq!(
+            console.cvar_value("cl_software_cursor").as_deref(),
+            Some("0")
+        );
+        console.submit("cl_software_cursor 1");
+        assert!(console.config.mouse.software_cursor);
+        assert_eq!(
+            console.cvar_value("cl_software_cursor").as_deref(),
+            Some("1")
+        );
+        console.submit("cl_software_cursor 0");
+        assert!(!console.config.mouse.software_cursor);
+        assert_eq!(
+            console.cvar_value("cl_software_cursor").as_deref(),
+            Some("0")
+        );
     }
 
     #[test]

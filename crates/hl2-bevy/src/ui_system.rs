@@ -221,13 +221,19 @@ pub fn update_ui(
         sim.transition = ui.source.mode() != before;
         sim.paused = ui.source.paused();
         let cfg = Some(&ui.source.config);
+        let sw_active = crate::software_cursor::is_active(
+            ui.source.config.mouse.software_cursor,
+            &window.mode,
+            window.focused,
+            sim.paused,
+        );
         if sim.transition || sim.paused {
             cursor.grab_mode = if sim.paused {
                 CursorGrabMode::None
             } else {
                 CursorGrabMode::Locked
             };
-            cursor.visible = sim.paused;
+            cursor.visible = sim.paused && !sw_active;
             sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
         } else if !sim.paused
             && buttons.just_pressed(MouseButton::Left)

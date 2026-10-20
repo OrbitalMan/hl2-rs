@@ -121,6 +121,11 @@ pub const COMMANDS: &[Spec] = &[
         &[Arg::Free],
     ),
     cvar(
+        "cl_software_cursor",
+        crate::gameui::localize::placeholders::CMD_CL_SOFTWARE_CURSOR_HELP,
+        BOOLEAN,
+    ),
+    cvar(
         "fov",
         "fov [degrees]: query or set camera field of view",
         &[Arg::Free],

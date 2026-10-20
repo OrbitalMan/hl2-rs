@@ -18,6 +18,7 @@ mod rendering;
 mod setup;
 mod simulation;
 mod sky;
+mod software_cursor;
 mod studio_decals;
 mod tonemap;
 mod ui_host;
