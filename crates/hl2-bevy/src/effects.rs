@@ -525,18 +525,7 @@ fn viewmodel_quads(
     }) else {
         return Vec::new();
     };
-    let elapsed = (game.scene.time - game.inventory.animation_at).max(0.) as f32;
-    let (clip, time) = if rig
-        .clips
-        .get(&game.inventory.animation)
-        .is_some_and(|c| elapsed < c.duration())
-    {
-        (game.inventory.animation.as_str(), elapsed)
-    } else {
-        (game.inventory.idle_animation(), game.scene.time as f32)
-    };
-    let matrices =
-        vm::viewmodel_matrices(rig, clip, time, &game.inventory.viewmodel_pose_values(rig));
+    let matrices = game.inventory.viewmodel_matrices(rig, game.scene.time);
     let fov = game.inventory.view_fov(game.scene.time);
     let framing = hl2_ui::tuning::viewmodel_framing(&game.inventory.active, aspect);
     let raw_viewmodel_fov =

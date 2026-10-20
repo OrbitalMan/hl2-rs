@@ -548,31 +548,26 @@ pub fn present_entities(
                 }
             }
         }
-        let (clip, time) = if let Some(id) = animation.entity {
+        let (clip, key) = if let Some(id) = animation.entity {
             let state = &game.scene.states[id];
             if !state.visible || state.killed {
                 continue;
             }
-            (state.animation.as_str(), game.scene.animation_time(id))
+            let clip = state.animation.as_str();
+            let time = game.scene.animation_time(id);
+            let Some(definition) = rig.clips.get(clip) else {
+                continue;
+            };
+            (clip.to_owned(), sample_key(definition, time))
         } else {
             if animation.weapon.as_deref() != Some(game.inventory.active.as_str()) {
                 continue;
             }
-            let elapsed = (game.scene.time - game.inventory.animation_at).max(0.) as f32;
-            if rig
-                .clips
-                .get(&game.inventory.animation)
-                .is_some_and(|c| elapsed < c.duration())
-            {
-                (game.inventory.animation.as_str(), elapsed)
-            } else {
-                (game.inventory.idle_animation(), game.scene.time as f32)
-            }
+            let state = game
+                .inventory
+                .viewmodel_animation_state(rig, game.scene.time);
+            state.cache_key(rig)
         };
-        let Some(definition) = rig.clips.get(clip) else {
-            continue;
-        };
-        let key = sample_key(definition, time);
         // Gesture layers make the pose actor-specific; the entity id keeps cache entries apart.
         let layers = animation
             .entity
@@ -595,22 +590,17 @@ pub fn present_entities(
             .sampled
             .as_ref()
             .is_some_and(|(name, previous, layered)| {
-                name == clip && *previous == key && *layered == layer_key
+                name == &clip && *previous == key && *layered == layer_key
             })
         {
             continue;
         }
-        let sampled = (clip.to_owned(), key, layer_key);
+        let sampled = (clip.clone(), key, layer_key);
         let matrices = poses
-            .entry((animation.key.clone(), clip.to_owned(), key, layer_key))
+            .entry((animation.key.clone(), clip, key, layer_key))
             .or_insert_with(|| match animation.entity {
                 Some(id) => game.scene.actor_matrices(rig, id),
-                None => hl2_simulation::viewmodel_effects::viewmodel_matrices(
-                    rig,
-                    clip,
-                    time,
-                    viewmodel_params.as_deref().unwrap_or_default(),
-                ),
+                None => game.inventory.viewmodel_matrices(rig, game.scene.time),
             });
         if let Some(skeleton) = &animation.gpu {
             if updated_joints.insert(skeleton.joints[0]) {

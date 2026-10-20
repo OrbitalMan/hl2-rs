@@ -3517,4 +3517,59 @@ mod tests {
         play_sound(&mut scene, &weapon, "reload", &world, "ir_reload");
         assert!(scene.sounds.is_empty());
     }
+
+    #[test]
+    #[ignore = "requires an owned HL2 installation in HL2_ROOT"]
+    fn owned_crowbar_attack_transition_is_smooth_without_twitch_or_hop() {
+        let vfs =
+            source_assets::vpk::Vfs::mount(&source_assets::install::discover().unwrap()).unwrap();
+        let weapons = crate::gameplay::definitions(&vfs).unwrap();
+        let w = &weapons["weapon_crowbar"];
+        let mut world = World::default();
+        crate::actors::prepare_weapons(&mut world, &vfs, &weapons).unwrap();
+        let rig = &world.rigs[&format!("{}#0", w.viewmodel.to_lowercase())];
+
+        let mut inv = Inventory {
+            active: "weapon_crowbar".into(),
+            ..Default::default()
+        };
+        inv.animate("misscenter1", 0.0);
+
+        let mut prev_hand: Option<Vec3> = None;
+        let mut prev_tip: Option<Vec3> = None;
+        let mut max_hand_step_delta = 0.0f32;
+        let mut max_tip_step_delta = 0.0f32;
+
+        // Sample in 20ms steps across the 0.667s end of swing and through the 0.2s fadeout window to 1.0s.
+        // During the transition (t >= 0.66s), the ending attack sequence smoothly cross-fades into idle.
+        for step in 33..=50 {
+            let t = step as f64 * 0.02;
+            let matrices = inv.viewmodel_matrices(rig, t);
+            let hand = matrices[8].transform_point3(Vec3::ZERO);
+            let tip = matrices[12].transform_point3(Vec3::ZERO);
+            if let (Some(ph), Some(pt)) = (prev_hand, prev_tip) {
+                let dh = (hand - ph).length();
+                let dt = (tip - pt).length();
+                if dh > max_hand_step_delta {
+                    max_hand_step_delta = dh;
+                }
+                if dt > max_tip_step_delta {
+                    max_tip_step_delta = dt;
+                }
+            }
+            prev_hand = Some(hand);
+            prev_tip = Some(tip);
+        }
+
+        // Without blending, hand.y jumped by >10.6 units across a single 20ms step (0.66s to 0.68s, dh = 10.96).
+        // With smoothstep cross-fade into idle, consecutive 20ms step deltas remain continuous and smooth (< 2.0 units).
+        assert!(
+            max_hand_step_delta < 2.0,
+            "hand step delta spiked: {max_hand_step_delta:.2}"
+        );
+        assert!(
+            max_tip_step_delta < 2.0,
+            "tip step delta spiked: {max_tip_step_delta:.2}"
+        );
+    }
 }

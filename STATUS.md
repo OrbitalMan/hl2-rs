@@ -4,6 +4,11 @@
  
 ## Current session: dynamic aspect ratio & FOV/viewmodel framing (2026-10-20, branch `orbitalman/hl2-ui`)
 
+- **Viewmodel sequence transitions & cross-fading (fix crowbar swing twitch/hop):**
+  - In `hl2-simulation::viewmodel_effects`, added `ViewmodelAnimationState` (`Playing`, `Transition`, `Idle`), `viewmodel_animation_state`, `viewmodel_state_matrices`, and `Inventory::viewmodel_matrices`.
+  - Finishing non-looping sequences (such as crowbar `misscenter1`, pistol `fire`, shotgun `fire01`/`pump`) now cross-fade smoothly into the active weapon's idle animation over `fade_time = min(clip.fade_out, idle.fade_in)` (default 0.2s) using Source SDK `MaintainSequenceTransitions` smoothstep spline blending ($s = 3s^2 - 2s^3$), holding the finished sequence at its final frame while advancing idle.
+  - Unified viewmodel matrix evaluation across `hl2-bevy::rendering` (joint transforms and CPU skinning) and `hl2-bevy::effects` (sprites, quads and beams), preventing discrete 10.7-unit bone jumps when animations expire.
+  - Verified with unit tests (`viewmodel_effects::tests::viewmodel_animation_state_transitions_smoothly_to_idle`), owned-install regression test (`gameplay::tests::owned_crowbar_attack_transition_is_smooth_without_twitch_or_hop`), `validate.sh`, and `check_windows.sh`.
 - **Dynamic/flexible aspect ratio ("Fit Display"):** Options > Video > Aspect Ratio adds "Fit Display" (`AspectRatio::Flexible`, `video.flexible_aspect`), dynamically shaping the game frame to window, display, or workspace bounds.
   - Universal aspect-ratio math (`hl2-ui::tuning`): `min_supported_aspect` (9:16) and `max_supported_aspect` (32:9); `clamp_supported_aspect`; `cubic_bezier_ease` ($3t^2 - 2t^3$) providing $C^1$-smooth extrapolation between known aspect ratios with zero slope at plateau boundaries; `aspect_factors` smoothly blending portrait and ultrawide strengths for world FOV and viewmodel framing.
   - Dynamic frame resolution & viewport (`hl2-ui::viewport`, `hl2-bevy::video`): `flexible_frame_resolution` sizes the frame to the active window/display within 9:16..=32:9 at the detail level of the configured short side; `ViewportBounds::compute_with_mode` and `VideoViewport::compute_with_mode` fill 100% of the active window/display with 0 black bars in 9:16..=32:9 and letterbox/pillarbox only outside that range.

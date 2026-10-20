@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-20 Viewmodel: smooth sequence transitions into idle (fix crowbar swing twitch/hop)
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Viewmodel sequence transitions & cross-fading (`hl2-simulation::viewmodel_effects`): added `ViewmodelAnimationState` (`Playing`, `Transition`, `Idle`), `viewmodel_animation_state`, and `viewmodel_state_matrices`, matching Source SDK `C_BaseAnimating::MaintainSequenceTransitions` and `CSequenceTransitioner`. When a non-looping animation (e.g. crowbar attack `misscenter1`, pistol `fire`, shotgun `fire01`/`pump`) completes its authored duration $D$, it now cross-fades into the active weapon's idle animation over `fade_time = min(clip.fade_out, idle.fade_in)` (default 0.2s) using Source's smoothstep spline curve ($s = 3s^2 - 2s^3$). During the transition window, the finishing sequence is held at its final frame ($t = D$) and blended into the progressing idle sequence via `modkit_core::animation::slerp_bones`.
+- Unified viewmodel matrix evaluation (`Inventory::viewmodel_animation_state`, `Inventory::viewmodel_matrices`): unified viewmodel matrix evaluation across `hl2-bevy::rendering` (joint updates and CPU mesh skinning) and `hl2-bevy::effects` (viewmodel quads, sprites and attached beams), replacing disconnected binary checks (`if elapsed < duration { attack } else { idle }`) and ensuring meshes and attachments track identical smoothly blended poses.
+- Sampling cache keys: `ViewmodelAnimationState::cache_key` provides cache lookup labels and state keys (`key = fade_weight.to_bits() ^ (to_time.to_bits().rotate_left(16))` for transitions) so animated meshes update every active frame during transitions without redundant re-skinning when paused.
+
+**Why:** owner request: fix the crowbar attack animation twitching/hopping at the end of the swing. In `v_crowbar.mdl`, `misscenter1` ends at `hand = (-29.87, -5.68, -60.94)` and upper arm rotation `(0.703, 0.022, -0.431, 0.564)`, while `idle01` rests at `(-27.45, +5.13, -61.30)` and `(0.727, -0.034, -0.460, 0.509)`. Binary clipping caused `hand.y` to teleport by +10.67 units (~27 cm) and the upper arm to snap by 11.1° in a single frame as soon as `elapsed >= 0.6667s`, visibly twitching the crowbar across the screen.
+
+**Tested how:**
+- Synthetic unit tests in `viewmodel_effects::tests::viewmodel_animation_state_transitions_smoothly_to_idle` verifying playing, transition (monotonically decreasing smoothstep weight from 1.0 down to 0.0), and idle phases, as well as smooth bone matrix blending.
+- Owned-install regression test `gameplay::tests::owned_crowbar_attack_transition_is_smooth_without_twitch_or_hop` verifying that 20ms step deltas across the 0.667s animation boundary remain smooth and bounded (< 1.7 units across all bones, down from > 10.9 units without blending).
+- Full workspace validation suite via `scripts/checks/validate.sh` (340 `hl2-ui` tests, 93 `hl2-bevy` tests, strict workspace clippy with `-D warnings`, `cargo fmt --check`).
+- Windows MSVC cross-check via `scripts/checks/check_windows.sh` (`x86_64-pc-windows-msvc` clippy with `-D warnings`).
+
+**Result:** the crowbar swing finishes smoothly and glides seamlessly into the idle position without any visual pop, hop, or twitch.
+
+**Still broken or not tested:** multiplayer prediction transitions not implemented (single-player viewmodel only).
+
+**Next:** owner review.
+
 ## 2026-10-20 GameUI: combobox element bounding and active resolution reading without black stripes
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
