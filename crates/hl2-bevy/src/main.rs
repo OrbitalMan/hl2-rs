@@ -6,6 +6,7 @@ mod camera;
 mod campaign;
 mod canvas_renderer;
 mod console_host;
+mod cursor;
 mod effects;
 mod eyes;
 mod gameplay;
@@ -560,6 +561,7 @@ fn main() -> Result<()> {
             source_assets::install::installed_maps(&options.game),
         ))
         .init_resource::<console_host::MapEntityNames>()
+        .init_resource::<cursor::WindowTransitionCursorState>()
         .init_resource::<crate::video::VideoViewport>()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(default_plugins)
@@ -639,7 +641,8 @@ fn main() -> Result<()> {
                 .after(bevy::camera::visibility::VisibilitySystems::CalculateBounds)
                 .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         )
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, cursor::setup_cursor_images))
+        .add_systems(PreUpdate, cursor::sync_cursor_position_on_window_transition)
         .add_systems(
             PostUpdate,
             tonemap::update.before(TransformSystems::Propagate),

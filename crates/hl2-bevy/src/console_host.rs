@@ -145,31 +145,14 @@ pub fn log_layer(_: &mut App) -> Option<BoxedLayer> {
 }
 
 /// The window cursor for a placement hint: resize arrows over the console's corner grips.
+#[allow(dead_code)]
 pub fn cursor_icon(hint: hl2_ui::gameui::placement::CursorHint) -> bevy::window::CursorIcon {
-    use bevy::window::SystemCursorIcon;
-    use hl2_ui::gameui::placement::CursorHint;
-    bevy::window::CursorIcon::System(match hint {
-        CursorHint::Arrow => SystemCursorIcon::Default,
-        CursorHint::ResizeNwSe => SystemCursorIcon::NwseResize,
-        CursorHint::ResizeNeSw => SystemCursorIcon::NeswResize,
-    })
+    crate::cursor::standard_cursor_icon(hint)
 }
 
 /// Shows the console's cursor hint on the window, written only when it changes; the arrow
 /// whenever no dialog asks for another shape.
-pub fn apply_cursor_hint(
-    ui: Option<Res<crate::ui_host::Console>>,
-    windows: Query<(Entity, Option<&bevy::window::CursorIcon>), With<bevy::window::PrimaryWindow>>,
-    mut commands: Commands,
-) {
-    let hint = ui.map_or_else(Default::default, |ui| ui.source.cursor_hint());
-    let icon = cursor_icon(hint);
-    if let Ok((window, current)) = windows.single()
-        && current != Some(&icon)
-    {
-        commands.entity(window).insert(icon);
-    }
-}
+pub use crate::cursor::apply_cursor_hint;
 
 /// Prints the queued log lines in the console.
 pub fn drain_log(ui: Option<ResMut<crate::ui_host::Console>>) {

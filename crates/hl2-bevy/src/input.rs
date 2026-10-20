@@ -12,7 +12,7 @@ use std::{collections::HashMap, sync::LazyLock};
 use bevy::{
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
-    window::{CursorGrabMode, CursorOptions, PrimaryWindow},
+    window::{CursorGrabMode, CursorOptions, PrimaryMonitor, PrimaryWindow, WindowMode},
 };
 use hl2_ui::config::Config;
 use modkit_core::movement::Input;
@@ -259,6 +259,7 @@ pub(crate) fn action_pressed(
 pub(crate) fn controls(
     (keys, buttons, mouse, scroll): InputDevices,
     windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>,
+    monitors: Query<&bevy::window::Monitor, With<PrimaryMonitor>>,
     mut sim: ResMut<crate::simulation::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     ui: Option<Res<crate::ui_host::Console>>,
@@ -326,7 +327,23 @@ pub(crate) fn controls(
         }
     }
     let settings = cfg.map_or(&DEFAULTS.mouse, |c| &c.mouse);
-    let [dx, dy] = mouse_filter.apply([mouse.delta.x, mouse.delta.y], settings);
+    let is_fullscreen = matches!(window.mode, WindowMode::Fullscreen(..)) && window.focused;
+    let sensitivity_scale = if is_fullscreen {
+        monitors
+            .iter()
+            .next()
+            .map(|m| m.scale_factor.round().clamp(1.0, 4.0) as f32)
+            .unwrap_or(1.0)
+    } else {
+        1.0
+    };
+    let [dx, dy] = mouse_filter.apply(
+        [
+            mouse.delta.x * sensitivity_scale,
+            mouse.delta.y * sensitivity_scale,
+        ],
+        settings,
+    );
     let radians = hl2_ui::input::MOUSE_DEGREES_PER_COUNT.to_radians();
     sim.yaw -= dx * radians;
     let pitch_sign = if settings.invert { -1.0 } else { 1.0 };
@@ -417,6 +434,107 @@ mod tests {
         assert!(
             devices.pressed("+forward", None),
             "defaults without a config"
+        );
+    }
+
+    #[test]
+    fn test_fullscreen_mouse_sensitivity_scaling() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::window::{CursorGrabMode, Monitor, MonitorSelection, VideoModeSelection};
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.init_resource::<ButtonInput<MouseButton>>();
+        app.insert_resource(AccumulatedMouseMotion {
+            delta: Vec2::new(10.0, 0.0),
+        });
+        app.insert_resource(crate::simulation::Simulation::new(
+            &modkit_core::World::default(),
+            glam::Vec3::ZERO,
+            0.0,
+            0.0,
+            false,
+            Vec::new(),
+        ));
+
+        let window_entity = app
+            .world_mut()
+            .spawn((
+                PrimaryWindow,
+                Window {
+                    mode: WindowMode::Windowed,
+                    focused: true,
+                    ..Default::default()
+                },
+                CursorOptions {
+                    grab_mode: CursorGrabMode::Locked,
+                    visible: false,
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.world_mut().spawn((
+            PrimaryMonitor,
+            Monitor {
+                name: Some("Retina".into()),
+                physical_width: 3456,
+                physical_height: 2234,
+                physical_position: bevy::math::IVec2::ZERO,
+                refresh_rate_millihertz: Some(60000),
+                scale_factor: 2.0,
+                video_modes: Vec::new(),
+            },
+        ));
+
+        // 1. Run in Windowed mode: delta is 10.0 * 1.0 = 10.0
+        app.world_mut().run_system_once(controls).unwrap();
+        let yaw_windowed = app.world().resource::<crate::simulation::Simulation>().yaw;
+        assert!(yaw_windowed < 0.0);
+
+        // Reset yaw and reset mouse motion
+        app.world_mut()
+            .resource_mut::<crate::simulation::Simulation>()
+            .yaw = 0.0;
+        app.insert_resource(AccumulatedMouseMotion {
+            delta: Vec2::new(10.0, 0.0),
+        });
+
+        // 2. Switch to Fullscreen, focused: delta is 10.0 * 2.0 = 20.0
+        {
+            let mut entity = app.world_mut().entity_mut(window_entity);
+            let mut win = entity.get_mut::<Window>().unwrap();
+            win.mode =
+                WindowMode::Fullscreen(MonitorSelection::Primary, VideoModeSelection::Current);
+        }
+
+        app.world_mut().run_system_once(controls).unwrap();
+        let yaw_fullscreen = app.world().resource::<crate::simulation::Simulation>().yaw;
+        assert!(
+            (yaw_fullscreen - (yaw_windowed * 2.0)).abs() < 1e-4,
+            "fullscreen sensitivity must scale by 2.0"
+        );
+
+        // Reset yaw and reset mouse motion
+        app.world_mut()
+            .resource_mut::<crate::simulation::Simulation>()
+            .yaw = 0.0;
+        app.insert_resource(AccumulatedMouseMotion {
+            delta: Vec2::new(10.0, 0.0),
+        });
+
+        // 3. Lose focus in Fullscreen: sensitivity must revert to 1.0
+        {
+            let mut entity = app.world_mut().entity_mut(window_entity);
+            let mut win = entity.get_mut::<Window>().unwrap();
+            win.focused = false;
+        }
+
+        app.world_mut().run_system_once(controls).unwrap();
+        let yaw_unfocused = app.world().resource::<crate::simulation::Simulation>().yaw;
+        assert!(
+            (yaw_unfocused - yaw_windowed).abs() < 1e-4,
+            "unfocused fullscreen must revert to 1.0 sensitivity"
         );
     }
 }
