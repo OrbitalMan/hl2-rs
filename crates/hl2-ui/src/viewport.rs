@@ -133,14 +133,32 @@ impl ViewportBounds {
 
         if rel_x >= 0.0
             && rel_x <= self.logical_size.x
-            && rel_y >= 0.0
+            && rel_y >= -2.0
             && rel_y <= self.logical_size.y
         {
             let size = self.logical_size.max(Vec2::ONE);
-            Some(Vec2::new(rel_x, rel_y) * self.target_resolution.as_vec2() / size)
+            let clamped_y = if rel_y < 0.0 { 0.0 } else { rel_y };
+            Some(Vec2::new(rel_x, clamped_y) * self.target_resolution.as_vec2() / size)
         } else {
             None
         }
+    }
+
+    /// Converts a canvas coordinate back to logical window coordinates.
+    pub fn canvas_to_cursor(&self, canvas_pos: Vec2) -> Vec2 {
+        let target = self.target_resolution.as_vec2().max(Vec2::ONE);
+        let rel_x = (canvas_pos.x / target.x) * self.logical_size.x;
+        let rel_y = (canvas_pos.y / target.y) * self.logical_size.y;
+        Vec2::new(
+            (rel_x + self.logical_offset.x).clamp(
+                self.logical_offset.x,
+                self.logical_offset.x + self.logical_size.x,
+            ),
+            (rel_y + self.logical_offset.y).clamp(
+                self.logical_offset.y,
+                self.logical_offset.y + self.logical_size.y,
+            ),
+        )
     }
 
     /// Resizes the given canvas to the game frame resolution it is drawn into.
@@ -259,12 +277,26 @@ pub fn pointer_to_canvas(
         vp.cursor_to_canvas(inner_pos)
     } else if inner_pos.x >= 0.0
         && inner_pos.x <= window_logical_size.x
-        && inner_pos.y >= 0.0
+        && inner_pos.y >= -2.0
         && inner_pos.y <= window_logical_size.y
     {
-        Some(inner_pos)
+        let clamped_y = if inner_pos.y < 0.0 { 0.0 } else { inner_pos.y };
+        Some(Vec2::new(inner_pos.x, clamped_y))
     } else {
         None
+    }
+}
+
+/// Pure function converting canvas coordinates back to logical window coordinates.
+pub fn canvas_to_cursor(
+    canvas_pos: Vec2,
+    viewport: Option<&ViewportBounds>,
+    window_logical_size: Vec2,
+) -> Vec2 {
+    if let Some(vp) = viewport {
+        vp.canvas_to_cursor(canvas_pos)
+    } else {
+        canvas_pos.clamp(Vec2::ZERO, window_logical_size)
     }
 }
 
@@ -397,6 +429,16 @@ mod tests {
             Vec2::new(1024.0, 1024.0),
         );
         assert_eq!(p_inside, Some(Vec2::new(640.0, 125.0)));
+    }
+
+    #[test]
+    fn test_canvas_to_cursor_round_trip() {
+        let vp = ViewportBounds::compute(UVec2::new(1024, 768), UVec2::new(1920, 1080), 1.0);
+        let canvas_pt = Vec2::new(512.0, 384.0);
+        let window_pt = canvas_to_cursor(canvas_pt, Some(&vp), Vec2::new(1920.0, 1080.0));
+        assert_eq!(window_pt, Vec2::new(960.0, 540.0));
+        let round_trip = cursor_to_canvas(Some(window_pt), Some(&vp), Vec2::new(1920.0, 1080.0));
+        assert_eq!(round_trip, Some(canvas_pt));
     }
 
     #[test]

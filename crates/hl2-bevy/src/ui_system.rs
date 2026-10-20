@@ -5,7 +5,7 @@ use bevy::{
     app::AppExit,
     ecs::message::{MessageReader, MessageWriter},
     prelude::*,
-    window::{CursorGrabMode, CursorOptions, PrimaryMonitor, PrimaryWindow, Window},
+    window::{CursorGrabMode, CursorOptions, PrimaryMonitor, PrimaryWindow, Window, WindowMode},
 };
 
 /// Maps a window cursor position in logical window coordinates to UI canvas coordinates
@@ -21,6 +21,21 @@ pub fn cursor_to_canvas(
         viewport.map(|v| v.bounds()).as_ref(),
         glam::Vec2::new(window.width(), window.height()),
     )
+}
+
+/// Converts canvas coordinates back to logical window coordinates.
+#[allow(dead_code)]
+pub fn canvas_to_cursor(
+    canvas_pos: glam::Vec2,
+    viewport: Option<&VideoViewport>,
+    window: &Window,
+) -> Vec2 {
+    let p = hl2_ui::viewport::canvas_to_cursor(
+        canvas_pos,
+        viewport.map(|v| v.bounds()).as_ref(),
+        glam::Vec2::new(window.width(), window.height()),
+    );
+    Vec2::new(p.x, p.y)
 }
 
 /// Resizes the UI canvas to the game-frame resolution it is drawn into.
@@ -88,7 +103,7 @@ type UiInputDevices<'w, 's> = (
 );
 
 type UiWindow<'w, 's> =
-    Query<'w, 's, (&'static mut Window, &'static mut CursorOptions), With<PrimaryWindow>>;
+    Query<'w, 's, (Entity, &'static mut Window, &'static mut CursorOptions), With<PrimaryWindow>>;
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_ui(
@@ -100,6 +115,13 @@ pub fn update_ui(
     mut exit: MessageWriter<AppExit>,
     mut ui: Option<ResMut<crate::ui_host::Console>>,
     global_volume: Option<ResMut<bevy::audio::GlobalVolume>>,
+    mut _was_at_top: Local<bool>,
+    mut _last_fullscreen: Local<Option<bool>>,
+    mut _rehide_countdown: Local<u32>,
+    mut _last_sw_active: Local<Option<bool>>,
+    mut _last_cursor_pos: Local<Option<Vec2>>,
+    mut _last_canvas_pointer: Local<Option<glam::Vec2>>,
+    mut _mode_switch_settle: Local<u32>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
         if let Some(ui) = ui.as_deref_mut() {
@@ -107,7 +129,8 @@ pub fn update_ui(
         }
         exit.write(AppExit::Success);
     }
-    let Ok((window, mut cursor)) = windows.single_mut() else {
+    #[allow(unused_mut)]
+    let Ok((_window_entity, mut window, mut cursor)) = windows.single_mut() else {
         return;
     };
     let text: String = characters
@@ -141,6 +164,97 @@ pub fn update_ui(
         game.actions.push(crate::gameplay::Action::Cancel);
     }
     if let Some(ui) = ui.as_deref_mut() {
+        let is_fullscreen = matches!(window.mode, WindowMode::Fullscreen(..));
+        let _mode_switched = if let Some(was_fullscreen) = _last_fullscreen.replace(is_fullscreen) {
+            if !was_fullscreen && is_fullscreen {
+                ui.source.config.mouse.software_cursor = true;
+                #[cfg(target_os = "macos")]
+                {
+                    let prev = (*_last_cursor_pos).or_else(|| window.cursor_position());
+                    if let Some(pos) = prev {
+                        let target = crate::software_cursor::adjust_cursor_position_for_mode_switch(
+                            pos,
+                            true,
+                            Some(Vec2::new(window.width(), window.height())),
+                        );
+                        window.set_cursor_position(Some(target));
+                        *_last_cursor_pos = Some(target);
+                    }
+                }
+                true
+            } else if was_fullscreen && !is_fullscreen {
+                ui.source.config.mouse.software_cursor = false;
+                #[cfg(target_os = "macos")]
+                {
+                    crate::software_cursor::restore_macos_hardware_cursor(_window_entity);
+                    let prev = (*_last_cursor_pos).or_else(|| window.cursor_position());
+                    if let Some(pos) = prev {
+                        let target = crate::software_cursor::adjust_cursor_position_for_mode_switch(
+                            pos,
+                            false,
+                            Some(Vec2::new(window.width(), window.height())),
+                        );
+                        window.set_cursor_position(Some(target));
+                        *_last_cursor_pos = Some(target);
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        } else {
+            ui.source.config.mouse.software_cursor = is_fullscreen;
+            #[cfg(target_os = "macos")]
+            if !is_fullscreen {
+                crate::software_cursor::restore_macos_hardware_cursor(_window_entity);
+            }
+            false
+        };
+
+        if !is_fullscreen && ui.source.config.mouse.software_cursor {
+            ui.source.config.mouse.software_cursor = false;
+        }
+
+        #[cfg(target_os = "macos")]
+        if _mode_switched {
+            *_mode_switch_settle = 30;
+        }
+
+        let sw_active = crate::software_cursor::is_active(
+            ui.source.config.mouse.software_cursor,
+            window.focused,
+            ui.source.paused(),
+            is_fullscreen,
+        );
+
+        #[cfg(target_os = "macos")]
+        if *_mode_switch_settle > 0 {
+            *_mode_switch_settle -= 1;
+            *_last_cursor_pos = window.cursor_position();
+        } else if is_fullscreen && sw_active && window.focused {
+            if let Some(curr_pos) = window.cursor_position() {
+                if let Some(prev_pos) = *_last_cursor_pos {
+                    let delta = curr_pos - prev_pos;
+                    if delta.length_squared() > 0.0 && delta.length() <= 150.0 {
+                        let max_bounds = Vec2::new(window.width(), window.height());
+                        let new_pos = crate::software_cursor::accelerate_cursor_position_2x(
+                            curr_pos, prev_pos, max_bounds,
+                        );
+                        window.set_cursor_position(Some(new_pos));
+                        *_last_cursor_pos = Some(new_pos);
+                    } else {
+                        *_last_cursor_pos = Some(curr_pos);
+                    }
+                } else {
+                    *_last_cursor_pos = Some(curr_pos);
+                }
+            } else {
+                *_last_cursor_pos = None;
+            }
+        } else {
+            *_last_cursor_pos = window.cursor_position();
+        }
+
         let before = ui.source.mode();
         resize_canvas(&ui.source.canvas, video_viewport.as_deref(), &window);
         if keys.just_pressed(KeyCode::Escape) && !cancel_selection {
@@ -160,6 +274,10 @@ pub fn update_ui(
         {
             let pointer =
                 cursor_to_canvas(window.cursor_position(), video_viewport.as_deref(), &window);
+            #[cfg(target_os = "macos")]
+            if let Some(p) = pointer {
+                *_last_canvas_pointer = Some(p);
+            }
             if buttons.just_pressed(MouseButton::Left) {
                 debug!(
                     "[ui] click cursor={:?} window={}x{} (scale {}) focused={} viewport={:?} -> canvas {:?} mode={:?}",
@@ -221,19 +339,44 @@ pub fn update_ui(
         sim.transition = ui.source.mode() != before;
         sim.paused = ui.source.paused();
         let cfg = Some(&ui.source.config);
-        let sw_active = crate::software_cursor::is_active(
-            ui.source.config.mouse.software_cursor,
-            &window.mode,
-            window.focused,
-            sim.paused,
-        );
+        #[cfg(target_os = "macos")]
+        if let Some(was_sw) = _last_sw_active.replace(sw_active) {
+            if was_sw && !sw_active {
+                crate::software_cursor::restore_macos_hardware_cursor(_window_entity);
+            } else if !was_sw && sw_active {
+                crate::software_cursor::ensure_macos_hardware_cursor_hidden(_window_entity);
+            }
+        } else if sw_active {
+            crate::software_cursor::ensure_macos_hardware_cursor_hidden(_window_entity);
+        } else {
+            crate::software_cursor::restore_macos_hardware_cursor(_window_entity);
+        }
         if sim.transition || sim.paused {
             cursor.grab_mode = if sim.paused {
                 CursorGrabMode::None
             } else {
                 CursorGrabMode::Locked
             };
+            #[cfg(target_os = "macos")]
+            let prior_visible = cursor.visible;
             cursor.visible = sim.paused && !sw_active;
+            #[cfg(target_os = "macos")]
+            if sw_active {
+                let is_at_top = window.cursor_position().is_none_or(|p| p.y <= 32.0);
+                if *_was_at_top && !is_at_top {
+                    *_rehide_countdown = 15;
+                }
+                *_was_at_top = is_at_top;
+                if (prior_visible && !cursor.visible) || *_rehide_countdown > 0 {
+                    if *_rehide_countdown > 0 {
+                        *_rehide_countdown -= 1;
+                    }
+                    crate::software_cursor::ensure_macos_hardware_cursor_hidden(_window_entity);
+                }
+            } else {
+                *_was_at_top = false;
+                *_rehide_countdown = 0;
+            }
             sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
         } else if !sim.paused
             && buttons.just_pressed(MouseButton::Left)

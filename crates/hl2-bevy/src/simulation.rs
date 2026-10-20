@@ -354,7 +354,7 @@ impl Simulation {
                     }
                 }
                 Effect::Quit => ui.quit_requested = true,
-                Effect::ApplyConfig(cfg) => {
+                Effect::ApplyConfig(mut cfg) => {
                     self.fov = cfg.video.fov;
                     self.vertical_fov = cfg.video.vertical_fov;
                     self.viewmodel_fov = cfg.video.viewmodel_fov;
@@ -366,6 +366,10 @@ impl Simulation {
                     if self.applied_window != Some(target) {
                         self.applied_window = Some(target);
                         self.pending_video_config = Some(cfg.video.clone());
+                    }
+                    if cfg.video.display_mode.effective() != hl2_ui::config::DisplayMode::Fullscreen
+                    {
+                        cfg.mouse.software_cursor = false;
                     }
                     ui.source.config = *cfg;
                 }

@@ -750,8 +750,12 @@ impl OptionsDialog {
     pub fn sync_display_mode(&mut self, mode: crate::config::DisplayMode) {
         if self.draft.config.video.display_mode == self.applied.video.display_mode {
             self.draft.config.video.display_mode = mode;
+            self.draft.config.mouse.software_cursor =
+                mode.effective() == crate::config::DisplayMode::Fullscreen;
         }
         self.applied.video.display_mode = mode;
+        self.applied.mouse.software_cursor =
+            mode.effective() == crate::config::DisplayMode::Fullscreen;
     }
 
     /// Whether Apply would change anything.

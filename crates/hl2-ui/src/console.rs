@@ -1362,6 +1362,8 @@ impl Console {
     /// the applied configuration and an open Options dialog follow it.
     pub fn set_display_mode_external(&mut self, mode: crate::config::DisplayMode) {
         self.config.video.display_mode = mode;
+        self.config.mouse.software_cursor =
+            mode.effective() == crate::config::DisplayMode::Fullscreen;
         self.options.sync_display_mode(mode);
     }
 
@@ -1829,6 +1831,8 @@ impl Console {
                 self.config.video.width = width;
                 self.config.video.height = height;
                 self.config.video.display_mode = display_mode;
+                self.config.mouse.software_cursor =
+                    display_mode.effective() == crate::config::DisplayMode::Fullscreen;
                 let _ = self.config.save();
                 self.log(format!("mat_setvideomode {width} {height} {windowed}"));
                 return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
@@ -2129,6 +2133,9 @@ impl Console {
         // The dialog's copy of the settings predates any drag made while it was open.
         let mut config = config;
         config.dialogs = self.config.dialogs;
+        if config.video.display_mode.effective() != crate::config::DisplayMode::Fullscreen {
+            config.mouse.software_cursor = false;
+        }
         if let Err(error) = config.save() {
             self.log(format!("Could not save settings: {error}"));
         }

@@ -463,6 +463,7 @@ impl Choice {
             Self::DisplayMode => {
                 if let Some(v) = DisplayMode::choices().get(index) {
                     c.video.display_mode = *v;
+                    c.mouse.software_cursor = v.effective() == DisplayMode::Fullscreen;
                 }
                 // The resolution list depends on the display mode (windowed resolutions must
                 // fit the desktop); keep the resolution when it is still offered.

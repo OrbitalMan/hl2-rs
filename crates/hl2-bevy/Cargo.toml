@@ -24,6 +24,6 @@ path = "src/main.rs"
 # All of these are already in the build through Bevy, winit and wgpu.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSResponder", "NSScreen", "NSView", "NSWindow", "NSCursor", "objc2-core-foundation"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSGeometry"] }
 raw-window-handle = "0.6"

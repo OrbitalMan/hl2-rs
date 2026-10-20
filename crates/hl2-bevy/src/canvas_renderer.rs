@@ -16,7 +16,7 @@ use bevy::{
     },
     shader::ShaderRef,
     sprite_render::{AlphaMode2d, Material2d, Material2dKey},
-    window::{Monitor, PrimaryMonitor, PrimaryWindow},
+    window::PrimaryWindow,
 };
 use hl2_ui::canvas::{FilterMode, Quad, Texture2D};
 use std::collections::HashMap;
@@ -286,15 +286,14 @@ pub fn present(
     mut hud: ResMut<Hud>,
     mut game: ResMut<crate::gameplay::Gameplay>,
     (ui, clock, sim, status, performance): HudResources,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    monitors: Query<&Monitor, With<PrimaryMonitor>>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     video_viewport: Option<Res<crate::video::VideoViewport>>,
     (mut images, mut materials, mut meshes): HudAssets,
     mut draws: DrawQuery,
     mut cursor_cache: Local<crate::software_cursor::SoftwareCursorCache>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "hud");
-    let Ok(window) = windows.single() else {
+    let Ok((_window_entity, window)) = windows.single() else {
         return;
     };
     // The HUD draws into the game frame, so it is laid out in frame pixels.
@@ -365,23 +364,25 @@ pub fn present(
         ui.source.draw_debug(&hud.debug_lines);
     }
     ui.source.draw(clock.elapsed_secs_f64());
+    let is_fullscreen = matches!(window.mode, bevy::window::WindowMode::Fullscreen(..));
     let sw_active = crate::software_cursor::is_active(
         ui.source.config.mouse.software_cursor,
-        &window.mode,
         window.focused,
         ui.source.paused(),
+        is_fullscreen,
     );
     if sw_active {
-        let scale = monitors
-            .iter()
-            .next()
-            .map(|m| m.scale_factor.round().clamp(1.0, 4.0) as u32)
-            .unwrap_or(1);
-        if let Some(pointer) = crate::ui_system::cursor_to_canvas(
+        let scale = crate::software_cursor::resolve_cursor_scale();
+        let (pointer, _edge_recovered) = cursor_cache.resolve_pointer(
             window.cursor_position(),
-            video_viewport.as_deref(),
+            video_viewport.as_deref().map(|v| v.bounds()).as_ref(),
             window,
-        ) {
+        );
+        #[cfg(target_os = "macos")]
+        if _edge_recovered {
+            crate::software_cursor::ensure_macos_hardware_cursor_hidden(_window_entity);
+        }
+        if let Some(pointer) = pointer {
             cursor_cache.draw(&hud.source.canvas, ui.source.cursor_hint(), pointer, scale);
         }
     }
