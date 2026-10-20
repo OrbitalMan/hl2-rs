@@ -83,6 +83,16 @@ pub struct PlayerHit {
     pub impulse: Vec3,
     pub fade: Option<crate::player_damage::ScreenFade>,
 }
+/// A melee swing that struck an NPC (CTraceFilterMelee: DMG_CLUB on a hated NPC); the
+/// host applies it through the shared hit path.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct MeleeHit {
+    pub attacker: usize,
+    pub victim: usize,
+    pub damage: f32,
+    pub position: Vec3,
+    pub direction: Vec3,
+}
 #[derive(Clone, Debug, Serialize)]
 pub enum AiClass {
     Metropolice(Box<Metropolice>),
@@ -186,6 +196,8 @@ pub struct AiActor {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Diagnostics {
     pub thinks: u64,
+    /// Melee swings that struck an NPC.
+    pub npc_melee_hits: u64,
     pub scripted_skips: u64,
     pub sentences: u64,
     /// Sentences FOkToMakeSound refused (equal or lower priority while speaking).
@@ -213,6 +225,10 @@ pub struct AiRuntime {
     serial: usize,
     /// weapon_stunstick script SoundData (melee_hit, melee_miss).
     stunstick_sounds: (Option<String>, Option<String>),
+    /// sk_npc_dmg_stunstick from skill.cfg. The runtime is built on the map-load worker
+    /// thread, so `tick` hands it to the simulation thread's STUNSTICK_DAMAGE.
+    #[serde(skip)]
+    stunstick_damage: Option<f32>,
     /// NPC weapon definitions (installed scripts and skill.cfg).
     #[serde(skip)]
     weapon_defs: BTreeMap<String, NpcWeaponDef>,
@@ -226,6 +242,8 @@ pub struct AiRuntime {
     pub weapon_muzzle_flashes: Vec<usize>,
     /// Hits on the player for the host to apply.
     pub player_hits: Vec<PlayerHit>,
+    /// Melee hits on NPCs this tick (stunstick swings).
+    pub melee_hits: Vec<MeleeHit>,
     pub diagnostics: Diagnostics,
     random: u64,
     /// Debug (F4): the AI does not sense the player (ai_ignoreplayers / notarget).
@@ -322,6 +340,7 @@ impl AiRuntime {
         super::metropolice::add_schedules(&mut schedules);
         humanoid::add_schedules(&mut schedules);
         let mut stunstick_sounds = (None, None);
+        let mut stunstick_damage = None;
         if let Some(vfs) = vfs {
             if let Ok(Some(skill)) = vfs.read("cfg/skill.cfg") {
                 if let Ok(tokens) = keyvalues::tokens(&String::from_utf8_lossy(&skill)) {
@@ -331,6 +350,7 @@ impl AiRuntime {
                         .and_then(|p| p[1].parse::<f32>().ok())
                     {
                         super::metropolice::STUNSTICK_DAMAGE.with(|d| d.set(value));
+                        stunstick_damage = Some(value);
                     }
                 }
             }
@@ -413,11 +433,13 @@ impl AiRuntime {
             goals,
             serial: 0,
             stunstick_sounds,
+            stunstick_damage,
             weapon_defs,
             shots: Vec::new(),
             muzzle_flashes: Vec::new(),
             weapon_muzzle_flashes: Vec::new(),
             player_hits: Vec::new(),
+            melee_hits: Vec::new(),
             diagnostics: Diagnostics::default(),
             random: 0x9e37_79b9_7f4a_7c15,
         }
@@ -1152,6 +1174,9 @@ impl AiRuntime {
         transients: &[ActorHull],
         player: PlayerState,
     ) {
+        if let Some(value) = self.stunstick_damage {
+            super::metropolice::STUNSTICK_DAMAGE.with(|d| d.set(value));
+        }
         self.inputs(world, scene, controller);
         if !self.enabled {
             if self.was_enabled {
@@ -1383,13 +1408,18 @@ impl AiRuntime {
             .and_then(|d| d.fire)
             .map(|f| (f.min_range, f.max_range));
         let is_cop = actor.class.cop().is_some();
+        let cop_target = actor.class.cop().and_then(|c| c.target_entity);
         let random = self.random();
         Context {
             now,
             origin: scene.states[id].origin,
             enemy,
-            // SetTarget(player): the cop's target is the player while precriminal.
-            target: (is_cop && !player.noclip).then_some(player.feet),
+            // SetTarget(player): the cop's target is the player while precriminal; an
+            // NPC enemy after SetTarget(GetEnemy()) in combat.
+            target: match cop_target {
+                Some(t) if t != PLAYER => scene.states.get(t).map(|s| s.origin),
+                _ => (is_cop && !player.noclip).then_some(player.feet),
+            },
             best_sound: None,
             player: (!player.noclip).then_some(player.feet),
             yaw: yaw_of(scene, id),
@@ -1970,8 +2000,87 @@ impl AiRuntime {
                     });
                 }
                 CopRequest::CallForJustice => self.call_for_justice(id, world, scene, physics),
+                CopRequest::Swing {
+                    start,
+                    end,
+                    mins,
+                    maxs,
+                    damage,
+                } => {
+                    let victim = self.melee_victim(id, world, scene, start, end, mins, maxs);
+                    let cue = if let Some(victim) = victim {
+                        self.diagnostics.npc_melee_hits += 1;
+                        let center = scene.states[victim].origin + Vec3::Z * 36.;
+                        self.melee_hits.push(MeleeHit {
+                            attacker: id,
+                            victim,
+                            damage,
+                            position: center,
+                            direction: (center - (origin + Vec3::Z * 36.)).normalize_or_zero(),
+                        });
+                        // CTraceFilterMelee: InsertSound(SOUND_COMBAT, damage position, 200, 0.2).
+                        self.sounds.insert(
+                            senses::sound::COMBAT,
+                            center,
+                            200.,
+                            0.2,
+                            Some(id),
+                            scene.time,
+                        );
+                        self.stunstick_sounds.0.clone()
+                    } else {
+                        self.stunstick_sounds.1.clone()
+                    };
+                    if let Some(cue) = cue {
+                        scene.sounds.push(crate::sounds::SoundRequest {
+                            origin: Some(origin + Vec3::Z * 36.),
+                            ..cue.into()
+                        });
+                    }
+                }
             }
         }
+    }
+    /// CheckTraceHullAttack's NPC part: the nearest NPC along the swept box (`mins`..`maxs`
+    /// around the segment) whose hull it touches and that the attacker hates
+    /// (CTraceFilterMelee only damages hated combat characters). World blocking is not
+    /// traced (the player swing does not trace it either).
+    #[allow(clippy::too_many_arguments)]
+    fn melee_victim(
+        &self,
+        id: usize,
+        world: &World,
+        scene: &Scene,
+        start: Vec3,
+        end: Vec3,
+        mins: Vec3,
+        maxs: Vec3,
+    ) -> Option<usize> {
+        let precriminal = scene.globals.is_on("gordon_precriminal");
+        world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(other, e)| *other != id && e.class().starts_with("npc_"))
+            .filter_map(|(other, e)| {
+                let state = scene.states.get(other)?;
+                if state.killed || !state.visible {
+                    return None;
+                }
+                let (hull_min, hull_max) = crate::physics::npc_hull(e.class())?;
+                let box_min = state.origin + hull_min - maxs;
+                let box_max = state.origin + hull_max - mins;
+                (super::metropolice::segment_hits_box(start, end, box_min, box_max)
+                    && self.npc_disposition(world, id, other, precriminal) == Disposition::HT)
+                    .then(|| {
+                        (
+                            other,
+                            (state.origin + Vec3::Z * 36.).distance_squared(start),
+                        )
+                    })
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(other, _)| other)
     }
     /// AdministerJustice's search: the first other allowed-to-respond cop within 512
     /// units that sees this cop and the player.
@@ -2638,6 +2747,68 @@ mod tests {
         r.scene.states[1].killed = true;
         run(&mut r, 10, player_at(-3000.));
         assert_eq!(r.ai.actors[&0].npc.enemy, None);
+    }
+    #[test]
+    fn stunstick_swings_strike_only_hated_npcs_in_the_swept_box() {
+        let cop = |name: &str, origin: &str, angles: &str| {
+            entity(&[
+                ("classname", "npc_metropolice"),
+                ("targetname", name),
+                ("origin", origin),
+                ("angles", angles),
+                ("additionalequipment", "weapon_stunstick"),
+            ])
+        };
+        let world = World {
+            entities: vec![
+                cop("friend", "0 0 0", "0 0 0"),
+                cop("foe", "40 0 0", "0 180 0"),
+                cop("ally", "0 40 0", "0 0 0"),
+            ],
+            ..Default::default()
+        };
+        let scene = Scene::new(&world);
+        let physics = Physics::new(&world);
+        let ai = AiRuntime::new(&world, None);
+        let mut r = Rig {
+            world,
+            scene,
+            physics,
+            controller: Controller::new(None, Default::default()),
+            ai,
+        };
+        r.ai.set_player_disposition(0, Some(Disposition::LI));
+        r.ai.set_player_disposition(1, Some(Disposition::HT));
+        r.ai.set_player_disposition(2, Some(Disposition::LI));
+        let swing = |end: Vec3| CopRequest::Swing {
+            start: Vec3::new(0., 0., 60.),
+            end,
+            mins: Vec3::new(-16., -16., -40.),
+            maxs: Vec3::splat(16.),
+            damage: 40.,
+        };
+        let player = player_at(-3000.);
+        // Toward the hated foe 40 units ahead: a hit with a combat sound.
+        r.ai.actors
+            .get_mut(&0)
+            .unwrap()
+            .class
+            .requests_mut()
+            .push(swing(Vec3::new(32., 0., 60.)));
+        r.ai.apply_requests(0, &r.world, &mut r.scene, &r.physics, player);
+        assert_eq!(r.ai.melee_hits.len(), 1);
+        assert_eq!(r.ai.melee_hits[0].victim, 1);
+        assert_eq!(r.ai.melee_hits[0].damage, 40.);
+        // Toward the liked ally: CTraceFilterMelee passes it (no damage).
+        r.ai.melee_hits.clear();
+        r.ai.actors
+            .get_mut(&0)
+            .unwrap()
+            .class
+            .requests_mut()
+            .push(swing(Vec3::new(0., 32., 60.)));
+        r.ai.apply_requests(0, &r.world, &mut r.scene, &r.physics, player);
+        assert!(r.ai.melee_hits.is_empty());
     }
     #[test]
     fn set_police_goal_enables_policing_warnings_and_goal_outputs() {

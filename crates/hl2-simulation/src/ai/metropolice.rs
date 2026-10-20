@@ -122,6 +122,16 @@ pub enum CopRequest {
     },
     /// AdministerJustice handed to a nearby allowed-to-respond cop.
     CallForJustice,
+    /// A stunstick swing that missed the player: the rest of CheckTraceHullAttack (the
+    /// swept box against NPCs the cop hates, CTraceFilterMelee) runs in the runtime,
+    /// which plays the hit or miss sound.
+    Swing {
+        start: Vec3,
+        end: Vec3,
+        mins: Vec3,
+        maxs: Vec3,
+        damage: f32,
+    },
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Metropolice {
@@ -130,6 +140,9 @@ pub struct Metropolice {
     pub has_baton: bool,
     pub baton_active: bool,
     pub should_activate_baton: bool,
+    /// m_hTargetEnt set by SelectCombatSchedule's SetTarget(GetEnemy()) before
+    /// SCHED_METROPOLICE_ACTIVATE_BATON (TASK_FACE_TARGET); None: the player.
+    pub target_entity: Option<usize>,
     pub warnings: u32,
     pub baton_debounce: f64,
     pub chase_until: f64,
@@ -395,8 +408,13 @@ impl Metropolice {
     fn stunstick_hit(&mut self, ctx: &Context, knock_out: bool) {
         let mut direction = forward(ctx.yaw);
         let start = ctx.origin + Vec3::Z * 60.;
-        if let Some(player) = self.player {
-            let delta = (player.center - start).normalize_or_zero();
+        // Toward GetEnemy()->WorldSpaceCenter() (an NPC enemy: feet + 36), else the player.
+        let enemy_center = match ctx.enemy {
+            Some((id, feet)) if id != PLAYER => Some(feet + Vec3::Z * 36.),
+            _ => self.player.map(|p| p.center),
+        };
+        if let Some(center) = enemy_center {
+            let delta = (center - start).normalize_or_zero();
             if delta
                 .truncate()
                 .normalize_or_zero()
@@ -412,7 +430,13 @@ impl Metropolice {
             Vec3::new(-16., -16., -40.),
             Vec3::splat(16.),
         ) {
-            self.requests.push(CopRequest::Sound("melee_miss"));
+            self.requests.push(CopRequest::Swing {
+                start,
+                end: start + direction * 32.,
+                mins: Vec3::new(-16., -16., -40.),
+                maxs: Vec3::splat(16.),
+                damage: self.stunstick_damage(),
+            });
             return;
         }
         let player = self.player.expect("hit implies a player");
@@ -585,6 +609,7 @@ impl Metropolice {
             // the swing timer allows, else face/chase.
             if self.has_baton && !self.baton_active {
                 self.should_activate_baton = true;
+                self.target_entity = npc.enemy;
                 return "SCHED_METROPOLICE_ACTIVATE_BATON".into();
             }
             if npc.conditions.has(COND_CAN_MELEE_ATTACK1) {

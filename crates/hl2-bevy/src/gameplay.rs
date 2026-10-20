@@ -894,6 +894,37 @@ impl Gameplay {
             }
             // ViewPunch needs the punch-angle path of the arsenal branch (not here).
         }
+        // NPC melee (stunstick swings on hated NPCs): DMG_CLUB through the shared hit path.
+        for melee in std::mem::take(&mut self.ai.melee_hits) {
+            let mut blood = Vec::new();
+            let origin = self.scene.states[melee.attacker].origin + glam::Vec3::Z * 36.;
+            hl2_simulation::gameplay::apply_hit(
+                &self.world,
+                &mut self.scene,
+                physics,
+                melee.damage,
+                "",
+                &hl2_simulation::physics::RayHit {
+                    entity: melee.victim,
+                    position: melee.position,
+                    normal: -melee.direction,
+                    hitgroup: 0,
+                },
+                melee.direction,
+                true,
+                hl2_simulation::gameplay::HitSource {
+                    player: false,
+                    origin,
+                },
+                &mut || self.ai.uniform(),
+                &mut blood,
+            );
+            self.ai.npc_attacked(melee.victim, melee.attacker);
+            for (hit, color) in blood {
+                self.impacts
+                    .add_blood(hit, color, &self.world, physics, &self.scene);
+            }
+        }
         // NPC weapons' FireBullets (DESIGN 14w): the shared hit path, the player's hull,
         // impacts and blood like the player's own shots.
         let shots = std::mem::take(&mut self.ai.shots);
