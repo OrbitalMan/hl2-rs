@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-20 session 23: Breen's broadcast eyes, muzzle elights (parked), stunstick melee on NPCs, combine kick, NPCs react to being hit (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_baseactor.cpp MaintainLookTargets, scripted.cpp SequenceDone/PostIdleDone, ai_basenpc.cpp CheckPVSCondition/OnTakeDamage_Alive/IsLight/HeavyDamage/GetFlinchActivity, util.cpp FindClientInPVS, c_baseanimating.cpp ProcessMuzzleFlashEvent/CalcAttachments, fx_hl2_tracers.cpp, c_te_legacytempents.cpp MuzzleFlash_Combine_NPC, weapon_stunstick.cpp, basecombatcharacter.cpp CheckTraceHullAttack/CTraceFilterMelee, npc_metropolice.cpp SelectCombatSchedule, npc_combine.cpp HandleAnimEvent/MeleeAttack1Conditions/grenade checks); retail engine.dll (private Ghidra headless, work/hl2-decompiled/muzzle-elight-20261020); a native 60 fps pistol recording (oracle + gdigrab).
+
+**Changed:** scripted_sequence post idles keep NPC_STATE_SCRIPT for the random look queue (Breen); entity lights (elights) from DoMuzzleFlash and the Combine NPC flash light models (retail conversion, per-map minlight floor, decay, slotting); stunstick swings hit hated NPCs; cops target their NPC enemy for TASK_FACE_TARGET; sk_npc_dmg_stunstick reaches the simulation thread; combine kick (condition, event, sounds, COMBINE_* sentences); NPC hits produce COND_LIGHT/HEAVY_DAMAGE and make a hated player the enemy.
+
+**Why:** owner report (Breen's nervous eyes), the owner's detail list (muzzle elights, stunstick melee on NPCs), then the owner's 2026-10-20 direction: NPC gameplay first, polish later (elights parked once working).
+
+**Tested how / Result:** unit tests (see STATUS session 23); workspace release tests (two known release-only failures), owned tests, strict Clippy, fmt; packaged runs: elight-fire (rejected: too bright) and elight-fire2, baton-duel (SCHED_FAIL loop), baton-duel2 (0 damage), baton-duel3 (works), kick (no kick: a map cop killed the rebel first), kick2 (the pistol shot came during the weapon deploy), kick3/kick4 (kicks land; sentence silent like retail), hurt (a soldier reacts to a shot in the back); regression batch artifacts/s23-regression (weapons 17/17, attention 26/26, movement 25/26 known doll01; Breen's feed eyes now forward). A first native recording attempt omitted the map argument (the oracle refused safely) and its window match picked a non-game window; that file was deleted.
+
+**Still broken or not tested:** native Breen broadcast frames not recaptured; elight decay frames vs native; NPC elights only unit-tested; combine grenades, flinch gestures, squads; native per-class combat comparison.
+
+**Next:** combine grenades (DESIGN 14n session-23 plan), AI gesture layers for flinches, then the session-22 open list.
+
 ## 2026-10-20 session 22: shared NPC AI for soldiers/citizens/rebels/Barney/Alyx, cover and line-of-fire searches, female citizen animations, AR2 tracers/impacts (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_basenpc_schedule.cpp SelectCombatSchedule/FindCoverFromEnemy/TASK_GET_PATH_TO_ENEMY_LOS, ai_tacticalservices.cpp FindCoverNode/FindLosNode, ai_basehumanoid.cpp CheckAmmo, ai_basenpc.cpp GatherAttackConditions/IsCoverPosition/DoImpactEffect, npc_playercompanion.cpp, npc_citizen17.cpp, npc_combine.cpp (SelectSchedule, SelectCombatSchedule, SelectScheduleAttack, TranslateSchedule, MaxYawSpeed, NPC_TranslateActivity, CalcWeaponProficiency, schedule text), public/bone_setup.cpp AddSequenceLayers, client fx_hl2_tracers.cpp AR2Tracer/AR2Impact, fx_quad.cpp, fx_line.cpp, c_baseanimating.cpp ProcessMuzzleFlashEvent, c_te_legacytempents.cpp MuzzleFlash_Combine_*).
