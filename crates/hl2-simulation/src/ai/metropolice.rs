@@ -132,6 +132,9 @@ pub enum CopRequest {
         maxs: Vec3,
         damage: f32,
     },
+    /// CNPC_Combine COMBINE_AE_KICK: CheckTraceHullAttack(70, -(16,16,18), (16,16,18))
+    /// from the body center along the facing; the runtime applies sk_combine_s_kick.
+    Kick { start: Vec3, forward: Vec3 },
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Metropolice {

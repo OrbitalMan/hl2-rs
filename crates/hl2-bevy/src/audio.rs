@@ -105,8 +105,12 @@ impl Vox {
             }
         };
         for (name, line) in source_assets::vox::sentences(&text) {
-            // The suit's sentences and the metrocops' (CAI_Sentence groups) are requested.
-            if !name.starts_with("HEV_") && !name.starts_with("METROPOLICE_") {
+            // The suit's sentences and the metrocops' and combine soldiers' (CAI_Sentence
+            // groups) are requested.
+            if !name.starts_with("HEV_")
+                && !name.starts_with("METROPOLICE_")
+                && !name.starts_with("COMBINE_")
+            {
                 continue;
             }
             let words = source_assets::vox::words(&line);
@@ -374,6 +378,8 @@ impl PreparedAudio {
                 // npc_metropolice.cpp OnAnimEventShove (owner report: shoves were silent;
                 // the request was dropped because the cue was never preloaded).
                 "NPC_Metropolice.Shove",
+                // npc_combine.cpp COMBINE_AE_KICK.
+                "NPC_Combine.WeaponBash",
             ]
             .into_iter()
             .map(str::to_owned),

@@ -83,6 +83,8 @@ pub struct PlayerHit {
     pub impulse: Vec3,
     pub fade: Option<crate::player_damage::ScreenFade>,
 }
+/// CNPC_Combine's kick animation event.
+const COMBINE_AE_KICK: i32 = 3;
 /// A melee swing that struck an NPC (CTraceFilterMelee: DMG_CLUB on a hated NPC); the
 /// host applies it through the shared hit path.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -229,6 +231,8 @@ pub struct AiRuntime {
     /// thread, so `tick` hands it to the simulation thread's STUNSTICK_DAMAGE.
     #[serde(skip)]
     stunstick_damage: Option<f32>,
+    /// sk_combine_s_kick (CNPC_CombineS::Spawn SetKickDamage); the ConVar default is 0.
+    combine_kick_damage: f32,
     /// NPC weapon definitions (installed scripts and skill.cfg).
     #[serde(skip)]
     weapon_defs: BTreeMap<String, NpcWeaponDef>,
@@ -341,6 +345,7 @@ impl AiRuntime {
         humanoid::add_schedules(&mut schedules);
         let mut stunstick_sounds = (None, None);
         let mut stunstick_damage = None;
+        let mut combine_kick_damage = 0.;
         if let Some(vfs) = vfs {
             if let Ok(Some(skill)) = vfs.read("cfg/skill.cfg") {
                 if let Ok(tokens) = keyvalues::tokens(&String::from_utf8_lossy(&skill)) {
@@ -351,6 +356,13 @@ impl AiRuntime {
                     {
                         super::metropolice::STUNSTICK_DAMAGE.with(|d| d.set(value));
                         stunstick_damage = Some(value);
+                    }
+                    if let Some(value) = tokens
+                        .windows(2)
+                        .find(|p| p[0].eq_ignore_ascii_case("sk_combine_s_kick"))
+                        .and_then(|p| p[1].parse::<f32>().ok())
+                    {
+                        combine_kick_damage = value;
                     }
                 }
             }
@@ -434,6 +446,7 @@ impl AiRuntime {
             serial: 0,
             stunstick_sounds,
             stunstick_damage,
+            combine_kick_damage,
             weapon_defs,
             shots: Vec::new(),
             muzzle_flashes: Vec::new(),
@@ -1265,9 +1278,19 @@ impl AiRuntime {
                 let mut reloaded = false;
                 for (name, event) in events {
                     if !(3000..4000).contains(&event) {
-                        // Class animation events (the humanoids' AE_* are not modeled).
+                        // Class animation events.
                         if let Some(cop) = class.cop_mut() {
                             cop.anim_event(&name, event, &ctx, knock_out);
+                        } else if let AiClass::Humanoid(h) = class {
+                            // CNPC_Combine::HandleAnimEvent COMBINE_AE_KICK (3); the other
+                            // humanoid AE_* events are not modeled yet.
+                            if h.kind == humanoid::Kind::Combine && event == COMBINE_AE_KICK {
+                                let yaw = ctx.yaw.to_radians();
+                                h.requests.push(CopRequest::Kick {
+                                    start: ctx.origin + Vec3::Z * 36.,
+                                    forward: Vec3::new(yaw.cos(), yaw.sin(), 0.),
+                                });
+                            }
                         }
                         continue;
                     }
@@ -1678,6 +1701,11 @@ impl AiRuntime {
             },
         );
         let has_baton = actor.class.cop().is_some_and(|cop| cop.has_baton);
+        // bits_CAP_INNATE_MELEE_ATTACK1: the combine soldier's kick.
+        let innate_kick = actor
+            .class
+            .humanoid()
+            .is_some_and(|h| h.kind == humanoid::Kind::Combine);
         if let Some(enemy) = actor.npc.enemy {
             if previous_enemy != Some(enemy) {
                 actor.npc.conditions.set(COND_NEW_ENEMY);
@@ -1756,6 +1784,29 @@ impl AiRuntime {
                     };
                     if condition != COND_CAN_RANGE_ATTACK1 || los {
                         actor.npc.conditions.set(condition);
+                    }
+                }
+                // CNPC_Combine::MeleeAttack1Conditions: within 64 units, facing within
+                // 0.7, no more than 64 units of height apart, never a headcrab, and a
+                // center-to-center line that reaches the enemy.
+                if innate_kick {
+                    let delta = t_center - (origin + Vec3::Z * 36.);
+                    let dot = delta
+                        .truncate()
+                        .normalize_or_zero()
+                        .dot(facing.truncate().normalize_or_zero());
+                    let headcrab = enemy != PLAYER
+                        && world
+                            .entities
+                            .get(enemy)
+                            .is_some_and(|e| e.class().starts_with("npc_headcrab"));
+                    if delta.length() <= 64.
+                        && dot >= 0.7
+                        && (t_feet.z - origin.z).abs() <= 64.
+                        && !headcrab
+                        && sight.visible(origin + Vec3::Z * 36., t_center, &[id, enemy])
+                    {
+                        actor.npc.conditions.set(COND_CAN_MELEE_ATTACK1);
                     }
                 }
             } else {
@@ -1909,7 +1960,7 @@ impl AiRuntime {
         world: &World,
         scene: &mut Scene,
         physics: &Physics,
-        _player: PlayerState,
+        player: PlayerState,
     ) {
         let origin = scene.states[id].origin;
         let requests = {
@@ -2000,6 +2051,65 @@ impl AiRuntime {
                     });
                 }
                 CopRequest::CallForJustice => self.call_for_justice(id, world, scene, physics),
+                CopRequest::Kick { start, forward } => {
+                    let end = start + forward * 70.;
+                    let (mins, maxs) = (-Vec3::new(16., 16., 18.), Vec3::new(16., 16., 18.));
+                    let damage = self.combine_kick_damage;
+                    let player_hit = self.actors[&id].npc.enemy == Some(PLAYER)
+                        && super::metropolice::segment_hits_box(
+                            start,
+                            end,
+                            player.feet + Vec3::new(-16., -16., 0.) - maxs,
+                            player.feet + Vec3::new(16., 16., 72.) - mins,
+                        );
+                    let hit = if player_hit {
+                        // ViewPunch(-12, -7, 0) and forward * 100 + up * 50.
+                        self.player_hits.push(PlayerHit {
+                            attacker: id,
+                            damage,
+                            punch: Vec3::new(-12., -7., 0.),
+                            impulse: forward * 100. + Vec3::Z * 50.,
+                            fade: None,
+                        });
+                        self.diagnostics.player_hits += 1;
+                        true
+                    } else if let Some(victim) =
+                        self.melee_victim(id, world, scene, start, end, mins, maxs)
+                    {
+                        self.diagnostics.npc_melee_hits += 1;
+                        let center = scene.states[victim].origin + Vec3::Z * 36.;
+                        self.melee_hits.push(MeleeHit {
+                            attacker: id,
+                            victim,
+                            damage,
+                            position: center,
+                            direction: forward,
+                        });
+                        true
+                    } else {
+                        false
+                    };
+                    if hit {
+                        scene.sounds.push(crate::sounds::SoundRequest {
+                            origin: Some(origin + Vec3::Z * 36.),
+                            ..String::from("NPC_Combine.WeaponBash").into()
+                        });
+                    }
+                    self.diagnostics.sentences += 1;
+                    scene.sounds.push(crate::sounds::SoundRequest {
+                        origin: Some(origin + Vec3::Z * 64.),
+                        actor: Some(crate::sounds::SoundActor {
+                            name: scene
+                                .entity(world, id)
+                                .and_then(|e| e.get("targetname"))
+                                .unwrap_or("")
+                                .into(),
+                            model: String::new(),
+                            entity: Some(id),
+                        }),
+                        ..String::from("#COMBINE_KICK").into()
+                    });
+                }
                 CopRequest::Swing {
                     start,
                     end,
@@ -2809,6 +2919,69 @@ mod tests {
             .push(swing(Vec3::new(0., 32., 60.)));
         r.ai.apply_requests(0, &r.world, &mut r.scene, &r.physics, player);
         assert!(r.ai.melee_hits.is_empty());
+    }
+    #[test]
+    fn combine_kick_strikes_the_player_enemy_or_a_hated_npc() {
+        let world = World {
+            entities: vec![
+                entity(&[
+                    ("classname", "npc_combine_s"),
+                    ("origin", "0 0 0"),
+                    ("angles", "0 0 0"),
+                    ("additionalequipment", "weapon_smg1"),
+                ]),
+                entity(&[
+                    ("classname", "npc_citizen"),
+                    ("origin", "50 0 0"),
+                    ("angles", "0 180 0"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let scene = Scene::new(&world);
+        let physics = Physics::new(&world);
+        let mut ai = AiRuntime::new(&world, None);
+        ai.combine_kick_damage = 10.;
+        let mut r = Rig {
+            world,
+            scene,
+            physics,
+            controller: Controller::new(None, Default::default()),
+            ai,
+        };
+        let kick = CopRequest::Kick {
+            start: Vec3::new(0., 0., 36.),
+            forward: Vec3::X,
+        };
+        // The player as the enemy 40 units ahead: punch (-12, -7, 0), 100 forward + 50 up.
+        r.ai.actors.get_mut(&0).unwrap().npc.enemy = Some(PLAYER);
+        r.ai.actors
+            .get_mut(&0)
+            .unwrap()
+            .class
+            .requests_mut()
+            .push(kick.clone());
+        r.ai.apply_requests(0, &r.world, &mut r.scene, &r.physics, player_at(40.));
+        assert_eq!(r.ai.player_hits.len(), 1);
+        assert_eq!(r.ai.player_hits[0].damage, 10.);
+        assert_eq!(r.ai.player_hits[0].punch, Vec3::new(-12., -7., 0.));
+        assert_eq!(r.ai.player_hits[0].impulse, Vec3::new(100., 0., 50.));
+        // A hated rebel in reach takes the kick through the melee hit path.
+        r.ai.actors.get_mut(&0).unwrap().npc.enemy = Some(1);
+        r.ai.set_player_disposition(0, Some(Disposition::HT));
+        r.ai.set_player_disposition(1, Some(Disposition::LI));
+        r.ai.actors
+            .get_mut(&0)
+            .unwrap()
+            .class
+            .requests_mut()
+            .push(kick);
+        r.ai.apply_requests(0, &r.world, &mut r.scene, &r.physics, player_at(-3000.));
+        assert_eq!(r.ai.melee_hits.len(), 1);
+        assert_eq!(
+            (r.ai.melee_hits[0].victim, r.ai.melee_hits[0].damage),
+            (1, 10.)
+        );
     }
     #[test]
     fn set_police_goal_enables_policing_warnings_and_goal_outputs() {
