@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-20 session 24: AR2 tracer blend, combine reload, native NPC burst cadence, F4 grenades and the first packaged flush throw (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (sprite_dx9.cpp render modes, npc_combine.cpp HandleAnimEvent/StartTask/RunTask/NPC_TranslateActivity/CanThrowGrenade/CheckCanThrowGrenade, baseanimating.cpp StudioFrameAdvanceInternal/GetLastVisibleCycle/DispatchAnimEvents, basehlcombatweapon.cpp WeaponSoundRealtime, weapon_smg1.cpp/weapon_ar2.cpp FireNPCPrimaryAttack, ai_basehumanoid.cpp BuildScheduleTestBits/StartTaskRangeAttack1/RunTaskRangeAttack1, ai_basenpc_schedule.cpp RunAttackTask, ai_basenpc.cpp NPCThink, h_ai.cpp VecCheckToss); owned MDL/VMT reads (combine_soldier_anims events and fade times, w_* weapon sequences, gunshiptracer.vmt); native per-process audio of an npc_create SMG1 soldier (private work/hl2-decompiled/npc-burst-20261020).
+
+**Changed:** kRenderTransAlphaAdd sprite blend (AR2 tracer); COMBINE_AE_RELOAD and the post-reload regulator reset; sequences finish at the last visible cycle and flush their remaining events; WeaponSoundRealtime double sounds with a delayed-sound queue; CHAN_WEAPON replacement of NPC shot sounds; CNPC_Combine's own burst TASK_RANGE_ATTACK1 (no shot regulator); BuildScheduleTestBits' rest-interval mask; face/attack tasks use the enemy LKP; F4 `grenades` row for npc_combine_s (NumGrenades); flush throws: start-on-surface traces ignored, ACT_RANGE_ATTACK2 -> ACT_COMBINE_THROW_GRENADE (preloaded), full SequenceDuration for Weapon_SetActivity; grenade-check diagnostics; audio trace logs stop requests.
+
+**Why:** owner reports (AR2 tracer black box, shotgun soldier reloading forever, NPC SMG1/AR2 fire too slow and regular with single shot sounds) and the owner's request for an F4 grenade count to test NPC grenades on any map.
+
+**Tested how / Result:** unit tests (hl2-simulation 317: realtime sound times, sequence finish, combine burst, F4 grenade row; owned: AR2 tracer kind); workspace release tests (only the two known release-only should_panic image tests fail); owned tests 53 pass; strict Clippy and fmt clean. Packaged d1_trainstation_02 runs (artifacts/s24): sg (shotgun soldier vs rebel: the rebel won before a reload), sgp (flying player: not sensed; then walking: three full shotgun reload cycles), gh (station hall flush: first no_toss from the start-on-floor trace, then RANGE_ATTACK2 without a throw (untranslated activity), then a thrown frag that exploded), ghc (capture burst of the throw), smg/smg2 (cadence before/after the combine burst port), ar2 (tracer look). Native: SMG1 recording used; AR2 recording rejected (a plaza cop blocked the soldier's line of fire).
+
+**Still broken or not tested:** soldier burst gaps slightly shorter than native and reloads ~2 s vs native ~4 s; citizen/cop cadence and AR2 cadence vs native; native flush grenade; AR2 tracer look vs native; flying players are not sensed (test aid).
+
+**Next:** the native comparisons above, then NPC flinch gestures and squads.
+
 ## 2026-10-20: first-map completion audit and genuine native scene starts
 
 **Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. One subagent from the same family independently reviewed completion scope,public REA updates and retained native bytes;its exact model identifier is unavailable.
