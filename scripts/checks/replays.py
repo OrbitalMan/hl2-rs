@@ -353,8 +353,8 @@ def check_fov_settings():
     holds("portrait: more above and below than 4:3, plus default portrait viewmodel framing",
           near(portrait, [107.51, 93.78]), portrait)
     ultrawide = camera("fov_ultrawide", (5120, 1440))
-    holds("super-ultrawide: world keeps 59.84 vertical, viewmodel narrows with ultrawide framing",
-          near(ultrawide, [59.84, 35.30]), ultrawide)
+    holds("super-ultrawide: world keeps 59.84 vertical, viewmodel widens with ultrawide framing",
+          near(ultrawide, [59.84, 68.09]), ultrawide)
 
 
 def check_resolution_stress():

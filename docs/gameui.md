@@ -978,10 +978,12 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
       `weapon_rpg` widens FOV (`+16°`) and shifts left/down (`offset: [0, 4.0, -12.0]`) so its
       right-mounted tube fits inside the narrow frame while its left arm stump stays below the bottom
       bezel; other weapons use `default.portrait` (`+8°`, `[0, 0, -5.0]`).
-    - **Ultrawide (`> 16:9` up to `32:9`)**: `weapon_rpg` narrows FOV (`-18°`) and shifts
-      back/right/down (`offset: [-5.0, -4.5, -3.0]`) so the unmodeled rear cutoff of the launcher
-      tube stays outside the right edge; `weapon_physcannon` (`-6°`) and other weapons
-      (`default.ultrawide`: `-8°`, `[-1.5, -1.0, -1.0]`) use gentle ultrawide framing.
+    - **Ultrawide (`> 16:9` up to `32:9`)**: `default.ultrawide` (`+30°`, `[0, 0, -3.5]`) and
+      `weapon_physcannon` (`+30°`, `[0, 0, -7.5]`) widen the viewmodel FOV to `84°` so the hands and
+      forearms sit comfortably above the bottom edge while keeping arm stumps grounded at the bottom
+      bezel; `weapon_rpg` widens FOV (`+28°` -> `82°`) and shifts back/right/down
+      (`offset: [-2.0, -21.5, -1.5]`) so the hand and forearm remain visible above the bottom edge
+      while the unmodeled rear cutoff of the launcher tube stays outside the right edge.
     - Standard `5:4`, `4:3`, `16:10`, and `16:9` frames receive `ViewmodelFraming::ZERO` and are
       untouched. Because framing is looked up from `game.inventory.active`, switching weapons
       applies the new weapon's framing immediately as its draw animation begins.

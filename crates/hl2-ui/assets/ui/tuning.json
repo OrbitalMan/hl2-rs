@@ -12,16 +12,16 @@
     "ultrawide_aspect": [32, 9],
     "default": {
       "portrait": {"fov_offset": 8.0, "offset": [0.0, 0.0, -5.0]},
-      "ultrawide": {"fov_offset": -8.0, "offset": [-1.5, -1.0, -1.0]}
+      "ultrawide": {"fov_offset": 30.0, "offset": [0.0, 0.0, -3.5]}
     },
     "weapons": {
       "weapon_physcannon": {
         "portrait": {"fov_offset": 0.0, "offset": [0.0, 0.0, -10.0]},
-        "ultrawide": {"fov_offset": -6.0, "offset": [0.0, 0.0, 0.0]}
+        "ultrawide": {"fov_offset": 30.0, "offset": [0.0, 0.0, -7.5]}
       },
       "weapon_rpg": {
         "portrait": {"fov_offset": 16.0, "offset": [0.0, 4.0, -12.0]},
-        "ultrawide": {"fov_offset": -18.0, "offset": [-5.0, -4.5, -3.0]}
+        "ultrawide": {"fov_offset": 28.0, "offset": [-2.0, -21.5, -1.5]}
       }
     }
   }

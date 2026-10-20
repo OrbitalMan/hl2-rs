@@ -210,19 +210,23 @@ mod tests {
             }
         }
         // Gravity Gun in portrait shifts down (negative Z) to hide the severed left arm stump
-        // without narrowing horizontal FOV.
+        // without narrowing horizontal FOV; in ultrawide it widens FOV so the hands and forearms
+        // remain well above the bottom edge.
         let phys_portrait = viewmodel_framing("weapon_physcannon", 9. / 16.);
         assert_eq!(phys_portrait.fov_offset, 0.0);
         assert!(phys_portrait.offset[2] < -5.0, "{phys_portrait:?}");
+        let phys_ultrawide = viewmodel_framing("weapon_physcannon", 32. / 9.);
+        assert!(phys_ultrawide.fov_offset >= 25.0, "{phys_ultrawide:?}");
 
         // Rocket Launcher in portrait widens FOV and shifts left (+Y) so the right-mounted tube
-        // stays inside the narrow frame; in ultrawide it narrows FOV and shifts back/right/down
-        // so the unmodeled rear cutoff stays outside the right edge.
+        // stays inside the narrow frame; in ultrawide it widens FOV (showing the hands and
+        // forearms above the bottom edge) and shifts right (-Y) so the unmodeled rear cutoff
+        // stays outside the right edge.
         let rpg_portrait = viewmodel_framing("weapon_rpg", 9. / 16.);
         assert!(rpg_portrait.fov_offset > 15.0 && rpg_portrait.offset[1] > 0.0);
         let rpg_21_9 = viewmodel_framing("weapon_rpg", 64. / 27.);
         let rpg_32_9 = viewmodel_framing("weapon_rpg", 32. / 9.);
-        assert!(rpg_21_9.fov_offset < 0.0 && rpg_32_9.fov_offset < rpg_21_9.fov_offset);
-        assert!(rpg_32_9.offset[0] < 0.0 && rpg_32_9.offset[1] < 0.0);
+        assert!(rpg_21_9.fov_offset > 0.0 && rpg_32_9.fov_offset > rpg_21_9.fov_offset);
+        assert!(rpg_21_9.offset[1] < 0.0 && rpg_32_9.offset[1] < rpg_21_9.offset[1]);
     }
 }
