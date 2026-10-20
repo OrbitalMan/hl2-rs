@@ -973,11 +973,13 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
     smoothly interpolated additive `fov_offset` (degrees) and camera-space `offset` (`[forward, left, up]`
     in Source units, applied to `ViewmodelCamera` and viewmodel attachment effects) from a `default`
     profile or a per-weapon override (`weapons`):
-    - **Portrait (`< 5:4` down to `9:16`)**: `weapon_physcannon` shifts down (`offset: [0, 0, -10.0]`)
+    - **Portrait (`< 5:4` down to `9:16`)**: `weapon_physcannon` shifts down (`offset: [0, 0, -11.5]`)
       so its severed left arm stump stays below the bottom bezel without narrowing horizontal FOV;
-      `weapon_rpg` widens FOV (`+16°`) and shifts left/down (`offset: [0, 4.0, -12.0]`) so its
-      right-mounted tube fits inside the narrow frame while its left arm stump stays below the bottom
-      bezel; other weapons use `default.portrait` (`+8°`, `[0, 0, -5.0]`).
+      `weapon_crowbar` widens FOV (`+8°`) and shifts down (`offset: [0, 0, -11.0]`) so its arm stump
+      stays below the bottom bezel throughout swing animations; `weapon_rpg` widens FOV (`+16°`) and
+      shifts left/down (`offset: [0, 4.0, -16.0]`) so its right-mounted tube fits inside the narrow
+      frame while its left arm stump stays below the bottom bezel during idle, fire, and reload
+      animations; other weapons use `default.portrait` (`+8°`, `[0, 0, -9.0]`).
     - **Ultrawide (`> 16:9` up to `32:9`)**: `default.ultrawide` (`+30°`, `[0, 0, -3.5]`) and
       `weapon_physcannon` (`+30°`, `[0, 0, -7.5]`) widen the viewmodel FOV to `84°` so the hands and
       forearms sit comfortably above the bottom edge while keeping arm stumps grounded at the bottom

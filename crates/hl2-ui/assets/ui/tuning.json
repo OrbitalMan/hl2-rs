@@ -11,16 +11,20 @@
     "portrait_aspect": [9, 16],
     "ultrawide_aspect": [32, 9],
     "default": {
-      "portrait": {"fov_offset": 8.0, "offset": [0.0, 0.0, -5.0]},
+      "portrait": {"fov_offset": 8.0, "offset": [0.0, 0.0, -9.0]},
       "ultrawide": {"fov_offset": 30.0, "offset": [0.0, 0.0, -3.5]}
     },
     "weapons": {
+      "weapon_crowbar": {
+        "portrait": {"fov_offset": 8.0, "offset": [0.0, 0.0, -11.0]},
+        "ultrawide": {"fov_offset": 30.0, "offset": [0.0, 0.0, -3.5]}
+      },
       "weapon_physcannon": {
-        "portrait": {"fov_offset": 0.0, "offset": [0.0, 0.0, -10.0]},
+        "portrait": {"fov_offset": 0.0, "offset": [0.0, 0.0, -11.5]},
         "ultrawide": {"fov_offset": 30.0, "offset": [0.0, 0.0, -7.5]}
       },
       "weapon_rpg": {
-        "portrait": {"fov_offset": 16.0, "offset": [0.0, 4.0, -12.0]},
+        "portrait": {"fov_offset": 16.0, "offset": [0.0, 4.0, -16.0]},
         "ultrawide": {"fov_offset": 28.0, "offset": [-2.0, -21.5, -1.5]}
       }
     }
