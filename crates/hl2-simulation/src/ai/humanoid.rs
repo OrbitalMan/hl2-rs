@@ -145,6 +145,12 @@ const COMBINE_SCHEDULES: &[(&str, &str)] = &[
          Interrupts",
     ),
     (
+        "SCHED_COMBINE_RANGE_ATTACK2",
+        "Tasks TASK_STOP_MOVING 0 TASK_COMBINE_FACE_TOSS_DIR 0 TASK_ANNOUNCE_ATTACK 2 \
+         TASK_PLAY_SEQUENCE ACTIVITY:ACT_RANGE_ATTACK2 TASK_COMBINE_DEFER_SQUAD_GRENADES 0 \
+         TASK_SET_SCHEDULE SCHEDULE:SCHED_COMBINE_WAIT_IN_COVER Interrupts",
+    ),
+    (
         "SCHED_COMBINE_TAKECOVER_FAILED",
         "Tasks TASK_STOP_MOVING 0 Interrupts",
     ),
@@ -224,6 +230,16 @@ pub struct Humanoid {
     pub armed: bool,
     /// m_flLastAttackTime (OnRangeAttack1).
     pub last_attack: f64,
+    /// CNPC_Combine m_iNumGrenades (the NumGrenades keyvalue; 0 by default).
+    pub grenades: i32,
+    /// m_flNextGrenadeCheck.
+    pub next_grenade_check: f64,
+    /// m_vecTossVelocity from the last successful CheckCanThrowGrenade.
+    pub toss_velocity: Vec3,
+    /// CanGrenadeEnemy succeeded this think (computed by the runtime, which owns the
+    /// traces).
+    #[serde(skip)]
+    pub grenade_ready: bool,
     /// The class's random stream (random->RandomInt in the class code).
     seed: u64,
 }
@@ -239,6 +255,10 @@ impl Humanoid {
             now: 0.,
             armed,
             last_attack: f64::NEG_INFINITY,
+            grenades: 0,
+            next_grenade_check: 0.,
+            toss_velocity: Vec3::ZERO,
+            grenade_ready: false,
         }
     }
     /// random->RandomInt(0, 1) == 1.
@@ -379,6 +399,11 @@ impl Humanoid {
         if c.has(COND_CAN_RANGE_ATTACK1) {
             return Some("SCHED_RANGE_ATTACK1".into());
         }
+        // The flush: an enemy out of sight for at most 3 s and within 256 units of where it
+        // was last seen gets a grenade (CanGrenadeEnemy(false), checked by the runtime).
+        if !c.has(COND_SEE_ENEMY) && self.grenade_ready {
+            return Some("SCHED_RANGE_ATTACK2".into());
+        }
         if c.has(COND_ENEMY_OCCLUDED) {
             // Slots are free without a squad: charge in and break the enemy's cover.
             return Some("SCHED_ESTABLISH_LINE_OF_FIRE".into());
@@ -417,6 +442,8 @@ impl Humanoid {
             "SCHED_COMBINE_ASSAULT" => "SCHED_COMBINE_ASSAULT".into(),
             "SCHED_ESTABLISH_LINE_OF_FIRE" => "SCHED_COMBINE_ESTABLISH_LINE_OF_FIRE".into(),
             "SCHED_HIDE_AND_RELOAD" => "SCHED_COMBINE_HIDE_AND_RELOAD".into(),
+            // The NPC weapons have no bits_CAP_WEAPON_RANGE_ATTACK2: the innate toss.
+            "SCHED_RANGE_ATTACK2" => "SCHED_COMBINE_RANGE_ATTACK2".into(),
             "SCHED_RANGE_ATTACK1" => {
                 if c.has(COND_NO_PRIMARY_AMMO) || c.has(COND_LOW_PRIMARY_AMMO) {
                     self.translate_combine("SCHED_HIDE_AND_RELOAD", npc)
@@ -534,7 +561,18 @@ impl Behavior for Humanoid {
             // the squad hand signal.
             "TASK_COMBINE_IGNORE_ATTACKS"
             | "TASK_COMBINE_SET_STANDING"
-            | "TASK_COMBINE_SIGNAL_BEST_SOUND" => TaskStatus::Complete,
+            | "TASK_COMBINE_SIGNAL_BEST_SOUND"
+            | "TASK_COMBINE_DEFER_SQUAD_GRENADES" => TaskStatus::Complete,
+            // Turn toward a point 64 toss-velocities along the throw.
+            "TASK_COMBINE_FACE_TOSS_DIR" => {
+                if motor.face(super::schedule::Goal::Position(
+                    ctx.origin + self.toss_velocity * 64.,
+                )) {
+                    TaskStatus::Complete
+                } else {
+                    TaskStatus::Running
+                }
+            }
             "TASK_AISCRIPTED_GET_PATH_TO_GOAL" => match self.script_goal.take() {
                 Some((goal, run)) if motor.path_to(goal, run) => {
                     let activity = if run { "ACT_RUN" } else { "ACT_WALK" };
@@ -568,6 +606,17 @@ impl Behavior for Humanoid {
         }
         if task == "TASK_RANGE_ATTACK1" {
             self.last_attack = ctx.now;
+        }
+        if task == "TASK_COMBINE_FACE_TOSS_DIR" {
+            return Some(
+                if motor.face(super::schedule::Goal::Position(
+                    ctx.origin + self.toss_velocity * 64.,
+                )) {
+                    TaskStatus::Complete
+                } else {
+                    TaskStatus::Running
+                },
+            );
         }
         None
     }

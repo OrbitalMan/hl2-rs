@@ -894,6 +894,27 @@ impl Gameplay {
             }
             // ViewPunch needs the punch-angle path of the arsenal branch (not here).
         }
+        // Combine grenade tosses: Fraggrenade_Create (NPC damage, 3.5 s fuse).
+        for (_thrower, position, velocity, spin) in std::mem::take(&mut self.ai.grenade_tosses) {
+            let damage = self.scene.skill.get("sk_npc_dmg_fraggrenade", 75.);
+            let radius = self.scene.skill.get("sk_fraggrenade_radius", 250.);
+            let at = self.scene.time;
+            self.projectiles.spawn(
+                hl2_simulation::projectiles::ProjectileSpawn {
+                    angles: Some(glam::Vec3::ZERO),
+                    kind: hl2_simulation::projectiles::ProjectileKind::FragGrenade,
+                    position,
+                    velocity,
+                    angular_velocity: spin,
+                    at,
+                    damage,
+                    radius,
+                    mass: 0.,
+                    lifetime: 3.5,
+                },
+                &mut self.scene,
+            );
+        }
         // NPC melee (stunstick swings on hated NPCs): DMG_CLUB through the shared hit path.
         for melee in std::mem::take(&mut self.ai.melee_hits) {
             let mut blood = Vec::new();

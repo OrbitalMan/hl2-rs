@@ -1066,6 +1066,7 @@ pub const HUMANOID_AI_ACTIVITIES: &[&str] = &[
     "ACT_WALK_AIM",
     "ACT_RUN_AIM",
     "ACT_RANGE_ATTACK1",
+    "ACT_RANGE_ATTACK2",
     "ACT_RELOAD",
     "ACT_SMALL_FLINCH",
     "ACT_BIG_FLINCH",

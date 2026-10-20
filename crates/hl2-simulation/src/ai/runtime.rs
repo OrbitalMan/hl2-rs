@@ -85,6 +85,72 @@ pub struct PlayerHit {
 }
 /// CNPC_Combine's kick animation event.
 const COMBINE_AE_KICK: i32 = 3;
+/// CNPC_Combine's grenade toss animation event.
+const COMBINE_AE_GREN_TOSS: i32 = 7;
+/// sv_gravity.
+const GRAVITY: f32 = 600.;
+/// VecCheckThrow (h_ai.cpp): a throw at `speed` from `start` to `target` whose two
+/// halves (start -> apex, target -> apex) are clear; None when blocked.
+pub fn vec_check_throw(
+    physics: &Physics,
+    id: usize,
+    start: Vec3,
+    target: Vec3,
+    speed: f32,
+) -> Option<Vec3> {
+    let delta = target - start;
+    let time = delta.length() / speed;
+    if time <= 0. {
+        return None;
+    }
+    let mut velocity = delta / time;
+    velocity.z += GRAVITY * time * 0.5;
+    let mut apex = start + delta * 0.5;
+    apex.z += 0.5 * GRAVITY * (time * 0.5) * (time * 0.5);
+    (physics.projectile_ray(start, apex, &[id]).is_none()
+        && physics.projectile_ray(target, apex, &[id]).is_none())
+    .then_some(velocity)
+}
+/// VecCheckToss (h_ai.cpp) with no height ratio limit, gravity 1 and the randomized
+/// target (`jitter`: four [0, 1) draws): the apex is the midpoint raised up to 300 units
+/// (15 under a ceiling); None when either half is blocked or the target is 500 above.
+pub fn vec_check_toss(
+    physics: &Physics,
+    id: usize,
+    start: Vec3,
+    target: Vec3,
+    forward: Vec3,
+    jitter: [f32; 4],
+) -> Option<Vec3> {
+    if target.z - start.z > 500. {
+        return None;
+    }
+    let right = forward.cross(Vec3::Z).normalize_or_zero();
+    let r = |u: f32, a: f32| -a + 2. * a * u;
+    let target = target
+        + right * (r(jitter[0], 8.) + r(jitter[1], 16.))
+        + forward * (r(jitter[2], 8.) + r(jitter[3], 16.));
+    let mid = start + (target - start) * 0.5;
+    let mid = match physics.projectile_ray(mid, mid + Vec3::Z * 300., &[id]) {
+        Some(hit) => hit.position - Vec3::Z * 15.,
+        None => mid + Vec3::Z * 300.,
+    };
+    if mid.z < start.z || mid.z < target.z {
+        return None;
+    }
+    let time1 = ((mid.z - start.z) / (0.5 * GRAVITY)).sqrt();
+    let time2 = ((mid.z - target.z) / (0.5 * GRAVITY)).sqrt();
+    if time1 < 0.1 {
+        return None;
+    }
+    let mut velocity = (target - start) / (time1 + time2);
+    velocity.z = GRAVITY * time1;
+    let mut apex = start + velocity * time1;
+    apex.z = mid.z;
+    (physics.projectile_ray(start, apex, &[id]).is_none()
+        && physics.projectile_ray(target, apex, &[id]).is_none())
+    .then_some(velocity)
+}
 /// A melee swing that struck an NPC (CTraceFilterMelee: DMG_CLUB on a hated NPC); the
 /// host applies it through the shared hit path.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -254,6 +320,8 @@ pub struct AiRuntime {
     pub player_hits: Vec<PlayerHit>,
     /// Melee hits on NPCs this tick (stunstick swings).
     pub melee_hits: Vec<MeleeHit>,
+    /// Combine grenade tosses this tick: (thrower, position, velocity, spin).
+    pub grenade_tosses: Vec<(usize, Vec3, Vec3, Vec3)>,
     pub diagnostics: Diagnostics,
     random: u64,
     /// Debug (F4): the AI does not sense the player (ai_ignoreplayers / notarget).
@@ -459,6 +527,7 @@ impl AiRuntime {
             weapon_muzzle_flashes: Vec::new(),
             player_hits: Vec::new(),
             melee_hits: Vec::new(),
+            grenade_tosses: Vec::new(),
             diagnostics: Diagnostics::default(),
             random: 0x9e37_79b9_7f4a_7c15,
         }
@@ -1072,11 +1141,15 @@ impl AiRuntime {
         let mut npc = AiNpc::new(id);
         npc.shot_regulator = Self::regulator(e.class(), weapon.as_ref(), defs, id);
         let class = match kind {
-            Some(kind) => AiClass::Humanoid(Box::new(Humanoid::new(
-                kind,
-                weapon.is_some(),
-                0x6a09_e667_f3bc_c909 ^ id as u64,
-            ))),
+            Some(kind) => {
+                let mut h =
+                    Humanoid::new(kind, weapon.is_some(), 0x6a09_e667_f3bc_c909 ^ id as u64);
+                h.grenades = e
+                    .get("NumGrenades")
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                AiClass::Humanoid(Box::new(h))
+            }
             None => AiClass::Metropolice(Box::new(Metropolice::new(flags, baton))),
         };
         Some(AiActor {
@@ -1305,6 +1378,10 @@ impl AiRuntime {
                                     start: ctx.origin + Vec3::Z * 36.,
                                     forward: Vec3::new(yaw.cos(), yaw.sin(), 0.),
                                 });
+                            } else if h.kind == humanoid::Kind::Combine
+                                && event == COMBINE_AE_GREN_TOSS
+                            {
+                                h.requests.push(CopRequest::GrenadeToss);
                             }
                         }
                         continue;
@@ -1850,6 +1927,69 @@ impl AiRuntime {
                 }
             }
         }
+        // CNPC_Combine::SelectCombatSchedule's flush grenade without a squad:
+        // CanGrenadeEnemy(false) -> CanThrowGrenade(last seen position) ->
+        // CheckCanThrowGrenade (VecCheckThrow at 650 in view and visible, else a high
+        // VecCheckToss with 64 units of headroom). Squad slots and the 4-unit hull check of
+        // the throw are not modeled.
+        let moving = scene.states[id].is_moving();
+        let enemy_now = actor.npc.enemy.map(|e| {
+            if e == PLAYER {
+                player.feet
+            } else {
+                scene.states[e].origin
+            }
+        });
+        let seen_enemy = actor.npc.conditions.has(COND_SEE_ENEMY);
+        let memory = actor
+            .npc
+            .enemy
+            .and_then(|e| actor.npc.enemies.find(Some(e)))
+            .map(|m| (m.time_last_seen, m.last_seen_position));
+        if let AiClass::Humanoid(h) = &mut actor.class {
+            h.grenade_ready = false;
+            if let (true, Some(current), Some((last_time, last_seen))) = (
+                h.kind == humanoid::Kind::Combine && h.grenades > 0 && !seen_enemy,
+                enemy_now,
+                memory,
+            ) {
+                if now >= h.next_grenade_check
+                    && now - last_time <= 3.
+                    && current.distance(last_seen) <= 256.
+                {
+                    let distance = last_seen.distance(origin);
+                    if !(128. ..=1024.).contains(&distance) {
+                        h.next_grenade_check = now + 1.;
+                    } else if !moving {
+                        let in_view = senses::in_view_cone(&viewer, last_seen)
+                            && sight.visible(eye, last_seen, &[id]);
+                        let bits = ((now * 1000.) as u64) ^ (id as u64).wrapping_mul(0x9e37_79b9);
+                        let jitter = [0u64, 1, 2, 3].map(|i| {
+                            (bits
+                                .wrapping_mul(6_364_136_223_846_793_005)
+                                .wrapping_add(i.wrapping_mul(1_442_695_040_888_963_407))
+                                >> 40) as f32
+                                / (1u64 << 24) as f32
+                        });
+                        let toss = if in_view {
+                            vec_check_throw(physics, id, eye, last_seen, 650.)
+                        } else if physics
+                            .projectile_ray(eye, eye + Vec3::Z * 64., &[id])
+                            .is_none()
+                        {
+                            vec_check_toss(physics, id, eye, last_seen, facing, jitter)
+                        } else {
+                            None
+                        };
+                        h.next_grenade_check = now + 1.;
+                        if let Some(velocity) = toss {
+                            h.toss_velocity = velocity;
+                            h.grenade_ready = true;
+                        }
+                    }
+                }
+            }
+        }
         // Listen.
         let (heard, best) = senses::listen(eye, id, sound_interests, &self.sounds);
         actor.npc.conditions = actor.npc.conditions.union(heard);
@@ -2085,6 +2225,29 @@ impl AiRuntime {
                     });
                 }
                 CopRequest::CallForJustice => self.call_for_justice(id, world, scene, physics),
+                CopRequest::GrenadeToss => {
+                    let position = scene
+                        .attachment_frames(world, id, &["lefthand"])
+                        .first()
+                        .copied()
+                        .flatten()
+                        .map_or(origin + Vec3::Z * 48., |m| m.w_axis.truncate());
+                    let spin = Vec3::new(
+                        self.random() * 2000. - 1000.,
+                        self.random() * 2000. - 1000.,
+                        self.random() * 2000. - 1000.,
+                    );
+                    let now = scene.time;
+                    if let Some(AiClass::Humanoid(h)) =
+                        self.actors.get_mut(&id).map(|a| &mut a.class)
+                    {
+                        self.grenade_tosses
+                            .push((id, position, h.toss_velocity, spin));
+                        h.grenades -= 1;
+                        // Wait six seconds before even looking again.
+                        h.next_grenade_check = now + 6.;
+                    }
+                }
                 CopRequest::Kick { start, forward } => {
                     let end = start + forward * 70.;
                     let (mins, maxs) = (-Vec3::new(16., 16., 18.), Vec3::new(16., 16., 18.));
@@ -3054,6 +3217,93 @@ mod tests {
         }
         assert_eq!(r.ai.actors[&0].npc.enemy, Some(PLAYER));
         assert!(r.scene.npc_damage.is_empty());
+    }
+    #[test]
+    fn grenade_throw_and_toss_velocities_land_on_the_target() {
+        let world = World::default();
+        let physics = Physics::new(&world);
+        let start = Vec3::new(0., 0., 64.);
+        let target = Vec3::new(400., 100., 0.);
+        let land = |v: Vec3| {
+            // Time to reach the target's horizontal distance, then the height there.
+            let t = (target - start).truncate().length() / v.truncate().length();
+            start + v * t - Vec3::Z * 0.5 * GRAVITY * t * t
+        };
+        let throw = vec_check_throw(&physics, 0, start, target, 650.).expect("throw");
+        assert!((land(throw) - target).length() < 0.5);
+        // Unjittered high toss (draws 0.5 = no offset): apex 300 above the midpoint.
+        let toss = vec_check_toss(&physics, 0, start, target, Vec3::X, [0.5; 4]).expect("toss");
+        assert!((land(toss) - target).length() < 0.5);
+        assert!((toss.z - GRAVITY * ((300. - 32.) / (0.5 * GRAVITY)).sqrt()).abs() < 0.5);
+        // Targets 500 units above the thrower are refused.
+        assert!(vec_check_toss(
+            &physics,
+            0,
+            start,
+            target + Vec3::Z * 600.,
+            Vec3::X,
+            [0.5; 4]
+        )
+        .is_none());
+    }
+    #[test]
+    fn a_soldier_flushes_an_enemy_that_just_dropped_out_of_sight() {
+        let world = World {
+            entities: vec![entity(&[
+                ("classname", "npc_combine_s"),
+                ("origin", "0 0 0"),
+                ("angles", "0 0 0"),
+                ("additionalequipment", "weapon_smg1"),
+                ("NumGrenades", "5"),
+            ])],
+            ..Default::default()
+        };
+        let scene = Scene::new(&world);
+        let physics = Physics::new(&world);
+        let ai = AiRuntime::new(&world, None);
+        let mut r = Rig {
+            world,
+            scene,
+            physics,
+            controller: Controller::new(None, Default::default()),
+            ai,
+        };
+        r.ai.enabled = true;
+        assert!(matches!(&r.ai.actors[&0].class, AiClass::Humanoid(h) if h.grenades == 5));
+        // The player was seen 1 s ago at (-300, 0) and now stands behind the soldier,
+        // 100 units from there: out of sight, so the soldier tosses at the last seen spot.
+        let behind = player_at(-400.);
+        r.scene.time = 2.;
+        {
+            let actor = r.ai.actors.get_mut(&0).unwrap();
+            actor.npc.state = NpcState::Combat;
+            actor.npc.ideal_state = NpcState::Combat;
+            actor.npc.enemy = Some(PLAYER);
+            actor
+                .npc
+                .enemies
+                .update(Some(PLAYER), Vec3::new(-300., 0., 0.), 0., true, 1.);
+        }
+        let mut schedules = Vec::new();
+        for _ in 0..20 {
+            run(&mut r, 1, behind);
+            schedules.push(r.ai.actors[&0].npc.schedule.clone().unwrap_or_default());
+        }
+        assert!(
+            schedules.iter().any(|s| s == "SCHED_COMBINE_RANGE_ATTACK2"),
+            "{schedules:?}"
+        );
+        // COMBINE_AE_GREN_TOSS: a frag with the toss velocity, one grenade fewer.
+        r.ai.actors
+            .get_mut(&0)
+            .unwrap()
+            .class
+            .requests_mut()
+            .push(CopRequest::GrenadeToss);
+        r.ai.apply_requests(0, &r.world, &mut r.scene, &r.physics, behind);
+        assert_eq!(r.ai.grenade_tosses.len(), 1);
+        assert!(r.ai.grenade_tosses[0].2.x < 0.);
+        assert!(matches!(&r.ai.actors[&0].class, AiClass::Humanoid(h) if h.grenades == 4));
     }
     #[test]
     fn set_police_goal_enables_policing_warnings_and_goal_outputs() {
