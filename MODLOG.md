@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-20 GameUI: combobox element bounding and active resolution reading without black stripes
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Bounded combobox text and dropdown elements (`hl2-ui::gameui::widgets`): bounded `Painter::combo` text area strictly before the arrow button (`SetDrawWidth(wide - bwide)` per Source SDK `ComboBox`), truncating overflowing strings with an ellipsis (`...`) per Source SDK `TextEntry::NeedsEllipses` and clamping selection highlight quads (`entry_selected_bg`) so text and focus highlights never overlap the arrow button or exceed combobox edges; added non-editing truncation to `Painter::text_entry` and scrollbar-aware bounding to `Painter::menu_list`.
+- Active resolution reading for flexible aspect ratio (`hl2-ui::gameui::settings`, `display`, `viewport`): `Choice::Resolution` now formats `"Fit Display ({current})"` using `current.without_stripes_for_flexible()` (`viewport::flexible_presented_resolution`), strictly excluding pillarbox (beyond 32:9) and letterbox (narrower than 9:16) black stripes widths/heights so only the active content area resolution is displayed.
+
+**Why:** owner request: fix combobox text field overlapping the down arrow element and parent bounding edge across all comboboxes/dropdowns with tests; in the disabled resolution box when flexible aspect ratio is enabled, fix the resolution reading so it does not include letter/pillar boxing black stripes widths/heights.
+
+**Tested how:** unit tests (`widgets::tests::combobox_text_and_selection_never_overlap_arrow_or_overflow_bounds`, `widgets::tests::menu_list_items_never_overlap_scrollbar_or_overflow_bounds`, `widgets::tests::truncate_ellipsis_truncates_long_strings_with_ellipsis`, `display::tests::resolution_without_stripes_for_flexible`, `viewport::tests::flexible_presented_resolution_excludes_letter_and_pillar_box_stripes`, `settings::tests::flexible_aspect_disables_resolution_and_shows_fit_display`); `scripts/checks/validate.sh` (tests, strict clippy `-D warnings`, fmt), `scripts/checks/check_windows.sh` (strict Windows MSVC clippy from macOS).
+
+**Result:** combobox text, selection boxes, and dropdown menu list items are strictly bounded and never overlap arrow buttons or exceed parent dialog bounds; when "Fit Display" is active, the disabled Resolution field displays the active content resolution excluding any letterbox or pillarbox black stripes.
+
+**Still broken or not tested:** physical ultrawide monitors exceeding 32:9 not physically tested.
+
+**Next:** owner review.
+
+
 ## 2026-10-20 Video: dynamic aspect ratio "Fit Display", universal aspect math and auto-resolution display
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

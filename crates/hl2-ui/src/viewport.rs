@@ -172,7 +172,7 @@ pub fn windowed_size(resolution: UVec2, bounds: Option<Vec2>) -> Vec2 {
 /// Physical size of the area a flexible frame is presented in inside a window of
 /// `physical_window_size`: the whole window when its aspect ratio is in the supported
 /// `9:16..=32:9` range, otherwise the largest centred area of the clamped aspect.
-fn flexible_presented_size(physical_window_size: UVec2) -> Vec2 {
+pub fn flexible_presented_size(physical_window_size: UVec2) -> Vec2 {
     let window = physical_window_size.max(UVec2::ONE).as_vec2();
     let win_aspect = window.x / window.y;
     let aspect = crate::tuning::clamp_supported_aspect(win_aspect);
@@ -183,6 +183,15 @@ fn flexible_presented_size(physical_window_size: UVec2) -> Vec2 {
     } else {
         window
     }
+}
+
+/// Physical size of the content area without letterbox or pillarbox black stripes in a window of
+/// `physical_window_size` when flexible aspect ratio is enabled.
+pub fn flexible_presented_resolution(physical_window_size: UVec2) -> UVec2 {
+    flexible_presented_size(physical_window_size)
+        .round()
+        .max(Vec2::ONE)
+        .as_uvec2()
 }
 
 /// Game-frame resolution of a flexible-aspect frame (Video > Aspect Ratio "Fit Display") in a
@@ -602,5 +611,30 @@ mod tests {
             Vec2::ZERO,
         );
         assert_eq!(fs_p, Some(Vec2::new(640.0, 360.0)));
+    }
+
+    #[test]
+    fn flexible_presented_resolution_excludes_letter_and_pillar_box_stripes() {
+        // Supported landscape, square, and portrait aspect ratios have no black stripes
+        assert_eq!(
+            flexible_presented_resolution(UVec2::new(1920, 1080)),
+            UVec2::new(1920, 1080)
+        );
+        assert_eq!(
+            flexible_presented_resolution(UVec2::new(5120, 1440)),
+            UVec2::new(5120, 1440)
+        );
+        assert_eq!(
+            flexible_presented_resolution(UVec2::new(1080, 1920)),
+            UVec2::new(1080, 1920)
+        );
+
+        // Ultrawide beyond 32:9 has pillarbox black stripes; width is clamped to 32:9
+        let pillarboxed = flexible_presented_resolution(UVec2::new(8000, 1000));
+        assert_eq!(pillarboxed, UVec2::new(3556, 1000));
+
+        // Ultra-tall narrower than 9:16 has letterbox black stripes; height is clamped to 9:16
+        let letterboxed = flexible_presented_resolution(UVec2::new(500, 2000));
+        assert_eq!(letterboxed, UVec2::new(500, 889));
     }
 }

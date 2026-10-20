@@ -231,6 +231,16 @@ impl Resolution {
         format!("{} x {}", self.width, self.height)
     }
 
+    /// Returns the active resolution without letterbox or pillarbox black stripes when flexible
+    /// aspect ratio is enabled (clamped to the supported 9:16..=32:9 range).
+    pub fn without_stripes_for_flexible(self) -> Self {
+        let size = crate::viewport::flexible_presented_resolution(glam::UVec2::new(
+            self.width,
+            self.height,
+        ));
+        Self::new(size.x, size.y)
+    }
+
     /// Whether this resolution is at least `min` in either orientation (a portrait mode is
     /// measured with its sides swapped).
     pub fn at_least(self, min: Resolution) -> bool {
@@ -752,6 +762,35 @@ mod tests {
         assert_eq!(
             choose_after_aspect_change(&[], AspectRatio::Normal, r(800, 600)),
             None
+        );
+    }
+
+    #[test]
+    fn resolution_without_stripes_for_flexible() {
+        // Fits within supported 9:16..=32:9 range: unchanged
+        assert_eq!(
+            Resolution::new(1920, 1080).without_stripes_for_flexible(),
+            Resolution::new(1920, 1080)
+        );
+        assert_eq!(
+            Resolution::new(5120, 1440).without_stripes_for_flexible(),
+            Resolution::new(5120, 1440)
+        );
+        assert_eq!(
+            Resolution::new(1080, 1920).without_stripes_for_flexible(),
+            Resolution::new(1080, 1920)
+        );
+
+        // Exceeds 32:9: pillarbox black stripes excluded
+        assert_eq!(
+            Resolution::new(8000, 1000).without_stripes_for_flexible(),
+            Resolution::new(3556, 1000)
+        );
+
+        // Taller than 9:16: letterbox black stripes excluded
+        assert_eq!(
+            Resolution::new(500, 2000).without_stripes_for_flexible(),
+            Resolution::new(500, 889)
         );
     }
 }

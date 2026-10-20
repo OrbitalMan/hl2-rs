@@ -3511,8 +3511,10 @@ mod tests {
     #[test]
     fn combobox_text_and_selection_never_overlap_arrow_or_overflow_bounds() {
         let canvas = Canvas::default();
-        let font_bytes =
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/ProggyClean.ttf"));
+        let font_bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/fonts/ProggyClean.ttf"
+        ));
         let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
         let fonts = Fonts {
             text: Some(font),
@@ -3634,8 +3636,10 @@ mod tests {
     #[test]
     fn menu_list_items_never_overlap_scrollbar_or_overflow_bounds() {
         let canvas = Canvas::default();
-        let font_bytes =
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/ProggyClean.ttf"));
+        let font_bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/fonts/ProggyClean.ttf"
+        ));
         let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
         let fonts = Fonts {
             text: Some(font),

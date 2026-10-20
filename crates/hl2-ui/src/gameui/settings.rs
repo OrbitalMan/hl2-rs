@@ -364,7 +364,7 @@ impl Choice {
                     vec![format!(
                         "{} ({})",
                         loc.text(draft.aspect.token()),
-                        current.label()
+                        current.without_stripes_for_flexible().label()
                     )]
                 } else {
                     display::resolution_choices(&env.resolutions(draft), draft.aspect)
@@ -419,7 +419,11 @@ impl Choice {
             Some(i) => items[i].clone(),
             None => match self {
                 Self::Resolution => {
-                    Resolution::new(draft.config.video.width, draft.config.video.height).label()
+                    if draft.aspect == AspectRatio::Flexible {
+                        items.first().cloned().unwrap_or_default()
+                    } else {
+                        Resolution::new(draft.config.video.width, draft.config.video.height).label()
+                    }
                 }
                 Self::Language => env
                     .localization
@@ -1064,6 +1068,46 @@ mod tests {
 
         // Selecting resolution while flexible is a no-op
         Choice::Resolution.select(&env, &mut draft, 0);
+
+        // Window exceeding 32:9 has pillarbox black stripes; reading excludes them (8000x1000 -> 3556x1000)
+        let pillarbox_modes = DisplayModes {
+            fullscreen: vec![],
+            desktop: None,
+            current: Some(Resolution::new(8000, 1000)),
+        };
+        let env_pillarbox = Env {
+            localization: &loc,
+            languages: &langs,
+            modes: &pillarbox_modes,
+        };
+        assert_eq!(
+            Choice::Resolution.items(&env_pillarbox, &draft),
+            ["Fit Display (3556 x 1000)"]
+        );
+        assert_eq!(
+            Choice::Resolution.text(&env_pillarbox, &draft),
+            "Fit Display (3556 x 1000)"
+        );
+
+        // Window taller than 9:16 has letterbox black stripes; reading excludes them (500x2000 -> 500x889)
+        let letterbox_modes = DisplayModes {
+            fullscreen: vec![],
+            desktop: None,
+            current: Some(Resolution::new(500, 2000)),
+        };
+        let env_letterbox = Env {
+            localization: &loc,
+            languages: &langs,
+            modes: &letterbox_modes,
+        };
+        assert_eq!(
+            Choice::Resolution.items(&env_letterbox, &draft),
+            ["Fit Display (500 x 889)"]
+        );
+        assert_eq!(
+            Choice::Resolution.text(&env_letterbox, &draft),
+            "Fit Display (500 x 889)"
+        );
 
         // Switch back to 16:9
         let wide_idx = AspectRatio::ALL
