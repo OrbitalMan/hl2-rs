@@ -93,6 +93,7 @@ pub mod display {
         DisplayModes {
             fullscreen: usable_modes(reported, size, current),
             desktop: size,
+            current: Some(current),
         }
     }
 }

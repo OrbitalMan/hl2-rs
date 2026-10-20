@@ -273,6 +273,7 @@ impl MonitorSpec {
         DisplayModes {
             fullscreen: usable_modes(self.reported.iter().copied(), Some(self.size), current),
             desktop: Some(self.size),
+            current: Some(current),
         }
     }
 }
@@ -331,6 +332,8 @@ pub struct DisplayModes {
     /// The desktop size in pixels, when known. A windowed game shows one frame pixel per display
     /// pixel, so windowed choices must fit inside it.
     pub desktop: Option<Resolution>,
+    /// The current window/display resolution in physical pixels, if known.
+    pub current: Option<Resolution>,
 }
 
 impl DisplayModes {
@@ -339,6 +342,7 @@ impl DisplayModes {
         Self {
             fullscreen,
             desktop: None,
+            current: None,
         }
     }
 
@@ -525,6 +529,7 @@ mod tests {
         let modes = DisplayModes {
             fullscreen: usable_modes(reported, Some(r(3456, 2234)), r(1728, 1117)),
             desktop: Some(r(3456, 2234)),
+            current: None,
         };
         let fullscreen = modes.choices(false);
         assert_eq!(fullscreen.first(), Some(&r(3456, 2234)));
@@ -555,6 +560,7 @@ mod tests {
             DisplayModes {
                 fullscreen: vec![r(1024, 768)],
                 desktop: Some(r(800, 600)),
+                current: None,
             }
             .choices(true),
             [r(1024, 768)],
@@ -626,6 +632,7 @@ mod tests {
         let modes = DisplayModes {
             fullscreen: usable_modes(reported, Some(panel), r(3840, 2160)),
             desktop: Some(panel),
+            current: None,
         };
         let top = |aspect| resolution_choices(&modes.choices(false), aspect)[0];
         assert_eq!(top(AspectRatio::Normal), r(5760, 4320));

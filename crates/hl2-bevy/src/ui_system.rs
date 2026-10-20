@@ -39,11 +39,11 @@ pub fn resize_canvas(
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiInputSet;
 
-/// Gives the Options dialog the display's resolutions each time it opens, whatever opened it
-/// (pointer, keyboard or a scripted replay).
+/// Gives the Options dialog the display's resolutions each time it opens or the window is resized,
+/// whatever triggered it (pointer, keyboard or a scripted replay).
 pub fn refresh_display_modes(
     mut was_options: Local<bool>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<Ref<Window>, With<PrimaryWindow>>,
     monitors: Query<&bevy::window::Monitor, With<PrimaryMonitor>>,
     options: Option<Res<crate::Options>>,
     ui: Option<ResMut<crate::ui_host::Console>>,
@@ -54,10 +54,13 @@ pub fn refresh_display_modes(
     let is_options = ui.source.options_open();
     let opened = is_options && !*was_options;
     *was_options = is_options;
-    if opened && let Ok(window) = windows.single() {
+    if is_options
+        && let Ok(window) = windows.single()
+        && (opened || window.is_changed())
+    {
         let fake = options.as_ref().and_then(|o| o.fake_monitor.as_ref());
         ui.source
-            .set_display_modes(crate::video::display::modes(&monitors, window, fake));
+            .set_display_modes(crate::video::display::modes(&monitors, &window, fake));
     }
 }
 

@@ -22,7 +22,7 @@
 //! presses the default button (docs/gameui.md section 6c).
 
 use super::{
-    display::{self, DisplayModes, Resolution},
+    display::DisplayModes,
     keys::{self, KeyRow},
     layout::{Align as LayoutAlign, Control, ControlKind},
     menu::MessageBox,
@@ -1036,11 +1036,12 @@ impl OptionsDialog {
 
     /// The Resolution combo's choices as shown (for the report).
     fn resolution_labels(&self) -> Vec<String> {
-        let offered = settings::offered_resolutions(&self.modes, &self.draft);
-        display::resolution_choices(&offered, self.draft.aspect)
-            .into_iter()
-            .map(Resolution::label)
-            .collect()
+        let env = settings::Env {
+            localization: &self.res.localization,
+            languages: &self.res.spoken_languages,
+            modes: &self.modes,
+        };
+        settings::Choice::Resolution.items(&env, &self.draft)
     }
 
     /// The Keyboard page's key list as a focus target.

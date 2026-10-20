@@ -356,10 +356,23 @@ impl Choice {
                 .iter()
                 .map(|l| loc.text(&language_token(l)))
                 .collect(),
-            Self::Resolution => display::resolution_choices(&env.resolutions(draft), draft.aspect)
-                .into_iter()
-                .map(Resolution::label)
-                .collect(),
+            Self::Resolution => {
+                if draft.aspect == AspectRatio::Flexible {
+                    let current = env.modes.current.unwrap_or_else(|| {
+                        Resolution::new(draft.config.video.width, draft.config.video.height)
+                    });
+                    vec![format!(
+                        "{} ({})",
+                        loc.text(draft.aspect.token()),
+                        current.label()
+                    )]
+                } else {
+                    display::resolution_choices(&env.resolutions(draft), draft.aspect)
+                        .into_iter()
+                        .map(Resolution::label)
+                        .collect()
+                }
+            }
         }
     }
 
@@ -386,9 +399,15 @@ impl Choice {
                 .languages
                 .iter()
                 .position(|l| l.eq_ignore_ascii_case(&c.audio.language)),
-            Self::Resolution => display::resolution_choices(&env.resolutions(draft), draft.aspect)
-                .iter()
-                .position(|r| *r == Resolution::new(c.video.width, c.video.height)),
+            Self::Resolution => {
+                if draft.aspect == AspectRatio::Flexible {
+                    Some(0)
+                } else {
+                    display::resolution_choices(&env.resolutions(draft), draft.aspect)
+                        .iter()
+                        .position(|r| *r == Resolution::new(c.video.width, c.video.height))
+                }
+            }
         }
     }
 
@@ -474,6 +493,9 @@ impl Choice {
                 }
             }
             Self::Resolution => {
+                if draft.aspect == AspectRatio::Flexible {
+                    return;
+                }
                 if let Some(r) = display::resolution_choices(&resolutions, draft.aspect).get(index)
                 {
                     c.video.width = r.width;
@@ -700,6 +722,7 @@ pub fn force_visible(panel: Panel, name: &str) -> bool {
 
 /// Dynamic enabled state on top of the layout's own `enabled` flag.
 ///
+/// * Resolution is disabled when the aspect ratio is [`AspectRatio::Flexible`];
 /// * acceleration amount follows its check box;
 /// * Aim-Assist Sensitivity is enabled only while aim assist is on (the layout disables it);
 /// * the brightness button is enabled in every display mode: retail enables it in full screen
@@ -713,6 +736,9 @@ pub fn enabled(
     _applied: &Config,
 ) -> bool {
     match binding {
+        Some(Binding::Choice(Choice::Resolution)) => {
+            layout_enabled && draft.aspect != AspectRatio::Flexible
+        }
         Some(Binding::Slider(Value::AccelExponent) | Binding::Entry(Value::AccelExponent)) => {
             layout_enabled && draft.config.mouse.acceleration
         }
@@ -804,6 +830,7 @@ mod tests {
                 Resolution::new(1024, 768),
             ],
             desktop: Some(Resolution::new(1728, 1117)),
+            current: None,
         };
         let env = env(&loc, &langs, &modes);
         let mut config = Config::default();
@@ -989,5 +1016,67 @@ mod tests {
             Some(Binding::Toggle(Toggle::ReverseMouse))
         );
         assert!(force_visible(Panel::Video, "HDR Label"));
+        let resolution = Some(Binding::Choice(Choice::Resolution));
+        assert!(enabled(resolution, true, &draft, &applied));
+        draft.aspect = AspectRatio::Flexible;
+        assert!(!enabled(resolution, true, &draft, &applied));
+    }
+
+    #[test]
+    fn flexible_aspect_disables_resolution_and_shows_fit_display() {
+        let mut loc = Localization::default();
+        loc.insert("#GameUI_HUDAspectRatio_FitDisplay", "Fit Display");
+        let modes = DisplayModes {
+            fullscreen: vec![Resolution::new(1920, 1080), Resolution::new(1280, 720)],
+            desktop: Some(Resolution::new(1920, 1080)),
+            current: Some(Resolution::new(1600, 900)),
+        };
+        let langs = ["english".to_owned()];
+        let env = env(&loc, &langs, &modes);
+        let mut draft = Draft::new(Config::default());
+        let res_binding = Some(Binding::Choice(Choice::Resolution));
+        assert!(enabled(res_binding, true, &draft, &draft.config));
+        assert_eq!(
+            Choice::Resolution.items(&env, &draft),
+            ["1920 x 1080", "1280 x 720"]
+        );
+
+        // Switch to Flexible ("Fit Display")
+        let flexible_idx = AspectRatio::ALL
+            .iter()
+            .position(|a| *a == AspectRatio::Flexible)
+            .unwrap();
+        Choice::Aspect.select(&env, &mut draft, flexible_idx);
+        assert_eq!(draft.aspect, AspectRatio::Flexible);
+        assert!(draft.config.video.flexible_aspect);
+
+        // Resolution is now disabled and shows "Fit Display (1600 x 900)"
+        assert!(!enabled(res_binding, true, &draft, &draft.config));
+        assert_eq!(
+            Choice::Resolution.items(&env, &draft),
+            ["Fit Display (1600 x 900)"]
+        );
+        assert_eq!(Choice::Resolution.selected(&env, &draft), Some(0));
+        assert_eq!(
+            Choice::Resolution.text(&env, &draft),
+            "Fit Display (1600 x 900)"
+        );
+
+        // Selecting resolution while flexible is a no-op
+        Choice::Resolution.select(&env, &mut draft, 0);
+
+        // Switch back to 16:9
+        let wide_idx = AspectRatio::ALL
+            .iter()
+            .position(|a| *a == AspectRatio::Wide16x9)
+            .unwrap();
+        Choice::Aspect.select(&env, &mut draft, wide_idx);
+        assert_eq!(draft.aspect, AspectRatio::Wide16x9);
+        assert!(!draft.config.video.flexible_aspect);
+        assert!(enabled(res_binding, true, &draft, &draft.config));
+        assert_eq!(
+            Choice::Resolution.items(&env, &draft),
+            ["1920 x 1080", "1280 x 720"]
+        );
     }
 }
