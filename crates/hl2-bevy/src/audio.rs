@@ -572,6 +572,16 @@ pub struct SoundPlayer {
     emitter: Option<(u64, String)>,
 }
 impl Audio {
+    /// The volume a new player starts with: spatial sounds already carry their distance
+    /// gain, because Source mixes a channel's first samples at its spatialized volume
+    /// (a one-frame silent start swallowed the 25 ms far layer of NPC gunfire); `queue`
+    /// keeps it current afterwards.
+    fn start_volume(&self, volume: f32, spatial: Option<(glam::Vec3, f32)>) -> f32 {
+        let gain = spatial.map_or(1., |(origin, soundlevel)| {
+            hl2_simulation::sounds::dist_gain(soundlevel, self.listener.distance(origin))
+        });
+        (volume * gain).clamp(0., 1.)
+    }
     fn emit(
         &mut self,
         commands: &mut Commands,
@@ -629,12 +639,7 @@ impl Audio {
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
-                // Spatial sounds start silent; `queue` applies their distance gain.
-                volume: bevy::audio::Volume::Linear(if spatial.is_some() {
-                    0.
-                } else {
-                    volume.clamp(0., 1.)
-                }),
+                volume: bevy::audio::Volume::Linear(self.start_volume(volume, spatial)),
                 speed: pitch / 100.,
                 paused,
                 ..settings
@@ -689,12 +694,7 @@ impl Audio {
             },
             AudioPlayer::new(sources.add(AudioSource { bytes: wav.into() })),
             PlaybackSettings {
-                // Spatial sounds start silent; `queue` applies their distance gain.
-                volume: bevy::audio::Volume::Linear(if spatial.is_some() {
-                    0.
-                } else {
-                    volume.clamp(0., 1.)
-                }),
+                volume: bevy::audio::Volume::Linear(self.start_volume(volume, spatial)),
                 paused,
                 ..PlaybackSettings::DESPAWN
             },
