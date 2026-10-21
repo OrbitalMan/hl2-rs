@@ -30,7 +30,7 @@ use super::{
     resources::{GameUiResources, Image},
     settings::{self, Binding, Choice, Command, Draft, Env, Panel, Value},
     widgets::{
-        self, Align, ButtonState, FrameSpec, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL,
+        self, Align, ButtonState, FrameSpec, Painter, Theme, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL,
         MENU_ROW, SCROLLBAR_WIDTH, SLIDER_HIT_TALL, SLIDER_TRACK_Y,
     },
 };
@@ -331,6 +331,10 @@ pub struct OptionsDialog {
     pub sub_alpha: f32,
     /// Confirmation dialog composite alpha multiplier.
     pub confirm_alpha: f32,
+    /// Active sub-dialog theme (focus-faded, from Console window management).
+    pub sub_theme: Option<Theme>,
+    /// Active confirmation dialog theme (focus-faded, from Console window management).
+    pub confirm_theme: Option<Theme>,
     /// The draft configuration when the open sub-dialog opened, restored by its Cancel.
     sub_saved: Option<Config>,
     gamma_texture: Option<Texture2D>,
@@ -385,6 +389,8 @@ impl Default for OptionsDialog {
             closing_confirm: None,
             sub_alpha: 1.0,
             confirm_alpha: 1.0,
+            sub_theme: None,
+            confirm_theme: None,
             sub_saved: None,
             gamma_texture: None,
             bink_texture: None,
@@ -725,6 +731,8 @@ impl OptionsDialog {
         self.sub = None;
         self.closing_sub = None;
         self.closing_confirm = None;
+        self.sub_theme = None;
+        self.confirm_theme = None;
         self.sub_saved = None;
         self.active_tooltip = None;
         self.placement.end();
@@ -2092,21 +2100,33 @@ impl OptionsDialog {
     pub fn draw_with_occluders(&self, base: &Painter, external_occluders: &[Rect]) {
         let canvas = vec2(base.canvas.width(), base.canvas.height());
         let scale = Painter::scale_for_canvas(canvas);
-        let painter_at = |origin: Vec2| Painter {
-            canvas: base.canvas,
-            fonts: base.fonts,
-            theme: base.theme,
-            origin,
-            scale,
-        };
-        let p = painter_at(self.placement.place(&main_frame(canvas)).origin);
-        // Sub-dialogs and confirmation boxes adapt their focus theme based on which is topmost.
-        let sub_theme = if self.confirm.is_some() {
+        let modal = self.sub.is_some() || self.confirm.is_some();
+        let options_theme = if self.sub_theme.is_some() || self.confirm_theme.is_some() {
+            base.theme.clone()
+        } else if modal {
             base.theme.focus_faded(0.0, false)
         } else {
             base.theme.focus_faded(1.0, true)
         };
-        let confirm_theme = base.theme.focus_faded(1.0, true);
+        let p = Painter {
+            canvas: base.canvas,
+            fonts: base.fonts,
+            theme: &options_theme,
+            origin: self.placement.place(&main_frame(canvas)).origin,
+            scale,
+        };
+        // Sub-dialogs and confirmation boxes adapt their focus theme based on which is topmost.
+        let sub_theme = self.sub_theme.clone().unwrap_or_else(|| {
+            if self.confirm.is_some() {
+                base.theme.focus_faded(0.0, false)
+            } else {
+                base.theme.focus_faded(1.0, true)
+            }
+        });
+        let confirm_theme = self
+            .confirm_theme
+            .clone()
+            .unwrap_or_else(|| base.theme.focus_faded(1.0, true));
         let loc = &self.res.localization;
         let env = Env {
             localization: loc,
@@ -2315,12 +2335,14 @@ impl OptionsDialog {
         if let Some(confirm) = confirm_to_draw {
             let layout = confirm.layout(|t| p.text_width(t, false));
             let cp = Painter {
+                canvas: base.canvas,
+                fonts: base.fonts,
                 theme: &confirm_theme,
-                ..painter_at(
-                    self.confirm_placement
-                        .place(&confirm_frame(canvas, layout.size))
-                        .origin,
-                )
+                origin: self
+                    .confirm_placement
+                    .place(&confirm_frame(canvas, layout.size))
+                    .origin,
+                scale,
             };
             let old_alpha = base.canvas.set_alpha_multiplier(self.confirm_alpha);
             confirm.draw(&cp, &layout);
@@ -4526,10 +4548,10 @@ pub(crate) mod tests {
                 .next_back()
                 .expect("frame quad")
         };
-        assert!(
-            frame_alpha(&mut h, &|_, _| DIALOG_SIZE.x) < 1.,
-            "the options dialog over the game stays translucent"
-        );
+        // Options alone: focused frame alpha
+        let options_alpha = frame_alpha(&mut h, &|_, _| DIALOG_SIZE.x);
+        assert!((options_alpha - h.theme.frame_bg_focused.a).abs() < 1e-4);
+
         for sub in [
             Sub::Gamma,
             Sub::AudioCredits,
@@ -4543,23 +4565,106 @@ pub(crate) mod tests {
             };
             let alpha = frame_alpha(&mut h, &width);
             assert!(
-                alpha < 1.0,
-                "{sub:?} stacked over options preserves translucent background (alpha={alpha})"
+                (alpha - h.theme.frame_bg_focused.a).abs() < 1e-4,
+                "{sub:?} stacked in-focus over options has focused frame background (alpha={alpha}, expected={})",
+                h.theme.frame_bg_focused.a
+            );
+
+            // Verify parent options dialog frame background is out of focus:
+            let painter = Painter {
+                canvas: &h.canvas,
+                fonts: &h.fonts,
+                theme: &h.theme,
+                origin: Vec2::ZERO,
+                scale: 1.,
+            };
+            h.dialog.draw(&painter);
+            let options_frame = h
+                .canvas
+                .drain()
+                .into_iter()
+                .find(|q| q.texture.is_none() && q.destination.w == DIALOG_SIZE.x)
+                .expect("options frame quad");
+            assert!(
+                (options_frame.color.a - h.theme.frame_bg_out_of_focus.a).abs() < 1e-4,
+                "parent options dialog has out-of-focus frame background (alpha={}, expected={})",
+                options_frame.color.a,
+                h.theme.frame_bg_out_of_focus.a
             );
             h.dialog.cancel_sub();
         }
-        h.tab(Tab::Keyboard);
+
+        // Test confirmation dialog over subdialog:
+        h.dialog.open_sub(Sub::KeyboardAdvanced);
         h.dialog.command(Command::KeyDefaults);
-        let width = |d: &OptionsDialog, p: &Painter| {
-            let confirm = d.confirm.as_ref().expect("confirmation box");
-            confirm.layout(|t| p.text_width(t, false)).size.x
+        let confirm_width = {
+            let painter = Painter {
+                canvas: &h.canvas,
+                fonts: &h.fonts,
+                theme: &h.theme,
+                origin: Vec2::ZERO,
+                scale: 1.,
+            };
+            let confirm = h.dialog.confirm.as_ref().expect("confirmation box");
+            confirm.layout(|t| painter.text_width(t, false)).size.x
         };
-        let alpha = frame_alpha(&mut h, &width);
+        let sub_width = {
+            let painter = Painter {
+                canvas: &h.canvas,
+                fonts: &h.fonts,
+                theme: &h.theme,
+                origin: Vec2::ZERO,
+                scale: 1.,
+            };
+            h.dialog
+                .sub_frame_size(Sub::KeyboardAdvanced, |s| painter.text_width(s, false))
+                .x
+        };
+        let painter = Painter {
+            canvas: &h.canvas,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        h.dialog.draw(&painter);
+        let quads = h.canvas.drain();
+
+        // 1. Confirmation box is focused:
+        let confirm_frame = quads
+            .iter()
+            .rfind(|q| q.texture.is_none() && q.destination.w == confirm_width)
+            .expect("confirmation frame quad");
         assert!(
-            alpha < 1.0,
-            "confirmation box over options preserves translucent background (alpha={alpha})"
+            (confirm_frame.color.a - h.theme.frame_bg_focused.a).abs() < 1e-4,
+            "confirmation box is focused (alpha={})",
+            confirm_frame.color.a
         );
+
+        // 2. Subdialog under confirmation is out of focus:
+        let sub_frame_quad = quads
+            .iter()
+            .rfind(|q| q.texture.is_none() && q.destination.w == sub_width)
+            .expect("subdialog frame quad");
+        assert!(
+            (sub_frame_quad.color.a - h.theme.frame_bg_out_of_focus.a).abs() < 1e-4,
+            "subdialog under confirmation box is out of focus (alpha={})",
+            sub_frame_quad.color.a
+        );
+
+        // 3. Parent options dialog is out of focus:
+        let options_frame = quads
+            .iter()
+            .find(|q| q.texture.is_none() && q.destination.w == DIALOG_SIZE.x)
+            .expect("options frame quad");
+        assert!(
+            (options_frame.color.a - h.theme.frame_bg_out_of_focus.a).abs() < 1e-4,
+            "options dialog is out of focus (alpha={})",
+            options_frame.color.a
+        );
+
         h.dialog.confirm = None;
+        h.dialog.cancel_sub();
 
         // Verify that underlying content behind the subdialog is clipped:
         let painter = Painter {

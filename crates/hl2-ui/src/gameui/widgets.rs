@@ -60,9 +60,11 @@ pub struct Theme {
     pub frame_bg: Color,
     /// `Frame.OutOfFocusBgColor`: a frame without the keyboard focus.
     pub frame_bg_out_of_focus: Color,
+    pub frame_bg_focused: Color,
     pub title_text: Color,
     /// `FrameTitleBar.DisabledTextColor`: the title of a frame without the focus.
     pub title_text_out_of_focus: Color,
+    pub title_text_focused: Color,
     pub text: Color,
     /// Normal label text (`Label.TextColor`, OffWhite): check box and radio button labels at
     /// rest, between `text_dull` and the brighter hover `text`.
@@ -129,8 +131,10 @@ impl Default for Theme {
         Self {
             frame_bg: rgba(132, 132, 132, 212),
             frame_bg_out_of_focus: rgba(132, 132, 132, 62),
+            frame_bg_focused: rgba(132, 132, 132, 212),
             title_text: rgba(255, 255, 255, 255),
             title_text_out_of_focus: rgba(255, 255, 255, 192),
+            title_text_focused: rgba(255, 255, 255, 255),
             text: rgba(255, 255, 255, 255),
             label_text: rgba(221, 221, 221, 255),
             text_dull: rgba(190, 190, 190, 255),
@@ -201,9 +205,9 @@ impl Theme {
             )
         };
         let mut theme = self.clone();
-        theme.frame_bg = mix(self.frame_bg_out_of_focus, self.frame_bg);
+        theme.frame_bg = mix(self.frame_bg_out_of_focus, self.frame_bg_focused);
         theme.title_text = if focused {
-            self.title_text
+            self.title_text_focused
         } else {
             self.title_text_out_of_focus
         };
@@ -281,6 +285,8 @@ impl Theme {
                 *slot = color;
             }
         }
+        theme.frame_bg_focused = theme.frame_bg;
+        theme.title_text_focused = theme.title_text;
         theme
     }
 
@@ -2531,8 +2537,26 @@ mod tests {
         .unwrap();
         let theme = Theme::from_scheme(&roots[0]);
         assert_eq!(theme.frame_bg, Color::from_rgba(1, 2, 3, 4));
+        assert_eq!(theme.frame_bg_focused, Color::from_rgba(1, 2, 3, 4));
         assert_eq!(theme.selection_bg, Color::from_rgba(255, 155, 0, 255));
         assert_eq!(theme.slider_nob, Theme::default().slider_nob);
+    }
+
+    #[test]
+    fn focus_faded_transitions_are_reversible_and_preserve_focused_colors() {
+        let theme = Theme::default();
+        let focused = theme.focus_faded(1.0, true);
+        assert_eq!(focused.frame_bg, theme.frame_bg_focused);
+        assert_eq!(focused.title_text, theme.title_text_focused);
+
+        let unfocused = focused.focus_faded(0.0, false);
+        assert_eq!(unfocused.frame_bg, theme.frame_bg_out_of_focus);
+        assert_eq!(unfocused.title_text, theme.title_text_out_of_focus);
+
+        // Crucial test: fading an already-unfocused theme back to focused restores the focused colors:
+        let restored = unfocused.focus_faded(1.0, true);
+        assert_eq!(restored.frame_bg, theme.frame_bg_focused);
+        assert_eq!(restored.title_text, theme.title_text_focused);
     }
 
     #[test]

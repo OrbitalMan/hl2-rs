@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-22 UI: Focused subdialog and confirmation appearance with reversible theme focus transitions
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Reversible theme focus transitions (`hl2-ui::gameui::widgets`):
+  - In `crates/hl2-ui/src/gameui/widgets.rs`, added `frame_bg_focused: Color` and `title_text_focused: Color` to `Theme`. Initialized both in `Theme::default()` and recorded them from `sourcescheme.res` in `Theme::from_scheme()`.
+  - In `Theme::focus_faded(fade, focused)`, blend `frame_bg` from `self.frame_bg_out_of_focus` to `self.frame_bg_focused` (rather than mutating against current `frame_bg`), and set `title_text` to `self.title_text_focused` when `focused` is true, else `self.title_text_out_of_focus`. This ensures `focus_faded` is fully reversible and idempotent even when called on an already-faded theme.
+- Subdialog and confirmation dialog focus styling (`hl2-ui::gameui::options`, `hl2-ui::console`):
+  - In `crates/hl2-ui/src/gameui/options.rs`, added `pub sub_theme: Option<Theme>` and `pub confirm_theme: Option<Theme>` to `OptionsDialog`.
+  - In `OptionsDialog::draw_with_occluders`, when a subdialog holds focus, its frame renders with `Frame.BgColor` (alpha 212) and focused title text `FrameTitleBar.TextColor` (white), while the underlying Options dialog renders with `Frame.OutOfFocusBgColor` (alpha 62) and `FrameTitleBar.DisabledTextColor`.
+  - When an overlying confirmation dialog opens on top of a subdialog, the confirmation dialog renders with `Frame.BgColor` (alpha 212) and focused title text, while the subdialog transitions to `Frame.OutOfFocusBgColor` (alpha 62) and disabled title text.
+  - In `crates/hl2-ui/src/console.rs`, synchronized `self.options.sub_theme` and `self.options.confirm_theme` in `Console::sync_dialog_windows` from `self.window_theme(Window::SubDialog, time)` and `self.window_theme(Window::Confirmation, time)`. In `Console::draw`, used `self.window_theme(Window::Confirmation, time)` for Quit/Disconnect confirmation dialogs.
+
+**Why:** user defect report: subdialogs were translucent like their parents even though they were in focus, and should look focused accordingly.
+
+**Tested how:**
+- Added unit tests:
+  - `crates/hl2-ui/src/gameui/widgets.rs`: `focus_faded_transitions_are_reversible_and_preserve_focused_colors` verifies fading an already-unfocused theme back to focused restores `frame_bg_focused` (alpha 212) and `title_text_focused` (white).
+  - `crates/hl2-ui/src/gameui/options.rs`: `dialogs_over_the_options_dialog_are_translucent_and_clip_underlying_content` verifies focused subdialog frame alpha matches `theme.frame_bg_focused.a` (212/255) while parent Options frame alpha matches `theme.frame_bg_out_of_focus.a` (62/255), and when confirmation box opens, confirmation has focused frame alpha (212/255) while subdialog and Options have out-of-focus frame alpha (62/255).
+  - `crates/hl2-ui/src/console.rs`: `subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused` tests end-to-end through `Console` that when Options > Video Advanced is open, SubDialog is focused with `Frame.BgColor` (alpha 212) and `title_text_focused`, parent Options is out-of-focus with `Frame.OutOfFocusBgColor` (alpha 62) and disabled title text, and opening confirmation switches SubDialog to out-of-focus while confirmation becomes focused.
+- Ran `scripts/checks/validate.sh` (345 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
+**Result:** subdialogs and confirmation boxes render with the authentic focused scheme frame background (`Frame.BgColor`, alpha 212) and focused title text when in focus, while their parent dialogs render out-of-focus with `Frame.OutOfFocusBgColor` (alpha 62) and disabled title text. Overlying confirmation dialogs properly transition underlying subdialogs to out-of-focus styling.
+
+**Still broken or not tested:** visual appearance in packaged release runs is unverified, needs manual check.
+
+**Next:** continue UI polish / plugin modularization.
+
 ## 2026-10-22 UI: Stacked dialog translucency with content occlusion clipping and modal console toggle gating
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

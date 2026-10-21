@@ -1412,5 +1412,26 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
     - `crates/hl2-ui/src/console.rs`: `console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open` verifies that `Console::toggle()` is blocked when `Sub::VideoAdvanced`, `Command::KeyDefaults` confirmation, or Quit confirmation is open, and unblocked when they are closed.
   - Ran `scripts/checks/validate.sh` (343 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
 
+## 21. Subdialog and confirmation focus styling and reversible theme transitions (2026-10-22)
+
+- **Root cause:**
+  - In `OptionsDialog::draw_with_occluders`, `base.theme` passed from `Console::draw` represented the parent Options dialog's theme, which had already faded to `Frame.OutOfFocusBgColor` (alpha 62) and `FrameTitleBar.DisabledTextColor`.
+  - Calling `base.theme.focus_faded(1.0, true)` on that theme previously interpolated between `frame_bg_out_of_focus` (62) and `frame_bg` (which had already been overwritten to 62), permanently trapping subdialogs in the out-of-focus dimmed look even though they held keyboard and mouse focus.
+  - Furthermore, `Console::sync_dialog_windows` computed `self.options.sub_alpha` and `confirm_alpha` but did not synchronize `sub_theme` or `confirm_theme`.
+- **Reversible focus transitions on `Theme`:**
+  - Added `frame_bg_focused: Color` and `title_text_focused: Color` to `Theme` (`crates/hl2-ui/src/gameui/widgets.rs`), initialized in `Theme::default()` and recorded from `sourcescheme.res` in `Theme::from_scheme()`.
+  - In `Theme::focus_faded(fade, focused)`, interpolated between `frame_bg_out_of_focus` and `frame_bg_focused` (rather than mutating against current `frame_bg`), restoring `title_text_focused` when `focused` is true. Any theme can now transition to out-of-focus and back to focused idempotently without losing its authentic scheme colors.
+- **Subdialog and confirmation dialog focus appearance:**
+  - In `crates/hl2-ui/src/gameui/options.rs`, added `pub sub_theme: Option<Theme>` and `pub confirm_theme: Option<Theme>` to `OptionsDialog`.
+  - When a subdialog is focused, its frame renders with `Frame.BgColor` (alpha 212) and `FrameTitleBar.TextColor` (white), while the underlying Options dialog renders with `Frame.OutOfFocusBgColor` (alpha 62) and `FrameTitleBar.DisabledTextColor`.
+  - When an overlying confirmation dialog opens on top of a subdialog, the confirmation dialog renders with `Frame.BgColor` (alpha 212) and focused title text, and the subdialog transitions to `Frame.OutOfFocusBgColor` (alpha 62) and disabled title text.
+  - In `crates/hl2-ui/src/console.rs`, synchronized `self.options.sub_theme` and `confirm_theme` in `Console::sync_dialog_windows` from `self.window_theme(Window::SubDialog, time)` and `self.window_theme(Window::Confirmation, time)`.
+- **Verification:**
+  - Added unit tests:
+    - `widgets::tests::focus_faded_transitions_are_reversible_and_preserve_focused_colors`
+    - `gameui::options::tests::dialogs_over_the_options_dialog_are_translucent_and_clip_underlying_content`
+    - `console::tests::subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused`
+  - Ran `scripts/checks/validate.sh` (345 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
 
 

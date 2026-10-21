@@ -1288,6 +1288,16 @@ impl Console {
         self.options.confirm_alpha = self
             .windows
             .window_composite_alpha(Window::Confirmation, time);
+        self.options.sub_theme = if self.windows.is_open(Window::SubDialog) {
+            Some(self.window_theme(Window::SubDialog, time))
+        } else {
+            None
+        };
+        self.options.confirm_theme = if self.windows.is_open(Window::Confirmation) {
+            Some(self.window_theme(Window::Confirmation, time))
+        } else {
+            None
+        };
 
         self.sync_mode();
     }
@@ -3347,7 +3357,7 @@ impl Console {
         if let Some((confirm, _)) = confirm_box_to_draw {
             let (origin, scale, layout) = self.quit_geometry(confirm);
             let painter = self.painter(origin, scale);
-            let theme = painter.theme.focus_faded(1.0, true);
+            let theme = self.window_theme(Window::Confirmation, time);
             let alpha = self
                 .windows
                 .window_composite_alpha(Window::Confirmation, time);
@@ -7270,6 +7280,86 @@ mod tests {
         console.windows.set_time(3.0);
         assert_eq!(console.windows.focus(), Layer::Base);
         assert!((console.windows.base_focus_amount(3.3) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused() {
+        let mut console = Console::default();
+        console.open_options();
+        console.tick(0.0);
+
+        // 1. Options alone holds focus:
+        let options_theme = console.window_theme(Window::Options, 0.0);
+        assert!((options_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4);
+
+        // 2. Open SubDialog:
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::VideoAdvanced);
+        console.tick(1.0);
+
+        // SubDialog is focused immediately:
+        assert_eq!(console.windows.focus(), Layer::Window(Window::SubDialog));
+        let sub_theme = console.options.sub_theme.as_ref().expect("sub theme");
+        assert!(
+            (sub_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4,
+            "subdialog has focused Frame.BgColor (alpha={})",
+            sub_theme.frame_bg.a
+        );
+        assert_eq!(sub_theme.title_text, console.theme.title_text_focused);
+
+        // After 0.3s fade-in transition:
+        console.tick(1.3);
+
+        // Parent Options is out of focus:
+        let options_theme = console.window_theme(Window::Options, 1.3);
+        assert!(
+            (options_theme.frame_bg.a - console.theme.frame_bg_out_of_focus.a).abs() < 1e-4,
+            "parent options has out-of-focus Frame.OutOfFocusBgColor (alpha={})",
+            options_theme.frame_bg.a
+        );
+        assert_eq!(
+            options_theme.title_text,
+            console.theme.title_text_out_of_focus
+        );
+
+        // SubDialog composite alpha is 1.0:
+        assert!((console.options.sub_alpha - 1.0).abs() < 1e-4);
+
+        // 3. Open confirmation box over SubDialog:
+        console
+            .options
+            .command(crate::gameui::settings::Command::KeyDefaults);
+        console.tick(2.0);
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Confirmation));
+
+        // After 0.3s fade-in transition:
+        console.tick(2.3);
+
+        // Confirmation box is in focus:
+        let confirm_theme = console
+            .options
+            .confirm_theme
+            .as_ref()
+            .expect("confirm theme");
+        assert!(
+            (confirm_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4,
+            "confirmation box has focused Frame.BgColor (alpha={})",
+            confirm_theme.frame_bg.a
+        );
+        assert_eq!(confirm_theme.title_text, console.theme.title_text_focused);
+
+        // SubDialog transitions to out of focus:
+        let sub_theme_unfocused = console.options.sub_theme.as_ref().expect("sub theme");
+        assert!(
+            (sub_theme_unfocused.frame_bg.a - console.theme.frame_bg_out_of_focus.a).abs() < 1e-4,
+            "subdialog under confirmation box has out-of-focus Frame.OutOfFocusBgColor (alpha={})",
+            sub_theme_unfocused.frame_bg.a
+        );
+        assert_eq!(
+            sub_theme_unfocused.title_text,
+            console.theme.title_text_out_of_focus
+        );
     }
 
     #[test]
