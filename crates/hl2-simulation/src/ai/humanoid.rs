@@ -250,6 +250,8 @@ pub struct Humanoid {
     pub armed: bool,
     /// m_flLastAttackTime (OnRangeAttack1).
     pub last_attack: f64,
+    /// TASK_ANNOUNCE_ATTACK's SetWait(2.0).
+    announce_until: f64,
     /// CNPC_Combine m_iNumGrenades (the NumGrenades keyvalue; 0 by default).
     pub grenades: i32,
     /// m_flNextGrenadeCheck.
@@ -331,6 +333,7 @@ impl Humanoid {
             now: 0.,
             armed,
             last_attack: f64::NEG_INFINITY,
+            announce_until: 0.,
             grenades: 0,
             next_grenade_check: 0.,
             toss_velocity: Vec3::ZERO,
@@ -848,6 +851,33 @@ impl Behavior for Humanoid {
                 return None;
             }
             // CNPC_Citizen::StartTask: SetWait(arg), m_bRPGAvoidPlayer = false.
+            // CNPC_Combine::StartTask: announce a primary attack (COMBINE_ANNOUNCE, HIGH)
+            // when the player enemy does not face me and I have not attacked for 3 s,
+            // then wait 2 s in ACT_IDLE; a grenade (2) always says COMBINE_THROW_GRENADE
+            // (MEDIUM) and waits 2 s. Crouching (ACT_COWER) is not modeled.
+            "TASK_ANNOUNCE_ATTACK" if self.kind == Kind::Combine => {
+                let grenade = matches!(arg, TaskArg::Number(n) if *n as i32 != 1);
+                let announce = grenade
+                    || (ctx
+                        .enemy
+                        .is_some_and(|(e, _)| e == super::metropolice::PLAYER)
+                        && ctx.enemy_sees_me == Some(false)
+                        && ctx.now - self.last_attack > 3.);
+                if !announce {
+                    return Some(TaskStatus::Complete);
+                }
+                if grenade {
+                    self.requests
+                        .push(CopRequest::Sentence("COMBINE_THROW_GRENADE"));
+                } else {
+                    self.last_attack = ctx.now;
+                    self.requests.push(CopRequest::Sentence("COMBINE_ANNOUNCE"));
+                }
+                self.announce_until = ctx.now + 2.;
+                npc.activity = "ACT_IDLE".into();
+                motor.set_activity("ACT_IDLE");
+                TaskStatus::Running
+            }
             "TASK_CIT_RPG_AUGER" => {
                 let seconds = match arg {
                     TaskArg::Number(n) => *n,
@@ -878,6 +908,19 @@ impl Behavior for Humanoid {
         }
         if task == "TASK_CIT_RPG_AUGER" {
             return Some(self.rpg_auger(ctx));
+        }
+        // Stop waiting once the enemy faces me or is gone, or after the 2 s.
+        if task == "TASK_ANNOUNCE_ATTACK" && self.kind == Kind::Combine {
+            return Some(
+                if ctx.enemy.is_none()
+                    || ctx.enemy_sees_me != Some(false)
+                    || ctx.now >= self.announce_until
+                {
+                    TaskStatus::Complete
+                } else {
+                    TaskStatus::Running
+                },
+            );
         }
         if task == "TASK_COMBINE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET" {
             motor.face(super::schedule::Goal::Position(self.alt_fire_target));
@@ -964,6 +1007,82 @@ mod tests {
         npc.maintain(s, h, &ctx(5.), m);
     }
 
+    #[test]
+    fn combine_announce_a_primary_attack_on_a_player_who_does_not_face_them() {
+        use super::super::metropolice::PLAYER;
+        let (mut h, mut npc, _) = setup(Kind::Combine);
+        let mut m = FakeMotor::default();
+        let mut c = ctx(10.);
+        c.enemy = Some((PLAYER, Vec3::X * 300.));
+        let primary = TaskArg::Number(1.);
+        // The player faces the soldier: no announcement.
+        c.enemy_sees_me = Some(true);
+        assert_eq!(
+            h.start_task(&mut npc, "TASK_ANNOUNCE_ATTACK", &primary, &c, &mut m),
+            Some(TaskStatus::Complete)
+        );
+        // Facing away and no attack for 3 s: COMBINE_ANNOUNCE, then wait up to 2 s.
+        c.enemy_sees_me = Some(false);
+        assert_eq!(
+            h.start_task(&mut npc, "TASK_ANNOUNCE_ATTACK", &primary, &c, &mut m),
+            Some(TaskStatus::Running)
+        );
+        assert!(h
+            .requests
+            .contains(&CopRequest::Sentence("COMBINE_ANNOUNCE")));
+        assert_eq!(npc.activity, "ACT_IDLE");
+        c.now = 11.;
+        assert_eq!(
+            h.run_task(&mut npc, "TASK_ANNOUNCE_ATTACK", &primary, &c, &mut m),
+            Some(TaskStatus::Running)
+        );
+        // Turning toward him ends the wait early.
+        c.enemy_sees_me = Some(true);
+        assert_eq!(
+            h.run_task(&mut npc, "TASK_ANNOUNCE_ATTACK", &primary, &c, &mut m),
+            Some(TaskStatus::Complete)
+        );
+        // Within 3 s of the last attack (the announcement counts) it is skipped.
+        h.requests.clear();
+        c.enemy_sees_me = Some(false);
+        c.now = 12.;
+        assert_eq!(
+            h.start_task(&mut npc, "TASK_ANNOUNCE_ATTACK", &primary, &c, &mut m),
+            Some(TaskStatus::Complete)
+        );
+        // NPC enemies are never announced; a grenade always is.
+        c.now = 20.;
+        c.enemy = Some((2, Vec3::X * 300.));
+        assert_eq!(
+            h.start_task(&mut npc, "TASK_ANNOUNCE_ATTACK", &primary, &c, &mut m),
+            Some(TaskStatus::Complete)
+        );
+        assert_eq!(
+            h.start_task(
+                &mut npc,
+                "TASK_ANNOUNCE_ATTACK",
+                &TaskArg::Number(2.),
+                &c,
+                &mut m
+            ),
+            Some(TaskStatus::Running)
+        );
+        assert_eq!(
+            h.requests,
+            vec![CopRequest::Sentence("COMBINE_THROW_GRENADE")]
+        );
+        c.now = 22.5;
+        assert_eq!(
+            h.run_task(
+                &mut npc,
+                "TASK_ANNOUNCE_ATTACK",
+                &TaskArg::Number(2.),
+                &c,
+                &mut m
+            ),
+            Some(TaskStatus::Complete)
+        );
+    }
     #[test]
     fn rpg_citizens_stand_off_near_the_player_and_guide_their_missile() {
         let (mut h, npc, _) = setup(Kind::Companion { citizen: true });

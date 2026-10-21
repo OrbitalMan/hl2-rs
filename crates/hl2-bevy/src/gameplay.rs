@@ -748,8 +748,10 @@ impl Gameplay {
         &self,
         player: &Player,
         fly: bool,
+        facing: glam::Vec3,
     ) -> hl2_simulation::ai::runtime::PlayerState {
         hl2_simulation::ai::runtime::PlayerState {
+            facing,
             feet: player.feet,
             velocity: player.velocity,
             crouched: player.crouched,
@@ -847,7 +849,7 @@ impl Gameplay {
                         continue;
                     }
                     if let Some((id, _)) = physics.ray(eye, direction, 96.) {
-                        let state = self.ai_player_state(player, fly);
+                        let state = self.ai_player_state(player, fly, direction);
                         if !self
                             .ai
                             .player_used(id, &self.world, &mut self.scene, physics, state)
@@ -1116,7 +1118,7 @@ impl Gameplay {
         }
         physics.refresh_entity_queries();
         // NPC stage: the AI thinks (when enabled) before the movement controller tick.
-        let ai_player = self.ai_player_state(player, fly);
+        let ai_player = self.ai_player_state(player, fly, direction);
         self.ai.tick(
             &self.world,
             &mut self.scene,

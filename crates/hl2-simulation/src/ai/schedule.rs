@@ -175,6 +175,8 @@ pub struct Context {
     pub best_sound_volume: f32,
     /// m_flDistTooFar (1024; SF_NPC_LONG_RANGE: 1e9).
     pub dist_too_far: f32,
+    /// Whether the enemy has me in its view cone (FInViewCone), with `enemy`.
+    pub enemy_sees_me: Option<bool>,
 }
 
 /// A class's schedule hooks (SelectSchedule, TranslateSchedule, StartTask/RunTask).

@@ -99,6 +99,39 @@ fn speech_group(class: &AiClass, speech: Speech) -> Option<&'static str> {
         _ => return None,
     })
 }
+/// The enemy's FInViewCone(me): a 2D dot from its eye to my WorldSpaceCenter against its
+/// m_flFieldOfView (`fov` for NPC enemies, 0.5 without one; players 0.766,
+/// CBasePlayer::Spawn).
+fn enemy_sees_me(
+    id: usize,
+    enemy: usize,
+    fov: Option<f32>,
+    scene: &Scene,
+    player: PlayerState,
+) -> Option<bool> {
+    let center = scene.states[id].origin + Vec3::Z * 36.;
+    let viewer = if enemy == PLAYER {
+        Viewer {
+            entity: PLAYER,
+            class: super::relationships::Class::Player,
+            eye: player.eye(),
+            facing: player.facing,
+            field_of_view: 0.766,
+            look_distance: f32::MAX,
+        }
+    } else {
+        let state = scene.states.get(enemy)?;
+        Viewer {
+            entity: enemy,
+            class: super::relationships::Class::None,
+            eye: state.origin + Vec3::Z * super::host::EYE_HEIGHT,
+            facing: state.rotation * Vec3::X,
+            field_of_view: fov.unwrap_or(0.5),
+            look_distance: f32::MAX,
+        }
+    };
+    Some(senses::in_view_cone(&viewer, center))
+}
 /// SF_NPC_GAG: no idle sounds (ShouldPlayIdleSound).
 const SF_NPC_GAG: u32 = 2;
 /// What the host knows about the local player this tick.
@@ -112,6 +145,8 @@ pub struct PlayerState {
     pub suit: bool,
     /// flying/noclip players are not sensed.
     pub noclip: bool,
+    /// The view direction (EyeDirection2D uses its yaw).
+    pub facing: Vec3,
 }
 impl PlayerState {
     fn center(&self) -> Vec3 {
@@ -1827,7 +1862,14 @@ impl AiRuntime {
             best_sound_volume: 0.,
             // m_flDistTooFar (SF_NPC_LONG_RANGE is not read yet).
             dist_too_far: 1024.,
+            enemy_sees_me: self.enemy_sees(id, scene, player),
         }
+    }
+    /// `enemy_sees_me` for the current enemy (see [`enemy_sees_me`]).
+    fn enemy_sees(&self, id: usize, scene: &Scene, player: PlayerState) -> Option<bool> {
+        let enemy = self.actors.get(&id)?.npc.enemy?;
+        let fov = self.actors.get(&enemy).map(|a| a.class.field_of_view());
+        enemy_sees_me(id, enemy, fov, scene, player)
     }
     #[allow(clippy::too_many_arguments)]
     fn think(
@@ -1939,6 +1981,19 @@ impl AiRuntime {
             self.weapon_def(&w.class)
                 .is_some_and(|d| d.fire.is_some() && w.clip1 > 0 && w.clip1 < d.max_clip1 / 4 + 1)
         });
+        // Enemies' fields of view for TASK_ANNOUNCE_ATTACK (combine soldiers only), read
+        // before this actor is borrowed: sensing below may pick a new enemy.
+        let enemy_fovs: Vec<(usize, f32)> = if matches!(
+            &self.actors[&id].class,
+            AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine
+        ) {
+            self.actors
+                .iter()
+                .map(|(&e, a)| (e, a.class.field_of_view()))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let actor = self.actors.get_mut(&id).expect("actor");
         actor.npc.conditions = Conditions::default();
         // CheckAmmo: an empty clip (NPCs have unlimited reserve ammunition), and
@@ -2497,6 +2552,10 @@ impl AiRuntime {
                     scene.states[e].origin
                 },
             )
+        });
+        ctx.enemy_sees_me = actor.npc.enemy.and_then(|e| {
+            let fov = enemy_fovs.iter().find(|(id, _)| *id == e).map(|f| f.1);
+            enemy_sees_me(id, e, fov, scene, player)
         });
         if let AiClass::Metropolice(cop) = &mut actor.class {
             cop.gather_conditions(&mut actor.npc, &ctx);
