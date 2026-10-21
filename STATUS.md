@@ -4,6 +4,12 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Confirmation dialogs arm Cancel button on held Escape (`hl2-ui::gameui::menu`, `hl2-ui::console`, `hl2-ui::gameui::options`):**
+  - Added `escape_held: bool` to `MessageBox`. In `MessageBox::draw`, when `escape_held` is active and the dialog has a Cancel button without a title-bar close button (`!has_close`), the Cancel button renders with `armed: true` and `pressed: true` (`ButtonState::depressed`), applying sunken 3D borders, 1px text offset, and depressed styling.
+  - In `Console::escape_pressed`, synchronized dialog windows and propagated `escape_held = true` to `confirm_box` and `options.confirm` when `Window::Confirmation` is top.
+  - In `Console::escape_released`, cleared `escape_held` and dismissed the confirmation dialog upon release. Dragging confirmation boxes cancels active drags on Escape press without holding Cancel.
+  - Verified with unit tests (`message_box_escape_held_arms_cancel_when_no_close_button`, `a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it`), `scripts/checks/validate.sh`, and `scripts/checks/check_windows.sh`. Visual appearance in packaged release runs is unverified, needs manual check.
+
 - **Focused subdialog close button highlights on held Escape (`hl2-ui::console`):**
   - Updated `Console::escape_pressed` to set `options.escape_held = true` when `windows.top()` is `Some(Window::SubDialog)`, causing `OptionsDialog::draw` to render the subdialog's title-bar close button in pressed/highlighted state while Escape is held.
   - Delegated `Window::SubDialog` escape handling in `Console::escape_closes_dialog` and `Console::escape` to `options.escape_closes()` and `options.escape()`, ensuring active drags and open combo dropdowns are cancelled first without prematurely closing the subdialog.

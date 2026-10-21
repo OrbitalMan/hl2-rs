@@ -311,6 +311,7 @@ pub struct MessageBox {
     pub armed: Option<usize>,
     pub pressed: Option<usize>,
     pub has_close: bool,
+    pub escape_held: bool,
     last_armed: Option<usize>,
     sounds: Vec<String>,
     tracker: ButtonTracker<usize>,
@@ -342,6 +343,7 @@ impl MessageBox {
             armed: None,
             pressed: None,
             has_close: false,
+            escape_held: false,
             last_armed: None,
             sounds: Vec::new(),
             tracker: ButtonTracker::capturing(),
@@ -526,7 +528,7 @@ impl MessageBox {
             let close_index = layout.buttons.len();
             ButtonState {
                 armed: self.armed == Some(close_index),
-                pressed: self.pressed == Some(close_index),
+                pressed: self.pressed == Some(close_index) || (self.has_close && self.escape_held),
                 enabled: true,
                 default: false,
             }
@@ -535,12 +537,17 @@ impl MessageBox {
         painter.text(&self.text, layout.text_at, painter.theme.text, false);
         let labels = std::iter::once(&self.ok).chain(self.cancel.as_ref());
         for (index, (rect, label)) in layout.buttons.iter().zip(labels).enumerate() {
+            let is_cancel = index == 1 && self.cancel.is_some() && !self.has_close;
+            let armed = self.armed == Some(index) || (is_cancel && self.escape_held);
+            let pressed = self.pressed == Some(index)
+                || self.key_press.pressed() == Some(index)
+                || (is_cancel && self.escape_held);
             painter.button(
                 *rect,
                 label,
                 ButtonState {
-                    armed: self.armed == Some(index),
-                    pressed: self.pressed == Some(index) || self.key_press.pressed() == Some(index),
+                    armed,
+                    pressed,
                     enabled: true,
                     default: false,
                 },
@@ -1485,6 +1492,75 @@ mod tests {
         );
         assert_eq!(outcome, Some(false), "Close button behaves like Cancel");
         assert_eq!(msg_box.take_sounds(), vec!["ui/buttonclickrelease.wav"]);
+    }
+
+    #[test]
+    fn message_box_escape_held_arms_cancel_when_no_close_button() {
+        use super::super::widgets::{Fonts, Theme};
+        use crate::canvas::Canvas;
+
+        let mut msg_box = MessageBox::new(
+            "Quit".into(),
+            "Quit game?".into(),
+            "Quit".into(),
+            Some("Cancel".into()),
+        );
+        let layout = msg_box.layout(|_| 100.);
+        let canvas = Canvas::default();
+        let fonts = Fonts::default();
+        let theme = Theme::default();
+        let painter = Painter {
+            canvas: &canvas,
+            fonts: &fonts,
+            theme: &theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+
+        // When escape_held is false:
+        assert!(!msg_box.escape_held);
+        msg_box.draw(&painter, &layout);
+        let normal_quads = canvas.drain();
+
+        // When escape_held is true on a box with cancel and no close button:
+        msg_box.escape_held = true;
+        msg_box.draw(&painter, &layout);
+        let armed_quads = canvas.drain();
+        assert!(!armed_quads.is_empty());
+        let normal_colors: Vec<_> = normal_quads
+            .iter()
+            .map(|q| (q.destination, q.color))
+            .collect();
+        let armed_colors: Vec<_> = armed_quads
+            .iter()
+            .map(|q| (q.destination, q.color))
+            .collect();
+        assert_ne!(normal_colors, armed_colors);
+
+        // When box has close button, escape_held does not arm/depress cancel button
+        let mut msg_box_close = MessageBox::new(
+            "Dialog".into(),
+            "Text".into(),
+            "OK".into(),
+            Some("Cancel".into()),
+        )
+        .with_close(true);
+        let layout_close = msg_box_close.layout(|_| 100.);
+        msg_box_close.draw(&painter, &layout_close);
+        let normal_close_quads = canvas.drain();
+        msg_box_close.escape_held = true;
+        msg_box_close.draw(&painter, &layout_close);
+        let armed_close_quads = canvas.drain();
+        let normal_close_colors: Vec<_> = normal_close_quads
+            .iter()
+            .map(|q| (q.destination, q.color))
+            .collect();
+        let armed_close_colors: Vec<_> = armed_close_quads
+            .iter()
+            .map(|q| (q.destination, q.color))
+            .collect();
+        // Since cancel is not armed when has_close is true, button borders remain identical
+        assert_eq!(normal_close_colors, armed_close_colors);
     }
 
     #[test]

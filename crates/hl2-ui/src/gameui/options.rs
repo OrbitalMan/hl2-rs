@@ -321,7 +321,7 @@ pub struct OptionsDialog {
     combo: Option<OpenCombo>,
     editing: Option<Editing>,
     keys: KeyList,
-    confirm: Option<MessageBox>,
+    pub(crate) confirm: Option<MessageBox>,
     sub: Option<Sub>,
     /// Currently fading-out sub-dialog being dismissed.
     pub(crate) closing_sub: Option<Sub>,
@@ -785,15 +785,15 @@ impl OptionsDialog {
 
     /// Closes the innermost layer. Returns `false` when the dialog itself closes (Cancel).
     /// Whether Escape would close a dialog with a close button (the sub-dialog, else the Options
-    /// dialog) rather than cancel a drag, key capture, list, text edit or confirmation box.
+    /// dialog) or a confirmation dialog with a Cancel button rather than cancel a drag, key
+    /// capture, dropdown list, or text edit.
     pub fn escape_closes(&self) -> bool {
         !(self.placement.active()
             || self.sub_placement.active()
             || self.confirm_placement.active()
             || self.keys.capture.is_some()
             || self.combo.is_some()
-            || self.editing.is_some()
-            || self.confirm.is_some())
+            || self.editing.is_some())
     }
 
     pub fn escape(&mut self) -> bool {
@@ -1094,9 +1094,18 @@ impl OptionsDialog {
         self.confirm.is_some()
     }
 
+    pub(crate) fn set_confirm_escape_held(&mut self, held: bool) {
+        if let Some(confirm) = &mut self.confirm {
+            confirm.escape_held = held;
+        }
+    }
+
     /// Dismisses the confirmation box.
     pub fn dismiss_confirm(&mut self) {
-        self.closing_confirm = self.confirm.take();
+        if let Some(mut confirm) = self.confirm.take() {
+            confirm.escape_held = false;
+            self.closing_confirm = Some(confirm);
+        }
     }
 
     /// The dialog's frame on `canvas`, in canvas pixels, where it is placed.

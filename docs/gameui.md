@@ -1374,12 +1374,19 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
 - **Focused subdialog close button highlighting on Escape:**
   - In `Console::escape_pressed`, `self.options.escape_held` now checks `matches!(self.windows.top(), Some(Window::Options | Window::SubDialog))` rather than strictly `Window::Options`. When a subdialog is focused, holding Escape down marks `escape_held = true`, rendering the subdialog's close button in the depressed, highlighted state (`ButtonState::pressed = true`) until Escape is released.
   - `Window::SubDialog` escape handling delegates to `options.escape_closes()` and `options.escape()`, cancelling active placement drags or open combo dropdowns first before dismissing the subdialog.
+- **Confirmation dialog Cancel button arming on Escape:**
+  - For confirmation dialogs (`MessageBox`) with a Cancel button and no title-bar close button (`!has_close && cancel.is_some()`, such as Quit, Return to Main Menu, Keep Video mode, and Options Use Defaults), pressing and holding Escape sets `escape_held = true` on the message box.
+  - `MessageBox::draw` renders the Cancel button with `armed: true` and `pressed: true`, displaying the sunken `ButtonBorder::Depressed` border, 1px text offset, and depressed scheme colors until Escape is released.
+  - On Escape release, `Console::escape_released` dismisses the confirmation dialog. Active placement drags on confirmation dialogs are cancelled immediately on Escape press without triggering held Escape.
 - **Verification:**
-  - Added unit tests in `crates/hl2-ui/src/console.rs`:
-    - `subdialog_buttons_can_be_activated_by_mouse_click`: verifies mouse click activation of OK and Cancel in `Sub::VideoAdvanced`, title bar close and bottom Close in `Sub::AudioCredits`, and OK in `Sub::Gamma`.
-    - `keyboard_use_defaults_confirmation_works_with_click_and_keys`: verifies opening Use Defaults confirmation box, retaining it across frames, and activating OK restores default keybindings.
-    - `out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline`: verifies no opaque text outline quads are emitted when the menu is out of focus.
-    - `a_held_escape_presses_subdialog_close_button_and_release_closes_it`: verifies holding Escape highlights the subdialog close button, release closes the subdialog and restores focus to Options, and in-progress drags are cancelled immediately.
+  - Added unit tests:
+    - `crates/hl2-ui/src/gameui/menu.rs`: `message_box_escape_held_arms_cancel_when_no_close_button` verifies `MessageBox::draw` renders depressed Cancel borders when `escape_held` is true on boxes without close button, and leaves Cancel un-depressed on boxes with close button.
+    - `crates/hl2-ui/src/console.rs`:
+      - `subdialog_buttons_can_be_activated_by_mouse_click`: verifies mouse click activation of OK and Cancel in `Sub::VideoAdvanced`, title bar close and bottom Close in `Sub::AudioCredits`, and OK in `Sub::Gamma`.
+      - `keyboard_use_defaults_confirmation_works_with_click_and_keys`: verifies opening Use Defaults confirmation box, retaining it across frames, and activating OK restores default keybindings.
+      - `out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline`: verifies no opaque text outline quads are emitted when the menu is out of focus.
+      - `a_held_escape_presses_subdialog_close_button_and_release_closes_it`: verifies holding Escape highlights the subdialog close button, release closes the subdialog and restores focus to Options, and in-progress drags are cancelled immediately.
+      - `a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it`: verifies Escape press on `confirm_box` and `options.confirm` holds Cancel button pressed while open, Escape release cancels the dialog, and in-progress drags are cancelled immediately on press.
   - Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
 
 

@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-21 UI: Escape key arms/depresses Cancel button on confirmation dialogs
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Confirmation dialog Escape interaction (`hl2-ui::gameui::menu`, `hl2-ui::console`, `hl2-ui::gameui::options`):
+  - In `MessageBox`, added `pub escape_held: bool` field initialized to `false` in `MessageBox::new`.
+  - In `MessageBox::draw`, when `self.escape_held` is true and the message box has a Cancel button (`self.cancel.is_some()`) without a title-bar close button (`!self.has_close`), the Cancel button (index 1) renders with `armed: true` and `pressed: true` (sunken `ButtonBorder::Depressed` border, 1px text offset, and depressed text/background colors). When `has_close: true`, `close_state` renders with `pressed: true` instead.
+  - In `Console::escape_closes_dialog`, removed `self.confirm_box.is_some()` from early return and handled `Window::Confirmation` by checking `!self.quit_placement.active()` (for `confirm_box`) or `!self.options.confirm_placement.active()` (for `options.confirm`).
+  - In `Console::escape_pressed`, when `windows.top() == Some(Window::Confirmation)`, set `escape_held = true` on `confirm_box` or via `options.set_confirm_escape_held(true)`.
+  - In `Console::escape_released`, reset `escape_held` and invoked `self.escape()` to cancel/dismiss the confirmation dialog on release.
+  - In `Console::escape`, cleared `escape_held` on dismissal and delegated `Window::Confirmation` to cancel drag first if `!self.options.escape_closes()`.
+  - In `Console::close_window`, defensively cleared confirmation `escape_held` flags.
+  - In `Console::console_button_state`, restricted `ConsoleButton::Close` Escape held highlighting to when `windows.top() == Some(Window::Console)`.
+  - In `OptionsDialog::escape_closes`, removed `|| self.confirm.is_some()` so confirmation dialogs close on Escape release rather than press.
+
+**Why:** user defect report: confirmation dialogs that have a Cancel button but no close button should arm the Cancel button on Escape key press, keeping it held until Escape is released.
+
+**Tested how:**
+- Added unit tests:
+  - `gameui::menu::tests::message_box_escape_held_arms_cancel_when_no_close_button`: verifies that `MessageBox::draw` renders depressed border/colors on Cancel when `escape_held` is true on boxes without close button, and leaves Cancel un-depressed when `has_close: true`.
+  - `console::tests::a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it`: verifies that pressing Escape on Quit confirmation and Options Use Defaults confirmation arms Cancel while dialog stays open, releasing Escape cancels/closes the dialog, and in-progress drags are cancelled immediately on press.
+- Ran `scripts/checks/validate.sh` (341 unit tests, 93 bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
+**Result:** confirmation dialogs (Quit, Return to Main Menu, Keep Video mode, and Options Use Defaults) cleanly arm and depress their Cancel button when Escape is pressed and cancel upon release.
+
+**Still broken or not tested:** visual appearance in packaged release runs is unverified, needs manual check.
+
+**Next:** continue UI polish / plugin modularization.
+
+
 ## 2026-10-21 UI: Escape key highlights focused subdialog close button on press
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

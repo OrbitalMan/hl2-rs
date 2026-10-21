@@ -1352,6 +1352,10 @@ impl Console {
         }
         self.escape_held = false;
         self.options.escape_held = false;
+        if let Some((box_, _)) = &mut self.confirm_box {
+            box_.escape_held = false;
+        }
+        self.options.set_confirm_escape_held(false);
         self.windows.close(window);
         self.reset_menu_interaction();
         self.sync_mode();
@@ -1505,9 +1509,9 @@ impl Console {
     }
 
     /// Escape went down. When it would close a dialog that has a close button (Options or one
-    /// of its sub-dialogs, the console), that button shows pressed until Escape is released and
-    /// the dialog closes then (owner request, 2026-10-17; retail closes on the press). Everything
-    /// else Escape does happens at once.
+    /// of its sub-dialogs, the console) or a confirmation dialog with a Cancel button, that
+    /// button shows pressed/armed until Escape is released and the dialog closes then.
+    /// Everything else Escape does happens at once.
     pub fn escape_pressed(&mut self) {
         self.sync_dialog_windows();
         if self.escape_closes_dialog() {
@@ -1516,16 +1520,25 @@ impl Console {
                 self.windows.top(),
                 Some(Window::Options | Window::SubDialog)
             );
+            let is_confirm = self.windows.top() == Some(Window::Confirmation);
+            if let Some((box_, _)) = &mut self.confirm_box {
+                box_.escape_held = is_confirm;
+            }
+            self.options.set_confirm_escape_held(is_confirm);
         } else {
             self.escape();
         }
     }
 
-    /// Escape went up: closes the dialog whose close button it held.
+    /// Escape went up: closes the dialog whose close button or cancel button it held.
     pub fn escape_released(&mut self) {
         self.sync_dialog_windows();
         if std::mem::take(&mut self.escape_held) {
             self.options.escape_held = false;
+            if let Some((box_, _)) = &mut self.confirm_box {
+                box_.escape_held = false;
+            }
+            self.options.set_confirm_escape_held(false);
             if self.escape_closes_dialog() {
                 self.escape();
             }
@@ -1533,16 +1546,19 @@ impl Console {
     }
 
     fn escape_closes_dialog(&self) -> bool {
-        if self.loading_dialog.is_some()
-            || self.confirm_box.is_some()
-            || self.quit_placement.active()
-        {
+        if self.loading_dialog.is_some() || self.quit_placement.active() {
             return false;
         }
         match self.windows.top() {
             Some(Window::Options | Window::SubDialog) => self.options.escape_closes(),
             Some(Window::Console) => !self.console_placement.active() && !self.editor.can_dismiss(),
-            Some(Window::Confirmation) => true,
+            Some(Window::Confirmation) => {
+                if self.confirm_box.is_some() {
+                    !self.quit_placement.active()
+                } else {
+                    self.options.escape_closes()
+                }
+            }
             None => false,
         }
     }
@@ -1566,7 +1582,8 @@ impl Console {
             }
             return;
         }
-        if let Some((box_, kind)) = self.confirm_box.take() {
+        if let Some((mut box_, kind)) = self.confirm_box.take() {
+            box_.escape_held = false;
             self.closing_confirm_box = Some((box_, kind.clone()));
             self.reset_menu_interaction();
             if let ConfirmKind::KeepVideo(keep) = kind {
@@ -1579,7 +1596,11 @@ impl Console {
         // Escape closes the top window first, whichever layer has the focus.
         match self.windows.top() {
             Some(Window::Confirmation) => {
-                self.options.dismiss_confirm();
+                if !self.options.escape_closes() {
+                    self.options.escape();
+                } else {
+                    self.options.dismiss_confirm();
+                }
                 self.sync_dialog_windows();
                 return;
             }
@@ -2769,7 +2790,9 @@ impl Console {
         ButtonState {
             armed: self.console_buttons.armable(self.console_hover) == Some(button),
             pressed: (hovered && self.console_buttons.is_pressed(button))
-                || (button == ConsoleButton::Close && self.escape_held),
+                || (button == ConsoleButton::Close
+                    && self.escape_held
+                    && self.windows.top() == Some(Window::Console)),
             enabled: true,
             // SDK `CConsolePanel` makes Submit the default button.
             default: button == ConsoleButton::Submit,
@@ -5365,6 +5388,101 @@ mod tests {
         assert!(console.options.escape_held);
         console.escape_released();
         assert!(!console.options.has_sub());
+    }
+
+    #[test]
+    fn a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it() {
+        let mut console = installed_console();
+        let loc = crate::gameui::localize::Localization::default();
+        console.set_mode(Mode::MainMenu);
+        console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+        console.sync_dialog_windows();
+        assert_eq!(console.windows.top(), Some(Window::Confirmation));
+        assert!(console.confirm_box.is_some());
+
+        // Press Escape while confirmation is top: Cancel button shows armed/pressed, box stays open
+        console.escape_pressed();
+        assert!(
+            console.confirm_box.is_some(),
+            "confirm box does not close on press"
+        );
+        assert!(
+            console.confirm_box.as_ref().unwrap().0.escape_held,
+            "Cancel button on confirm_box shows armed/pressed while Escape is held"
+        );
+
+        // Render to verify drawing with escape_held works cleanly
+        console.canvas.resize(1280., 720.);
+        console.draw(0.0);
+
+        // Release Escape: confirm box closes and cancelled
+        console.escape_released();
+        assert!(
+            console.confirm_box.is_none(),
+            "confirm box dismissed on Escape release"
+        );
+        assert_ne!(
+            console.windows.top(),
+            Some(Window::Confirmation),
+            "Confirmation window closed"
+        );
+
+        // Test dragging confirm box: pressing Escape cancels the drag, dialog stays open
+        console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+        console.sync_dialog_windows();
+        let bounds = console.window_bounds(Window::Confirmation);
+        let caption_pt = vec2(bounds.x + 50., bounds.y + 10.);
+        pointer_frame(&mut console, caption_pt, true, true, false);
+        pointer_frame(
+            &mut console,
+            caption_pt + vec2(100., 50.),
+            false,
+            true,
+            false,
+        );
+        assert!(console.quit_placement.active());
+
+        // Escape cancels drag immediately without holding Escape
+        console.escape_pressed();
+        assert!(
+            !console.confirm_box.as_ref().unwrap().0.escape_held,
+            "drag cancelled, escape not held"
+        );
+        assert!(
+            console.confirm_box.is_some(),
+            "confirm box still open after drag cancelled"
+        );
+        assert!(!console.quit_placement.active());
+
+        // Subsequent Escape press now holds Cancel button
+        console.escape_pressed();
+        assert!(console.confirm_box.as_ref().unwrap().0.escape_held);
+        console.escape_released();
+        assert!(console.confirm_box.is_none());
+
+        // Test Options Use Defaults confirmation box
+        console.open_options();
+        console.options.confirm = Some(MessageBox::new(
+            "Use Defaults".into(),
+            "Reset all keys to default?".into(),
+            "OK".into(),
+            Some("Cancel".into()),
+        ));
+        console.sync_dialog_windows();
+        assert_eq!(console.windows.top(), Some(Window::Confirmation));
+        assert!(console.options.has_confirm());
+
+        // Escape pressed: options confirm has escape_held = true
+        console.escape_pressed();
+        assert!(console.options.has_confirm());
+        assert!(console.escape_held);
+
+        console.draw(0.0);
+
+        // Escape released: options confirm closed
+        console.escape_released();
+        assert!(!console.options.has_confirm());
+        assert_eq!(console.windows.top(), Some(Window::Options));
     }
 
     #[test]
