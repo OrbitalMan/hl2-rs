@@ -122,6 +122,9 @@ pub struct FireSpec {
     pub max_burst: u32,
     /// GetFireRate (seconds between shots in a burst).
     pub fire_rate: f32,
+    /// GetMinRestTime / GetMaxRestTime (the shot regulator's rest).
+    pub min_rest: f32,
+    pub max_rest: f32,
     /// m_fMinRange1 / m_fMaxRange1.
     pub min_range: f32,
     pub max_range: f32,
@@ -141,6 +144,8 @@ fn fire_spec(class: &str) -> Option<FireSpec> {
             min_burst: 1,
             max_burst: 3,
             fire_rate: 0.5,
+            min_rest: 0.3,
+            max_rest: 0.6,
             min_range: 24.,
             max_range: 1500.,
             proficiency: DEFAULT_PROFICIENCY,
@@ -155,6 +160,8 @@ fn fire_spec(class: &str) -> Option<FireSpec> {
             min_burst: 2,
             max_burst: 5,
             fire_rate: 0.075,
+            min_rest: 0.3,
+            max_rest: 0.6,
             min_range: 0.,
             max_range: 1400.,
             proficiency: SMG1_PROFICIENCY,
@@ -169,6 +176,8 @@ fn fire_spec(class: &str) -> Option<FireSpec> {
             min_burst: 2,
             max_burst: 5,
             fire_rate: 0.1,
+            min_rest: 0.3,
+            max_rest: 0.6,
             min_range: 65.,
             max_range: 2048.,
             proficiency: AR2_PROFICIENCY,
@@ -183,14 +192,62 @@ fn fire_spec(class: &str) -> Option<FireSpec> {
             min_burst: 1,
             max_burst: 3,
             fire_rate: 0.7,
+            min_rest: 0.3,
+            max_rest: 0.6,
             min_range: 0.,
             max_range: 500.,
             proficiency: DEFAULT_PROFICIENCY,
             tracer_freq: 0,
             sound_volume: 1500.,
         },
+        // CWeaponAlyxGun (HL2, not episodic): CHLSelectFireMachineGun, WeaponSound (not
+        // realtime) per EVENT_WEAPON_PISTOL_FIRE, VECTOR_CONE_2DEGREES, range 1..5000.
+        "weapon_alyxgun" => FireSpec {
+            event: EVENT_WEAPON_PISTOL_FIRE,
+            pellets: 1,
+            cone_degrees: 2.,
+            precalculated: true,
+            min_burst: 4,
+            max_burst: 7,
+            fire_rate: 0.1,
+            min_rest: 0.3,
+            max_rest: 0.6,
+            min_range: 1.,
+            max_range: 5000.,
+            proficiency: DEFAULT_PROFICIENCY,
+            tracer_freq: 2,
+            sound_volume: 0.,
+        },
+        // CWeaponRPG: EVENT_WEAPON_SMG1 launches a missile (CMissile::Create) instead of
+        // bullets; one at a time, GetFireRate 1, bursts of 1, 4 s rests, 480..6000 units
+        // of horizontal distance, VECTOR_CONE_3DEGREES; no combat sound insertion.
+        "weapon_rpg" => FireSpec {
+            event: EVENT_WEAPON_SMG1,
+            pellets: 1,
+            cone_degrees: 3.,
+            precalculated: true,
+            min_burst: 1,
+            max_burst: 1,
+            fire_rate: 1.,
+            min_rest: 4.,
+            max_rest: 4.,
+            min_range: 40. * 12.,
+            max_range: 500. * 12.,
+            proficiency: DEFAULT_PROFICIENCY,
+            tracer_freq: 0,
+            sound_volume: 0.,
+        },
         _ => return None,
     })
+}
+
+/// CWeaponSMG1::Equip: 3000 units of range for a CLASS_PLAYER_ALLY owner, else 1400.
+pub fn equip_max_range(weapon: &str, ally: bool, spec: &FireSpec) -> f32 {
+    if weapon == "weapon_smg1" && ally {
+        3000.
+    } else {
+        spec.max_range
+    }
 }
 
 /// One NPC weapon type.
@@ -390,6 +447,8 @@ pub struct NpcWeapon {
     pub sequence: Option<WeaponSequence>,
     /// CHLMachineGun::m_flNextSoundTime (WeaponSoundRealtime).
     pub next_sound_time: f64,
+    /// CWeaponRPG::m_hMissile: the launched missile still flies.
+    pub missile_out: bool,
 }
 /// A weapon world-model sequence started by Weapon_SetActivity: its events are
 /// dispatched to the operator (CBaseCombatWeapon::Operator_FrameUpdate), with the
@@ -416,6 +475,7 @@ impl NpcWeapon {
             shots: 0,
             sequence: None,
             next_sound_time: 0.,
+            missile_out: false,
         }
     }
     /// CHLMachineGun::WeaponSoundRealtime(SINGLE_NPC), which FireNPCPrimaryAttack of
@@ -542,6 +602,7 @@ pub struct ShotRegulator {
     pub burst_remaining: u32,
     pub in_rest: bool,
     weapon_burst: (u32, u32),
+    weapon_rest: (f32, f32),
     fire_rate: f32,
     seed: u64,
 }
@@ -560,6 +621,7 @@ impl ShotRegulator {
             burst_remaining: 1,
             in_rest: false,
             weapon_burst: (spec.min_burst, spec.max_burst),
+            weapon_rest: (spec.min_rest, spec.max_rest),
             fire_rate: spec.fire_rate,
             seed: seed | 1,
         };
@@ -572,7 +634,7 @@ impl ShotRegulator {
     pub fn on_update(&mut self, enemy_distance: Option<f32>) {
         (self.min_burst, self.max_burst) = self.weapon_burst;
         (self.min_burst_interval, self.max_burst_interval) = (self.fire_rate, self.fire_rate);
-        (self.min_rest, self.max_rest) = (0.3, 0.6);
+        (self.min_rest, self.max_rest) = self.weapon_rest;
         if self.rule == RegulatorRule::MetropolicePistol {
             if let Some(distance) = enemy_distance {
                 let (near, far) = PISTOL_MODIFY_DIST;
@@ -614,6 +676,10 @@ impl ShotRegulator {
             self.next_shot = now + f64::from(rest);
             self.in_rest = true;
         }
+    }
+    /// FireNoEarlierThan.
+    pub fn fire_no_earlier_than(&mut self, time: f64) {
+        self.next_shot = self.next_shot.max(time);
     }
     pub fn should_shoot(&self, now: f64) -> bool {
         self.next_shot <= now
@@ -691,6 +757,8 @@ pub struct NpcShot {
     pub ammo_type: String,
     /// Tracer on this shot (every `tracer_freq` bullets).
     pub tracer: bool,
+    /// An RPG launch (CMissile::Create along `directions[0]`) instead of bullets.
+    pub missile: bool,
 }
 
 /// GetActualShootTrajectory for a shot from `origin` at a target point (the enemy's
@@ -773,6 +841,11 @@ impl NpcWeapon {
         let Some((origin, target, since_valid)) = aim else {
             return WeaponEvent::None;
         };
+        let missile = self.class == "weapon_rpg";
+        if missile && self.missile_out {
+            return WeaponEvent::None;
+        }
+        self.missile_out |= missile;
         let directions = shot_directions(
             &spec,
             proficiency(npc_class, &self.class),
@@ -793,6 +866,7 @@ impl NpcWeapon {
             damage: definition.damage,
             ammo_type: definition.ammo_type.clone(),
             tracer: spec.tracer_freq > 0 && self.shots.is_multiple_of(spec.tracer_freq),
+            missile,
         });
         WeaponEvent::Fired
     }

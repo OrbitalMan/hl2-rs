@@ -104,6 +104,10 @@ pub struct Projectile {
     pub body: Option<rapier3d::prelude::RigidBodyHandle>,
     /// The swept frag lies on a floor and rolls about its long axis.
     pub grounded: bool,
+    /// The NPC that launched this missile (CMissile::Create's owner), if not the player.
+    pub npc_owner: Option<usize>,
+    /// That NPC's guiding laser dot (TASK_CIT_RPG_AUGER), set by the host each tick.
+    pub npc_dot: Option<crate::weapon_rpg::LaserDot>,
 }
 impl Projectile {
     pub fn model(&self) -> &'static str {
@@ -216,6 +220,8 @@ pub struct Projectiles {
     pub laser_dot: Option<crate::weapon_rpg::LaserDot>,
     /// Missile deaths/removals this tick; the host notifies the RPG.
     pub missile_events: Vec<crate::weapon_rpg::MissileEvent>,
+    /// NPC-owned missiles that exploded or left the world this tick (by owner).
+    pub npc_missiles_died: Vec<usize>,
     /// Thrown bug bait splats this tick (step 14 antlion reactions consume them).
     pub bugbait_events: Vec<crate::weapon_bugbait::BugBaitEvent>,
     next_id: u64,
@@ -337,7 +343,32 @@ impl Projectiles {
             },
             body: None,
             grounded: false,
+            npc_owner: None,
+            npc_dot: None,
         });
+    }
+    /// An NPC's combine ball (CWeaponAR2::FireNPCSecondaryAttack -> CreateCombineBall with
+    /// the NPC as owner: the ball never strikes its shooter).
+    pub fn spawn_npc_ball(&mut self, launch: ProjectileSpawn, owner: usize, scene: &mut Scene) {
+        let count = self.active.len();
+        self.spawn(launch, scene);
+        if let Some(ball) = self.active.get_mut(count) {
+            ball.hit_entities.push(owner);
+        }
+    }
+    /// An NPC's RPG missile (CWeaponRPG::Operator_HandleAnimEvent -> CMissile::Create with
+    /// the NPC as owner). Returns the projectile id.
+    pub fn spawn_npc_missile(
+        &mut self,
+        launch: ProjectileSpawn,
+        owner: usize,
+        scene: &mut Scene,
+    ) -> Option<u64> {
+        let count = self.active.len();
+        self.spawn(launch, scene);
+        let missile = self.active.get_mut(count)?;
+        missile.npc_owner = Some(owner);
+        Some(missile.id)
     }
     /// CBreakableProp::Break -> ExplosionCreate for the explosive props broken by this
     /// tick's damage (SURFACEONLY). Native explodes before PropBreakableCreateAll, so
@@ -393,8 +424,12 @@ impl Projectiles {
             if projectile.position.abs().max_element() > 16384. {
                 self.diagnostics.out_of_world += 1;
                 if projectile.kind == ProjectileKind::RpgMissile {
-                    self.missile_events
-                        .push(crate::weapon_rpg::MissileEvent::Removed);
+                    if let Some(owner) = projectile.npc_owner {
+                        self.npc_missiles_died.push(owner);
+                    } else {
+                        self.missile_events
+                            .push(crate::weapon_rpg::MissileEvent::Removed);
+                    }
                 }
                 continue;
             }
@@ -553,10 +588,16 @@ impl Projectiles {
                     }
                 }
                 ProjectileKind::RpgMissile => {
+                    // SeekThink follows only dots of the missile's own owner.
+                    let dot = if projectile.npc_owner.is_some() {
+                        projectile.npc_dot
+                    } else {
+                        self.laser_dot
+                    };
                     if let crate::weapon_rpg::MissileOutcome::Explode =
                         crate::weapon_rpg::missile_tick(
                             &mut projectile,
-                            self.laser_dot.as_ref(),
+                            dot.as_ref(),
                             scene,
                             physics,
                             dt,
@@ -581,8 +622,12 @@ impl Projectiles {
                             player_ducked,
                             &mut damage,
                         );
-                        self.missile_events
-                            .push(crate::weapon_rpg::MissileEvent::Died);
+                        if let Some(owner) = projectile.npc_owner {
+                            self.npc_missiles_died.push(owner);
+                        } else {
+                            self.missile_events
+                                .push(crate::weapon_rpg::MissileEvent::Died);
+                        }
                         alive = false;
                     }
                 }
@@ -1324,6 +1369,8 @@ mod tests {
             solid_at: 0.,
             body: None,
             grounded: false,
+            npc_owner: None,
+            npc_dot: None,
         };
         let physics = Physics::new(&World::default());
         let mut t = 0.045;

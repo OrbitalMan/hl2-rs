@@ -871,6 +871,14 @@ impl Gameplay {
             self.scene.time,
         );
         self.projectiles.laser_dot = self.inventory.rpg.dot;
+        // NPC missiles seek their owner's dot while it guides (TASK_CIT_RPG_AUGER).
+        for missile in &mut self.projectiles.active {
+            if let Some(owner) = missile.npc_owner {
+                missile.npc_dot = self.ai.npc_laser(owner).map(|(position, shoot)| {
+                    hl2_simulation::weapon_rpg::LaserDot::npc(position, shoot)
+                });
+            }
+        }
         physics.refresh_entity_queries();
         // NPC stage: the AI thinks (when enabled) before the movement controller tick.
         let ai_player = self.ai_player_state(player, fly);
@@ -951,9 +959,54 @@ impl Gameplay {
                     .add_blood(hit, color, &self.world, physics, &self.scene);
             }
         }
+        // Elite combine balls (CreateCombineBall: sk_weapon_ar2_alt_fire_radius/mass/
+        // duration; the AR2's own ball damage).
+        for (owner, position, velocity) in self.ai.take_ball_launches() {
+            let Some(ar2) = self.weapons.get("weapon_ar2") else {
+                continue;
+            };
+            let launch = hl2_simulation::projectiles::ProjectileSpawn {
+                angles: None,
+                kind: hl2_simulation::projectiles::ProjectileKind::CombineBall,
+                position,
+                velocity,
+                angular_velocity: glam::Vec3::ZERO,
+                at: self.scene.time,
+                damage: ar2.secondary_damage,
+                radius: ar2.secondary_radius,
+                mass: ar2.secondary_mass,
+                lifetime: ar2.secondary_lifetime,
+            };
+            self.projectiles
+                .spawn_npc_ball(launch, owner, &mut self.scene);
+        }
+        // NPC RPG launches (CWeaponRPG::Operator_HandleAnimEvent -> CMissile::Create with
+        // the NPC as owner, a 0.5 s grace period); the rest are FireBullets.
+        let (missiles, shots): (Vec<_>, Vec<_>) = std::mem::take(&mut self.ai.shots)
+            .into_iter()
+            .partition(|s| s.missile);
+        for shot in missiles {
+            let forward = shot.directions.first().copied().unwrap_or(glam::Vec3::X);
+            let at = self.scene.time;
+            self.projectiles.spawn_npc_missile(
+                hl2_simulation::projectiles::ProjectileSpawn {
+                    angles: None,
+                    kind: hl2_simulation::projectiles::ProjectileKind::RpgMissile,
+                    position: shot.origin,
+                    velocity: forward * 300. + glam::Vec3::Z * 128.,
+                    angular_velocity: glam::Vec3::ZERO,
+                    at,
+                    damage: hl2_simulation::weapon_rpg::MISSILE_DAMAGE,
+                    radius: hl2_simulation::weapon_rpg::EXPLOSION_RADIUS,
+                    mass: 0.,
+                    lifetime: 0.5,
+                },
+                shot.attacker,
+                &mut self.scene,
+            );
+        }
         // NPC weapons' FireBullets (DESIGN 14w): the shared hit path, the player's hull,
         // impacts and blood like the player's own shots.
-        let shots = std::mem::take(&mut self.ai.shots);
         if !shots.is_empty() {
             let target = (!player.dead).then_some(hl2_simulation::gameplay::PlayerTarget {
                 feet: player.feet,
@@ -1099,6 +1152,9 @@ impl Gameplay {
         self.inventory.bugbait_events.clear();
         self.projectiles.bugbait_events.clear();
         // CMissile::Explode -> CWeaponRPG::NotifyRocketDied.
+        for owner in std::mem::take(&mut self.projectiles.npc_missiles_died) {
+            self.ai.npc_missile_died(owner);
+        }
         for event in std::mem::take(&mut self.projectiles.missile_events) {
             self.inventory
                 .rpg_missile_event(event, &self.weapons, &self.world, &mut self.scene);

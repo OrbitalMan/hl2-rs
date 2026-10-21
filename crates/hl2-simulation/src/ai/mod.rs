@@ -9,6 +9,7 @@ pub mod host;
 pub mod humanoid;
 pub mod memory;
 pub mod metropolice;
+pub mod moveshoot;
 pub mod police;
 pub mod relationships;
 pub mod runtime;

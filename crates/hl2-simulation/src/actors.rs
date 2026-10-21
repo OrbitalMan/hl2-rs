@@ -56,8 +56,13 @@ pub fn prepare_actor_animations(
 pub const GROUND_HUMANS: [&str; 2] = ["npc_barney", "npc_kleiner"];
 /// Human-hull NPC classes registered for AI goals only (step 14): scripted scene moves
 /// for them stay unsupported as before. SetHullType(HULL_HUMAN) in CNPC_MetroPolice,
-/// CNPC_Combine and CNPC_PlayerCompanion (npc_citizen) Spawn.
-pub const AI_GROUND_HUMANS: [&str; 3] = ["npc_metropolice", "npc_combine_s", "npc_citizen"];
+/// CNPC_Combine and CNPC_PlayerCompanion (npc_citizen, npc_alyx) Spawn.
+pub const AI_GROUND_HUMANS: [&str; 4] = [
+    "npc_metropolice",
+    "npc_combine_s",
+    "npc_citizen",
+    "npc_alyx",
+];
 /// AI movers' walk/run per weapon class ("" unarmed): Weapon_TranslateActivity of
 /// ACT_WALK/ACT_RUN when the model has the result (else the base activity), played as
 /// the first sequence with that activity. Variants missing a looping sequence are left
@@ -81,9 +86,15 @@ fn locomotion_variants(
         sequence(activity).map(|name| (name, activity.to_owned()))
     };
     let mut choices = Vec::new();
+    // Move and shoot's aiming walk/run (StartShootWhileMove needs both sequences).
+    let mut aims = std::collections::BTreeMap::new();
     for weapon in std::iter::once("").chain(crate::npc_weapons::NPC_WEAPONS.iter().copied()) {
         if let (Some(walk), Some(run)) = (pick(weapon, "ACT_WALK"), pick(weapon, "ACT_RUN")) {
             choices.push((weapon.to_owned(), walk, run));
+        }
+        if let (Some(walk), Some(run)) = (pick(weapon, "ACT_WALK_AIM"), pick(weapon, "ACT_RUN_AIM"))
+        {
+            aims.insert(weapon.to_owned(), (walk.0, run.0));
         }
     }
     let wanted = choices
@@ -94,13 +105,16 @@ fn locomotion_variants(
     Ok(choices
         .into_iter()
         .map(|(weapon, walk, run)| {
-            let locomotion = crate::npc::Locomotion::from_named(
+            let mut locomotion = crate::npc::Locomotion::from_named(
                 &sequences,
                 [
                     (MoveStyle::Walk, &walk.0, &walk.1),
                     (MoveStyle::Run, &run.0, &run.1),
                 ],
             );
+            if let Some((walk, run)) = aims.get(&weapon) {
+                locomotion.set_aim(walk.clone(), run.clone());
+            }
             (weapon, locomotion)
         })
         .filter(|(_, locomotion)| locomotion.complete())

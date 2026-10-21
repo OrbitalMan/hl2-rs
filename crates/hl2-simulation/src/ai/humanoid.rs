@@ -67,6 +67,9 @@ impl Kind {
     }
 }
 
+/// npc_citizen17.cpp RPG_SAFE_DISTANCE (CMissile::EXPLOSION_RADIUS + 64).
+pub const RPG_SAFE_DISTANCE: f32 = 200. + 64.;
+
 /// CNPC_Combine's schedules used here (SDK text; COND_COMBINE_NO_FIRE and
 /// COND_COMBINE_ATTACK_SLOT_AVAILABLE need squads and are left out of the interrupts).
 const COMBINE_SCHEDULES: &[(&str, &str)] = &[
@@ -76,6 +79,12 @@ const COMBINE_SCHEDULES: &[(&str, &str)] = &[
          TASK_STOP_MOVING 0 TASK_COMBINE_SIGNAL_BEST_SOUND 0 TASK_FIND_COVER_FROM_BEST_SOUND 0 \
          TASK_RUN_PATH 0 TASK_WAIT_FOR_MOVEMENT 0 TASK_REMEMBER MEMORY:INCOVER \
          TASK_FACE_REASONABLE 0 Interrupts",
+    ),
+    (
+        "SCHED_COMBINE_AR2_ALTFIRE",
+        "Tasks TASK_STOP_MOVING 0 TASK_ANNOUNCE_ATTACK 1 \
+         TASK_COMBINE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET ACTIVITY:ACT_COMBINE_AR2_ALTFIRE \
+         Interrupts",
     ),
     (
         "SCHED_COMBINE_RUN_AWAY_FROM_BEST_SOUND",
@@ -203,6 +212,11 @@ const COMPANION_SCHEDULES: &[(&str, &str)] = &[
          Interrupts COND_NEW_ENEMY",
     ),
     (
+        "SCHED_CITIZEN_RANGE_ATTACK1_RPG",
+        "Tasks TASK_STOP_MOVING 0 TASK_FACE_ENEMY 0 TASK_ANNOUNCE_ATTACK 1 \
+         TASK_RANGE_ATTACK1 0 TASK_CIT_RPG_AUGER 1 Interrupts",
+    ),
+    (
         "SCHED_PC_FLEE_FROM_BEST_SOUND",
         "Tasks TASK_SET_FAIL_SCHEDULE SCHEDULE:SCHED_COWER TASK_GET_PATH_AWAY_FROM_BEST_SOUND 600 \
          TASK_RUN_PATH_TIMED 1.5 TASK_STOP_MOVING 0 TASK_TURN_LEFT 179 Interrupts COND_NEW_ENEMY",
@@ -260,6 +274,35 @@ pub struct Humanoid {
     pub shots: i32,
     shot_delay: f32,
     next_attack: f64,
+    /// The active weapon is an RPG, and its missile still flies (CWeaponRPG::m_hMissile).
+    #[serde(skip)]
+    pub rpg: bool,
+    #[serde(skip)]
+    pub missile_out: bool,
+    /// Weapon_ShootPosition this think (the laser's shoot position).
+    #[serde(skip)]
+    pub shoot_position: Vec3,
+    /// The laser dot handed to UpdateNPCLaserPosition while guiding (TASK_CIT_RPG_AUGER).
+    pub rpg_laser: Option<Vec3>,
+    /// m_vecNPCLaserDot before the per-think imprecision.
+    rpg_laser_base: Vec3,
+    /// m_bRPGAvoidPlayer.
+    rpg_avoid_player: bool,
+    /// TASK_CIT_RPG_AUGER's wait end (the task's argument in seconds).
+    rpg_wait_until: f64,
+    /// The missile was seen in flight since the auger started.
+    rpg_launched: bool,
+    /// CNPC_CombineS::m_fIsElite (models/combine_super_soldier.mdl).
+    pub elite: bool,
+    /// m_flNextAltFireTime (the spawn time; DelayAltFireAttack pushes it).
+    pub next_alt_fire: f64,
+    /// m_vecAltFireTarget.
+    pub alt_fire_target: Vec3,
+    /// This think's CanAltFireEnemy(true) trace result (computed by the runtime): the
+    /// chest point at the enemy's last known position when a 24-unit hull from the
+    /// shoot position travels at least 65% of the way and more than 128 units.
+    #[serde(skip)]
+    pub alt_fire_probe: Option<Vec3>,
     /// The class's random stream (random->RandomInt in the class code).
     seed: u64,
 }
@@ -297,7 +340,42 @@ impl Humanoid {
             shots: 0,
             shot_delay: 0.,
             next_attack: 0.,
+            rpg: false,
+            missile_out: false,
+            shoot_position: Vec3::ZERO,
+            rpg_laser: None,
+            rpg_laser_base: Vec3::ZERO,
+            rpg_avoid_player: false,
+            rpg_wait_until: 0.,
+            rpg_launched: false,
+            elite: false,
+            next_alt_fire: 0.,
+            alt_fire_target: Vec3::ZERO,
+            alt_fire_probe: None,
         }
+    }
+    /// CNPC_Combine::CanAltFireEnemy(true): elites only, not before m_flNextAltFireTime or
+    /// m_flNextGrenadeCheck, at least one grenade (the shot does not spend it), an enemy
+    /// that is the player or a player ally (the runtime's probe), and a clear ball path.
+    pub fn can_alt_fire_enemy(&mut self) -> bool {
+        if !self.elite
+            || self.now < self.next_alt_fire
+            || self.now < self.next_grenade_check
+            || self.grenades < 1
+        {
+            return false;
+        }
+        match self.alt_fire_probe {
+            Some(target) => {
+                self.alt_fire_target = target;
+                true
+            }
+            None => false,
+        }
+    }
+    /// CNPC_Combine::DelayAltFireAttack (squadless DelaySquadAltFireAttack).
+    pub fn delay_alt_fire(&mut self, delay: f64) {
+        self.next_alt_fire = self.next_alt_fire.max(self.now + delay);
     }
     /// CNPC_Combine::CanGrenadeEnemy(bUseFreeKnowledge) -> CanThrowGrenade: no grenades or
     /// before m_flNextGrenadeCheck: no; out of 128..1024: no, check again in 1 s; moving:
@@ -519,7 +597,14 @@ impl Humanoid {
                 }
             }
             "SCHED_COMBINE_ASSAULT" => "SCHED_COMBINE_ASSAULT".into(),
-            "SCHED_ESTABLISH_LINE_OF_FIRE" => "SCHED_COMBINE_ESTABLISH_LINE_OF_FIRE".into(),
+            // An elite that could put a combine ball at the enemy's last known position.
+            "SCHED_ESTABLISH_LINE_OF_FIRE" => {
+                if self.can_alt_fire_enemy() {
+                    "SCHED_COMBINE_AR2_ALTFIRE".into()
+                } else {
+                    "SCHED_COMBINE_ESTABLISH_LINE_OF_FIRE".into()
+                }
+            }
             // "If I COULD throw a grenade and I need to reload, 20% chance I'll throw a
             // grenade before I hide to reload" (CanGrenadeEnemy() at the last known position).
             "SCHED_HIDE_AND_RELOAD" => {
@@ -534,6 +619,8 @@ impl Humanoid {
             "SCHED_RANGE_ATTACK1" => {
                 if c.has(COND_NO_PRIMARY_AMMO) || c.has(COND_LOW_PRIMARY_AMMO) {
                     self.translate_combine("SCHED_HIDE_AND_RELOAD", npc)
+                } else if self.can_alt_fire_enemy() {
+                    "SCHED_COMBINE_AR2_ALTFIRE".into()
                 } else {
                     "SCHED_COMBINE_RANGE_ATTACK1".into()
                 }
@@ -558,6 +645,23 @@ impl Humanoid {
     /// CNPC_PlayerCompanion::TranslateSchedule (+ CNPC_Citizen's, which only matter with
     /// a command goal, a dead player or an RPG).
     fn translate_companion(&self, name: &str, npc: &AiNpc, ctx: &Context) -> String {
+        // CNPC_Citizen: an RPG fires its own schedule unless the enemy is within
+        // RPG_SAFE_DISTANCE (EXPLOSION_RADIUS 200 + 64) of the player (so never at the
+        // player himself); mortars and striders (squad slots) are not modeled.
+        if name == "SCHED_RANGE_ATTACK1"
+            && self.rpg
+            && matches!(self.kind, Kind::Companion { citizen: true })
+        {
+            let near_player = match (ctx.enemy, ctx.player) {
+                (Some((_, enemy)), Some(player)) => enemy.distance(player) < RPG_SAFE_DISTANCE,
+                _ => false,
+            };
+            return if near_player {
+                "SCHED_STANDOFF".into()
+            } else {
+                "SCHED_CITIZEN_RANGE_ATTACK1_RPG".into()
+            };
+        }
         match name {
             "SCHED_COWER" => "SCHED_PC_COWER".into(),
             "SCHED_TAKE_COVER_FROM_BEST_SOUND" => {
@@ -575,6 +679,54 @@ impl Humanoid {
             }
             other => other.into(),
         }
+    }
+    /// CNPC_Citizen::RunTask TASK_CIT_RPG_AUGER: guide the missile until it is gone,
+    /// pulling the laser up to 90 units per think toward the enemy (or 90 units up once
+    /// the enemy came within RPG_SAFE_DISTANCE of the player), with 18 sin(t) imprecision.
+    /// The SDK starts guiding on the first think after the launch event.
+    fn rpg_auger(&mut self, ctx: &Context) -> TaskStatus {
+        let done = |h: &mut Self, status| {
+            h.rpg_laser = None;
+            status
+        };
+        if !self.rpg {
+            return done(self, TaskStatus::Failed);
+        }
+        if !self.missile_out {
+            // Before the launch event: wait; after it, the missile's end ends the task.
+            if self.rpg_launched || ctx.now >= self.rpg_wait_until + 2. {
+                return done(self, TaskStatus::Complete);
+            }
+            return TaskStatus::Running;
+        }
+        let Some((_, enemy)) = ctx.enemy else {
+            return done(self, TaskStatus::Failed);
+        };
+        if !self.rpg_launched {
+            self.rpg_launched = true;
+            // GetActualShootPosition: SetNPCLaserPosition(vecTarget).
+            self.rpg_laser_base = ctx.enemy_eye.unwrap_or(enemy);
+        }
+        let mut laser = self.rpg_laser_base;
+        if !self.rpg_avoid_player {
+            if ctx
+                .player
+                .is_some_and(|p| enemy.distance(p) < RPG_SAFE_DISTANCE)
+            {
+                self.rpg_avoid_player = true;
+            } else {
+                let to = enemy - laser;
+                let length = to.length();
+                laser += to / length.max(1e-6) * length.min(90.);
+            }
+        }
+        if self.rpg_avoid_player {
+            laser.z += 90.;
+        }
+        self.rpg_laser_base = laser;
+        let imprecision = 18. * (ctx.now as f32).sin();
+        self.rpg_laser = Some(laser + Vec3::splat(imprecision));
+        TaskStatus::Running
     }
 }
 impl Behavior for Humanoid {
@@ -650,6 +802,16 @@ impl Behavior for Humanoid {
             | "TASK_COMBINE_SET_STANDING"
             | "TASK_COMBINE_SIGNAL_BEST_SOUND"
             | "TASK_COMBINE_DEFER_SQUAD_GRENADES" => TaskStatus::Complete,
+            "TASK_COMBINE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET" => {
+                let activity = match arg {
+                    TaskArg::Activity(a) => a.clone(),
+                    _ => "ACT_COMBINE_AR2_ALTFIRE".into(),
+                };
+                npc.activity = activity.clone();
+                motor.set_activity(&activity);
+                motor.face(super::schedule::Goal::Position(self.alt_fire_target));
+                TaskStatus::Running
+            }
             // Turn toward a point 64 toss-velocities along the throw.
             "TASK_COMBINE_FACE_TOSS_DIR" => {
                 if motor.face(super::schedule::Goal::Position(
@@ -685,6 +847,17 @@ impl Behavior for Humanoid {
                 self.last_attack = ctx.now;
                 return None;
             }
+            // CNPC_Citizen::StartTask: SetWait(arg), m_bRPGAvoidPlayer = false.
+            "TASK_CIT_RPG_AUGER" => {
+                let seconds = match arg {
+                    TaskArg::Number(n) => *n,
+                    _ => 0.,
+                };
+                self.rpg_wait_until = ctx.now + f64::from(seconds);
+                self.rpg_avoid_player = false;
+                self.rpg_launched = false;
+                TaskStatus::Running
+            }
             _ => return None,
         })
     }
@@ -702,6 +875,17 @@ impl Behavior for Humanoid {
                     return Some(status);
                 }
             }
+        }
+        if task == "TASK_CIT_RPG_AUGER" {
+            return Some(self.rpg_auger(ctx));
+        }
+        if task == "TASK_COMBINE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET" {
+            motor.face(super::schedule::Goal::Position(self.alt_fire_target));
+            return Some(if motor.activity_finished() {
+                TaskStatus::Complete
+            } else {
+                TaskStatus::Running
+            });
         }
         // CNPC_Combine::RunTask: keep facing the LKP; once the shot's activity ends and
         // m_flNextAttack passed, shoot again until the burst is spent.

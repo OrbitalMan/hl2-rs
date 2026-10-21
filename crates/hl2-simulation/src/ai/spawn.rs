@@ -14,6 +14,9 @@ use serde::Serialize;
 pub const SPAWN_CLASSES: &[&str] = &[
     "npc_metropolice",
     "npc_combine_s",
+    "npc_combine_s_shotgunner",
+    "npc_combine_s_elite",
+    "npc_combine_s_prisonguard",
     "npc_citizen",
     "npc_citizen_rebel",
     "npc_citizen_refugee",
@@ -85,6 +88,20 @@ pub fn spawn_class(label: &str) -> (&str, Vec<(&'static str, String)>) {
                 ),
             ],
         ),
+        // CNPC_Combine::CalcWeaponProficiency gives a shotgun holder COMBINE_SKIN_SHOTGUNNER
+        // (1); the pool entity is built with it (the F4 shotgun choice on the plain
+        // soldier keeps skin 0: skins are chosen at map load).
+        "npc_combine_s_shotgunner" => ("npc_combine_s", vec![("skin", "1".into())]),
+        // CNPC_CombineS::Precache: m_fIsElite for this model (sk_combine_guard_health,
+        // AR2 combine balls).
+        "npc_combine_s_elite" => (
+            "npc_combine_s",
+            vec![("model", "models/combine_super_soldier.mdl".into())],
+        ),
+        "npc_combine_s_prisonguard" => (
+            "npc_combine_s",
+            vec![("model", "models/combine_soldier_prisonguard.mdl".into())],
+        ),
         class => (class, Vec::new()),
     }
 }
@@ -94,7 +111,9 @@ pub fn default_weapon(label: &str) -> &'static str {
     match label {
         "npc_citizen_rebel" | "npc_citizen_medic" => "weapon_smg1",
         "npc_metropolice" => "weapon_stunstick",
-        "npc_combine_s" => "weapon_smg1",
+        "npc_combine_s" | "npc_combine_s_prisonguard" => "weapon_smg1",
+        "npc_combine_s_shotgunner" => "weapon_shotgun",
+        "npc_combine_s_elite" => "weapon_ar2",
         "npc_barney" => "weapon_pistol",
         "npc_alyx" => "weapon_alyxgun",
         "npc_monk" => "weapon_annabelle",
@@ -183,7 +202,7 @@ pub fn append_pool(world: &mut modkit_core::World) {
                 (POOL_KEY.into(), (*label).into()),
             ];
             // Citizens get their head from SelectModel (citizens::select_models).
-            if class != "npc_citizen" {
+            if class != "npc_citizen" && !keyvalues.iter().any(|(k, _)| *k == "model") {
                 properties.push(("model".into(), model.into()));
             }
             properties.extend(keyvalues.iter().map(|(k, v)| ((*k).into(), v.clone())));

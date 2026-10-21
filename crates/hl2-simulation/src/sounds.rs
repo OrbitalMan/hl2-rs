@@ -5,7 +5,7 @@ use source_assets::{
     sounds::{ActorGender, ActorRegistry, Wave},
     vpk::Vfs,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Cursor, ErrorKind};
 use symphonia::core::{
     audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
@@ -532,6 +532,38 @@ pub fn playback_path(wave: &str) -> String {
         .to_owned()
 }
 
+/// SDK soundchars.h TestSoundChar(name, CHAR_DISTVARIANT): '^' as the first character, or
+/// the second after another sound character.
+pub fn distance_variant_name(wave: &str) -> bool {
+    let mut chars = wave.chars();
+    match chars.next() {
+        Some('^') => true,
+        Some(c) if "*?!#><@)}".contains(c) => chars.next() == Some('^'),
+        _ => false,
+    }
+}
+
+/// Retail engine.dll SND_Spatialize (1008f4d0): a distance-variant channel's crossfade from
+/// the wave's left (near) channel to its right (far) channel, 0 at 240 units or closer and
+/// 1 from 1320 (constants 1031da0c/1031da20, x 1/1080 at 1031d8f0; the distance is
+/// truncated to whole units). Doppler ('>') channels keep 0.
+pub fn distance_mix(distance: f32) -> f32 {
+    const NEAR: f32 = 240.;
+    const FAR: f32 = 1320.;
+    (distance.trunc().clamp(NEAR, FAR) - NEAR) * (1. / 1080.)
+}
+
+/// Retail engine.dll distance-variant stereo mixers (100a3070 16-bit, 100a3840 8-bit): each
+/// output sample is near + (far - near) x distmix, mixed as a mono source.
+pub fn distance_variant_mono(stereo: &[f32], distmix: f32) -> Vec<f32> {
+    stereo
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[near, far]| near + (far - near) * distmix)
+        .collect()
+}
+
 fn raw_wave(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.contains(".wav") || lower.contains(".mp3")
@@ -652,6 +684,8 @@ fn script_params(entry: &source_assets::keyvalues::Entry) -> ScriptParams {
 
 pub struct Library {
     names: BTreeMap<String, Vec<Wave>>,
+    /// Playback paths of waves marked CHAR_DISTVARIANT ('^').
+    distance_variants: BTreeSet<String>,
     params: BTreeMap<String, ScriptParams>,
     actors: ActorRegistry,
     available: HashMap<String, Vec<bool>>,
@@ -676,7 +710,7 @@ impl Library {
             .with_context(|| format!("sound script absent: {name}"))
     }
     pub fn new(vfs: &Vfs) -> Self {
-        let mut names = BTreeMap::new();
+        let mut names: BTreeMap<String, Vec<Wave>> = BTreeMap::new();
         let mut params = BTreeMap::new();
         let mut errors = BTreeMap::new();
         let actors = match (|| -> Result<ActorRegistry> {
@@ -738,8 +772,15 @@ impl Library {
             eprintln!("Sound manifest: {e:#}");
             errors.insert("scripts/game_sounds_manifest.txt".into(), format!("{e:#}"));
         }
+        let distance_variants = names
+            .values()
+            .flatten()
+            .filter(|wave| distance_variant_name(&wave.path))
+            .map(|wave| playback_path(&wave.path))
+            .collect();
         Self {
             names,
+            distance_variants,
             params,
             actors,
             available: HashMap::new(),
@@ -769,6 +810,10 @@ impl Library {
         (volume, pitch, p.soundlevel)
     }
     /// Script volume/pitch/soundlevel; raw waves use the SDK defaults.
+    /// Whether a playback path is a distance-variant stereo wave (left near, right far).
+    pub fn distance_variant(&self, path: &str) -> bool {
+        self.distance_variants.contains(path)
+    }
     pub fn params(&self, name: &str) -> ScriptParams {
         self.params
             .get(&name.to_ascii_lowercase())
@@ -966,8 +1011,26 @@ impl WeaponAnimationSounds {
 mod tests {
     use super::*;
 
+    #[test]
+    fn distance_variants_crossfade_near_to_far_like_retail() {
+        assert!(distance_variant_name("^weapons/smg1/npc_smg1_fire1.wav"));
+        assert!(distance_variant_name(")^weapons/x.wav"));
+        assert!(!distance_variant_name("weapons/shotgun/shotgun_fire6.wav"));
+        assert!(!distance_variant_name("weapons/^x.wav"));
+        assert_eq!(distance_mix(0.), 0.);
+        assert_eq!(distance_mix(240.9), 0.);
+        assert!((distance_mix(780.) - 0.5).abs() < 1e-6);
+        assert_eq!(distance_mix(1320.), 1.);
+        assert_eq!(distance_mix(5000.), 1.);
+        let stereo = [1., -1., 0.5, 0.25];
+        assert_eq!(distance_variant_mono(&stereo, 0.), vec![1., 0.5]);
+        assert_eq!(distance_variant_mono(&stereo, 1.), vec![-1., 0.25]);
+        assert_eq!(distance_variant_mono(&stereo, 0.5), vec![0., 0.375]);
+    }
+
     fn speech_audio() -> Library {
         Library {
+            distance_variants: BTreeSet::new(),
             params: BTreeMap::new(),
             names: [
                 (

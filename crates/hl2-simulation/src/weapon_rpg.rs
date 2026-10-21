@@ -85,6 +85,19 @@ pub struct LaserDot {
     next_think: f64,
 }
 impl LaserDot {
+    /// An NPC's dot (CWeaponRPG::UpdateNPCLaserPosition: the NPC sets the position
+    /// directly; no aim trace, no target entity, no sprite).
+    pub fn npc(position: Vec3, owner_center: Vec3) -> Self {
+        Self {
+            position,
+            normal: Vec3::ZERO,
+            target: None,
+            on: true,
+            scale: 0.,
+            owner_center,
+            next_think: 0.,
+        }
+    }
     /// CLaserDot::GetChasePosition.
     pub fn chase_position(&self) -> Vec3 {
         self.position - self.normal * 10.

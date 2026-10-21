@@ -91,6 +91,13 @@ const COMBINE_AE_KICK: i32 = 3;
 const COMBINE_AE_GREN_TOSS: i32 = 7;
 /// sv_gravity.
 const GRAVITY: f32 = 600.;
+/// CNPC_CombineS::Precache: the elite flag comes from the model name.
+pub fn is_elite_model(model: Option<&str>) -> bool {
+    model.is_some_and(|m| {
+        m.replace('\\', "/")
+            .eq_ignore_ascii_case("models/combine_super_soldier.mdl")
+    })
+}
 /// VecCheckThrow (h_ai.cpp): a throw at `speed` from `start` to `target` whose two
 /// halves (start -> apex, target -> apex) are clear; None when blocked.
 pub fn vec_check_throw(
@@ -283,6 +290,18 @@ pub struct AiActor {
     /// The last think interval: the weapon's m_flAnimTime - m_flPrevAnimTime, which
     /// Operator_FrameUpdate advances once per think (WeaponSoundRealtime's estimate).
     think_dt: f32,
+    /// CAI_MoveAndShootOverlay.
+    pub move_shoot: super::moveshoot::MoveShoot,
+    /// The soldier's GetShotRegulator() for move and shoot (CNPC_Combine has no
+    /// bits_CAP_USE_SHOT_REGULATOR, so its standing bursts do not use it).
+    #[serde(skip)]
+    move_regulator: Option<npc_weapons::ShotRegulator>,
+    /// Weapon fire events the overlay queued for the next tick.
+    #[serde(skip)]
+    move_fire: u32,
+    /// CNPC_Combine::m_flStopMoveShootTime.
+    #[serde(skip)]
+    stop_move_shoot: Option<f64>,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Diagnostics {
@@ -341,6 +360,8 @@ pub struct AiRuntime {
     pub melee_hits: Vec<MeleeHit>,
     /// Combine grenade tosses this tick: (thrower, position, velocity, spin).
     pub grenade_tosses: Vec<(usize, Vec3, Vec3, Vec3)>,
+    /// Elite combine balls (CreateCombineBall at 1000 units/s).
+    ball_launches: Vec<(usize, Vec3, Vec3)>,
     /// WeaponSound(SINGLE_NPC, soundtime) requests that start later (WeaponSoundRealtime
     /// schedules a machine gun's second sound ahead of the next think).
     #[serde(skip)]
@@ -551,6 +572,7 @@ impl AiRuntime {
             player_hits: Vec::new(),
             melee_hits: Vec::new(),
             grenade_tosses: Vec::new(),
+            ball_launches: Vec::new(),
             delayed_sounds: Vec::new(),
             diagnostics: Diagnostics::default(),
             random: 0x9e37_79b9_7f4a_7c15,
@@ -1172,6 +1194,7 @@ impl AiRuntime {
                     .get("NumGrenades")
                     .and_then(|v| v.trim().parse().ok())
                     .unwrap_or(0);
+                h.elite = kind == humanoid::Kind::Combine && is_elite_model(e.get("model"));
                 AiClass::Humanoid(Box::new(h))
             }
             None => AiClass::Metropolice(Box::new(Metropolice::new(flags, baton))),
@@ -1192,6 +1215,10 @@ impl AiRuntime {
             events_until: 0.,
             idle_angry: false,
             think_dt: THINK_INTERVAL as f32,
+            move_shoot: Default::default(),
+            move_regulator: None,
+            move_fire: 0,
+            stop_move_shoot: None,
         })
     }
     /// The NumGrenades keyvalue of a spawned CNPC_Combine (F4; DESIGN 14r would set it
@@ -1374,6 +1401,19 @@ impl AiRuntime {
             let since = self.actors[&id].events_until.min(now);
             self.actors.get_mut(&id).expect("actor").events_until = now;
             let mut events = scene.ai_events(world, id, since, now);
+            // Move and shoot: the restarted ACT_GESTURE_RANGE_ATTACK1's fire event.
+            let queued = std::mem::take(&mut self.actors.get_mut(&id).expect("actor").move_fire);
+            if queued > 0 {
+                if let Some(event) = self.actors[&id]
+                    .weapon
+                    .as_ref()
+                    .and_then(|w| self.weapon_def(&w.class))
+                    .and_then(|d| d.fire)
+                    .map(|f| f.event)
+                {
+                    events.extend((0..queued).map(|_| (String::new(), event)));
+                }
+            }
             // Operator_FrameUpdate: the weapon world model's events go to its operator.
             if let Some(weapon) = self.actors.get_mut(&id).and_then(|a| a.weapon.as_mut()) {
                 if let Some(rig) = self
@@ -1453,6 +1493,17 @@ impl AiRuntime {
                                 && event == COMBINE_AE_GREN_TOSS
                             {
                                 h.requests.push(CopRequest::GrenadeToss);
+                            } else if name.eq_ignore_ascii_case("COMBINE_AE_BEGIN_ALTFIRE") {
+                                h.requests
+                                    .push(CopRequest::Sound("Weapon_CombineGuard.Special1"));
+                            } else if name.eq_ignore_ascii_case("COMBINE_AE_ALTFIRE") && h.elite {
+                                // EVENT_WEAPON_AR2_ALTFIRE on the active weapon, then
+                                // DelaySquadAltFireAttack(10); m_iNumGrenades is not spent.
+                                if weapon.as_ref().is_some_and(|w| w.class == "weapon_ar2") {
+                                    h.requests.push(CopRequest::AltFire(h.alt_fire_target));
+                                }
+                                h.now = now;
+                                h.delay_alt_fire(10.);
                             }
                         }
                         continue;
@@ -1500,8 +1551,11 @@ impl AiRuntime {
                             }
                             // Operator_HandleAnimEvent: InsertSound(SOUND_COMBAT |
                             // SOUND_CONTEXT_GUNFIRE, operator origin, SOUNDENT_VOLUME_*, 0.2).
-                            if let Some(volume) =
-                                def.as_ref().and_then(|d| d.fire).map(|f| f.sound_volume)
+                            if let Some(volume) = def
+                                .as_ref()
+                                .and_then(|d| d.fire)
+                                .map(|f| f.sound_volume)
+                                .filter(|&v| v > 0.)
                             {
                                 self.sounds.insert(
                                     senses::sound::COMBAT,
@@ -1674,7 +1728,7 @@ impl AiRuntime {
         let gun = self.actors[&id].weapon.as_ref().and_then(|w| {
             self.weapon_def(&w.class)
                 .and_then(|d| d.fire)
-                .map(|f| (f, w.clip1))
+                .map(|f| (f, w.clip1, w.class == "weapon_rpg", w.missile_out))
         });
         let eye = origin + Vec3::Z * 64.;
         let facing = scene.states[id].rotation * Vec3::X;
@@ -1766,7 +1820,7 @@ impl AiRuntime {
         actor.npc.conditions = Conditions::default();
         // CheckAmmo: an empty clip (NPCs have unlimited reserve ammunition), and
         // CAI_BaseHumanoid::CheckAmmo's low clip (below a quarter of the clip plus one).
-        if gun.is_some_and(|(_, clip)| clip == 0) {
+        if gun.is_some_and(|(_, clip, _, _)| clip == 0) {
             actor.npc.conditions.set(COND_NO_PRIMARY_AMMO);
         } else if low_clip {
             actor.npc.conditions.set(COND_LOW_PRIMARY_AMMO);
@@ -1973,7 +2027,7 @@ impl AiRuntime {
                     } else {
                         actor.npc.conditions.set(COND_TOO_FAR_TO_ATTACK);
                     }
-                } else if let Some((spec, clip)) = gun {
+                } else if let Some((spec, clip, rpg, missile_out)) = gun {
                     // GatherAttackConditions: the weapon's LOS from Weapon_ShootPosition to
                     // the enemy's eyes, else its BodyTarget, and
                     // CBaseCombatWeapon::WeaponRangeAttack1Condition(flDot, flDist).
@@ -1989,19 +2043,48 @@ impl AiRuntime {
                     }
                     let to = t_feet - origin;
                     let dot = to.truncate().normalize_or_zero().dot(forward);
-                    let distance = to.length();
-                    let condition = if clip == 0 {
+                    // CWeaponRPG::WeaponRangeAttack1Condition ignores vertical distance.
+                    let distance = if rpg {
+                        to.truncate().length()
+                    } else {
+                        to.length()
+                    };
+                    // CWeaponSMG1::Equip: allies reach 3000 units.
+                    let max_range = npc_weapons::equip_max_range(
+                        actor.weapon.as_ref().map_or("", |w| w.class.as_str()),
+                        my_class == Class::PlayerAlly,
+                        &spec,
+                    );
+                    // The RPG: nothing while its missile flies; a 48-unit hull must clear
+                    // 120 units along the shot (COND_WEAPON_SIGHT_OCCLUDED otherwise).
+                    let rpg_blocked = rpg && distance >= spec.min_range && {
+                        let start = origin + Vec3::Z * 55.;
+                        let direction = (t_center - start).normalize_or_zero();
+                        physics
+                            .projectile_sweep(
+                                start,
+                                start + direction * 120.,
+                                crate::physics::ProjectileHull::Box(Vec3::splat(24.)),
+                                &[id],
+                            )
+                            .is_some()
+                    };
+                    let condition = if rpg && missile_out {
+                        COND_NONE
+                    } else if rpg_blocked {
+                        COND_WEAPON_SIGHT_OCCLUDED
+                    } else if clip == 0 {
                         COND_NO_PRIMARY_AMMO
                     } else if distance < spec.min_range {
                         COND_TOO_CLOSE_TO_ATTACK
-                    } else if distance > spec.max_range {
+                    } else if distance > max_range {
                         COND_TOO_FAR_TO_ATTACK
                     } else if dot < 0.5 {
                         COND_NOT_FACING_ATTACK
                     } else {
                         COND_CAN_RANGE_ATTACK1
                     };
-                    if condition != COND_CAN_RANGE_ATTACK1 || los {
+                    if condition != COND_NONE && (condition != COND_CAN_RANGE_ATTACK1 || los) {
                         actor.npc.conditions.set(condition);
                     }
                 }
@@ -2056,6 +2139,11 @@ impl AiRuntime {
             .and_then(|e| actor.npc.enemies.find(Some(e)))
             .map(|m| (m.time_last_seen, m.last_seen_position, m.last_known));
         if let AiClass::Humanoid(h) = &mut actor.class {
+            // CWeaponRPG state the citizen's RPG schedules read (m_hMissile).
+            let rpg = actor.weapon.as_ref().filter(|w| w.class == "weapon_rpg");
+            h.rpg = rpg.is_some();
+            h.missile_out = rpg.is_some_and(|w| w.missile_out);
+            h.shoot_position = origin + Vec3::Z * 55.;
             // The previous think's CanGrenadeEnemy outcomes.
             for outcome in h.grenade_outcomes.drain(..) {
                 *self
@@ -2066,6 +2154,39 @@ impl AiRuntime {
             }
             h.throw_probes = Default::default();
             h.flush_window = false;
+            // CanAltFireEnemy(true)'s trace: the enemy (the player or a player ally) at its
+            // last known position plus 0.75 of its view offset, a 24-unit hull from the
+            // shoot position along MASK_SHOT; valid when it travels >= 65% and > 128 units.
+            h.alt_fire_probe = None;
+            if h.elite {
+                let ally = |e: usize| {
+                    e == PLAYER
+                        || world.entities.get(e).is_some_and(|ent| {
+                            matches!(
+                                classify(ent.class(), precriminal),
+                                Class::PlayerAlly | Class::PlayerAllyVital
+                            )
+                        })
+                };
+                if let (Some(enemy), Some((_, _, last_known))) = (actor.npc.enemy, memory) {
+                    if ally(enemy) {
+                        let target = last_known + Vec3::Z * 64. * 0.75;
+                        let start = origin + Vec3::Z * 55.;
+                        let length = start.distance(target);
+                        let travelled = physics
+                            .projectile_sweep(
+                                start,
+                                target,
+                                crate::physics::ProjectileHull::Box(Vec3::splat(12.)),
+                                &[id],
+                            )
+                            .map_or(length, |hit| hit.position.distance(start));
+                        if length > 0. && travelled / length >= 0.65 && travelled > 128. {
+                            h.alt_fire_probe = Some(target);
+                        }
+                    }
+                }
+            }
             if let (true, Some((last_time, last_seen, last_known))) =
                 (h.kind == humanoid::Kind::Combine && h.grenades > 0, memory)
             {
@@ -2212,6 +2333,123 @@ impl AiRuntime {
             &ctx,
             &mut motor,
         );
+        // StartTaskOverlay / RunTaskOverlay: move and shoot (bits_CAP_MOVE_SHOOT: the
+        // soldier, the companions and non-efficient cops).
+        {
+            let schedule = actor.npc.schedule.clone();
+            let task_name = schedule.as_deref().and_then(|s| {
+                self.schedules
+                    .0
+                    .get(s)
+                    .and_then(|sc| sc.tasks.get(actor.npc.task))
+                    .map(|(t, _)| t.clone())
+            });
+            let combine =
+                matches!(&actor.class, AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine);
+            // CNPC_Combine::ShouldMoveAndShoot: not while fleeing a danger sound.
+            let allowed = !(combine
+                && matches!(
+                    schedule.as_deref(),
+                    Some(
+                        "SCHED_TAKE_COVER_FROM_BEST_SOUND"
+                            | "SCHED_COMBINE_TAKE_COVER_FROM_BEST_SOUND"
+                            | "SCHED_COMBINE_RUN_AWAY_FROM_BEST_SOUND"
+                    )
+                ));
+            let ranged = actor
+                .weapon
+                .as_ref()
+                .and_then(|w| {
+                    self.weapon_defs
+                        .get(&w.class)
+                        .cloned()
+                        .or_else(|| npc_weapons::builtin(&w.class))
+                })
+                .and_then(|d| d.fire)
+                .filter(|_| {
+                    actor
+                        .weapon
+                        .as_ref()
+                        .is_some_and(|w| w.class != "weapon_rpg")
+                });
+            if combine && actor.move_regulator.is_none() {
+                if let Some(spec) = ranged.as_ref() {
+                    actor.move_regulator = Some(npc_weapons::ShotRegulator::for_weapon(
+                        spec,
+                        npc_weapons::RegulatorRule::Weapon,
+                        now,
+                        0x9e37_79b9_7f4a_7c15 ^ id as u64,
+                    ));
+                }
+            }
+            // m_flStopMoveShootTime: hiding to reload (or empty) stops aiming at the enemy
+            // after U(0.4, 0.6) s for 5 s, so the soldier faces the way it runs.
+            if combine {
+                let reloading = schedule.as_deref() == Some("SCHED_COMBINE_HIDE_AND_RELOAD")
+                    || actor.npc.conditions.has(COND_NO_PRIMARY_AMMO);
+                if !reloading {
+                    actor.stop_move_shoot = None;
+                } else if actor.stop_move_shoot.is_none() {
+                    actor.stop_move_shoot = Some(now + 0.4 + 0.2 * f64::from(ctx.random));
+                }
+                if actor.stop_move_shoot.is_some_and(|t| now >= t) {
+                    actor
+                        .move_shoot
+                        .suspend(5., actor.move_regulator.as_mut(), now);
+                    actor.stop_move_shoot = Some(f64::INFINITY);
+                }
+            }
+            let regulator = if combine {
+                actor.move_regulator.as_mut()
+            } else {
+                actor.npc.shot_regulator.as_mut()
+            };
+            let moving = motor.goal.is_some() && motor.scene.states[id].is_moving();
+            let has_aim = motor.controller.has_move_aim(id);
+            let out = actor.move_shoot.think(
+                schedule
+                    .as_deref()
+                    .zip(task_name.as_deref())
+                    .map(|(s, t)| (s, t, actor.npc.task)),
+                allowed,
+                (
+                    actor.npc.state == NpcState::Script,
+                    ranged.is_some(),
+                    has_aim,
+                ),
+                moving,
+                actor.npc.conditions,
+                actor.npc.enemy.is_some(),
+                regulator,
+                now,
+            );
+            if let Some(aim) = out.aim {
+                motor.controller.set_move_aim(id, aim);
+            }
+            if out.shoot {
+                // OnRangeAttack1: OnFiredWeapon (and the class's attack time).
+                let distance = ctx.enemy.map(|(_, p)| p.distance(origin));
+                let regulator = if combine {
+                    actor.move_regulator.as_mut()
+                } else {
+                    actor.npc.shot_regulator.as_mut()
+                };
+                if let Some(r) = regulator {
+                    r.on_range_attack1(now, distance);
+                }
+                if let AiClass::Humanoid(h) = &mut actor.class {
+                    h.last_attack = now;
+                }
+                actor.move_fire += 1;
+            }
+            let lkp = ctx.enemy_lkp.or(ctx.enemy.map(|(_, p)| p));
+            motor.scene.states[id].ai_move_facing = match (out.face_enemy, lkp) {
+                (true, Some(point)) => Some((point, now + 0.8)),
+                _ => motor.scene.states[id]
+                    .ai_move_facing
+                    .filter(|(_, until)| now < *until),
+            };
+        }
         // The idle activity is translated again when the angry-idle inputs change
         // (MaintainActivity re-translates the ideal ACT_IDLE).
         if idle_angry != actor.idle_angry {
@@ -2351,6 +2589,24 @@ impl AiRuntime {
                     });
                 }
                 CopRequest::CallForJustice => self.call_for_justice(id, world, scene, physics),
+                CopRequest::AltFire(target) => {
+                    // FireNPCSecondaryAttack: WeaponSound(WPN_DOUBLE) and a ball from
+                    // Weapon_ShootPosition toward the elite's m_vecAltFireTarget.
+                    let start = origin + Vec3::Z * 55.;
+                    let aim = (target - start).normalize_or_zero();
+                    self.ball_launches.push((id, start, aim * 1000.));
+                    let cue = self.actors[&id]
+                        .weapon
+                        .as_ref()
+                        .and_then(|w| self.weapon_def(&w.class))
+                        .and_then(|d| d.sounds.get("double_shot").cloned());
+                    if let Some(cue) = cue {
+                        scene.sounds.push(crate::sounds::SoundRequest {
+                            origin: Some(start),
+                            ..cue.into()
+                        });
+                    }
+                }
                 CopRequest::GrenadeToss => {
                     let position = scene
                         .attachment_frames(world, id, &["lefthand"])
@@ -2614,6 +2870,21 @@ impl AiRuntime {
         }
     }
     /// An NPC's bullet struck AI actor `target` (the victim responds at its next think).
+    /// CMissile::Explode / removal -> the owner's CWeaponRPG::m_hMissile clears.
+    pub fn npc_missile_died(&mut self, owner: usize) {
+        if let Some(weapon) = self.actors.get_mut(&owner).and_then(|a| a.weapon.as_mut()) {
+            weapon.missile_out = false;
+        }
+    }
+    /// An NPC's guiding laser dot (TASK_CIT_RPG_AUGER): (position, shoot position).
+    pub fn npc_laser(&self, owner: usize) -> Option<(Vec3, Vec3)> {
+        let h = self.actors.get(&owner)?.class.humanoid()?;
+        Some((h.rpg_laser?, h.shoot_position))
+    }
+    /// CWeaponAR2::FireNPCSecondaryAttack launches this tick: (shooter, origin, velocity).
+    pub fn take_ball_launches(&mut self) -> Vec<(usize, Vec3, Vec3)> {
+        std::mem::take(&mut self.ball_launches)
+    }
     pub fn npc_attacked(&mut self, target: usize, attacker: usize) {
         if target == attacker {
             return;

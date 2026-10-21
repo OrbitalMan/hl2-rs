@@ -59,6 +59,16 @@ impl Skill {
             _ => self.get("sk_dmg_inflict_scale2", 1.),
         }
     }
+    /// npc_health for an entity: CNPC_CombineS::Spawn gives elites (the super soldier
+    /// model) sk_combine_guard_health.
+    pub fn npc_entity_health(&self, entity: &modkit_core::Entity) -> Option<f32> {
+        if entity.class() == "npc_combine_s"
+            && crate::ai::runtime::is_elite_model(entity.get("model"))
+        {
+            return Some(self.get("sk_combine_guard_health", 70.));
+        }
+        self.npc_health(entity.class())
+    }
     /// m_iHealth set by each class's Spawn (SDK 2013 hl2/npc_*.cpp); None for classes
     /// not reviewed yet (the map's health keyvalue, else 40, as before).
     pub fn npc_health(&self, class: &str) -> Option<f32> {

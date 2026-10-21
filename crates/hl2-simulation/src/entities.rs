@@ -141,6 +141,9 @@ pub struct State {
     animation_done: Option<f64>,
     scene_animation: Option<SceneAnimation>,
     movement_animation: Option<MovementAnimation>,
+    /// The AI motor's facing target while moving (AddFacingTarget: point, expiry); the
+    /// body turns to it and move_yaw keeps the legs on the path.
+    pub ai_move_facing: Option<(Vec3, f64)>,
     script_actor: Option<usize>,
     pub scripted_by: Option<usize>,
     /// The scripted_sequence whose post idle holds this actor in NPC_STATE_SCRIPT
@@ -443,6 +446,7 @@ impl Scene {
             animation_done: None,
             scene_animation: None,
             movement_animation: None,
+            ai_move_facing: None,
             script_actor: None,
             scripted_by: None,
             script_post_idle: None,
@@ -1533,8 +1537,21 @@ impl Scene {
         };
         let forward = self.states[key.actor].rotation * Vec3::X;
         let current = forward.y.atan2(forward.x).to_degrees();
+        // CAI_BaseNPC::OverrideMoveFacing: an active facing target (move and shoot) turns
+        // the body toward it instead of the path.
+        let facing = self.states[key.actor]
+            .ai_move_facing
+            .filter(|(_, until)| self.time < *until && key.scene == crate::npc::AI_SCENE)
+            .map(|(point, _)| {
+                let d = point - feet;
+                d.y.atan2(d.x).to_degrees()
+            });
         let body = if animation.is_some() {
-            clamp_yaw(yaw_speed * self.tick_dt, current, yaw_degrees)
+            clamp_yaw(
+                yaw_speed * self.tick_dt,
+                current,
+                facing.unwrap_or(yaw_degrees),
+            )
         } else {
             yaw_degrees
         };

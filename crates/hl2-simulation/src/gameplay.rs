@@ -1445,7 +1445,7 @@ impl Inventory {
                     let Some(entity) = world.entities.get(id) else {
                         continue;
                     };
-                    let class_health = scene.skill.npc_health(entity.class());
+                    let class_health = scene.skill.npc_entity_health(entity);
                     let Some(state) = scene.states.get_mut(id) else {
                         continue;
                     };
@@ -1996,7 +1996,7 @@ pub struct NpcHitReport {
 /// An NPC's health before its first damage: the class's Spawn value from skill.cfg
 /// (`Skill::npc_health`), else the map's health keyvalue, else 40.
 pub fn npc_spawn_health(scene: &Scene, e: &modkit_core::Entity) -> f32 {
-    scene.skill.npc_health(e.class()).unwrap_or_else(|| {
+    scene.skill.npc_entity_health(e).unwrap_or_else(|| {
         e.get("health")
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| *v > 0.)
@@ -3034,6 +3034,7 @@ mod tests {
             damage: 3.,
             ammo_type: "Pistol".into(),
             tracer: true,
+            missile: false,
         };
         let mut uniform = || 0.;
         let mut out = NpcBullets::default();

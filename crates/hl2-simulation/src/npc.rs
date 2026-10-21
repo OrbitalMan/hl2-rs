@@ -355,6 +355,9 @@ pub struct Locomotion {
     /// The sequence of each style when it is not the default walk_all/run_all (a
     /// weapon-translated ACT_WALK_RIFLE/ACT_RUN_RIFLE sequence, say).
     names: BTreeMap<MoveStyle, String>,
+    /// The aiming walk/run (Weapon_TranslateActivity of ACT_WALK_AIM/ACT_RUN_AIM) that
+    /// move and shoot plays over the same root-motion track.
+    aim_names: BTreeMap<MoveStyle, String>,
 }
 impl Locomotion {
     /// Load once at map/actor setup. Simulation ticks never access the VFS.
@@ -425,6 +428,19 @@ impl Locomotion {
             .collect()
     }
     /// The sequence a style plays.
+    /// Set the aiming sequences (both styles, or none).
+    pub fn set_aim(&mut self, walk: String, run: String) {
+        self.aim_names = [(MoveStyle::Walk, walk), (MoveStyle::Run, run)].into();
+    }
+    pub fn has_aim(&self) -> bool {
+        self.aim_names.len() == 2
+    }
+    fn played_name(&self, style: MoveStyle, aiming: bool) -> String {
+        match self.aim_names.get(&style).filter(|_| aiming) {
+            Some(name) => name.clone(),
+            None => self.sequence_name(style),
+        }
+    }
     pub fn sequence_name(&self, style: MoveStyle) -> String {
         self.names
             .get(&style)
@@ -511,6 +527,8 @@ struct Actor {
     /// Locomotion per active weapon class ("" unarmed), preloaded (`set_locomotion`).
     variants: BTreeMap<String, Locomotion>,
     view_offset: Option<Vec3>,
+    /// Move and shoot: play the aiming walk/run.
+    aiming: bool,
 }
 struct Goal {
     request: MoveRequest,
@@ -603,6 +621,18 @@ impl Controller {
     }
     /// Weapon_Equip: move with the new weapon's walk/run sequences (unchanged when the
     /// model has no variant for it). Moves already running keep their track.
+    /// CAI_MoveAndShootOverlay::UpdateMoveShootActivity: the aiming walk/run on or off.
+    pub fn set_move_aim(&mut self, entity: usize, aiming: bool) {
+        if let Some(actor) = self.actors.get_mut(&entity) {
+            actor.aiming = aiming && actor.locomotion.has_aim();
+        }
+    }
+    /// The model has both aiming locomotions for the current weapon.
+    pub fn has_move_aim(&self, entity: usize) -> bool {
+        self.actors
+            .get(&entity)
+            .is_some_and(|a| a.locomotion.has_aim())
+    }
     pub fn set_locomotion(&mut self, entity: usize, weapon: &str) -> bool {
         let Some(actor) = self.actors.get_mut(&entity) else {
             return false;
@@ -768,6 +798,7 @@ impl Controller {
                 locomotion,
                 variants: BTreeMap::new(),
                 view_offset: None,
+                aiming: false,
             },
         );
         Ok(())
@@ -805,7 +836,7 @@ impl Controller {
                 sequence: goal.state.is_moving().then(|| {
                     self.actors.get(&key.actor).map_or_else(
                         || goal.request.style.sequence().to_owned(),
-                        |a| a.locomotion.sequence_name(goal.request.style),
+                        |a| a.locomotion.played_name(goal.request.style, a.aiming),
                     )
                 }),
                 animation_time: goal.animation_time,
@@ -912,7 +943,7 @@ impl Controller {
             let name = self
                 .actors
                 .get(&key.actor)
-                .map(|a| a.locomotion.sequence_name(goal.request.style));
+                .map(|a| a.locomotion.played_name(goal.request.style, a.aiming));
             self.pending.push(update(key, &goal, &self.doors, name));
         }
         self.goals.insert(key, goal);
@@ -955,7 +986,7 @@ impl Controller {
                 let name = self
                     .actors
                     .get(&key.actor)
-                    .map(|a| a.locomotion.sequence_name(goal.request.style));
+                    .map(|a| a.locomotion.played_name(goal.request.style, a.aiming));
                 updates.push(update(*key, goal, &self.doors, name));
                 continue;
             }
@@ -1010,7 +1041,7 @@ impl Controller {
             let name = self
                 .actors
                 .get(&key.actor)
-                .map(|a| a.locomotion.sequence_name(goal.request.style));
+                .map(|a| a.locomotion.played_name(goal.request.style, a.aiming));
             updates.push(update(*key, goal, &self.doors, name));
         }
         updates
