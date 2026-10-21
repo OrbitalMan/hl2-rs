@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-21 session 26: runtime entity spawning of loaded classes (DESIGN 14r part A) and npc_template_maker repeat copies (`wip/runtime-entities-20261021`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_concommands.cpp CC_NPC_Create, monstermaker.cpp CTemplateNPCMaker::MakeNPC, const.h MAX_EDICT_BITS); installed d1_canals_01 entity lump read-only (maker limits).
+
+**Changed:** spawns grow the map's World in place (Arc::make_mut) and copy a hidden class template (`ai::spawn::instantiate`, `Scene::spawn_entity`, `Physics::add_spawned_instance` sharing the factored map-load `add_model_instance`, `AiRuntime::add_actor` refreshing NPC sight candidates, `Controller::copy_actor`, `rendering::spawn_runtime_draws`, `Eyes::copy_actor`); the cloud's Scene-side extension table is removed; live runtime spawns capped at 2048 (`--max-edicts N`, 0 = none); npc_template_maker repeat spawns queue `CopyRequest`s that the host creates and the maker adopts.
+
+**Why:** owner priority 2026-10-21: spawn any number of NPCs without the 3-per-class pool; owner questions on Source's entity limit (compiled-in MAX_EDICT_BITS) and future netcode/mods.
+
+**Tested how / Result:** new unit tests (template copy with physics hull/hitbox at the new place; a foe spawned after the first think is seen, which failed before the sight-candidate fix; maker copy request/adopt with the StartNPC floor drop); hl2-simulation 325 tests, workspace release tests (two known release-only failures), strict Clippy/fmt. Packaged station hall: 20 soldiers render and idle (fixed step 4-6 ms); 10 foe soldiers vs 10 friend rebels fight to 2 survivors (488 shots, step peak 14.6 ms); map change after spawning loads cleanly; d1_canals_01 barrelpush_cop3_maker makes a copy after its first child dies and stops at MaxNPCCount 2. Regression batch artifacts/s26-regression (part A build): weapons 17/17, attention 26/26, movement 25/26 (known doll01 warning), every capture within 4 levels of s25-regression.
+
+**Still broken or not tested:** classes the map never loaded (part B late precache); killed runtime NPCs keep hidden draws until the map changes; render frame timing with many NPCs beyond the fixed step; native comparison of mass spawns; the maker-copy build was not run through the regression batch (makers in the batch scenes spawn only once).
+
+**Next:** part B (async late precache, prop/ent_create, gibs and dropped weapons as entities), then the owner's playtest notes (NPC gunfire overlap and far layer, NPC footsteps, NPC speech).
+
 ## 2026-10-21 session 25: distance-variant gunfire mix, move and shoot, Alyx gun, RPG citizens, combine elite/shotgunner/prison guard (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (weapon_smg1/ar2/alyxgun/rpg.cpp, npc_citizen17.cpp RPG schedules, npc_combine.cpp/npc_combines.cpp elites and ShouldMoveAndShoot, ai_moveshoot.cpp, ai_basenpc_schedule.cpp task overlays), installed sound scripts (temporary owned probe, not committed) and retail engine.dll via the pass02 Ghidra project read-only (SND_Spatialize distmix, '^' mixers; private npc-gunfire-20261021).

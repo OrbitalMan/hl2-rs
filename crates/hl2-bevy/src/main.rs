@@ -70,6 +70,9 @@ struct Options {
     audio_trace: Option<PathBuf>,
     /// Do not take focus at window creation, so unattended tests leave the desktop usable.
     no_focus: bool,
+    /// Windowed position on the desktop (top-left corner, virtual-screen pixels; may be
+    /// on another monitor, e.g. negative X left of the primary).
+    window_at: Option<(i32, i32)>,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
     tonemap_scale: Option<f32>,
 }
@@ -105,6 +108,7 @@ impl Options {
             volume: 1.,
             audio_trace: None,
             no_focus: false,
+            window_at: None,
             tonemap_scale: None,
         };
         while let Some(arg) = args.next() {
@@ -152,6 +156,11 @@ impl Options {
                     assets::FRAG_RIGID_BODY.store(false, std::sync::atomic::Ordering::Relaxed)
                 }
                 "--no-focus" => options.no_focus = true,
+                "--window-at" => {
+                    let x = next(&mut args)?.parse()?;
+                    let y = next(&mut args)?.parse()?;
+                    options.window_at = Some((x, y));
+                }
                 // Runtime entity limit (Source: MAX_EDICT_BITS 11 = 2048, compiled in);
                 // 0 = no limit.
                 "--max-edicts" => hl2_simulation::ai::spawn::MAX_EDICTS.store(
@@ -175,7 +184,7 @@ impl Options {
                         "Installation: auto-detect Steam or use the remembered folder.\n--setup: choose/remember the game folder; --no-setup: fail without opening setup.\n--game PATH and HL2_ROOT override the remembered folder.\n--setup-preview PNG: capture setup and exit without loading a map."
                     );
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-ai (NPC AI off; on by default like Source) --frag-swept-box (legacy fitted frag instead of its w_grenade.phy body) --no-focus (start unfocused for unattended tests) --tonemap-scale S (fixed HDR exposure) --max-edicts N (runtime entity limit; Source 2048, 0 none)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --borderless --width N --height N\n--position X Y Z --yaw DEGREES --pitch DEGREES\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON\n--fly --movement-script JSON --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-ai (NPC AI off; on by default like Source) --frag-swept-box (legacy fitted frag instead of its w_grenade.phy body) --no-focus (start unfocused for unattended tests) --window-at X Y (window position, e.g. on another monitor) --tonemap-scale S (fixed HDR exposure) --max-edicts N (runtime entity limit; Source 2048, 0 none)\nClick to capture mouse; WASD move, Space jump, Ctrl crouch, Shift sprint, Alt walk. F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
                     );
                     std::process::exit(0);
                 }
@@ -387,6 +396,11 @@ fn main() -> Result<()> {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         focused: !options.no_focus,
+                        position: options
+                            .window_at
+                            .map_or(bevy::window::WindowPosition::Automatic, |(x, y)| {
+                                bevy::window::WindowPosition::At(IVec2::new(x, y))
+                            }),
                         present_mode: if options.uncapped {
                             bevy::window::PresentMode::AutoNoVsync
                         } else {
