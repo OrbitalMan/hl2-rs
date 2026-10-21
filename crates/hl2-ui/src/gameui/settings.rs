@@ -707,7 +707,7 @@ fn advanced_choice(name: &str) -> Option<AdvancedChoice> {
 /// `Close` (VGUI `Frame` commands).
 pub fn command_binding(command: &str) -> Option<Binding> {
     match command.to_ascii_lowercase().as_str() {
-        "ok" => Some(Binding::Command(Command::SubOk)),
+        "ok" | "apply" => Some(Binding::Command(Command::SubOk)),
         "close" | "cancel" => Some(Binding::Command(Command::SubCancel)),
         _ => None,
     }

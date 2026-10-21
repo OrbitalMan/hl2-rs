@@ -4,6 +4,13 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Options sub-dialog mouse clicks, Use Defaults confirmation, and out-of-focus title translucency (`hl2-ui::console`, `gameui::options`, `gameui::settings`):**
+  - Synchronized dialog window input routing in `Console::windows_input` to route mouse clicks strictly to `active_options_window` (`Confirmation` > `SubDialog` > `Options`), preventing lower windows from wiping `ButtonTracker` state.
+  - Added `"apply"` command mapping in `gameui::settings::command_binding` for `OptionsSubVideoAdvancedDlg.res`.
+  - Retained `confirm` across input frames in `OptionsDialog::input` when pending outcome is `None`.
+  - Modulated `title_outline` and `sub_outline` with `base_focus` in `Console::draw`, disabling black text outline when out of focus so title and subtitle glyphs render with pure translucency.
+  - Verified with unit tests (`subdialog_buttons_can_be_activated_by_mouse_click`, `keyboard_use_defaults_confirmation_works_with_click_and_keys`, `out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline`), `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`. Visual appearance in packaged release runs is unverified, needs manual check.
+
 - **Mid-gameplay developer console opens pause menu (`hl2-ui::console`, `hl2-bevy::simulation`):**
   - Opening the developer console mid-gameplay (`toggle()`, `set_mode(Mode::Console)`) automatically transitions base to `Mode::Pause`, bringing up the authentic pause menu with dev console focused on top.
   - Closing the developer console mid-gameplay (tilde, Escape, or `[X]` button) restores focus to the underlying pause menu (`Layer::Base`), leaving gameplay paused.

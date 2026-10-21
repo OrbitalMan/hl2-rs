@@ -1,5 +1,40 @@
 # MODLOG
 
+## 2026-10-21 UI: fix Options sub-dialog clicks, Keyboard Use Defaults confirmation, and menu title translucency
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Options sub-dialog input routing (`hl2-ui::console`):
+  - In `Console::windows_input`, synchronized dialog windows via `self.sync_dialog_windows()` and resolved `active_options_window` (`Confirmation` > `SubDialog` > `Options`).
+  - Input share is routed to `self.options_input(&share)` strictly when `window == active_options_window`, preventing inactive parent windows with unowned pointer state from resetting `ButtonTracker` in `OptionsDialog`.
+  - In `gameui::settings::command_binding`, mapped `"apply"` to `Binding::Command(Command::SubOk)` to match `OptionsSubVideoAdvancedDlg.res` authored command.
+- Options Keyboard Use Defaults confirmation (`hl2-ui::gameui::options`):
+  - In `OptionsDialog::input`, retained `confirm` in `self.confirm` when outcome is `None` (pending user click or key input), and stored `confirm` into `self.closing_confirm` when confirmed (`Some(true)`) or cancelled (`Some(false)`).
+- Main menu title and subtitle out-of-focus translucency (`hl2-ui::console`):
+  - In `Console::draw`, modulated `title_outline` and `sub_outline` with `base_focus`.
+  - When `base_focus <= 1e-4`, outline switches to `TextOutline::NONE`, preventing 8 overlapping dark outline passes from rendering solid black behind translucent menu title and subtitle glyphs.
+
+**Why:** user defect reports:
+1. Mouse clicks on OK, Cancel, and Close in Options sub-dialogs (Options > Video > Advanced, Brightness, 3rd party credits) did not activate.
+2. Options > Keyboard > "Use Defaults" did not work with either mouse clicks or keyboard input.
+3. Half-Life 2 title and subtitle appeared darkened/dimmed rather than translucent when the main menu was out of focus.
+
+**Tested how:**
+- Added unit tests in `crates/hl2-ui/src/console.rs`:
+  - `subdialog_buttons_can_be_activated_by_mouse_click`: clicks OK and Cancel in Video Advanced, Close buttons in 3rd-party credits, and OK in Brightness.
+  - `keyboard_use_defaults_confirmation_works_with_click_and_keys`: clicks OK on Use Defaults confirmation box and asserts restored keybindings.
+  - `out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline`: verifies zero opaque text outline quads are emitted when menu is out of focus.
+- Verified test suite: 348 `hl2-ui` tests and 93 `hl2-bevy` tests passed.
+- Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh` (0 warnings).
+
+**Result:** Options sub-dialog buttons activate cleanly on click, Use Defaults confirmation box operates as intended, and menu title/subtitle render translucent without black outline artifacts.
+
+**Still broken or not tested:** visual verification in packaged release runs is unverified, needs manual check.
+
+**Next:** continue UI polish / plugin modularization.
+
+
 ## 2026-10-21 UI: mid-gameplay dev console opens main menu and restores focus on close
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

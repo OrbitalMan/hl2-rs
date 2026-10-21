@@ -1359,5 +1359,24 @@ Aligning mid-gameplay developer console activation with authentic Half-Life 2 / 
 - **Verification:** Unit-tested in `console::tests::mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus`
   and `simulation::tests::ui_open_close_and_resume_consume_pointer_attack_and_held_jump`.
 
+## 19. Sub-dialog interaction, keyboard defaults confirmation, and out-of-focus menu title translucency (2026-10-21)
+
+Fixing input routing and visual defects across Options sub-dialogs and out-of-focus menu text:
+- **Options sub-dialog mouse click activation:**
+  - In `Console::windows_input`, previously `Window::Options`, `Window::SubDialog`, and `Window::Confirmation` were all in the window order list, and `self.options_input` was called for each. When a sub-dialog was open, `Window::Options` was passed an unowned share with no pointer coordinates, which reset the dialog's `ButtonTracker` and cleared button press state on release.
+  - Now, `Console::windows_input` resolves `active_options_window` (giving precedence to `Window::Confirmation`, then `Window::SubDialog`, then `Window::Options`), and strictly routes input to `self.options_input(&share)` for the active layer.
+  - In `gameui::settings::command_binding`, added `"apply"` alongside `"ok"` (mapping to `Binding::Command(Command::SubOk)`) to support `OptionsSubVideoAdvancedDlg.res` which authors the OK button with `"Command" "Apply"`.
+- **Keyboard Use Defaults confirmation dialog persistence:**
+  - In `OptionsDialog::input`, when `self.confirm` was handled, an unresolved outcome (`None`) previously did not restore `confirm` into `self.confirm`, causing the confirmation dialog to be discarded on the very first frame after opening. Now `confirm` is properly retained on `None`, and `closing_confirm` is set on resolution (`Some(true)` or `Some(false)`).
+- **Out-of-focus main menu title and subtitle translucency:**
+  - In `Console::draw`, `draw_cell_text_outlined` previously drew `TextOutline::DEFAULT` (8 dark outline glyph passes) unconditionally behind the Half-Life 2 title and expansion subtitle, even when `base_focus` was 0.0 (dialog open). This produced dark opaque silhouette blobs under translucent text.
+  - Now, `title_outline` and `sub_outline` modulate their alpha with `base_focus`. When `base_focus <= 1e-4`, outline becomes `TextOutline::NONE`, emitting zero outline quads so text glyphs render at `alpha_mult` (0.3) directly over the background.
+- **Verification:**
+  - Added unit tests in `crates/hl2-ui/src/console.rs`:
+    - `subdialog_buttons_can_be_activated_by_mouse_click`: verifies mouse click activation of OK and Cancel in `Sub::VideoAdvanced`, title bar close and bottom Close in `Sub::AudioCredits`, and OK in `Sub::Gamma`.
+    - `keyboard_use_defaults_confirmation_works_with_click_and_keys`: verifies opening Use Defaults confirmation box, retaining it across frames, and activating OK restores default keybindings.
+    - `out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline`: verifies no opaque text outline quads are emitted when the menu is out of focus.
+  - Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
+
 
 

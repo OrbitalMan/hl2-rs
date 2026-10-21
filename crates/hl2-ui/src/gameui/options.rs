@@ -311,7 +311,7 @@ pub struct OptionsDialog {
     modes: DisplayModes,
     tab: Tab,
     applied: Config,
-    draft: Draft,
+    pub(crate) draft: Draft,
     pub(crate) armed: Option<Target>,
     pub(crate) pressed: Option<Target>,
     last_armed: Option<Target>,
@@ -888,7 +888,7 @@ impl OptionsDialog {
             .push(format!("{label}: not implemented in HL2-RS yet."));
     }
 
-    fn select_tab(&mut self, tab: Tab) {
+    pub(crate) fn select_tab(&mut self, tab: Tab) {
         self.commit_entry();
         self.combo = None;
         self.active_tooltip = None;
@@ -937,12 +937,14 @@ impl OptionsDialog {
             match outcome {
                 Some(true) => {
                     self.use_default_keys();
-                    self.closing_confirm = self.confirm.take();
+                    self.closing_confirm = Some(confirm);
                 }
                 Some(false) => {
-                    self.closing_confirm = self.confirm.take();
+                    self.closing_confirm = Some(confirm);
                 }
-                None => {}
+                None => {
+                    self.confirm = Some(confirm);
+                }
             }
             return OptionsOutcome::None;
         }
@@ -2561,7 +2563,7 @@ impl OptionsDialog {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::canvas::Canvas;
     use crate::config::{AimAssist, HdrMode};
@@ -2678,7 +2680,7 @@ mod tests {
         DIALOG + vec2(page_rect().x + x, page_rect().y + y)
     }
 
-    fn resources() -> Arc<GameUiResources> {
+    pub(crate) fn resources() -> Arc<GameUiResources> {
         let mut localization = Localization::default();
         localization.insert("GameUI_Gamepad", "Gamepad");
         localization.insert("GameUI_Open_SteamInput", "Open Steam Input Configuration");

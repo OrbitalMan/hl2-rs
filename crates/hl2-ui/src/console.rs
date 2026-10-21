@@ -2146,8 +2146,22 @@ impl Console {
     /// modal layer inside Options (sub-dialog, its confirmation box, an open list, a key
     /// capture) takes every click. Every layer sees every frame, with only its share of it.
     fn windows_input(&mut self, input: &Input) -> Vec<Effect> {
-        let modal =
-            (self.options_open() && self.options.modal_layer_open()).then_some(Window::Options);
+        self.sync_dialog_windows();
+        let active_options_window = if self.confirm_box.is_none()
+            && self.options.has_confirm()
+            && self.windows.is_open(Window::Confirmation)
+        {
+            Window::Confirmation
+        } else if self.options.has_sub() && self.windows.is_open(Window::SubDialog) {
+            Window::SubDialog
+        } else {
+            Window::Options
+        };
+        let modal = if self.options_open() && self.options.modal_layer_open() {
+            Some(active_options_window)
+        } else {
+            None
+        };
         let completion = self.completion_bounds();
         let bounds: Vec<(Window, Rect)> = self
             .windows
@@ -2178,13 +2192,21 @@ impl Console {
             let layer = Layer::Window(window);
             let share = input.share(owner == Some(layer), focus == layer);
             effects.extend(match window {
-                Window::Options | Window::SubDialog => self.options_input(&share),
+                Window::Options | Window::SubDialog => {
+                    if window == active_options_window {
+                        self.options_input(&share)
+                    } else {
+                        Vec::new()
+                    }
+                }
                 Window::Console => self.console_input(&share),
                 Window::Confirmation => {
                     if self.confirm_box.is_some() {
                         self.confirm_input(input)
-                    } else {
+                    } else if window == active_options_window {
                         self.options_input(&share)
+                    } else {
+                        Vec::new()
                     }
                 }
             });
@@ -3031,10 +3053,35 @@ impl Console {
             } else {
                 Color::new(1., 1., 1., (200.0 / 255.0) * alpha_mult)
             };
-            let sub_outline = if alpha_mult >= 1.0 - 1e-4 {
+            let title_outline = if base_focus >= 1.0 - 1e-4 {
                 TextOutline::DEFAULT
+            } else if base_focus > 1e-4 {
+                TextOutline::new(
+                    Color::new(
+                        TextOutline::DEFAULT.color.r,
+                        TextOutline::DEFAULT.color.g,
+                        TextOutline::DEFAULT.color.b,
+                        TextOutline::DEFAULT.color.a * base_focus,
+                    ),
+                    1.0,
+                )
             } else {
-                TextOutline::new(Color::new(0., 0., 0., 0.8 * alpha_mult), 1.0)
+                TextOutline::NONE
+            };
+            let sub_outline = if base_focus >= 1.0 - 1e-4 {
+                TextOutline::DEFAULT
+            } else if base_focus > 1e-4 {
+                TextOutline::new(
+                    Color::new(
+                        TextOutline::DEFAULT.color.r,
+                        TextOutline::DEFAULT.color.g,
+                        TextOutline::DEFAULT.color.b,
+                        TextOutline::DEFAULT.color.a * base_focus,
+                    ),
+                    1.0,
+                )
+            } else {
+                TextOutline::NONE
             };
 
             if let Some(face) = &self.title_face {
@@ -3059,16 +3106,18 @@ impl Console {
                             // GDI supplies integer ABC advances. Fractional accumulation visibly widens this logo.
                             pen.x += face.metrics(character, em).advance_width.round();
                         }
-                        for &(character, char_pen) in &chars {
-                            draw_cell_text_outlined(
-                                &character.to_string(),
-                                char_pen,
-                                geometry.title_tall,
-                                self.title_font.as_ref(),
-                                self.title_metrics,
-                                Color::new(0., 0., 0., 0.),
-                                TextOutline::DEFAULT,
-                            );
+                        if title_outline.is_visible() {
+                            for &(character, char_pen) in &chars {
+                                draw_cell_text_outlined(
+                                    &character.to_string(),
+                                    char_pen,
+                                    geometry.title_tall,
+                                    self.title_font.as_ref(),
+                                    self.title_metrics,
+                                    Color::new(0., 0., 0., 0.),
+                                    title_outline,
+                                );
+                            }
                         }
                         for &(character, char_pen) in &chars {
                             draw_cell_text(
@@ -3150,7 +3199,7 @@ impl Console {
                             sub_color
                         },
                         if line_idx == 0 {
-                            TextOutline::DEFAULT
+                            title_outline
                         } else {
                             sub_outline
                         },
@@ -3196,15 +3245,15 @@ impl Console {
                 } else {
                     Color::new(color.r, color.g, color.b, color.a * alpha_mult)
                 };
-                let border_color = if alpha_mult >= 1.0 - 1e-4 {
-                    border_color
+                let border_alpha = if base_focus > 1e-4 {
+                    border_color.a * base_focus
                 } else {
-                    Color::new(
-                        border_color.r,
-                        border_color.g,
-                        border_color.b,
-                        border_color.a * alpha_mult,
-                    )
+                    0.0
+                };
+                let button_outline = if border_alpha > 1e-4 {
+                    TextOutline::new(Color::new(0.0, 0.0, 0.0, border_alpha), 1.0)
+                } else {
+                    TextOutline::NONE
                 };
                 let offset = if is_pressed { vec2(1., 1.) } else { Vec2::ZERO };
                 draw_cell_text_outlined(
@@ -3214,7 +3263,7 @@ impl Console {
                     self.menu_font.as_ref(),
                     self.menu_metrics,
                     color,
-                    TextOutline::new(border_color, 1.0),
+                    button_outline,
                 );
             }
         }
@@ -7097,5 +7146,277 @@ mod tests {
         assert_eq!(console.base, Mode::Gameplay);
         assert!(!console.paused());
         assert_eq!(console.windows.focus(), Layer::Base);
+    }
+
+    #[test]
+    fn subdialog_buttons_can_be_activated_by_mouse_click() {
+        let mut console = menu_with_options(720.);
+        console.set_resources((*crate::gameui::options::tests::resources()).clone());
+        console.open_options();
+
+        let scale = Painter::scale_for_canvas(console.canvas_size());
+
+        // Test 1: Sub::VideoAdvanced OK button click
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::VideoAdvanced);
+        console.sync_dialog_windows();
+        assert!(console.options.has_sub());
+        assert!(console.windows.is_active(Window::SubDialog));
+        let bounds = console.window_bounds(Window::SubDialog);
+        assert!(bounds.w > 0. && bounds.h > 0.);
+        // OK button in test layout VIDEO_ADVANCED is at (290, 316, 80, 24)
+        let ok_pt = vec2(bounds.x, bounds.y) + (vec2(290. + 40., 316. + 12.) * scale);
+
+        pointer_frame(&mut console, ok_pt, true, true, false);
+        assert!(console.options.has_sub(), "still open while pressed");
+        pointer_frame(&mut console, ok_pt, false, false, true);
+        assert!(!console.options.has_sub(), "closed on OK click release");
+        assert!(console.options.closing_sub.is_some());
+
+        // Test 2: Sub::VideoAdvanced Cancel button click
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::VideoAdvanced);
+        console.sync_dialog_windows();
+        assert!(console.options.has_sub());
+        let bounds = console.window_bounds(Window::SubDialog);
+        // Cancel button in test layout VIDEO_ADVANCED is at (382, 316, 80, 24)
+        let cancel_pt = vec2(bounds.x, bounds.y) + (vec2(382. + 40., 316. + 12.) * scale);
+
+        pointer_frame(&mut console, cancel_pt, true, true, false);
+        pointer_frame(&mut console, cancel_pt, false, false, true);
+        assert!(!console.options.has_sub(), "closed on Cancel click release");
+
+        // Test 3: Sub::AudioCredits title bar close button click
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::AudioCredits);
+        console.sync_dialog_windows();
+        assert!(console.options.has_sub());
+        let bounds = console.window_bounds(Window::SubDialog);
+        let size = console
+            .options
+            .sub_frame_size(crate::gameui::options::Sub::AudioCredits, |_| 0.);
+        let title_close_pt = vec2(bounds.x, bounds.y)
+            + (crate::gameui::widgets::close_button_rect(size).center() * scale);
+
+        pointer_frame(&mut console, title_close_pt, true, true, false);
+        pointer_frame(&mut console, title_close_pt, false, false, true);
+        assert!(
+            !console.options.has_sub(),
+            "credits closed on close button release"
+        );
+
+        // Test 4: Sub::AudioCredits bottom Close button click
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::AudioCredits);
+        console.sync_dialog_windows();
+        assert!(console.options.has_sub());
+        let bounds = console.window_bounds(Window::SubDialog);
+        let size = console
+            .options
+            .sub_frame_size(crate::gameui::options::Sub::AudioCredits, |s| {
+                s.chars().count() as f32 * 7.
+            });
+        let bottom_close_rect = Rect::new(size.x - 96., size.y - 34., 80., 24.);
+        let bottom_close_pt = vec2(bounds.x, bounds.y) + (bottom_close_rect.center() * scale);
+
+        pointer_frame(&mut console, bottom_close_pt, true, true, false);
+        pointer_frame(&mut console, bottom_close_pt, false, false, true);
+        assert!(
+            !console.options.has_sub(),
+            "credits closed on bottom close button release"
+        );
+
+        // Test 5: Sub::Gamma (Brightness) OK and Cancel buttons
+        console.options.open_sub(crate::gameui::options::Sub::Gamma);
+        console.sync_dialog_windows();
+        assert!(console.options.has_sub());
+        let bounds = console.window_bounds(Window::SubDialog);
+        // Gamma OKButton is at (104, 356, 72, 24)
+        let gamma_ok_pt = vec2(bounds.x, bounds.y) + (vec2(104. + 36., 356. + 12.) * scale);
+
+        pointer_frame(&mut console, gamma_ok_pt, true, true, false);
+        pointer_frame(&mut console, gamma_ok_pt, false, false, true);
+        assert!(
+            !console.options.has_sub(),
+            "brightness closed on OK click release"
+        );
+    }
+
+    #[test]
+    fn keyboard_use_defaults_confirmation_works_with_click_and_keys() {
+        let mut console = menu_with_options(720.);
+        let res = GameUiResources {
+            key_rows: vec![crate::gameui::keys::KeyRow::Action {
+                command: "+forward".into(),
+                label: "Move forward".into(),
+            }],
+            default_bindings: std::collections::BTreeMap::from([("+forward".into(), "w".into())]),
+            ..Default::default()
+        };
+        console.set_resources(res);
+        console.open_options();
+        console
+            .options
+            .select_tab(crate::gameui::options::Tab::Keyboard);
+
+        // Modify a key binding
+        console
+            .options
+            .draft
+            .config
+            .keys
+            .insert("+forward".into(), "x".into());
+        assert_eq!(
+            console
+                .options
+                .draft
+                .config
+                .keys
+                .get("+forward")
+                .map(|s| s.as_str()),
+            Some("x")
+        );
+
+        // Trigger KeyDefaults
+        console
+            .options
+            .command(crate::gameui::settings::Command::KeyDefaults);
+        console.sync_dialog_windows();
+        assert!(console.options.has_confirm());
+        assert!(console.windows.is_active(Window::Confirmation));
+
+        // Idle frame: confirmation dialog persists across frames
+        console.input(&Input::default());
+        assert!(
+            console.options.has_confirm(),
+            "confirmation dialog persists across idle frames"
+        );
+
+        // Cancel via Escape or dismissal
+        console.options.dismiss_confirm();
+        assert!(!console.options.has_confirm());
+        assert!(console.options.closing_confirm.is_some());
+        assert_eq!(
+            console
+                .options
+                .draft
+                .config
+                .keys
+                .get("+forward")
+                .map(|s| s.as_str()),
+            Some("x"),
+            "binding unchanged after cancel"
+        );
+
+        // Re-open KeyDefaults
+        console
+            .options
+            .command(crate::gameui::settings::Command::KeyDefaults);
+        console.sync_dialog_windows();
+        assert!(console.options.has_confirm());
+
+        // Press Enter to confirm defaults
+        console.input(&Input {
+            keys: [Key::Enter].into_iter().collect(),
+            held_keys: [Key::Enter].into_iter().collect(),
+            ..Default::default()
+        });
+        console.input(&Input {
+            keys: Default::default(),
+            held_keys: Default::default(),
+            ..Default::default()
+        });
+        assert!(!console.options.has_confirm(), "confirm closed after Enter");
+        assert!(console.options.closing_confirm.is_some());
+        assert_eq!(
+            console
+                .options
+                .draft
+                .config
+                .keys
+                .get("+forward")
+                .map(|s| s.as_str()),
+            Some("w"),
+            "default bindings restored after Enter confirmation"
+        );
+
+        // Re-open KeyDefaults and test mouse click on OK
+        console
+            .options
+            .draft
+            .config
+            .keys
+            .insert("+forward".into(), "x".into());
+        console
+            .options
+            .command(crate::gameui::settings::Command::KeyDefaults);
+        console.sync_dialog_windows();
+        assert!(console.options.has_confirm());
+
+        let bounds = console.window_bounds(Window::Confirmation);
+        let ok_pt = vec2(bounds.x + bounds.w * 0.25, bounds.y + bounds.h - 25.);
+        pointer_frame(&mut console, ok_pt, true, true, false);
+        pointer_frame(&mut console, ok_pt, false, false, true);
+        assert!(
+            !console.options.has_confirm(),
+            "confirm closed after OK click"
+        );
+        assert_eq!(
+            console
+                .options
+                .draft
+                .config
+                .keys
+                .get("+forward")
+                .map(|s| s.as_str()),
+            Some("w"),
+            "default bindings restored after OK click"
+        );
+    }
+
+    #[test]
+    fn out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline() {
+        let mut console = installed_console();
+        console.set_mode(Mode::MainMenu);
+        console.canvas.resize(1280., 720.);
+
+        // When menu is focused (t=0.0):
+        console.windows.set_time(0.0);
+        assert_eq!(console.windows.base_focus_amount(0.0), 1.0);
+
+        // Open options: base menu focus fades out to 0.0 at t=0.3
+        console.open_options();
+        console.windows.set_time(0.0);
+        let base_focus = console.windows.base_focus_amount(0.3);
+        assert!(base_focus < 1e-4);
+
+        // Draw menu when fully out of focus (t=0.3)
+        console.canvas.drain();
+        console.draw(0.3);
+        let quads = console.canvas.drain();
+
+        // Outline quads (emitted by draw_cell_text_outlined) have color (0,0,0, 0.45 * base_focus)
+        // and texture.is_some() (the glyph cache texture).
+        // When base_focus is 0.0, outline is TextOutline::NONE, so NO text outline quads are emitted.
+        // Verify no text glyph outline quads with alpha >= 0.2 are emitted under the menu.
+        let black_outline_quads: Vec<_> = quads
+            .iter()
+            .filter(|q| {
+                q.texture.is_some()
+                    && q.color.r == 0.0
+                    && q.color.g == 0.0
+                    && q.color.b == 0.0
+                    && q.color.a >= 0.2
+            })
+            .collect();
+        assert!(
+            black_outline_quads.is_empty(),
+            "no opaque outline quads should be emitted when out of focus, found: {}",
+            black_outline_quads.len()
+        );
     }
 }
