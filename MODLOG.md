@@ -1,5 +1,35 @@
 # MODLOG
 
+## 2026-10-21 UI: Escape key highlights focused subdialog close button on press
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Escape key state propagation for subdialogs (`hl2-ui::console`):
+  - In `Console::escape_pressed`, synchronized dialog windows and updated `options.escape_held` to check `matches!(self.windows.top(), Some(Window::Options | Window::SubDialog))` rather than strictly `Window::Options`.
+  - When a subdialog is top/focused, pressing and holding Escape marks `options.escape_held = true`, causing `OptionsDialog::draw` to render the subdialog's title-bar close button with `ButtonState::pressed = true` (depressed 1px offset, highlighted in white `title_text` via `close_style`), while keeping parent Options close button unpressed (`self.sub.is_none()` is false).
+  - In `Console::escape_closes_dialog`, delegated `Window::SubDialog` to `self.options.escape_closes()` so active placement drags or open combos are cancelled first before closing the subdialog.
+  - In `Console::escape`, called `self.options.escape()` for `Window::SubDialog` to cancel in-progress drags or open combos without prematurely terminating the subdialog.
+  - In `Console::close_window`, ensured `escape_held` flags are cleared defensively.
+
+**Why:** user defect report: pressing Escape key did not highlight the focused subdialog's close button while held down.
+
+**Tested how:**
+- Added unit test `console::tests::a_held_escape_presses_subdialog_close_button_and_release_closes_it` verifying:
+  1. With SubDialog open and top, pressing Escape sets `options.escape_held = true` while subdialog remains open.
+  2. Drawing renders subdialog close button in pressed/highlighted state.
+  3. Releasing Escape clears `options.escape_held`, dismisses subdialog, and returns focus/top to Options dialog.
+  4. Subsequent Escape on Options dialog holds Options close button and dismisses to MainMenu on release.
+  5. In-progress subdialog placement drag is cancelled on Escape press without holding close button.
+- Ran `scripts/checks/validate.sh` (349 tests, strict clippy, rustfmt) and `scripts/checks/check_windows.sh`.
+
+**Result:** focused subdialogs cleanly highlight their title-bar close button when Escape is held down and dismiss upon release.
+
+**Still broken or not tested:** visual appearance in packaged release runs is unverified, needs manual check.
+
+**Next:** continue UI polish / plugin modularization.
+
+
 ## 2026-10-21 UI: fix Options sub-dialog clicks, Keyboard Use Defaults confirmation, and menu title translucency
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

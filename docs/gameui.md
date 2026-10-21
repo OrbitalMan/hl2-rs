@@ -1371,11 +1371,15 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
 - **Out-of-focus main menu title and subtitle translucency:**
   - In `Console::draw`, `draw_cell_text_outlined` previously drew `TextOutline::DEFAULT` (8 dark outline glyph passes) unconditionally behind the Half-Life 2 title and expansion subtitle, even when `base_focus` was 0.0 (dialog open). This produced dark opaque silhouette blobs under translucent text.
   - Now, `title_outline` and `sub_outline` modulate their alpha with `base_focus`. When `base_focus <= 1e-4`, outline becomes `TextOutline::NONE`, emitting zero outline quads so text glyphs render at `alpha_mult` (0.3) directly over the background.
+- **Focused subdialog close button highlighting on Escape:**
+  - In `Console::escape_pressed`, `self.options.escape_held` now checks `matches!(self.windows.top(), Some(Window::Options | Window::SubDialog))` rather than strictly `Window::Options`. When a subdialog is focused, holding Escape down marks `escape_held = true`, rendering the subdialog's close button in the depressed, highlighted state (`ButtonState::pressed = true`) until Escape is released.
+  - `Window::SubDialog` escape handling delegates to `options.escape_closes()` and `options.escape()`, cancelling active placement drags or open combo dropdowns first before dismissing the subdialog.
 - **Verification:**
   - Added unit tests in `crates/hl2-ui/src/console.rs`:
     - `subdialog_buttons_can_be_activated_by_mouse_click`: verifies mouse click activation of OK and Cancel in `Sub::VideoAdvanced`, title bar close and bottom Close in `Sub::AudioCredits`, and OK in `Sub::Gamma`.
     - `keyboard_use_defaults_confirmation_works_with_click_and_keys`: verifies opening Use Defaults confirmation box, retaining it across frames, and activating OK restores default keybindings.
     - `out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline`: verifies no opaque text outline quads are emitted when the menu is out of focus.
+    - `a_held_escape_presses_subdialog_close_button_and_release_closes_it`: verifies holding Escape highlights the subdialog close button, release closes the subdialog and restores focus to Options, and in-progress drags are cancelled immediately.
   - Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
 
 

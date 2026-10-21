@@ -1350,6 +1350,8 @@ impl Console {
         if window == Window::Console {
             self.console_placement.end();
         }
+        self.escape_held = false;
+        self.options.escape_held = false;
         self.windows.close(window);
         self.reset_menu_interaction();
         self.sync_mode();
@@ -1507,9 +1509,13 @@ impl Console {
     /// the dialog closes then (owner request, 2026-10-17; retail closes on the press). Everything
     /// else Escape does happens at once.
     pub fn escape_pressed(&mut self) {
+        self.sync_dialog_windows();
         if self.escape_closes_dialog() {
             self.escape_held = true;
-            self.options.escape_held = self.windows.top() == Some(Window::Options);
+            self.options.escape_held = matches!(
+                self.windows.top(),
+                Some(Window::Options | Window::SubDialog)
+            );
         } else {
             self.escape();
         }
@@ -1517,6 +1523,7 @@ impl Console {
 
     /// Escape went up: closes the dialog whose close button it held.
     pub fn escape_released(&mut self) {
+        self.sync_dialog_windows();
         if std::mem::take(&mut self.escape_held) {
             self.options.escape_held = false;
             if self.escape_closes_dialog() {
@@ -1533,9 +1540,8 @@ impl Console {
             return false;
         }
         match self.windows.top() {
-            Some(Window::Options) => self.options.escape_closes(),
+            Some(Window::Options | Window::SubDialog) => self.options.escape_closes(),
             Some(Window::Console) => !self.console_placement.active() && !self.editor.can_dismiss(),
-            Some(Window::SubDialog) => true,
             Some(Window::Confirmation) => true,
             None => false,
         }
@@ -1578,7 +1584,7 @@ impl Console {
                 return;
             }
             Some(Window::SubDialog) => {
-                self.options.cancel_sub();
+                self.options.escape();
                 self.sync_dialog_windows();
                 return;
             }
@@ -5281,6 +5287,84 @@ mod tests {
         // Escape that does not close a dialog acts at once: the main menu has no dialog to close.
         console.escape_pressed();
         assert!(!console.escape_held);
+    }
+
+    #[test]
+    fn a_held_escape_presses_subdialog_close_button_and_release_closes_it() {
+        let mut console = installed_console();
+        console.set_mode(Mode::MainMenu);
+        console.set_mode(Mode::Options);
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::VideoAdvanced);
+        console.sync_dialog_windows();
+        assert_eq!(console.windows.top(), Some(Window::SubDialog));
+        assert!(console.options.has_sub());
+
+        // Press Escape while SubDialog is top: subdialog close button shows pressed
+        console.escape_pressed();
+        assert!(
+            console.options.escape_held,
+            "subdialog close button shows pressed while Escape is held"
+        );
+        assert!(
+            console.options.has_sub(),
+            "subdialog does not close on press"
+        );
+
+        // When drawn, verify no panic and quads emit cleanly
+        console.canvas.resize(1280., 720.);
+        console.draw(0.0);
+
+        // Release Escape: subdialog closes, focus and top return to Options
+        console.escape_released();
+        assert!(!console.options.escape_held);
+        assert!(
+            !console.options.has_sub(),
+            "subdialog closed on Escape release"
+        );
+        assert_eq!(
+            console.windows.top(),
+            Some(Window::Options),
+            "Options dialog is now top"
+        );
+
+        // Escape on Options now holds Options close button
+        console.escape_pressed();
+        assert!(console.options.escape_held);
+        console.escape_released();
+        assert_eq!(console.mode(), Mode::MainMenu);
+
+        // Test cancel drag first: dragging subdialog cancels drag immediately on Escape press
+        console.open_options();
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::VideoAdvanced);
+        console.sync_dialog_windows();
+        let bounds = console.window_bounds(Window::SubDialog);
+        let caption_pt = vec2(bounds.x + 50., bounds.y + 10.);
+        pointer_frame(&mut console, caption_pt, true, true, false);
+        pointer_frame(
+            &mut console,
+            caption_pt + vec2(100., 50.),
+            false,
+            true,
+            false,
+        );
+
+        // Escape cancels drag immediately without holding close button
+        console.escape_pressed();
+        assert!(!console.options.escape_held);
+        assert!(
+            console.options.has_sub(),
+            "subdialog still open after drag cancelled"
+        );
+
+        // Subsequent Escape press now holds the close button
+        console.escape_pressed();
+        assert!(console.options.escape_held);
+        console.escape_released();
+        assert!(!console.options.has_sub());
     }
 
     #[test]

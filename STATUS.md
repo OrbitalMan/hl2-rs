@@ -4,6 +4,11 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Focused subdialog close button highlights on held Escape (`hl2-ui::console`):**
+  - Updated `Console::escape_pressed` to set `options.escape_held = true` when `windows.top()` is `Some(Window::SubDialog)`, causing `OptionsDialog::draw` to render the subdialog's title-bar close button in pressed/highlighted state while Escape is held.
+  - Delegated `Window::SubDialog` escape handling in `Console::escape_closes_dialog` and `Console::escape` to `options.escape_closes()` and `options.escape()`, ensuring active drags and open combo dropdowns are cancelled first without prematurely closing the subdialog.
+  - Verified with unit test `console::tests::a_held_escape_presses_subdialog_close_button_and_release_closes_it`, `scripts/checks/validate.sh`, and `scripts/checks/check_windows.sh`. Visual appearance in packaged release runs is unverified, needs manual check.
+
 - **Options sub-dialog mouse clicks, Use Defaults confirmation, and out-of-focus title translucency (`hl2-ui::console`, `gameui::options`, `gameui::settings`):**
   - Synchronized dialog window input routing in `Console::windows_input` to route mouse clicks strictly to `active_options_window` (`Confirmation` > `SubDialog` > `Options`), preventing lower windows from wiping `ButtonTracker` state.
   - Added `"apply"` command mapping in `gameui::settings::command_binding` for `OptionsSubVideoAdvancedDlg.res`.
