@@ -965,6 +965,93 @@ mod tests {
     }
 
     #[test]
+    fn rpg_citizens_stand_off_near_the_player_and_guide_their_missile() {
+        let (mut h, npc, _) = setup(Kind::Companion { citizen: true });
+        h.rpg = true;
+        let mut c = ctx(5.);
+        // The enemy is the player himself (within RPG_SAFE_DISTANCE): no rocket.
+        c.player = Some(Vec3::X * 300.);
+        assert_eq!(
+            h.translate_schedule("SCHED_RANGE_ATTACK1", &npc, &c),
+            "SCHED_STANDOFF"
+        );
+        c.player = Some(Vec3::new(-400., 0., 0.));
+        assert_eq!(
+            h.translate_schedule("SCHED_RANGE_ATTACK1", &npc, &c),
+            "SCHED_CITIZEN_RANGE_ATTACK1_RPG"
+        );
+        // TASK_CIT_RPG_AUGER: waits for the launch, guides while the missile flies (the
+        // dot moves at most 90 units per think toward the enemy), ends with the missile.
+        let mut m = FakeMotor::default();
+        let mut npc = npc;
+        h.start_task(
+            &mut npc,
+            "TASK_CIT_RPG_AUGER",
+            &TaskArg::Number(1.),
+            &c,
+            &mut m,
+        );
+        assert_eq!(h.rpg_auger(&c), TaskStatus::Running);
+        assert_eq!(h.rpg_laser, None);
+        h.missile_out = true;
+        c.enemy = Some((2, Vec3::new(300., 500., 0.)));
+        assert_eq!(h.rpg_auger(&c), TaskStatus::Running);
+        // The dot starts at the shoot target (the enemy eye) and is pulled 90 units.
+        let first = h.rpg_laser_base;
+        assert!(
+            (first.distance(Vec3::new(300., 0., 64.)) - 90.).abs() < 1e-3,
+            "{first}"
+        );
+        assert!(h.rpg_laser.is_some());
+        h.rpg_auger(&c);
+        assert!((h.rpg_laser_base - first).length() <= 90. + 1e-3);
+        h.missile_out = false;
+        assert_eq!(h.rpg_auger(&c), TaskStatus::Complete);
+        assert_eq!(h.rpg_laser, None);
+    }
+
+    #[test]
+    fn elites_alt_fire_only_with_a_grenade_a_clear_path_and_after_the_delay() {
+        let (mut h, npc, _) = setup(Kind::Combine);
+        let c = ctx(5.);
+        h.now = 5.;
+        h.alt_fire_probe = Some(Vec3::new(300., 0., 48.));
+        // Not an elite.
+        assert_eq!(
+            h.translate_schedule("SCHED_RANGE_ATTACK1", &npc, &c),
+            "SCHED_COMBINE_RANGE_ATTACK1"
+        );
+        h.elite = true;
+        // No grenades: CanAltFireEnemy refuses (designers disable balls with 0).
+        assert_eq!(
+            h.translate_schedule("SCHED_RANGE_ATTACK1", &npc, &c),
+            "SCHED_COMBINE_RANGE_ATTACK1"
+        );
+        h.grenades = 1;
+        assert_eq!(
+            h.translate_schedule("SCHED_RANGE_ATTACK1", &npc, &c),
+            "SCHED_COMBINE_AR2_ALTFIRE"
+        );
+        assert_eq!(h.alt_fire_target, Vec3::new(300., 0., 48.));
+        assert_eq!(
+            h.translate_schedule("SCHED_ESTABLISH_LINE_OF_FIRE", &npc, &c),
+            "SCHED_COMBINE_AR2_ALTFIRE"
+        );
+        // After a shot: 10 s of plain attacks; a blocked path never alt-fires.
+        h.delay_alt_fire(10.);
+        assert_eq!(
+            h.translate_schedule("SCHED_RANGE_ATTACK1", &npc, &c),
+            "SCHED_COMBINE_RANGE_ATTACK1"
+        );
+        h.now = 15.1;
+        h.alt_fire_probe = None;
+        assert_eq!(
+            h.translate_schedule("SCHED_RANGE_ATTACK1", &npc, &c),
+            "SCHED_COMBINE_RANGE_ATTACK1"
+        );
+    }
+
+    #[test]
     fn combine_soldier_shoots_a_visible_enemy_and_hunts_an_occluded_one() {
         let (mut h, mut npc, s) = setup(Kind::Combine);
         let mut m = FakeMotor::default();
