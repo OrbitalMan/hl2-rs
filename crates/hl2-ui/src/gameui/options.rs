@@ -1063,6 +1063,21 @@ impl OptionsDialog {
         self.keys.capture.is_some()
     }
 
+    /// A sub-dialog is open over this options dialog.
+    pub fn has_sub(&self) -> bool {
+        self.sub.is_some()
+    }
+
+    /// The options reset defaults confirmation box is open.
+    pub fn has_confirm(&self) -> bool {
+        self.confirm.is_some()
+    }
+
+    /// Dismisses the confirmation box.
+    pub fn dismiss_confirm(&mut self) {
+        self.confirm = None;
+    }
+
     /// The dialog's frame on `canvas`, in canvas pixels, where it is placed.
     pub fn frame_bounds(&self, canvas: Vec2) -> Rect {
         let frame = main_frame(canvas);
@@ -1073,6 +1088,40 @@ impl OptionsDialog {
             placed.size.x * frame.scale,
             placed.size.y * frame.scale,
         )
+    }
+
+    /// A sub-dialog's frame on `canvas`, in canvas pixels, if one is open.
+    pub fn sub_bounds(&self, canvas: Vec2) -> Rect {
+        if let Some(sub) = self.sub {
+            let size = self.sub_frame_size(sub, |s| s.chars().count() as f32 * 7.);
+            let frame = sub_frame(canvas, size);
+            let placed = self.sub_placement.place(&frame);
+            Rect::new(
+                placed.origin.x,
+                placed.origin.y,
+                placed.size.x * frame.scale,
+                placed.size.y * frame.scale,
+            )
+        } else {
+            Rect::default()
+        }
+    }
+
+    /// The options reset confirmation frame on `canvas`, in canvas pixels, if one is open.
+    pub fn confirm_bounds(&self, canvas: Vec2) -> Rect {
+        if let Some(confirm) = &self.confirm {
+            let size = confirm.layout(|s| s.chars().count() as f32 * 7.).size;
+            let frame = confirm_frame(canvas, size);
+            let placed = self.confirm_placement.place(&frame);
+            Rect::new(
+                placed.origin.x,
+                placed.origin.y,
+                placed.size.x * frame.scale,
+                placed.size.y * frame.scale,
+            )
+        } else {
+            Rect::default()
+        }
     }
 
     /// A layer that takes every click while it is open, wherever the pointer is: a sub-dialog
@@ -1557,7 +1606,7 @@ impl OptionsDialog {
         }
     }
 
-    fn open_sub(&mut self, sub: Sub) {
+    pub(crate) fn open_sub(&mut self, sub: Sub) {
         self.sub_placement.reset();
         self.sub_saved = Some(self.draft.config.clone());
         self.sub = Some(sub);
@@ -1577,7 +1626,7 @@ impl OptionsDialog {
     }
 
     /// Cancel, Escape or the title-bar close of a sub-dialog: its edits are dropped.
-    fn cancel_sub(&mut self) {
+    pub fn cancel_sub(&mut self) {
         if let Some(saved) = self.sub_saved.take() {
             self.draft.config = saved;
         }
@@ -2015,8 +2064,13 @@ impl OptionsDialog {
             scale,
         };
         let p = painter_at(self.placement.place(&main_frame(canvas)).origin);
-        // Layers drawn over this dialog (sub-dialogs, the confirmation box) are opaque.
-        let stacked = base.theme.stacked();
+        // Sub-dialogs and confirmation boxes adapt their focus theme based on which is topmost.
+        let sub_theme = if self.confirm.is_some() {
+            base.theme.stacked().focus_faded(0.0, false)
+        } else {
+            base.theme.stacked().focus_faded(1.0, true)
+        };
+        let confirm_theme = base.theme.stacked().focus_faded(1.0, true);
         let loc = &self.res.localization;
         let env = Env {
             localization: loc,
@@ -2107,7 +2161,7 @@ impl OptionsDialog {
             let sp = Painter {
                 canvas: base.canvas,
                 fonts: base.fonts,
-                theme: &stacked,
+                theme: &sub_theme,
                 origin: self.sub_placement.place(&sub_frame(canvas, size)).origin,
                 scale,
             };
@@ -2145,7 +2199,7 @@ impl OptionsDialog {
         if let Some(confirm) = &self.confirm {
             let layout = confirm.layout(|t| p.text_width(t, false));
             let cp = Painter {
-                theme: &stacked,
+                theme: &confirm_theme,
                 ..painter_at(
                     self.confirm_placement
                         .place(&confirm_frame(canvas, layout.size))

@@ -1270,3 +1270,26 @@ as the original does.
   console's frame, is part of the console for hit tests (`Console::window_contains`). Scripted
   replays carry no times, so packaged captures show finished fades; the 0.3 s timing is unit
   tested (the host feeds input and drawing from the same real-time clock).
+
+## 15. Unified single-focus state for menus and dialogs (2026-10-21)
+
+Unified focus model across the main/sub menu and all dialogs (Options, dev console, sub-dialogs,
+and confirmation dialogs):
+- **Single active focus invariant:** strictly one surface (`Layer::Base` or `Layer::Window(top)`)
+  holds keyboard and primary interaction focus at any given moment (`Windows::focus()`).
+- **Hierarchy and translucency:**
+  - When a sub-dialog (e.g. Video Advanced, Keyboard Advanced) opens over Options, Options loses focus
+    and transitions to translucent (`Theme::focus_faded` using `Frame.OutOfFocusBgColor`).
+  - When a confirmation dialog (e.g. Video Keep/Revert) opens over a sub-dialog, the sub-dialog loses focus
+    and transitions to translucent.
+  - When any dialog is open over the main or submenu, the base layer loses focus: the Half-Life 2
+    logo, chapter subtitle, and menu buttons transition to translucent using the 0.3 s fade time and
+    unfocused alpha factor (0.3) declared in `assets/ui/tuning.json` (`ui_fade_duration`,
+    `unfocused_alpha_factor`, matching `sourcescheme.res` `Frame.FocusTransitionEffectTime` and
+    `Frame.OutOfFocusBgColor` ratio `62 / 212`).
+  - Closing the top-most focused dialog restores focus step by step to the parent dialog, and finally
+    back to the main menu when all dialogs are dismissed.
+- **Shared layer management:** managed centrally via `gameui::windows::Windows` (`Window::SubDialog`,
+  `Window::Confirmation`, `Windows::base_focus_amount`) and synchronized through `Console::sync_dialog_windows`,
+  eliminating per-dialog focus checks.
+

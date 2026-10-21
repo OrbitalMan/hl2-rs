@@ -16,10 +16,21 @@
 use glam::Vec2;
 
 /// A dialog window over the base layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum Window {
     Options,
     Console,
+    /// A sub-dialog over a parent dialog (e.g. Video Advanced, Keyboard Advanced, Gamma, Credits).
+    SubDialog,
+    /// A modal confirmation / message box dialog (Quit, Return to menu, Video keep, Reset defaults).
+    Confirmation,
+}
+
+impl Window {
+    /// Whether this window is modal (captures focus until closed).
+    pub fn is_modal(&self) -> bool {
+        matches!(self, Window::SubDialog | Window::Confirmation)
+    }
 }
 
 /// A layer that can take the pointer or the keyboard.
@@ -61,9 +72,11 @@ impl Fade {
 }
 
 /// The open windows, bottom to top, and the focus.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Windows {
     order: Vec<(Window, Fade)>,
+    /// Fade state of the base (main menu / gameplay). 1.0 when base is focused, 0.0 when out of focus.
+    base_fade: Fade,
     /// The base has the focus although windows are open.
     base_focused: bool,
     /// The layer the held button belongs to.
@@ -72,6 +85,23 @@ pub struct Windows {
     now: f64,
     /// `Frame.FocusTransitionEffectTime` in seconds.
     pub fade_time: f32,
+}
+
+impl Default for Windows {
+    fn default() -> Self {
+        Self {
+            order: Vec::new(),
+            base_fade: Fade {
+                from: 1.,
+                to: 1.,
+                start: 0.,
+            },
+            base_focused: false,
+            press: None,
+            now: 0.,
+            fade_time: 0.3,
+        }
+    }
 }
 
 impl Windows {
@@ -96,6 +126,16 @@ impl Windows {
         self.order.is_empty()
     }
 
+    /// Whether any modal window (SubDialog or Confirmation) is open.
+    pub fn has_modal(&self) -> bool {
+        self.order.iter().any(|(w, _)| w.is_modal())
+    }
+
+    /// Whether the specified layer holds focus.
+    pub fn is_focused(&self, layer: Layer) -> bool {
+        self.focus() == layer
+    }
+
     /// The open windows, bottom to top.
     pub fn order(&self) -> impl DoubleEndedIterator<Item = Window> + '_ {
         self.order.iter().map(|(w, _)| *w)
@@ -105,12 +145,25 @@ impl Windows {
         self.order.last().map(|(w, _)| *w)
     }
 
-    /// The layer with the keyboard focus: the top window unless the base took it.
+    /// The layer with the focus: exactly one element holds focus at any time.
+    /// If a modal window is open, the topmost modal window holds focus.
+    /// Otherwise, the top window holds focus unless the base took it.
+    /// If no windows are open, the base holds focus.
     pub fn focus(&self) -> Layer {
+        if self.has_modal() {
+            if let Some(top) = self.top() {
+                return Layer::Window(top);
+            }
+        }
         match self.top() {
             Some(top) if !self.base_focused => Layer::Window(top),
             _ => Layer::Base,
         }
+    }
+
+    /// How far the base layer is faded towards its focused look (0 out of focus, 1 in focus).
+    pub fn base_focus_amount(&self, now: f64) -> f32 {
+        self.base_fade.at(now, self.fade_time)
     }
 
     /// Opens `window` on top with the focus (or raises it if it is open).
@@ -150,11 +203,20 @@ impl Windows {
         self.order.clear();
         self.base_focused = false;
         self.press = None;
+        let now = self.now;
+        let duration = self.fade_time;
+        if self.base_fade.to != 1. {
+            self.base_fade = Fade {
+                from: self.base_fade.at(now, duration),
+                to: 1.,
+                start: now,
+            };
+        }
     }
 
     /// Gives the keyboard focus to the base; the windows keep their order.
     pub fn focus_base(&mut self) {
-        if !self.order.is_empty() {
+        if !self.has_modal() && !self.order.is_empty() {
             self.set_focus(Layer::Base);
         }
     }
@@ -185,6 +247,15 @@ impl Windows {
                 Layer::Base => true,
             });
         let layer = pressed.or_else(|| {
+            if let Some(top_modal) = self
+                .order
+                .iter()
+                .rev()
+                .find(|(w, _)| w.is_modal())
+                .map(|(w, _)| *w)
+            {
+                return Some(Layer::Window(top_modal));
+            }
             if let Some(window) = modal.filter(|w| self.is_open(*w)) {
                 return Some(Layer::Window(window));
             }
@@ -230,6 +301,22 @@ impl Windows {
         self.base_focused = focus == Layer::Base;
         let now = self.now;
         let duration = self.fade_time;
+
+        // Base focus fade
+        let base_to = if self.base_focused || self.order.is_empty() {
+            1.
+        } else {
+            0.
+        };
+        if self.base_fade.to != base_to {
+            self.base_fade = Fade {
+                from: self.base_fade.at(now, duration),
+                to: base_to,
+                start: now,
+            };
+        }
+
+        // Each window focus fade
         for (window, fade) in &mut self.order {
             let to = if focus == Layer::Window(*window) {
                 1.
@@ -257,6 +344,8 @@ mod tests {
         match window {
             Window::Options => p.x < 100.,
             Window::Console => (50. ..150.).contains(&p.x),
+            Window::SubDialog => (20. ..80.).contains(&p.x),
+            Window::Confirmation => (30. ..70.).contains(&p.x),
         }
     }
 
@@ -460,5 +549,80 @@ mod tests {
         );
         assert!(w.focus_amount(Window::Options, 10.45) > 1. - 1e-4);
         assert_eq!(w.focus_amount(Window::Console, 10.45), 0., "not open");
+    }
+
+    #[test]
+    fn single_focus_state_machine_across_menus_dialogs_and_subdialogs() {
+        let mut w = Windows::new(0.3);
+        w.set_time(0.0);
+
+        // 1. Main menu alone (focused)
+        assert_eq!(w.focus(), Layer::Base);
+        assert!(w.is_focused(Layer::Base));
+        assert_eq!(w.base_focus_amount(0.0), 1.0);
+
+        // 2. Main menu + dialog (dialog focused, main menu unfocused)
+        w.open(Window::Options);
+        assert_eq!(w.focus(), Layer::Window(Window::Options));
+        assert!(w.is_focused(Layer::Window(Window::Options)));
+        assert!(!w.is_focused(Layer::Base));
+        assert_eq!(w.focus_amount(Window::Options, 0.0), 1.0);
+        // Base fades out towards 0.0
+        assert!((w.base_focus_amount(0.3) - 0.0).abs() < 1e-4);
+
+        // 3. Parent dialog + sub-dialog (sub-dialog focused, parent and main menu unfocused)
+        w.set_time(1.0);
+        w.open(Window::SubDialog);
+        assert_eq!(w.focus(), Layer::Window(Window::SubDialog));
+        assert!(w.is_focused(Layer::Window(Window::SubDialog)));
+        assert!(!w.is_focused(Layer::Window(Window::Options)));
+        assert!(!w.is_focused(Layer::Base));
+        assert_eq!(w.focus_amount(Window::SubDialog, 1.0), 1.0);
+        // Options fades out towards 0.0
+        assert!((w.focus_amount(Window::Options, 1.3) - 0.0).abs() < 1e-4);
+
+        // 4. Options + Dev console open simultaneously (strictly one focused)
+        let mut w2 = Windows::new(0.3);
+        w2.set_time(0.0);
+        w2.open(Window::Options);
+        assert_eq!(w2.focus(), Layer::Window(Window::Options));
+        w2.open(Window::Console);
+        assert_eq!(w2.focus(), Layer::Window(Window::Console));
+        assert!(!w2.is_focused(Layer::Window(Window::Options)));
+        // Switch focus back to options (raising it)
+        w2.raise(Window::Options);
+        assert_eq!(w2.focus(), Layer::Window(Window::Options));
+        assert!(!w2.is_focused(Layer::Window(Window::Console)));
+
+        // 5. Sequential closing restoring focus step by step
+        // Start from Options -> SubDialog -> Confirmation
+        w.set_time(2.0);
+        w.open(Window::Confirmation);
+        assert_eq!(w.focus(), Layer::Window(Window::Confirmation));
+        assert!(!w.is_focused(Layer::Window(Window::SubDialog)));
+        assert!(!w.is_focused(Layer::Window(Window::Options)));
+        assert!(!w.is_focused(Layer::Base));
+
+        // Close Confirmation -> restores to SubDialog
+        w.set_time(3.0);
+        w.close(Window::Confirmation);
+        assert_eq!(w.focus(), Layer::Window(Window::SubDialog));
+        assert!(w.is_focused(Layer::Window(Window::SubDialog)));
+        assert!(!w.is_focused(Layer::Window(Window::Options)));
+        assert!(!w.is_focused(Layer::Base));
+
+        // Close SubDialog -> restores to Options
+        w.set_time(4.0);
+        w.close(Window::SubDialog);
+        assert_eq!(w.focus(), Layer::Window(Window::Options));
+        assert!(w.is_focused(Layer::Window(Window::Options)));
+        assert!(!w.is_focused(Layer::Base));
+
+        // Close Options -> restores to Main Menu (Base)
+        w.set_time(5.0);
+        w.close(Window::Options);
+        assert_eq!(w.focus(), Layer::Base);
+        assert!(w.is_focused(Layer::Base));
+        assert!((w.base_focus_amount(5.3) - 1.0).abs() < 1e-4);
     }
 }

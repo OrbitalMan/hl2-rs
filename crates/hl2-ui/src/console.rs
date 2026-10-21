@@ -1199,10 +1199,37 @@ impl Console {
     /// Keeps `mode` on the focused layer after the windows changed.
     fn sync_mode(&mut self) {
         self.mode = match self.windows.focus() {
-            Layer::Window(Window::Options) => Mode::Options,
+            Layer::Window(Window::Options | Window::SubDialog) => Mode::Options,
             Layer::Window(Window::Console) => Mode::Console,
+            Layer::Window(Window::Confirmation) => {
+                if self.options_open() {
+                    Mode::Options
+                } else {
+                    self.base
+                }
+            }
             Layer::Base => self.base,
         };
+    }
+
+    /// Synchronizes sub-dialog and confirmation modal windows in `self.windows`.
+    pub(crate) fn sync_dialog_windows(&mut self) {
+        let has_sub = self.options.has_sub();
+        let has_confirm = self.confirm_box.is_some() || self.options.has_confirm();
+
+        if has_sub && !self.windows.is_open(Window::SubDialog) {
+            self.windows.open(Window::SubDialog);
+        } else if !has_sub && self.windows.is_open(Window::SubDialog) {
+            self.windows.close(Window::SubDialog);
+        }
+
+        if has_confirm && !self.windows.is_open(Window::Confirmation) {
+            self.windows.open(Window::Confirmation);
+        } else if !has_confirm && self.windows.is_open(Window::Confirmation) {
+            self.windows.close(Window::Confirmation);
+        }
+
+        self.sync_mode();
     }
 
     /// The Options dialog is open (focused or not).
@@ -1302,10 +1329,9 @@ impl Console {
 
     /// A window's frame on the canvas, in canvas pixels.
     pub fn window_bounds(&self, window: Window) -> Rect {
+        let canvas = vec2(self.canvas.width(), self.canvas.height());
         match window {
-            Window::Options => self
-                .options
-                .frame_bounds(vec2(self.canvas.width(), self.canvas.height())),
+            Window::Options => self.options.frame_bounds(canvas),
             Window::Console => {
                 let layout = self.dialog_layout();
                 Rect::new(
@@ -1314,6 +1340,22 @@ impl Console {
                     layout.size.x * layout.scale,
                     layout.size.y * layout.scale,
                 )
+            }
+            Window::SubDialog => self.options.sub_bounds(canvas),
+            Window::Confirmation => {
+                if let Some((confirm, _)) = &self.confirm_box {
+                    let frame = self.quit_frame(confirm);
+                    Rect::new(
+                        frame.origin.x,
+                        frame.origin.y,
+                        frame.size.x * frame.scale,
+                        frame.size.y * frame.scale,
+                    )
+                } else if self.options.has_confirm() {
+                    self.options.confirm_bounds(canvas)
+                } else {
+                    Rect::default()
+                }
             }
         }
     }
@@ -1430,6 +1472,8 @@ impl Console {
         match self.windows.top() {
             Some(Window::Options) => self.options.escape_closes(),
             Some(Window::Console) => !self.console_placement.active() && !self.editor.can_dismiss(),
+            Some(Window::SubDialog) => true,
+            Some(Window::Confirmation) => true,
             None => false,
         }
     }
@@ -1459,10 +1503,21 @@ impl Console {
                 let effect = self.revert_video(keep.previous);
                 self.deferred.push(effect);
             }
+            self.sync_dialog_windows();
             return;
         }
         // Escape closes the top window first, whichever layer has the focus.
         match self.windows.top() {
+            Some(Window::Confirmation) => {
+                self.options.dismiss_confirm();
+                self.sync_dialog_windows();
+                return;
+            }
+            Some(Window::SubDialog) => {
+                self.options.cancel_sub();
+                self.sync_dialog_windows();
+                return;
+            }
             Some(Window::Options) => {
                 if !self.options.escape() {
                     self.close_window(Window::Options);
@@ -2054,8 +2109,15 @@ impl Console {
             let layer = Layer::Window(window);
             let share = input.share(owner == Some(layer), focus == layer);
             effects.extend(match window {
-                Window::Options => self.options_input(&share),
+                Window::Options | Window::SubDialog => self.options_input(&share),
                 Window::Console => self.console_input(&share),
+                Window::Confirmation => {
+                    if self.confirm_box.is_some() {
+                        self.confirm_input(input)
+                    } else {
+                        self.options_input(&share)
+                    }
+                }
             });
             if self.confirm_box.is_some() || self.modal_dialog_open() {
                 return effects;
@@ -2877,6 +2939,22 @@ impl Console {
             }
             let geometry = self.menu_layout.geometry_for(self.canvas_size());
             let title = self.current_title();
+            let base_focus = self.windows.base_focus_amount(time);
+            let unfocused_alpha = crate::tuning::unfocused_alpha_factor();
+            let alpha_mult = unfocused_alpha + (1.0 - unfocused_alpha) * base_focus;
+
+            let title_color = Color::new(1., 1., 1., alpha_mult);
+            let sub_color = if alpha_mult >= 1.0 - 1e-4 {
+                Color::from_rgba(255, 255, 255, 200)
+            } else {
+                Color::new(1., 1., 1., (200.0 / 255.0) * alpha_mult)
+            };
+            let sub_outline = if alpha_mult >= 1.0 - 1e-4 {
+                TextOutline::DEFAULT
+            } else {
+                TextOutline::new(Color::new(0., 0., 0., 0.8 * alpha_mult), 1.0)
+            };
+
             if let Some(face) = &self.title_face {
                 let em = geometry.title_tall * self.title_metrics.em_per_cell;
                 for (line_idx, line) in title.lines().enumerate() {
@@ -2918,7 +2996,7 @@ impl Console {
                                 geometry.title_tall,
                                 self.title_font.as_ref(),
                                 self.title_metrics,
-                                WHITE,
+                                title_color,
                             );
                         }
                     } else {
@@ -2932,8 +3010,8 @@ impl Console {
                                 geometry.title_tall,
                                 self.lostcoast_title_font.as_ref(),
                                 self.lostcoast_title_metrics,
-                                Color::from_rgba(255, 255, 255, 200),
-                                TextOutline::DEFAULT,
+                                sub_color,
+                                sub_outline,
                             );
                         } else if self.title_font_can_render(line) {
                             draw_cell_text_outlined(
@@ -2942,8 +3020,8 @@ impl Console {
                                 geometry.title_tall,
                                 self.title_font.as_ref(),
                                 self.title_metrics,
-                                Color::from_rgba(255, 255, 255, 200),
-                                TextOutline::DEFAULT,
+                                sub_color,
+                                sub_outline,
                             );
                         } else {
                             let sub_tall = (geometry.title_tall * 0.55).round().max(14.);
@@ -2953,8 +3031,8 @@ impl Console {
                                 sub_tall,
                                 self.menu_font.as_ref(),
                                 self.menu_metrics,
-                                Color::from_rgba(255, 255, 255, 200),
-                                TextOutline::DEFAULT,
+                                sub_color,
+                                sub_outline,
                             );
                         }
                     }
@@ -2985,11 +3063,15 @@ impl Console {
                         self.menu_font.as_ref(),
                         self.menu_metrics,
                         if line_idx == 0 {
-                            WHITE
+                            title_color
                         } else {
-                            Color::from_rgba(255, 255, 255, 200)
+                            sub_color
                         },
-                        TextOutline::DEFAULT,
+                        if line_idx == 0 {
+                            TextOutline::DEFAULT
+                        } else {
+                            sub_outline
+                        },
                     );
                 }
             }
@@ -3027,6 +3109,21 @@ impl Console {
                 } else {
                     Color::new(0.0, 0.0, 0.0, 0.45)
                 };
+                let color = if alpha_mult >= 1.0 - 1e-4 {
+                    color
+                } else {
+                    Color::new(color.r, color.g, color.b, color.a * alpha_mult)
+                };
+                let border_color = if alpha_mult >= 1.0 - 1e-4 {
+                    border_color
+                } else {
+                    Color::new(
+                        border_color.r,
+                        border_color.g,
+                        border_color.b,
+                        border_color.a * alpha_mult,
+                    )
+                };
                 let offset = if is_pressed { vec2(1., 1.) } else { Vec2::ZERO };
                 draw_cell_text_outlined(
                     &entry.label,
@@ -3049,6 +3146,7 @@ impl Console {
                     });
                 }
                 Window::Console => self.draw_console(time),
+                Window::SubDialog | Window::Confirmation => {}
             }
         }
         // The confirmation box is modal over every window.
@@ -6740,5 +6838,48 @@ mod tests {
         console.escape();
         assert!(!console.options_open());
         assert_eq!(console.mode(), Mode::MainMenu);
+    }
+
+    #[test]
+    fn main_menu_loses_focus_and_becomes_translucent_when_dialog_opens_and_restores_on_close() {
+        let mut console = installed_console();
+        console.set_mode(Mode::MainMenu);
+        console.canvas.resize(1280., 720.);
+
+        // Initially main menu has focus
+        assert_eq!(console.windows.focus(), Layer::Base);
+        assert_eq!(console.windows.base_focus_amount(0.0), 1.0);
+
+        // Open Options dialog: main menu loses focus and becomes translucent
+        console.open_options();
+        console.windows.set_time(0.0);
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Options));
+        assert_eq!(console.windows.focus_amount(Window::Options, 0.0), 1.0);
+        // Base fades to 0.0
+        assert!((console.windows.base_focus_amount(0.3) - 0.0).abs() < 1e-4);
+
+        // Open SubDialog inside Options
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::VideoAdvanced);
+        console.sync_dialog_windows();
+        console.windows.set_time(1.0);
+        assert_eq!(console.windows.focus(), Layer::Window(Window::SubDialog));
+        // Parent options is now unfocused
+        assert!((console.windows.focus_amount(Window::Options, 1.3) - 0.0).abs() < 1e-4);
+
+        // Close SubDialog: restores focus to Options
+        console.options.cancel_sub();
+        console.sync_dialog_windows();
+        console.windows.set_time(2.0);
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Options));
+        assert!((console.windows.focus_amount(Window::Options, 2.3) - 1.0).abs() < 1e-4);
+
+        // Close Options: restores focus to MainMenu (Base)
+        console.close_window(Window::Options);
+        console.sync_dialog_windows();
+        console.windows.set_time(3.0);
+        assert_eq!(console.windows.focus(), Layer::Base);
+        assert!((console.windows.base_focus_amount(3.3) - 1.0).abs() < 1e-4);
     }
 }

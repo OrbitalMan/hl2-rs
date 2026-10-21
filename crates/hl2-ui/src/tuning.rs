@@ -15,6 +15,10 @@ struct Tuning {
     widescreen_menu_scale_max: f32,
     /// Rows of the tallest menu: the stack whose bottom stays put when the menu grows.
     menu_stack_rows: u32,
+    /// Duration of UI focus and window fade animations in seconds (matching sourcescheme Frame.FocusTransitionEffectTime).
+    ui_fade_duration: f32,
+    /// Unfocused title/subtitle opacity factor (ratio of Frame.OutOfFocusBgColor to Frame.BgColor).
+    unfocused_alpha_factor: f32,
     /// Seconds before an unconfirmed video change reverts (`gameui::video_confirm`).
     video_confirm_seconds: f64,
     /// Smallest and largest explicit vertical field of view of the Video > Advanced slider
@@ -127,6 +131,16 @@ pub fn menu_stack_rows() -> f32 {
 /// Seconds before an unconfirmed video change reverts.
 pub fn video_confirm_seconds() -> f64 {
     data().video_confirm_seconds
+}
+
+/// Duration of UI focus and window fade animations in seconds.
+pub fn ui_fade_duration() -> f32 {
+    data().ui_fade_duration
+}
+
+/// Unfocused title and subtitle alpha multiplier.
+pub fn unfocused_alpha_factor() -> f32 {
+    data().unfocused_alpha_factor
 }
 
 /// Smallest and largest explicit vertical field of view (degrees).

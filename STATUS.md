@@ -4,6 +4,14 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Unified single-focus state across menus, dialogs, and sub-dialogs (`gameui::windows`, `console`, `gameui::options`):**
+  - Enforced single-focus invariant in `Windows::focus()`: strictly one layer (`Layer::Base` or `Layer::Window(top)`) holds keyboard and primary interaction focus at any time.
+  - Sub-dialogs and confirmation dialogs integrated into `Windows` enum as modal layers (`Window::SubDialog`, `Window::Confirmation`), synchronized through `Console::sync_dialog_windows()`.
+  - When sub-dialogs or confirmation dialogs open, parent dialogs lose focus and transition to translucent (`Theme::focus_faded` using `Frame.OutOfFocusBgColor`).
+  - When any dialog opens over the main/sub menu, the main menu loses focus: the title, subtitle, and menu buttons fade to translucent using `base_focus_amount(time)` and `unfocused_alpha_factor: 0.3` (matching `sourcescheme.res` `Frame.OutOfFocusBgColor`).
+  - Closing dialogs restores focus step by step back to the next parent dialog, or to the main menu when all dialogs are dismissed.
+  - Verified with unit tests (`single_focus_state_machine_across_menus_dialogs_and_subdialogs`, `main_menu_loses_focus_and_becomes_translucent_when_dialog_opens_and_restores_on_close`), `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`. Visual smoothness is unverified, needs manual check.
+
 - **Automated target cleaner & build verification (`scripts/checks/clean_target.py`, `scripts/clean-target.sh`, `launch-bevy.sh`):**
   - Added standalone cleaner supporting `--stale` (default: prunes orphaned incremental sessions, stale `.rcgu.o` object files, old test runners and superseded `.rlib` archives for workspace crates, leaving active builds and 3rd-party crates intact), `--workspace` (`cargo clean -p ...` without touching Bevy/wgpu/Rapier), and `--dry-run`.
   - Integrated into `launch-bevy.sh`: added `--clean` flag and auto-pruning of stale hashes whenever a git branch change is detected.

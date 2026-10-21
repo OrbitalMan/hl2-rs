@@ -1,5 +1,41 @@
 # MODLOG
 
+## 2026-10-21 UI: unified single-focus state for menus, dialogs, and sub-dialogs
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Unified window and focus model (`hl2-ui::gameui::windows`):
+  - Extended `Window` enum with `SubDialog` and `Confirmation` (`is_modal()` support).
+  - Enforced single-focus invariant in `Windows::focus()`: strictly one element (`Layer::Base` or `Layer::Window(top)`) holds focus at any time.
+  - Added `base_fade: Fade` tracking the main/sub menu and base layer focus transitions, with `Windows::base_focus_amount(time)` and `Windows::is_focused(layer)`.
+- Dialog synchronization & translucent hierarchy (`hl2-ui::console`, `hl2-ui::gameui::options`):
+  - Added `Console::sync_dialog_windows()` to automatically keep `windows` synchronized with `options.sub`, `options.confirm`, and `confirm_box`.
+  - Scaled main menu Half-Life 2 title, subtitle, and menu buttons by `base_focus_amount(time)` so the main menu transitions to translucent when any dialog is open, smoothly restoring to 100% opacity when all dialogs close.
+  - Replaced hardcoded `theme.stacked()` in sub-dialogs and confirmation boxes with `sub_theme` and `confirm_theme` using `Theme::focus_faded`, making parent dialogs render translucent (`Frame.OutOfFocusBgColor`) when child dialogs open.
+- Data-driven UI tuning (`assets/ui/tuning.json`, `hl2-ui::tuning`):
+  - Added `ui_fade_duration: 0.3` (matching `sourcescheme.res` `Frame.FocusTransitionEffectTime`) and `unfocused_alpha_factor: 0.3` (derived from `sourcescheme.res` `Frame.OutOfFocusBgColor` ratio `62 / 212`).
+
+**Why:** owner request: enforce a single shared focus model across the main/sub menu and all dialogs (options, confirmations, dev console, sub-dialogs). When child dialogs open, parent dialogs and the main menu must lose focus and become translucent; closing dialogs must restore focus back step by step.
+
+**Tested how:**
+- Added unit test `gameui::windows::tests::single_focus_state_machine_across_menus_dialogs_and_subdialogs` verifying all 5 required state transitions:
+  1. Main menu alone (focused).
+  2. Main menu + dialog (dialog focused, main menu unfocused and fading).
+  3. Parent dialog + sub-dialog (sub-dialog focused, parent and main menu unfocused).
+  4. Options + Dev console open simultaneously (strictly one focused, raising shifts focus).
+  5. Sequential closing restoring focus step by step (Confirmation -> SubDialog -> Options -> Main Menu).
+- Added unit test `console::tests::main_menu_loses_focus_and_becomes_translucent_when_dialog_opens_and_restores_on_close`.
+- Ran full workspace test and verification suite via `scripts/checks/validate.sh` (342 `hl2-ui` tests, 93 `hl2-bevy` tests, strict clippy `-D warnings`, `cargo fmt`).
+- Ran `scripts/checks/check_windows.sh` (`x86_64-pc-windows-msvc` cross-clippy).
+
+**Result:** single shared focus invariant guaranteed across all menus and dialog layers with hierarchical focus-fading.
+
+**Still broken or not tested:** visual appearance of in-game focus transitions is unverified, needs manual check.
+
+**Next:** Task 2 (shared fade-in/out and focus-transition animations for dialogs).
+
+
 ## 2026-10-21 Build & target maintenance: automated target cleaner and launch-bevy build validation
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
