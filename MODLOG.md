@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-21 session 27 (cont.): player-ally speech through the talker response rules (`wip/runtime-entities-20261021`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 AI_ResponseSystem.cpp/h (CResponseSystem parsing, matching, response groups), AI_Criteria, ai_speech.cpp (CAI_Expresser criteria), ai_playerally.cpp (g_ConceptInfos, SpeakIfAllowed/IsAllowedToSpeak/IsOkToSpeak, GatherEnemyConditions, OnStartSchedule, OnKilledNPC, PainSound), npc_citizen17.cpp/npc_barney.cpp/npc_alyx.cpp DeathSound; installed scripts/talker/*.txt and scenes.image.
+
+**Changed:** new `ai::talker` (response system) and `ai::ally_speech` (ally gates, criteria, concept table, scene sound resolution); runtime hooks (CopRequest::Concept, companion pain/death, STARTCOMBAT/ENEMY_DEAD in the speech block, HIDEANDRELOAD on schedule start, diagnostics.ally_speech); audio preloads the ally cues.
+
+**Why:** owner step 14 speech list (citizens' response-rule concepts; NPCs were mute in fights except cops/soldiers).
+
+**Tested how / Result:** talker and ally unit tests (rule scoring, depletion, matchers, gates), owned probe of the installed rules (182 rules, 175 groups, no warnings), workspace release tests (hl2-simulation 334; two known release-only failures), strict Clippy/fmt; packaged artifacts/s27/drop-view: a rebel calls "Combine!" (npc_citizen.combine02) as the fight starts and wound lines follow.
+
+**Still broken or not tested:** TLK_WATCHOUT, idle/hello/question-answer concepts, player/env_global criteria, scene gestures/flexes, real wave lengths for speak responses, squad speech; native comparison.
+
+**Next:** owner listening (gunfire and ally speech), squad speech, remaining 14r leftovers.
+
 ## 2026-10-21 session 27: silent far gunfire fixed, F4 Props tab, prop_physics_create/ent_create, combine attack announcement, hand-pose weapon drops (`wip/runtime-entities-20261021`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: retail engine.dll through the private Ghidra project (distance-variant mixers 100a3070/100a39b0, per-buffer channel volume 100a1db0, MIX_PaintChannels 100a47d0, SND_PickDynamicChannel 1008e990/1008ff40, channel stop time +0xa0 in 100a07d0, DSP convar registrations), installed scripts/dsp_presets.txt and soundscapes, SDK 2013 (c_soundscape.cpp, props.cpp CC_Prop_Physics_Create/CreatePhysicsProp/CBaseProp::Spawn, baseentity.cpp CC_Ent_Create, npc_combine.cpp TASK_ANNOUNCE_ATTACK, basecombatcharacter.cpp FInViewCone/Weapon_Drop, player.cpp m_flFieldOfView).

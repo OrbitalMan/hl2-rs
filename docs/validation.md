@@ -126,6 +126,8 @@ Packaged on d1_trainstation_04 (`--map d1_trainstation_04`, no globals when load
 Barrier: packaged `test-inputs/bevy-barrier-hum.json` with `--audio-trace` and a per-process recording; the touch loop (2.69 s) stays continuous for 7.8 s and 6.7 s inside the trigger and stops on leaving. Soundscapes: packaged `test-inputs/bevy-soundscapes.json` (spawn, hall at (-4304,-722) eye 128, outside at (-3104,-2018) eye 128, 12 s each) and native oracle views at the same places with `ORACLE_SETUP="volume 0.05;snd_mute_losefocus 0"`, both recorded per process. Background medians (dB): spawn -56.0 native / -58.7 ours, hall -53.5 / -51.9, outside -44.7 / -38.1 (open). Native stays silent while unfocused unless `snd_mute_losefocus 0`. Batches artifacts/ambient-inputs-regression and artifacts/soundscapes-regression: 26/17/26.
 
 ## Audio verification method (session 8, 2026-10-08)
+Session 27 (2026-10-21): for short distance-dependent sounds compare a far-only stretch of a per-process recording (trace: every play at the same premix, e.g. `#dv16`) against native at the same layout; check the trace's `started` volume too. Our far NPC gunfire measured -99 dB there because spatial players started at volume 0 for a frame (fixed a782904); the 25 ms far crack vanished while the 125 ms near layer survived, so level-only checks at mid range had missed it. Native layout: work/hl2-decompiled/npc-dsp-20261021 (street.sh, record_ours.py).
+
 
 Use this method for any "sound is cut / sounds different" report. Sink lifetimes and sample counts alone missed a real defect.
 
