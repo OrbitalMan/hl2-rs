@@ -1,5 +1,12 @@
 # Local validation — 2026-10-05
 
+## F4 overlay, ent_create and the main merge (session 28, 2026-10-21)
+
+- Unit tests: `ai::spawn` overlay clicks/scroll/filter/escape/common folder, ent_create placement and quoting; `spawn_panel` drawn-row hit test at 720 p; hl2-ui console routing keeps quoted values. Workspace release tests pass except the two known release-only should_panic image tests; owned suite (HL2_ROOT, `--ignored`) 54 pass; strict Clippy and fmt clean.
+- Packaged script runs (artifacts/s28, `run.sh`, `mkfix.py`): mouse-props (clicks spawn oildrum001_explosive, wood_crate001a and the filtered items/ammocrate_grenade in the d1_trainstation_02 plaza), mouse-npc (npc_combine_s_elite with weapon_ar2 by clicks), mouse-panel/mouse-common/mouse-page (filter "barrel", common folder with names, wheel + PageDown with 28 rows), entcreate (angles yaw 180). Real mouse input not tested.
+- Regression batch artifacts/s28-regression vs s27-regression-b: weapons 17/17, attention 26/26, movement 25/26 (known doll01 PHY root rotation warning); only the Breen slate exposure differs (max 12 levels).
+- Final package `bin/hl2-bevy.exe` SHA-256 `3DD773E9607A1B3A324CDB97FFDEB8213290BC4BB20A89DAF93AAAC7FDCCB38F`.
+
 ## First-map completion audit and natural starts (2026-10-20)
 
 From checkout run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-natural-firstmap-20261020/verify.py`;expected `passed:true`,two natural_starts,`first_map_finished:false`,`ordinary_full_traversal_tested:false`,`rust_parity_tested:false`. The new lane reran eleven retained checks,including consolidated seal,independent311-query integration and explicit16h drift acceptance. It rechecks six exact native bodies against immutable path/hash/address/baseline/original rows,six relocated hook prologues,1672 selected events/834 call pairs,raw callback clocks,actor/model generation,input pointers and OnStart output identity. Thirty-two pre-window events remain excluded. Complete exported Evidence is authoritative where MCP transport responses exceeded10MiB.

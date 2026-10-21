@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-21 session 28: F4 overlay mouse, filter and common props; ent_create placement; sessions 18-28 merged into main
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 baseentity.cpp CC_Ent_Create.
+
+**Changed:** `ai::spawn::Overlay` gained a common-props folder (`SPAWN_PROP_NAMES`), a typed filter, `click`/`scroll` with drawn-row targets (`PanelTarget`), a tab bar and window-sized lists; `spawn_panel` returns hit rectangles; `movement::controls` frees the cursor while F4 is open (right mouse held looks), routes clicks and the wheel to the overlay, repeats held list keys, types the filter and closes F4 on Escape before pause; the HUD marks the aim over the panel; script actions spawn_overlay_text/click/scroll. ent_create uses CC_Ent_Create's placement and the `angles` yaw; console lines are tokenized with quotes, and the hl2-ui routing re-quotes arguments with spaces. `wip/runtime-entities-20261021` merged into `wip/npc-ai-20261014` and `main`.
+
+**Why:** owner report (F4 Props navigation needed many single key presses, no mouse; common props were hard to find); 14r leftover (ent_create placement); owner decision to merge to main so @OrbitalMan can merge it before his hl2-ui PR.
+
+**Tested how / Result:** unit tests (overlay clicks/scroll/filter/escape, drawn-row hit test, ent_create placement and quoting), workspace release tests (two known release-only failures), owned suite 54 pass, strict Clippy/fmt; packaged script runs artifacts/s28 (props by click: explosive barrel, wooden crate, filtered ammo crate; elite by click; panel captures; ent_create citizen faces yaw 180 from angles "0 180 0"); regression batch artifacts/s28-regression: weapons 17/17, attention 26/26, movement 25/26 (known doll01), images equal to s27-regression-b except the Breen slate exposure.
+
+**Still broken or not tested:** real mouse/keyboard input on the overlay (only script actions and unit tests); ent_create of physics props keeps prop_physics_create placement; the session 27 gunfire listening.
+
+**Next:** owner playtest; squads and squad speech; 14r leftovers.
+
 ## 2026-10-21 session 27 (cont.): player-ally speech through the talker response rules (`wip/runtime-entities-20261021`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 AI_ResponseSystem.cpp/h (CResponseSystem parsing, matching, response groups), AI_Criteria, ai_speech.cpp (CAI_Expresser criteria), ai_playerally.cpp (g_ConceptInfos, SpeakIfAllowed/IsAllowedToSpeak/IsOkToSpeak, GatherEnemyConditions, OnStartSchedule, OnKilledNPC, PainSound), npc_citizen17.cpp/npc_barney.cpp/npc_alyx.cpp DeathSound; installed scripts/talker/*.txt and scenes.image.
