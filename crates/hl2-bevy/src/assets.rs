@@ -231,6 +231,11 @@ pub fn load_with_canvas(
             Err(error) => world.warnings.push(format!("{model}: {error:#}")),
         }
     }
+    // Dropped NPC weapons are VPhysics objects (CBaseCombatWeapon::FallInit): their
+    // world models' .phy (a model without one is not dropped).
+    for model in &weapon_models {
+        let _ = models::append_model_physics(&mut world, &vfs, model);
+    }
     // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body
     // from w_grenade.phy (12-sided prism as a round cylinder, the .phy's IVP inertia) and
     // SDK spawn orientation. Session 13 replay against five native throws (lob, roll,

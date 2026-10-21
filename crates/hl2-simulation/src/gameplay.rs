@@ -857,6 +857,16 @@ impl Inventory {
                         let w = &weapons[class];
                         if !self.owned.contains_key(class) {
                             self.give(class, weapons, scene.time);
+                            // Weapon_Equip keeps the weapon's own clip (an NPC's drop
+                            // was refilled by Weapon_Drop).
+                            if let Some(clip) = e
+                                .get("ammo")
+                                .and_then(|v| v.parse::<i32>().ok())
+                                .filter(|_| w.magazine > 0)
+                            {
+                                self.owned
+                                    .insert(class.to_owned(), clip.clamp(0, w.magazine));
+                            }
                             true
                         } else {
                             let ammo = e
@@ -1515,6 +1525,9 @@ impl Inventory {
                     if dead {
                         self.kills += 1;
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
+                        if npc {
+                            scene.npc_deaths.push(id);
+                        }
                         // CBreakableProp::Break -> PhysBreakSound: the surfaceprop's break
                         // cue from the world at the prop (it is about to be removed).
                         if let Some(name) = (!npc)
@@ -1964,6 +1977,7 @@ pub fn apply_hit(
     scene.fire(id, "OnDamaged", usize::MAX);
     if scene.states[id].value <= 0. {
         scene.fire(id, "OnDeath", usize::MAX);
+        scene.npc_deaths.push(id);
         scene.states[id].killed = true;
         scene.states[id].visible = false;
         physics.set_entity(
@@ -3472,6 +3486,24 @@ mod tests {
         assert_eq!(inv.reserve_for("weapon_pistol", &defs), 0);
     }
 
+    #[test]
+    fn a_dropped_weapon_keeps_its_clip_when_equipped() {
+        // An NPC's SMG1 drop carries 25 rounds (Weapon_Drop); Weapon_Equip keeps them.
+        let defs = definitions();
+        let mut world = World::default();
+        world.entities.push(modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "weapon_smg1".into()),
+                ("origin".into(), "0 0 24".into()),
+                ("ammo".into(), "25".into()),
+            ],
+        });
+        let mut scene = Scene::new(&world);
+        let mut inv = Inventory::default();
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+        assert!(scene.states[0].killed);
+        assert_eq!(inv.owned.get("weapon_smg1"), Some(&25));
+    }
     #[test]
     fn secondary_ammo_pickups_clamp_independently_and_full_pickups_remain() {
         let defs = definitions();

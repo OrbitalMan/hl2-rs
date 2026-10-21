@@ -340,6 +340,9 @@ pub struct Scene {
     /// Bullet/club hits on NPCs this tick (victim, by the player, damage) for the AI's
     /// OnTakeDamage_Alive conditions; the AI runtime drains it.
     pub npc_damage: Vec<(usize, bool, f32)>,
+    /// NPCs killed by damage this tick (CBaseCombatCharacter::Event_Killed, not removal
+    /// by Kill inputs): the host drops their active weapons (DESIGN 14r part B).
+    pub npc_deaths: Vec<usize>,
     /// NPCs whose AI has the player as enemy or in enemy memory (CAI_BaseHumanoid
     /// sneak attacks exclude them); refreshed by the host after each AI tick.
     pub npc_knows_player: std::collections::BTreeSet<usize>,
@@ -543,6 +546,7 @@ impl Scene {
             skill: Default::default(),
             last_npc_hit: None,
             npc_damage: Vec::new(),
+            npc_deaths: Vec::new(),
             npc_knows_player: Default::default(),
             ai_sequence_end: BTreeMap::new(),
             look_targets: Default::default(),

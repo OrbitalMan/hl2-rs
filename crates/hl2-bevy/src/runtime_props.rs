@@ -86,6 +86,19 @@ pub fn poll(
             result: slot,
         });
     }
+    for id in std::mem::take(&mut game.model_draws) {
+        let world = game.world.clone();
+        let state = &game.scene.states[id];
+        let transform = crate::rendering::entity_transform(state.origin, state.rotation);
+        crate::rendering::build_model_draws(
+            &mut commands,
+            (&mut meshes, &mut materials, &mut inverse_binds),
+            &cache,
+            &world,
+            id,
+            transform,
+        );
+    }
     let mut pending = Vec::new();
     for job in std::mem::take(&mut props.jobs) {
         let finished = match job.result.lock() {

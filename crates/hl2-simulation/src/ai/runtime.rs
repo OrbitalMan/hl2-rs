@@ -592,6 +592,14 @@ impl AiRuntime {
     /// A uniform value in [-1, 1) from the AI's stream (shot spread, blood noise).
     /// The world model of an NPC's active weapon (CBaseCombatWeapon::Equip follows the
     /// owner bone-merged), lowercase; None when unarmed.
+    /// The NPC's active weapon class (an AI actor's or a held weapon).
+    pub fn weapon_class(&self, id: usize) -> Option<String> {
+        self.actors
+            .get(&id)
+            .and_then(|a| a.weapon.as_ref())
+            .or_else(|| self.held_weapons.get(&id))
+            .map(|w| w.class.clone())
+    }
     pub fn weapon_world_model(&self, id: usize) -> Option<String> {
         let class = &self
             .actors

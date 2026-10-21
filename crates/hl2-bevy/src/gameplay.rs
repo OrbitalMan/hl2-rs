@@ -176,6 +176,8 @@ pub struct Gameplay {
     pub world_copies: usize,
     /// prop_physics_create requests (model, eye, aim) for the host's model loader.
     pub prop_requests: Vec<(String, Vec3, Vec3)>,
+    /// Runtime entities whose model draws the host builds next frame (dropped weapons).
+    pub model_draws: Vec<usize>,
 }
 /// The weapons each F4 class can be given: Weapon_CanUse on its pooled spawn's
 /// loaded model (every activity of the model, loaded or not).
@@ -399,6 +401,7 @@ impl Gameplay {
             runtime_entities: Vec::new(),
             world_copies: 0,
             prop_requests: Vec::new(),
+            model_draws: Vec::new(),
         }
     }
     pub fn load_with_campaign(
@@ -441,6 +444,7 @@ impl Gameplay {
             runtime_entities: Vec::new(),
             world_copies: 0,
             prop_requests: Vec::new(),
+            model_draws: Vec::new(),
             player_damage,
             damage_messages: Vec::new(),
             suit: Default::default(),
@@ -575,6 +579,84 @@ impl Gameplay {
         self.runtime_entities.push(id);
         self.ai.add_actor(id, &entity);
         Ok(id)
+    }
+    /// CBaseCombatCharacter::Event_Killed -> Weapon_Drop (DESIGN 14r part B): each NPC
+    /// killed this tick drops its active weapon as a new weapon entity with VPhysics
+    /// (FallInit; the world model's .phy is preloaded with the NPC weapons), refilled
+    /// like an NPC drop (default clip; SMG1: enough player shots to kill two of the
+    /// dropper), in front of its shoot position (no hand-bone pose on the simulation
+    /// side yet) and thrown 64-128 u/s along the body (the SDK branch without a death
+    /// force) with AngularImpulse(200, 200, 200). SF_NPC_NO_WEAPON_DROP removes it.
+    fn drop_weapons(&mut self, physics: &mut Physics) {
+        for npc in std::mem::take(&mut self.scene.npc_deaths) {
+            let Some(class) = self.ai.weapon_class(npc) else {
+                continue;
+            };
+            let Some(model) = self.ai.weapon_model(&class) else {
+                continue;
+            };
+            let flags = self.world.entities[npc]
+                .get("spawnflags")
+                .and_then(|v| v.trim().parse::<u32>().ok())
+                .unwrap_or(0);
+            if flags & (1 << 13) != 0
+                || !self.world.model_physics.contains_key(&format!("{model}#0"))
+            {
+                continue;
+            }
+            let state = &self.scene.states[npc];
+            let body = state.rotation * Vec3::X;
+            let flat = Vec3::new(body.x, body.y, 0.).normalize_or(Vec3::X);
+            let origin = state.origin + Vec3::Z * 55. + flat * 10.;
+            let yaw = flat.y.atan2(flat.x).to_degrees();
+            let clip = if class == "weapon_smg1" {
+                let health = hl2_simulation::gameplay::npc_spawn_health(
+                    &self.scene,
+                    &self.world.entities[npc],
+                );
+                let shot = self.scene.skill.get("sk_plr_dmg_smg1", 4.)
+                    * self.scene.skill.player_inflict_scale();
+                ((health / shot.max(0.01)) * 2.) as i32
+            } else {
+                self.weapons.get(&class).map_or(0, |w| w.default_clip)
+            };
+            let id = self.world.entities.len();
+            let entity = modkit_core::Entity {
+                properties: [
+                    ("classname", class.clone()),
+                    ("origin", format!("{} {} {}", origin.x, origin.y, origin.z)),
+                    ("angles", format!("0 {yaw} 0")),
+                    ("model", model.clone()),
+                    ("ammo", clip.to_string()),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v))
+                .collect(),
+            };
+            let instance = modkit_core::ModelInstance {
+                background: false,
+                model: model.clone(),
+                origin,
+                angles: Vec3::new(0., yaw, 0.),
+                skin: 0,
+                scale: 1.,
+                // A VPhysics object like a physics prop (its .phy and propdata).
+                kind: "prop_physics".into(),
+                solid: true,
+                solid_mode: None,
+                entity: Some(id),
+            };
+            let Ok(id) = self.insert_entity(entity, Some(instance), physics) else {
+                continue;
+            };
+            let speed = 64. + (npc.wrapping_mul(2_654_435_761) % 65) as f32;
+            if let Some(handle) = physics.entity_body(id) {
+                physics.set_body_velocity(handle, body * speed, Vec3::splat(200.));
+            }
+            self.model_draws.push(id);
+            self.spawn_log
+                .push(serde_json::json!({"weapon_drop":class,"npc":npc,"entity":id,"ammo":clip}));
+        }
     }
     /// Merge a late-loaded model's tables into the map's World (keys it lacks only).
     pub fn merge_model(&mut self, loaded: World) {
@@ -1362,6 +1444,8 @@ impl Gameplay {
         // Gib poses and SUB_FadeOut (not while seen or held).
         self.gibs
             .tick(physics, self.scene.time, TICK, eye, direction, held);
+        // NPCs killed this tick drop their weapons.
+        self.drop_weapons(physics);
         // VPhysics impact sounds of props and thrown frags (PhysCollisionSound).
         self.impacts
             .physics_collision_sounds(physics, &self.world, &mut self.scene);
