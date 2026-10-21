@@ -45,14 +45,62 @@ const METROPOLICE_SOUNDS: u32 = senses::sound::WORLD
 const METROPOLICE_FOV: f32 = -0.2;
 /// NPC_Metropolice sentences take their volume/soundlevel from this sound script entry.
 pub const METROPOLICE_SENTENCE_PARAMETERS: &str = "NPC_Metropolice.SentenceParameters";
+/// CNPC_Combine m_Sentences.Init( this, "NPC_Combine.SentenceParameters" ).
+pub const COMBINE_SENTENCE_PARAMETERS: &str = "NPC_Combine.SentenceParameters";
 
 /// The sound script entry holding an NPC sentence's volume/soundlevel/pitch
 /// (CAI_Sentence::Init), by sentence or group name ("!NAME" / "#GROUP").
 pub fn sentence_parameters(sentence: &str) -> Option<&'static str> {
     let name = sentence.trim_start_matches(['!', '#']).to_ascii_uppercase();
-    name.starts_with("METROPOLICE_")
-        .then_some(METROPOLICE_SENTENCE_PARAMETERS)
+    if name.starts_with("METROPOLICE_") {
+        Some(METROPOLICE_SENTENCE_PARAMETERS)
+    } else if name.starts_with("COMBINE_") {
+        Some(COMBINE_SENTENCE_PARAMETERS)
+    } else {
+        None
+    }
 }
+/// CAI_BaseNPC sound hooks (PainSound, DeathSound, IdleSound, LostEnemySound,
+/// FoundEnemySound) and CNPC_Combine::AnnounceEnemyKill with each class's sentence
+/// groups (npc_metropolice.cpp, npc_combine.cpp).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Speech {
+    Pain,
+    /// The first light hit (cop > 0.8 health: PAIN_LIGHT; soldier > 0.9: TAUNT).
+    PainLight,
+    /// The first heavy hit (< 0.25 health: cop PAIN_HEAVY, soldier COVER).
+    PainHeavy,
+    Die,
+    LostShort,
+    LostLong,
+    Found,
+    KilledEnemy,
+}
+fn speech_group(class: &AiClass, speech: Speech) -> Option<&'static str> {
+    let combine = matches!(class, AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine);
+    let cop = class.cop().is_some();
+    use Speech::*;
+    Some(match (cop, combine, speech) {
+        (true, _, Pain) => "METROPOLICE_PAIN",
+        (true, _, PainLight) => "METROPOLICE_PAIN_LIGHT",
+        (true, _, PainHeavy) => "METROPOLICE_PAIN_HEAVY",
+        (true, _, Die) => "METROPOLICE_DIE",
+        (true, _, LostShort) => "METROPOLICE_LOST_SHORT",
+        (true, _, LostLong) => "METROPOLICE_LOST_LONG",
+        (true, _, Found) => "METROPOLICE_REFIND_ENEMY",
+        (_, true, Pain) => "COMBINE_PAIN",
+        (_, true, PainLight) => "COMBINE_TAUNT",
+        (_, true, PainHeavy) => "COMBINE_COVER",
+        (_, true, Die) => "COMBINE_DIE",
+        (_, true, LostShort) => "COMBINE_LOST_SHORT",
+        (_, true, LostLong) => "COMBINE_LOST_LONG",
+        (_, true, Found) => "COMBINE_REFIND_ENEMY",
+        (_, true, KilledEnemy) => "COMBINE_KILL_MONST",
+        _ => return None,
+    })
+}
+/// SF_NPC_GAG: no idle sounds (ShouldPlayIdleSound).
+const SF_NPC_GAG: u32 = 2;
 /// What the host knows about the local player this tick.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PlayerState {
@@ -299,6 +347,19 @@ pub struct AiActor {
     /// Weapon fire events the overlay queued for the next tick.
     #[serde(skip)]
     move_fire: u32,
+    /// bits_MEMORY_PAIN_LIGHT_SOUND (1) / bits_MEMORY_PAIN_HEAVY_SOUND (2).
+    #[serde(skip)]
+    pain_memory: u8,
+    /// m_flNextPainSoundTime, m_flNextLostSoundTime.
+    #[serde(skip)]
+    next_pain_sound: f64,
+    #[serde(skip)]
+    next_lost_sound: f64,
+    /// The enemy eluded (LostEnemySound said); seeing it again says FoundEnemySound.
+    #[serde(skip)]
+    enemy_eluded: bool,
+    #[serde(skip)]
+    death_spoken: bool,
     /// CNPC_Combine::m_flStopMoveShootTime.
     #[serde(skip)]
     stop_move_shoot: Option<f64>,
@@ -381,6 +442,10 @@ pub struct AiRuntime {
     /// CAI_BaseNPC m_flSoundWaitTime / m_nSoundPriority per NPC (FOkToMakeSound).
     #[serde(skip)]
     sound_wait: BTreeMap<usize, (f64, i32)>,
+    /// CNPC_Combine g_fCombineQuestion: 1 after COMBINE_CHECK, 2 after COMBINE_QUEST
+    /// (the next idle soldier answers CLEAR / ANSWER).
+    #[serde(skip)]
+    combine_question: u8,
     /// CRallyPoint::Lock: rally point entity -> the NPC holding it.
     pub rally_locks: BTreeMap<usize, usize>,
     /// CAssaultPoint::m_flTimeLastUsed by entity.
@@ -445,8 +510,33 @@ fn sentence_priority(group: &str) -> i32 {
         "METROPOLICE_FT_APPROACH",
         "METROPOLICE_AS_ADV",
     ];
-    if group.starts_with("METROPOLICE_PAIN") || group == "METROPOLICE_DIE" {
+    // CNPC_Combine: PainSound (PAIN/TAUNT/COVER) and DeathSound speak INVALID +
+    // CRITERIA_ALWAYS; the enemy announcements and REFIND_ENEMY are HIGH.
+    const COMBINE_HIGH: [&str; 7] = [
+        "COMBINE_ANNOUNCE",
+        "COMBINE_REFIND_ENEMY",
+        "COMBINE_GO_ALERT",
+        "COMBINE_MONST",
+        "COMBINE_ALERT",
+        "COMBINE_KILL_MONST",
+        "COMBINE_PLAYER_DEAD",
+    ];
+    if group.starts_with("METROPOLICE_PAIN")
+        || group == "METROPOLICE_DIE"
+        || matches!(
+            group,
+            "COMBINE_PAIN"
+                | "COMBINE_TAUNT"
+                | "COMBINE_COVER"
+                | "COMBINE_DIE"
+                | "COMBINE_PLAYERHIT"
+        )
+    {
         -1
+    } else if COMBINE_HIGH.iter().any(|g| group.starts_with(g)) {
+        2
+    } else if group == "COMBINE_THROW_GRENADE" {
+        1
     } else if HIGH.iter().any(|g| group.starts_with(g)) {
         2
     } else if MEDIUM.iter().any(|g| group.starts_with(g)) {
@@ -558,6 +648,7 @@ impl AiRuntime {
             held_weapons,
             was_enabled: false,
             sound_wait: BTreeMap::new(),
+            combine_question: 0,
             rally_locks: BTreeMap::new(),
             assault_used: BTreeMap::new(),
             goals_started: false,
@@ -1238,6 +1329,11 @@ impl AiRuntime {
             move_regulator: None,
             move_fire: 0,
             stop_move_shoot: None,
+            pain_memory: 0,
+            next_pain_sound: 0.,
+            next_lost_sound: 0.,
+            enemy_eluded: false,
+            death_spoken: false,
         })
     }
     /// The NumGrenades keyvalue of a spawned CNPC_Combine (F4; DESIGN 14r would set it
@@ -1362,6 +1458,7 @@ impl AiRuntime {
                 actor.damage_taken = actor.damage_taken.max(damage);
                 actor.damaged_by_player |= by_player;
             }
+            self.pain_or_death_sound(victim, world, scene);
         }
         if let Some(value) = self.stunstick_damage {
             super::metropolice::STUNSTICK_DAMAGE.with(|d| d.set(value));
@@ -1511,6 +1608,7 @@ impl AiRuntime {
                                     start: ctx.origin + Vec3::Z * 36.,
                                     forward: Vec3::new(yaw.cos(), yaw.sin(), 0.),
                                 });
+                                h.requests.push(CopRequest::Sentence("COMBINE_KICK"));
                             } else if h.kind == humanoid::Kind::Combine
                                 && event == COMBINE_AE_GREN_TOSS
                             {
@@ -1746,6 +1844,9 @@ impl AiRuntime {
         let now = scene.time;
         let mut ctx = self.context(id, world, scene, player, now, 0.);
         let origin = ctx.origin;
+        // Speech dice (ShouldPlayIdleSound RandomInt(0, 99), IdleSound's choices,
+        // the lost-sound delay U(5, 15)).
+        let speech_rolls = [self.random(), self.random(), self.random(), self.random()];
         // The active gun's firing data and clip (GatherAttackConditions, CheckAmmo).
         let gun = self.actors[&id].weapon.as_ref().and_then(|w| {
             self.weapon_def(&w.class)
@@ -2255,6 +2356,100 @@ impl AiRuntime {
                 }
             }
         }
+        // Speech (CAI_BaseNPC sound hooks; queued like the class's own sentences).
+        {
+            let mut lines: Vec<&'static str> = Vec::new();
+            let c = actor.npc.conditions;
+            let player_criminal = !precriminal;
+            let cop = actor.class.cop().is_some();
+            // LostEnemySound when the enemy eludes (COND_LOST_ENEMY); FoundEnemySound when
+            // it is seen again (UpdateEnemyMemory of an eluded enemy). Cops speak these
+            // only when the player is a criminal.
+            if c.has(COND_LOST_ENEMY) && !actor.enemy_eluded {
+                actor.enemy_eluded = true;
+                actor.npc.enemies.mark_eluded(actor.npc.enemy);
+                if now > actor.next_lost_sound && (!cop || player_criminal) {
+                    let long = actor.npc.enemy.is_none()
+                        || now - actor.npc.enemies.last_time_seen(actor.npc.enemy) > 10.;
+                    if let Some(g) = speech_group(
+                        &actor.class,
+                        if long {
+                            Speech::LostLong
+                        } else {
+                            Speech::LostShort
+                        },
+                    ) {
+                        lines.push(g);
+                        actor.next_lost_sound = now + 5. + 10. * f64::from(speech_rolls[2]);
+                    }
+                }
+            } else if actor.enemy_eluded && (c.has(COND_SEE_ENEMY) || c.has(COND_SEE_HATE)) {
+                actor.enemy_eluded = false;
+                if let Some(g) = speech_group(&actor.class, Speech::Found) {
+                    lines.push(g);
+                }
+            }
+            // CNPC_Combine::SelectIdealState: AnnounceEnemyKill on COND_ENEMY_DEAD.
+            if c.has(COND_ENEMY_DEAD) {
+                if let Some(g) = speech_group(&actor.class, Speech::KilledEnemy) {
+                    lines.push(g);
+                }
+            }
+            // ShouldPlayIdleSound: idle or alert, 1 in 100 per think, not gagged.
+            let gagged = world.entities.get(id).is_some_and(|e| {
+                e.get("spawnflags")
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .is_some_and(|f| f & SF_NPC_GAG != 0)
+            });
+            if matches!(actor.npc.state, NpcState::Idle | NpcState::Alert)
+                && (speech_rolls[0] * 100.) as u32 == 0
+                && !gagged
+            {
+                let pick = speech_rolls[1];
+                match &actor.class {
+                    // CNPC_Combine::IdleSound: a check-in or question the next idle soldier
+                    // answers, or a statement (g_fCombineQuestion).
+                    AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine => {
+                        match self.combine_question {
+                            0 if pick < 0.5 => {}
+                            0 => {
+                                let choice = (speech_rolls[3] * 3.) as u32;
+                                lines.push(
+                                    ["COMBINE_CHECK", "COMBINE_QUEST", "COMBINE_IDLE"]
+                                        [choice.min(2) as usize],
+                                );
+                                self.combine_question = match choice {
+                                    0 => 1,
+                                    1 => 2,
+                                    _ => 0,
+                                };
+                            }
+                            1 => {
+                                lines.push("COMBINE_CLEAR");
+                                self.combine_question = 0;
+                            }
+                            _ => {
+                                lines.push("COMBINE_ANSWER");
+                                self.combine_question = 0;
+                            }
+                        }
+                    }
+                    // CNPC_MetroPolice::IdleSound without a squad: half the time an idle
+                    // line (the criminal variant when the player is one); the harassment
+                    // line is the policing behavior's.
+                    AiClass::Metropolice(_) if pick >= 0.5 => lines.push(if player_criminal {
+                        "METROPOLICE_IDLE_CR"
+                    } else {
+                        "METROPOLICE_IDLE"
+                    }),
+                    _ => {}
+                }
+            }
+            actor
+                .class
+                .requests_mut()
+                .extend(lines.into_iter().map(CopRequest::Sentence));
+        }
         // Listen.
         let (heard, best) = senses::listen(eye, id, sound_interests, &self.sounds);
         actor.npc.conditions = actor.npc.conditions.union(heard);
@@ -2513,6 +2708,89 @@ impl AiRuntime {
         }
         self.apply_requests(id, world, scene, physics, player);
     }
+    /// CAI_SentenceBase::Speak: FOkToMakeSound (no squads yet) culls a sentence of equal
+    /// or lower priority while the last one's timer runs; JustMadeSound(priority, 2 s)
+    /// sets it to 2 + U(1.5, 2.0) s. False when culled.
+    fn say(&mut self, id: usize, group: &'static str, world: &World, scene: &mut Scene) -> bool {
+        let origin = scene.states[id].origin;
+        let priority = sentence_priority(group);
+        if priority >= 0 {
+            let now = scene.time;
+            if let Some(&(until, last)) = self.sound_wait.get(&id) {
+                if now <= until && priority <= last {
+                    self.diagnostics.culled_sentences += 1;
+                    return false;
+                }
+            }
+            let wait = now + 2. + 1.5 + 0.5 * f64::from(self.random());
+            self.sound_wait.insert(id, (wait, priority));
+        }
+        self.diagnostics.sentences += 1;
+        scene.sounds.push(crate::sounds::SoundRequest {
+            origin: Some(origin + Vec3::Z * 64.),
+            actor: Some(crate::sounds::SoundActor {
+                name: scene
+                    .entity(world, id)
+                    .and_then(|e| e.get("targetname"))
+                    .unwrap_or("")
+                    .into(),
+                model: String::new(),
+                entity: Some(id),
+            }),
+            ..format!("#{group}").into()
+        });
+        true
+    }
+    /// CAI_BaseNPC::OnTakeDamage_Alive -> PainSound, or Event_Killed -> DeathSound
+    /// (CNPC_MetroPolice/CNPC_Combine): pain at most once a second, the first light and
+    /// heavy hits with their own groups; the death line once.
+    fn pain_or_death_sound(&mut self, id: usize, world: &World, scene: &mut Scene) {
+        let now = scene.time;
+        let Some(e) = world.entities.get(id) else {
+            return;
+        };
+        let max = crate::gameplay::npc_spawn_health(scene, e).max(1.);
+        let Some(actor) = self.actors.get_mut(&id) else {
+            return;
+        };
+        let state = &scene.states[id];
+        let speech = if state.killed {
+            if std::mem::replace(&mut actor.death_spoken, true) {
+                return;
+            }
+            Speech::Die
+        } else {
+            let ratio = state.value / max;
+            if now < actor.next_pain_sound || ratio <= 0. {
+                return;
+            }
+            actor.next_pain_sound = now + 1.;
+            let combine =
+                matches!(&actor.class, AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine);
+            if combine {
+                if actor.pain_memory & 1 == 0 && ratio > 0.9 {
+                    actor.pain_memory |= 1;
+                    Speech::PainLight
+                } else if actor.pain_memory & 2 == 0 && ratio < 0.25 {
+                    actor.pain_memory |= 2;
+                    Speech::PainHeavy
+                } else {
+                    Speech::Pain
+                }
+            } else if actor.pain_memory & 2 == 0 && ratio < 0.25 {
+                actor.pain_memory |= 3;
+                Speech::PainHeavy
+            } else if actor.pain_memory & 1 == 0 && ratio > 0.8 {
+                actor.pain_memory |= 1;
+                Speech::PainLight
+            } else {
+                Speech::Pain
+            }
+        };
+        if let Some(group) = speech_group(&actor.class, speech) {
+            self.say(id, group, world, scene);
+        }
+    }
     /// Carry out the cop's requests (sentences, look targets, outputs, sounds, hits).
     fn apply_requests(
         &mut self,
@@ -2530,35 +2808,7 @@ impl AiRuntime {
         for request in requests {
             match request {
                 CopRequest::Sentence(group) => {
-                    // CAI_SentenceBase::Speak: FOkToMakeSound (no squads yet) culls a
-                    // sentence of equal or lower priority while the last one's timer runs;
-                    // JustMadeSound(priority, 2 s) sets it to 2 + U(1.5, 2.0) s.
-                    let priority = sentence_priority(group);
-                    if priority >= 0 {
-                        let now = scene.time;
-                        if let Some(&(until, last)) = self.sound_wait.get(&id) {
-                            if now <= until && priority <= last {
-                                self.diagnostics.culled_sentences += 1;
-                                continue;
-                            }
-                        }
-                        let wait = now + 2. + 1.5 + 0.5 * f64::from(self.random());
-                        self.sound_wait.insert(id, (wait, priority));
-                    }
-                    self.diagnostics.sentences += 1;
-                    scene.sounds.push(crate::sounds::SoundRequest {
-                        origin: Some(origin + Vec3::Z * 64.),
-                        actor: Some(crate::sounds::SoundActor {
-                            name: scene
-                                .entity(world, id)
-                                .and_then(|e| e.get("targetname"))
-                                .unwrap_or("")
-                                .into(),
-                            model: String::new(),
-                            entity: Some(id),
-                        }),
-                        ..format!("#{group}").into()
-                    });
+                    self.say(id, group, world, scene);
                 }
                 CopRequest::LookAtPlayer {
                     importance,
@@ -3478,6 +3728,37 @@ mod tests {
         r.scene.states[1].killed = true;
         run(&mut r, 10, player_at(-3000.));
         assert_eq!(r.ai.actors[&0].npc.enemy, None);
+    }
+    #[test]
+    fn hurt_and_killed_cops_speak_their_pain_and_death_lines() {
+        let mut r = rig();
+        r.ai.enabled = true;
+        let health = crate::gameplay::npc_spawn_health(&r.scene, &r.world.entities[0]);
+        // A first light hit (> 0.8 health): PAIN_LIGHT; another within a second: none.
+        r.scene.states[0].value = health * 0.85;
+        r.scene.npc_damage.push((0, true, health * 0.15));
+        r.scene.npc_damage.push((0, true, 1.));
+        run(&mut r, 1, player_at(-3000.));
+        let spoken = |r: &Rig| -> Vec<String> {
+            r.scene
+                .sounds
+                .iter()
+                .filter(|s| s.name.starts_with('#'))
+                .map(|s| s.name.clone())
+                .collect()
+        };
+        assert_eq!(spoken(&r), ["#METROPOLICE_PAIN_LIGHT"]);
+        // Killed: DeathSound once.
+        r.scene.sounds.clear();
+        r.scene.states[0].killed = true;
+        r.scene.npc_damage.push((0, true, 50.));
+        r.scene.npc_damage.push((0, true, 50.));
+        run(&mut r, 1, player_at(-3000.));
+        assert_eq!(spoken(&r), ["#METROPOLICE_DIE"]);
+        assert_eq!(
+            sentence_parameters("#COMBINE_DIE"),
+            Some(COMBINE_SENTENCE_PARAMETERS)
+        );
     }
     #[test]
     fn an_npc_spawned_after_the_first_think_is_seen() {
