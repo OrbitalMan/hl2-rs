@@ -14,6 +14,7 @@ mod monitors;
 mod movement;
 mod performance;
 mod rendering;
+mod runtime_props;
 mod setup;
 mod sky;
 mod spawn_panel;
@@ -449,6 +450,12 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
+            runtime_props::poll
+                .run_if(resource_exists::<runtime_props::RuntimeProps>)
+                .before(rendering::present_entities),
+        )
+        .add_systems(
+            PostUpdate,
             rendering::spawn_runtime_draws
                 .before(rendering::present_entities)
                 .before(eyes::present),
@@ -681,6 +688,7 @@ pub(crate) fn install_map(
         no_pvs,
     ));
     commands.insert_resource(rendering::FlexModels(loaded.flexes.clone()));
+    commands.insert_resource(runtime_props::RuntimeProps::new(loaded.vfs.clone()));
     let camera_target = monitors::install(&loaded, commands, images);
     rendering::spawn_map(
         &loaded,

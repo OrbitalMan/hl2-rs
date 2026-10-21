@@ -22,7 +22,7 @@ const MAX_MATERIALS: usize = 16384;
 /// Animation frames, each with its authored mip chain (largest first).
 pub type TextureFrames = Arc<Vec<Arc<Vec<Image>>>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TwoTexture {
     pub base_frames: TextureFrames,
     pub second_frames: TextureFrames,
@@ -48,6 +48,8 @@ pub struct LoadedMap {
     pub materials: BTreeMap<String, MaterialData>,
     pub texture_errors: Vec<String>,
     pub models: serde_json::Value,
+    /// The map's mounted content (its pak included) for runtime model loads.
+    pub vfs: Arc<Vfs>,
 }
 
 pub fn map_metadata(loaded: &LoadedMap) -> serde_json::Value {
@@ -67,7 +69,7 @@ pub fn map_metadata(loaded: &LoadedMap) -> serde_json::Value {
             "owned_eye_dx8_fallbacks":loaded.materials.iter().filter(|(_,m)|m.eye_fallback).map(|(n,_)|n).collect::<Vec<_>>()}})
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MaterialData {
     pub base: Option<Arc<Image>>,
     /// Normalized VTF key shared by both decoded textures and GPU image handles.
@@ -374,6 +376,82 @@ pub fn load_with_canvas(
         materials,
         texture_errors,
         models: serde_json::to_value(model_report)?,
+        vfs: Arc::new(vfs),
+    })
+}
+
+/// A model loaded after the map (late precache, DESIGN 14r part B): its world tables
+/// (`world`: one prop_physics instance through the map's model loader: mesh, rig,
+/// .phy solid/pieces, propdata, breaks, illumination), the materials not already
+/// loaded, and its studio hull.
+pub struct PreparedModel {
+    pub world: World,
+    pub materials: BTreeMap<String, MaterialData>,
+    pub hull: (glam::Vec3, glam::Vec3),
+    /// Its breakable gibs/chunks by render key (the map preloads these per prop).
+    pub gibs: BTreeMap<String, Vec<modkit_core::Surface>>,
+}
+/// Load a model on a worker thread (no GPU work): `known` materials are skipped.
+pub fn prepare_model(
+    vfs: &Vfs,
+    model: &str,
+    class: &str,
+    known: &std::collections::BTreeSet<String>,
+) -> Result<PreparedModel> {
+    let mut world = World {
+        entities: vec![modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), class.into()),
+                ("model".into(), model.into()),
+            ],
+        }],
+        ..Default::default()
+    };
+    let report = models::append_models(&mut world, vfs);
+    if world.model_assets.is_empty() {
+        bail!("{model}: {}", report.errors.join("; "));
+    }
+    let _ = models::append_break_physics(&mut world, vfs);
+    let rig_failures = models::append_rigs(&mut world, vfs, &[]);
+    world.warnings.extend(rig_failures);
+    let hull = models::read_hull(vfs, model)?;
+    let mut gibs = BTreeMap::new();
+    for (path, skin) in crate::effects::gib_models(&world) {
+        match crate::effects::read_effect_model(vfs, &path, skin) {
+            Ok(surfaces) => {
+                gibs.insert(hl2_simulation::gibs::render_key(&path, skin), surfaces);
+            }
+            Err(e) => world.warnings.push(format!("{path}: {e:#}")),
+        }
+    }
+    let mut materials = BTreeMap::new();
+    let (mut cache, mut frames, mut decoded, mut errors) =
+        (BTreeMap::new(), BTreeMap::new(), 0usize, Vec::new());
+    let names: std::collections::BTreeSet<String> = world
+        .model_assets
+        .values()
+        .chain(gibs.values())
+        .flatten()
+        .map(|s| s.material.clone())
+        .filter(|m| !known.contains(m))
+        .collect();
+    for name in names {
+        let material = load_material(
+            vfs,
+            &name,
+            &mut cache,
+            &mut frames,
+            &mut decoded,
+            &mut errors,
+        );
+        materials.insert(name, material);
+    }
+    world.warnings.extend(errors);
+    Ok(PreparedModel {
+        world,
+        materials,
+        hull,
+        gibs,
     })
 }
 

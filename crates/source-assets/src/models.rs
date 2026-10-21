@@ -14,6 +14,19 @@ pub fn read_eye_position(vfs: &Vfs, model: &str) -> Result<Vec3> {
         .with_context(|| format!("missing model {model}"))?;
     eye_position(&data).with_context(|| format!("studio eye position: {model}"))
 }
+/// Studio header hull_min/hull_max (studiohdr_t offsets 104/116): the box
+/// CreatePhysicsProp sweeps to place a prop.
+pub fn read_hull(vfs: &Vfs, model: &str) -> Result<(Vec3, Vec3)> {
+    let data = vfs
+        .read(model)?
+        .with_context(|| format!("missing model {model}"))?;
+    eye_position(&data).with_context(|| format!("studio header: {model}"))?;
+    let (mins, maxs) = (vec3(&data, 104)?, vec3(&data, 116)?);
+    if !(mins.is_finite() && maxs.is_finite()) || mins.cmpgt(maxs).any() {
+        bail!("invalid studio hull: {model}");
+    }
+    Ok((mins, maxs))
+}
 fn eye_position(data: &[u8]) -> Result<Vec3> {
     if data.len() > 64 * 1024 * 1024
         || bytes(data, 0, 4)? != b"IDST"

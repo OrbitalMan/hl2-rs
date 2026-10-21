@@ -1474,6 +1474,22 @@ pub fn spawn_map(
     }
     stats.skin_joints = skeletons.values().map(|s| s.joints.len()).sum();
     stats.materials = material_handles.len();
+    drop(stats);
+    commands.insert_resource(ModelCache {
+        textures: texture_handles,
+        definitions: loaded
+            .materials
+            .iter()
+            .map(|(name, material)| {
+                let mut material = material.clone();
+                strip_pixels(&mut material);
+                (name.clone(), material)
+            })
+            .collect(),
+        white,
+        black_cube,
+        missing,
+    });
 }
 type TemplateDraw<'a> = (
     &'a SourceEntity,
@@ -1643,6 +1659,194 @@ pub fn spawn_runtime_draws(
             }
         }
     }
+}
+/// The loaded map's GPU textures and material definitions, kept for models drawn after
+/// the map load (DESIGN 14r part B): texture handles by VTF path (shared with the map's
+/// draws) and definitions without their decoded pixels.
+#[derive(Resource, Default)]
+pub struct ModelCache {
+    pub textures: BTreeMap<String, Handle<Image>>,
+    pub definitions: BTreeMap<String, MaterialData>,
+    pub white: Handle<Image>,
+    pub black_cube: Handle<Image>,
+    pub missing: Handle<Image>,
+}
+impl ModelCache {
+    /// Upload a late-loaded model's materials: textures not on the GPU yet, then the
+    /// definitions without pixels.
+    pub fn add_materials(
+        &mut self,
+        images: &mut Assets<Image>,
+        loaded: BTreeMap<String, MaterialData>,
+    ) {
+        for (name, mut material) in loaded {
+            if let (Some(base), Some(path)) = (&material.base, &material.base_path) {
+                self.textures.entry(path.clone()).or_insert_with(|| {
+                    images.add(image(base.width, base.height, base.rgba.clone(), true))
+                });
+            }
+            if let (Some(iris), Some(path)) = (&material.iris, &material.iris_path) {
+                self.textures.entry(path.clone()).or_insert_with(|| {
+                    images.add(image(iris.width, iris.height, iris.rgba.clone(), false))
+                });
+            }
+            strip_pixels(&mut material);
+            self.definitions.entry(name).or_insert(material);
+        }
+    }
+}
+/// A material definition without decoded images (their GPU copies stay in ModelCache).
+fn strip_pixels(material: &mut MaterialData) {
+    material.base = None;
+    material.iris = None;
+    material.camera_overlay = None;
+    material.envmap = None;
+    material.envmap_mask = None;
+    material.two_texture = None;
+}
+/// One runtime entity's studio-model draws (DESIGN 14r part B: models loaded after the
+/// map): one mesh per material like the map build's entity batches, lit per entity,
+/// GPU-skinned on its own skeleton when the model has bone weights.
+pub(crate) fn build_model_draws(
+    commands: &mut Commands,
+    (meshes, materials, inverse_binds): (
+        &mut Assets<Mesh>,
+        &mut Assets<SourceMaterial>,
+        &mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
+    ),
+    cache: &ModelCache,
+    world: &modkit_core::World,
+    id: usize,
+    transform: Transform,
+) -> usize {
+    let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(id)) else {
+        return 0;
+    };
+    let Some(surfaces) = world.model_assets.get(&instance.asset_key()) else {
+        return 0;
+    };
+    let scale = Mat4::from_scale(Vec3::splat(instance.scale));
+    let mut batches: BTreeMap<String, Batch> = BTreeMap::new();
+    for surface in surfaces.iter().filter(|s| !s.indices.is_empty()) {
+        batches.entry(surface.material.clone()).or_default().append(
+            surface,
+            scale,
+            cache.definitions.get(&surface.material),
+        );
+    }
+    let rig = world
+        .rigs
+        .get(&instance.asset_key())
+        .filter(|rig| !rig.bones.is_empty() && rig.bones.len() < 256);
+    let modulation = entity_modulation(world, id);
+    let mut skeleton: Option<crate::gpu_skinning::Skeleton> = None;
+    let mut draws = 0;
+    for (name, mut batch) in batches {
+        let fallback = MaterialData::default();
+        let definition = cache.definitions.get(&name).unwrap_or(&fallback);
+        let base = definition
+            .base_path
+            .as_ref()
+            .and_then(|p| cache.textures.get(p))
+            .unwrap_or(&cache.missing)
+            .clone();
+        let iris = definition
+            .iris_path
+            .as_ref()
+            .and_then(|p| cache.textures.get(p))
+            .cloned();
+        let lit = batch.model && !definition.unlit && !definition.camera;
+        let mut material = make_material(
+            definition,
+            base,
+            cache.white.clone(),
+            iris,
+            (&cache.white, &cache.black_cube),
+        );
+        material.tint *= modulation;
+        if lit {
+            material.lighting = ModelLighting::fallback(definition.half_lambert);
+        }
+        let material = materials.add(material);
+        let triangles = batch.indices.len() / 3;
+        let mut animation = batch
+            .skin
+            .iter()
+            .any(|(_, w)| w.is_some())
+            .then(|| AnimatedMesh {
+                sampled: None,
+                gpu: None,
+                entity: Some(id),
+                weapon: None,
+                key: instance.asset_key(),
+                scale: instance.scale,
+                flex_base: batch.skin.iter().map(|(p, _)| *p).collect(),
+                normals: batch.normals.clone(),
+                bind: std::mem::take(&mut batch.skin),
+                flex: std::mem::take(&mut batch.flex),
+                flex_signature: 0,
+            });
+        if let (Some(animation), Some(rig)) = (&mut animation, rig) {
+            if skeleton.is_none() {
+                let root = commands
+                    .spawn((
+                        crate::campaign::MapOwned,
+                        Transform::IDENTITY,
+                        Visibility::Inherited,
+                        SourceEntity(id),
+                    ))
+                    .id();
+                skeleton = Some(crate::gpu_skinning::Skeleton::spawn(
+                    commands,
+                    inverse_binds,
+                    rig,
+                    instance.scale,
+                    root,
+                ));
+            }
+            animation.gpu = skeleton.clone();
+        }
+        let mut mesh = batch.mesh();
+        if let Some(animation) = &animation
+            && let Some(skeleton) = &animation.gpu
+        {
+            skeleton.attributes(&mut mesh, &animation.bind);
+        }
+        if animation.is_some() {
+            mesh.asset_usage = RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
+        }
+        let mut draw = commands.spawn((
+            crate::campaign::MapOwned,
+            Name::new(name.clone()),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(material),
+            transform,
+            SourceEntity(id),
+            crate::visibility::PvsDraw::default(),
+            DrawTriangles(triangles),
+        ));
+        if lit {
+            draw.insert(ModelLit {
+                entity: Some(id),
+                key: instance.asset_key(),
+                scale: instance.scale,
+                half_lambert: definition.half_lambert,
+                last: None,
+                dynamic: false,
+            });
+        }
+        if let Some(animation) = animation {
+            if let Some(skeleton) = &animation.gpu {
+                draw.insert((
+                    skeleton.component(),
+                    bevy::camera::visibility::DynamicSkinnedMeshBounds,
+                ));
+            }
+            draw.insert(animation);
+        }
+        draws += 1;
+    }
+    draws
 }
 /// Source render color/alpha of an entity (rendercolor, renderamt when rendermode != 0).
 fn entity_modulation(world: &modkit_core::World, id: usize) -> Vec4 {

@@ -174,6 +174,8 @@ pub struct Gameplay {
     pub runtime_entities: Vec<usize>,
     /// Spawns that had to copy the World because another Arc held it (should stay 0).
     pub world_copies: usize,
+    /// prop_physics_create requests (model, eye, aim) for the host's model loader.
+    pub prop_requests: Vec<(String, Vec3, Vec3)>,
 }
 /// The weapons each F4 class can be given: Weapon_CanUse on its pooled spawn's
 /// loaded model (every activity of the model, loaded or not).
@@ -396,6 +398,7 @@ impl Gameplay {
             render_spawns: Vec::new(),
             runtime_entities: Vec::new(),
             world_copies: 0,
+            prop_requests: Vec::new(),
         }
     }
     pub fn load_with_campaign(
@@ -437,6 +440,7 @@ impl Gameplay {
             render_spawns: Vec::new(),
             runtime_entities: Vec::new(),
             world_copies: 0,
+            prop_requests: Vec::new(),
             player_damage,
             damage_messages: Vec::new(),
             suit: Default::default(),
@@ -521,12 +525,38 @@ impl Gameplay {
         physics: &mut Physics,
     ) -> Result<usize, String> {
         use hl2_simulation::ai::spawn;
+        let id = self.world.entities.len();
+        let (mut new_entity, instance) = spawn::instantiate(&self.world, template, id, origin, yaw);
+        if let Some(flags) = spawnflags {
+            new_entity
+                .properties
+                .retain(|(k, _)| !k.eq_ignore_ascii_case("spawnflags"));
+            new_entity
+                .properties
+                .push(("spawnflags".into(), flags.to_string()));
+        }
+        let id = self.insert_entity(new_entity, instance, physics)?;
+        self.npcs.copy_actor(template, id);
+        self.render_spawns.push((template, id));
+        self.scene.ai_set_yaw(id, yaw);
+        Ok(id)
+    }
+    /// CreateEntityByName + DispatchSpawn's simulation part for any runtime entity:
+    /// append it (and its model instance, whose id must be the next entity id) to the
+    /// map's World in place, its spawn state, colliders and AI actor. The host draws it.
+    pub fn insert_entity(
+        &mut self,
+        entity: modkit_core::Entity,
+        instance: Option<modkit_core::ModelInstance>,
+        physics: &mut Physics,
+    ) -> Result<usize, String> {
         let live = self
             .runtime_entities
             .iter()
             .filter(|id| !self.scene.states[**id].killed)
             .count();
-        let limit = spawn::MAX_EDICTS.load(std::sync::atomic::Ordering::Relaxed);
+        let limit =
+            hl2_simulation::ai::spawn::MAX_EDICTS.load(std::sync::atomic::Ordering::Relaxed);
         if limit > 0 && live >= limit {
             return Err(format!(
                 "{limit} runtime entities alive (ED_Alloc: no free edicts; --max-edicts)"
@@ -536,28 +566,50 @@ impl Gameplay {
             self.world_copies += 1;
         }
         let world = Arc::make_mut(&mut self.world);
-        let id = world.entities.len();
-        let (mut new_entity, instance) = spawn::instantiate(world, template, id, origin, yaw);
-        if let Some(flags) = spawnflags {
-            new_entity
-                .properties
-                .retain(|(k, _)| !k.eq_ignore_ascii_case("spawnflags"));
-            new_entity
-                .properties
-                .push(("spawnflags".into(), flags.to_string()));
-        }
-        let spawned = self.scene.spawn_entity(world, new_entity.clone());
-        debug_assert_eq!(spawned, id);
+        let id = self.scene.spawn_entity(world, entity.clone());
         if let Some(instance) = instance {
+            debug_assert_eq!(instance.entity, Some(id));
             world.model_instances.push(instance.clone());
             physics.add_spawned_instance(world, &instance);
         }
         self.runtime_entities.push(id);
-        self.ai.add_actor(id, &new_entity);
-        self.npcs.copy_actor(template, id);
-        self.render_spawns.push((template, id));
-        self.scene.ai_set_yaw(id, yaw);
+        self.ai.add_actor(id, &entity);
         Ok(id)
+    }
+    /// Merge a late-loaded model's tables into the map's World (keys it lacks only).
+    pub fn merge_model(&mut self, loaded: World) {
+        if Arc::strong_count(&self.world) > 1 {
+            self.world_copies += 1;
+        }
+        let world = Arc::make_mut(&mut self.world);
+        for (k, v) in loaded.model_assets {
+            world.model_assets.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.model_collision {
+            world.model_collision.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.rigs {
+            world.rigs.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.illumination {
+            world.illumination.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.model_physics {
+            world.model_physics.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.model_mass {
+            world.model_mass.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.model_prop_health {
+            world.model_prop_health.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.model_prop_data {
+            world.model_prop_data.entry(k).or_insert(v);
+        }
+        for (k, v) in loaded.model_breaks {
+            world.model_breaks.entry(k).or_insert(v);
+        }
+        world.warnings.extend(loaded.warnings);
     }
     /// The F4/npc_create part: a class template, then the request's weapon, side and
     /// grenades.

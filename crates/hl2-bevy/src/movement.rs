@@ -316,6 +316,12 @@ impl Simulation {
         use hl2_simulation::ai::spawn::OverlayCommand;
         match game.spawn_overlay.key(key)? {
             OverlayCommand::Spawn(request) => Some(self.spawn_npc(game, request)),
+            OverlayCommand::SpawnProp(model) => {
+                let model = crate::runtime_props::model_path(&model);
+                let message = format!("prop_physics_create {model}");
+                game.prop_requests.push((model, self.eye, self.forward()));
+                Some(message)
+            }
             OverlayCommand::ToggleNotarget => {
                 game.ai.ignore_player = !game.ai.ignore_player;
                 None
@@ -327,6 +333,14 @@ impl Simulation {
                 None
             }
         }
+    }
+    /// The view direction (Source axes).
+    fn forward(&self) -> glam::Vec3 {
+        glam::Vec3::new(
+            self.pitch.cos() * self.yaw.cos(),
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+        )
     }
     /// npc_create from the player's eye along the aim (a new runtime entity).
     pub fn spawn_npc(

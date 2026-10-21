@@ -62,6 +62,43 @@ pub const SPAWN_CLASSES: &[&str] = &[
     "npc_helicopter",
     "npc_combinedropship",
 ];
+/// Physics props after the NPC classes in the overlay (developer choice: common HL2
+/// props, every one with a .phy), spawned like `prop_physics_create <model>` (the
+/// argument is relative to models/).
+pub const SPAWN_PROPS: &[&str] = &[
+    "props_c17/oildrum001.mdl",
+    "props_c17/oildrum001_explosive.mdl",
+    "props_junk/wood_crate001a.mdl",
+    "props_junk/wood_crate002a.mdl",
+    "props_junk/cardboard_box001a.mdl",
+    "props_junk/watermelon01.mdl",
+    "props_junk/popcan01a.mdl",
+    "props_junk/gascan001a.mdl",
+    "props_junk/propane_tank001a.mdl",
+    "props_junk/trafficcone001a.mdl",
+    "props_junk/metal_paintcan001a.mdl",
+    "props_junk/garbage_metalcan001a.mdl",
+    "props_junk/cinderblock01a.mdl",
+    "props_junk/sawblade001a.mdl",
+    "props_junk/harpoon002a.mdl",
+    "props_c17/furniturechair001a.mdl",
+    "props_c17/furnituretable001a.mdl",
+    "props_c17/furniturestove001a.mdl",
+    "props_c17/furniturebathtub001a.mdl",
+    "props_interiors/furniture_couch01a.mdl",
+    "props_wasteland/cafeteria_bench001a.mdl",
+    "props_borealis/bluebarrel001.mdl",
+    "props_c17/canister01a.mdl",
+    "props_c17/metalpot001a.mdl",
+    "props_c17/doll01.mdl",
+    "props_lab/monitor01a.mdl",
+    "props_debris/metal_panel01a.mdl",
+    "props_vehicles/car002a_physics.mdl",
+];
+/// Overlay entries: NPC classes, then props.
+pub fn entry_count() -> usize {
+    SPAWN_CLASSES.len() + SPAWN_PROPS.len()
+}
 /// An overlay entry's entity class and extra keyvalues: citizen variants are npc_citizen
 /// with a `citizentype` (CT_REFUGEE 2, CT_REBEL 3) and the medic spawnflag; every pooled
 /// citizen has SF_CITIZEN_RANDOM_HEAD, so CNPC_Citizen::SelectModel gives each slot its
@@ -483,6 +520,8 @@ pub enum OverlayKey {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum OverlayCommand {
     Spawn(SpawnRequest),
+    /// prop_physics_create with this argument (relative to models/).
+    SpawnProp(String),
     /// Toggle notarget (the AI does not sense the player).
     ToggleNotarget,
     /// Toggle the AI think loop (ai_enable).
@@ -557,12 +596,24 @@ impl Overlay {
         self.usable.get(class).map_or(&[], Vec::as_slice)
     }
     fn label(&self) -> &'static str {
-        SPAWN_CLASSES[self.class]
+        SPAWN_CLASSES
+            .get(self.class)
+            .copied()
+            .unwrap_or_else(|| self.prop().unwrap_or(""))
+    }
+    /// The selected prop entry's model argument.
+    fn prop(&self) -> Option<&'static str> {
+        SPAWN_PROPS
+            .get(self.class.checked_sub(SPAWN_CLASSES.len())?)
+            .copied()
     }
     fn class_name(&self) -> &'static str {
         spawn_class(self.label()).0
     }
     fn rows(&self) -> Vec<OptionRow> {
+        if self.prop().is_some() {
+            return vec![OptionRow::Notarget, OptionRow::Ai];
+        }
         let mut rows = vec![OptionRow::Weapon(String::new())];
         rows.extend(
             self.usable(self.label())
@@ -609,7 +660,7 @@ impl Overlay {
             OverlayKey::Right => self.column = Column::Options,
             OverlayKey::Up | OverlayKey::Down => match self.column {
                 Column::Classes => {
-                    let n = SPAWN_CLASSES.len() as isize;
+                    let n = entry_count() as isize;
                     self.select_class((self.class as isize + step).rem_euclid(n) as usize);
                 }
                 Column::Options => {
@@ -640,6 +691,9 @@ impl Overlay {
                         OptionRow::Weapon(_) => {}
                     }
                 }
+                if let Some(model) = self.prop() {
+                    return Some(OverlayCommand::SpawnProp(model.into()));
+                }
                 return Some(OverlayCommand::Spawn(self.request()));
             }
             OverlayKey::Toggle => {}
@@ -660,7 +714,7 @@ impl Overlay {
     }
     /// The panel to draw; `ai` and `notarget` are the host's live switches.
     pub fn panel(&self, ai: bool, notarget: bool) -> Panel {
-        let total = SPAWN_CLASSES.len();
+        let total = entry_count();
         let first = self
             .class
             .saturating_sub(VISIBLE_CLASSES / 2)
@@ -676,9 +730,14 @@ impl Overlay {
         if first > 0 {
             classes.push(note(format!("({first} more above)")));
         }
-        for (index, class) in SPAWN_CLASSES.iter().enumerate().take(last).skip(first) {
+        let entries = SPAWN_CLASSES.iter().map(|c| (*c).to_owned()).chain(
+            SPAWN_PROPS
+                .iter()
+                .map(|m| format!("prop: {}", m.trim_end_matches(".mdl"))),
+        );
+        for (index, text) in entries.enumerate().take(last).skip(first) {
             classes.push(PanelRow {
-                text: (*class).into(),
+                text,
                 selected: index == self.class,
                 cursor: classes_focused && index == self.class,
             });
@@ -737,7 +796,7 @@ impl Overlay {
             .collect();
         Panel {
             title: format!(
-                "F4 NPC spawn ({}/{total}): Up/Down move, Left/Right column, Enter spawn / toggle",
+                "F4 spawn ({}/{total}): Up/Down move, Left/Right column, Enter spawn / toggle",
                 self.class + 1
             ),
             classes,
@@ -749,6 +808,35 @@ impl Overlay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn props_follow_the_npc_classes_in_the_overlay() {
+        let mut overlay = Overlay::default();
+        overlay.key(OverlayKey::Toggle);
+        // Up from the first class wraps to the last prop.
+        overlay.key(OverlayKey::Up);
+        assert_eq!(overlay.class, entry_count() - 1);
+        assert_eq!(
+            overlay.key(OverlayKey::Enter),
+            Some(OverlayCommand::SpawnProp(
+                SPAWN_PROPS.last().unwrap().to_string()
+            ))
+        );
+        let panel = overlay.panel(true, false);
+        assert!(panel
+            .classes
+            .iter()
+            .any(|r| r.cursor && r.text == "prop: props_vehicles/car002a_physics"));
+        // Props have no weapon rows; the class column still spawns NPCs before them.
+        overlay.key(OverlayKey::Right);
+        assert_eq!(overlay.rows(), vec![OptionRow::Notarget, OptionRow::Ai]);
+        overlay.key(OverlayKey::Left);
+        overlay.key(OverlayKey::Down);
+        assert_eq!(overlay.class, 0);
+        assert!(matches!(
+            overlay.key(OverlayKey::Enter),
+            Some(OverlayCommand::Spawn(_))
+        ));
+    }
     #[test]
     fn the_pool_has_slots_for_every_overlay_class() {
         let mut world = modkit_core::World::default();
@@ -955,28 +1043,37 @@ mod tests {
         assert_eq!(o.request().equipment, "");
         // The class list scrolls: the selection is always one of the drawn rows.
         o.key(OverlayKey::Up);
-        for _ in 0..SPAWN_CLASSES.len() {
+        for _ in 0..entry_count() {
             o.key(OverlayKey::Down);
             let panel = o.panel(true, false);
             assert!(panel.classes.len() <= VISIBLE_CLASSES + 2);
+            let text = match SPAWN_CLASSES.get(o.class) {
+                Some(class) => (*class).to_owned(),
+                None => format!(
+                    "prop: {}",
+                    SPAWN_PROPS[o.class - SPAWN_CLASSES.len()].trim_end_matches(".mdl")
+                ),
+            };
             assert!(
-                panel
-                    .classes
-                    .iter()
-                    .any(|r| r.selected && r.text == SPAWN_CLASSES[o.class]),
+                panel.classes.iter().any(|r| r.selected && r.text == text),
                 "{panel:?}"
             );
         }
-        // Wrapping up from the first class reaches the last, with "more above".
+        // Wrapping up from the first class reaches the last entry (a prop), with "more
+        // above"; the last NPC class is just before the props.
         while o.class != 0 {
             o.key(OverlayKey::Down);
         }
         o.key(OverlayKey::Up);
         let panel = o.panel(false, false);
         assert!(panel.classes[0].text.contains("more above"));
+        assert_eq!(o.class, entry_count() - 1);
+        for _ in 0..SPAWN_PROPS.len() {
+            o.key(OverlayKey::Up);
+        }
         assert_eq!(o.request().classname, "npc_combinedropship");
         // Combine soldiers have no stunstick: their default SMG1 is preselected.
-        while SPAWN_CLASSES[o.class] != "npc_combine_s" {
+        while o.class >= SPAWN_CLASSES.len() || SPAWN_CLASSES[o.class] != "npc_combine_s" {
             o.key(OverlayKey::Down);
         }
         assert_eq!(o.request().equipment, "weapon_smg1");

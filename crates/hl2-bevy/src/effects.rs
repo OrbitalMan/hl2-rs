@@ -24,36 +24,45 @@ pub struct PreparedEffects {
     pub models: BTreeMap<String, Vec<Surface>>,
     model_errors: Vec<String>,
 }
+/// Gib models are precached with their breakable props (PrecacheGibsForModel), in the
+/// skins they can take: the parent's (BreakModelCreateSingle) or a chunk set's
+/// breakable_skin; propdata chunk models only where a prop uses them.
+pub fn gib_models(world: &modkit_core::World) -> std::collections::BTreeSet<(String, i32)> {
+    let mut gibs = std::collections::BTreeSet::new();
+    for instance in &world.model_instances {
+        let key = instance.asset_key();
+        if let Some(list) = world.model_breaks.get(&key) {
+            for gib in list.iter().filter(|gib| !gib.ragdoll) {
+                gibs.insert((gib.model.clone(), instance.skin as i32));
+            }
+        } else if let Some(data) = world.model_prop_data.get(&key) {
+            let set = data.breakable_model.as_deref().and_then(|name| {
+                world
+                    .breakable_chunks
+                    .iter()
+                    .find(|(set, _)| set.starts_with(name))
+            });
+            if let Some((_, models)) = set.filter(|_| data.health > 0. && data.breakable_count > 0)
+            {
+                for model in models {
+                    gibs.insert((model.clone(), data.breakable_skin));
+                }
+            }
+        }
+    }
+    gibs
+}
+/// One projectile/gib model posed at sequence 0 frame 0 (setup or worker threads).
+pub fn read_effect_model(vfs: &Vfs, path: &str, skin: i32) -> anyhow::Result<Vec<Surface>> {
+    let mut surfaces = models::read_model(vfs, path, skin.max(0) as usize)?;
+    pose_sequence_zero(vfs, path, &mut surfaces)?;
+    Ok(surfaces)
+}
 impl PreparedEffects {
     pub fn load(vfs: &Vfs, world: &modkit_core::World) -> Self {
         let mut model_errors = Vec::new();
         let mut loaded = BTreeMap::new();
-        // Gib models are precached with their breakable props (PrecacheGibsForModel), in
-        // the skins they can take: the parent's (BreakModelCreateSingle) or a chunk
-        // set's breakable_skin; propdata chunk models only where a prop uses them.
-        let mut gibs: std::collections::BTreeSet<(String, i32)> = std::collections::BTreeSet::new();
-        for instance in &world.model_instances {
-            let key = instance.asset_key();
-            if let Some(list) = world.model_breaks.get(&key) {
-                for gib in list.iter().filter(|gib| !gib.ragdoll) {
-                    gibs.insert((gib.model.clone(), instance.skin as i32));
-                }
-            } else if let Some(data) = world.model_prop_data.get(&key) {
-                let set = data.breakable_model.as_deref().and_then(|name| {
-                    world
-                        .breakable_chunks
-                        .iter()
-                        .find(|(set, _)| set.starts_with(name))
-                });
-                if let Some((_, models)) =
-                    set.filter(|_| data.health > 0. && data.breakable_count > 0)
-                {
-                    for model in models {
-                        gibs.insert((model.clone(), data.breakable_skin));
-                    }
-                }
-            }
-        }
+        let gibs = gib_models(world);
         let fixed = [
             hl2_simulation::projectiles::GRENADE_MODEL,
             hl2_simulation::projectiles::FRAG_MODEL,
@@ -69,10 +78,7 @@ impl PreparedEffects {
             if loaded.contains_key(&key) {
                 continue;
             }
-            match models::read_model(vfs, &path, skin.max(0) as usize).and_then(|mut surfaces| {
-                pose_sequence_zero(vfs, &path, &mut surfaces)?;
-                Ok(surfaces)
-            }) {
+            match read_effect_model(vfs, &path, skin) {
                 Ok(surfaces) => {
                     loaded.insert(key, surfaces);
                 }
@@ -229,6 +235,51 @@ struct QuadDraw {
 }
 /// One projectile model surface: mesh and material.
 type ModelPart = (Handle<Mesh>, Handle<rendering::SourceMaterial>);
+impl Effects {
+    /// Gib models loaded after the map (DESIGN 14r part B) by render key, textured from
+    /// the model cache like the map's gibs.
+    pub fn add_models(
+        &mut self,
+        models: BTreeMap<String, Vec<Surface>>,
+        cache: &rendering::ModelCache,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<rendering::SourceMaterial>,
+    ) {
+        for (key, surfaces) in models {
+            if self.grenade_meshes.contains_key(&key) {
+                continue;
+            }
+            let parts = surfaces
+                .iter()
+                .map(|surface| {
+                    let fallback = crate::assets::MaterialData::default();
+                    let definition = cache
+                        .definitions
+                        .get(&surface.material)
+                        .unwrap_or(&fallback);
+                    let base = definition
+                        .base_path
+                        .as_ref()
+                        .and_then(|p| cache.textures.get(p))
+                        .unwrap_or(&cache.white)
+                        .clone();
+                    let material = materials.add(rendering::make_material(
+                        definition,
+                        base,
+                        cache.white.clone(),
+                        None,
+                        (&cache.white, &cache.black_cube),
+                    ));
+                    (
+                        meshes.add(rendering::mesh_from_surface(surface, definition)),
+                        material,
+                    )
+                })
+                .collect();
+            self.grenade_meshes.insert(key, parts);
+        }
+    }
+}
 #[derive(Resource)]
 pub struct Effects {
     source: ProjectileVisuals,
