@@ -55,26 +55,49 @@ pub struct Pointer {
 
 /// How far a window is faded towards its focused look (0 out of focus, 1 in focus).
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Fade {
-    from: f32,
-    to: f32,
-    start: f64,
+pub struct Fade {
+    pub from: f32,
+    pub to: f32,
+    pub start: f64,
 }
 
 impl Fade {
-    fn at(&self, now: f64, duration: f32) -> f32 {
+    pub const fn new(from: f32, to: f32, start: f64) -> Self {
+        Self { from, to, start }
+    }
+
+    pub fn at(&self, now: f64, duration: f32) -> f32 {
         if duration <= 0. {
             return self.to;
         }
         let t = (((now - self.start) / duration as f64) as f32).clamp(0., 1.);
         self.from + (self.to - self.from) * t
     }
+
+    pub fn is_finished(&self, now: f64, duration: f32) -> bool {
+        if duration <= 0. {
+            return true;
+        }
+        (now - self.start) as f32 >= duration
+    }
+}
+
+/// The state of an open or fading dialog window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindowRecord {
+    pub window: Window,
+    /// How far the window is faded towards its focused look (0 out of focus, 1 in focus).
+    pub focus_fade: Fade,
+    /// How far the window is faded towards full visibility (0 hidden/closed, 1 fully visible).
+    pub alpha_fade: Fade,
+    /// Whether this window has begun closing and is fading out.
+    pub closing: bool,
 }
 
 /// The open windows, bottom to top, and the focus.
 #[derive(Clone, Debug)]
 pub struct Windows {
-    order: Vec<(Window, Fade)>,
+    order: Vec<WindowRecord>,
     /// Fade state of the base (main menu / gameplay). 1.0 when base is focused, 0.0 when out of focus.
     base_fade: Fade,
     /// The base has the focus although windows are open.
@@ -83,8 +106,10 @@ pub struct Windows {
     press: Option<Layer>,
     /// Time of the current frame, stamped on focus changes.
     now: f64,
-    /// `Frame.FocusTransitionEffectTime` in seconds.
+    /// `Frame.FocusTransitionEffectTime` and `Frame.TransitionEffectTime` in seconds.
     pub fade_time: f32,
+    /// Unfocused alpha factor (ratio of Frame.OutOfFocusBgColor to Frame.BgColor).
+    pub unfocused_alpha: f32,
 }
 
 impl Default for Windows {
@@ -100,15 +125,17 @@ impl Default for Windows {
             press: None,
             now: 0.,
             fade_time: 0.3,
+            unfocused_alpha: 0.3,
         }
     }
 }
 
 impl Windows {
-    /// No windows; focus fades take `fade_time` seconds (`Frame.FocusTransitionEffectTime`).
+    /// No windows; focus and window fades take `fade_time` seconds (`Frame.FocusTransitionEffectTime`).
     pub fn new(fade_time: f32) -> Self {
         Self {
             fade_time,
+            unfocused_alpha: crate::tuning::unfocused_alpha_factor(),
             ..Self::default()
         }
     }
@@ -118,17 +145,29 @@ impl Windows {
         self.now = now;
     }
 
+    /// Whether `window` is present in the window stack (open or currently fading out).
     pub fn is_open(&self, window: Window) -> bool {
-        self.order.iter().any(|(w, _)| *w == window)
+        self.order.iter().any(|r| r.window == window)
     }
 
+    /// Whether `window` is active (open and not closing).
+    pub fn is_active(&self, window: Window) -> bool {
+        self.order.iter().any(|r| r.window == window && !r.closing)
+    }
+
+    /// Whether `window` is currently closing and fading out.
+    pub fn is_closing(&self, window: Window) -> bool {
+        self.order.iter().any(|r| r.window == window && r.closing)
+    }
+
+    /// Whether there are no active (non-closing) windows.
     pub fn is_empty(&self) -> bool {
-        self.order.is_empty()
+        !self.order.iter().any(|r| !r.closing)
     }
 
-    /// Whether any modal window (SubDialog or Confirmation) is open.
+    /// Whether any modal window (SubDialog or Confirmation) is actively open.
     pub fn has_modal(&self) -> bool {
-        self.order.iter().any(|(w, _)| w.is_modal())
+        self.order.iter().any(|r| r.window.is_modal() && !r.closing)
     }
 
     /// Whether the specified layer holds focus.
@@ -136,23 +175,38 @@ impl Windows {
         self.focus() == layer
     }
 
-    /// The open windows, bottom to top.
+    /// All windows currently present (including those fading out), bottom to top.
     pub fn order(&self) -> impl DoubleEndedIterator<Item = Window> + '_ {
-        self.order.iter().map(|(w, _)| *w)
+        self.order.iter().map(|r| r.window)
     }
 
+    /// All active windows (excluding those fading out), bottom to top.
+    pub fn active_order(&self) -> impl DoubleEndedIterator<Item = Window> + '_ {
+        self.order.iter().filter(|r| !r.closing).map(|r| r.window)
+    }
+
+    /// The topmost active (non-closing) window.
     pub fn top(&self) -> Option<Window> {
-        self.order.last().map(|(w, _)| *w)
+        self.order
+            .iter()
+            .rev()
+            .find(|r| !r.closing)
+            .map(|r| r.window)
     }
 
     /// The layer with the focus: exactly one element holds focus at any time.
     /// If a modal window is open, the topmost modal window holds focus.
-    /// Otherwise, the top window holds focus unless the base took it.
-    /// If no windows are open, the base holds focus.
+    /// Otherwise, the top active window holds focus unless the base took it.
+    /// If no windows are active, the base holds focus.
     pub fn focus(&self) -> Layer {
         if self.has_modal() {
-            if let Some(top) = self.top() {
-                return Layer::Window(top);
+            if let Some(modal) = self
+                .order
+                .iter()
+                .rev()
+                .find(|r| r.window.is_modal() && !r.closing)
+            {
+                return Layer::Window(modal.window);
             }
         }
         match self.top() {
@@ -168,12 +222,23 @@ impl Windows {
 
     /// Opens `window` on top with the focus (or raises it if it is open).
     pub fn open(&mut self, window: Window) {
-        let fade = self.take(window).unwrap_or(Fade {
-            from: 1.,
-            to: 1.,
-            start: self.now,
-        });
-        self.order.push((window, fade));
+        let now = self.now;
+        let rec = if let Some(mut existing) = self.take_record(window) {
+            if existing.closing {
+                let current_alpha = existing.alpha_fade.at(now, self.fade_time);
+                existing.alpha_fade = Fade::new(current_alpha, 1.0, now);
+                existing.closing = false;
+            }
+            existing
+        } else {
+            WindowRecord {
+                window,
+                focus_fade: Fade::new(1.0, 1.0, now),
+                alpha_fade: Fade::new(0.0, 1.0, now),
+                closing: false,
+            }
+        };
+        self.order.push(rec);
         self.set_focus(Layer::Window(window));
     }
 
@@ -184,21 +249,55 @@ impl Windows {
         }
     }
 
-    /// Closes `window`. The focus stays on the base if the base had it, otherwise it goes to
-    /// the window now on top.
+    /// Closes `window`. If `fade_time > 0`, it begins fading out over `fade_time` while focus
+    /// immediately restores to the next active surface.
     pub fn close(&mut self, window: Window) {
-        self.take(window);
+        if self.fade_time <= 0. {
+            self.take_record(window);
+            if self.press == Some(Layer::Window(window)) {
+                self.press = None;
+            }
+            if !self.order.iter().any(|r| !r.closing) {
+                self.base_focused = false;
+            }
+            let focus = self.focus();
+            self.set_focus(focus);
+            return;
+        }
+
+        let now = self.now;
+        if let Some(rec) = self
+            .order
+            .iter_mut()
+            .find(|r| r.window == window && !r.closing)
+        {
+            rec.closing = true;
+            let current_alpha = rec.alpha_fade.at(now, self.fade_time);
+            rec.alpha_fade = Fade::new(current_alpha, 0.0, now);
+            let current_focus = rec.focus_fade.at(now, self.fade_time);
+            rec.focus_fade = Fade::new(current_focus, 0.0, now);
+        }
         if self.press == Some(Layer::Window(window)) {
             self.press = None;
         }
-        if self.order.is_empty() {
+        let focus = self.focus();
+        self.set_focus(focus);
+    }
+
+    /// Immediately removes `window` without fading.
+    pub fn close_immediate(&mut self, window: Window) {
+        self.take_record(window);
+        if self.press == Some(Layer::Window(window)) {
+            self.press = None;
+        }
+        if !self.order.iter().any(|r| !r.closing) {
             self.base_focused = false;
         }
         let focus = self.focus();
         self.set_focus(focus);
     }
 
-    /// Closes every window.
+    /// Closes every window immediately.
     pub fn clear(&mut self) {
         self.order.clear();
         self.base_focused = false;
@@ -214,19 +313,56 @@ impl Windows {
         }
     }
 
+    /// Cleans up any windows that have completed their closing fade-out.
+    /// Returns the list of windows that finished closing.
+    pub fn clean_closed(&mut self) -> Vec<Window> {
+        let now = self.now;
+        let duration = self.fade_time;
+        let mut closed = Vec::new();
+        self.order.retain(|r| {
+            if r.closing && r.alpha_fade.is_finished(now, duration) {
+                closed.push(r.window);
+                false
+            } else {
+                true
+            }
+        });
+        if !self.order.iter().any(|r| !r.closing) {
+            self.base_focused = false;
+        }
+        closed
+    }
+
     /// Gives the keyboard focus to the base; the windows keep their order.
     pub fn focus_base(&mut self) {
-        if !self.has_modal() && !self.order.is_empty() {
+        if !self.has_modal() && !self.is_empty() {
             self.set_focus(Layer::Base);
         }
+    }
+
+    /// How far `window` is faded towards full visibility (0 hidden, 1 visible).
+    pub fn window_alpha(&self, window: Window, now: f64) -> f32 {
+        self.order
+            .iter()
+            .find(|r| r.window == window)
+            .map_or(0., |r| r.alpha_fade.at(now, self.fade_time))
     }
 
     /// How far `window` is faded towards its focused look at `now` (0..1).
     pub fn focus_amount(&self, window: Window, now: f64) -> f32 {
         self.order
             .iter()
-            .find(|(w, _)| *w == window)
-            .map_or(0., |(_, fade)| fade.at(now, self.fade_time))
+            .find(|r| r.window == window)
+            .map_or(0., |r| r.focus_fade.at(now, self.fade_time))
+    }
+
+    /// The combined composite alpha multiplier for drawing `window` (combining visibility fade
+    /// and unfocused translucency).
+    pub fn window_composite_alpha(&self, window: Window, now: f64) -> f32 {
+        let vis = self.window_alpha(window, now);
+        let focus = self.focus_amount(window, now);
+        let factor = self.unfocused_alpha + (1.0 - self.unfocused_alpha) * focus;
+        vis * factor
     }
 
     /// Which layer gets the pointer this frame, if any: the layer a held press belongs to,
@@ -243,7 +379,7 @@ impl Windows {
             .press
             .filter(|_| pointer.held || pointer.released)
             .filter(|layer| match layer {
-                Layer::Window(w) => self.is_open(*w),
+                Layer::Window(w) => self.is_active(*w),
                 Layer::Base => true,
             });
         let layer = pressed.or_else(|| {
@@ -251,12 +387,12 @@ impl Windows {
                 .order
                 .iter()
                 .rev()
-                .find(|(w, _)| w.is_modal())
-                .map(|(w, _)| *w)
+                .find(|r| r.window.is_modal() && !r.closing)
+                .map(|r| r.window)
             {
                 return Some(Layer::Window(top_modal));
             }
-            if let Some(window) = modal.filter(|w| self.is_open(*w)) {
+            if let Some(window) = modal.filter(|w| self.is_active(*w)) {
                 return Some(Layer::Window(window));
             }
             // Without a position (scripted or keyboard-only input) the focused layer gets the
@@ -270,7 +406,8 @@ impl Windows {
             self.order
                 .iter()
                 .rev()
-                .map(|(w, _)| *w)
+                .filter(|r| !r.closing)
+                .map(|r| r.window)
                 .find(|w| hit(*w, at))
                 .map(Layer::Window)
                 .or(base_takes_pointer.then_some(Layer::Base))
@@ -292,9 +429,9 @@ impl Windows {
         layer
     }
 
-    fn take(&mut self, window: Window) -> Option<Fade> {
-        let index = self.order.iter().position(|(w, _)| *w == window)?;
-        Some(self.order.remove(index).1)
+    fn take_record(&mut self, window: Window) -> Option<WindowRecord> {
+        let index = self.order.iter().position(|r| r.window == window)?;
+        Some(self.order.remove(index))
     }
 
     fn set_focus(&mut self, focus: Layer) {
@@ -303,7 +440,8 @@ impl Windows {
         let duration = self.fade_time;
 
         // Base focus fade
-        let base_to = if self.base_focused || self.order.is_empty() {
+        let has_active = self.order.iter().any(|r| !r.closing);
+        let base_to = if self.base_focused || !has_active {
             1.
         } else {
             0.
@@ -317,15 +455,18 @@ impl Windows {
         }
 
         // Each window focus fade
-        for (window, fade) in &mut self.order {
-            let to = if focus == Layer::Window(*window) {
+        for rec in &mut self.order {
+            if rec.closing {
+                continue;
+            }
+            let to = if focus == Layer::Window(rec.window) {
                 1.
             } else {
                 0.
             };
-            if fade.to != to {
-                *fade = Fade {
-                    from: fade.at(now, duration),
+            if rec.focus_fade.to != to {
+                rec.focus_fade = Fade {
+                    from: rec.focus_fade.at(now, duration),
                     to,
                     start: now,
                 };
@@ -624,5 +765,76 @@ mod tests {
         assert_eq!(w.focus(), Layer::Base);
         assert!(w.is_focused(Layer::Base));
         assert!((w.base_focus_amount(5.3) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn shared_fade_state_and_interpolation_logic_with_deterministic_timesteps() {
+        let mut w = Windows::new(0.3);
+        w.set_time(0.0);
+
+        // 1. Opening fade-in: Window opens at t=0.0
+        w.open(Window::Options);
+        assert!(w.is_active(Window::Options));
+        assert!(!w.is_closing(Window::Options));
+        assert_eq!(w.focus(), Layer::Window(Window::Options));
+        // At t=0.0: alpha is 0.0, focused
+        assert!((w.window_alpha(Window::Options, 0.0) - 0.0).abs() < 1e-4);
+        assert!((w.focus_amount(Window::Options, 0.0) - 1.0).abs() < 1e-4);
+        // At t=0.15 (halfway): alpha is 0.5, composite alpha is 0.5
+        assert!((w.window_alpha(Window::Options, 0.15) - 0.5).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 0.15) - 0.5).abs() < 1e-4);
+        // At t=0.30 (complete): alpha is 1.0, fully opaque
+        assert!((w.window_alpha(Window::Options, 0.30) - 1.0).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 0.30) - 1.0).abs() < 1e-4);
+
+        // 2. Focused-to-unfocused alpha transition: Child opens at t=1.0
+        w.set_time(1.0);
+        w.open(Window::SubDialog);
+        assert_eq!(w.focus(), Layer::Window(Window::SubDialog));
+        // SubDialog is focused and fading in
+        assert!((w.window_alpha(Window::SubDialog, 1.0) - 0.0).abs() < 1e-4);
+        // Parent Options loses focus and transitions towards 0.0 (unfocused alpha 0.3)
+        assert!((w.focus_amount(Window::Options, 1.0) - 1.0).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 1.0) - 1.0).abs() < 1e-4);
+        // At t=1.15 (halfway): Options focus is 0.5, composite is 1.0 * (0.3 + 0.7 * 0.5) = 0.65
+        assert!((w.focus_amount(Window::Options, 1.15) - 0.5).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 1.15) - 0.65).abs() < 1e-4);
+        // At t=1.30 (complete): Options focus is 0.0, composite is 0.30 (translucent)
+        assert!((w.focus_amount(Window::Options, 1.30) - 0.0).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 1.30) - 0.30).abs() < 1e-4);
+
+        // 3. Unfocused-to-focused transition & Closing fade-out completion:
+        // Child closes at t=2.0
+        w.set_time(2.0);
+        w.close(Window::SubDialog);
+        // Focus hands off to Parent (Options) IMMEDIATELY, SubDialog is not active
+        assert_eq!(w.focus(), Layer::Window(Window::Options));
+        assert!(!w.is_active(Window::SubDialog));
+        assert!(w.is_closing(Window::SubDialog));
+
+        // Options immediately starts transitioning back from 0.0 towards 1.0
+        assert!((w.focus_amount(Window::Options, 2.0) - 0.0).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 2.0) - 0.30).abs() < 1e-4);
+        // At t=2.15: Options focus is 0.5, composite is 0.65
+        assert!((w.focus_amount(Window::Options, 2.15) - 0.5).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 2.15) - 0.65).abs() < 1e-4);
+        // At t=2.30: Options focus is 1.0, fully opaque again
+        assert!((w.focus_amount(Window::Options, 2.30) - 1.0).abs() < 1e-4);
+        assert!((w.window_composite_alpha(Window::Options, 2.30) - 1.0).abs() < 1e-4);
+
+        // 4. Closing fade-out progression on SubDialog:
+        // At t=2.0: SubDialog alpha is 1.0
+        assert!((w.window_alpha(Window::SubDialog, 2.0) - 1.0).abs() < 1e-4);
+        // At t=2.15: SubDialog alpha is 0.5
+        assert!((w.window_alpha(Window::SubDialog, 2.15) - 0.5).abs() < 1e-4);
+        // At t=2.30: SubDialog alpha reaches 0.0
+        assert!((w.window_alpha(Window::SubDialog, 2.30) - 0.0).abs() < 1e-4);
+
+        // clean_closed at t=2.30 purges the finished closing window
+        w.set_time(2.30);
+        let closed = w.clean_closed();
+        assert_eq!(closed, vec![Window::SubDialog]);
+        assert!(!w.is_open(Window::SubDialog));
+        assert!(w.is_active(Window::Options));
     }
 }

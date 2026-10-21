@@ -134,6 +134,7 @@ struct State {
     /// width and every drawn quad moves right by its x. `None`: the whole viewport.
     frame: Option<(f32, f32)>,
     additive: bool,
+    alpha_multiplier: f32,
     commands: Vec<Quad>,
 }
 #[derive(Clone)]
@@ -144,6 +145,7 @@ impl Default for Canvas {
             viewport: vec2(1280., 720.),
             frame: None,
             additive: false,
+            alpha_multiplier: 1.0,
             commands: vec![],
         })))
     }
@@ -151,6 +153,17 @@ impl Default for Canvas {
 impl Canvas {
     pub fn resize(&self, width: f32, height: f32) {
         self.0.lock().expect("HUD canvas").viewport = vec2(width, height);
+    }
+    /// Sets the current alpha multiplier (0..=1) for all subsequent drawing, returning the old value.
+    pub fn set_alpha_multiplier(&self, mult: f32) -> f32 {
+        let mut state = self.0.lock().expect("HUD canvas");
+        let old = state.alpha_multiplier;
+        state.alpha_multiplier = mult.clamp(0., 1.);
+        old
+    }
+    /// The current alpha multiplier.
+    pub fn alpha_multiplier(&self) -> f32 {
+        self.0.lock().expect("HUD canvas").alpha_multiplier
     }
     /// The width drawing is laid out in: the frame's, or the viewport's.
     pub fn width(&self) -> f32 {
@@ -187,10 +200,11 @@ impl Canvas {
         std::mem::take(&mut self.0.lock().expect("HUD canvas").commands)
     }
     fn quad(&self, texture: Option<Texture2D>, source: Rect, destination: Rect, color: Color) {
-        if destination.w <= 0. || destination.h <= 0. || color.a <= 0. {
+        let mut state = self.0.lock().expect("HUD canvas");
+        let a = color.a * state.alpha_multiplier;
+        if destination.w <= 0. || destination.h <= 0. || a <= 0. {
             return;
         }
-        let mut state = self.0.lock().expect("HUD canvas");
         let additive = state.additive;
         let destination = match state.frame {
             Some((x, _)) => Rect::new(
@@ -205,7 +219,7 @@ impl Canvas {
             texture,
             source,
             destination,
-            color,
+            color: Color::new(color.r, color.g, color.b, a),
             additive,
             modulate: false,
             vertices: None,
@@ -213,13 +227,20 @@ impl Canvas {
     }
     /// An untextured quad with per-vertex positions and colors (blend as set).
     pub fn polygon(&self, vertices: [(Vec2, Color); 4]) {
-        if vertices.iter().all(|(_, c)| c.a <= 0.) {
+        let mut state = self.0.lock().expect("HUD canvas");
+        let mult = state.alpha_multiplier;
+        if mult <= 0. || vertices.iter().all(|(_, c)| c.a * mult <= 0.) {
             return;
         }
-        let mut state = self.0.lock().expect("HUD canvas");
         let vertices = match state.frame {
-            Some((x, _)) => vertices.map(|(p, c)| (p + vec2(x, 0.), c)),
-            None => vertices,
+            Some((x, _)) => vertices.map(|(p, mut c)| {
+                c.a *= mult;
+                (p + vec2(x, 0.), c)
+            }),
+            None => vertices.map(|(p, mut c)| {
+                c.a *= mult;
+                (p, c)
+            }),
         };
         let min = vertices.iter().fold(Vec2::MAX, |m, (p, _)| m.min(*p));
         let max = vertices.iter().fold(Vec2::MIN, |m, (p, _)| m.max(*p));

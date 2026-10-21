@@ -4,6 +4,14 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Shared fade-in/out and focus-transition animations (`gameui::windows`, `canvas`, `console`, `gameui::options`):**
+  - Verified `sourcescheme.res` values: `Frame.TransitionEffectTime` = 0.3 s, `Frame.FocusTransitionEffectTime` = 0.3 s, `Frame.BgColor` alpha = 212, `Frame.OutOfFocusBgColor` alpha = 62.
+  - Implemented `Canvas::set_alpha_multiplier` and `Canvas::alpha_multiplier` (matching Source SDK `surface()->DrawSetAlphaMultiplier()`), modulating drawing primitives across dialogs, text, and widgets.
+  - Added `WindowRecord` in `gameui::windows` tracking `focus_fade`, `alpha_fade`, and `closing: bool`.
+  - Closing dialogs fade out visibility alpha from current down to 0.0 over 0.3 s; focus and interaction immediately hand off to the underlying surface without delay, and finished closing dialogs are purged automatically via `Windows::clean_closed()`.
+  - Unified composite alpha calculation: $A_{\text{comp}} = A_{\text{vis}} \times (u + (1 - u) \times F)$ with $u = 0.3$.
+  - Unit-tested via `shared_fade_state_and_interpolation_logic_with_deterministic_timesteps`, `validate.sh`, and `check_windows.sh`. Visual smoothness is unverified, needs manual check.
+
 - **Unified single-focus state across menus, dialogs, and sub-dialogs (`gameui::windows`, `console`, `gameui::options`):**
   - Enforced single-focus invariant in `Windows::focus()`: strictly one layer (`Layer::Base` or `Layer::Window(top)`) holds keyboard and primary interaction focus at any time.
   - Sub-dialogs and confirmation dialogs integrated into `Windows` enum as modal layers (`Window::SubDialog`, `Window::Confirmation`), synchronized through `Console::sync_dialog_windows()`.

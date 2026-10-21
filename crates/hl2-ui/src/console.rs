@@ -209,6 +209,7 @@ pub struct Console {
     /// The in-game (pause) menu.
     pause_menu: GameMenu,
     pub(crate) confirm_box: Option<(MessageBox, ConfirmKind)>,
+    pub(crate) closing_confirm_box: Option<(MessageBox, ConfirmKind)>,
     /// UI clock in seconds (real time), set every frame by [`Console::tick`].
     ui_clock: f64,
     /// Effects of calls that return none ([`Console::escape`]), handed out by the next
@@ -571,6 +572,7 @@ impl Default for Console {
             main_menu,
             pause_menu,
             confirm_box: None,
+            closing_confirm_box: None,
             ui_clock: 0.,
             deferred: Vec::new(),
             loading_dialog: None,
@@ -1214,32 +1216,50 @@ impl Console {
 
     /// Synchronizes sub-dialog and confirmation modal windows in `self.windows`.
     pub(crate) fn sync_dialog_windows(&mut self) {
+        let closed = self.windows.clean_closed();
+        for w in closed {
+            match w {
+                Window::SubDialog => self.options.closing_sub = None,
+                Window::Confirmation => {
+                    self.options.closing_confirm = None;
+                    self.closing_confirm_box = None;
+                }
+                _ => {}
+            }
+        }
+
         let has_sub = self.options.has_sub();
         let has_confirm = self.confirm_box.is_some() || self.options.has_confirm();
 
-        if has_sub && !self.windows.is_open(Window::SubDialog) {
+        if has_sub && !self.windows.is_active(Window::SubDialog) {
             self.windows.open(Window::SubDialog);
-        } else if !has_sub && self.windows.is_open(Window::SubDialog) {
+        } else if !has_sub && self.windows.is_active(Window::SubDialog) {
             self.windows.close(Window::SubDialog);
         }
 
-        if has_confirm && !self.windows.is_open(Window::Confirmation) {
+        if has_confirm && !self.windows.is_active(Window::Confirmation) {
             self.windows.open(Window::Confirmation);
-        } else if !has_confirm && self.windows.is_open(Window::Confirmation) {
+        } else if !has_confirm && self.windows.is_active(Window::Confirmation) {
             self.windows.close(Window::Confirmation);
         }
+
+        let time = self.ui_clock;
+        self.options.sub_alpha = self.windows.window_composite_alpha(Window::SubDialog, time);
+        self.options.confirm_alpha = self
+            .windows
+            .window_composite_alpha(Window::Confirmation, time);
 
         self.sync_mode();
     }
 
     /// The Options dialog is open (focused or not).
     pub fn options_open(&self) -> bool {
-        self.windows.is_open(Window::Options)
+        self.windows.is_active(Window::Options)
     }
 
     /// The open windows, bottom to top.
     pub fn open_windows(&self) -> Vec<Window> {
-        self.windows.order().collect()
+        self.windows.active_order().collect()
     }
 
     /// The main menu's geometry on this canvas, for run reports.
@@ -1262,7 +1282,7 @@ impl Console {
 
     /// The developer console is open (focused or not).
     pub fn console_open(&self) -> bool {
-        self.windows.is_open(Window::Console)
+        self.windows.is_active(Window::Console)
     }
 
     /// The menu under the windows takes the pointer (gameplay under the console does not).
@@ -1497,7 +1517,8 @@ impl Console {
             }
             return;
         }
-        if let Some((_, kind)) = self.confirm_box.take() {
+        if let Some((box_, kind)) = self.confirm_box.take() {
+            self.closing_confirm_box = Some((box_, kind.clone()));
             self.reset_menu_interaction();
             if let ConfirmKind::KeepVideo(keep) = kind {
                 let effect = self.revert_video(keep.previous);
@@ -1980,10 +2001,11 @@ impl Console {
     /// (scripted replays too): a keep-video confirmation counts down and reverts at its timeout.
     pub fn tick(&mut self, now: f64) -> Vec<Effect> {
         self.ui_clock = now;
+        self.windows.set_time(now);
         if let Some((confirm, ConfirmKind::KeepVideo(keep))) = &mut self.confirm_box {
             if keep.expired(now) {
                 let previous = keep.previous;
-                self.confirm_box = None;
+                self.closing_confirm_box = self.confirm_box.take();
                 self.reset_menu_interaction();
                 let effect = self.revert_video(previous);
                 self.deferred.push(effect);
@@ -1994,6 +2016,7 @@ impl Console {
                 ));
             }
         }
+        self.sync_dialog_windows();
         std::mem::take(&mut self.deferred)
     }
 
@@ -2213,33 +2236,39 @@ impl Console {
                 effects.push(Effect::PlaySound(sound));
             }
             match outcome {
-                Some(true) => match kind {
-                    ConfirmKind::Quit => {
-                        effects.push(Effect::Quit);
-                        return effects;
-                    }
-                    ConfirmKind::KeepVideo(_) => {
-                        self.reset_menu_interaction();
-                        return effects;
-                    }
-                    ConfirmKind::ReturnToMainMenu => {
-                        self.set_mode(Mode::MainMenu);
-                        self.clear_menu_hover();
-                        match self.menu_background_after_game() {
-                            Some(background) => effects.push(Effect::MainMenuMap(background)),
-                            None => {
-                                self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
-                                self.level_loaded(true);
-                            }
+                Some(true) => {
+                    self.closing_confirm_box = Some((confirm, kind.clone()));
+                    self.sync_dialog_windows();
+                    match kind {
+                        ConfirmKind::Quit => {
+                            effects.push(Effect::Quit);
+                            return effects;
                         }
-                        return effects;
+                        ConfirmKind::KeepVideo(_) => {
+                            self.reset_menu_interaction();
+                            return effects;
+                        }
+                        ConfirmKind::ReturnToMainMenu => {
+                            self.set_mode(Mode::MainMenu);
+                            self.clear_menu_hover();
+                            match self.menu_background_after_game() {
+                                Some(background) => effects.push(Effect::MainMenuMap(background)),
+                                None => {
+                                    self.log("No main-menu background map is installed; keeping the current map frozen behind the menu.");
+                                    self.level_loaded(true);
+                                }
+                            }
+                            return effects;
+                        }
                     }
-                },
+                }
                 Some(false) => {
+                    self.closing_confirm_box = Some((confirm, kind.clone()));
                     self.reset_menu_interaction();
                     if let ConfirmKind::KeepVideo(keep) = kind {
                         effects.push(self.revert_video(keep.previous));
                     }
+                    self.sync_dialog_windows();
                 }
                 None => self.confirm_box = Some((confirm, kind)),
             }
@@ -3140,18 +3169,30 @@ impl Console {
             match window {
                 Window::Options => {
                     let theme = self.window_theme(window, time);
+                    let alpha = self.windows.window_composite_alpha(Window::Options, time);
+                    let old_alpha = self.canvas.set_alpha_multiplier(alpha);
                     self.options.draw(&Painter {
                         theme: &theme,
                         ..self.painter(Vec2::ZERO, 1.)
                     });
+                    self.canvas.set_alpha_multiplier(old_alpha);
                 }
-                Window::Console => self.draw_console(time),
+                Window::Console => {
+                    let alpha = self.windows.window_composite_alpha(Window::Console, time);
+                    let old_alpha = self.canvas.set_alpha_multiplier(alpha);
+                    self.draw_console(time);
+                    self.canvas.set_alpha_multiplier(old_alpha);
+                }
                 Window::SubDialog | Window::Confirmation => {}
             }
         }
         // The confirmation box is modal over every window.
         // Over a window it is opaque, like every dialog stacked over another.
-        if let Some((confirm, _)) = &self.confirm_box {
+        let confirm_box_to_draw = self
+            .confirm_box
+            .as_ref()
+            .or(self.closing_confirm_box.as_ref());
+        if let Some((confirm, _)) = confirm_box_to_draw {
             let (origin, scale, layout) = self.quit_geometry(confirm);
             let painter = self.painter(origin, scale);
             let stacked = painter.theme.stacked();
@@ -3160,7 +3201,12 @@ impl Console {
             } else {
                 painter.theme
             };
+            let alpha = self
+                .windows
+                .window_composite_alpha(Window::Confirmation, time);
+            let old_alpha = self.canvas.set_alpha_multiplier(alpha);
             confirm.draw(&Painter { theme, ..painter }, &layout);
+            self.canvas.set_alpha_multiplier(old_alpha);
         }
         if let Some(loading) = &self.loading_dialog {
             let scale = Painter::scale_for_canvas(self.canvas_size());

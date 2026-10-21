@@ -1293,3 +1293,27 @@ and confirmation dialogs):
   `Window::Confirmation`, `Windows::base_focus_amount`) and synchronized through `Console::sync_dialog_windows`,
   eliminating per-dialog focus checks.
 
+## 16. Shared fade-in/out and focus-transition animations (2026-10-21)
+
+All UI surfaces (main/sub menu, Options, sub-dialogs, developer console, confirmation boxes) share
+a unified fade and focus-transition model:
+- **Reference timings from game resources:** in `hl2_complete/resource/sourcescheme.res`, both
+  `Frame.TransitionEffectTime` (dialog open/close fade) and `Frame.FocusTransitionEffectTime`
+  (focus/out-of-focus transition) are explicitly `"0.3"` s. `Frame.BgColor` alpha is 212 and
+  `Frame.OutOfFocusBgColor` is 62 (ratio ~0.292, rounded to 0.3).
+- **Canvas alpha multiplier:** implemented `Canvas::set_alpha_multiplier` and `Canvas::alpha_multiplier`
+  mirroring Source SDK `surface()->DrawSetAlphaMultiplier()`. Modulates all primitives (`quad`, `polygon`,
+  `rectangle`, text glyphs, borders, buttons, drop-downs) without per-widget drawing modifications.
+- **Window state and closing fade-out:** `gameui::windows::WindowRecord` tracks both `focus_fade` (0..1)
+  and `alpha_fade` (0..1), with a `closing: bool` flag. When a dialog closes (`close`):
+  - It is marked `closing = true` and fades visibility alpha from current down to 0.0 over 0.3 s.
+  - Focus hands off immediately to the underlying active window or base menu; closing windows are
+    ignored by `focus()`, `is_active()`, and `route()`, so they never intercept pointer or key input.
+  - While fading out, the closing dialog is drawn on top with its fading composite alpha until completion,
+    at which point `Windows::clean_closed()` purges it from the draw list.
+- **Unified composite alpha:** each surface computes $A_{\text{comp}} = A_{\text{vis}} \times (u + (1 - u) \times F)$
+  where $u = 0.3$, $A_{\text{vis}} \in [0, 1]$ is visibility alpha (opening/closing), and $F \in [0, 1]$
+  is focus amount (focused vs translucent).
+- **Verification:** unit-tested in `gameui::windows::tests::shared_fade_state_and_interpolation_logic_with_deterministic_timesteps`
+  with deterministic timestep updates. Visual smoothness is documented as unverified, needs manual check.
+

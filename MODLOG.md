@@ -1,5 +1,44 @@
 # MODLOG
 
+## 2026-10-21 UI: shared fade-in/out animations and focus transitions across dialogs and menus
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Shared fade animations for dialogs (`hl2-ui::gameui::windows`):
+  - In `sourcescheme.res`, verified `Frame.TransitionEffectTime` (dialog open/close fade) and `Frame.FocusTransitionEffectTime` (focus change fade) are both `"0.3"` seconds.
+  - Added `WindowRecord` tracking `focus_fade: Fade` (0..1 focus amount) and `alpha_fade: Fade` (0..1 visibility alpha) along with `closing: bool`.
+  - Openings smoothly fade in visibility alpha from 0.0 to 1.0 over `fade_time` (0.3s).
+  - Closings mark `closing = true` and fade out visibility alpha from current to 0.0 over `fade_time` (0.3s).
+  - Immediate focus handoff: closing dialogs are excluded from `focus()`, `is_active()`, and `route()`, immediately transferring interaction and focus to the next underlying active dialog or base menu while the closing dialog fades out cleanly.
+  - Added `Windows::clean_closed()` to purge finished closing windows from the record stack once fade-out completes.
+  - Added `Windows::window_composite_alpha(window, now)` computing $A_{\text{vis}} \times (u + (1 - u) \times F)$ where $u = 0.3$, unifying visibility and focus translucency.
+- Canvas-level alpha multiplier (`hl2-ui::canvas`):
+  - Added `Canvas::set_alpha_multiplier` and `Canvas::alpha_multiplier` matching Source SDK `surface()->DrawSetAlphaMultiplier()`, modulating all quads, polygons, textures, rectangles, and text glyphs without invasive widget-level plumbing.
+- Retained closing states in UI layers (`hl2-ui::console`, `hl2-ui::gameui::options`):
+  - In `OptionsDialog`, added `closing_sub` and `closing_confirm` with `sub_alpha` and `confirm_alpha`, ensuring closing sub-dialogs and confirmation boxes fade out before being dropped.
+  - In `Console`, added `closing_confirm_box` to render fading quit/video confirmation dialogs during their dismissal.
+  - Applied `window_composite_alpha` to Options, Console, SubDialog, and Confirmation drawings.
+
+**Why:** owner request: add a short fade animation for all dialog openings and closings, using the exact same animation timing whenever a surface transitions between focused (opaque) and unfocused (translucent). Closing dialogs must fade out cleanly before despawning or hiding without breaking focus handoff to the underlying surface.
+
+**Tested how:**
+- Added deterministic unit test `gameui::windows::tests::shared_fade_state_and_interpolation_logic_with_deterministic_timesteps` verifying:
+  1. Opening fade-in ($A_{\text{vis}}: 0.0 \to 0.5 \to 1.0$).
+  2. Focused-to-unfocused alpha transition ($F: 1.0 \to 0.5 \to 0.0$, composite alpha $1.0 \to 0.65 \to 0.30$).
+  3. Unfocused-to-focused transition upon child close ($F: 0.0 \to 0.5 \to 1.0$, composite alpha $0.30 \to 0.65 \to 1.0$).
+  4. Closing fade-out completion on child window ($A_{\text{vis}}: 1.0 \to 0.5 \to 0.0$) with immediate focus restoration and automatic purge by `clean_closed()`.
+- Verified all 343 `hl2-ui` unit tests pass.
+- Ran full workspace test and verification suite via `scripts/checks/validate.sh` (343 `hl2-ui` tests, 93 `hl2-bevy` tests, strict clippy `-D warnings`, `cargo fmt`).
+- Ran `scripts/checks/check_windows.sh` (`x86_64-pc-windows-msvc` cross-clippy).
+
+**Result:** clean, unified fade-in/out and focus-transition animations for all dialogs and menus with zero focus latency.
+
+**Still broken or not tested:** visual smoothness in interactive gameplay is unverified, needs manual check.
+
+**Next:** Task 3 (context-aware background dim overlay: menu background vs. mid-gameplay).
+
+
 ## 2026-10-21 UI: unified single-focus state for menus, dialogs, and sub-dialogs
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

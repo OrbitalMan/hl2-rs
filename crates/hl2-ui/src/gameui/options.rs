@@ -323,6 +323,14 @@ pub struct OptionsDialog {
     keys: KeyList,
     confirm: Option<MessageBox>,
     sub: Option<Sub>,
+    /// Currently fading-out sub-dialog being dismissed.
+    pub(crate) closing_sub: Option<Sub>,
+    /// Currently fading-out confirmation box being dismissed.
+    pub(crate) closing_confirm: Option<MessageBox>,
+    /// Sub-dialog composite alpha multiplier (for opening/closing and focus transitions).
+    pub sub_alpha: f32,
+    /// Confirmation dialog composite alpha multiplier.
+    pub confirm_alpha: f32,
     /// The draft configuration when the open sub-dialog opened, restored by its Cancel.
     sub_saved: Option<Config>,
     gamma_texture: Option<Texture2D>,
@@ -373,6 +381,10 @@ impl Default for OptionsDialog {
             keys: KeyList::default(),
             confirm: None,
             sub: None,
+            closing_sub: None,
+            closing_confirm: None,
+            sub_alpha: 1.0,
+            confirm_alpha: 1.0,
             sub_saved: None,
             gamma_texture: None,
             bink_texture: None,
@@ -711,6 +723,8 @@ impl OptionsDialog {
         self.keys.capture = None;
         self.confirm = None;
         self.sub = None;
+        self.closing_sub = None;
+        self.closing_confirm = None;
         self.sub_saved = None;
         self.active_tooltip = None;
         self.placement.end();
@@ -921,9 +935,14 @@ impl OptionsDialog {
                 .or_else(|| confirm.keys(input));
             self.sounds.extend(confirm.take_sounds());
             match outcome {
-                Some(true) => self.use_default_keys(),
-                Some(false) => {}
-                None => self.confirm = Some(confirm),
+                Some(true) => {
+                    self.use_default_keys();
+                    self.closing_confirm = self.confirm.take();
+                }
+                Some(false) => {
+                    self.closing_confirm = self.confirm.take();
+                }
+                None => {}
             }
             return OptionsOutcome::None;
         }
@@ -1075,7 +1094,7 @@ impl OptionsDialog {
 
     /// Dismisses the confirmation box.
     pub fn dismiss_confirm(&mut self) {
-        self.confirm = None;
+        self.closing_confirm = self.confirm.take();
     }
 
     /// The dialog's frame on `canvas`, in canvas pixels, where it is placed.
@@ -1609,6 +1628,7 @@ impl OptionsDialog {
     pub(crate) fn open_sub(&mut self, sub: Sub) {
         self.sub_placement.reset();
         self.sub_saved = Some(self.draft.config.clone());
+        self.closing_sub = None;
         self.sub = Some(sub);
         self.sub_return_focus = self.focus.take();
         // The credits' Close button is their only control: it holds the focus (drawn after Tab).
@@ -1620,7 +1640,7 @@ impl OptionsDialog {
 
     /// Focus goes back to the page control that opened the closed sub-dialog.
     fn close_sub(&mut self) {
-        self.sub = None;
+        self.closing_sub = self.sub.take();
         self.focus = self.sub_return_focus.take();
         self.key_press.reset();
     }
@@ -1660,6 +1680,7 @@ impl OptionsDialog {
             Command::KeyAdvanced => self.open_sub(Sub::KeyboardAdvanced),
             Command::KeyDefaults => {
                 self.confirm_placement.reset();
+                self.closing_confirm = None;
                 self.confirm = Some(MessageBox::new(
                     loc.text("#GameUI_KeyboardSettings"),
                     loc.text("#GameUI_KeyboardSettingsText"),
@@ -2156,7 +2177,8 @@ impl OptionsDialog {
         if self.sub.is_none() {
             self.draw_combo(&p);
         }
-        if let Some(sub) = self.sub {
+        let sub_to_draw = self.sub.or(self.closing_sub);
+        if let Some(sub) = sub_to_draw {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
             let sp = Painter {
                 canvas: base.canvas,
@@ -2165,38 +2187,44 @@ impl OptionsDialog {
                 origin: self.sub_placement.place(&sub_frame(canvas, size)).origin,
                 scale,
             };
-            let sub_modal = self.confirm.is_some();
-            let sub_close_armed = !sub_modal && self.armed == Some(Target::Close);
-            let sub_close_pressed =
-                !sub_modal && (self.pressed == Some(Target::Close) || self.escape_held);
+            let sub_modal = self.confirm.is_some() || self.closing_confirm.is_some();
+            let is_closing = self.sub.is_none();
+            let sub_close_armed = !sub_modal && !is_closing && self.armed == Some(Target::Close);
+            let sub_close_pressed = !sub_modal
+                && !is_closing
+                && (self.pressed == Some(Target::Close) || self.escape_held);
+            let old_alpha = base.canvas.set_alpha_multiplier(self.sub_alpha);
             sp.frame_with_close(
                 size,
                 &loc.text(sub.title()),
                 Some(ButtonState {
                     armed: sub_close_armed,
                     pressed: sub_close_pressed,
-                    enabled: !sub_modal,
+                    enabled: !sub_modal && !is_closing,
                     default: false,
                 }),
             );
             if sub.is_credits() {
-                self.draw_credits_subdialog(&sp, sub, size, sub_modal);
+                self.draw_credits_subdialog(&sp, sub, size, sub_modal || is_closing);
             } else {
                 let area = Rect::new(0., 0., size.x, size.y);
                 let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
                 for (i, widget) in list.iter().enumerate() {
                     let target = Some(Target::Control(i));
-                    let armed = !sub_modal && self.armed == target;
+                    let armed = !sub_modal && !is_closing && self.armed == target;
                     let pressed = !sub_modal
+                        && !is_closing
                         && (self.pressed == target || self.key_press.pressed() == target);
-                    let logical = !sub_modal && self.focus == target;
+                    let logical = !sub_modal && !is_closing && self.focus == target;
                     let focus = logical && self.focus_visible;
                     self.draw_widget(&sp, widget, &env, (armed, pressed), (focus, logical));
                 }
                 self.draw_combo(&sp);
             }
+            base.canvas.set_alpha_multiplier(old_alpha);
         }
-        if let Some(confirm) = &self.confirm {
+        let confirm_to_draw = self.confirm.as_ref().or(self.closing_confirm.as_ref());
+        if let Some(confirm) = confirm_to_draw {
             let layout = confirm.layout(|t| p.text_width(t, false));
             let cp = Painter {
                 theme: &confirm_theme,
@@ -2206,7 +2234,9 @@ impl OptionsDialog {
                         .origin,
                 )
             };
+            let old_alpha = base.canvas.set_alpha_multiplier(self.confirm_alpha);
             confirm.draw(&cp, &layout);
+            base.canvas.set_alpha_multiplier(old_alpha);
         }
         if let Some(tip) = &self.active_tooltip {
             let tip_painter = Painter {
