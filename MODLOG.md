@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-21 Build & target maintenance: automated target cleaner and launch-bevy build validation
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Target cleaner script (`scripts/checks/clean_target.py` and `scripts/clean-target.sh`): provides automated maintenance for `target/` without deleting cached 3rd-party dependencies (Bevy, wgpu, Rapier):
+  - `--stale` (default): scans `target/debug/incremental/` and `target/*/deps/`, identifying superseded hashes of workspace crates (`hl2-bevy`, `hl2-ui`, `hl2-simulation`, `source-assets`, `modkit-core`) and deleting orphaned incremental query sessions, stale codegen object files (`.rcgu.o`), duplicate `.rlib` archives, and old standalone test runner executables. Keeps the current active build and active incremental cache session intact so subsequent builds are instant.
+  - `--workspace`: invokes `cargo clean -p <workspace-packages>` to reset local crates while preserving all 3rd-party dependencies.
+  - `--dry-run`: reports exact file counts and reclaimed disk space without deleting anything.
+- Advanced build verification & clean integration in `launch-bevy.sh`:
+  - Added `--clean`, `--clean=workspace`, and `--clean=dry-run` options calling `scripts/clean-target.sh`.
+  - Automatically prunes stale hashes and orphaned incremental caches from previous branches when a git branch change is detected (`CURRENT_BRANCH != RECORDED_BRANCH`).
+  - Added build out-of-date checks verifying executable existence, shader asset directory, build profile (release vs debug), git branch, git commit hash, and source file modification timestamps (`find ... -newer bin/hl2-bevy`).
+- Updated `.gitignore` to allow `/scripts/clean-target.sh`.
+
+**Why:** owner request: `target/debug/deps` and `target/debug/incremental` ballooned to over 29 GB (with >119,000 `.o` files and 75 incremental sessions), while `bin/` is only ~137 MB. Cargo never garbage-collects older hashed units, causing rapid disk bloat across repeated test and build cycles.
+
+**Tested how:**
+- `./scripts/clean-target.sh --dry-run` and `./launch-bevy.sh --clean=dry-run` reporting 29.07 GiB of reclaimable dead artifacts.
+- Executed `./launch-bevy.sh --clean` reclaiming 29.07 GiB (68 dead incremental directories and 119,029 stale files removed; `target/` shrank from ~29 GB to 9.3 GB with 3rd-party dependencies intact).
+- Verified subsequent dry-run reports 0 stale items.
+- Ran full workspace test and verification suite via `scripts/checks/validate.sh` (340 `hl2-ui` tests, 93 `hl2-bevy` tests, strict clippy `-D warnings`, `cargo fmt`).
+- Ran `scripts/checks/check_windows.sh` (`x86_64-pc-windows-msvc` cross-clippy).
+
+**Result:** `target/` disk consumption reduced by ~20 GB instantly; `launch-bevy.sh` ensures builds are up to date across git branch switches and automatically prevents waste accumulation.
+
+**Still broken or not tested:** none.
+
+**Next:** Task 1 of UI pass (unified single-focus state).
+
+
 ## 2026-10-20 Viewmodel: smooth sequence transitions into idle (fix crowbar swing twitch/hop)
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

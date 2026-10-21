@@ -17,6 +17,7 @@
 !/launch*.sh
 !/scripts/build-bevy.ps1
 !/scripts/build-bevy.sh
+!/scripts/clean-target.sh
 !/scripts/checks/*.sh
 !/scripts/checks/*.py
 !/test-inputs/*.json

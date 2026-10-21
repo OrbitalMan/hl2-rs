@@ -2,7 +2,13 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
  
-## Current session: dynamic aspect ratio & FOV/viewmodel framing (2026-10-20, branch `orbitalman/hl2-ui`)
+## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
+
+- **Automated target cleaner & build verification (`scripts/checks/clean_target.py`, `scripts/clean-target.sh`, `launch-bevy.sh`):**
+  - Added standalone cleaner supporting `--stale` (default: prunes orphaned incremental sessions, stale `.rcgu.o` object files, old test runners and superseded `.rlib` archives for workspace crates, leaving active builds and 3rd-party crates intact), `--workspace` (`cargo clean -p ...` without touching Bevy/wgpu/Rapier), and `--dry-run`.
+  - Integrated into `launch-bevy.sh`: added `--clean` flag and auto-pruning of stale hashes whenever a git branch change is detected.
+  - Reclaimed 29.07 GiB of dead build remnants on disk (119,029 stale files and 68 dead incremental directories removed; `target/` reduced from 29+ GB to 9.3 GB).
+  - Verified with dry-run checks, `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
 
 - **Viewmodel sequence transitions & cross-fading (fix crowbar swing twitch/hop):**
   - In `hl2-simulation::viewmodel_effects`, added `ViewmodelAnimationState` (`Playing`, `Transition`, `Idle`), `viewmodel_animation_state`, `viewmodel_state_matrices`, and `Inventory::viewmodel_matrices`.
