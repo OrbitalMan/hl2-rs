@@ -343,6 +343,8 @@ pub struct AiRuntime {
     stunstick_damage: Option<f32>,
     /// sk_combine_s_kick (CNPC_CombineS::Spawn SetKickDamage); the ConVar default is 0.
     combine_kick_damage: f32,
+    /// sk_combine_guard_kick (the elite's SetKickDamage).
+    combine_guard_kick_damage: f32,
     /// NPC weapon definitions (installed scripts and skill.cfg).
     #[serde(skip)]
     weapon_defs: BTreeMap<String, NpcWeaponDef>,
@@ -464,6 +466,7 @@ impl AiRuntime {
         let mut stunstick_sounds = (None, None);
         let mut stunstick_damage = None;
         let mut combine_kick_damage = 0.;
+        let mut combine_guard_kick_damage = 0.;
         if let Some(vfs) = vfs {
             if let Ok(Some(skill)) = vfs.read("cfg/skill.cfg") {
                 if let Ok(tokens) = keyvalues::tokens(&String::from_utf8_lossy(&skill)) {
@@ -481,6 +484,13 @@ impl AiRuntime {
                         .and_then(|p| p[1].parse::<f32>().ok())
                     {
                         combine_kick_damage = value;
+                    }
+                    if let Some(value) = tokens
+                        .windows(2)
+                        .find(|p| p[0].eq_ignore_ascii_case("sk_combine_guard_kick"))
+                        .and_then(|p| p[1].parse::<f32>().ok())
+                    {
+                        combine_guard_kick_damage = value;
                     }
                 }
             }
@@ -565,6 +575,7 @@ impl AiRuntime {
             stunstick_sounds,
             stunstick_damage,
             combine_kick_damage,
+            combine_guard_kick_damage,
             weapon_defs,
             shots: Vec::new(),
             muzzle_flashes: Vec::new(),
@@ -2633,7 +2644,12 @@ impl AiRuntime {
                 CopRequest::Kick { start, forward } => {
                     let end = start + forward * 70.;
                     let (mins, maxs) = (-Vec3::new(16., 16., 18.), Vec3::new(16., 16., 18.));
-                    let damage = self.combine_kick_damage;
+                    let elite = self.actors[&id].class.humanoid().is_some_and(|h| h.elite);
+                    let damage = if elite {
+                        self.combine_guard_kick_damage
+                    } else {
+                        self.combine_kick_damage
+                    };
                     let player_hit = self.actors[&id].npc.enemy == Some(PLAYER)
                         && super::metropolice::segment_hits_box(
                             start,
