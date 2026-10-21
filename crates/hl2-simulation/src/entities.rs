@@ -1044,6 +1044,35 @@ impl Scene {
                 ),
         )
     }
+    /// The world frame of a bone-merged model on `id` (an NPC's weapon): its first bone
+    /// that the owner also has (ValveBiped.Weapon_bone on HL2 weapons) sits on the owner's
+    /// bone, like Weapon_Drop's Weapon_bone transform times the inverse root bone.
+    pub fn merged_model_frame(&self, world: &World, id: usize, weapon_key: &str) -> Option<Mat4> {
+        let state = self.states.get(id)?;
+        let instance = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))?;
+        let rig = world.rigs.get(&instance.asset_key())?;
+        let weapon = world.rigs.get(weapon_key)?;
+        let (merged, owner) = weapon.bones.iter().enumerate().find_map(|(b, bone)| {
+            rig.bones
+                .iter()
+                .position(|o| o.name.eq_ignore_ascii_case(&bone.name))
+                .map(|j| (b, j))
+        })?;
+        let skin = self.actor_matrices(rig, id);
+        let owner_bone = *skin.get(owner)? * rig.bones[owner].inverse_bind.inverse();
+        let model = owner_bone * weapon.bones[merged].inverse_bind;
+        let (_, rotation, translation) = model.to_scale_rotation_translation();
+        Some(
+            Mat4::from_rotation_translation(state.rotation, state.origin)
+                * Mat4::from_rotation_translation(
+                    rotation.normalize(),
+                    translation * instance.scale,
+                ),
+        )
+    }
     /// SetParent/SetParentAttachment: keep the current world pose as a local offset, or
     /// snap onto the parent frame.
     fn set_parent(

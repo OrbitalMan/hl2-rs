@@ -462,6 +462,10 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
+            rendering::despawn_killed_runtime_draws.before(rendering::spawn_runtime_draws),
+        )
+        .add_systems(
+            PostUpdate,
             rendering::present_lighting
                 .after(rendering::present_entities)
                 .after(effects::present)

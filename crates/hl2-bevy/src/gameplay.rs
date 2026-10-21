@@ -174,6 +174,8 @@ pub struct Gameplay {
     pub render_spawns: Vec<(usize, usize)>,
     /// Runtime-spawned entity ids (DESIGN 14r part A), in creation order.
     pub runtime_entities: Vec<usize>,
+    /// Runtime entities whose Bevy draws were despawned after they were killed.
+    pub despawned_draws: std::collections::BTreeSet<usize>,
     /// Spawns that had to copy the World because another Arc held it (should stay 0).
     pub world_copies: usize,
     /// prop_physics_create requests (model, eye, aim) for the host's model loader.
@@ -402,6 +404,7 @@ impl Gameplay {
             spawn_counts: Default::default(),
             render_spawns: Vec::new(),
             runtime_entities: Vec::new(),
+            despawned_draws: Default::default(),
             world_copies: 0,
             prop_requests: Vec::new(),
             model_draws: Vec::new(),
@@ -447,6 +450,7 @@ impl Gameplay {
             spawn_counts: Default::default(),
             render_spawns: Vec::new(),
             runtime_entities: Vec::new(),
+            despawned_draws: Default::default(),
             world_copies: 0,
             prop_requests: Vec::new(),
             model_draws: Vec::new(),
@@ -613,8 +617,26 @@ impl Gameplay {
             let state = &self.scene.states[npc];
             let body = state.rotation * Vec3::X;
             let flat = Vec3::new(body.x, body.y, 0.).normalize_or(Vec3::X);
-            let origin = state.origin + Vec3::Z * 55. + flat * 10.;
-            let yaw = flat.y.atan2(flat.x).to_degrees();
+            // Weapon_Drop teleports a bone-merged weapon to the owner's Weapon_bone pose
+            // (times its inverse root bone); without a rig, in front of the shoot position.
+            let (origin, angles) = self
+                .scene
+                .merged_model_frame(&self.world, npc, &format!("{model}#0"))
+                .map(|frame| {
+                    let (_, rotation, translation) = frame.to_scale_rotation_translation();
+                    let (yaw, pitch, roll) = rotation.to_euler(glam::EulerRot::ZYX);
+                    (
+                        translation,
+                        Vec3::new(pitch.to_degrees(), yaw.to_degrees(), roll.to_degrees()),
+                    )
+                })
+                .unwrap_or_else(|| {
+                    let yaw = flat.y.atan2(flat.x).to_degrees();
+                    (
+                        state.origin + Vec3::Z * 55. + flat * 10.,
+                        Vec3::new(0., yaw, 0.),
+                    )
+                });
             let clip = if class == "weapon_smg1" {
                 let health = hl2_simulation::gameplay::npc_spawn_health(
                     &self.scene,
@@ -631,7 +653,7 @@ impl Gameplay {
                 properties: [
                     ("classname", class.clone()),
                     ("origin", format!("{} {} {}", origin.x, origin.y, origin.z)),
-                    ("angles", format!("0 {yaw} 0")),
+                    ("angles", format!("{} {} {}", angles.x, angles.y, angles.z)),
                     ("model", model.clone()),
                     ("ammo", clip.to_string()),
                 ]
@@ -643,7 +665,7 @@ impl Gameplay {
                 background: false,
                 model: model.clone(),
                 origin,
-                angles: Vec3::new(0., yaw, 0.),
+                angles,
                 skin: 0,
                 scale: 1.,
                 // A VPhysics object like a physics prop (its .phy and propdata).
@@ -661,7 +683,7 @@ impl Gameplay {
             }
             self.model_draws.push(id);
             self.spawn_log
-                .push(serde_json::json!({"weapon_drop":class,"npc":npc,"entity":id,"ammo":clip}));
+                .push(serde_json::json!({"weapon_drop":class,"npc":npc,"entity":id,"ammo":clip,"origin":origin.to_array(),"angles":angles.to_array(),"npc_origin":self.scene.states[npc].origin.to_array()}));
         }
     }
     /// Merge a late-loaded model's tables into the map's World (keys it lacks only).
@@ -1566,7 +1588,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"random_look_targets":self.scene.look_targets.random_report(),"heads":self.scene.heads.iter().map(|(id,h)| (id.to_string(), h.goal.to_array())).collect::<std::collections::BTreeMap<_,_>>(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"runtime_entities":{"created":self.runtime_entities.len(),"live":self.runtime_entities.iter().filter(|id| !self.scene.states[**id].killed).count(),"world_copies":self.world_copies},"spawn_overlay":self.spawn_overlay,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"runtime_entities":{"despawned_draws":self.despawned_draws.len(),"created":self.runtime_entities.len(),"live":self.runtime_entities.iter().filter(|id| !self.scene.states[**id].killed).count(),"world_copies":self.world_copies},"spawn_overlay":self.spawn_overlay,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

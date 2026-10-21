@@ -1509,6 +1509,34 @@ type TemplateDraw<'a> = (
 /// rewrites per entity (flex faces, eyes, CPU skinning) and lit materials (per-entity
 /// light state) are copied; the entity gets its own skeleton and its weapons are
 /// bone-merged onto it.
+/// Killed runtime entities (NPCs, props, dropped weapons) never come back: their hidden
+/// draws (model roots with their joints, meshes) are despawned once instead of staying
+/// until the map changes. Map entities keep theirs (scripts may show them again).
+pub fn despawn_killed_runtime_draws(
+    mut commands: Commands,
+    mut game: ResMut<crate::gameplay::Gameplay>,
+    draws: Query<(Entity, &SourceEntity)>,
+) {
+    let game = &mut *game;
+    let killed: std::collections::BTreeSet<usize> = game
+        .runtime_entities
+        .iter()
+        .copied()
+        .filter(|id| {
+            game.scene.states.get(*id).is_some_and(|s| s.killed)
+                && !game.despawned_draws.contains(id)
+        })
+        .collect();
+    if killed.is_empty() {
+        return;
+    }
+    for (entity, source) in &draws {
+        if killed.contains(&source.0) {
+            commands.entity(entity).despawn();
+        }
+    }
+    game.despawned_draws.extend(killed);
+}
 pub fn spawn_runtime_draws(
     mut commands: Commands,
     mut game: ResMut<crate::gameplay::Gameplay>,
