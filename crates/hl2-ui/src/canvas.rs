@@ -135,6 +135,7 @@ struct State {
     frame: Option<(f32, f32)>,
     additive: bool,
     alpha_multiplier: f32,
+    occluders: Vec<Rect>,
     commands: Vec<Quad>,
 }
 #[derive(Clone)]
@@ -146,6 +147,7 @@ impl Default for Canvas {
             frame: None,
             additive: false,
             alpha_multiplier: 1.0,
+            occluders: vec![],
             commands: vec![],
         })))
     }
@@ -164,6 +166,21 @@ impl Canvas {
     /// The current alpha multiplier.
     pub fn alpha_multiplier(&self) -> f32 {
         self.0.lock().expect("HUD canvas").alpha_multiplier
+    }
+    /// Pushes an occluder rectangle in canvas pixels. Subsequent drawn quads
+    /// and polygons will have any portion falling inside this rectangle clipped/hidden.
+    pub fn push_occluder(&self, rect: Rect) {
+        if rect.w > 0. && rect.h > 0. {
+            self.0.lock().expect("HUD canvas").occluders.push(rect);
+        }
+    }
+    /// Pops the topmost occluder rectangle.
+    pub fn pop_occluder(&self) {
+        self.0.lock().expect("HUD canvas").occluders.pop();
+    }
+    /// Clears all active occluders.
+    pub fn clear_occluders(&self) {
+        self.0.lock().expect("HUD canvas").occluders.clear();
     }
     /// The width drawing is laid out in: the frame's, or the viewport's.
     pub fn width(&self) -> f32 {
@@ -197,7 +214,9 @@ impl Canvas {
         self.0.lock().expect("HUD canvas").additive = value;
     }
     pub fn drain(&self) -> Vec<Quad> {
-        std::mem::take(&mut self.0.lock().expect("HUD canvas").commands)
+        let mut state = self.0.lock().expect("HUD canvas");
+        state.occluders.clear();
+        std::mem::take(&mut state.commands)
     }
     fn quad(&self, texture: Option<Texture2D>, source: Rect, destination: Rect, color: Color) {
         let mut state = self.0.lock().expect("HUD canvas");
@@ -215,15 +234,43 @@ impl Canvas {
             ),
             None => destination,
         };
-        state.commands.push(Quad {
-            texture,
-            source,
-            destination,
-            color: Color::new(color.r, color.g, color.b, a),
-            additive,
-            modulate: false,
-            vertices: None,
-        });
+
+        if state.occluders.is_empty() {
+            state.commands.push(Quad {
+                texture,
+                source,
+                destination,
+                color: Color::new(color.r, color.g, color.b, a),
+                additive,
+                modulate: false,
+                vertices: None,
+            });
+            return;
+        }
+
+        let mut pieces = vec![(destination, source)];
+        for occ in &state.occluders {
+            let mut next = Vec::new();
+            for (d, s) in pieces {
+                clip_quad_against_occluder(d, s, *occ, &mut next);
+            }
+            pieces = next;
+            if pieces.is_empty() {
+                break;
+            }
+        }
+
+        for (dest, src) in pieces {
+            state.commands.push(Quad {
+                texture: texture.clone(),
+                source: src,
+                destination: dest,
+                color: Color::new(color.r, color.g, color.b, a),
+                additive,
+                modulate: false,
+                vertices: None,
+            });
+        }
     }
     /// An untextured quad with per-vertex positions and colors (blend as set).
     pub fn polygon(&self, vertices: [(Vec2, Color); 4]) {
@@ -242,6 +289,13 @@ impl Canvas {
                 (p, c)
             }),
         };
+        if state
+            .occluders
+            .iter()
+            .any(|occ| vertices.iter().all(|(p, _)| occ.contains(*p)))
+        {
+            return;
+        }
         let min = vertices.iter().fold(Vec2::MAX, |m, (p, _)| m.min(*p));
         let max = vertices.iter().fold(Vec2::MIN, |m, (p, _)| m.max(*p));
         let additive = state.additive;
@@ -325,12 +379,126 @@ pub fn texture(vfs: &source_assets::vpk::Vfs, name: &str) -> anyhow::Result<Text
     ))
 }
 
+/// Clips a quad's destination rectangle and source texture coordinates against an occluder
+/// rectangle using 2D axis-aligned box subtraction. Any visible portions outside `occ` are pushed
+/// to `out` with proportionally scaled source coordinates.
+fn clip_quad_against_occluder(dest: Rect, src: Rect, occ: Rect, out: &mut Vec<(Rect, Rect)>) {
+    let x0 = dest.x;
+    let x1 = dest.x + dest.w;
+    let y0 = dest.y;
+    let y1 = dest.y + dest.h;
+
+    let ox0 = occ.x;
+    let ox1 = occ.x + occ.w;
+    let oy0 = occ.y;
+    let oy1 = occ.y + occ.h;
+
+    let ix0 = x0.max(ox0);
+    let ix1 = x1.min(ox1);
+    let iy0 = y0.max(oy0);
+    let iy1 = y1.min(oy1);
+
+    // No intersection
+    if ix1 <= ix0 || iy1 <= iy0 {
+        out.push((dest, src));
+        return;
+    }
+
+    // Completely covered by occluder
+    if ix0 <= x0 && ix1 >= x1 && iy0 <= y0 && iy1 >= y1 {
+        return;
+    }
+
+    let u_scale = if dest.w > 0. { src.w / dest.w } else { 0. };
+    let v_scale = if dest.h > 0. { src.h / dest.h } else { 0. };
+
+    let mut add_slice = |sx_dest: f32, sy_dest: f32, sw_dest: f32, sh_dest: f32| {
+        if sw_dest > 0. && sh_dest > 0. {
+            let d = Rect::new(sx_dest, sy_dest, sw_dest, sh_dest);
+            let s = Rect::new(
+                src.x + (sx_dest - x0) * u_scale,
+                src.y + (sy_dest - y0) * v_scale,
+                sw_dest * u_scale,
+                sh_dest * v_scale,
+            );
+            out.push((d, s));
+        }
+    };
+
+    // 1. Top slice (above intersection)
+    if y0 < iy0 {
+        add_slice(x0, y0, x1 - x0, iy0 - y0);
+    }
+    // 2. Bottom slice (below intersection)
+    if y1 > iy1 {
+        add_slice(x0, iy1, x1 - x0, y1 - iy1);
+    }
+    // 3. Left slice (left of intersection, vertical span of intersection)
+    if x0 < ix0 {
+        add_slice(x0, iy0, ix0 - x0, iy1 - iy0);
+    }
+    // 4. Right slice (right of intersection, vertical span of intersection)
+    if x1 > ix1 {
+        add_slice(ix1, iy0, x1 - ix1, iy1 - iy0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn white() -> Color {
         Color::new(1., 1., 1., 1.)
+    }
+
+    #[test]
+    fn occluder_clips_quads_and_proportional_texture_coordinates() {
+        let canvas = Canvas::default();
+        // Push an occluder covering (20, 20, 20, 20)
+        canvas.push_occluder(Rect::new(20., 20., 20., 20.));
+
+        // 1. Quad completely outside: should be untouched
+        canvas.quad(
+            None,
+            Rect::new(0., 0., 1., 1.),
+            Rect::new(50., 50., 10., 10.),
+            white(),
+        );
+
+        // 2. Quad completely inside: should be dropped
+        canvas.quad(
+            None,
+            Rect::new(0., 0., 1., 1.),
+            Rect::new(22., 22., 5., 5.),
+            white(),
+        );
+
+        // 3. Quad partially overlapping: (10, 10, 20, 20), overlaps (20, 20, 10, 10)
+        // Pieces should be: top (10, 10, 20, 10) and left (10, 20, 10, 10)
+        canvas.quad(
+            None,
+            Rect::new(0., 0., 100., 100.),
+            Rect::new(10., 10., 20., 20.),
+            white(),
+        );
+
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 3, "1 outside + 0 inside + 2 split pieces");
+        assert_eq!(quads[0].destination, Rect::new(50., 50., 10., 10.));
+
+        // Slices of quad 3:
+        let top = &quads[1];
+        assert_eq!(top.destination, Rect::new(10., 10., 20., 10.));
+        assert_eq!(top.source, Rect::new(0., 0., 100., 50.));
+
+        let left = &quads[2];
+        assert_eq!(left.destination, Rect::new(10., 20., 10., 10.));
+        assert_eq!(left.source, Rect::new(0., 50., 50., 50.));
+
+        // Drain should have cleared occluders
+        canvas.rectangle(25., 25., 10., 10., white());
+        let quads = canvas.drain();
+        assert_eq!(quads.len(), 1, "drain clears occluders");
     }
 
     #[test]

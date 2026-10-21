@@ -1389,5 +1389,28 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
       - `a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it`: verifies Escape press on `confirm_box` and `options.confirm` holds Cancel button pressed while open, Escape release cancels the dialog, and in-progress drags are cancelled immediately on press.
   - Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
 
+## 20. Stacked dialog translucency, content occlusion clipping, and console invocation gating (2026-10-22)
+
+- **Stacked dialog opacity removal:**
+  - Removed 100% opacity logic for stacked dialogs (`Theme::stacked()` no longer overrides `frame_bg.a = 1.0`). All dialogs out of focus or stacked over another dialog preserve their authentic translucent scheme background (`Frame.BgColor` / `Frame.OutOfFocusBgColor` from `sourcescheme.res`).
+  - In `Console::window_theme`, `OptionsDialog::draw_with_occluders`, and `Console::draw`, dialogs use `Theme::focus_faded` directly without forced 100% alpha.
+- **Underlying content occlusion clipping:**
+  - In `crates/hl2-ui/src/canvas.rs`, added an occluder stack (`push_occluder`, `pop_occluder`, `clear_occluders`) to `Canvas`.
+  - When occluders are active, `Canvas::quad` clips destination rectangles and proportionally interpolates source texture coordinates using 2D axis-aligned box subtraction (`clip_quad_against_occluder`). Portions of quads falling inside any active occluder rectangle are removed, while portions outside are preserved. Polygons with all vertices inside an active occluder are dropped. `Canvas::drain` clears active occluders between frames.
+  - In `Painter` (`crates/hl2-ui/src/gameui/widgets.rs`), split `frame_spec` into `frame_background(&spec)` (which renders the rounded or rectangular frame fill and outer border) and `frame_foreground(&spec, close)` (which renders the title text and close button).
+  - In `OptionsDialog::draw_with_occluders`, the Options frame background is drawn first unclipped via `p.frame_background(&spec)`. Active occluders for any overlying subdialog (`sub_bounds`), confirmation box (`confirm_bounds`), or external window are then pushed before drawing the foreground title, close button, tabs, page controls, and bottom buttons.
+  - Subdialogs similarly draw their frame background unclipped via `sp.frame_background(&sub_spec)`, then push occluders for any overlying confirmation box (`confirm_bounds`) before drawing subdialog content.
+  - In `Console::draw`, `draw_console_with_occluders` similarly draws the console frame background unclipped via `painter.frame_background(&spec)`, then pushes occluders for any window or confirmation box above it before drawing console history, entry, submit button, and completion popup.
+  - Result: dialog frames behind a focused dialog retain their translucent background tint, but all controls, text, tabs, buttons, and borders behind the focused dialog are hidden/clipped, matching retail Source VGUI behavior.
+- **Console invocation gating:**
+  - In `Console::toggle()`, added a modal/subdialog guard: if any modal dialog or blocking subdialog is open (`self.windows.has_modal() || self.modal_dialog_open() || self.options.has_sub() || self.options.has_confirm()`), console toggle invocation is blocked early.
+  - Pressing tilde (`KeyCode::Backquote`), activating `Action::ToggleConsole`, or executing `toggleconsole` while in Options > Video > Advanced, Gamma, Credits, Keyboard Advanced, or a confirmation dialog does not open or toggle the console, matching retail Half-Life 2 behavior.
+- **Verification:**
+  - Added unit tests:
+    - `crates/hl2-ui/src/canvas.rs`: `occluder_clips_quads_and_proportional_texture_coordinates` tests quads outside, quads inside, partial quad splitting with proportional source UVs, and occluder clearing on drain.
+    - `crates/hl2-ui/src/gameui/options.rs`: `dialogs_over_the_options_dialog_are_translucent_and_clip_underlying_content` verifies subdialogs and confirmation boxes have frame alpha < 1.0, options frame background is drawn across full bounds unclipped, and underlying options content quads behind the subdialog are clipped outside its bounds.
+    - `crates/hl2-ui/src/console.rs`: `console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open` verifies that `Console::toggle()` is blocked when `Sub::VideoAdvanced`, `Command::KeyDefaults` confirmation, or Quit confirmation is open, and unblocked when they are closed.
+  - Ran `scripts/checks/validate.sh` (343 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
 
 

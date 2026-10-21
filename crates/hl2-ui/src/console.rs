@@ -12,7 +12,7 @@ use crate::gameui::{
     resources::{self, fallback_game_menu, GameUiResources},
     video_confirm::{VideoConfirm, VideoMode},
     widgets::{
-        scheme_color, Align, ButtonState, ButtonTracker, Fonts, HoldRepeat, Painter,
+        scheme_color, Align, ButtonState, ButtonTracker, Fonts, FrameSpec, HoldRepeat, Painter,
         ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
     },
     windows::{Layer, Pointer, Window, Windows},
@@ -1361,20 +1361,9 @@ impl Console {
         self.sync_mode();
     }
 
-    /// A window's frame look: faded towards its focused look (SDK `Frame` focus), and, when it
-    /// lies over another window, opaque in focus like every stacked dialog.
+    /// A window's frame look: faded towards its focused look (SDK `Frame` focus).
     fn window_theme(&self, window: Window, time: f64) -> Theme {
-        let stacked = self
-            .windows
-            .order()
-            .next()
-            .is_some_and(|bottom| bottom != window);
-        let theme = if stacked {
-            self.theme.stacked()
-        } else {
-            self.theme.clone()
-        };
-        theme.focus_faded(
+        self.theme.focus_faded(
             self.windows.focus_amount(window, time),
             self.windows.focus() == Layer::Window(window),
         )
@@ -1649,8 +1638,15 @@ impl Console {
         self.set_mode(base);
     }
     /// Opens the console on top with the focus, or closes it (focused or not); it opens only
-    /// while `con_enable` is on.
+    /// while `con_enable` is on. Blocked when a modal dialog or blocking subdialog is open.
     pub fn toggle(&mut self) {
+        if self.windows.has_modal()
+            || self.modal_dialog_open()
+            || self.options.has_sub()
+            || self.options.has_confirm()
+        {
+            return;
+        }
         if self.console_open() {
             self.close_window(Window::Console);
             self.clear_menu_hover();
@@ -3296,47 +3292,73 @@ impl Console {
                 );
             }
         }
-        for window in self.windows.order() {
+        let confirm_box_to_draw = self
+            .confirm_box
+            .as_ref()
+            .or(self.closing_confirm_box.as_ref());
+        let quit_bounds = confirm_box_to_draw.map(|(confirm, _)| {
+            let (origin, scale, layout) = self.quit_geometry(confirm);
+            Rect::new(
+                origin.x,
+                origin.y,
+                layout.size.x * scale,
+                layout.size.y * scale,
+            )
+        });
+
+        let active_windows: Vec<Window> = self.windows.order().collect();
+        for (idx, &window) in active_windows.iter().enumerate() {
+            let mut occluders = Vec::new();
+            if let Some(qb) = quit_bounds {
+                occluders.push(qb);
+            }
+            for &above in &active_windows[idx + 1..] {
+                match above {
+                    Window::Console => occluders.push(self.window_bounds(Window::Console)),
+                    Window::Options => occluders.push(self.window_bounds(Window::Options)),
+                    _ => {}
+                }
+            }
+
             match window {
                 Window::Options => {
                     let theme = self.window_theme(window, time);
                     let alpha = self.windows.window_composite_alpha(Window::Options, time);
                     let old_alpha = self.canvas.set_alpha_multiplier(alpha);
-                    self.options.draw(&Painter {
-                        theme: &theme,
-                        ..self.painter(Vec2::ZERO, 1.)
-                    });
+                    self.options.draw_with_occluders(
+                        &Painter {
+                            theme: &theme,
+                            ..self.painter(Vec2::ZERO, 1.)
+                        },
+                        &occluders,
+                    );
                     self.canvas.set_alpha_multiplier(old_alpha);
                 }
                 Window::Console => {
                     let alpha = self.windows.window_composite_alpha(Window::Console, time);
                     let old_alpha = self.canvas.set_alpha_multiplier(alpha);
-                    self.draw_console(time);
+                    self.draw_console_with_occluders(time, &occluders);
                     self.canvas.set_alpha_multiplier(old_alpha);
                 }
                 Window::SubDialog | Window::Confirmation => {}
             }
         }
         // The confirmation box is modal over every window.
-        // Over a window it is opaque, like every dialog stacked over another.
-        let confirm_box_to_draw = self
-            .confirm_box
-            .as_ref()
-            .or(self.closing_confirm_box.as_ref());
         if let Some((confirm, _)) = confirm_box_to_draw {
             let (origin, scale, layout) = self.quit_geometry(confirm);
             let painter = self.painter(origin, scale);
-            let stacked = painter.theme.stacked();
-            let theme = if self.windows.top().is_some() {
-                &stacked
-            } else {
-                painter.theme
-            };
+            let theme = painter.theme.focus_faded(1.0, true);
             let alpha = self
                 .windows
                 .window_composite_alpha(Window::Confirmation, time);
             let old_alpha = self.canvas.set_alpha_multiplier(alpha);
-            confirm.draw(&Painter { theme, ..painter }, &layout);
+            confirm.draw(
+                &Painter {
+                    theme: &theme,
+                    ..painter
+                },
+                &layout,
+            );
             self.canvas.set_alpha_multiplier(old_alpha);
         }
         if let Some(loading) = &self.loading_dialog {
@@ -3455,7 +3477,12 @@ impl Console {
 
     /// The console dialog (SDK `CConsoleDialog`): a titled frame with the history, the entry
     /// and the Submit button, then the completion popup over everything.
+    #[allow(dead_code)]
     fn draw_console(&self, time: f64) {
+        self.draw_console_with_occluders(time, &[]);
+    }
+
+    fn draw_console_with_occluders(&self, time: f64, occluders: &[Rect]) {
         let layout = self.dialog_layout();
         let scale = layout.scale;
         let theme = self.window_theme(Window::Console, time);
@@ -3476,11 +3503,19 @@ impl Console {
             );
         };
         let localization = &self.gameui.localization;
-        painter.frame_with_close(
-            layout.size,
-            &localization.text("#Console_Title"),
-            Some(self.console_button_state(ConsoleButton::Close)),
-        );
+        let title = localization.text("#Console_Title");
+        let spec = FrameSpec::new(layout.size, &title);
+
+        // Frame background (unclipped):
+        painter.frame_background(&spec);
+
+        // Push occluders for console content:
+        for occ in occluders {
+            self.canvas.push_occluder(*occ);
+        }
+
+        // Frame foreground (title, close button):
+        painter.frame_foreground(&spec, Some(self.console_button_state(ConsoleButton::Close)));
 
         // History (`RichText`, `DepressedButtonBorder`): filtered, wrapped, scrolled, one color
         // per level, the rows of selected lines highlighted.
@@ -3563,6 +3598,10 @@ impl Console {
         );
         let entry = layout.canvas(layout.entry);
         self.draw_completion(scale, (entry.x, entry.y, entry.w, entry.h), &text);
+
+        for _ in 0..occluders.len() {
+            self.canvas.pop_occluder();
+        }
     }
 
     /// The completion popup (SDK `CConsolePanel` completion list, VGUI menu colors): a help
@@ -7619,6 +7658,88 @@ mod tests {
             black_outline_quads.is_empty(),
             "no opaque outline quads should be emitted when out of focus, found: {}",
             black_outline_quads.len()
+        );
+    }
+
+    #[test]
+    fn console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open() {
+        let mut console = menu_with_options(720.);
+        console.set_resources((*crate::gameui::options::tests::resources()).clone());
+        console.open_options();
+        console.sync_dialog_windows();
+
+        // 1. With just Options open (non-modal), toggle() successfully opens the console:
+        assert!(!console.console_open());
+        console.toggle();
+        assert!(console.console_open(), "console opens over options dialog");
+        console.toggle();
+        assert!(!console.console_open(), "console closes on toggle");
+
+        // 2. Open blocking subdialog (Video Advanced): toggle() is blocked!
+        console
+            .options
+            .open_sub(crate::gameui::options::Sub::VideoAdvanced);
+        console.sync_dialog_windows();
+        assert!(console.options.has_sub());
+        assert!(console.windows.has_modal());
+
+        console.toggle();
+        assert!(
+            !console.console_open(),
+            "console invocation is blocked when subdialog is open"
+        );
+
+        // 3. Close subdialog: console toggle is unblocked
+        console.options.cancel_sub();
+        console.sync_dialog_windows();
+        assert!(!console.options.has_sub());
+        assert!(!console.windows.has_modal());
+
+        console.toggle();
+        assert!(
+            console.console_open(),
+            "console opens after subdialog is closed"
+        );
+        console.toggle();
+        assert!(!console.console_open());
+
+        // 4. Open options confirmation dialog (Reset Defaults): toggle() is blocked!
+        console
+            .options
+            .command(crate::gameui::settings::Command::KeyDefaults);
+        console.sync_dialog_windows();
+        assert!(console.options.has_confirm());
+        assert!(console.windows.has_modal());
+
+        console.toggle();
+        assert!(
+            !console.console_open(),
+            "console invocation is blocked when options confirm dialog is open"
+        );
+
+        // 5. Dismiss options confirmation dialog: toggle is unblocked
+        console.options.dismiss_confirm();
+        console.sync_dialog_windows();
+        assert!(!console.options.has_confirm());
+        assert!(!console.windows.has_modal());
+
+        console.toggle();
+        assert!(
+            console.console_open(),
+            "console opens after options confirm is dismissed"
+        );
+        console.toggle();
+        assert!(!console.console_open());
+
+        // 6. When Quit confirmation box is open: toggle() is blocked!
+        let loc = console.gameui.localization.clone();
+        console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+        assert!(console.modal_dialog_open());
+
+        console.toggle();
+        assert!(
+            !console.console_open(),
+            "console invocation is blocked when quit confirmation is open"
         );
     }
 }

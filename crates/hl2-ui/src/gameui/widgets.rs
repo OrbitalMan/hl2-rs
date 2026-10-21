@@ -179,20 +179,17 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// The theme of a dialog drawn over another dialog: an opaque frame background, so the
-    /// controls of the dialog below never show through. A dialog over the game scene keeps the
-    /// scheme's translucent `Frame.BgColor`.
+    /// The theme of a dialog drawn over another dialog. Stacked dialogs keep the scheme's
+    /// translucent `Frame.BgColor` / `Frame.OutOfFocusBgColor` now that underlying content
+    /// behind the focused dialog is clipped.
     pub fn stacked(&self) -> Self {
-        let mut theme = self.clone();
-        theme.frame_bg.a = 1.0;
-        theme
+        self.clone()
     }
 
     /// A frame's focus look (SDK `Frame::OnFrameFocusChanged`): the background `fade` of the
     /// way (0..1) from `Frame.OutOfFocusBgColor` to `Frame.BgColor` (it fades over
     /// `Frame.FocusTransitionEffectTime`), the title in `FrameTitleBar.TextColor` when
-    /// `focused`, else `FrameTitleBar.DisabledTextColor` (switched at once). Composes with
-    /// [`Theme::stacked`]: `theme.stacked().focus_faded(..)` fades to an opaque background.
+    /// `focused`, else `FrameTitleBar.DisabledTextColor` (switched at once).
     pub fn focus_faded(&self, fade: f32, focused: bool) -> Self {
         let mix = |from: Color, to: Color| {
             let t = fade.clamp(0., 1.);
@@ -1180,8 +1177,8 @@ impl Painter<'_> {
         self.frame_spec(FrameSpec::new(size, title), close);
     }
 
-    /// Renders a titled VGUI frame according to the declarative [`FrameSpec`].
-    pub fn frame_spec(&self, spec: FrameSpec, close: Option<ButtonState>) {
+    /// Draws the frame background (rounded or flat fill) and optional outer 3D border.
+    pub fn frame_background(&self, spec: &FrameSpec) {
         let rect = Rect::new(0., 0., spec.size.x, spec.size.y);
         let bg = spec.bg_color.unwrap_or(self.theme.frame_bg);
         if spec.style.rounded {
@@ -1192,6 +1189,10 @@ impl Painter<'_> {
         if spec.style.outer_3d_border {
             self.raised(rect);
         }
+    }
+
+    /// Draws the frame title text and optional close button.
+    pub fn frame_foreground(&self, spec: &FrameSpec, close: Option<ButtonState>) {
         if !spec.title.is_empty() {
             self.text(
                 spec.title,
@@ -1208,6 +1209,12 @@ impl Painter<'_> {
                 self.close_button(close_rect, state);
             }
         }
+    }
+
+    /// Renders a titled VGUI frame according to the declarative [`FrameSpec`].
+    pub fn frame_spec(&self, spec: FrameSpec, close: Option<ButtonState>) {
+        self.frame_background(&spec);
+        self.frame_foreground(&spec, close);
     }
 
     /// The close (X) button in a frame title bar.

@@ -1,5 +1,37 @@
 # MODLOG
 
+## 2026-10-22 UI: Stacked dialog translucency with content occlusion clipping and modal console toggle gating
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Stacked dialog opacity and underlying content occlusion (`hl2-ui::canvas`, `hl2-ui::gameui::widgets`, `hl2-ui::gameui::options`, `hl2-ui::console`):
+  - In `crates/hl2-ui/src/canvas.rs`, added an occluder stack (`push_occluder`, `pop_occluder`, `clear_occluders`) to `State` and `Canvas`. In `Canvas::quad`, when occluders are active, destination rectangles are clipped and texture source UVs proportionally interpolated via 2D axis-aligned box subtraction (`clip_quad_against_occluder`). Portions of quads falling inside any active occluder rectangle are removed, while portions outside are preserved. Polygons with all vertices inside an occluder are dropped. In `Canvas::drain`, active occluders are cleared.
+  - In `crates/hl2-ui/src/gameui/widgets.rs`, removed `theme.frame_bg.a = 1.0;` from `Theme::stacked()` so stacked dialogs retain the scheme's authentic translucent background (`Frame.BgColor` / `Frame.OutOfFocusBgColor`). Split `Painter::frame_spec` into `frame_background(&spec)` (unclipped frame fill and outer border) and `frame_foreground(&spec, close)` (title text and close button).
+  - In `crates/hl2-ui/src/gameui/options.rs`, implemented `OptionsDialog::draw_with_occluders`. The Options frame background is rendered unclipped via `p.frame_background(&spec)`. Active occluders for any overlying subdialog (`sub_bounds`), confirmation box (`confirm_bounds`), or external window are then pushed to the canvas before drawing the foreground title, close button, tabs, page controls, and bottom buttons. Subdialogs similarly draw their frame background unclipped via `sp.frame_background(&sub_spec)` and push occluders for overlying confirmation boxes before drawing subdialog content.
+  - In `crates/hl2-ui/src/console.rs`, removed `.stacked()` from `window_theme` and Quit confirmation drawing. In `draw_console_with_occluders`, the console frame background is drawn unclipped via `painter.frame_background(&spec)`, then occluders for any window or confirmation box above it are pushed before drawing console history, entry, submit button, and completion list.
+- Developer console toggle gating (`hl2-ui::console`):
+  - In `Console::toggle()`, added a modal/subdialog guard checking `self.windows.has_modal() || self.modal_dialog_open() || self.options.has_sub() || self.options.has_confirm()`. When a blocking subdialog (e.g. Options > Video > Advanced, Gamma, Credits, Keyboard Advanced) or modal confirmation dialog is in focus, console toggle invocation via tilde (`KeyCode::Backquote`), `Action::ToggleConsole`, or `toggleconsole` command is blocked early.
+
+**Why:** user defect reports:
+1. Stacked dialogs should not force 100% opacity; all out-of-focus dialogs should preserve their authentic translucent scheme background, while hiding/clipping any underlying content except the background behind the focused dialog.
+2. The developer console should not be invoked by the tilde button when a blocking subdialog (like Options > Video > Advanced) is in focus.
+
+**Tested how:**
+- Added unit tests:
+  - `crates/hl2-ui/src/canvas.rs`: `occluder_clips_quads_and_proportional_texture_coordinates` tests quads outside, inside, and partially overlapping occluders, verifying proportional source UV interpolation and occluder clearing on drain.
+  - `crates/hl2-ui/src/gameui/options.rs`: `dialogs_over_the_options_dialog_are_translucent_and_clip_underlying_content` verifies subdialogs and confirmation boxes have frame alpha < 1.0, options frame background is drawn across full dialog bounds unclipped, and underlying options content quads behind the subdialog are clipped outside its bounds.
+  - `crates/hl2-ui/src/console.rs`: `console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open` verifies that `Console::toggle()` is blocked when `Sub::VideoAdvanced`, `Command::KeyDefaults` confirmation, or Quit confirmation is open, and works normally when they are closed or with just Options open.
+- Ran `scripts/checks/validate.sh` (343 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
+**Result:** dialogs stacked over other dialogs retain their authentic translucent scheme backgrounds while underlying controls/text behind the focused dialog are cleanly clipped. Console toggle via tilde is blocked when any modal or subdialog is in focus.
+
+**Still broken or not tested:** visual appearance in packaged release runs is unverified, needs manual check.
+
+**Next:** continue UI polish / plugin modularization.
+
+
+
 ## 2026-10-21 UI: Escape key arms/depresses Cancel button on confirmation dialogs
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

@@ -30,8 +30,8 @@ use super::{
     resources::{GameUiResources, Image},
     settings::{self, Binding, Choice, Command, Draft, Env, Panel, Value},
     widgets::{
-        self, Align, ButtonState, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL, MENU_ROW,
-        SCROLLBAR_WIDTH, SLIDER_HIT_TALL, SLIDER_TRACK_Y,
+        self, Align, ButtonState, FrameSpec, Painter, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL,
+        MENU_ROW, SCROLLBAR_WIDTH, SLIDER_HIT_TALL, SLIDER_TRACK_Y,
     },
 };
 use crate::canvas::{Rect, Texture2D};
@@ -2086,6 +2086,10 @@ impl OptionsDialog {
     // ---- drawing -------------------------------------------------------------------------
 
     pub fn draw(&self, base: &Painter) {
+        self.draw_with_occluders(base, &[]);
+    }
+
+    pub fn draw_with_occluders(&self, base: &Painter, external_occluders: &[Rect]) {
         let canvas = vec2(base.canvas.width(), base.canvas.height());
         let scale = Painter::scale_for_canvas(canvas);
         let painter_at = |origin: Vec2| Painter {
@@ -2098,11 +2102,11 @@ impl OptionsDialog {
         let p = painter_at(self.placement.place(&main_frame(canvas)).origin);
         // Sub-dialogs and confirmation boxes adapt their focus theme based on which is topmost.
         let sub_theme = if self.confirm.is_some() {
-            base.theme.stacked().focus_faded(0.0, false)
+            base.theme.focus_faded(0.0, false)
         } else {
-            base.theme.stacked().focus_faded(1.0, true)
+            base.theme.focus_faded(1.0, true)
         };
-        let confirm_theme = base.theme.stacked().focus_faded(1.0, true);
+        let confirm_theme = base.theme.focus_faded(1.0, true);
         let loc = &self.res.localization;
         let env = Env {
             localization: loc,
@@ -2120,9 +2124,52 @@ impl OptionsDialog {
         let focused = |target: Target| !modal && self.focus_visible && self.focus == Some(target);
         let (close_armed, close_pressed) = state(Target::Close);
         let close_pressed = close_pressed || (self.escape_held && self.sub.is_none());
-        p.frame_with_close(
-            DIALOG_SIZE,
-            &loc.text("#GameUI_Options"),
+
+        let sub_to_draw = self.sub.or(self.closing_sub);
+        let sub_bounds = sub_to_draw.map(|sub| {
+            let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
+            let origin = self.sub_placement.place(&sub_frame(canvas, size)).origin;
+            Rect::new(origin.x, origin.y, size.x * scale, size.y * scale)
+        });
+
+        let confirm_to_draw = self.confirm.as_ref().or(self.closing_confirm.as_ref());
+        let confirm_bounds = confirm_to_draw.as_ref().map(|confirm| {
+            let layout = confirm.layout(|t| p.text_width(t, false));
+            let origin = self
+                .confirm_placement
+                .place(&confirm_frame(canvas, layout.size))
+                .origin;
+            Rect::new(
+                origin.x,
+                origin.y,
+                layout.size.x * scale,
+                layout.size.y * scale,
+            )
+        });
+
+        // 1. Draw Options frame background (unclipped).
+        let options_title = loc.text("#GameUI_Options");
+        let spec = FrameSpec::new(DIALOG_SIZE, &options_title);
+        p.frame_background(&spec);
+
+        // 2. Push occluders for Options content: any subdialog, confirmation, or external window on top.
+        let mut pushed_options_occluders = 0;
+        if let Some(bounds) = sub_bounds {
+            base.canvas.push_occluder(bounds);
+            pushed_options_occluders += 1;
+        }
+        if let Some(bounds) = confirm_bounds {
+            base.canvas.push_occluder(bounds);
+            pushed_options_occluders += 1;
+        }
+        for occ in external_occluders {
+            base.canvas.push_occluder(*occ);
+            pushed_options_occluders += 1;
+        }
+
+        // 3. Draw Options foreground (title, close button) and content.
+        p.frame_foreground(
+            &spec,
             Some(ButtonState {
                 armed: close_armed,
                 pressed: close_pressed,
@@ -2188,7 +2235,13 @@ impl OptionsDialog {
         if self.sub.is_none() {
             self.draw_combo(&p);
         }
-        let sub_to_draw = self.sub.or(self.closing_sub);
+
+        // Pop Options content occluders before drawing subdialog on top.
+        for _ in 0..pushed_options_occluders {
+            base.canvas.pop_occluder();
+        }
+
+        // 4. Draw subdialog on top (if any).
         if let Some(sub) = sub_to_draw {
             let size = self.sub_frame_size(sub, |s| base.text_width(s, false));
             let sp = Painter {
@@ -2205,9 +2258,25 @@ impl OptionsDialog {
                 && !is_closing
                 && (self.pressed == Some(Target::Close) || self.escape_held);
             let old_alpha = base.canvas.set_alpha_multiplier(self.sub_alpha);
-            sp.frame_with_close(
-                size,
-                &loc.text(sub.title()),
+
+            // Subdialog frame background (unclipped).
+            let sub_title = loc.text(sub.title());
+            let sub_spec = FrameSpec::new(size, &sub_title);
+            sp.frame_background(&sub_spec);
+
+            // Push occluders for subdialog content (if confirm box or external window is open).
+            let mut pushed_sub_occluders = 0;
+            if let Some(bounds) = confirm_bounds {
+                base.canvas.push_occluder(bounds);
+                pushed_sub_occluders += 1;
+            }
+            for occ in external_occluders {
+                base.canvas.push_occluder(*occ);
+                pushed_sub_occluders += 1;
+            }
+
+            sp.frame_foreground(
+                &sub_spec,
                 Some(ButtonState {
                     armed: sub_close_armed,
                     pressed: sub_close_pressed,
@@ -2215,6 +2284,7 @@ impl OptionsDialog {
                     default: false,
                 }),
             );
+
             if sub.is_credits() {
                 self.draw_credits_subdialog(&sp, sub, size, sub_modal || is_closing);
             } else {
@@ -2232,8 +2302,15 @@ impl OptionsDialog {
                 }
                 self.draw_combo(&sp);
             }
+
+            for _ in 0..pushed_sub_occluders {
+                base.canvas.pop_occluder();
+            }
+
             base.canvas.set_alpha_multiplier(old_alpha);
         }
+
+        // 5. Draw confirmation box on top (if any).
         let confirm_to_draw = self.confirm.as_ref().or(self.closing_confirm.as_ref());
         if let Some(confirm) = confirm_to_draw {
             let layout = confirm.layout(|t| p.text_width(t, false));
@@ -4428,7 +4505,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn dialogs_over_the_options_dialog_are_opaque() {
+    fn dialogs_over_the_options_dialog_are_translucent_and_clip_underlying_content() {
         let mut h = Harness::new();
         // The frame fill of the topmost layer: the last untextured quad as wide as its frame.
         let frame_alpha = |h: &mut Harness, width: &dyn Fn(&OptionsDialog, &Painter) -> f32| {
@@ -4464,7 +4541,11 @@ pub(crate) mod tests {
             let width = |d: &OptionsDialog, p: &Painter| {
                 d.sub_frame_size(sub, |s| p.text_width(s, false)).x
             };
-            assert_eq!(frame_alpha(&mut h, &width), 1., "{sub:?}");
+            let alpha = frame_alpha(&mut h, &width);
+            assert!(
+                alpha < 1.0,
+                "{sub:?} stacked over options preserves translucent background (alpha={alpha})"
+            );
             h.dialog.cancel_sub();
         }
         h.tab(Tab::Keyboard);
@@ -4473,7 +4554,69 @@ pub(crate) mod tests {
             let confirm = d.confirm.as_ref().expect("confirmation box");
             confirm.layout(|t| p.text_width(t, false)).size.x
         };
-        assert_eq!(frame_alpha(&mut h, &width), 1., "confirmation box");
+        let alpha = frame_alpha(&mut h, &width);
+        assert!(
+            alpha < 1.0,
+            "confirmation box over options preserves translucent background (alpha={alpha})"
+        );
+        h.dialog.confirm = None;
+
+        // Verify that underlying content behind the subdialog is clipped:
+        let painter = Painter {
+            canvas: &h.canvas,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        // 1. Without subdialog: options content quads are drawn.
+        let canvas_size = vec2(h.canvas.width(), h.canvas.height());
+        h.dialog.draw(&painter);
+        let quads_without_sub = h.canvas.drain();
+        assert!(
+            quads_without_sub.len() > 10,
+            "options dialog draws content quads"
+        );
+
+        // 2. With subdialog open:
+        h.dialog.open_sub(Sub::VideoAdvanced);
+        let sub_size = h
+            .dialog
+            .sub_frame_size(Sub::VideoAdvanced, |s| painter.text_width(s, false));
+        let sub_origin = h
+            .dialog
+            .sub_placement
+            .place(&sub_frame(canvas_size, sub_size))
+            .origin;
+        let sub_rect = Rect::new(sub_origin.x, sub_origin.y, sub_size.x, sub_size.y);
+        h.dialog.draw(&painter);
+        let quads_with_sub = h.canvas.drain();
+
+        // The options dialog's own frame background is still drawn (unclipped)
+        assert!(
+            quads_with_sub
+                .iter()
+                .any(|q| q.destination.w == DIALOG_SIZE.x && q.texture.is_none()),
+            "options frame background is drawn across full dialog bounds"
+        );
+
+        // Find where the subdialog begins drawing its frame:
+        let sub_start_idx = quads_with_sub
+            .iter()
+            .position(|q| q.destination.x == sub_rect.x + 5.0 && q.destination.y == sub_rect.y)
+            .expect("subdialog top bar");
+
+        // All underlying options content quads drawn before the subdialog frame (excluding the options
+        // frame background at indices 0..7) are clipped outside sub_rect:
+        for q in &quads_with_sub[7..sub_start_idx] {
+            let dest = q.destination;
+            let center = dest.center();
+            assert!(
+                !sub_rect.contains(center),
+                "underlying quad {:?} center was not clipped despite being inside subdialog bounds {:?}",
+                dest, sub_rect
+            );
+        }
     }
 
     #[test]
