@@ -53,6 +53,14 @@ const COMMANDS: &[(&str, &str)] = &[
         "npc_create_equipment <weapon>: weapon for the next npc_create",
     ),
     (
+        "prop_physics_create",
+        "prop_physics_create <model>: physics prop at the crosshair, model relative to models/ (cheat)",
+    ),
+    (
+        "ent_create",
+        "ent_create <class> [key value ...]: create an entity at the crosshair; NPC classes and prop_physics with a model only (cheat)",
+    ),
+    (
         "ai_disable",
         "ai_disable: toggle all NPC AI off/on; disabled NPCs idle (cheat, Source command)",
     ),
@@ -82,7 +90,8 @@ pub enum Effect {
     AiEnable(Option<bool>),
     /// ai_disable (CC_AI_Disable): toggle the AI, Source's messages.
     AiDisable,
-    /// npc_create / npc_create_aimed / npc_create_equipment, the whole line.
+    /// npc_create / npc_create_aimed / npc_create_equipment / prop_physics_create /
+    /// ent_create, the whole line.
     NpcCommand(String),
     Noclip(Option<bool>),
     Getpos,
@@ -637,7 +646,11 @@ impl Console {
                 cheat()?;
                 return Ok(Some(Effect::Noclip(value)));
             }
-            "npc_create" | "npc_create_aimed" | "npc_create_equipment" => {
+            "npc_create"
+            | "npc_create_aimed"
+            | "npc_create_equipment"
+            | "prop_physics_create"
+            | "ent_create" => {
                 if name != "npc_create_equipment" {
                     cheat()?;
                 }
@@ -1256,6 +1269,21 @@ mod tests {
             vec![Effect::NpcCommand(
                 "npc_create_aimed npc_metropolice cop1".into()
             )]
+        );
+    }
+    #[test]
+    fn prop_physics_create_and_ent_create_are_cheats_routed_with_npc_create() {
+        let mut console = Console::default();
+        assert_eq!(
+            console.submit("prop_physics_create props_c17/oildrum001"),
+            vec![]
+        );
+        assert_eq!(
+            console.submit("sv_cheats 1; prop_physics_create props_c17/oildrum001; ent_create npc_metropolice targetname cop9"),
+            vec![
+                Effect::NpcCommand("prop_physics_create props_c17/oildrum001".into()),
+                Effect::NpcCommand("ent_create npc_metropolice targetname cop9".into()),
+            ]
         );
     }
     #[test]

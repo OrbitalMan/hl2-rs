@@ -113,14 +113,14 @@ impl PanelFont {
         };
         self.text(
             canvas,
-            "NPC class",
+            &panel.headings[0],
             LEFT + pad,
             header,
             heading(classes_focused),
         );
         self.text(
             canvas,
-            "weapon / options",
+            &panel.headings[1],
             LEFT + column + pad,
             header,
             heading(!classes_focused),

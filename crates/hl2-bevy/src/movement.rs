@@ -300,6 +300,11 @@ impl Simulation {
                     Ok(Some(hl2_simulation::ai::spawn::Command::SetEquipment(value))) => {
                         ui.source.log(format!("npc_create_equipment {value}"));
                     }
+                    Ok(Some(hl2_simulation::ai::spawn::Command::SpawnProp(model))) => {
+                        let model = crate::runtime_props::model_path(&model);
+                        ui.source.log(format!("prop_physics_create {model}"));
+                        game.prop_requests.push((model, self.eye, self.forward()));
+                    }
                     Ok(None) => {}
                     Err(e) => ui.source.log(e),
                 },
@@ -734,9 +739,10 @@ fn controls(
                 game.actions.push(Action::Slot { slot });
             }
         }
-        // F4 NPC spawn overlay (ours; not a native binding): Up/Down move in the focused
-        // column, Left/Right switch columns, Enter spawns at the crosshair or toggles the
-        // option under the cursor.
+        // F4 spawn overlay (ours; not a native binding): Tab switches NPCs / Props, Up/Down
+        // (PageUp/PageDown: a page) move in the focused column, Left/Right switch columns,
+        // Enter spawns at the crosshair, opens a prop folder or toggles the option under
+        // the cursor. Keys other than F4 do nothing while the overlay is closed.
         use hl2_simulation::ai::spawn::OverlayKey;
         for (key, overlay) in [
             (KeyCode::F4, OverlayKey::Toggle),
@@ -745,6 +751,9 @@ fn controls(
             (KeyCode::ArrowLeft, OverlayKey::Left),
             (KeyCode::ArrowRight, OverlayKey::Right),
             (KeyCode::Enter, OverlayKey::Enter),
+            (KeyCode::Tab, OverlayKey::Tab),
+            (KeyCode::PageUp, OverlayKey::PageUp),
+            (KeyCode::PageDown, OverlayKey::PageDown),
         ] {
             if keys.just_pressed(key) {
                 let message = sim.spawn_overlay_key(game, overlay);

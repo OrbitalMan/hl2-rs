@@ -433,6 +433,8 @@ impl Gameplay {
         ai.enabled = AI_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
         let mut spawn_overlay = hl2_simulation::ai::spawn::Overlay::default();
         spawn_overlay.set_usable(spawn_usable_weapons(&world, &ai));
+        // The Props tab: every installed (and map pak) model with a .phy.
+        spawn_overlay.set_props(vfs.physics_prop_models());
         Ok(Self {
             ai,
             player_impulse: glam::Vec3::ZERO,
