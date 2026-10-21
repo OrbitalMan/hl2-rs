@@ -1342,4 +1342,22 @@ Dim overlay behavior distinguishes startup/menu background mode from active game
   `console::tests::context_aware_background_dim_overlay_across_all_four_cases`.
   Visual smoothness and gameplay dim contrast are unverified, needs manual check.
 
+## 18. Mid-gameplay developer console and pause menu focus transition (2026-10-21)
+
+Aligning mid-gameplay developer console activation with authentic Half-Life 2 / Source GameUI behavior:
+- **Pause menu as base surface:** Invoking the developer console mid-gameplay (via the tilde / backquote
+  key `toggle()`, `toggleconsole`, or `set_mode(Mode::Console)`) sets `base = Mode::Pause` if `base == Mode::Gameplay`
+  and `background_level == false`. The pause menu (in-game main menu) becomes the active base surface,
+  pausing and dimming gameplay, with the developer console opened and focused on top (`Mode::Console`,
+  `windows.focus() == Layer::Window(Window::Console)`).
+- **Focus restoration on console dismissal:** Closing the developer console mid-gameplay (pressing tilde
+  again, clicking the close `[X]` button, or pressing Escape) closes the console dialog and returns focus
+  to the underlying pause menu (`Mode::Pause`, `windows.focus() == Layer::Base`), in accordance with the
+  single-focus model from section 15. The pause menu remains open and gameplay remains paused.
+- **Resuming gameplay:** Gameplay is resumed from the pause menu either by activating the "Resume Game"
+  menu row or by pressing Escape while the pause menu is focused.
+- **Verification:** Unit-tested in `console::tests::mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus`
+  and `simulation::tests::ui_open_close_and_resume_consume_pointer_attack_and_held_jump`.
+
+
 

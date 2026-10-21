@@ -1218,8 +1218,18 @@ impl Console {
     /// every window.
     pub fn set_mode(&mut self, mode: Mode) {
         match mode {
-            Mode::Options => self.windows.open(Window::Options),
-            Mode::Console => self.windows.open(Window::Console),
+            Mode::Options => {
+                if !self.background_level && self.base == Mode::Gameplay {
+                    self.base = Mode::Pause;
+                }
+                self.windows.open(Window::Options);
+            }
+            Mode::Console => {
+                if !self.background_level && self.base == Mode::Gameplay {
+                    self.base = Mode::Pause;
+                }
+                self.windows.open(Window::Console);
+            }
             base => {
                 self.base = base;
                 self.windows.clear();
@@ -1327,6 +1337,9 @@ impl Console {
             self.options.open(self.config.clone());
             self.options
                 .reset_placement_if_off_screen(vec2(self.canvas.width(), self.canvas.height()));
+        }
+        if !self.background_level && self.base == Mode::Gameplay {
+            self.base = Mode::Pause;
         }
         self.windows.open(Window::Options);
         self.reset_menu_interaction();
@@ -1616,6 +1629,9 @@ impl Console {
             self.clear_menu_hover();
         } else if self.config.keyboard.developer_console {
             self.clear_menu_hover();
+            if !self.background_level && self.base == Mode::Gameplay {
+                self.base = Mode::Pause;
+            }
             self.windows.open(Window::Console);
             self.sync_mode();
             let frame = self.console_frame();
@@ -7033,5 +7049,53 @@ mod tests {
         // 5. Active gameplay without menu: no dim
         assert_eq!(Console::dim_overlay_opacity(false, false, 1.0), 0.0);
         assert_eq!(Console::dim_overlay_opacity(true, false, 1.0), 0.0);
+    }
+
+    #[test]
+    fn mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus() {
+        let mut console = installed_console();
+        // 1. Start in active gameplay (not background level)
+        console.level_loaded(false);
+        assert_eq!(console.mode(), Mode::Gameplay);
+        assert_eq!(console.base, Mode::Gameplay);
+        assert!(!console.paused());
+        assert_eq!(console.windows.focus(), Layer::Base);
+
+        // 2. Press tilde mid-gameplay: opens main menu as active base (paused) with dev console focused
+        console.toggle();
+        assert_eq!(console.mode(), Mode::Console);
+        assert_eq!(console.base, Mode::Pause);
+        assert!(console.paused());
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+
+        // 3. Close the dev console via toggle (pressing tilde again):
+        // Leaves the main/pause menu open, active, and focused
+        console.toggle();
+        assert_eq!(console.mode(), Mode::Pause);
+        assert_eq!(console.base, Mode::Pause);
+        assert!(console.paused());
+        assert_eq!(console.windows.focus(), Layer::Base);
+
+        // 4. Pressing tilde again from the pause menu opens dev console over pause menu
+        console.toggle();
+        assert_eq!(console.mode(), Mode::Console);
+        assert_eq!(console.base, Mode::Pause);
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+
+        // 5. Closing dev console via Escape also leaves main/pause menu active and focused
+        console.escape_pressed();
+        console.escape_released();
+        assert_eq!(console.mode(), Mode::Pause);
+        assert_eq!(console.base, Mode::Pause);
+        assert!(console.paused());
+        assert_eq!(console.windows.focus(), Layer::Base);
+
+        // 6. Resuming from the main/pause menu returns to active gameplay
+        console.escape_pressed();
+        console.escape_released();
+        assert_eq!(console.mode(), Mode::Gameplay);
+        assert_eq!(console.base, Mode::Gameplay);
+        assert!(!console.paused());
+        assert_eq!(console.windows.focus(), Layer::Base);
     }
 }

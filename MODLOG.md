@@ -1,5 +1,37 @@
 # MODLOG
 
+## 2026-10-21 UI: mid-gameplay dev console opens main menu and restores focus on close
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Mid-gameplay console invocation (`hl2-ui::console`):
+  - In `Console::toggle`, `Console::set_mode`, and `Console::open_options`, when invoked during active gameplay (`!self.background_level && self.base == Mode::Gameplay`), automatically set `self.base = Mode::Pause`.
+  - In retail Half-Life 2, opening the dev console mid-gameplay brings up the in-game main menu (pause menu), pausing and dimming gameplay, with the developer console focused over it.
+- Focus restoration upon dismissal (`hl2-ui::console`):
+  - Closing the developer console (via tilde key `toggle()`, clicking the `[X]` close button, or pressing Escape) dismisses the console window and restores focus to `Layer::Base` (the pause menu), keeping gameplay paused.
+  - From the pause menu, resuming gameplay (activating the "Resume Game" menu item or pressing Escape on the pause menu) returns to active gameplay (`Mode::Gameplay`, unpaused).
+- Updated host simulation test (`hl2-bevy::simulation`):
+  - Updated `ui_open_close_and_resume_consume_pointer_attack_and_held_jump` to reflect the authentic two-stage transition (Escape closes dev console leaving pause menu active; subsequent Escape or Resume returns to gameplay).
+
+**Why:** owner request: invoking the dev console mid-gameplay should open the main menu (pausing/dimming gameplay) with the dev console focused over it. Closing the console leaves the main menu active and focused, and resuming from the main menu returns to active gameplay.
+
+**Tested how:**
+- Added unit test `console::tests::mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus` verifying:
+  1. Active gameplay -> press tilde -> main menu becomes active base surface (paused), dev console is focused window.
+  2. Closing dev console via tilde leaves main menu active and focused (paused).
+  3. Reopening dev console and closing via Escape leaves main menu active and focused (paused).
+  4. Resuming from main menu via Escape returns to active gameplay (`Mode::Gameplay`, unpaused).
+- Ran all 345 `hl2-ui` tests and 93 `hl2-bevy` tests.
+- Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
+
+**Result:** developer console mid-gameplay cleanly opens over the pause menu with unified focus and proper resume flow.
+
+**Still broken or not tested:** visual pause menu backdrop in packaged release runs is unverified, needs manual check.
+
+**Next:** Task 5 (extract non-vanilla features into a modular Bevy plugin).
+
+
 ## 2026-10-21 UI: context-aware background dim overlay (menu background vs. mid-gameplay)
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

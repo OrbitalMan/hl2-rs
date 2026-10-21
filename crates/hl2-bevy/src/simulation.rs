@@ -825,6 +825,23 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release(KeyCode::Escape);
+        step_input(&mut app);
+        assert_eq!(
+            app.world()
+                .resource::<crate::ui_host::Console>()
+                .source
+                .mode(),
+            Mode::Pause,
+            "closing the console leaves the pause menu active"
+        );
+        assert!(app.world().resource::<Simulation>().paused);
+        // Resuming from the pause menu via Escape returns to active gameplay
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Space);

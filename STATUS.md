@@ -4,6 +4,12 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Mid-gameplay developer console opens pause menu (`hl2-ui::console`, `hl2-bevy::simulation`):**
+  - Opening the developer console mid-gameplay (`toggle()`, `set_mode(Mode::Console)`) automatically transitions base to `Mode::Pause`, bringing up the authentic pause menu with dev console focused on top.
+  - Closing the developer console mid-gameplay (tilde, Escape, or `[X]` button) restores focus to the underlying pause menu (`Layer::Base`), leaving gameplay paused.
+  - Resuming from the pause menu (Escape or "Resume Game") returns cleanly to active gameplay (`Mode::Gameplay`).
+  - Unit-tested via `console::tests::mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus`, `simulation::tests::ui_open_close_and_resume_consume_pointer_attack_and_held_jump`, `validate.sh`, and `check_windows.sh`. Visual backdrop in packaged runs is unverified, needs manual check.
+
 - **Context-aware background dim overlay (menu background vs. mid-gameplay) (`hl2-ui::console`, `tuning.json`):**
   - Added `backdrop_alpha: 0.611765` matching `MainMenu.Backdrop` in `sourcescheme.res` (`156 / 255`) and `gameplay_dim_alpha: 0.3` (unverified fallback) in `assets/ui/tuning.json`.
   - Implemented pure calculation in `Console::dim_overlay_opacity(is_mid_gameplay, menu_open, base_focus) -> f32` and `Console::dim_overlay_alpha(time)`.
