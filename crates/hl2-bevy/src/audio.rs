@@ -354,6 +354,8 @@ impl PreparedAudio {
         for weapon in game.weapons.values() {
             cues.extend(weapon.sounds.values().cloned());
         }
+        // Player-ally speech (talker response rules: scene speak sounds, die sounds).
+        cues.extend(game.ai.speech_cues());
         // Studio client sound events: viewmodels and NPC sequences (5004 sounds and
         // CL_EVENT_FOOTSTEP names).
         for rig in game.world.rigs.values() {

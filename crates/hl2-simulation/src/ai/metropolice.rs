@@ -105,6 +105,8 @@ pub struct PlayerView {
 pub enum CopRequest {
     /// m_Sentences.Speak(group).
     Sentence(&'static str),
+    /// CAI_PlayerAlly::SpeakIfAllowed(concept) (`ally_speech`).
+    Concept(&'static str),
     /// AddLookTarget(player, importance, duration).
     LookAtPlayer { importance: f32, duration: f32 },
     /// An output of the cop (OnStunnedPlayer).

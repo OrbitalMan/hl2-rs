@@ -417,6 +417,8 @@ pub struct Diagnostics {
     /// NPC weapon shots fired and pellets that struck the player (host-counted).
     pub shots_fired: u64,
     pub bullet_hits_on_player: u64,
+    /// Player-ally concepts by outcome ("TLK_WOUND:spoken", "TLK_STARTCOMBAT:semaphore").
+    pub ally_speech: BTreeMap<String, u32>,
 }
 #[derive(Serialize)]
 pub struct AiRuntime {
@@ -477,6 +479,9 @@ pub struct AiRuntime {
     /// CAI_BaseNPC m_flSoundWaitTime / m_nSoundPriority per NPC (FOkToMakeSound).
     #[serde(skip)]
     sound_wait: BTreeMap<usize, (f64, i32)>,
+    /// Player-ally speech through the talker response rules.
+    #[serde(skip)]
+    pub ally: super::ally_speech::AllySpeech,
     /// CNPC_Combine g_fCombineQuestion: 1 after COMBINE_CHECK, 2 after COMBINE_QUEST
     /// (the next idle soldier answers CLEAR / ANSWER).
     #[serde(skip)]
@@ -683,6 +688,9 @@ impl AiRuntime {
             held_weapons,
             was_enabled: false,
             sound_wait: BTreeMap::new(),
+            ally: vfs
+                .map(super::ally_speech::AllySpeech::load)
+                .unwrap_or_default(),
             combine_question: 0,
             rally_locks: BTreeMap::new(),
             assault_used: BTreeMap::new(),
@@ -1493,7 +1501,7 @@ impl AiRuntime {
                 actor.damage_taken = actor.damage_taken.max(damage);
                 actor.damaged_by_player |= by_player;
             }
-            self.pain_or_death_sound(victim, world, scene);
+            self.pain_or_death_sound(victim, world, scene, player);
         }
         if let Some(value) = self.stunstick_damage {
             super::metropolice::STUNSTICK_DAMAGE.with(|d| d.set(value));
@@ -2450,6 +2458,25 @@ impl AiRuntime {
                     lines.push(g);
                 }
             }
+            // CAI_PlayerAlly: TLK_STARTCOMBAT (GatherEnemyConditions: an enemy seen after
+            // 30 s without one) and TLK_ENEMY_DEAD (OnKilledNPC; here when the enemy died).
+            let mut concepts: Vec<&'static str> = Vec::new();
+            if matches!(&actor.class, AiClass::Humanoid(h) if matches!(h.kind, humanoid::Kind::Companion { .. }))
+            {
+                if self
+                    .ally
+                    .start_combat(id, actor.npc.enemy.is_some(), c.has(COND_SEE_ENEMY), now)
+                {
+                    concepts.push("TLK_STARTCOMBAT");
+                }
+                if c.has(COND_ENEMY_DEAD) {
+                    concepts.push("TLK_ENEMY_DEAD");
+                }
+            }
+            actor
+                .class
+                .requests_mut()
+                .extend(concepts.into_iter().map(CopRequest::Concept));
             // ShouldPlayIdleSound: idle or alert, 1 in 100 per think, not gagged.
             let gagged = world.entities.get(id).is_some_and(|e| {
                 e.get("spawnflags")
@@ -2609,6 +2636,18 @@ impl AiRuntime {
             &ctx,
             &mut motor,
         );
+        // CAI_PlayerAlly::OnStartSchedule: TLK_HIDEANDRELOAD.
+        if matches!(&actor.class, AiClass::Humanoid(h) if matches!(h.kind, humanoid::Kind::Companion { .. }))
+            && self
+                .ally
+                .schedule_started(id, actor.npc.schedule.as_deref())
+            && actor.npc.schedule.as_deref() == Some("SCHED_HIDE_AND_RELOAD")
+        {
+            actor
+                .class
+                .requests_mut()
+                .push(CopRequest::Concept("TLK_HIDEANDRELOAD"));
+        }
         // StartTaskOverlay / RunTaskOverlay: move and shoot (bits_CAP_MOVE_SHOOT: the
         // soldier, the companions and non-efficient cops).
         {
@@ -2770,6 +2809,108 @@ impl AiRuntime {
     /// CAI_SentenceBase::Speak: FOkToMakeSound (no squads yet) culls a sentence of equal
     /// or lower priority while the last one's timer runs; JustMadeSound(priority, 2 s)
     /// sets it to 2 + U(1.5, 2.0) s. False when culled.
+    /// The sound cues ally speech can play (audio preload).
+    pub fn speech_cues(&self) -> Vec<String> {
+        self.ally.cues()
+    }
+    /// CAI_PlayerAlly::SpeakIfAllowed(concept): the talker rules pick a response for this
+    /// NPC's criteria; its sound plays at the speaker (lip sync through the actor).
+    fn ally_say(
+        &mut self,
+        id: usize,
+        concept: &'static str,
+        world: &World,
+        scene: &mut Scene,
+        player: PlayerState,
+    ) -> bool {
+        let Some(e) = world.entities.get(id) else {
+            return false;
+        };
+        let Some(actor) = self.actors.get(&id) else {
+            return false;
+        };
+        let state = &scene.states[id];
+        let model = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .map_or("", |i| i.model.as_str());
+        let enemy = actor.npc.enemy.map(|en| {
+            if en == PLAYER {
+                "player"
+            } else {
+                world.entities.get(en).map_or("", |x| x.class())
+            }
+        });
+        let npc_state = format!("{:?}", actor.npc.state);
+        let weapon = actor.weapon.as_ref().map(|w| w.class.clone());
+        let gagged = e
+            .get("spawnflags")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .is_some_and(|f| f & SF_NPC_GAG != 0);
+        let speaker = super::ally_speech::Speaker {
+            id,
+            classname: e.class(),
+            name: e.get("targetname").unwrap_or(""),
+            // An NPC nobody hurt yet keeps 0 here and has its spawn health.
+            health: if state.killed {
+                0.
+            } else if state.value > 0. {
+                state.value
+            } else {
+                crate::gameplay::npc_spawn_health(scene, e)
+            },
+            max_health: crate::gameplay::npc_spawn_health(scene, e),
+            npc_state: &npc_state,
+            enemy,
+            weapon: weapon.as_deref(),
+            // sv_npc_talker_maxdist measures to the player whether or not he flies.
+            distance_to_player: (state.origin + Vec3::Z * 36.).distance(player.center()),
+            map: &world.name,
+            gender: if model.to_ascii_lowercase().contains("female") {
+                "female"
+            } else {
+                "male"
+            },
+            gagged,
+            now: scene.time,
+        };
+        let mut rolls = [0f32; 8];
+        for r in &mut rolls {
+            *r = self.random();
+        }
+        let mut next = rolls.into_iter().cycle();
+        let mut random = move || next.next().unwrap_or(0.5);
+        let sound = match self.ally.speak(concept, &speaker, &mut random) {
+            Ok(sound) => {
+                *self
+                    .diagnostics
+                    .ally_speech
+                    .entry(format!("{concept}:spoken"))
+                    .or_default() += 1;
+                sound
+            }
+            Err(reason) => {
+                *self
+                    .diagnostics
+                    .ally_speech
+                    .entry(format!("{concept}:{reason}"))
+                    .or_default() += 1;
+                return false;
+            }
+        };
+        let origin = state.origin;
+        scene.sounds.push(crate::sounds::SoundRequest {
+            origin: Some(origin + Vec3::Z * 64.),
+            actor: Some(crate::sounds::SoundActor {
+                name: e.get("targetname").unwrap_or("").into(),
+                model: String::new(),
+                entity: Some(id),
+            }),
+            ..sound.into()
+        });
+        true
+    }
     fn say(&mut self, id: usize, group: &'static str, world: &World, scene: &mut Scene) -> bool {
         let origin = scene.states[id].origin;
         let priority = sentence_priority(group);
@@ -2803,7 +2944,13 @@ impl AiRuntime {
     /// CAI_BaseNPC::OnTakeDamage_Alive -> PainSound, or Event_Killed -> DeathSound
     /// (CNPC_MetroPolice/CNPC_Combine): pain at most once a second, the first light and
     /// heavy hits with their own groups; the death line once.
-    fn pain_or_death_sound(&mut self, id: usize, world: &World, scene: &mut Scene) {
+    fn pain_or_death_sound(
+        &mut self,
+        id: usize,
+        world: &World,
+        scene: &mut Scene,
+        player: PlayerState,
+    ) {
         let now = scene.time;
         let Some(e) = world.entities.get(id) else {
             return;
@@ -2813,6 +2960,33 @@ impl AiRuntime {
             return;
         };
         let state = &scene.states[id];
+        // CAI_PlayerAlly::PainSound speaks TLK_WOUND; the companions' DeathSound emits
+        // their die sound (CNPC_Citizen/CNPC_Barney/CNPC_Alyx).
+        if matches!(&actor.class, AiClass::Humanoid(h) if matches!(h.kind, humanoid::Kind::Companion { .. }))
+        {
+            if state.killed {
+                if std::mem::replace(&mut actor.death_spoken, true) {
+                    return;
+                }
+                let die = match e.class() {
+                    "npc_barney" => "npc_barney.die",
+                    "npc_alyx" => "npc_alyx.die",
+                    _ => "NPC_Citizen.Die",
+                };
+                let origin = state.origin;
+                scene.sounds.push(crate::sounds::SoundRequest {
+                    origin: Some(origin + Vec3::Z * 64.),
+                    ..die.into()
+                });
+                return;
+            }
+            if now < actor.next_pain_sound || state.value <= 0. {
+                return;
+            }
+            actor.next_pain_sound = now + 1.;
+            self.ally_say(id, "TLK_WOUND", world, scene, player);
+            return;
+        }
         let speech = if state.killed {
             if std::mem::replace(&mut actor.death_spoken, true) {
                 return;
@@ -2868,6 +3042,9 @@ impl AiRuntime {
             match request {
                 CopRequest::Sentence(group) => {
                     self.say(id, group, world, scene);
+                }
+                CopRequest::Concept(concept) => {
+                    self.ally_say(id, concept, world, scene, player);
                 }
                 CopRequest::LookAtPlayer {
                     importance,
