@@ -150,6 +150,10 @@ pub struct Hud {
     spawn_font: Option<crate::spawn_panel::PanelFont>,
     /// The F4 panel drawn last frame (report).
     spawn_panel: Option<hl2_simulation::ai::spawn::Panel>,
+    /// The F4 panel's clickable rows drawn last frame (canvas pixels), for the pointer.
+    pub spawn_hits: Vec<([f32; 4], hl2_simulation::ai::spawn::PanelTarget)>,
+    /// F4 list rows that fit in the window.
+    pub spawn_rows: usize,
 }
 impl Hud {
     pub fn report(&self) -> serde_json::Value {
@@ -167,6 +171,8 @@ impl Hud {
             debug_lines: vec![],
             spawn_font: crate::spawn_panel::PanelFont::load(18.),
             spawn_panel: None,
+            spawn_hits: vec![],
+            spawn_rows: 0,
         }
     }
     fn material(
@@ -370,13 +376,30 @@ pub fn present(
             hl2_ui::canvas::WHITE,
         );
     }
-    if let (Some(font), Some(panel)) = (&hud.spawn_font, &hud.spawn_panel) {
+    let hits = if let (Some(font), Some(panel)) = (&hud.spawn_font, &hud.spawn_panel) {
         let message = game
             .spawn_log
             .last()
             .and_then(|entry| entry["message"].as_str());
-        font.draw(&hud.source.canvas, panel, message);
-    }
+        let hits = font.draw(&hud.source.canvas, panel, message);
+        // The panel can cover the screen center: mark where spawns aim (ours).
+        let (x, y) = ((width / 2.).round(), (height / 2.).round());
+        let canvas = &hud.source.canvas;
+        let dark = hl2_ui::canvas::Color::new(0., 0., 0., 0.8);
+        canvas.rectangle(x - 8., y - 2., 17., 5., dark);
+        canvas.rectangle(x - 2., y - 8., 5., 17., dark);
+        let mark = hl2_ui::canvas::Color::from_rgba(255, 238, 160, 255);
+        canvas.rectangle(x - 7., y - 1., 15., 3., mark);
+        canvas.rectangle(x - 1., y - 7., 3., 15., mark);
+        hits
+    } else {
+        vec![]
+    };
+    hud.spawn_hits = hits;
+    hud.spawn_rows = hud
+        .spawn_font
+        .as_ref()
+        .map_or(0, |font| font.rows_fit(height));
     ui.source.draw(clock.elapsed_secs_f64());
     game.scene
         .sounds

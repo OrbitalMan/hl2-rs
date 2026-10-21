@@ -95,6 +95,37 @@ pub const SPAWN_PROPS: &[&str] = &[
     "props_debris/metal_panel01a.mdl",
     "props_vehicles/car002a_physics.mdl",
 ];
+/// Plain names for the common props (shown and searchable in the Props tab).
+pub const SPAWN_PROP_NAMES: &[(&str, &str)] = &[
+    ("props_c17/oildrum001.mdl", "oil drum"),
+    ("props_c17/oildrum001_explosive.mdl", "explosive barrel"),
+    ("props_junk/wood_crate001a.mdl", "wooden crate"),
+    ("props_junk/wood_crate002a.mdl", "wooden crate, long"),
+    ("props_junk/cardboard_box001a.mdl", "cardboard box"),
+    ("props_junk/watermelon01.mdl", "watermelon"),
+    ("props_junk/popcan01a.mdl", "soda can"),
+    ("props_junk/gascan001a.mdl", "gas can"),
+    ("props_junk/propane_tank001a.mdl", "propane tank"),
+    ("props_junk/trafficcone001a.mdl", "traffic cone"),
+    ("props_junk/metal_paintcan001a.mdl", "paint can"),
+    ("props_junk/garbage_metalcan001a.mdl", "metal can"),
+    ("props_junk/cinderblock01a.mdl", "cinder block"),
+    ("props_junk/sawblade001a.mdl", "sawblade"),
+    ("props_junk/harpoon002a.mdl", "harpoon"),
+    ("props_c17/furniturechair001a.mdl", "chair"),
+    ("props_c17/furnituretable001a.mdl", "table"),
+    ("props_c17/furniturestove001a.mdl", "stove"),
+    ("props_c17/furniturebathtub001a.mdl", "bathtub"),
+    ("props_interiors/furniture_couch01a.mdl", "couch"),
+    ("props_wasteland/cafeteria_bench001a.mdl", "cafeteria bench"),
+    ("props_borealis/bluebarrel001.mdl", "blue barrel"),
+    ("props_c17/canister01a.mdl", "gas canister"),
+    ("props_c17/metalpot001a.mdl", "metal pot"),
+    ("props_c17/doll01.mdl", "doll"),
+    ("props_lab/monitor01a.mdl", "monitor"),
+    ("props_debris/metal_panel01a.mdl", "metal panel"),
+    ("props_vehicles/car002a_physics.mdl", "car"),
+];
 /// NPC tab entries.
 pub fn entry_count() -> usize {
     SPAWN_CLASSES.len()
@@ -343,6 +374,10 @@ pub struct SpawnRequest {
     /// The F4 NumGrenades keyvalue for classes that read it (CNPC_Combine); None: the
     /// entity's own value (npc_create: none, so 0 like native).
     pub grenades: Option<i32>,
+    /// Created by ent_create: CC_Ent_Create's placement (no hull test, no flying offset).
+    pub ent_create: bool,
+    /// The yaw of an ent_create `angles` keyvalue (degrees).
+    pub yaw: Option<f32>,
 }
 impl SpawnRequest {
     /// The pool entry this request draws from.
@@ -418,7 +453,8 @@ impl Console {
     /// targetname / additionalequipment / NumGrenades, and physics props with a model).
     /// Ok(None) for other commands.
     pub fn parse(&mut self, line: &str) -> Result<Option<Command>, String> {
-        let args: Vec<&str> = line.split_whitespace().collect();
+        let args = tokens(line);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let Some(command) = args.first() else {
             return Ok(None);
         };
@@ -458,6 +494,7 @@ impl Console {
                     allegiance: Allegiance::Default,
                     variant,
                     grenades: None,
+                    ..Default::default()
                 })))
             }
             "prop_physics_create" => {
@@ -502,6 +539,10 @@ impl Console {
                         grenades: value("numgrenades")
                             .filter(|_| reads_num_grenades(&class))
                             .and_then(|n| n.parse().ok()),
+                        ent_create: true,
+                        // "pitch yaw roll" (CBaseEntity::KeyValue angles).
+                        yaw: value("angles")
+                            .and_then(|a| a.split_whitespace().nth(1)?.parse().ok()),
                     })));
                 }
                 Err(format!(
@@ -513,6 +554,31 @@ impl Console {
     }
 }
 
+/// Console arguments like CCommand::Tokenize: whitespace separates them, a double-quoted
+/// argument keeps its spaces (without the quotes).
+pub fn tokens(line: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut chars = line.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        if c.is_whitespace() {
+            chars.next();
+        } else if c == '"' {
+            chars.next();
+            args.push(chars.by_ref().take_while(|c| *c != '"').collect());
+        } else {
+            let mut arg = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() || c == '"' {
+                    break;
+                }
+                arg.push(c);
+                chars.next();
+            }
+            args.push(arg);
+        }
+    }
+    args
+}
 /// Where the spawned NPC goes.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Placement {
@@ -531,6 +597,8 @@ pub trait PlacementWorld {
 }
 /// CC_NPC_Create / CC_NPC_Create_Aimed placement. Err for "Bad Position" (the SDK
 /// removes the NPC). A miss leaves the NPC at its spawn origin (world origin here).
+/// CC_Ent_Create: the aim end raised 12 units and dropped to the floor, for every class,
+/// with no hull test; the yaw comes from its `angles` keyvalue.
 pub fn place(
     request: &SpawnRequest,
     eye: Vec3,
@@ -538,18 +606,18 @@ pub fn place(
     world: &dyn PlacementWorld,
 ) -> Result<Placement, String> {
     let forward = forward.normalize_or_zero();
-    let yaw = if request.aimed {
+    let yaw = request.yaw.unwrap_or(if request.aimed {
         forward.y.atan2(forward.x).to_degrees()
     } else {
         0.
-    };
+    });
     let Some(end) = world.trace_line(eye, eye + forward * MAX_TRACE_LENGTH) else {
         return Ok(Placement {
             origin: Vec3::ZERO,
             yaw,
         });
     };
-    let origin = if flies(&request.classname) {
+    let origin = if flies(&request.classname) && !request.ent_create {
         end - forward * 36.
     } else {
         let raised = end + Vec3::Z * 12.;
@@ -557,7 +625,7 @@ pub fn place(
             .drop_to_floor(&request.classname, raised)
             .unwrap_or(raised)
     };
-    if !world.hull_fits(&request.classname, origin) {
+    if !request.ent_create && !world.hull_fits(&request.classname, origin) {
         // The SDK message, then our diagnostics (aim end and the tested origin).
         return Err(format!(
             "Can't create {}.  Bad Position! (aim end {:.1} {:.1} {:.1}, origin {:.1} {:.1} {:.1})",
@@ -581,6 +649,10 @@ pub enum OverlayKey {
     Tab,
     PageUp,
     PageDown,
+    /// Start or stop typing into the Props filter.
+    Filter,
+    /// Delete the filter's last character (while typing).
+    Backspace,
 }
 /// What an overlay key asks the host to do.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -593,7 +665,7 @@ pub enum OverlayCommand {
     /// Toggle the AI think loop (ai_enable).
     ToggleAi,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub enum Column {
     #[default]
     Classes,
@@ -610,17 +682,32 @@ enum OptionRow {
     Notarget,
     Ai,
 }
+/// What a pointer click on a drawn panel row means (`Overlay::click`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub enum PanelTarget {
+    Tab(Tab),
+    /// The Props tab's filter box.
+    Filter,
+    /// An item of a column (its index in that column's list).
+    Row(Column, usize),
+    /// A "more above/below" note: scroll that column a page (-1 up, 1 down).
+    Page(Column, isize),
+}
 /// A drawn panel row: text, selected (the current choice), under the cursor.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PanelRow {
     pub text: String,
     pub selected: bool,
     pub cursor: bool,
+    #[serde(skip)]
+    pub target: Option<PanelTarget>,
 }
-/// The overlay as the host draws it: a title and two columns.
+/// The overlay as the host draws it: a title, a tab bar and two columns.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Panel {
     pub title: String,
+    /// Tab buttons (NPCs, Props; the filter box on the Props tab).
+    pub tabs: Vec<PanelRow>,
     /// Column headings (left, right).
     pub headings: [String; 2],
     pub classes: Vec<PanelRow>,
@@ -636,45 +723,69 @@ pub fn reads_num_grenades(class: &str) -> bool {
 /// Class rows shown at once; the list scrolls to keep the selection visible.
 pub const VISIBLE_CLASSES: usize = 14;
 /// The overlay's two tabs (Tab switches): NPC classes, or physics props by folder.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub enum Tab {
     #[default]
     Npcs,
     Props,
 }
-/// The rows of `items` drawn around `selected` (at most VISIBLE_CLASSES, plus "more"
-/// notes), so the selection is always visible.
-fn scrolled_rows(items: &[String], selected: usize, focused: bool) -> Vec<PanelRow> {
+/// The rows of `items` drawn around `selected` (at most `visible`, plus "more" notes), so
+/// the selection is always visible.
+fn scrolled_rows(
+    items: &[String],
+    selected: usize,
+    focused: bool,
+    visible: usize,
+    column: Column,
+) -> Vec<PanelRow> {
     let total = items.len();
     let first = selected
-        .saturating_sub(VISIBLE_CLASSES / 2)
-        .min(total.saturating_sub(VISIBLE_CLASSES));
-    let last = (first + VISIBLE_CLASSES).min(total);
-    let note = |text: String| PanelRow {
+        .saturating_sub(visible / 2)
+        .min(total.saturating_sub(visible));
+    let last = (first + visible).min(total);
+    let note = |text: String, page| PanelRow {
         text,
         selected: false,
         cursor: false,
+        target: Some(PanelTarget::Page(column, page)),
     };
     let mut rows = Vec::new();
     if first > 0 {
-        rows.push(note(format!("({first} more above)")));
+        rows.push(note(format!("({first} more above)"), -1));
     }
     for (index, text) in items.iter().enumerate().take(last).skip(first) {
         rows.push(PanelRow {
             text: text.clone(),
             selected: index == selected,
             cursor: focused && index == selected,
+            target: Some(PanelTarget::Row(column, index)),
         });
     }
     if last < total {
-        rows.push(note(format!("({} more below)", total - last)));
+        rows.push(note(format!("({} more below)", total - last), 1));
     }
     rows
+}
+/// The Props tab's first folder: the common HL2 props (`SPAWN_PROPS`) that are installed.
+pub const COMMON_FOLDER: &str = "* common";
+/// A common prop's plain name ("explosive barrel"), if it has one.
+pub fn prop_name(model: &str) -> Option<&'static str> {
+    SPAWN_PROP_NAMES
+        .iter()
+        .find(|(m, _)| *m == model)
+        .map(|(_, name)| *name)
+}
+/// Characters the Props filter accepts (model paths are lowercase ASCII).
+fn filter_char(c: char) -> Option<char> {
+    let c = c.to_ascii_lowercase();
+    (c.is_ascii_alphanumeric() || matches!(c, '_' | '/' | '.' | '-' | ' ')).then_some(c)
 }
 
 /// The F4 overlay. NPC tab: a scrolling class column and an options column with the
 /// weapons the selected class can use (`set_usable`), its allegiance, notarget and the AI
-/// switch. Props tab: model folders and the selected folder's physics props.
+/// switch. Props tab: model folders (first the installed common props) and the selected
+/// folder's physics props, narrowed by a typed filter. Keys, mouse clicks
+/// (`click`) and the wheel (`scroll`) drive it.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Overlay {
     pub open: bool,
@@ -683,6 +794,12 @@ pub struct Overlay {
     /// Props tab cursors: folder index and model index inside it.
     pub folder: usize,
     pub model: usize,
+    /// Props tab filter (lowercase substring of the model path) and whether typed keys go
+    /// into it.
+    pub filter: String,
+    pub typing: bool,
+    /// List rows that fit on screen (host, from the window height; 0 = VISIBLE_CLASSES).
+    pub rows_visible: usize,
     /// Physics props by folder (relative to models/), from the installation at map load.
     #[serde(skip)]
     props: Vec<(String, Vec<String>)>,
@@ -710,11 +827,11 @@ impl Overlay {
     /// The Props tab's models by folder (host, map load: every installed model with a .phy).
     pub fn set_props(&mut self, folders: std::collections::BTreeMap<String, Vec<String>>) {
         self.props = folders.into_iter().filter(|(_, m)| !m.is_empty()).collect();
-        self.folder = self.folder.min(self.props.len().saturating_sub(1));
+        self.folder = self.folder.min(self.prop_folders().len().saturating_sub(1));
         self.model = 0;
     }
-    /// The prop folders: the installation listing, else `SPAWN_PROPS` by folder.
-    fn prop_folders(&self) -> std::borrow::Cow<'_, [(String, Vec<String>)]> {
+    /// The installed prop folders: the installation listing, else `SPAWN_PROPS` by folder.
+    fn installed_folders(&self) -> std::borrow::Cow<'_, [(String, Vec<String>)]> {
         if !self.props.is_empty() {
             return std::borrow::Cow::Borrowed(&self.props);
         }
@@ -727,6 +844,57 @@ impl Overlay {
                 .push((*model).into());
         }
         std::borrow::Cow::Owned(folders.into_iter().collect())
+    }
+    /// The Props tab's folders as listed: without a filter the installed common props
+    /// first, then every folder; with one, all matches first, then the folders that
+    /// have matches (only their matching models).
+    fn prop_folders(&self) -> Vec<(String, Vec<String>)> {
+        let installed = self.installed_folders();
+        if self.filter.is_empty() {
+            let all: std::collections::BTreeSet<&str> = installed
+                .iter()
+                .flat_map(|(_, m)| m.iter().map(String::as_str))
+                .collect();
+            let common = SPAWN_PROPS
+                .iter()
+                .filter(|m| all.contains(**m))
+                .map(|m| (*m).to_owned())
+                .collect();
+            let mut folders = vec![(COMMON_FOLDER.to_owned(), common)];
+            folders.extend(installed.iter().cloned());
+            folders.retain(|(_, m)| !m.is_empty());
+            return folders;
+        }
+        let matches: Vec<(String, Vec<String>)> = installed
+            .iter()
+            .map(|(folder, models)| {
+                let models = models
+                    .iter()
+                    .filter(|m| {
+                        m.to_ascii_lowercase().contains(&self.filter)
+                            || prop_name(m).is_some_and(|n| n.contains(&self.filter))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (folder.clone(), models)
+            })
+            .filter(|(_, m)| !m.is_empty())
+            .collect();
+        let all = matches
+            .iter()
+            .flat_map(|(_, m)| m.iter().cloned())
+            .collect();
+        let mut folders = vec![(format!("* matches \"{}\"", self.filter), all)];
+        folders.extend(matches);
+        folders
+    }
+    /// Rows per page and per drawn list.
+    fn page(&self) -> usize {
+        if self.rows_visible == 0 {
+            VISIBLE_CLASSES
+        } else {
+            self.rows_visible
+        }
     }
     fn label(&self) -> &'static str {
         SPAWN_CLASSES.get(self.class).copied().unwrap_or("")
@@ -771,11 +939,48 @@ impl Overlay {
     }
     pub fn toggle(&mut self) {
         self.open = !self.open;
+        self.typing = false;
+    }
+    fn switch_tab(&mut self, tab: Tab) {
+        if self.tab == tab {
+            return;
+        }
+        self.tab = tab;
+        self.column = Column::Classes;
+        self.typing = false;
+        if self.tab == Tab::Npcs {
+            self.select_class(self.class);
+        }
+    }
+    /// Typed text for the Props filter (only while `typing`); the selection restarts at
+    /// the matches.
+    pub fn type_text(&mut self, text: &str) {
+        if !self.open || !self.typing {
+            return;
+        }
+        let before = self.filter.len();
+        self.filter.extend(text.chars().filter_map(filter_char));
+        if self.filter.len() != before {
+            (self.folder, self.model) = (0, 0);
+        }
+    }
+    /// Escape: stop typing, else close the overlay. False when it was closed already.
+    pub fn escape(&mut self) -> bool {
+        if !self.open {
+            return false;
+        }
+        if self.typing {
+            self.typing = false;
+        } else {
+            self.open = false;
+        }
+        true
     }
     /// Apply one key: Tab switches NPCs / Props; Up/Down (PageUp/PageDown: a page) move
     /// in the focused column (lists wrap; moving onto a weapon row chooses it), Left/Right
     /// switch columns, Enter toggles the option under the cursor (allegiance, notarget,
-    /// AI) or else spawns. Props: Enter on a folder opens its models.
+    /// AI) or else spawns. Props: Enter on a folder opens its models; Filter starts or
+    /// stops typing into the filter, Backspace edits it.
     pub fn key(&mut self, key: OverlayKey) -> Option<OverlayCommand> {
         if key == OverlayKey::Toggle {
             self.toggle();
@@ -784,21 +989,38 @@ impl Overlay {
         if !self.open {
             return None;
         }
-        if key == OverlayKey::Tab {
-            self.tab = match self.tab {
-                Tab::Npcs => Tab::Props,
-                Tab::Props => Tab::Npcs,
-            };
-            self.column = Column::Classes;
-            if self.tab == Tab::Npcs {
-                self.select_class(self.class);
+        match key {
+            OverlayKey::Tab => {
+                self.switch_tab(match self.tab {
+                    Tab::Npcs => Tab::Props,
+                    Tab::Props => Tab::Npcs,
+                });
+                return None;
             }
-            return None;
+            OverlayKey::Filter => {
+                self.switch_tab(Tab::Props);
+                self.typing = !self.typing;
+                return None;
+            }
+            OverlayKey::Backspace => {
+                if self.typing && self.filter.pop().is_some() {
+                    (self.folder, self.model) = (0, 0);
+                }
+                return None;
+            }
+            // Enter finishes typing; the arrows still move while typing.
+            OverlayKey::Enter if self.typing => {
+                self.typing = false;
+                self.column = Column::Options;
+                return None;
+            }
+            _ => {}
         }
+        let page = self.page() as isize;
         let step = match key {
             OverlayKey::Up => -1,
-            OverlayKey::PageUp => -(VISIBLE_CLASSES as isize),
-            OverlayKey::PageDown => VISIBLE_CLASSES as isize,
+            OverlayKey::PageUp => -page,
+            OverlayKey::PageDown => page,
             _ => 1,
         };
         let paged = matches!(key, OverlayKey::PageUp | OverlayKey::PageDown);
@@ -834,7 +1056,7 @@ impl Overlay {
                     }
                     return self.prop().map(OverlayCommand::SpawnProp);
                 }
-                OverlayKey::Toggle | OverlayKey::Tab => {}
+                _ => {}
             }
             return None;
         }
@@ -877,9 +1099,114 @@ impl Overlay {
                 }
                 return Some(OverlayCommand::Spawn(self.request()));
             }
-            OverlayKey::Toggle | OverlayKey::Tab => {}
+            _ => {}
         }
         None
+    }
+    /// A pointer click on a drawn row: tabs switch, the filter box starts typing, a "more"
+    /// note pages, an item is selected and a click on the selected item acts like Enter
+    /// (spawn, open a folder); option toggles act on every click.
+    pub fn click(&mut self, target: PanelTarget) -> Option<OverlayCommand> {
+        if !self.open {
+            return None;
+        }
+        match target {
+            PanelTarget::Tab(tab) => {
+                self.switch_tab(tab);
+                self.typing = false;
+                None
+            }
+            PanelTarget::Filter => {
+                self.switch_tab(Tab::Props);
+                self.typing = true;
+                None
+            }
+            PanelTarget::Page(column, direction) => {
+                self.typing = false;
+                self.column = column;
+                self.scroll(Some(column), direction * self.page() as isize);
+                None
+            }
+            PanelTarget::Row(column, index) => {
+                self.typing = false;
+                let focused = self.column == column;
+                self.column = column;
+                match (self.tab, column) {
+                    (Tab::Props, Column::Classes) => {
+                        if focused && self.folder == index {
+                            self.column = Column::Options;
+                        } else if self.folder != index {
+                            (self.folder, self.model) = (index, 0);
+                        }
+                        None
+                    }
+                    (Tab::Props, Column::Options) => {
+                        if focused && self.model == index {
+                            return self.prop().map(OverlayCommand::SpawnProp);
+                        }
+                        self.model = index;
+                        None
+                    }
+                    (Tab::Npcs, Column::Classes) => {
+                        if focused && self.class == index {
+                            return Some(OverlayCommand::Spawn(self.request()));
+                        }
+                        if index < entry_count() {
+                            self.select_class(index);
+                        }
+                        None
+                    }
+                    (Tab::Npcs, Column::Options) => {
+                        let rows = self.rows();
+                        let row = rows.get(index)?;
+                        let again = focused && self.row == index;
+                        self.row = index;
+                        match row {
+                            OptionRow::Weapon(weapon) if !again => {
+                                self.weapon = weapon.clone();
+                                None
+                            }
+                            // Toggles act on every click; the chosen weapon spawns.
+                            _ => self.key(OverlayKey::Enter),
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /// Mouse wheel over a column (None: the focused one): moves that column's selection
+    /// by `rows`, clamped at the ends (a weapon row reached is chosen).
+    pub fn scroll(&mut self, column: Option<Column>, rows: isize) {
+        if !self.open || rows == 0 {
+            return;
+        }
+        let column = column.unwrap_or(self.column);
+        self.column = column;
+        let moved =
+            |at: usize, n: usize| (at as isize + rows).clamp(0, n.max(1) as isize - 1) as usize;
+        match (self.tab, column) {
+            (Tab::Props, Column::Classes) => {
+                let folder = moved(self.folder, self.prop_folders().len());
+                if folder != self.folder {
+                    (self.folder, self.model) = (folder, 0);
+                }
+            }
+            (Tab::Props, Column::Options) => {
+                let models = self
+                    .prop_folders()
+                    .get(self.folder)
+                    .map_or(0, |f| f.1.len());
+                self.model = moved(self.model, models);
+            }
+            (Tab::Npcs, Column::Classes) => self.select_class(moved(self.class, entry_count())),
+            (Tab::Npcs, Column::Options) => {
+                let options = self.rows();
+                self.row = moved(self.row, options.len());
+                if let OptionRow::Weapon(weapon) = &options[self.row] {
+                    self.weapon = weapon.clone();
+                }
+            }
+        }
     }
     /// The overlay spawns at the crosshair like npc_create_aimed (facing the aim).
     pub fn request(&self) -> SpawnRequest {
@@ -891,12 +1218,36 @@ impl Overlay {
             allegiance: self.allegiance,
             variant: self.label().into(),
             grenades: reads_num_grenades(self.class_name()).then_some(self.grenades),
+            ..Default::default()
         }
     }
     /// The panel to draw; `ai` and `notarget` are the host's live switches.
     pub fn panel(&self, ai: bool, notarget: bool) -> Panel {
         let total = entry_count();
+        let page = self.page();
         let classes_focused = self.column == Column::Classes;
+        let tab = |text: &str, t: Tab| PanelRow {
+            text: text.into(),
+            selected: self.tab == t,
+            cursor: false,
+            target: Some(PanelTarget::Tab(t)),
+        };
+        let mut tabs = vec![tab("NPCs", Tab::Npcs), tab("Props", Tab::Props)];
+        if self.tab == Tab::Props {
+            let text = if self.typing {
+                format!("filter: {}_", self.filter)
+            } else if self.filter.is_empty() {
+                "filter: (click or /)".into()
+            } else {
+                format!("filter: {}", self.filter)
+            };
+            tabs.push(PanelRow {
+                text,
+                selected: !self.filter.is_empty(),
+                cursor: self.typing,
+                target: Some(PanelTarget::Filter),
+            });
+        }
         if self.tab == Tab::Props {
             let folders = self.prop_folders();
             let names: Vec<String> = folders
@@ -910,33 +1261,41 @@ impl Overlay {
                     format!("{folder}/ ({})", models.len())
                 })
                 .collect();
+            // The common/matches list mixes folders: it shows each model's folder too.
+            let mixed = self.folder == 0;
             let models: Vec<String> = folders.get(self.folder).map_or(Vec::new(), |(_, m)| {
                 m.iter()
                     .map(|m| {
-                        m.rsplit('/')
-                            .next()
-                            .unwrap_or(m)
-                            .trim_end_matches(".mdl")
-                            .into()
+                        let shown = if mixed {
+                            m.as_str()
+                        } else {
+                            m.rsplit('/').next().unwrap_or(m)
+                        };
+                        let shown = shown.trim_end_matches(".mdl");
+                        match prop_name(m) {
+                            Some(name) => format!("{shown}  ({name})"),
+                            None => shown.into(),
+                        }
                     })
                     .collect()
             });
-            let count: usize = folders.iter().map(|f| f.1.len()).sum();
+            let count: usize = self.installed_folders().iter().map(|f| f.1.len()).sum();
             return Panel {
                 title: format!(
-                    "F4 Props ({count} models): folder {}/{}, model {}/{}  Tab: NPCs  PgUp/PgDn: page",
+                    "F4 Props ({count} models): folder {}/{}, model {}/{}  click: select, again: spawn",
                     self.folder + 1,
                     folders.len(),
                     self.model + 1,
                     models.len()
                 ),
+                tabs,
                 headings: ["folder".into(), "model (Enter spawns)".into()],
-                classes: scrolled_rows(&names, self.folder, classes_focused),
-                options: scrolled_rows(&models, self.model, !classes_focused),
+                classes: scrolled_rows(&names, self.folder, classes_focused, page, Column::Classes),
+                options: scrolled_rows(&models, self.model, !classes_focused, page, Column::Options),
             };
         }
         let names: Vec<String> = SPAWN_CLASSES.iter().map(|c| (*c).to_owned()).collect();
-        let classes = scrolled_rows(&names, self.class, classes_focused);
+        let classes = scrolled_rows(&names, self.class, classes_focused, page, Column::Classes);
         let natural = !crate::npc_weapons::uses_weapons(self.class_name());
         let options = self
             .rows()
@@ -983,14 +1342,16 @@ impl Overlay {
                     text,
                     selected,
                     cursor: !classes_focused && index == self.row,
+                    target: Some(PanelTarget::Row(Column::Options, index)),
                 }
             })
             .collect();
         Panel {
             title: format!(
-                "F4 spawn: NPCs ({}/{total}): Tab props, Up/Down move, Left/Right column, Enter spawn / toggle",
+                "F4 spawn: NPCs ({}/{total}): click: select, again: spawn / toggle; Enter spawns",
                 self.class + 1
             ),
+            tabs,
             headings: ["NPC class".into(), "weapon / options".into()],
             classes,
             options,
@@ -1027,12 +1388,15 @@ mod tests {
         let panel = overlay.panel(true, false);
         assert!(panel.title.starts_with("F4 Props (31 models)"));
         assert_eq!(panel.headings[0], "folder");
-        assert_eq!(panel.classes[0].text, "props_c17/ (1)");
+        // The installed common props come first (with their folders), then each folder.
+        assert_eq!(panel.classes[0].text, "* common/ (1)");
+        assert_eq!(panel.classes[1].text, "props_c17/ (1)");
         assert!(panel.classes[0].cursor);
-        assert_eq!(panel.options[0].text, "oildrum001");
+        assert_eq!(panel.options[0].text, "props_c17/oildrum001  (oil drum)");
         // Enter on a folder opens it; Enter on a model spawns it.
         overlay.key(OverlayKey::Down);
-        assert_eq!(overlay.folder, 1);
+        overlay.key(OverlayKey::Down);
+        assert_eq!(overlay.folder, 2);
         assert_eq!(overlay.key(OverlayKey::Enter), None);
         assert_eq!(overlay.column, Column::Options);
         overlay.key(OverlayKey::PageDown);
@@ -1068,10 +1432,120 @@ mod tests {
         fallback.key(OverlayKey::Enter);
         assert_eq!(
             fallback.key(OverlayKey::Enter),
+            Some(OverlayCommand::SpawnProp("props_c17/oildrum001.mdl".into()))
+        );
+    }
+    #[test]
+    fn the_mouse_and_the_filter_drive_the_overlay() {
+        let mut o = Overlay::default();
+        o.set_usable(usable());
+        assert_eq!(o.click(PanelTarget::Tab(Tab::Props)), None);
+        assert_eq!(o.tab, Tab::Npcs, "closed: clicks do nothing");
+        o.key(OverlayKey::Toggle);
+        // NPC tab: a click selects a class, a second click on it spawns it.
+        let cop = SPAWN_CLASSES
+            .iter()
+            .position(|c| *c == "npc_metropolice")
+            .unwrap();
+        assert_eq!(o.click(PanelTarget::Row(Column::Classes, cop + 1)), None);
+        assert_eq!(o.click(PanelTarget::Row(Column::Classes, cop)), None);
+        assert_eq!(o.class, cop);
+        let Some(OverlayCommand::Spawn(r)) = o.click(PanelTarget::Row(Column::Classes, cop)) else {
+            panic!()
+        };
+        assert_eq!(r.classname, "npc_metropolice");
+        // Options: a weapon click chooses it; toggles act on every click.
+        o.click(PanelTarget::Row(Column::Options, 2));
+        assert_eq!(o.weapon, "weapon_pistol");
+        let allegiance = o
+            .rows()
+            .iter()
+            .position(|r| *r == OptionRow::Allegiance)
+            .unwrap();
+        o.click(PanelTarget::Row(Column::Options, allegiance));
+        o.click(PanelTarget::Row(Column::Options, allegiance));
+        assert_eq!(o.allegiance, Allegiance::Foe.next());
+        // The wheel moves the hovered column's selection, clamped.
+        o.scroll(Some(Column::Classes), -1000);
+        assert_eq!((o.class, o.column), (0, Column::Classes));
+        o.scroll(Some(Column::Classes), 3);
+        assert_eq!(o.class, 3);
+        // The drawn rows carry their click targets; notes page the list.
+        o.rows_visible = 5;
+        let panel = o.panel(true, false);
+        assert_eq!(panel.classes.len(), 7);
+        assert_eq!(
+            panel.classes[0].target,
+            Some(PanelTarget::Page(Column::Classes, -1))
+        );
+        assert_eq!(
+            panel.classes[1].target,
+            Some(PanelTarget::Row(Column::Classes, 1))
+        );
+        o.click(PanelTarget::Page(Column::Classes, 1));
+        assert_eq!(o.class, 8);
+        assert_eq!(panel.tabs.len(), 2);
+        // Props: the filter box takes typed text; matches come first across folders.
+        let mut folders = std::collections::BTreeMap::new();
+        folders.insert(
+            "props_c17".to_string(),
+            vec![
+                "props_c17/oildrum001.mdl".to_string(),
+                "props_c17/oildrum001_explosive.mdl".to_string(),
+            ],
+        );
+        folders.insert(
+            "props_junk".to_string(),
+            vec![
+                "props_junk/wood_crate001a.mdl".to_string(),
+                "props_junk/wood_crate002a.mdl".to_string(),
+                "props_junk/popcan01a.mdl".to_string(),
+            ],
+        );
+        o.set_props(folders);
+        o.click(PanelTarget::Filter);
+        assert!(o.typing && o.tab == Tab::Props);
+        o.type_text("Crate!");
+        assert_eq!(o.filter, "crate");
+        let panel = o.panel(true, false);
+        assert_eq!(panel.classes[0].text, "* matches \"crate\"/ (2)");
+        assert_eq!(panel.classes[1].text, "props_junk/ (2)");
+        assert_eq!(panel.tabs[2].text, "filter: crate_");
+        o.key(OverlayKey::Backspace);
+        o.type_text("e");
+        assert_eq!(o.filter, "crate");
+        // Enter ends typing in the models column; click a model, again to spawn.
+        o.key(OverlayKey::Enter);
+        assert!(!o.typing);
+        assert_eq!(o.click(PanelTarget::Row(Column::Options, 1)), None);
+        assert_eq!(
+            o.click(PanelTarget::Row(Column::Options, 1)),
             Some(OverlayCommand::SpawnProp(
-                "props_borealis/bluebarrel001.mdl".into()
+                "props_junk/wood_crate002a.mdl".into()
             ))
         );
+        // Without a filter the common folder lists the installed common props.
+        o.click(PanelTarget::Filter);
+        for _ in 0..5 {
+            o.key(OverlayKey::Backspace);
+        }
+        o.key(OverlayKey::Filter);
+        let panel = o.panel(true, false);
+        assert_eq!(panel.classes[0].text, "* common/ (5)");
+        // Common props are found by their plain names too.
+        o.key(OverlayKey::Filter);
+        o.type_text("explosive barrel");
+        let panel = o.panel(true, false);
+        assert_eq!(
+            panel.options[0].text,
+            "props_c17/oildrum001_explosive  (explosive barrel)"
+        );
+        o.key(OverlayKey::Enter);
+        // Escape stops typing first, then closes the overlay.
+        o.key(OverlayKey::Filter);
+        assert!(o.escape() && o.open && !o.typing);
+        assert!(o.escape() && !o.open);
+        assert!(!o.escape());
     }
     #[test]
     fn the_pool_has_slots_for_every_overlay_class() {
@@ -1164,6 +1638,15 @@ mod tests {
             ),
             ("npc_combine_s", Some("s1"), "weapon_ar2", Some(3), false)
         );
+        assert!(r.ent_create && r.yaw.is_none());
+        // Quoted values keep their spaces: angles "pitch yaw roll".
+        let Some(Command::Spawn(r)) = console
+            .parse("ent_create npc_citizen \"angles\" \"0 135 0\"")
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(r.yaw, Some(135.));
         let Some(Command::Spawn(r)) = console.parse("ent_create npc_metropolice").unwrap() else {
             panic!()
         };
@@ -1240,6 +1723,16 @@ mod tests {
         assert!((p.origin - (Vec3::new(256., 0., 0.) - down * 36.)).length() < 1e-2);
         // Into the wall: the hull does not fit.
         assert!(place(&request("npc_metropolice", true), eye, Vec3::X, &Floor).is_err());
+        // ent_create: no hull test, no flying offset, the angles keyvalue's yaw.
+        let ent = |class: &str| SpawnRequest {
+            ent_create: true,
+            yaw: Some(90.),
+            ..request(class, false)
+        };
+        let p = place(&ent("npc_metropolice"), eye, Vec3::X, &Floor).unwrap();
+        assert_eq!((p.origin, p.yaw), (Vec3::new(1000., 0., 0.), 90.));
+        let p = place(&ent("npc_manhack"), eye, down, &Floor).unwrap();
+        assert!((p.origin - Vec3::new(256., 0., 0.)).length() < 1e-2);
         // Straight up: no hit, the NPC stays at its spawn origin.
         assert_eq!(
             place(&request("npc_citizen", true), eye, Vec3::Z, &Floor)

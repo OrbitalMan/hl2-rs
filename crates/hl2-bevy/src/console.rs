@@ -36,11 +36,25 @@ pub enum Action {
     SpawnOverlay {
         key: hl2_simulation::ai::spawn::OverlayKey,
     },
+    /// Text typed into the F4 Props filter (while it is typing).
+    SpawnOverlayText {
+        text: String,
+    },
+    /// A pointer click on an F4 row, e.g. {"Row": ["Options", 3]} or "Filter".
+    SpawnOverlayClick {
+        target: hl2_simulation::ai::spawn::PanelTarget,
+    },
+    /// Mouse wheel rows over an F4 column (null: the focused one).
+    SpawnOverlayScroll {
+        column: Option<hl2_simulation::ai::spawn::Column>,
+        rows: isize,
+    },
 }
 impl Action {
     pub fn valid(&self) -> bool {
         match self {
             Self::Command { command } => command.len() <= 1024,
+            Self::SpawnOverlayText { text } => text.len() <= 256,
             Self::Input { input } => {
                 input.text.len() <= 4096 && input.pointer.is_none_or(|p| p.is_finite())
             }
@@ -78,6 +92,21 @@ impl crate::movement::Simulation {
                 if let Some(message) = self.spawn_overlay_key(game, *key) {
                     ui.source.log(message);
                 }
+                vec![]
+            }
+            Action::SpawnOverlayText { text } => {
+                game.spawn_overlay.type_text(text);
+                vec![]
+            }
+            Action::SpawnOverlayClick { target } => {
+                let command = game.spawn_overlay.click(*target);
+                if let Some(message) = self.spawn_overlay_command(game, command) {
+                    ui.source.log(message);
+                }
+                vec![]
+            }
+            Action::SpawnOverlayScroll { column, rows } => {
+                game.spawn_overlay.scroll(*column, *rows);
                 vec![]
             }
         };

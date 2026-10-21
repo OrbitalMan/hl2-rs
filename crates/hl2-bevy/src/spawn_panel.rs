@@ -2,7 +2,7 @@
 //! canvas (classes | weapons and options) in the project's ProggyClean developer font
 //! (hl2-ui/assets/fonts, MIT). Glyphs are rasterized once at setup; frame systems only
 //! queue quads. The panel content comes from `hl2_simulation::ai::spawn::Overlay`.
-use hl2_simulation::ai::spawn::{Panel, PanelRow};
+use hl2_simulation::ai::spawn::{Panel, PanelRow, PanelTarget};
 use hl2_ui::canvas::{Canvas, Color, FilterMode, Texture2D, draw_texture};
 
 struct Glyph {
@@ -65,12 +65,27 @@ impl PanelFont {
             }
         }
     }
-    /// Draw the overlay panel at the left of the screen below the F1 bar.
-    pub fn draw(&self, canvas: &Canvas, panel: &Panel, message: Option<&str>) {
-        const LEFT: f32 = 20.;
-        const TOP: f32 = 118.;
-        let pad = 10.;
-        let row = (self.line * 1.15).round();
+    /// Row height of the panel lists.
+    fn row(&self) -> f32 {
+        (self.line * 1.15).round()
+    }
+    /// List rows that fit in a canvas `height` below the title, tabs, headings, the two
+    /// "more" notes and the message footer.
+    pub fn rows_fit(&self, height: f32) -> usize {
+        let free = height - TOP - 2. * PAD - 6. * self.row();
+        ((free / self.row()).floor() as usize).max(5)
+    }
+    /// Draw the overlay panel at the left of the screen below the F1 bar; returns each
+    /// clickable row's rectangle (x, y, width, height in canvas pixels) and target.
+    pub fn draw(
+        &self,
+        canvas: &Canvas,
+        panel: &Panel,
+        message: Option<&str>,
+    ) -> Vec<([f32; 4], PanelTarget)> {
+        let pad = PAD;
+        let row = self.row();
+        let mut hits = Vec::new();
         let class_chars = panel
             .classes
             .iter()
@@ -92,7 +107,7 @@ impl PanelFont {
         let width = (column + options_width).max(title_width).max(message_width);
         let rows = panel.classes.len().max(panel.options.len()) + 1;
         let footer = usize::from(message.is_some());
-        let height = (rows + 1 + footer) as f32 * row + 2. * pad;
+        let height = (rows + 2 + footer) as f32 * row + 2. * pad;
         canvas.rectangle(
             LEFT,
             TOP,
@@ -102,7 +117,31 @@ impl PanelFont {
         );
         let title = Color::from_rgba(240, 180, 90, 255);
         self.text(canvas, &panel.title, LEFT + pad, TOP + pad, title);
-        let header = TOP + pad + row;
+        // Tab bar: NPCs | Props | the filter box.
+        let tabs_top = TOP + pad + row;
+        let mut x = LEFT + pad;
+        for tab in &panel.tabs {
+            let w = (tab.text.len() + 2) as f32 * self.advance;
+            let fill = if tab.cursor {
+                Color::new(0.85, 0.55, 0.15, 0.45)
+            } else if tab.selected {
+                Color::new(0.3, 0.4, 0.55, 0.7)
+            } else {
+                Color::new(0.15, 0.18, 0.22, 0.7)
+            };
+            canvas.rectangle(x, tabs_top - 2., w, row, fill);
+            let color = if tab.selected || tab.cursor {
+                Color::from_rgba(255, 238, 160, 255)
+            } else {
+                Color::new(0.78, 0.78, 0.78, 1.)
+            };
+            self.text(canvas, &tab.text, x + self.advance, tabs_top, color);
+            if let Some(target) = tab.target {
+                hits.push(([x, tabs_top - 2., w, row], target));
+            }
+            x += w + self.advance;
+        }
+        let header = tabs_top + row;
         let classes_focused = panel.classes.iter().any(|r| r.cursor);
         let heading = |focused: bool| {
             if focused {
@@ -125,7 +164,7 @@ impl PanelFont {
             header,
             heading(!classes_focused),
         );
-        let draw_rows = |rows: &[PanelRow], x: f32, w: f32| {
+        let mut draw_rows = |rows: &[PanelRow], x: f32, w: f32| {
             for (i, r) in rows.iter().enumerate() {
                 let top = header + (i + 1) as f32 * row;
                 if r.cursor {
@@ -138,6 +177,9 @@ impl PanelFont {
                 };
                 let mark = if r.selected { "> " } else { "  " };
                 self.text(canvas, &format!("{mark}{}", r.text), x + pad, top, color);
+                if let Some(target) = r.target {
+                    hits.push(([x, top - 2., w, row], target));
+                }
             }
         };
         draw_rows(&panel.classes, LEFT, column);
@@ -152,7 +194,29 @@ impl PanelFont {
                 Color::new(0.78, 0.78, 0.78, 1.),
             );
         }
+        hits
     }
+}
+const LEFT: f32 = 20.;
+const TOP: f32 = 118.;
+const PAD: f32 = 10.;
+/// The drawn row under a pointer position (canvas pixels), from `PanelFont::draw`.
+pub fn hit(hits: &[([f32; 4], PanelTarget)], x: f32, y: f32) -> Option<PanelTarget> {
+    hits.iter()
+        .find(|([left, top, w, h], _)| x >= *left && x < left + w && y >= *top && y < top + h)
+        .map(|(_, target)| *target)
+}
+/// The column under a pointer position (for the wheel), from the drawn rows.
+pub fn column_at(
+    hits: &[([f32; 4], PanelTarget)],
+    x: f32,
+) -> Option<hl2_simulation::ai::spawn::Column> {
+    use hl2_simulation::ai::spawn::PanelTarget::{Page, Row};
+    hits.iter()
+        .find_map(|([left, _, w, _], target)| match target {
+            Row(column, _) | Page(column, _) if x >= *left && x < left + w => Some(*column),
+            _ => None,
+        })
 }
 
 #[cfg(test)]
@@ -164,5 +228,32 @@ mod tests {
         // Space has no coverage; letters do.
         assert!(font.glyphs[0].is_none());
         assert!(font.glyphs[usize::from(b'A' - 32)].is_some());
+    }
+    #[test]
+    fn drawn_rows_are_clickable_where_they_are_drawn() {
+        use hl2_simulation::ai::spawn::{Column, Overlay, OverlayKey, PanelTarget, Tab};
+        let font = super::PanelFont::load(18.).expect("ProggyClean");
+        let canvas = hl2_ui::canvas::Canvas::default();
+        let mut overlay = Overlay::default();
+        overlay.key(OverlayKey::Toggle);
+        overlay.rows_visible = font.rows_fit(720.);
+        let hits = font.draw(&canvas, &overlay.panel(true, false), Some("spawned"));
+        // Every list row fits a 720-pixel window.
+        assert!(hits.iter().all(|([_, top, _, h], _)| top + h <= 720.));
+        let center = |target| {
+            let ([x, y, w, h], _) = hits.iter().find(|(_, t)| *t == target).unwrap();
+            (x + w / 2., y + h / 2.)
+        };
+        for target in [
+            PanelTarget::Tab(Tab::Props),
+            PanelTarget::Row(Column::Classes, 3),
+            PanelTarget::Row(Column::Options, 0),
+        ] {
+            let (x, y) = center(target);
+            assert_eq!(super::hit(&hits, x, y), Some(target));
+        }
+        let (x, _) = center(PanelTarget::Row(Column::Options, 0));
+        assert_eq!(super::column_at(&hits, x), Some(Column::Options));
+        assert_eq!(super::hit(&hits, 5., 5.), None);
     }
 }
