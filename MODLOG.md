@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-21 session 25: distance-variant gunfire mix, move and shoot, Alyx gun, RPG citizens, combine elite/shotgunner/prison guard (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (weapon_smg1/ar2/alyxgun/rpg.cpp, npc_citizen17.cpp RPG schedules, npc_combine.cpp/npc_combines.cpp elites and ShouldMoveAndShoot, ai_moveshoot.cpp, ai_basenpc_schedule.cpp task overlays), installed sound scripts (temporary owned probe, not committed) and retail engine.dll via the pass02 Ghidra project read-only (SND_Spatialize distmix, '^' mixers; private npc-gunfire-20261021).
+
+**Changed:** distance-variant premixes in the audio host; `ai::moveshoot` overlay with aim locomotion and movement facing; weapon_alyxgun/weapon_rpg fire specs, NPC missiles with owner dots, SCHED_CITIZEN_RANGE_ATTACK1_RPG; SMG1 ally range; elite alt-fire (combine balls), guard health, F4 shotgunner/elite/prison guard entries; npc_alyx as AI ground mover.
+
+**Why:** owner reports (gunfire sound with distance, NPCs never shooting while moving, Alyx/RPG citizens never firing, missing combine variants).
+
+**Tested how / Result:** hl2-simulation 321 unit tests, workspace release tests (two known release-only failures), strict Clippy/fmt; packaged station-hall fixtures artifacts/s25 (ms-smg/ms-cap move-and-shoot, alyx, rpg, elite, variants): all behaviours fire as described in STATUS session 25.
+
+**Still broken or not tested:** native A/B listening of the distance mix; stereo panning/DSP; AI gesture layers (no recoil gesture while moving); native comparisons of move-and-shoot, RPG guidance and elite cadence; runtime skin change for a plain soldier given a shotgun.
+
+**Next:** regression/owned suite results, AI gesture layers, DESIGN 14r part A (runtime spawning of already-loaded classes).
+
 ## 2026-10-21 session 24, second part (same chat): native soldier comparisons, soldiers/citizens move, grenade-before-reload (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`, the same chat as the session 24 entry below (commit 9a20127's message wrongly says session 25). No subagents. Research: native oracle runs with per-process audio and ent_text (private npc-burst-20261020), SDK 2013 npc_combine.cpp (TranslateSchedule SCHED_HIDE_AND_RELOAD, CanGrenadeEnemy/CanThrowGrenade/CheckCanThrowGrenade, flush rule), player TraceAttack.
