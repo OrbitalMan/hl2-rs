@@ -1317,3 +1317,29 @@ a unified fade and focus-transition model:
 - **Verification:** unit-tested in `gameui::windows::tests::shared_fade_state_and_interpolation_logic_with_deterministic_timesteps`
   with deterministic timestep updates. Visual smoothness is documented as unverified, needs manual check.
 
+## 17. Context-aware background dim overlay (menu background vs. mid-gameplay) (2026-10-21)
+
+Dim overlay behavior distinguishes startup/menu background mode from active gameplay:
+- **Rule 1: Menu background mode (startup / background map):**
+  - When the main or submenu is in focus, no dim overlay is drawn (alpha 0.0); the 3D background map
+    or 2D background texture remains clean and unobstructed.
+  - When the menu loses focus (Options, dev console, or confirmation dialog opens), the dim overlay
+    smoothly fades in over the background behind the menu buttons and dialogs up to the authentic
+    `MainMenu.Backdrop` opacity (`156 / 255` ~ `0.611765` from `sourcescheme.res`) using the shared 0.3 s
+    transition timing.
+- **Rule 2: Mid-gameplay mode:**
+  - When opening the pause menu during active gameplay, a slight dim overlay (`gameplay_dim_alpha: 0.3`
+    in `assets/ui/tuning.json`, unverified fallback value) is applied over the paused 3D game world.
+  - When a dialog (such as Options or dev console) opens on top of the pause menu, the overlay smoothly
+    transitions from `gameplay_dim_alpha` (0.3) to the full `MainMenu.Backdrop` (0.611765) coordinated with
+    the dialog focus fade. Dismissing the dialog smoothly returns the dim back to 0.3.
+  - Active gameplay without the menu has no dim overlay (alpha 0.0).
+- **Architecture and pure calculation:**
+  - Implemented via `Console::dim_overlay_opacity(is_mid_gameplay, menu_open, base_focus)` and
+    `Console::dim_overlay_alpha(time)`.
+  - Drawn in `Console::draw` as a full-canvas quad behind the menu buttons and windows.
+- **Verification:** unit-tested across all four scenarios and transition steps in
+  `console::tests::context_aware_background_dim_overlay_across_all_four_cases`.
+  Visual smoothness and gameplay dim contrast are unverified, needs manual check.
+
+

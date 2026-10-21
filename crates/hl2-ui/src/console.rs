@@ -883,6 +883,36 @@ impl Console {
         self.category_title(category)
     }
 
+    /// Pure calculation of the background dim overlay opacity based on context and base focus amount.
+    pub fn dim_overlay_opacity(is_mid_gameplay: bool, menu_open: bool, base_focus: f32) -> f32 {
+        if !menu_open {
+            return 0.0;
+        }
+        let backdrop = crate::tuning::backdrop_alpha();
+        let gameplay_dim = crate::tuning::gameplay_dim_alpha();
+        let unfocused = (1.0 - base_focus).clamp(0.0, 1.0);
+
+        if is_mid_gameplay {
+            // Mid-gameplay mode: gameplay_dim when menu is focused, fades to backdrop when dialog opens.
+            gameplay_dim + (backdrop - gameplay_dim) * unfocused
+        } else {
+            // Menu background mode: no dim when menu is focused, fades to backdrop when unfocused.
+            backdrop * unfocused
+        }
+    }
+
+    /// Current dim overlay alpha at `time`.
+    pub fn dim_overlay_alpha(&self, time: f64) -> f32 {
+        let menu_open = matches!(
+            self.mode,
+            Mode::MainMenu | Mode::Pause | Mode::Options | Mode::Console
+        );
+        let is_mid_gameplay =
+            !self.background_level && matches!(self.base, Mode::Pause | Mode::Gameplay);
+        let base_focus = self.windows.base_focus_amount(time);
+        Self::dim_overlay_opacity(is_mid_gameplay, menu_open, base_focus)
+    }
+
     /// The active menu category for the current mode.
     pub fn menu_category(&self) -> &str {
         if self.base == Mode::Pause {
@@ -2965,6 +2995,13 @@ impl Console {
                     h,
                     crate::gameui::loading::BackgroundTransitionState::MAIN_MENU_BACKDROP,
                 );
+            } else {
+                let dim_alpha = self.dim_overlay_alpha(time);
+                if dim_alpha > 0.001 {
+                    let (w, h) = (self.canvas.width(), self.canvas.height());
+                    self.canvas
+                        .rectangle(0., 0., w, h, Color::new(0., 0., 0., dim_alpha));
+                }
             }
             let geometry = self.menu_layout.geometry_for(self.canvas_size());
             let title = self.current_title();
@@ -6927,5 +6964,74 @@ mod tests {
         console.windows.set_time(3.0);
         assert_eq!(console.windows.focus(), Layer::Base);
         assert!((console.windows.base_focus_amount(3.3) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn context_aware_background_dim_overlay_across_all_four_cases() {
+        let backdrop = crate::tuning::backdrop_alpha();
+        let gameplay_dim = crate::tuning::gameplay_dim_alpha();
+
+        // 1. Menu background focused: no dim (opacity 0.0)
+        assert_eq!(Console::dim_overlay_opacity(false, true, 1.0), 0.0);
+
+        let mut console = installed_console();
+        console.background_level = true;
+        console.set_mode(Mode::MainMenu);
+        console.windows.set_time(0.0);
+        assert_eq!(console.dim_overlay_alpha(0.0), 0.0);
+
+        // 2. Menu background unfocused with dialog open: dim active (backdrop opacity ~0.6118)
+        assert!((Console::dim_overlay_opacity(false, true, 0.0) - backdrop).abs() < 1e-4);
+
+        console.open_options();
+        console.windows.set_time(0.0);
+        // At t=0.0: just opened, base_focus is still 1.0, dim is 0.0
+        assert_eq!(console.dim_overlay_alpha(0.0), 0.0);
+        // At t=0.15 (halfway): base_focus is 0.5, dim is halfway
+        assert!((console.dim_overlay_alpha(0.15) - backdrop * 0.5).abs() < 1e-4);
+        // At t=0.30 (complete): base_focus is 0.0, dim is full backdrop
+        assert!((console.dim_overlay_alpha(0.30) - backdrop).abs() < 1e-4);
+
+        // Close options at t=1.0: restores focus to menu, fading dim out
+        console.windows.set_time(1.0);
+        console.close_window(Window::Options);
+        console.sync_dialog_windows();
+        assert!((console.dim_overlay_alpha(1.0) - backdrop).abs() < 1e-4);
+        assert!((console.dim_overlay_alpha(1.15) - backdrop * 0.5).abs() < 1e-4);
+        assert!((console.dim_overlay_alpha(1.30) - 0.0).abs() < 1e-4);
+
+        // 3. Mid-gameplay main menu open and focused: gameplay dim active (0.3)
+        assert!((Console::dim_overlay_opacity(true, true, 1.0) - gameplay_dim).abs() < 1e-4);
+
+        let mut play_console = installed_console();
+        play_console.background_level = false;
+        play_console.set_mode(Mode::Pause);
+        play_console.windows.set_time(2.0);
+        assert!((play_console.dim_overlay_alpha(2.0) - gameplay_dim).abs() < 1e-4);
+
+        // 4. Mid-gameplay with a dialog open: coordinated transition to backdrop dim (~0.6118)
+        assert!((Console::dim_overlay_opacity(true, true, 0.0) - backdrop).abs() < 1e-4);
+
+        play_console.open_options();
+        play_console.windows.set_time(2.0);
+        // At t=2.0: options just opened, dim starts at gameplay_dim
+        assert!((play_console.dim_overlay_alpha(2.0) - gameplay_dim).abs() < 1e-4);
+        // At t=2.15: halfway between gameplay_dim and backdrop
+        let mid_dim = gameplay_dim + (backdrop - gameplay_dim) * 0.5;
+        assert!((play_console.dim_overlay_alpha(2.15) - mid_dim).abs() < 1e-4);
+        // At t=2.30: fully faded to backdrop
+        assert!((play_console.dim_overlay_alpha(2.30) - backdrop).abs() < 1e-4);
+
+        // Close options at t=3.0: fades back down to gameplay_dim
+        play_console.windows.set_time(3.0);
+        play_console.close_window(Window::Options);
+        play_console.sync_dialog_windows();
+        assert!((play_console.dim_overlay_alpha(3.0) - backdrop).abs() < 1e-4);
+        assert!((play_console.dim_overlay_alpha(3.15) - mid_dim).abs() < 1e-4);
+        assert!((play_console.dim_overlay_alpha(3.30) - gameplay_dim).abs() < 1e-4);
+
+        // 5. Active gameplay without menu: no dim
+        assert_eq!(Console::dim_overlay_opacity(false, false, 1.0), 0.0);
+        assert_eq!(Console::dim_overlay_opacity(true, false, 1.0), 0.0);
     }
 }

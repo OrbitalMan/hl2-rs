@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-10-21 UI: context-aware background dim overlay (menu background vs. mid-gameplay)
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Data-driven dim tuning (`assets/ui/tuning.json`, `hl2-ui::tuning`):
+  - Added `backdrop_alpha: 0.611765` matching authentic `MainMenu.Backdrop` in `sourcescheme.res` (`156 / 255`).
+  - Added `gameplay_dim_alpha: 0.3` (unverified fallback) for mid-gameplay pause menu dimming overlay.
+- Pure dim overlay calculation and rendering (`hl2-ui::console`):
+  - Added `Console::dim_overlay_opacity(is_mid_gameplay, menu_open, base_focus) -> f32` and `Console::dim_overlay_alpha(time) -> f32`.
+  - Rule 1 (Menu background mode): when menu is in focus, no dim is shown (0.0). When main/sub menu loses focus (Options, console, confirmation dialog open), dim fades in over the 3D background map / 2D background texture to `MainMenu.Backdrop` (0.611765) using the shared 0.3s transition.
+  - Rule 2 (Mid-gameplay mode): when opening the menu during active gameplay, gameplay dim (0.3) is applied over gameplay; when dialogs open on top, dim smoothly transitions from 0.3 to full `MainMenu.Backdrop` (0.611765). Active gameplay without menu has no dim (0.0).
+  - Rendered dim overlay quad across canvas in `Console::draw` behind menu buttons and dialogs.
+
+**Why:** owner request: separate dim overlay behavior into menu background mode (no dim when focused, fades in when dialog opens) and mid-gameplay mode (gameplay dim when menu focused, coordinated transition to backdrop when dialog opens).
+
+**Tested how:**
+- Added unit test `console::tests::context_aware_background_dim_overlay_across_all_four_cases` verifying:
+  1. Menu background focused: no dim (0.0).
+  2. Menu background unfocused with dialog open: dim active (`MainMenu.Backdrop` 0.6118) with smooth 0.3s bidirectional fade.
+  3. Mid-gameplay menu open and focused: gameplay dim active (0.3).
+  4. Mid-gameplay with dialog open: coordinated transition to backdrop dim (0.6118) and back down to 0.3.
+  5. Active gameplay without menu: no dim (0.0).
+- Ran all 344 `hl2-ui` unit tests (`cargo test -p hl2-ui`).
+- Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
+
+**Result:** context-aware dimming overlay matching retail Source GameUI behavior.
+
+**Still broken or not tested:** visual contrast in live gameplay is unverified, needs manual check.
+
+**Next:** Task 4 (tilde dev console mid-gameplay opens main menu).
+
+
 ## 2026-10-21 UI: shared fade-in/out animations and focus transitions across dialogs and menus
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

@@ -4,6 +4,13 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Context-aware background dim overlay (menu background vs. mid-gameplay) (`hl2-ui::console`, `tuning.json`):**
+  - Added `backdrop_alpha: 0.611765` matching `MainMenu.Backdrop` in `sourcescheme.res` (`156 / 255`) and `gameplay_dim_alpha: 0.3` (unverified fallback) in `assets/ui/tuning.json`.
+  - Implemented pure calculation in `Console::dim_overlay_opacity(is_mid_gameplay, menu_open, base_focus) -> f32` and `Console::dim_overlay_alpha(time)`.
+  - Menu background mode: zero dim overlay when main/sub menu is focused, smoothly fades in to `MainMenu.Backdrop` (0.6118) over 0.3s when dialogs open.
+  - Mid-gameplay mode: pause menu applies `gameplay_dim_alpha` (0.3) over gameplay; dialogs opening on top smoothly transition dim to `MainMenu.Backdrop` (0.6118).
+  - Verified with unit tests (`console::tests::context_aware_background_dim_overlay_across_all_four_cases`), `scripts/checks/validate.sh`, and `scripts/checks/check_windows.sh`. Visual smoothness is unverified, needs manual check.
+
 - **Shared fade-in/out and focus-transition animations (`gameui::windows`, `canvas`, `console`, `gameui::options`):**
   - Verified `sourcescheme.res` values: `Frame.TransitionEffectTime` = 0.3 s, `Frame.FocusTransitionEffectTime` = 0.3 s, `Frame.BgColor` alpha = 212, `Frame.OutOfFocusBgColor` alpha = 62.
   - Implemented `Canvas::set_alpha_multiplier` and `Canvas::alpha_multiplier` (matching Source SDK `surface()->DrawSetAlphaMultiplier()`), modulating drawing primitives across dialogs, text, and widgets.

@@ -5,6 +5,8 @@
   "menu_stack_rows": 7,
   "ui_fade_duration": 0.3,
   "unfocused_alpha_factor": 0.3,
+  "backdrop_alpha": 0.611765,
+  "gameplay_dim_alpha": 0.3,
   "video_confirm_seconds": 15,
   "vertical_fov_range": [40, 120],
   "viewmodel_fov_range": [30, 110],

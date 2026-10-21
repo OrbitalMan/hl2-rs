@@ -19,6 +19,10 @@ struct Tuning {
     ui_fade_duration: f32,
     /// Unfocused title/subtitle opacity factor (ratio of Frame.OutOfFocusBgColor to Frame.BgColor).
     unfocused_alpha_factor: f32,
+    /// Authentic backdrop overlay opacity from MainMenu.Backdrop in sourcescheme.res (156 / 255).
+    backdrop_alpha: f32,
+    /// Unverified fallback opacity for mid-gameplay pause menu dimming overlay.
+    gameplay_dim_alpha: f32,
     /// Seconds before an unconfirmed video change reverts (`gameui::video_confirm`).
     video_confirm_seconds: f64,
     /// Smallest and largest explicit vertical field of view of the Video > Advanced slider
@@ -141,6 +145,16 @@ pub fn ui_fade_duration() -> f32 {
 /// Unfocused title and subtitle alpha multiplier.
 pub fn unfocused_alpha_factor() -> f32 {
     data().unfocused_alpha_factor
+}
+
+/// Authentic backdrop overlay opacity from MainMenu.Backdrop in sourcescheme.res (156 / 255).
+pub fn backdrop_alpha() -> f32 {
+    data().backdrop_alpha
+}
+
+/// Fallback opacity for mid-gameplay pause menu dimming overlay.
+pub fn gameplay_dim_alpha() -> f32 {
+    data().gameplay_dim_alpha
 }
 
 /// Smallest and largest explicit vertical field of view (degrees).
