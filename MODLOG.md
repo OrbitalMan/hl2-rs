@@ -1,10 +1,10 @@
 # MODLOG
 
-## 2026-10-21 session 25: native soldier comparisons, soldiers/citizens move, grenade-before-reload (`wip/npc-ai-20261014`)
+## 2026-10-21 session 24, second part (same chat): native soldier comparisons, soldiers/citizens move, grenade-before-reload (`wip/npc-ai-20261014`)
 
-**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: native oracle runs with per-process audio and ent_text (private npc-burst-20261020), SDK 2013 npc_combine.cpp (TranslateSchedule SCHED_HIDE_AND_RELOAD, CanGrenadeEnemy/CanThrowGrenade/CheckCanThrowGrenade, flush rule), player TraceAttack.
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`, the same chat as the session 24 entry below (commit 9a20127's message wrongly says session 25). No subagents. Research: native oracle runs with per-process audio and ent_text (private npc-burst-20261020), SDK 2013 npc_combine.cpp (TranslateSchedule SCHED_HIDE_AND_RELOAD, CanGrenadeEnemy/CanThrowGrenade/CheckCanThrowGrenade, flush rule), player TraceAttack.
 
-**Changed:** per-weapon locomotion variants and AI ground registration for npc_combine_s/npc_citizen; lazy CanGrenadeEnemy with side-effect-free throw probes and the 20% grenade-before-reload; AR2Impact and TraceBleed for NPC hits on the player; DESIGN 14n session 25 plan.
+**Changed:** per-weapon locomotion variants and AI ground registration for npc_combine_s/npc_citizen; lazy CanGrenadeEnemy with side-effect-free throw probes and the 20% grenade-before-reload; AR2Impact and TraceBleed for NPC hits on the player; DESIGN 14n session 24 second-part plan.
 
 **Why:** owner request: native comparisons of AR2 cadence, reload pauses, flush grenades (and citizen/cop cadence, not reached).
 
