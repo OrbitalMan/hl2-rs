@@ -354,17 +354,10 @@ impl PreparedAudio {
         for weapon in game.weapons.values() {
             cues.extend(weapon.sounds.values().cloned());
         }
+        // Studio client sound events: viewmodels and NPC sequences (5004 sounds and
+        // CL_EVENT_FOOTSTEP names).
         for rig in game.world.rigs.values() {
-            for clip in rig.clips.values() {
-                cues.extend(
-                    clip.events
-                        .iter()
-                        .filter(|e| {
-                            (e.id == 5004 || e.name == "AE_CL_PLAYSOUND") && !e.options.is_empty()
-                        })
-                        .map(|e| e.options.clone()),
-                );
-            }
+            cues.extend(hl2_simulation::sounds::animation_sound_names(rig));
         }
         cues.extend(
             [

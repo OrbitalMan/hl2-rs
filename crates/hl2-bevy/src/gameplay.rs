@@ -142,6 +142,8 @@ pub struct Gameplay {
     pub sound_cues: Vec<String>,
     pub sound_requests: Vec<hl2_simulation::sounds::SoundRequest>,
     weapon_sounds: hl2_simulation::sounds::WeaponAnimationSounds,
+    /// Client sound events of entity animations (NPC footsteps).
+    entity_sounds: hl2_simulation::sounds::EntityAnimationSounds,
     pub footsteps: hl2_simulation::footsteps::Footsteps,
     /// Local player damage intake (skill 2, the owner's native setting).
     pub player_damage: hl2_simulation::player_damage::PlayerDamage,
@@ -384,6 +386,7 @@ impl Gameplay {
             sound_cues: vec![],
             sound_requests: vec![],
             weapon_sounds: Default::default(),
+            entity_sounds: Default::default(),
             footsteps: Default::default(),
             player_damage: Default::default(),
             damage_messages: Vec::new(),
@@ -469,6 +472,7 @@ impl Gameplay {
             sound_cues: vec![],
             sound_requests: vec![],
             weapon_sounds: Default::default(),
+            entity_sounds: Default::default(),
             footsteps: Default::default(),
         })
     }
@@ -1454,6 +1458,43 @@ impl Gameplay {
                 .events(&self.world, &self.inventory, &self.weapons, self.scene.time)
         {
             self.scene.sounds.push(event.options.into());
+        }
+        for sound in self.entity_sounds.events(&self.world, &self.scene, TICK) {
+            match sound {
+                hl2_simulation::sounds::AnimationSound::Named(request) => {
+                    self.scene.sounds.push(request)
+                }
+                hl2_simulation::sounds::AnimationSound::Material {
+                    entity,
+                    origin,
+                    left,
+                    volume,
+                } => {
+                    // MaterialFootstepSound: the surface 48 units under the foot (the
+                    // entity origin stands in for the LeftFoot/RightFoot attachment).
+                    let step = self
+                        .impacts
+                        .ground_property(
+                            &self.world,
+                            physics,
+                            &self.scene,
+                            origin + Vec3::Z * 2.,
+                            48.,
+                        )
+                        .map(|prop| self.impacts.step_surface(&prop));
+                    let name = step.and_then(|s| if left { s.step_left } else { s.step_right });
+                    if let Some(name) = name {
+                        self.scene
+                            .sounds
+                            .push(hl2_simulation::sounds::SoundRequest {
+                                origin: Some(origin),
+                                volume: Some(volume),
+                                emitter: Some(entity as u64),
+                                ..name.as_str().into()
+                            });
+                    }
+                }
+            }
         }
         for (hit, _melee, direction) in self.inventory.impacts.drain(..) {
             self.impacts
