@@ -378,8 +378,21 @@ pub struct SpawnRequest {
     pub ent_create: bool,
     /// The yaw of an ent_create `angles` keyvalue (degrees).
     pub yaw: Option<f32>,
+    /// ent_create's `squadname` keyvalue (CAI_BaseNPC m_SquadName).
+    pub squad: Option<String>,
 }
 impl SpawnRequest {
+    /// Keyvalues the new entity gets before it spawns (targetname, squadname).
+    pub fn keyvalues(&self) -> Vec<(&'static str, String)> {
+        let mut keyvalues = Vec::new();
+        if let Some(name) = &self.name {
+            keyvalues.push(("targetname", name.clone()));
+        }
+        if let Some(squad) = &self.squad {
+            keyvalues.push(("squadname", squad.clone()));
+        }
+        keyvalues
+    }
     /// The pool entry this request draws from.
     pub fn pool_label(&self) -> &str {
         if self.variant.is_empty() {
@@ -450,7 +463,8 @@ impl Console {
     /// [name]`, `npc_create_equipment <weapon>`, `prop_physics_create <model>` (SDK
     /// CC_Prop_Physics_Create: exactly one argument, else nothing happens) and
     /// `ent_create <class> [key value ...]` (CC_Ent_Create; here only NPC classes, with
-    /// targetname / additionalequipment / NumGrenades, and physics props with a model).
+    /// targetname / squadname / additionalequipment / NumGrenades / angles, and physics
+    /// props with a model).
     /// Ok(None) for other commands.
     pub fn parse(&mut self, line: &str) -> Result<Option<Command>, String> {
         let args = tokens(line);
@@ -540,6 +554,7 @@ impl Console {
                             .filter(|_| reads_num_grenades(&class))
                             .and_then(|n| n.parse().ok()),
                         ent_create: true,
+                        squad: value("squadname").map(str::to_owned),
                         // "pitch yaw roll" (CBaseEntity::KeyValue angles).
                         yaw: value("angles")
                             .and_then(|a| a.split_whitespace().nth(1)?.parse().ok()),
@@ -1639,6 +1654,14 @@ mod tests {
             ("npc_combine_s", Some("s1"), "weapon_ar2", Some(3), false)
         );
         assert!(r.ent_create && r.yaw.is_none());
+        assert_eq!(r.keyvalues(), [("targetname", "s1".to_string())]);
+        let Some(Command::Spawn(r)) = console
+            .parse("ent_create npc_metropolice squadname cops")
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(r.keyvalues(), [("squadname", "cops".to_string())]);
         // Quoted values keep their spaces: angles "pitch yaw roll".
         let Some(Command::Spawn(r)) = console
             .parse("ent_create npc_citizen \"angles\" \"0 135 0\"")

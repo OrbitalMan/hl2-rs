@@ -132,6 +132,21 @@ impl Enemies {
             }
         }
     }
+    /// Entity enemies seen first-hand at `now` (this think's sightings) and where.
+    pub fn seen_at(&self, now: f64) -> Vec<(usize, Vec3)> {
+        self.memories
+            .iter()
+            .filter(|(_, m)| m.time_last_seen == now)
+            .filter_map(|(e, m)| Some(((*e)?, m.last_known)))
+            .collect()
+    }
+    /// Every remembered entity enemy and its last known position.
+    pub fn known(&self) -> Vec<(usize, Vec3)> {
+        self.memories
+            .iter()
+            .filter_map(|(e, m)| Some(((*e)?, m.last_known)))
+            .collect()
+    }
     pub fn find(&self, enemy: Option<usize>) -> Option<&EnemyInfo> {
         self.memories.get(&enemy)
     }

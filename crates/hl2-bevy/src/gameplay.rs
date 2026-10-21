@@ -527,7 +527,7 @@ impl Gameplay {
     }
     /// CreateEntityByName + DispatchSpawn + Activate of a copy of a loaded entity (an F4
     /// class template or a maker's template NPC; DESIGN 14r part A): the template's
-    /// keyvalues at `origin` facing `yaw` (optionally other spawnflags), its model
+    /// keyvalues at `origin` facing `yaw` (with `overrides` replacing keys), its model
     /// instance, colliders, AI actor, movement registration and (next frame) draws.
     /// The map's World grows in place (no copy while nothing else holds it).
     pub fn create_from_template(
@@ -535,19 +535,19 @@ impl Gameplay {
         template: usize,
         origin: Vec3,
         yaw: f32,
-        spawnflags: Option<u32>,
+        overrides: &[(&str, String)],
         physics: &mut Physics,
     ) -> Result<usize, String> {
         use hl2_simulation::ai::spawn;
         let id = self.world.entities.len();
         let (mut new_entity, instance) = spawn::instantiate(&self.world, template, id, origin, yaw);
-        if let Some(flags) = spawnflags {
+        // Keyvalues set before DispatchSpawn (maker spawnflags, npc_create's name,
+        // ent_create's targetname/squadname).
+        for (key, value) in overrides {
             new_entity
                 .properties
-                .retain(|(k, _)| !k.eq_ignore_ascii_case("spawnflags"));
-            new_entity
-                .properties
-                .push(("spawnflags".into(), flags.to_string()));
+                .retain(|(k, _)| !k.eq_ignore_ascii_case(key));
+            new_entity.properties.push(((*key).into(), value.clone()));
         }
         let id = self.insert_entity(new_entity, instance, physics)?;
         self.npcs.copy_actor(template, id);
@@ -743,7 +743,7 @@ impl Gameplay {
         let template = templates[*count % templates.len()];
         *count += 1;
         let id = self
-            .create_from_template(template, origin, yaw, None, physics)
+            .create_from_template(template, origin, yaw, &request.keyvalues(), physics)
             .map_err(|e| format!("Can't create {}: {e}", request.classname))?;
         self.ai
             .set_equipment(id, &request.classname, &request.equipment);
@@ -978,7 +978,7 @@ impl Gameplay {
                     request.template,
                     request.origin,
                     request.yaw,
-                    Some(request.spawnflags),
+                    &[("spawnflags", request.spawnflags.to_string())],
                     physics,
                 )
                 .ok();

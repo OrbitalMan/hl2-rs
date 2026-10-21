@@ -395,6 +395,19 @@ pub struct AiActor {
     enemy_eluded: bool,
     #[serde(skip)]
     death_spoken: bool,
+    /// CAI_BaseNPC m_SquadName (the `squadname` keyvalue) until InitSquad joins it.
+    #[serde(skip)]
+    squad_name: Option<String>,
+    /// The squad joined (CAI_SquadManager::FindCreateSquad).
+    pub squad: Option<String>,
+    /// SetEnemy by SquadNewEnemy since the last think (COND_NEW_ENEMY).
+    #[serde(skip)]
+    squad_new_enemy: bool,
+    /// CNPC_MetroPolice m_nIdleChatterType (COP_CHATTER_*).
+    pub idle_chatter: u8,
+    /// bits_MEMORY_PLAYER_HARASSED.
+    #[serde(skip)]
+    harassed: bool,
     /// CNPC_Combine::m_flStopMoveShootTime.
     #[serde(skip)]
     stop_move_shoot: Option<f64>,
@@ -419,6 +432,12 @@ pub struct Diagnostics {
     pub bullet_hits_on_player: u64,
     /// Player-ally concepts by outcome ("TLK_WOUND:spoken", "TLK_STARTCOMBAT:semaphore").
     pub ally_speech: BTreeMap<String, u32>,
+    /// Sentence groups spoken, and those MatchesCriteria refused (e.g. IN_SQUAD lines of
+    /// an NPC without a squad of two).
+    pub sentence_groups: BTreeMap<String, u32>,
+    pub criteria_refused: BTreeMap<String, u32>,
+    /// Squad events: joins, deaths, SquadNewEnemy enemies given, memories shared.
+    pub squad_events: BTreeMap<String, u32>,
 }
 #[derive(Serialize)]
 pub struct AiRuntime {
@@ -509,6 +528,114 @@ pub struct AiRuntime {
     pub relationship_overrides: BTreeMap<(usize, usize), Disposition>,
     #[serde(skip)]
     applied_relationships: BTreeMap<usize, Vec<(usize, usize)>>,
+    /// CAI_SquadManager: squads by name.
+    pub squads: BTreeMap<String, super::squad::Squad>,
+    /// Squad work a think asked for (applied right after it).
+    #[serde(skip)]
+    squad_events: Vec<SquadEvent>,
+    /// IdleSound lines a think chose (spoken right after it).
+    #[serde(skip)]
+    idle_lines: Vec<IdleLine>,
+}
+/// METROPOLICE_CHATTER_WAIT_FOR_RESPONSE / ASK_QUESTION / RESPONSE (+ the question type).
+const COP_CHATTER_WAIT_FOR_RESPONSE: u8 = 0;
+const COP_CHATTER_ASK_QUESTION: u8 = 1;
+const COP_CHATTER_RESPONSE: u8 = 2;
+/// An IdleSound line and what speaking it changes (only when Speak succeeds).
+#[derive(Clone, Copy, Debug)]
+struct IdleLine {
+    id: usize,
+    group: &'static str,
+    then: IdleThen,
+}
+#[derive(Clone, Copy, Debug)]
+enum IdleThen {
+    Nothing,
+    /// g_fCombineQuestion.
+    CombineQuestion(u8),
+    /// Remember (and SquadRemember) bits_MEMORY_PLAYER_HARASSED.
+    CopHarassed,
+    /// The squadmates answer this question type; the asker waits.
+    CopAsked(u8),
+    /// The squadmates may ask again.
+    CopAnswered,
+}
+/// CAI_Squad calls a member's think makes on the others.
+#[derive(Clone, Debug)]
+enum SquadEvent {
+    /// CAI_Squad::UpdateEnemyMemory: a first-hand sighting shared with the squad.
+    Memory {
+        squad: String,
+        from: usize,
+        enemy: usize,
+        position: Vec3,
+    },
+    /// CAI_Squad::SquadNewEnemy (SelectIdealState, idle/alert with COND_NEW_ENEMY).
+    NewEnemy { squad: String, enemy: usize },
+}
+/// SentenceCriteria_t of a CAI_SentenceBase::Speak call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Criteria {
+    Always,
+    /// Obeys the gag spawnflag outside combat.
+    Normal,
+    /// The default: a squad of more than one.
+    InSquad,
+    SquadLeader,
+}
+/// The criteria npc_metropolice.cpp, ai_behavior_police.cpp and npc_combine.cpp pass for
+/// each sentence group (Speak's default is SENTENCE_CRITERIA_IN_SQUAD).
+fn sentence_criteria(group: &str) -> Criteria {
+    if group.starts_with("METROPOLICE_PAIN")
+        || matches!(
+            group,
+            "METROPOLICE_DIE"
+                | "METROPOLICE_ON_FIRE"
+                | "METROPOLICE_HIT_BY_PHYSOBJECT"
+                | "COMBINE_PAIN"
+                | "COMBINE_TAUNT"
+                | "COMBINE_COVER"
+                | "COMBINE_DIE"
+        )
+    {
+        Criteria::Always
+    } else if [
+        "METROPOLICE_MOVE_ALONG",
+        "METROPOLICE_BACK_UP",
+        "METROPOLICE_DANGER",
+        "METROPOLICE_IDLE_HARASS_PLAYER",
+    ]
+    .iter()
+    .any(|g| group.starts_with(g))
+        || matches!(
+            group,
+            "METROPOLICE_MANHACK_KILLED"
+                | "METROPOLICE_LAST_OF_SQUAD"
+                | "METROPOLICE_FREEZE"
+                | "METROPOLICE_OVER_HERE"
+                | "METROPOLICE_HES_RUNNING"
+                | "METROPOLICE_TAKE_HIM_DOWN"
+                | "METROPOLICE_ARREST_IN_POS"
+                | "METROPOLICE_COVER_HEAVY_DAMAGE"
+                | "METROPOLICE_ACTIVATE_BATON"
+                | "METROPOLICE_DEACTIVATE_BATON"
+                | "COMBINE_LAST_OF_SQUAD"
+                | "COMBINE_GREN"
+                | "COMBINE_DANGER"
+        )
+    {
+        Criteria::Normal
+    } else if matches!(
+        group,
+        "METROPOLICE_SO_BEGIN"
+            | "METROPOLICE_SO_END"
+            | "METROPOLICE_AS_ADV_RALLY"
+            | "METROPOLICE_AS_ADV_ASSAULT"
+    ) {
+        Criteria::SquadLeader
+    } else {
+        Criteria::InSquad
+    }
 }
 /// A pair-keyed map as a list of (subject, target, value) for the JSON report.
 fn serialize_pairs<S: serde::Serializer, V: Serialize>(
@@ -570,6 +697,7 @@ fn sentence_priority(group: &str) -> i32 {
                 | "COMBINE_COVER"
                 | "COMBINE_DIE"
                 | "COMBINE_PLAYERHIT"
+                | "COMBINE_LAST_OF_SQUAD"
         )
     {
         -1
@@ -700,6 +828,9 @@ impl AiRuntime {
             npc_ids: None,
             relationship_overrides: BTreeMap::new(),
             applied_relationships: BTreeMap::new(),
+            squads: BTreeMap::new(),
+            squad_events: Vec::new(),
+            idle_lines: Vec::new(),
             schedules,
             relationships: Relationships::default(),
             sounds: SoundEnt::default(),
@@ -1377,6 +1508,15 @@ impl AiRuntime {
             next_lost_sound: 0.,
             enemy_eluded: false,
             death_spoken: false,
+            squad_name: e
+                .get("squadname")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            squad: None,
+            squad_new_enemy: false,
+            idle_chatter: COP_CHATTER_ASK_QUESTION,
+            harassed: false,
         })
     }
     /// The NumGrenades keyvalue of a spawned CNPC_Combine (F4; DESIGN 14r would set it
@@ -1534,6 +1674,7 @@ impl AiRuntime {
         let now = scene.time;
         self.sounds.purge(now);
         let precriminal = scene.globals.is_on("gordon_precriminal");
+        self.update_squads(world, scene);
         let ids: Vec<usize> = self.actors.keys().copied().collect();
         for id in ids {
             let state = &scene.states[id];
@@ -1784,6 +1925,225 @@ impl AiRuntime {
                 player,
                 precriminal,
             );
+            self.apply_squad_events(scene);
+            self.speak_idle_lines(world, scene);
+        }
+    }
+    /// IdleSound's lines, and their effects when Speak succeeds.
+    fn speak_idle_lines(&mut self, world: &World, scene: &mut Scene) {
+        for line in std::mem::take(&mut self.idle_lines) {
+            if !self.say(line.id, line.group, world, scene) {
+                continue;
+            }
+            let squadmates: Vec<usize> = self.actors[&line.id]
+                .squad
+                .as_ref()
+                .and_then(|n| self.squads.get(n))
+                .map_or(Vec::new(), |s| {
+                    s.members
+                        .iter()
+                        .copied()
+                        .filter(|m| *m != line.id)
+                        .collect()
+                });
+            let mut set = |id: usize, f: &mut dyn FnMut(&mut AiActor)| {
+                if let Some(actor) = self.actors.get_mut(&id) {
+                    f(actor);
+                }
+            };
+            match line.then {
+                IdleThen::Nothing => {}
+                IdleThen::CombineQuestion(q) => self.combine_question = q,
+                IdleThen::CopHarassed => {
+                    for m in std::iter::once(line.id).chain(squadmates) {
+                        set(m, &mut |a| a.harassed = true);
+                    }
+                }
+                IdleThen::CopAsked(question) => {
+                    set(line.id, &mut |a| {
+                        a.idle_chatter = COP_CHATTER_WAIT_FOR_RESPONSE
+                    });
+                    for m in squadmates {
+                        set(m, &mut |a| a.idle_chatter = COP_CHATTER_RESPONSE + question);
+                    }
+                }
+                IdleThen::CopAnswered => {
+                    for m in std::iter::once(line.id).chain(squadmates) {
+                        set(m, &mut |a| a.idle_chatter = COP_CHATTER_ASK_QUESTION);
+                    }
+                }
+            }
+        }
+    }
+    /// CAI_BaseNPC::InitSquad for NPCs in the world (map NPCs on the first tick, maker
+    /// and runtime copies when they appear; hidden templates never join), and
+    /// Event_Killed's RemoveFromSquad(death) -> NotifyDeadFriend for the killed.
+    fn update_squads(&mut self, world: &World, scene: &mut Scene) {
+        let ids: Vec<usize> = self.actors.keys().copied().collect();
+        for id in ids {
+            let state = &scene.states[id];
+            let actor = &self.actors[&id];
+            if state.killed {
+                if let Some(name) = actor.squad.clone() {
+                    self.remove_from_squad(id, &name, true, world, scene);
+                }
+                continue;
+            }
+            if actor.squad.is_none() && state.visible {
+                if let Some(name) = actor.squad_name.clone() {
+                    self.add_to_squad(id, &name, scene.time);
+                }
+            }
+        }
+    }
+    /// CAI_Squad::AddToSquad: join in order; a later member learns the first member's
+    /// enemies (UpdateEnemyMemory informed by it, not first-hand).
+    fn add_to_squad(&mut self, id: usize, name: &str, now: f64) {
+        let squad = self
+            .squads
+            .entry(name.to_owned())
+            .or_insert_with(|| super::squad::Squad::new(name));
+        squad.add(id);
+        let first = squad.members[0];
+        *self
+            .diagnostics
+            .squad_events
+            .entry("join".into())
+            .or_default() += 1;
+        let known = if first == id {
+            Vec::new()
+        } else {
+            self.actors[&first].npc.enemies.known()
+        };
+        let actor = self.actors.get_mut(&id).expect("actor");
+        actor.squad = Some(name.to_owned());
+        for (enemy, position) in known {
+            actor
+                .npc
+                .enemies
+                .update(Some(enemy), position, 0., false, now);
+        }
+    }
+    /// CAI_Squad::RemoveFromSquad; on death the remaining members get NotifyDeadFriend.
+    fn remove_from_squad(
+        &mut self,
+        id: usize,
+        name: &str,
+        death: bool,
+        world: &World,
+        scene: &mut Scene,
+    ) {
+        let Some(squad) = self.squads.get_mut(name) else {
+            return;
+        };
+        squad.remove(id);
+        let members = squad.members.clone();
+        let remaining = squad.num_members();
+        if let Some(actor) = self.actors.get_mut(&id) {
+            actor.squad = None;
+            actor.squad_name = None;
+        }
+        if !death {
+            return;
+        }
+        *self
+            .diagnostics
+            .squad_events
+            .entry("death".into())
+            .or_default() += 1;
+        let friend_class = world.entities.get(id).map_or("", |e| e.class());
+        for member in members {
+            if scene.states.get(member).is_none_or(|s| s.killed) {
+                continue;
+            }
+            let Some(actor) = self.actors.get_mut(&member) else {
+                continue;
+            };
+            // CNPC_MetroPolice::NotifyDeadFriend resets idle chatter waiting for an answer.
+            if actor.class.cop().is_some()
+                && friend_class != "npc_manhack"
+                && actor.idle_chatter == COP_CHATTER_WAIT_FOR_RESPONSE
+            {
+                actor.idle_chatter = COP_CHATTER_ASK_QUESTION;
+            }
+            // NotifyDeadFriend: CNPC_MetroPolice (no line for a dead manhack) and
+            // CNPC_Combine; LAST_OF_SQUAD when fewer than two remain.
+            let group = match &actor.class {
+                AiClass::Metropolice(_) if friend_class != "npc_manhack" => {
+                    Some(if remaining < 2 {
+                        "METROPOLICE_LAST_OF_SQUAD"
+                    } else {
+                        "METROPOLICE_MAN_DOWN"
+                    })
+                }
+                AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine => {
+                    Some(if remaining < 2 {
+                        "COMBINE_LAST_OF_SQUAD"
+                    } else {
+                        "COMBINE_MAN_DOWN"
+                    })
+                }
+                _ => None,
+            };
+            if let Some(group) = group {
+                self.say(member, group, world, scene);
+            }
+        }
+    }
+    /// Squad calls made by the last think: shared first-hand sightings
+    /// (CAI_Squad::UpdateEnemyMemory) and SquadNewEnemy (a member without an enemy, or
+    /// whose other enemy is unseen for over 3 s, takes the new one).
+    fn apply_squad_events(&mut self, scene: &Scene) {
+        let now = scene.time;
+        for event in std::mem::take(&mut self.squad_events) {
+            let (name, from) = match &event {
+                SquadEvent::Memory { squad, from, .. } => (squad, Some(*from)),
+                SquadEvent::NewEnemy { squad, .. } => (squad, None),
+            };
+            let Some(squad) = self.squads.get(name) else {
+                continue;
+            };
+            let members: Vec<usize> = squad.members.clone();
+            for member in members {
+                if Some(member) == from || scene.states.get(member).is_none_or(|s| s.killed) {
+                    continue;
+                }
+                let Some(actor) = self.actors.get_mut(&member) else {
+                    continue;
+                };
+                match &event {
+                    SquadEvent::Memory {
+                        enemy, position, ..
+                    } => {
+                        actor
+                            .npc
+                            .enemies
+                            .update(Some(*enemy), *position, 0., false, now);
+                        *self
+                            .diagnostics
+                            .squad_events
+                            .entry("memory".into())
+                            .or_default() += 1;
+                    }
+                    SquadEvent::NewEnemy { enemy, .. } => {
+                        let current = actor.npc.enemy;
+                        if super::squad::should_take_squad_enemy(
+                            current,
+                            *enemy,
+                            actor.npc.conditions.has(COND_SEE_ENEMY),
+                            now - actor.npc.enemies.last_time_seen(current),
+                        ) {
+                            actor.npc.enemy = Some(*enemy);
+                            actor.squad_new_enemy = true;
+                            *self
+                                .diagnostics
+                                .squad_events
+                                .entry("new_enemy".into())
+                                .or_default() += 1;
+                        }
+                    }
+                }
+            }
         }
     }
     /// Would a stunstick hit knock the player out (the cop's policing goal)?
@@ -2072,6 +2432,10 @@ impl AiRuntime {
             None => class_hates_player,
         };
         let previous_enemy = actor.npc.enemy;
+        // SetEnemy from the squad (SquadNewEnemy) since the last think.
+        if std::mem::take(&mut actor.squad_new_enemy) {
+            actor.npc.conditions.set(COND_NEW_ENEMY);
+        }
         if hates && player_visible {
             actor.npc.conditions.set(COND_SEE_HATE);
             actor
@@ -2159,6 +2523,17 @@ impl AiRuntime {
                 }
             },
         );
+        // UpdateEnemyMemory first-hand -> CAI_Squad::UpdateEnemyMemory to the others.
+        if let Some(squad) = &actor.squad {
+            for (enemy, position) in actor.npc.enemies.seen_at(now) {
+                self.squad_events.push(SquadEvent::Memory {
+                    squad: squad.clone(),
+                    from: id,
+                    enemy,
+                    position,
+                });
+            }
+        }
         let has_baton = actor.class.cop().is_some_and(|cop| cop.has_baton);
         // bits_CAP_INNATE_MELEE_ATTACK1: the combine soldier's kick.
         let innate_kick = actor
@@ -2483,47 +2858,85 @@ impl AiRuntime {
                     .and_then(|v| v.trim().parse::<u32>().ok())
                     .is_some_and(|f| f & SF_NPC_GAG != 0)
             });
-            if matches!(actor.npc.state, NpcState::Idle | NpcState::Alert)
-                && (speech_rolls[0] * 100.) as u32 == 0
-                && !gagged
-            {
+            let idle_or_alert = matches!(actor.npc.state, NpcState::Idle | NpcState::Alert);
+            // CNPC_MetroPolice::ShouldPlayIdleSound: a cop a squadmate asked answers as soon
+            // as FOkToMakeSound allows (the squad's gate, else his own; never gagged).
+            let cop_answers = cop && idle_or_alert && actor.idle_chatter >= COP_CHATTER_RESPONSE;
+            let should_play = if cop_answers {
+                !gagged
+                    && match actor.squad.as_ref().and_then(|n| self.squads.get(n)) {
+                        Some(squad) => squad.ok_to_make_sound(0, now),
+                        None => self
+                            .sound_wait
+                            .get(&id)
+                            .is_none_or(|&(until, last)| now > until || 0 > last),
+                    }
+            } else {
+                idle_or_alert && (speech_rolls[0] * 100.) as u32 == 0 && !gagged
+            };
+            if should_play {
                 let pick = speech_rolls[1];
+                let choice = ((speech_rolls[3] * 3.) as u8).min(2);
+                let mut idle = |group: &'static str, then: IdleThen| {
+                    self.idle_lines.push(IdleLine { id, group, then });
+                };
                 match &actor.class {
                     // CNPC_Combine::IdleSound: a check-in or question the next idle soldier
-                    // answers, or a statement (g_fCombineQuestion).
+                    // answers, or a statement (g_fCombineQuestion, set when spoken).
                     AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine => {
                         match self.combine_question {
                             0 if pick < 0.5 => {}
-                            0 => {
-                                let choice = (speech_rolls[3] * 3.) as u32;
-                                lines.push(
-                                    ["COMBINE_CHECK", "COMBINE_QUEST", "COMBINE_IDLE"]
-                                        [choice.min(2) as usize],
-                                );
-                                self.combine_question = match choice {
-                                    0 => 1,
-                                    1 => 2,
-                                    _ => 0,
-                                };
-                            }
-                            1 => {
-                                lines.push("COMBINE_CLEAR");
-                                self.combine_question = 0;
-                            }
-                            _ => {
-                                lines.push("COMBINE_ANSWER");
-                                self.combine_question = 0;
-                            }
+                            0 => idle(
+                                ["COMBINE_CHECK", "COMBINE_QUEST", "COMBINE_IDLE"]
+                                    [usize::from(choice)],
+                                IdleThen::CombineQuestion([1, 2, 0][usize::from(choice)]),
+                            ),
+                            1 => idle("COMBINE_CLEAR", IdleThen::CombineQuestion(0)),
+                            _ => idle("COMBINE_ANSWER", IdleThen::CombineQuestion(0)),
                         }
                     }
-                    // CNPC_MetroPolice::IdleSound without a squad: half the time an idle
-                    // line (the criminal variant when the player is one); the harassment
-                    // line is the policing behavior's.
-                    AiClass::Metropolice(_) if pick >= 0.5 => lines.push(if player_criminal {
-                        "METROPOLICE_IDLE_CR"
-                    } else {
-                        "METROPOLICE_IDLE"
-                    }),
+                    // CNPC_MetroPolice::IdleSound: a precriminal player within 128 units is
+                    // harassed once (bits_MEMORY_PLAYER_HARASSED, shared by the squad); else
+                    // half the time a squad cop asks a check-in or question his squadmates
+                    // answer (g_interactionMetrocopIdleChatter), or anyone says an idle line.
+                    AiClass::Metropolice(_) => match actor.idle_chatter {
+                        COP_CHATTER_WAIT_FOR_RESPONSE => {}
+                        COP_CHATTER_ASK_QUESTION => {
+                            let near = !player_criminal
+                                && (player.center() - (origin + Vec3::Z * 36.)).length_squared()
+                                    < 128. * 128.;
+                            if near && !actor.harassed {
+                                idle("METROPOLICE_IDLE_HARASS_PLAYER", IdleThen::CopHarassed);
+                            } else if pick >= 0.5 {
+                                let criminal = usize::from(player_criminal);
+                                if actor.squad.is_none() || choice == 2 {
+                                    idle(
+                                        ["METROPOLICE_IDLE", "METROPOLICE_IDLE_CR"][criminal],
+                                        IdleThen::Nothing,
+                                    );
+                                } else {
+                                    idle(
+                                        [
+                                            ["METROPOLICE_IDLE_CHECK", "METROPOLICE_IDLE_QUEST"],
+                                            [
+                                                "METROPOLICE_IDLE_CHECK_CR",
+                                                "METROPOLICE_IDLE_QUEST_CR",
+                                            ],
+                                        ][criminal][usize::from(choice)],
+                                        IdleThen::CopAsked(choice),
+                                    );
+                                }
+                            }
+                        }
+                        response => idle(
+                            [
+                                ["METROPOLICE_IDLE_CLEAR", "METROPOLICE_IDLE_ANSWER"],
+                                ["METROPOLICE_IDLE_CLEAR_CR", "METROPOLICE_IDLE_ANSWER_CR"],
+                            ][usize::from(player_criminal)]
+                                [usize::from((response - COP_CHATTER_RESPONSE).min(1))],
+                            IdleThen::CopAnswered,
+                        ),
+                    },
                     _ => {}
                 }
             }
@@ -2537,7 +2950,17 @@ impl AiRuntime {
         actor.npc.conditions = actor.npc.conditions.union(heard);
         ctx.best_sound = best.map(|s| s.origin);
         ctx.best_sound_volume = best.map_or(0., |s| s.volume);
-        // SelectIdealState.
+        // SelectIdealState: squad members idle or alert share a new enemy first.
+        if let (Some(squad), Some(enemy)) = (&actor.squad, actor.npc.enemy) {
+            if matches!(actor.npc.state, NpcState::Idle | NpcState::Alert)
+                && actor.npc.conditions.has(COND_NEW_ENEMY)
+            {
+                self.squad_events.push(SquadEvent::NewEnemy {
+                    squad: squad.clone(),
+                    enemy,
+                });
+            }
+        }
         let (ideal, _) = select_ideal_state(
             actor.npc.state,
             &StateInputs {
@@ -2911,21 +3334,66 @@ impl AiRuntime {
         });
         true
     }
+    /// CAI_SentenceBase::Speak: MatchesCriteria (the group's SentenceCriteria_t), then a
+    /// prioritized line asks FOkToMakeSound (the squad's gate in a squad, else the NPC's)
+    /// and JustMadeSound(priority, 2 s) sets the NPC's and the squad's waits to
+    /// 2 + U(1.5, 2.0) s. False when refused or culled.
     fn say(&mut self, id: usize, group: &'static str, world: &World, scene: &mut Scene) -> bool {
         let origin = scene.states[id].origin;
+        let Some(actor) = self.actors.get(&id) else {
+            return false;
+        };
+        let squad = actor.squad.as_ref().and_then(|name| self.squads.get(name));
+        let gagged = actor.npc.state != NpcState::Combat
+            && world.entities.get(id).is_some_and(|e| {
+                e.get("spawnflags")
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .is_some_and(|f| f & SF_NPC_GAG != 0)
+            });
+        let matches = match sentence_criteria(group) {
+            Criteria::Always => true,
+            Criteria::Normal => !gagged,
+            Criteria::InSquad => !gagged && squad.is_some_and(|s| s.num_members() > 1),
+            Criteria::SquadLeader => {
+                !gagged && squad.is_some_and(|s| s.num_members() > 1 && s.leader() == Some(id))
+            }
+        };
+        if !matches {
+            *self
+                .diagnostics
+                .criteria_refused
+                .entry(group.into())
+                .or_default() += 1;
+            return false;
+        }
+        let squad_name = actor.squad.clone();
         let priority = sentence_priority(group);
         if priority >= 0 {
             let now = scene.time;
-            if let Some(&(until, last)) = self.sound_wait.get(&id) {
-                if now <= until && priority <= last {
-                    self.diagnostics.culled_sentences += 1;
-                    return false;
-                }
+            let ok = match squad_name.as_ref().and_then(|n| self.squads.get(n)) {
+                Some(squad) => squad.ok_to_make_sound(priority, now),
+                None => self
+                    .sound_wait
+                    .get(&id)
+                    .is_none_or(|&(until, last)| now > until || priority > last),
+            };
+            if !ok {
+                self.diagnostics.culled_sentences += 1;
+                return false;
             }
             let wait = now + 2. + 1.5 + 0.5 * f64::from(self.random());
             self.sound_wait.insert(id, (wait, priority));
+            let squad_wait = now + 2. + 1.5 + 0.5 * f64::from(self.random());
+            if let Some(squad) = squad_name.as_ref().and_then(|n| self.squads.get_mut(n)) {
+                squad.just_made_sound(priority, squad_wait);
+            }
         }
         self.diagnostics.sentences += 1;
+        *self
+            .diagnostics
+            .sentence_groups
+            .entry(group.into())
+            .or_default() += 1;
         scene.sounds.push(crate::sounds::SoundRequest {
             origin: Some(origin + Vec3::Z * 64.),
             actor: Some(crate::sounds::SoundActor {
@@ -3995,6 +4463,161 @@ mod tests {
             sentence_parameters("#COMBINE_DIE"),
             Some(COMBINE_SENTENCE_PARAMETERS)
         );
+    }
+    #[test]
+    fn squads_share_enemies_gate_lines_and_mourn_their_dead() {
+        // Three soldiers of squad "s" (the last two face away from the player) and a
+        // squadless one far away.
+        let soldier = |name: &str, origin: &str, yaw: &str, squad: &str| {
+            let angles = format!("0 {yaw} 0");
+            let mut pairs = vec![
+                ("classname", "npc_combine_s"),
+                ("targetname", name),
+                ("origin", origin),
+                ("angles", angles.as_str()),
+            ];
+            if !squad.is_empty() {
+                pairs.push(("squadname", squad));
+            }
+            entity(&pairs)
+        };
+        let world = World {
+            entities: vec![
+                soldier("a", "0 0 0", "0", "s"),
+                soldier("b", "0 200 0", "180", "s"),
+                soldier("c", "0 -200 0", "180", "s"),
+                soldier("lone", "0 3000 0", "180", ""),
+            ],
+            ..Default::default()
+        };
+        let mut r = Rig {
+            scene: Scene::new(&world),
+            physics: Physics::new(&world),
+            controller: Controller::new(None, Default::default()),
+            ai: AiRuntime::new(&world, None),
+            world,
+        };
+        r.ai.enabled = true;
+        let far = player_at(-5000.);
+        run(&mut r, 1, far);
+        let squad = &r.ai.squads["s"];
+        assert_eq!(
+            (squad.members.clone(), squad.leader()),
+            (vec![0, 1, 2], Some(0))
+        );
+        assert!(r.ai.actors[&3].squad.is_none());
+        // IN_SQUAD lines need a squad of two; NORMAL ones do not.
+        let world = r.world.clone();
+        assert!(!r.ai.say(3, "COMBINE_IDLE", &world, &mut r.scene));
+        assert!(r.ai.say(3, "COMBINE_DANGER", &world, &mut r.scene));
+        assert!(r.ai.say(0, "COMBINE_IDLE", &world, &mut r.scene));
+        // The squad's sound gate: another member's normal line waits.
+        assert!(!r.ai.say(1, "COMBINE_IDLE", &world, &mut r.scene));
+        assert!(r.ai.say(1, "COMBINE_ALERT", &world, &mut r.scene));
+        // Only the leader sees the player; SquadNewEnemy gives him to the others.
+        run(&mut r, 12, player_at(300.));
+        assert_eq!(r.ai.actors[&0].npc.enemy, Some(PLAYER));
+        for member in [1, 2] {
+            assert_eq!(
+                r.ai.actors[&member].npc.enemy,
+                Some(PLAYER),
+                "member {member}"
+            );
+            assert!(r.ai.actors[&member]
+                .npc
+                .enemies
+                .find(Some(PLAYER))
+                .is_some());
+        }
+        assert!(r.ai.diagnostics.squad_events["new_enemy"] >= 2);
+        assert!(r.ai.diagnostics.squad_events["memory"] >= 2);
+        // A death: MAN_DOWN while two remain (one member speaks; the squad gate culls the
+        // other's), LAST_OF_SQUAD for the last one. The earlier lines' waits are over.
+        r.ai.squads.get_mut("s").expect("squad").sound_wait = 0.;
+        r.ai.sound_wait.clear();
+        r.scene.sounds.clear();
+        r.scene.states[2].killed = true;
+        run(&mut r, 1, far);
+        assert_eq!(r.ai.squads["s"].members, [0, 1]);
+        let spoken = |r: &Rig| -> Vec<String> {
+            r.scene
+                .sounds
+                .iter()
+                .filter(|s| {
+                    s.name.starts_with("#COMBINE_MAN_DOWN") || s.name.starts_with("#COMBINE_LAST")
+                })
+                .map(|s| s.name.clone())
+                .collect()
+        };
+        assert_eq!(spoken(&r), ["#COMBINE_MAN_DOWN"]);
+        r.scene.sounds.clear();
+        r.scene.states[1].killed = true;
+        run(&mut r, 1, far);
+        assert_eq!(spoken(&r), ["#COMBINE_LAST_OF_SQUAD"]);
+        assert_eq!(r.ai.squads["s"].leader(), None);
+    }
+    #[test]
+    fn squad_cops_ask_and_answer_idle_chatter_and_harass_a_near_player_once() {
+        let cop = |name: &str, x: &str| {
+            entity(&[
+                ("classname", "npc_metropolice"),
+                ("targetname", name),
+                ("origin", x),
+                ("squadname", "pair"),
+            ])
+        };
+        let world = World {
+            entities: vec![
+                cop("a", "0 0 0"),
+                cop("b", "0 300 0"),
+                entity(&[
+                    ("classname", "env_global"),
+                    ("globalstate", "gordon_precriminal"),
+                    ("initialstate", "1"),
+                    ("spawnflags", "1"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let mut r = Rig {
+            scene: Scene::new(&world),
+            physics: Physics::new(&world),
+            controller: Controller::new(None, Default::default()),
+            ai: AiRuntime::new(&world, None),
+            world,
+        };
+        r.ai.enabled = true;
+        run(&mut r, 1, player_at(-5000.));
+        let world = r.world.clone();
+        // A spoken question makes the asker wait and his squadmate answer it.
+        r.ai.idle_lines.push(IdleLine {
+            id: 0,
+            group: "METROPOLICE_IDLE_QUEST",
+            then: IdleThen::CopAsked(1),
+        });
+        r.ai.speak_idle_lines(&world, &mut r.scene);
+        assert_eq!(r.ai.actors[&0].idle_chatter, COP_CHATTER_WAIT_FOR_RESPONSE);
+        assert_eq!(r.ai.actors[&1].idle_chatter, COP_CHATTER_RESPONSE + 1);
+        // The answer waits for the squad's sound gate, then comes on the next thinks.
+        r.scene.sounds.clear();
+        run(&mut r, 400, player_at(-5000.));
+        assert!(r
+            .scene
+            .sounds
+            .iter()
+            .any(|s| s.name == "#METROPOLICE_IDLE_ANSWER"));
+        assert_eq!(r.ai.actors[&0].idle_chatter, COP_CHATTER_ASK_QUESTION);
+        assert_eq!(r.ai.actors[&1].idle_chatter, COP_CHATTER_ASK_QUESTION);
+        // Harassment is remembered by the whole squad.
+        r.ai.idle_lines.push(IdleLine {
+            id: 1,
+            group: "METROPOLICE_IDLE_HARASS_PLAYER",
+            then: IdleThen::CopHarassed,
+        });
+        r.ai.squads.get_mut("pair").expect("squad").sound_wait = 0.;
+        r.ai.sound_wait.clear();
+        r.ai.speak_idle_lines(&world, &mut r.scene);
+        assert!(r.ai.actors[&0].harassed && r.ai.actors[&1].harassed);
     }
     #[test]
     fn an_npc_spawned_after_the_first_think_is_seen() {

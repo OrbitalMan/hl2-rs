@@ -1,6 +1,10 @@
-//! CAI_Squad (ai_squad.cpp, ai_squadslot.h): members by name, the leader (first
-//! member), per-enemy strategy slots (PER_ENEMY_SQUADSLOTS is defined in HL2), shared
-//! enemy memory and SquadNewEnemy. SDK behavior, retail not compared.
+//! CAI_Squad (ai_squad.cpp, ai_squadslot.h): members in join order, the leader (the
+//! first member once there are two), per-enemy strategy slots (PER_ENEMY_SQUADSLOTS is
+//! defined in HL2), the squad sound gate (FOkToMakeSound/JustMadeSound) and
+//! SquadNewEnemy's per-member test. The runtime (`ai::runtime`) owns the squads by name
+//! (CAI_SquadManager), joins, deaths and enemy-memory sharing. Silent members
+//! (npc_enemyfinder) are not AI actors here, so every member counts. SDK behavior,
+//! retail not compared.
 use std::collections::{BTreeMap, BTreeSet};
 
 /// SQUAD_SLOT_t shared slots; classes add theirs after LAST_SHARED_SQUADSLOT.
@@ -13,6 +17,8 @@ pub const SLOT_PICKUP_WEAPON1: i32 = 5;
 pub const SLOT_PICKUP_WEAPON2: i32 = 6;
 pub const SLOT_SPECIAL_ATTACK: i32 = 7;
 pub const LAST_SHARED_SQUADSLOT: i32 = 8;
+/// MAX_SQUAD_MEMBERS.
+pub const MAX_SQUAD_MEMBERS: usize = 16;
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct Squad {
@@ -20,6 +26,9 @@ pub struct Squad {
     pub members: Vec<usize>,
     /// Occupied slots per enemy (None for no enemy).
     slots: BTreeMap<Option<usize>, BTreeSet<i32>>,
+    /// m_flSquadSoundWaitTime / m_nSquadSoundPriority.
+    pub sound_wait: f64,
+    pub sound_priority: i32,
 }
 impl Squad {
     pub fn new(name: &str) -> Self {
@@ -28,16 +37,34 @@ impl Squad {
             ..Default::default()
         }
     }
+    /// AddToSquad's list part: a full squad replaces its last member.
     pub fn add(&mut self, member: usize) {
         if !self.members.contains(&member) {
+            if self.members.len() == MAX_SQUAD_MEMBERS {
+                self.members.pop();
+            }
             self.members.push(member);
         }
     }
     pub fn remove(&mut self, member: usize) {
         self.members.retain(|m| *m != member);
     }
+    /// GetLeader: the first member, only while the squad has more than one.
     pub fn leader(&self) -> Option<usize> {
-        self.members.first().copied()
+        (self.members.len() > 1).then(|| self.members[0])
+    }
+    /// NumMembers.
+    pub fn num_members(&self) -> usize {
+        self.members.len()
+    }
+    /// FOkToMakeSound: while the last squad sound's wait runs, only a higher priority.
+    pub fn ok_to_make_sound(&self, priority: i32, now: f64) -> bool {
+        now > self.sound_wait || priority > self.sound_priority
+    }
+    /// JustMadeSound(priority, until).
+    pub fn just_made_sound(&mut self, priority: i32, until: f64) {
+        self.sound_wait = until;
+        self.sound_priority = priority;
     }
     pub fn is_slot_occupied(&self, enemy: Option<usize>, slot: i32) -> bool {
         self.slots.get(&enemy).is_some_and(|s| s.contains(&slot))
@@ -100,6 +127,14 @@ mod tests {
             squad.add(m);
         }
         assert_eq!(squad.leader(), Some(3));
+        // A lone member is no leader (GetLeader needs two).
+        let mut lone = Squad::new("one");
+        lone.add(7);
+        assert_eq!((lone.leader(), lone.num_members()), (None, 1));
+        // The squad sound gate.
+        lone.just_made_sound(1, 10.);
+        assert!(!lone.ok_to_make_sound(1, 9.) && lone.ok_to_make_sound(2, 9.));
+        assert!(lone.ok_to_make_sound(0, 10.5));
         let (mut a, mut b, mut c) = (None, None, None);
         assert!(squad.occupy_range(Some(0), SLOT_ATTACK1, SLOT_ATTACK2, &mut a));
         assert!(squad.occupy_range(Some(0), SLOT_ATTACK1, SLOT_ATTACK2, &mut b));
