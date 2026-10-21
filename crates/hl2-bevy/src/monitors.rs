@@ -26,6 +26,10 @@ pub struct Monitors {
     error: Option<String>,
 }
 impl Monitors {
+    /// The point_camera rendering `_rt_Camera` this frame.
+    pub fn selected(&self) -> Option<usize> {
+        self.selected
+    }
     pub fn report(&self, game: &Gameplay) -> serde_json::Value {
         serde_json::json!({"texture":"_rt_Camera","asset":format!("{:?}",self.target.id()),"size":[256,256],"materials":self.materials,"material_details":self.material_details,"eligible_cameras":self.active,
             "selected":self.selected.map(|id| serde_json::json!({"entity":id,"name":game.world.entities[id].get("targetname"),

@@ -59,6 +59,37 @@ fn backend_wav(data: Vec<u8>, looped: bool) -> Result<Vec<u8>> {
     wav_bytes(&pcm, channels)
 }
 /// 16-bit PCM WAV bytes at the backend rate.
+/// Premixed mono versions of a distance-variant stereo wave (Source mixes left near and
+/// right far by the channel's distmix while it plays). Keys use the `{path}` placeholder.
+const DISTANCE_VARIANT_STEPS: usize = 16;
+fn distance_variant_key(path: &str, distance: f32) -> String {
+    let mix = hl2_simulation::sounds::distance_mix(distance);
+    format!(
+        "{path}#dv{}",
+        (mix * DISTANCE_VARIANT_STEPS as f32).round() as usize
+    )
+}
+/// Keyed backend WAV bytes.
+type KeyedWaves = Vec<(String, Vec<u8>)>;
+/// None for a mono wave (the mixer then plays it as it is).
+fn distance_variant_mixes(data: &[u8]) -> Result<Option<KeyedWaves>> {
+    let (channels, rate, samples) = hl2_simulation::sounds::wav_samples(data)?;
+    if channels != 2 {
+        return Ok(None);
+    }
+    (0..=DISTANCE_VARIANT_STEPS)
+        .map(|step| {
+            let mix = step as f32 / DISTANCE_VARIANT_STEPS as f32;
+            let mono = hl2_simulation::sounds::distance_variant_mono(&samples, mix);
+            Ok((
+                format!("{{path}}#dv{step}"),
+                wav_bytes(&resample(&mono, 1, rate, BACKEND_RATE), 1)?,
+            ))
+        })
+        .collect::<Result<_>>()
+        .map(Some)
+}
+
 fn wav_bytes(pcm: &[f32], channels: u16) -> Result<Vec<u8>> {
     let bytes = u32::try_from(pcm.len() * 2).context("converted audio exceeds WAV size")?;
     let mut wav = Vec::with_capacity(44 + pcm.len() * 2);
@@ -105,8 +136,12 @@ impl Vox {
             }
         };
         for (name, line) in source_assets::vox::sentences(&text) {
-            // Only the suit's sentences are requested by the game so far.
-            if !name.starts_with("HEV_") {
+            // The suit's sentences and the metrocops' and combine soldiers' (CAI_Sentence
+            // groups) are requested.
+            if !name.starts_with("HEV_")
+                && !name.starts_with("METROPOLICE_")
+                && !name.starts_with("COMBINE_")
+            {
                 continue;
             }
             let words = source_assets::vox::words(&line);
@@ -319,17 +354,12 @@ impl PreparedAudio {
         for weapon in game.weapons.values() {
             cues.extend(weapon.sounds.values().cloned());
         }
+        // Player-ally speech (talker response rules: scene speak sounds, die sounds).
+        cues.extend(game.ai.speech_cues());
+        // Studio client sound events: viewmodels and NPC sequences (5004 sounds and
+        // CL_EVENT_FOOTSTEP names).
         for rig in game.world.rigs.values() {
-            for clip in rig.clips.values() {
-                cues.extend(
-                    clip.events
-                        .iter()
-                        .filter(|e| {
-                            (e.id == 5004 || e.name == "AE_CL_PLAYSOUND") && !e.options.is_empty()
-                        })
-                        .map(|e| e.options.clone()),
-                );
-            }
+            cues.extend(hl2_simulation::sounds::animation_sound_names(rig));
         }
         cues.extend(
             [
@@ -368,6 +398,16 @@ impl PreparedAudio {
                 // weapon_bugbait.cpp squeeze, grenade_bugbait.cpp splat.
                 "Weapon_Bugbait.Splat",
                 "GrenadeBugBait.Splat",
+                // Metrocop baton hits (weapon_stunstick.txt SoundData melee_hit/melee_miss).
+                "Weapon_StunStick.Melee_Hit",
+                "Weapon_StunStick.Melee_Miss",
+                // npc_metropolice.cpp OnAnimEventShove (owner report: shoves were silent;
+                // the request was dropped because the cue was never preloaded).
+                "NPC_Metropolice.Shove",
+                // npc_combine.cpp COMBINE_AE_KICK.
+                "NPC_Combine.WeaponBash",
+                // npc_combine.cpp COMBINE_AE_BEGIN_ALTFIRE (elites).
+                "Weapon_CombineGuard.Special1",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -418,8 +458,17 @@ impl PreparedAudio {
                     _ => None,
                 };
                 let (data, summary) = hl2_simulation::sounds::decode(&path, encoded)?;
-                let data = backend_wav(data, looped.contains(&path))?;
-                if data.len() > MAX_PRELOADED_BYTES.saturating_sub(bytes) {
+                let mixes = if library.distance_variant(&path) {
+                    distance_variant_mixes(&data)?
+                } else {
+                    None
+                };
+                let data = match mixes {
+                    Some(mixes) => mixes,
+                    None => vec![(path.clone(), backend_wav(data, looped.contains(&path))?)],
+                };
+                let size = data.iter().map(|(_, d)| d.len()).sum::<usize>();
+                if size > MAX_PRELOADED_BYTES.saturating_sub(bytes) {
                     bail!("owned audio preload exceeds 512 MiB budget");
                 }
                 Ok((data, summary, sentence))
@@ -429,9 +478,11 @@ impl PreparedAudio {
                     if let Some(sentence) = sentence {
                         sentences.push((path.clone(), sentence, summary.seconds() as f32));
                     }
-                    bytes += data.len();
                     library.decoded.insert(path.clone(), summary);
-                    waves.push((path, data));
+                    for (key, data) in data {
+                        bytes += data.len();
+                        waves.push((key.replace("{path}", &path), data));
+                    }
                 }
                 Err(error) => {
                     library.errors.insert(path, format!("{error:#}"));
@@ -480,6 +531,8 @@ pub struct Audio {
     vox: Vox,
     /// CSoundPatch envelopes by (emitter, cue).
     patches: HashMap<(u64, String), hl2_simulation::sounds::PatchEnvelope>,
+    /// The listener (player eye) of the latest frame.
+    listener: glam::Vec3,
 }
 /// `--audio-trace PATH`: one JSON line per sound request, sink start and sink removal,
 /// with the sink's last observed playback position, for diagnosing cut-off sounds.
@@ -521,6 +574,16 @@ pub struct SoundPlayer {
     emitter: Option<(u64, String)>,
 }
 impl Audio {
+    /// The volume a new player starts with: spatial sounds already carry their distance
+    /// gain, because Source mixes a channel's first samples at its spatialized volume
+    /// (a one-frame silent start swallowed the 25 ms far layer of NPC gunfire); `queue`
+    /// keeps it current afterwards.
+    fn start_volume(&self, volume: f32, spatial: Option<(glam::Vec3, f32)>) -> f32 {
+        let gain = spatial.map_or(1., |(origin, soundlevel)| {
+            hl2_simulation::sounds::dist_gain(soundlevel, self.listener.distance(origin))
+        });
+        (volume * gain).clamp(0., 1.)
+    }
     fn emit(
         &mut self,
         commands: &mut Commands,
@@ -539,7 +602,18 @@ impl Audio {
                 return None;
             }
         };
-        let Some(handle) = self.handles.get(&path) else {
+        // A distance-variant wave plays the premix for the listener's distance at the start
+        // (unpositioned requests are at the listener: the near channel).
+        let variant = self.library.distance_variant(&path).then(|| {
+            let distance = spatial.map_or(0., |(origin, _)| self.listener.distance(origin));
+            distance_variant_key(&path, distance)
+        });
+        let variant = variant.filter(|key| self.handles.contains_key(key));
+        let Some(handle) = variant
+            .as_ref()
+            .and_then(|key| self.handles.get(key))
+            .or_else(|| self.handles.get(&path))
+        else {
             self.library.errors.entry(path).or_insert_with(|| {
                 "cue variant was not preloaded; no file reads are allowed in playback systems"
                     .into()
@@ -555,7 +629,8 @@ impl Audio {
         commands.spawn((
             crate::campaign::MapOwned,
             SoundPlayer {
-                path: path.clone(),
+                // The premix key for distance variants (traces show the mix chosen).
+                path: variant.unwrap_or_else(|| path.clone()),
                 queued_frame: self.frame,
                 observed: false,
                 volume,
@@ -566,12 +641,7 @@ impl Audio {
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
-                // Spatial sounds start silent; `queue` applies their distance gain.
-                volume: bevy::audio::Volume::Linear(if spatial.is_some() {
-                    0.
-                } else {
-                    volume.clamp(0., 1.)
-                }),
+                volume: bevy::audio::Volume::Linear(self.start_volume(volume, spatial)),
                 speed: pitch / 100.,
                 paused,
                 ..settings
@@ -603,7 +673,15 @@ impl Audio {
                 return None;
             }
         };
-        let volume = request.volume.unwrap_or(1.);
+        // NPC sentences (CAI_Sentence) use the class's SentenceParameters script entry
+        // for volume and soundlevel and play at the speaker; the suit's are unspatialized.
+        let parameters = hl2_simulation::ai::runtime::sentence_parameters(&request.name)
+            .map(|cue| self.library.draw_params(cue));
+        let volume = request.volume.or(parameters.map(|p| p.0)).unwrap_or(1.);
+        let spatial = request
+            .origin
+            .zip(parameters)
+            .map(|(origin, (_, _, soundlevel))| (origin, soundlevel));
         commands.spawn((
             crate::campaign::MapOwned,
             SoundPlayer {
@@ -611,14 +689,14 @@ impl Audio {
                 queued_frame: self.frame,
                 observed: false,
                 volume,
-                spatial: None,
+                spatial,
                 ambient: None,
                 soundscape: None,
                 emitter: None,
             },
             AudioPlayer::new(sources.add(AudioSource { bytes: wav.into() })),
             PlaybackSettings {
-                volume: bevy::audio::Volume::Linear(volume.clamp(0., 1.)),
+                volume: bevy::audio::Volume::Linear(self.start_volume(volume, spatial)),
                 paused,
                 ..PlaybackSettings::DESPAWN
             },
@@ -635,7 +713,7 @@ impl Audio {
             "soundscape":{"definitions":self.soundscapes.len(),"active":self.soundscape.active(),"started":self.soundscape.started,
                 "loops":self.soundscape.loops(),"random_plays":self.soundscape_plays,"unknown":self.soundscape.unknown},
             "vox":{"sentences":self.vox.sentences.len(),"words":self.vox.words.len(),"played":self.vox.played,"errors":self.vox.errors},
-            "mixing":"ambient_generic loops and positional soundscape sounds use Source distance gain; stereo panning and DSP are not implemented"})
+            "mixing":"ambient_generic loops and positional soundscape sounds use Source distance gain; distance-variant (^) waves play the near/far premix for the start distance; stereo panning and DSP are not implemented"})
     }
 }
 pub fn install(
@@ -680,6 +758,7 @@ pub fn install(
         soundscape_plays: 0,
         vox: prepared.vox,
         patches: HashMap::new(),
+        listener: glam::Vec3::ZERO,
     };
     let mute = MUTE_AMBIENT.load(std::sync::atomic::Ordering::Relaxed);
     let mut spawn: Vec<(usize, Ambient)> = audio
@@ -719,6 +798,7 @@ pub fn queue(
     mut sources: ResMut<Assets<AudioSource>>,
 ) {
     let listener = glam::Vec3::from_array(simulation.eye().to_array());
+    audio.listener = listener;
     let paused = simulation.paused();
     if paused != audio.paused {
         if paused {
@@ -796,7 +876,7 @@ pub fn queue(
     for request in &game.sound_requests {
         if let Some(trace) = trace.as_deref_mut() {
             trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused,
-                "ambient":request.ambient.map(|c| format!("{c:?}"))}));
+                "ambient":request.ambient.map(|c| format!("{c:?}")),"stop":request.stop}));
         }
     }
     for request in std::mem::take(&mut game.sound_requests) {
@@ -1148,6 +1228,10 @@ mod tests {
         let text = String::from_utf8(vfs.read("scripts/sentences.txt").unwrap().unwrap()).unwrap();
         let mut checked = 0;
         for (name, line) in source_assets::vox::sentences(&text) {
+            // METROPOLICE_* sentences all carry a placeholder {Len 1.5} (caption hint).
+            if !name.starts_with("HEV_") {
+                continue;
+            }
             let Some(length) = line
                 .split("Len ")
                 .nth(1)

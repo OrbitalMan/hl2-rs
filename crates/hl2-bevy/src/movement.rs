@@ -230,6 +230,23 @@ impl Simulation {
                         .give("weapon_crowbar", &game.weapons, game.scene.time);
                     ui.source.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
                 }
+                Effect::AiEnable(value) => {
+                    let on = value.unwrap_or(!game.ai.enabled);
+                    game.ai.enabled = on;
+                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                    ui.source.log(format!("ai_enable {}", u8::from(on)));
+                }
+                // CC_AI_Disable: a toggle; DevMsg "AI Disabled." / "AI Enabled.".
+                Effect::AiDisable => {
+                    let on = !game.ai.enabled;
+                    game.ai.enabled = on;
+                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                    ui.source.log(String::from(if on {
+                        "AI Enabled."
+                    } else {
+                        "AI Disabled."
+                    }));
+                }
                 Effect::Noclip(value) => {
                     self.fly = value.unwrap_or(!self.fly);
                     self.player = Player::new(self.eye);
@@ -275,9 +292,82 @@ impl Simulation {
                             .log(format!("Queued {target}.{input} after {delay} seconds."));
                     }
                 }
+                Effect::NpcCommand(line) => match game.spawn_console.parse(&line) {
+                    Ok(Some(hl2_simulation::ai::spawn::Command::Spawn(request))) => {
+                        let message = self.spawn_npc(game, request);
+                        ui.source.log(message);
+                    }
+                    Ok(Some(hl2_simulation::ai::spawn::Command::SetEquipment(value))) => {
+                        ui.source.log(format!("npc_create_equipment {value}"));
+                    }
+                    Ok(Some(hl2_simulation::ai::spawn::Command::SpawnProp(model))) => {
+                        let model = crate::runtime_props::model_path(&model);
+                        ui.source.log(format!("prop_physics_create {model}"));
+                        game.prop_requests.push((model, self.eye, self.forward()));
+                    }
+                    Ok(None) => {}
+                    Err(e) => ui.source.log(e),
+                },
                 Effect::Quit => ui.quit_requested = true,
             }
         }
+    }
+    /// One F4 overlay key; a spawn returns its console message.
+    pub fn spawn_overlay_key(
+        &mut self,
+        game: &mut crate::gameplay::Gameplay,
+        key: hl2_simulation::ai::spawn::OverlayKey,
+    ) -> Option<String> {
+        let command = game.spawn_overlay.key(key);
+        self.spawn_overlay_command(game, command)
+    }
+    /// Carry out what an F4 overlay key or click asked; a spawn returns its console message.
+    pub fn spawn_overlay_command(
+        &mut self,
+        game: &mut crate::gameplay::Gameplay,
+        command: Option<hl2_simulation::ai::spawn::OverlayCommand>,
+    ) -> Option<String> {
+        use hl2_simulation::ai::spawn::OverlayCommand;
+        match command? {
+            OverlayCommand::Spawn(request) => Some(self.spawn_npc(game, request)),
+            OverlayCommand::SpawnProp(model) => {
+                let model = crate::runtime_props::model_path(&model);
+                let message = format!("prop_physics_create {model}");
+                game.prop_requests.push((model, self.eye, self.forward()));
+                Some(message)
+            }
+            OverlayCommand::ToggleNotarget => {
+                game.ai.ignore_player = !game.ai.ignore_player;
+                None
+            }
+            OverlayCommand::ToggleAi => {
+                let on = !game.ai.enabled;
+                game.ai.enabled = on;
+                crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                None
+            }
+        }
+    }
+    /// The view direction (Source axes).
+    fn forward(&self) -> glam::Vec3 {
+        glam::Vec3::new(
+            self.pitch.cos() * self.yaw.cos(),
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+        )
+    }
+    /// npc_create from the player's eye along the aim (a new runtime entity).
+    pub fn spawn_npc(
+        &mut self,
+        game: &mut crate::gameplay::Gameplay,
+        request: hl2_simulation::ai::spawn::SpawnRequest,
+    ) -> String {
+        let forward = glam::Vec3::new(
+            self.pitch.cos() * self.yaw.cos(),
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+        );
+        game.request_spawn(request, &mut self.physics, self.eye, forward)
     }
     fn step(
         &mut self,
@@ -391,6 +481,10 @@ impl Simulation {
                     noclip: false,
                 };
                 let feet = self.player.feet;
+                // NPC hits push the player (ApplyAbsVelocityImpulse) before the move.
+                if let Some(game) = game.as_deref_mut() {
+                    self.player.velocity += std::mem::take(&mut game.player_impulse);
+                }
                 // SetMaxSpeed from the weapons stage (gravity gun load) for this step.
                 self.input.max_speed = game
                     .as_deref()
@@ -511,6 +605,51 @@ type InputDevices<'w, 's> = (
     Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>,
     MessageReader<'w, 's, bevy::input::keyboard::KeyboardInput>,
 );
+/// Held-key repeat for the F4 overlay lists (Bevy's ButtonInput has none): the first
+/// press, then after REPEAT_DELAY one more every REPEAT_INTERVAL (Windows keyboard
+/// defaults are a 250 ms - 1 s delay and up to ~30 repeats per second).
+#[derive(Default)]
+struct KeyRepeat {
+    key: Option<KeyCode>,
+    wait: f32,
+    /// The overlay owned the cursor last frame (it is locked again when it closes).
+    overlay_cursor: bool,
+}
+const REPEAT_DELAY: f32 = 0.35;
+const REPEAT_INTERVAL: f32 = 0.04;
+impl KeyRepeat {
+    /// Presses of the newest held key among `keys` this frame (first press + repeats).
+    fn update(
+        &mut self,
+        input: &ButtonInput<KeyCode>,
+        keys: &[KeyCode],
+        dt: f32,
+    ) -> Option<(KeyCode, usize)> {
+        if let Some(&key) = keys.iter().find(|k| input.just_pressed(**k)) {
+            (self.key, self.wait) = (Some(key), REPEAT_DELAY);
+            return Some((key, 1));
+        }
+        let key = self.key.filter(|k| input.pressed(*k))?;
+        self.wait -= dt;
+        let mut presses = 0;
+        while self.wait <= 0. {
+            presses += 1;
+            self.wait += REPEAT_INTERVAL;
+        }
+        (presses > 0).then_some((key, presses))
+    }
+}
+/// Set the cursor grab (hidden while grabbed), writing only on a change.
+fn set_cursor(cursor: &mut CursorOptions, grab: CursorGrabMode) {
+    if cursor.grab_mode != grab {
+        cursor.grab_mode = grab;
+    }
+    let visible = grab == CursorGrabMode::None;
+    if cursor.visible != visible {
+        cursor.visible = visible;
+    }
+}
+#[allow(clippy::too_many_arguments)]
 fn controls(
     (keys, buttons, mouse, scroll, mut characters): InputDevices,
     mut windows: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
@@ -518,6 +657,9 @@ fn controls(
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut exit: MessageWriter<AppExit>,
     mut ui: Option<ResMut<crate::console::Console>>,
+    hud: Option<Res<crate::hud::Hud>>,
+    time: Option<Res<Time<Real>>>,
+    mut repeat: Local<KeyRepeat>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
         if let Some(ui) = ui.as_deref_mut() {
@@ -537,17 +679,45 @@ fn controls(
     if keys.just_pressed(KeyCode::F1) && window.focused {
         sim.dev_overlay = !sim.dev_overlay;
     }
+    if let (Some(game), Some(hud)) = (game.as_deref_mut(), hud.as_deref()) {
+        game.spawn_overlay.rows_visible = hud.spawn_rows;
+    }
     if !sim.commands.is_empty() {
         return;
     }
     sim.transition = false;
     sim.focused = window.focused;
+    // The F4 overlay frees the cursor for its rows (right mouse held: look around) and
+    // locks it again when it closes.
+    let overlay_open = game.as_ref().is_some_and(|g| g.spawn_overlay.open);
+    let typing = game.as_ref().is_some_and(|g| g.spawn_overlay.typing);
+    if !sim.paused && window.focused {
+        if overlay_open {
+            let grab = if buttons.pressed(MouseButton::Right) {
+                CursorGrabMode::Locked
+            } else {
+                CursorGrabMode::None
+            };
+            set_cursor(&mut cursor, grab);
+        } else if repeat.overlay_cursor {
+            set_cursor(&mut cursor, CursorGrabMode::Locked);
+        }
+    }
+    repeat.overlay_cursor = overlay_open;
     let cancel_selection = keys.just_pressed(KeyCode::Escape)
         && !sim.paused
         && game.as_ref().is_some_and(|g| g.selection.pending.is_some());
     if cancel_selection && let Some(game) = game.as_deref_mut() {
         game.actions.push(crate::gameplay::Action::Cancel);
     }
+    // Escape stops typing into the overlay filter, else closes the overlay, before pause.
+    let cancel_overlay = keys.just_pressed(KeyCode::Escape)
+        && !sim.paused
+        && !cancel_selection
+        && game
+            .as_deref_mut()
+            .is_some_and(|g| g.spawn_overlay.escape());
+    let cancel_selection = cancel_selection || cancel_overlay;
     if let Some(ui) = ui.as_deref_mut() {
         let before = ui.source.mode;
         ui.source.canvas.resize(window.width(), window.height());
@@ -564,7 +734,7 @@ fn controls(
             && let Some(game) = game.as_deref_mut()
         {
             let effects = ui.source.input(&hl2_ui::console::Input {
-                text,
+                text: if typing { String::new() } else { text.clone() },
                 keys: crate::console::keys(&keys),
                 pointer: window
                     .cursor_position()
@@ -584,6 +754,7 @@ fn controls(
             cursor.visible = sim.paused;
             sim.jump_suppressed |= keys.pressed(KeyCode::Space);
         } else if !sim.paused
+            && !overlay_open
             && buttons.just_pressed(MouseButton::Left)
             && cursor.grab_mode == CursorGrabMode::None
         {
@@ -601,7 +772,7 @@ fn controls(
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
         sim.jump_suppressed |= keys.pressed(KeyCode::Space);
-    } else if buttons.just_pressed(MouseButton::Left) {
+    } else if buttons.just_pressed(MouseButton::Left) && (sim.paused || !overlay_open) {
         sim.transition = sim.paused || cursor.grab_mode == CursorGrabMode::None;
         if sim.transition {
             sim.jump_suppressed |= keys.pressed(KeyCode::Space);
@@ -613,14 +784,16 @@ fn controls(
     if !keys.pressed(KeyCode::Space) {
         sim.jump_suppressed = false;
     }
+    // The overlay takes the mouse buttons (rows, right-drag look) while it is open.
     if let Some(game) = game.as_deref_mut() {
         game.buttons(
-            buttons.pressed(MouseButton::Left),
-            buttons.pressed(MouseButton::Right),
+            buttons.pressed(MouseButton::Left) && !overlay_open,
+            buttons.pressed(MouseButton::Right) && !overlay_open,
         );
     }
     sim.input = Input::default();
-    if sim.paused() || sim.transition || cursor.grab_mode == CursorGrabMode::None {
+    if sim.paused() || sim.transition || (cursor.grab_mode == CursorGrabMode::None && !overlay_open)
+    {
         if let Some(game) = game.as_deref_mut() {
             game.consume_attacks();
         }
@@ -635,7 +808,7 @@ fn controls(
             (KeyCode::KeyQ, Action::Previous),
             (KeyCode::KeyG, Action::Impulse),
         ] {
-            if keys.just_pressed(key) {
+            if keys.just_pressed(key) && !typing {
                 game.actions.push(action);
             }
         }
@@ -650,18 +823,104 @@ fn controls(
         .into_iter()
         .enumerate()
         {
-            if keys.just_pressed(key) {
+            if keys.just_pressed(key) && !typing {
                 game.actions.push(Action::Slot { slot });
             }
         }
-        if let Some(scroll) = scroll.as_deref().filter(|s| s.delta.y != 0.) {
+        // F4 spawn overlay (ours; not a native binding): Tab switches NPCs / Props, Up/Down
+        // (PageUp/PageDown: a page; held keys repeat) move in the focused column,
+        // Left/Right switch columns, Enter spawns at the crosshair, opens a prop folder or
+        // toggles the option under the cursor; "/" or Ctrl+F types a Props filter. The
+        // pointer clicks rows and the wheel scrolls the column under it. Keys other than
+        // F4 do nothing while the overlay is closed.
+        use hl2_simulation::ai::spawn::OverlayKey;
+        let mut pressed: Vec<OverlayKey> = [
+            (KeyCode::F4, OverlayKey::Toggle),
+            (KeyCode::ArrowLeft, OverlayKey::Left),
+            (KeyCode::ArrowRight, OverlayKey::Right),
+            (KeyCode::Enter, OverlayKey::Enter),
+            (KeyCode::Tab, OverlayKey::Tab),
+        ]
+        .into_iter()
+        .filter(|(key, _)| keys.just_pressed(*key))
+        .map(|(_, overlay)| overlay)
+        .collect();
+        let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        if overlay_open
+            && !typing
+            && (text.contains('/') || ctrl && keys.just_pressed(KeyCode::KeyF))
+        {
+            pressed.push(OverlayKey::Filter);
+        }
+        if let Some((key, presses)) = repeat.update(
+            &keys,
+            &[
+                KeyCode::ArrowUp,
+                KeyCode::ArrowDown,
+                KeyCode::PageUp,
+                KeyCode::PageDown,
+                KeyCode::Backspace,
+            ],
+            time.map_or(0., |t| t.delta_secs()),
+        ) {
+            let overlay = match key {
+                KeyCode::ArrowUp => OverlayKey::Up,
+                KeyCode::ArrowDown => OverlayKey::Down,
+                KeyCode::PageUp => OverlayKey::PageUp,
+                KeyCode::PageDown => OverlayKey::PageDown,
+                _ => OverlayKey::Backspace,
+            };
+            pressed.extend(std::iter::repeat_n(overlay, presses));
+        }
+        if typing {
+            game.spawn_overlay.type_text(&text);
+        }
+        let mut messages = Vec::new();
+        for overlay in pressed {
+            messages.extend(sim.spawn_overlay_key(game, overlay));
+        }
+        let pointer = window
+            .cursor_position()
+            .filter(|_| overlay_open && cursor.grab_mode == CursorGrabMode::None);
+        if let (Some(pointer), Some(hud)) = (pointer, hud.as_deref()) {
+            if buttons.just_pressed(MouseButton::Left)
+                && let Some(target) = crate::spawn_panel::hit(&hud.spawn_hits, pointer.x, pointer.y)
+            {
+                let command = game.spawn_overlay.click(target);
+                messages.extend(sim.spawn_overlay_command(game, command));
+            }
+            if let Some(scroll) = scroll.as_deref().filter(|s| s.delta.y != 0.) {
+                // Three rows per wheel notch (the Windows default lines per notch).
+                let rows = match scroll.unit {
+                    bevy::input::mouse::MouseScrollUnit::Line => -scroll.delta.y * 3.,
+                    bevy::input::mouse::MouseScrollUnit::Pixel => -scroll.delta.y / 20.,
+                };
+                let column = crate::spawn_panel::column_at(&hud.spawn_hits, pointer.x);
+                game.spawn_overlay.scroll(column, rows.round() as isize);
+            }
+        }
+        if let Some(ui) = ui.as_deref_mut() {
+            for message in messages {
+                ui.source.log(message);
+            }
+        }
+        if let Some(scroll) = scroll
+            .as_deref()
+            .filter(|s| s.delta.y != 0. && !overlay_open)
+        {
             game.actions.push(Action::Wheel {
                 delta: if scroll.delta.y > 0. { -1 } else { 1 },
             });
         }
     }
-    sim.yaw -= mouse.delta.x * 0.001152;
-    sim.pitch = (sim.pitch - mouse.delta.y * 0.001152).clamp(-1.55, 1.55);
+    // Typing into the overlay filter: no movement or look.
+    if typing {
+        return;
+    }
+    if !overlay_open || buttons.pressed(MouseButton::Right) {
+        sim.yaw -= mouse.delta.x * 0.001152;
+        sim.pitch = (sim.pitch - mouse.delta.y * 0.001152).clamp(-1.55, 1.55);
+    }
     if keys.just_pressed(KeyCode::F2) {
         let fly = !sim.fly;
         sim.change_fly(fly);

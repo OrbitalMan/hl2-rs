@@ -54,6 +54,72 @@ pub fn prepare_actor_animations(
 }
 /// NPC classes registered with the shared human ground-movement controller.
 pub const GROUND_HUMANS: [&str; 2] = ["npc_barney", "npc_kleiner"];
+/// Human-hull NPC classes registered for AI goals only (step 14): scripted scene moves
+/// for them stay unsupported as before. SetHullType(HULL_HUMAN) in CNPC_MetroPolice,
+/// CNPC_Combine and CNPC_PlayerCompanion (npc_citizen, npc_alyx) Spawn.
+pub const AI_GROUND_HUMANS: [&str; 4] = [
+    "npc_metropolice",
+    "npc_combine_s",
+    "npc_citizen",
+    "npc_alyx",
+];
+/// AI movers' walk/run per weapon class ("" unarmed): Weapon_TranslateActivity of
+/// ACT_WALK/ACT_RUN when the model has the result (else the base activity), played as
+/// the first sequence with that activity. Variants missing a looping sequence are left
+/// out (e.g. the unarmed soldier, whose model has only rifle walks and runs).
+fn locomotion_variants(
+    vfs: &Vfs,
+    model: &str,
+    rig: &modkit_core::animation::Rig,
+) -> Result<std::collections::BTreeMap<String, crate::npc::Locomotion>> {
+    use crate::npc::MoveStyle;
+    let sequence = |activity: &str| {
+        rig.sequences
+            .iter()
+            .find(|s| s.activity.eq_ignore_ascii_case(activity))
+            .map(|s| s.name.clone())
+    };
+    let pick = |weapon: &str, base: &str| {
+        let activity = crate::npc_weapons::translate(weapon, base)
+            .filter(|a| sequence(a).is_some())
+            .unwrap_or(base);
+        sequence(activity).map(|name| (name, activity.to_owned()))
+    };
+    let mut choices = Vec::new();
+    // Move and shoot's aiming walk/run (StartShootWhileMove needs both sequences).
+    let mut aims = std::collections::BTreeMap::new();
+    for weapon in std::iter::once("").chain(crate::npc_weapons::NPC_WEAPONS.iter().copied()) {
+        if let (Some(walk), Some(run)) = (pick(weapon, "ACT_WALK"), pick(weapon, "ACT_RUN")) {
+            choices.push((weapon.to_owned(), walk, run));
+        }
+        if let (Some(walk), Some(run)) = (pick(weapon, "ACT_WALK_AIM"), pick(weapon, "ACT_RUN_AIM"))
+        {
+            aims.insert(weapon.to_owned(), (walk.0, run.0));
+        }
+    }
+    let wanted = choices
+        .iter()
+        .flat_map(|(_, walk, run)| [walk.0.clone(), run.0.clone()])
+        .collect();
+    let sequences = source_assets::models::read_root_motion(vfs, model, &wanted)?;
+    Ok(choices
+        .into_iter()
+        .map(|(weapon, walk, run)| {
+            let mut locomotion = crate::npc::Locomotion::from_named(
+                &sequences,
+                [
+                    (MoveStyle::Walk, &walk.0, &walk.1),
+                    (MoveStyle::Run, &run.0, &run.1),
+                ],
+            );
+            if let Some((walk, run)) = aims.get(&weapon) {
+                locomotion.set_aim(walk.clone(), run.clone());
+            }
+            (weapon, locomotion)
+        })
+        .filter(|(_, locomotion)| locomotion.complete())
+        .collect())
+}
 pub fn prepare_npcs(
     world: &mut World,
     vfs: &Vfs,
@@ -88,17 +154,47 @@ pub fn prepare_npcs(
         let Some(actor) = instance.entity else {
             continue;
         };
-        if !GROUND_HUMANS.contains(&world.entities[actor].class()) {
+        let class = world.entities[actor].class();
+        let ai_only = AI_GROUND_HUMANS.contains(&class);
+        if !GROUND_HUMANS.contains(&class) && !ai_only {
             continue;
         }
         let loaded = (|| -> anyhow::Result<_> {
-            let motion = crate::npc::Locomotion::load(vfs, &instance.model)?;
-            let wanted = motion.required_clips();
             let ground = crate::npc::normal_human(instance.scale, 18., 1.)
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-            controller
-                .register_actor(actor, instance.scale, ground, motion)
-                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            let wanted = if ai_only {
+                let rig = world
+                    .rigs
+                    .get(&instance.asset_key())
+                    .ok_or_else(|| anyhow::anyhow!("no rig for {}", instance.model))?;
+                let variants = locomotion_variants(vfs, &instance.model, rig)?;
+                let equipment = world.entities[actor]
+                    .get("additionalequipment")
+                    .unwrap_or("")
+                    .to_lowercase();
+                let motion = variants
+                    .get(&equipment)
+                    .or_else(|| variants.get(""))
+                    .or_else(|| variants.values().next())
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("no walk/run locomotion"))?;
+                let wanted = variants
+                    .values()
+                    .flat_map(|v| v.required_clips())
+                    .collect::<std::collections::BTreeSet<_>>();
+                controller
+                    .register_ai_actor(actor, instance.scale, ground, motion)
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                controller.set_locomotion_variants(actor, variants);
+                wanted
+            } else {
+                let motion = crate::npc::Locomotion::load(vfs, &instance.model)?;
+                let wanted = motion.required_clips();
+                controller
+                    .register_actor(actor, instance.scale, ground, motion)
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                wanted
+            };
             // Verified ordinary Barney eye offset comes from his MDL, not the player's eye.
             if instance.scale == 1. {
                 controller
@@ -298,4 +394,49 @@ pub fn prepare_weapons(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn owned_ai_movers_walk_and_run_with_their_weapon_sequences() {
+        use crate::npc::MoveStyle;
+        let vfs = Vfs::mount(&source_assets::install::discover().unwrap()).unwrap();
+        // Humanoid rigs load the HUMANOID_AI_ACTIVITIES (the walk/run translations too).
+        let wanted = source_assets::models::HUMANOID_AI_ACTIVITIES
+            .iter()
+            .map(|a| a.to_lowercase())
+            .collect();
+        let rig = |model: &str| source_assets::animation::load(&vfs, model, &wanted).unwrap();
+        let names = |model: &str, weapon: &str| {
+            let variants = locomotion_variants(&vfs, model, &rig(model)).unwrap();
+            let v = &variants[weapon];
+            (
+                v.sequence_name(MoveStyle::Walk),
+                v.sequence_name(MoveStyle::Run),
+            )
+        };
+        // combine_soldier: only rifle walks/runs (no unarmed variant).
+        let soldier = "models/combine_soldier.mdl";
+        assert_eq!(
+            names(soldier, "weapon_smg1"),
+            ("walk_all".into(), "runall".into())
+        );
+        assert_eq!(
+            names(soldier, "weapon_ar2"),
+            ("walk_all".into(), "runall".into())
+        );
+        assert!(!locomotion_variants(&vfs, soldier, &rig(soldier))
+            .unwrap()
+            .contains_key(""));
+        // A male citizen: unarmed walk_all/run_all, armed ACT_WALK/RUN_RIFLE.
+        let citizen = "models/humans/group01/male_07.mdl";
+        assert_eq!(names(citizen, ""), ("walk_all".into(), "run_all".into()));
+        assert_eq!(
+            names(citizen, "weapon_smg1"),
+            ("walkholdall1".into(), "run_holding_all".into())
+        );
+    }
 }

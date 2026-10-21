@@ -1,5 +1,289 @@
 # MODLOG
 
+## 2026-10-21 session 28: F4 overlay mouse, filter and common props; ent_create placement; sessions 18-28 merged into main
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 baseentity.cpp CC_Ent_Create.
+
+**Changed:** `ai::spawn::Overlay` gained a common-props folder (`SPAWN_PROP_NAMES`), a typed filter, `click`/`scroll` with drawn-row targets (`PanelTarget`), a tab bar and window-sized lists; `spawn_panel` returns hit rectangles; `movement::controls` frees the cursor while F4 is open (right mouse held looks), routes clicks and the wheel to the overlay, repeats held list keys, types the filter and closes F4 on Escape before pause; the HUD marks the aim over the panel; script actions spawn_overlay_text/click/scroll. ent_create uses CC_Ent_Create's placement and the `angles` yaw; console lines are tokenized with quotes, and the hl2-ui routing re-quotes arguments with spaces. `wip/runtime-entities-20261021` merged into `wip/npc-ai-20261014` and `main`.
+
+**Why:** owner report (F4 Props navigation needed many single key presses, no mouse; common props were hard to find); 14r leftover (ent_create placement); owner decision to merge to main so @OrbitalMan can merge it before his hl2-ui PR.
+
+**Tested how / Result:** unit tests (overlay clicks/scroll/filter/escape, drawn-row hit test, ent_create placement and quoting), workspace release tests (two known release-only failures), owned suite 54 pass, strict Clippy/fmt; packaged script runs artifacts/s28 (props by click: explosive barrel, wooden crate, filtered ammo crate; elite by click; panel captures; ent_create citizen faces yaw 180 from angles "0 180 0"); regression batch artifacts/s28-regression: weapons 17/17, attention 26/26, movement 25/26 (known doll01), images equal to s27-regression-b except the Breen slate exposure.
+
+**Still broken or not tested:** real mouse/keyboard input on the overlay (only script actions and unit tests); ent_create of physics props keeps prop_physics_create placement; the session 27 gunfire listening.
+
+**Next:** owner playtest; squads and squad speech; 14r leftovers.
+
+## 2026-10-21 session 27 (cont.): player-ally speech through the talker response rules (`wip/runtime-entities-20261021`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 AI_ResponseSystem.cpp/h (CResponseSystem parsing, matching, response groups), AI_Criteria, ai_speech.cpp (CAI_Expresser criteria), ai_playerally.cpp (g_ConceptInfos, SpeakIfAllowed/IsAllowedToSpeak/IsOkToSpeak, GatherEnemyConditions, OnStartSchedule, OnKilledNPC, PainSound), npc_citizen17.cpp/npc_barney.cpp/npc_alyx.cpp DeathSound; installed scripts/talker/*.txt and scenes.image.
+
+**Changed:** new `ai::talker` (response system) and `ai::ally_speech` (ally gates, criteria, concept table, scene sound resolution); runtime hooks (CopRequest::Concept, companion pain/death, STARTCOMBAT/ENEMY_DEAD in the speech block, HIDEANDRELOAD on schedule start, diagnostics.ally_speech); audio preloads the ally cues.
+
+**Why:** owner step 14 speech list (citizens' response-rule concepts; NPCs were mute in fights except cops/soldiers).
+
+**Tested how / Result:** talker and ally unit tests (rule scoring, depletion, matchers, gates), owned probe of the installed rules (182 rules, 175 groups, no warnings), workspace release tests (hl2-simulation 334; two known release-only failures), strict Clippy/fmt; packaged artifacts/s27/drop-view: a rebel calls "Combine!" (npc_citizen.combine02) as the fight starts and wound lines follow.
+
+**Still broken or not tested:** TLK_WATCHOUT, idle/hello/question-answer concepts, player/env_global criteria, scene gestures/flexes, real wave lengths for speak responses, squad speech; native comparison.
+
+**Next:** owner listening (gunfire and ally speech), squad speech, remaining 14r leftovers.
+
+## 2026-10-21 session 27: silent far gunfire fixed, F4 Props tab, prop_physics_create/ent_create, combine attack announcement, hand-pose weapon drops (`wip/runtime-entities-20261021`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: retail engine.dll through the private Ghidra project (distance-variant mixers 100a3070/100a39b0, per-buffer channel volume 100a1db0, MIX_PaintChannels 100a47d0, SND_PickDynamicChannel 1008e990/1008ff40, channel stop time +0xa0 in 100a07d0, DSP convar registrations), installed scripts/dsp_presets.txt and soundscapes, SDK 2013 (c_soundscape.cpp, props.cpp CC_Prop_Physics_Create/CreatePhysicsProp/CBaseProp::Spawn, baseentity.cpp CC_Ent_Create, npc_combine.cpp TASK_ANNOUNCE_ATTACK, basecombatcharacter.cpp FInViewCone/Weapon_Drop, player.cpp m_flFieldOfView).
+
+**Changed:** spatial sound players start at their distance gain (audio.rs); Vfs::list_files/physics_prop_models (source-assets); F4 overlay Tab/Props tab with folders, PageUp/PageDown and panel headings; console prop_physics_create and ent_create (hl2-ui parser routing next to npc_create, owner-approved; ai::spawn::Console); combine TASK_ANNOUNCE_ATTACK with the enemy's view cone (PlayerState.facing, Context.enemy_sees_me); Scene::merged_model_frame for Weapon_Drop poses; despawn of killed runtime entities' draws.
+
+**Why:** owner playtest notes (far NPC gunfire never heard; owner test layout on the street: soldier at the station entrance, player at the pallet spot), owner requests (props in their own F4 tab with all installed props; the console route), DESIGN 14r leftovers and the step 14 speech list.
+
+**Tested how / Result:** per-process recordings of native (oracle, street layout, DSP on/off) and ours before/after: far shots -99 dB before (silent), audible after with a far/near difference close to native; hl2-simulation 331 unit tests, hl2-ui console test, workspace release tests (two known release-only failures), strict Clippy/fmt; packaged fixtures artifacts/s27 (propstab, console, announce, battle-drop, drop-view); regression artifacts/s27-regression (17/17, 26/26, 25/26 known doll01; diffs within 6 levels except Kleiner mouth flex 17 px).
+
+**Still broken or not tested:** owner listening of the near "saw"; room DSP (native dsp_off shows little difference; not implemented); squad speech and citizens' response rules; type-to-filter in the Props tab; ent_create of non-NPC/non-prop classes; late precache of NPC classes outside the F4 list; gibs as entities; native drop rest pose and announcement timing; owned suite not rerun (no preload changes).
+
+**Next:** owner listening, squad/citizen speech, remaining 14r leftovers, merge into wip/npc-ai-20261014.
+
+## 2026-10-21 session 26: runtime entities (14r part A, maker copies, part B props and weapon drops), NPC footsteps and speech (`wip/runtime-entities-20261021`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_concommands.cpp CC_NPC_Create, monstermaker.cpp CTemplateNPCMaker::MakeNPC, const.h MAX_EDICT_BITS, props.cpp CC_Prop_Physics_Create/CreatePhysicsProp, basecombatcharacter.cpp Event_Killed/Weapon_Drop, basecombatweapon_shared.cpp Drop, c_baseanimating.cpp FireEvent/MaterialFootstepSound, ai_basenpc.cpp sound hooks, npc_combine.cpp/npc_metropolice.cpp speech); installed d1_canals_01/d1_trainstation_02 entity lumps and hl2_misc_dir.vpk listing read-only; a temporary owned animation-event probe (not committed).
+
+**Changed:** spawns grow the map's World in place and copy hidden class templates (Scene/Physics/AI/controller/eyes/draw registration); the cloud's Scene-side extension table is removed; live runtime spawns capped at 2048 (`--max-edicts N`); npc_template_maker repeat spawns become copies; F4 physics props with an async model loader (late precache) and per-instance draw builder; NPCs drop their weapons on death as pickup-able entities; entity animation client sounds (NPC footsteps); NPC pain/death/idle/lost/found/kill speech for cops and soldiers; `--window-at X Y` for test windows.
+
+**Why:** owner priority 2026-10-21 (runtime entity spawning), owner questions on Source's entity limit and future netcode/mods, owner playtest notes (NPC footsteps, NPC chatter), owner request to keep test windows off the working monitor.
+
+**Tested how / Result:** unit tests (hl2-simulation 329 incl. 7 new; hl2-bevy naming test), workspace release tests (two known release-only failures), strict Clippy/fmt, owned suite 54 pass; packaged station hall: 20 spawned soldiers (step 4-6 ms), 10 vs 10 runtime-spawned battle (488 shots, 16 deaths, step peak 14.6 ms), map change after spawning, F4 props (late loads 14-95 ms), runtime watermelon breaking into drawn gibs, 12 weapon drops and player pickup, NPC run footsteps, 48 rendered NPC sentences; d1_canals_01 maker copy. Regression batches s26-regression/-b match s25-regression within 4 levels (except a known 45 px cop glance).
+
+**Still broken or not tested:** the owner's gunfire notes (cut-off "saw" overlap, missing far layer); ent_create/prop_physics_create console route (owner OK for the hl2-ui parser); squad speech, TASK_ANNOUNCE_ATTACK, citizen speech; killed runtime NPCs keep hidden draws until map change; weapon drops use the shoot position, not the hand bone; render frame timing with many NPCs; native comparisons of spawn placement, drops and speech cadence.
+
+**Next:** gunfire overlap/far-layer research with native A/B recordings, remaining speech, 14r part C, then the session 25 open list.
+
+## 2026-10-21 session 25: distance-variant gunfire mix, move and shoot, Alyx gun, RPG citizens, combine elite/shotgunner/prison guard (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (weapon_smg1/ar2/alyxgun/rpg.cpp, npc_citizen17.cpp RPG schedules, npc_combine.cpp/npc_combines.cpp elites and ShouldMoveAndShoot, ai_moveshoot.cpp, ai_basenpc_schedule.cpp task overlays), installed sound scripts (temporary owned probe, not committed) and retail engine.dll via the pass02 Ghidra project read-only (SND_Spatialize distmix, '^' mixers; private npc-gunfire-20261021).
+
+**Changed:** distance-variant premixes in the audio host; `ai::moveshoot` overlay with aim locomotion and movement facing; weapon_alyxgun/weapon_rpg fire specs, NPC missiles with owner dots, SCHED_CITIZEN_RANGE_ATTACK1_RPG; SMG1 ally range; elite alt-fire (combine balls), guard health, F4 shotgunner/elite/prison guard entries; npc_alyx as AI ground mover.
+
+**Why:** owner reports (gunfire sound with distance, NPCs never shooting while moving, Alyx/RPG citizens never firing, missing combine variants).
+
+**Tested how / Result:** hl2-simulation 321 unit tests, workspace release tests (two known release-only failures), strict Clippy/fmt; packaged station-hall fixtures artifacts/s25 (ms-smg/ms-cap move-and-shoot, alyx, rpg, elite, variants): all behaviours fire as described in STATUS session 25.
+
+**Still broken or not tested:** native A/B listening of the distance mix; stereo panning/DSP; AI gesture layers (no recoil gesture while moving); native comparisons of move-and-shoot, RPG guidance and elite cadence; runtime skin change for a plain soldier given a shotgun.
+
+**Next:** regression/owned suite results, AI gesture layers, DESIGN 14r part A (runtime spawning of already-loaded classes).
+
+## 2026-10-21 session 24, second part (same chat): native soldier comparisons, soldiers/citizens move, grenade-before-reload (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`, the same chat as the session 24 entry below (commit 9a20127's message wrongly says session 25). No subagents. Research: native oracle runs with per-process audio and ent_text (private npc-burst-20261020), SDK 2013 npc_combine.cpp (TranslateSchedule SCHED_HIDE_AND_RELOAD, CanGrenadeEnemy/CanThrowGrenade/CheckCanThrowGrenade, flush rule), player TraceAttack.
+
+**Changed:** per-weapon locomotion variants and AI ground registration for npc_combine_s/npc_citizen; lazy CanGrenadeEnemy with side-effect-free throw probes and the 20% grenade-before-reload; AR2Impact and TraceBleed for NPC hits on the player; DESIGN 14n session 24 second-part plan.
+
+**Why:** owner request: native comparisons of AR2 cadence, reload pauses, flush grenades (and citizen/cop cadence, not reached).
+
+**Tested how / Result:** unit + owned locomotion test; Clippy/fmt; packaged hall runs (hall-ar2 matches the native reload cycle and alcove; flush runs: no throw by the seeded 20% roll). Regression batch **not run** (usage limit).
+
+**Still broken or not tested:** regression batch; citizen/cop cadence vs native; packaged grenade-before-reload throw; AR2 impacts on the player vs native.
+
+**Next:** regression batch vs s24-regression, then the remaining comparisons.
+
+## 2026-10-20 session 24: AR2 tracer blend, combine reload, native NPC burst cadence, F4 grenades and the first packaged flush throw (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (sprite_dx9.cpp render modes, npc_combine.cpp HandleAnimEvent/StartTask/RunTask/NPC_TranslateActivity/CanThrowGrenade/CheckCanThrowGrenade, baseanimating.cpp StudioFrameAdvanceInternal/GetLastVisibleCycle/DispatchAnimEvents, basehlcombatweapon.cpp WeaponSoundRealtime, weapon_smg1.cpp/weapon_ar2.cpp FireNPCPrimaryAttack, ai_basehumanoid.cpp BuildScheduleTestBits/StartTaskRangeAttack1/RunTaskRangeAttack1, ai_basenpc_schedule.cpp RunAttackTask, ai_basenpc.cpp NPCThink, h_ai.cpp VecCheckToss); owned MDL/VMT reads (combine_soldier_anims events and fade times, w_* weapon sequences, gunshiptracer.vmt); native per-process audio of an npc_create SMG1 soldier (private work/hl2-decompiled/npc-burst-20261020).
+
+**Changed:** kRenderTransAlphaAdd sprite blend (AR2 tracer); COMBINE_AE_RELOAD and the post-reload regulator reset; sequences finish at the last visible cycle and flush their remaining events; WeaponSoundRealtime double sounds with a delayed-sound queue; CHAN_WEAPON replacement of NPC shot sounds; CNPC_Combine's own burst TASK_RANGE_ATTACK1 (no shot regulator); BuildScheduleTestBits' rest-interval mask; face/attack tasks use the enemy LKP; F4 `grenades` row for npc_combine_s (NumGrenades); flush throws: start-on-surface traces ignored, ACT_RANGE_ATTACK2 -> ACT_COMBINE_THROW_GRENADE (preloaded), full SequenceDuration for Weapon_SetActivity; grenade-check diagnostics; audio trace logs stop requests.
+
+**Why:** owner reports (AR2 tracer black box, shotgun soldier reloading forever, NPC SMG1/AR2 fire too slow and regular with single shot sounds) and the owner's request for an F4 grenade count to test NPC grenades on any map.
+
+**Tested how / Result:** unit tests (hl2-simulation 317: realtime sound times, sequence finish, combine burst, F4 grenade row; owned: AR2 tracer kind); workspace release tests (only the two known release-only should_panic image tests fail); owned tests 53 pass; strict Clippy and fmt clean. Packaged d1_trainstation_02 runs (artifacts/s24): sg (shotgun soldier vs rebel: the rebel won before a reload), sgp (flying player: not sensed; then walking: three full shotgun reload cycles), gh (station hall flush: first no_toss from the start-on-floor trace, then RANGE_ATTACK2 without a throw (untranslated activity), then a thrown frag that exploded), ghc (capture burst of the throw), smg/smg2 (cadence before/after the combine burst port), ar2 (tracer look). Native: SMG1 recording used; AR2 recording rejected (a plaza cop blocked the soldier's line of fire).
+
+**Still broken or not tested:** soldier burst gaps slightly shorter than native and reloads ~2 s vs native ~4 s; citizen/cop cadence and AR2 cadence vs native; native flush grenade; AR2 tracer look vs native; flying players are not sensed (test aid).
+
+**Next:** the native comparisons above, then NPC flinch gestures and squads.
+
+## 2026-10-20: first-map completion audit and genuine native scene starts
+
+**Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. One subagent from the same family independently reviewed completion scope,public REA updates and retained native bytes;its exact model identifier is unavailable.
+
+**Changed / Why:** Rechecked whether d1_trainstation_01 is finished before advancing. Retained a new private first-map lane and handoff with two genuine map scene-start observations and a fresh process without Frida. Public documentation distinguishes complete authored metadata from incomplete runtime research. Rust/source implementation was not changed.
+
+**Tested how / Result:** Eleven existing metadata/static checks pass,including311 independent query cases. New acceptance checks six exact bodies,six PE hook prologues,1672 selected events/834 paired calls,raw source clocks,actor/model generations,input/output attribution and cleanup. Genuine intro policy0 and train endline policy1 accepted. Fresh native snapshots corroborate G-Man playing then later cleared. Live REA6.7.0/207tools confirmed. All owned games closed;checked installed settings/modules unchanged. See docs/validation.md for the exact repeat command.
+
+**Still broken or not tested:** First map not finished;ordinary traversal/exit,full scene playback and current Rust parity unverified. Preserved original16 gaps,missing native bodies and historical closure failure. Failed model decoding,pre-window events,transport overflow and a forward rehearsal without measured movement remain recorded. Public Scale AI collaboration scope remains unverified.
+
+**Next:** Stay on first-map player control/ordinary triggers and downstream genuine actors. No second-map promotion,Rust builds,staging,commits or pushes in this research pass.
+
+## 2026-10-20: publish accumulated research documentation
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Commit the six reviewed research documentation files accumulated across the October16/18 campaign-scene handoffs and October20 Frida work. Restore newest-first log order and distinguish historical revision-bound checks from current publication acceptance. Keep private binaries, native bodies, databases, tools and captures outside Git.
+
+**Tested how / Result:** Documentation diff and whitelist checks; all149 sealed scene-start research files; native static/runtime component verifiers; consolidated first-map metadata verifier. No new gameplay replay, Cargo tests, Clippy or build for this documentation-only publication.
+
+**Still broken or not tested:** Existing private-evidence gaps and rejected captures remain unchanged. This commit adds no gameplay behavior or Rust parity claim.
+
+**Next:** Keep subsequent reviewed research documentation in dedicated commits. Current acceptance: ../../work/publishing/docs-publication-20261020/validate.py.
+
+## 2026-10-20: controlled native scene-start gate observation
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Private static value-flow and Frida research tests one unresolved busy-actor start decision; documentation records the result. Six exact native bodies and a fresh496-byte CheckActors dossier preserve pass14 path/hash/address/baseline/original identity. No Rust implementation or Git mutation.
+
+**Tested how / Result:** Native policy1 scene-with-speech query returned true for201 failed actor checks over3.015game seconds, then false after owner cancellation; acceptance, OnStart and cleared wait state followed. Duplicate pending Start was ignored. Policy0 accepted concurrently without the query. A fresh never-attached HL2 process reproduced the output order for both. Both processes closed, selected module hashes and six installed cfg identities unchanged. Private verify_static.py and verify_runtime.py pass. Research-time root verification passed; its document/revision guard remains historical. Current publication validation checks the same sealed file set and native components without changing that guard. Static trace remains depth0/truncated164nodes/166edges with43unknowns.
+
+**Still broken or not tested:** Seeded citizen/literal Barney fixture only; two missing gestures, two rejected periodic clock races and earlier failed/partial captures remain recorded. Actual audibility, separate expresser IsSpeaking, ordinary campaign, general ABI and Rust parity not tested. Historical lifecycle full checker fails its changed Rust-source binding; native identity is independently rechecked.
+
+**Next:** Naturally triggered first-map controller with genuine actor/model. Private checkpoint: ../../work/publishing/research-scene-start-frida-continuation-20261020.md. No builds, staging, commit, push or implementation handoff message.
+
+## 2026-10-20 session 23: Breen's broadcast eyes, muzzle elights (parked), stunstick melee on NPCs, combine kick, NPCs react to being hit (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_baseactor.cpp MaintainLookTargets, scripted.cpp SequenceDone/PostIdleDone, ai_basenpc.cpp CheckPVSCondition/OnTakeDamage_Alive/IsLight/HeavyDamage/GetFlinchActivity, util.cpp FindClientInPVS, c_baseanimating.cpp ProcessMuzzleFlashEvent/CalcAttachments, fx_hl2_tracers.cpp, c_te_legacytempents.cpp MuzzleFlash_Combine_NPC, weapon_stunstick.cpp, basecombatcharacter.cpp CheckTraceHullAttack/CTraceFilterMelee, npc_metropolice.cpp SelectCombatSchedule, npc_combine.cpp HandleAnimEvent/MeleeAttack1Conditions/grenade checks); retail engine.dll (private Ghidra headless, work/hl2-decompiled/muzzle-elight-20261020); a native 60 fps pistol recording (oracle + gdigrab).
+
+**Changed:** scripted_sequence post idles keep NPC_STATE_SCRIPT for the random look queue (Breen); entity lights (elights) from DoMuzzleFlash and the Combine NPC flash light models (retail conversion, per-map minlight floor, decay, slotting); stunstick swings hit hated NPCs; cops target their NPC enemy for TASK_FACE_TARGET; sk_npc_dmg_stunstick reaches the simulation thread; combine kick (condition, event, sounds, COMBINE_* sentences); NPC hits produce COND_LIGHT/HEAVY_DAMAGE and make a hated player the enemy. Later (54b32b1): squadless combine flush grenades (NumGrenades, CanThrowGrenade/CheckCanThrowGrenade with VecCheckThrow/VecCheckToss, SCHED_COMBINE_RANGE_ATTACK2, COMBINE_AE_GREN_TOSS frags); unit-tested, packaged map-soldier throw not tested.
+
+**Why:** owner report (Breen's nervous eyes), the owner's detail list (muzzle elights, stunstick melee on NPCs), then the owner's 2026-10-20 direction: NPC gameplay first, polish later (elights parked once working).
+
+**Tested how / Result:** unit tests (see STATUS session 23); workspace release tests (two known release-only failures), owned tests, strict Clippy, fmt; packaged runs: elight-fire (rejected: too bright) and elight-fire2, baton-duel (SCHED_FAIL loop), baton-duel2 (0 damage), baton-duel3 (works), kick (no kick: a map cop killed the rebel first), kick2 (the pistol shot came during the weapon deploy), kick3/kick4 (kicks land; sentence silent like retail), hurt (a soldier reacts to a shot in the back); regression batch artifacts/s23-regression (weapons 17/17, attention 26/26, movement 25/26 known doll01; Breen's feed eyes now forward). A first native recording attempt omitted the map argument (the oracle refused safely) and its window match picked a non-game window; that file was deleted.
+
+**Still broken or not tested:** native Breen broadcast frames not recaptured; elight decay frames vs native; NPC elights only unit-tested; combine grenades, flinch gestures, squads; native per-class combat comparison.
+
+**Next:** a packaged grenade throw by a map soldier, AI gesture layers for flinches, then the session-22 open list.
+
+## 2026-10-20 session 22: shared NPC AI for soldiers/citizens/rebels/Barney/Alyx, cover and line-of-fire searches, female citizen animations, AR2 tracers/impacts (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_basenpc_schedule.cpp SelectCombatSchedule/FindCoverFromEnemy/TASK_GET_PATH_TO_ENEMY_LOS, ai_tacticalservices.cpp FindCoverNode/FindLosNode, ai_basehumanoid.cpp CheckAmmo, ai_basenpc.cpp GatherAttackConditions/IsCoverPosition/DoImpactEffect, npc_playercompanion.cpp, npc_citizen17.cpp, npc_combine.cpp (SelectSchedule, SelectCombatSchedule, SelectScheduleAttack, TranslateSchedule, MaxYawSpeed, NPC_TranslateActivity, CalcWeaponProficiency, schedule text), public/bone_setup.cpp AddSequenceLayers, client fx_hl2_tracers.cpp AR2Tracer/AR2Impact, fx_quad.cpp, fx_line.cpp, c_baseanimating.cpp ProcessMuzzleFlashEvent, c_te_legacytempents.cpp MuzzleFlash_Combine_*).
+
+**Changed:** owner report: F4 soldiers, citizens and rebels stood idle with weapons; only cops fought (the runtime gave AI only to npc_metropolice). AiClass Metropolice | Humanoid with per-class SDK parameters; `ai::humanoid` (CNPC_PlayerCompanion/CNPC_Citizen and squadless CNPC_Combine selection, translation, fail schedules and tasks, SCHED_COMBINE_*/SCHED_PC_* schedules); shared base_combat_schedule, COND_LOW_PRIMARY_AMMO, COND_WEAPON_SIGHT_OCCLUDED, graph cover/line-of-fire searches and their tasks; TranslateSchedule receives the NPC; companion regulator rule and proficiencies; humanoid model activity preloads. Loader: autolayer ramps read raw (retail female_shared.mdl all-NaN ramp dropped every female citizen clip; a non-finite child cycle is skipped). AR2: FX_PlayerAR2Tracer/FX_AR2Tracer lines and AR2Impact quads for player and NPC AR2 hits.
+
+**Why:** Source's AI is layered (CAI_BaseNPC -> CAI_BaseHumanoid -> class overrides); the owner asked for the SDK behavior exactly, gaps listed rather than invented. AR2 effects: owner report (plasma impacts and energy tracers missing).
+
+**Tested how / Result:** unit tests (combine shoot/hunt/cover/reload, companion attack/rest/reload/danger, tactical node searches, soldier-vs-rebel runtime, companion regulator, preload/acttable sync, NaN ramp, AR2 effect parameters); hl2-simulation 308 passed; workspace release tests pass except the two known release-only should_panic image tests; strict Clippy and fmt clean; owned tests 52 pass; regression batch artifacts/s22-regression (weapons 17/17, attention 26/26, movement 25/26 known doll01; diffs vs s21b explained in STATUS session 22). Packaged d1_trainstation_02 F4 fight (artifacts/s22/f4-d): foe SMG1 soldier vs friendly SMG1 female rebel; both fire (85 SMG1 shots), the soldier turns to the attacker, tries cover, returns fire and dies at ~9 s; the rebel reloads and engages the map cops. Earlier runs f4-a/f4-c: rebel never fired (no attack clips: preload, then the female-model loader bug); f4-b left no report (cause not determined).
+
+**Shove sound (owner report):** NPC_Metropolice.Shove was requested but never preloaded (dropped); now preloaded, packaged plaza walk-up plays flesh_impact_hard3/4.wav.
+
+**Still broken or not tested:** native comparison of soldier/citizen combat; squads, grenades, AR2 ball, kick, crouch, readiness, follow/standoff/actbusy, speech, medics, monk, vortigaunt, non-combat actors' base AI; the NaN child-cycle behavior of retail; muzzle-flash elights (engine.dll conversion to research); AR2 look vs native; stunstick tesla arcs; the metrocop shove sound.
+
+**Next:** muzzle elight research in engine.dll, then native per-class combat captures (npc_create_aimed npc_combine_s / npc_citizen with ORACLE_SETUP equipment), then the DESIGN 14n leftovers in campaign order.
+
+## 2026-10-18: consolidated first-map controller and resource handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material inherited-model workers: inventory_review (model closure and independent arrival audit),scene_lifecycle (scheduler/intro audit/queue),scripted_sequences (response/speaker); exact identifiers unavailable.
+
+**Changed/why:** one private query entry joins all66 first-map controllers to actor/I/O/event/resource/native references,with progression groups and explicit gaps for Claude. DESIGN records finalized model dependencies,camera/arrival ownership and response-context contracts. No implementation changes.
+
+**Tested how/result:** all66 source joins/62resource plans/11 query cases pass;parent reruns of model,response,arrival,baseline16h and additive drift acceptance pass;separate intro/arrival audits pass. The original16h child strict closure still fails as documented. Model closure:37MDL/23ANI,416 requested sequence nodes/322autolayer edges/58blocks. Empty/conditional bindings and missing exact procedures remain explicit.
+
+**Still broken/not tested:** native execution,ABI,audio/animation/camera playback,ordinary traversal and Rust parity not tested. Queue/speaker/package finalization now passes;preseal cinematic actor-query failure was corrected and retained. The first-map handoff carries16 explicit gaps;SpeakerThink remains missing/SDK-only for recurrence. **Next:** finalize the first-map handoff,then advance detailed research to trainstation02 while carrying open runtime questions.
+
+
+## 2026-10-18: first-map scene handoff continuation (research only)
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. Material research workers: inventory_review, scene_lifecycle and scripted_sequences, inherited model; exact identifiers not exposed.
+
+**Changed:** DESIGN and research/status/validation notes for first-map scheduler/SECTION speech dependencies, customs actbusy release and trigger-time acquisition, plus opening camera state and authored relay timing. Sealed intro-camera separately; preserved older closed-set drift and rejected parser/index attempts.
+
+**Why:** give Claude reusable first-map requirements in campaign order without guessed timers, actors or copied native implementation.
+
+**Tested how/result:** parent reruns of16j scheduler, actor-eligibility, intro-camera and additive16h acceptance pass; the original16h child closure still fails as documented. Native/ABI/ordinary campaign/Rust parity **not tested**. Animation dependency finalization and independent camera audit remain pending. No Rust/build/Git/installed-game changes.
+
+**Next:** finish pending checks and response/context prerequisites, then deliver the first-map implementation/replay checklist before detailed trainstation02 research.
+
+
+## 2026-10-16 session 21 (cont.): NPC-vs-NPC enemies, ai_relationship, gunfire sounds, chase repath, dynamic graph links, path simplification/turn rate (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_dynamiclink.cpp, ai_navigator.cpp SimplifyPath*, ai_motor.cpp MoveFacing/UpdateYaw/AI_ClampYaw, npc_metropolice.cpp MaxYawSpeed, ai_basenpc.cpp UpdateEnemyPos/GetGoalRepathTolerance, CAI_Relationship, soundent.h volumes and the weapons' InsertSound calls).
+
+**Changed:** dynamic graph links (initial state, TurnOn/TurnOff); wildcard assault names; held templates are not goal actors; SimplifyPathForward and the metrocop turn rate for AI goals; chase paths refound as the enemy moves; NPC-vs-NPC sight/memory/targeting, ai_relationship, F4 allegiance sides, CSoundEnt gunfire from NPCs and the player, NPC damage memory; AI report yaw.
+
+**Why:** owner reports (robotic straight-line movement, cops stopping to look while chasing, the canals planner refusing graph routes) and the owner's priority on NPC-vs-NPC fights for showcases.
+
+**Tested how:** hl2-simulation unit tests (dynamic links, path simplification, chase repath, friend/foe targeting, ai_relationship apply/revert, report serialization), workspace tests (two known release-only should_panic failures), strict Clippy, fmt; packaged canals reruns (no blocked moves), d1_trainstation_02 F4 duel (artifacts/s21/npc-duel2), regression batch artifacts/s21b-regression.
+
+**Result:** the duel works both ways (hearing, turning, returning fire, reloads, a winner). Regression: weapons 17/17, attention 26/26, movement 25/26 (the known doll01 warning), campaign texture errors 25 (station03 set); every final image matches s21-regression except the Breen slate exposure (max 15, known variation); feeds identical.
+
+**Still broken or not tested:** stunstick melee on NPCs; packaged chase/turn comparison with native; scene moves are not simplified; F4 spawns face away and a cop behind the player reacts only to sound; graph searches refuse graphs over 1500 nodes.
+
+**Next:** DESIGN 14n steps 2-4 (citizens/medics, soldiers, natural attacks), stunstick melee on NPCs, native chase comparison.
+
+## 2026-10-16 session 21: native NPC pistol comparison; metrocop pistol regulator, assault behavior, aiscripted_schedule, player hitboxes (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (npc_metropolice.cpp OnUpdateShotRegulator/SelectSchedule/TranslateSchedule/CreateBehaviors, ai_utils.cpp CAI_ShotRegulator, ai_basenpc.cpp OnRangeAttack1/GatherEnemyConditions/GetActualShootPosition/GetAttackSpread/GetSpreadBias, ai_behavior_assault.cpp/.h, ai_behavior.h behavior host, scripted.cpp CAI_ScriptedSchedule, player.cpp TraceAttack), Codex's private ai-scripted-schedule contract notes (campaign-scenes-20261016h), owned models/player.mdl (temporary probe test, not committed), native oracle capture with 60 fps recording and per-process audio.
+
+**Changed:** CNPC_MetroPolice pistol shot regulator (distance-scaled bursts/rests, U(0.2, 0.5) s shot spacing, OnRangeAttack1 update); `ai::assault` (CAI_AssaultBehavior + CAI_AssaultGoal, non-episodic schedules, rally locks, assault chains, OnArrival/OnAssaultClear) as a metrocop behavior after policing; OnFoundPlayer/OnFoundEnemy/OnLostPlayerLOS/OnLostEnemyLOS; aiscripted_schedule StartSchedule/StopSchedule (direct goal modes 1/2/6, forcestate, once unless repeatable, radius, 1 s retry); AI move goals drop to the floor (FloorPoint); NPC bullets test the player's models/player.mdl hitboxes after the hull; actor origin in the AI report; DESIGN 14a.
+
+**Why:** Step 1b (owner order): compare NPC pistol fire with native on d1_canals_01 with the HEV suit. Ours killed in 17.9 s with every shot hitting; native takes 35-40 s.
+
+**Tested how:** Native oracle T061116Z (12 HUD captures ~5.2 s apart, ent_text, 60 fps recording, audio onsets) vs packaged runs artifacts/s21/canals-pistol..canals-pistol5 (audio trace shot/hit times, AI report positions/schedules). hl2-simulation unit tests (new regulator, assault, input routing and player hitbox tests), workspace tests (two known release-only should_panic failures), owned tests with HL2_ROOT, strict Clippy, fmt, regression batch artifacts/s21-regression diffed against s20b-regression.
+
+**Result:** The canals cop now runs to its rally point and fights from (632,-3400) like native; burst cadence matches the native audio; player health matches native through 19 s (64/64, 52/52) and drains slower afterwards (22 vs 4 HP at 35 s). Regression: weapons 17/17, attention 26/26, movement 25/26 (the known doll01 collision warning only), no panics, campaign texture errors 25 (the known station03 set); every final image matches s20b-regression (no pixel over 8 except 25 pixels at an NPC head in bevy-attention: glance noise), Breen/slate/Kleiner feeds identical.
+
+**Still broken or not tested:** variance of the native kill time (one run); move-and-shoot, npc_metropolice's own pistol schedules, hint-group navigation, graph routes on maps with info_node_link controllers, aiscripted path modes 4/5 and interruptability 1/2, rally sequences/force crouch/urgent movement, squads; the player hitboxes use the idle01 pose only (no player animation states).
+
+**Next:** native variance rerun, then DESIGN 14n per-class AI or the first-map aiscripted/scene work per the owner's order; merge step 14 to main after the remaining checklist.
+
+## 2026-10-16: campaign-order NPC scene research and Claude handoff
+
+**Agent/model:** Codex Desktop, GPT-6 family; exact model identifier unavailable. Material research subagents: `scene_lifecycle` (scene lifecycle/event controls), `scripted_sequences` (cinematic sequences/resource paths/first-map AI paths), `inventory_review` (independent installed-data/guide/first-map checks); same inherited model family, exact identifiers unavailable. Claude's concurrent implementation changes are separate work.
+
+**Changed:** DESIGN records the owner's first-map-to-last research order and actionable static contracts. AGENTS/STATUS record the expected native `d2_coast_02` gap. Private `campaign-scenes-20261016h` holds the all-map roadmap, canonical guide-v3 cards, read-only queries, first-map dossier and exact native evidence; research/validation documentation points to the handoff. No implementation changes.
+
+**Why:** Let Claude reconstruct the campaign from authored data and common scheduler/controller contracts while research advances from `d1_trainstation_01`, avoiding guessed per-map timers or unsupported completeness claims.
+
+**Tested how / Result:** Independent installed-byte inventory and canonical derivation audits passed: 71 parsed inputs (69 numbered maps plus intro/credits), 1,837 cache records, 760 scene instances and 26,488 output connections. Independent first-map metadata audit passed 275 checks. Native evidence lanes check full database identities and selected PE bytes; root freeze and documentation acceptance commands are in docs/validation.md/private handoff. Earlier parser failures, prefix-setting misclassification, rejected listings and missing exact input body are preserved.
+
+**Still broken or not tested:** No native game execution, Rust build/runtime tests, ABI, ordinary campaign or Rust/native parity in this pass. Later maps have inventories only; first-map path/replay/model dependencies still require bounded research and matched runtime validation.
+
+**Next:** Finish first-map prerequisites and use its authored intro/ambient/customs/escort/monitor/storage/exit checklist with equivalent unpaused native and packaged Rust traces; advance detailed research to trainstation02 afterwards. The whole-cache census does not establish campaign completion.
+
+**Continued first-map followup16i:** Four more exact native bodies and selected PE spans establish persistent per-event processing state across LOOP rewinds, with Start flag-before-callback and End callback-before-clear ordering. DESIGN distinguishes continuing enabled pointing events from speech/gestures that can start on later crossings; inactive AI_AIM stays inactive. The sealed successor's verifier and parent read-only rerun pass. Multi-loop/long-frame ordering and audible replay remain unresolved/not tested. Root16h freeze remains unchanged; latest private handoff is research-campaign-firstmap-loop-continuation-20261016i.md.
+
+**16j continuation correction:** A resumed subagent acted on a stale completed assignment and added11 files to16h first-map-path-completion. Parent stopped the old assignment and audited the actual bytes: original27 lane/566 parent records unchanged, but old lane closure check fails. Additions were copied to a new private drift audit and remain unpromoted; additive acceptance passes while explicitly retaining the closure failure. No prior seal was rewritten. Subsequent research is confined to new first-map scheduler, actor-eligibility, animation-dependency and intro-camera roots. Owner's stop condition is near98% of the five-hour window; work continues below that threshold.
+
+## 2026-10-15/16 session 20: F4 overlay redesign, AI on by default + ai_disable, citizen heads, DX-level VMT blocks, RPG launch flash, grate fences/gates, combine ball rules (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013, private Ghidra pass project (retail client.dll MuzzleFlash switch and MuzzleFlash_AR2_Player), installed-map scans (read-only), native oracle captures/recordings.
+
+**Changed:** `ai/spawn.rs` overlay data model (columns, keys, panel, allegiance, citizen variants, campaign loadouts + Weapon_CanUse); `hl2-bevy/spawn_panel.rs` (new: setup-rasterized ProggyClean panel); AI runtime held weapons, per-actor player disposition, usable weapons; host Weapon_Equip/idle translation, NpcWeaponDraw gating, overlay keys and script actions; AI default on, `--no-ai`, `ai_disable` (hl2-ui console, owner go-ahead); `citizens.rs` (new: SelectModel); `npc_weapons::CAMPAIGN_LOADOUTS`; VMT DX-level blocks; `muzzle_effects` obsolete CL_EVENT_MUZZLEFLASH events + retail AR2 player flash + NPC RPG flash; `Physics::bullet_ray` (MASK_SHOT); BSP loader keeps grate/window world brushes; combine ball SDK hit/dissolve/homing rules.
+
+**Why:** owner notes in session 20 (F4 overlay; non-human NPCs use natural attacks; rebels and model cycling; queue citizens identical; citizen SMG pose; AI should be on by default with ai_disable; RPG flash missing; flash on every shot; combine ball bouncing; shooting through fences; walking through the can-cop gate).
+
+**Tested how:** unit tests (overlay, held weapons/allegiance, citizen heads, DX blocks, obsolete muzzle events, grate bullets, ball rules, ai_disable), owned tests with HL2_ROOT (new owned weapon-column test), workspace tests (two known release-only should_panic failures), strict Clippy, fmt. Packaged (artifacts/s20): F4 panel and spawns (pistol cop, SMG1 soldier, SMG1 citizen), queue heads, RPG launch flash, scissor gate walk, forcefield/fence walks, combine ball vs plaza and F4 cops. Native: oracle T212223Z (SMG1 citizen stance), T213147Z + 60 fps recording (RPG launch and ignition).
+
+**Result:** see STATUS session 20.
+
+**Still broken or not tested:** pistol flash on every shot (native skips most; retail cause open); grate bullets not checked in a packaged canals run; DX-block material changes not reviewed map-wide; NPC-vs-NPC; F4 allegiance not used by the combine ball; natural attacks/bugbait/medics (DESIGN 14n); regression batch not run (AI now on by default); main 6226ae7 not merged into the branch.
+
+**Next:** STATUS session 20 "Open".
+
+## 2026-10-15 session 19: template makers + StartNPC floor drop, NPC health/hitgroups/sneak attacks, NPC weapons in hands, muzzle flashes/tracers, stunstick glow (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. Continued in a side session handed off from the main session (same conversation, same model). No subagents. Research input: Codex Desktop REA npc-ai-research-20261015b (spawn-floor) and 20261015c (metrocop StartNPC bypass via IsWaitingToRappel).
+
+**Changed:** `npc_makers.rs` (DESIGN 14s): SF_NPC_TEMPLATE NPCs held at load (MapEntity_ParseAllEntities), npc_template_maker inputs/MakerThink/CanMakeNPC/destinations/radius/outputs/DeathNotice (first spawn uses the held entity; repeats counted unsupported until 14r), CAI_BaseNPC::StartNPC FloorPoint drop, SF_NPC_FALL_TO_GROUND step gravity. `skill.rs`: skill.cfg table, per-class Spawn health, GetHitgroupDamageMultiplier (+combine_s/zombie head overrides, gear 0.01), CAI_BaseHumanoid sneak attack. MDL hitbox set 0 parsed into `Rig::hitboxes`; NPC trace colliders are animated hitbox boxes (`RayHit::hitgroup`, `pose_npc_hitboxes`). NPC weapon world models drawn bone-merged (GPU skin reusing the owner's joints). `muzzle_effects.rs`: SDK MuzzleFlash_* particle sets from AE_MUZZLEFLASH/AE_NPC_MUZZLEFLASH, player FX_PlayerTracer and NPC FX_Tracer lines, stunstick halos. Owned tests: police hitboxes, bone merge names, muzzle events.
+
+**Why:** owner session-18 notes (floating NPCs, SDK health/damage, native cops die faster, weapons not drawn, flashes/tracers for NPCs and the player arsenal).
+
+**Tested how:** hl2-simulation 285 (new: makers incl. shared template, FloorPoint, falling, skill/hitgroups, sneak attack, muzzle/tracer), workspace (two known release-only should_panic failures), owned tests (HL2_ROOT) all pass, strict Clippy, fmt. Packaged (artifacts/s19): canals barrelpush makers (cop1 z 288 -> 256, fires, 29 hits on a suited player), tr02 plaza makers (citizens at npc_exit_point), headshots vs native ent_text (chest 40->35; sneak headshot 35->-70 and 40->-80 like native T163611Z/T164806Z; far 586 u front-facing 40->25 like native T165923Z), baton in hand, pistol/SMG1 first-person flashes, canals NPC pistol flash, stunstick ring vs native T020836Z. Native pistol hold recorded at 60 fps (work/hl2-decompiled/muzzle-20261015): flashes on about 1 in 2-3 shots at ~30 rendered fps.
+
+**Result:** floating template NPCs are gone (they appear where makers spawn them, on the floor); cops die to one close headshot like native; NPCs hold their weapons and show muzzle flashes; the player's bullet weapons have flashes and tracers.
+
+**Still broken or not tested:** repeat maker spawns (DESIGN 14r); actbusy (ForceThisNPCToLeave/ActBusy) so maker citizens stand at exit points; NPC flinch (native flinch_head on hits); player hitgroups (hull still); our flash shows on every shot (native depends on frame timing, 0.01 s life); muzzle dynamic lights, tracer whiz sounds, combine NPC side burst/embers, stunstick tesla arcs; F4 overlay redesign; native NPC pistol cadence comparison; regression batch; merge to main.
+
+**Next:** STATUS session 19 "Open".
+## 2026-10-15 session 18: terminal-cop policing like native, NPC weapons (DESIGN 14w steps 1-3) (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research input: Codex Desktop REA topics npc-ai-research-20261015a (weapon-activity: retail stunstick acttable 63->295 required; hull initialization) and 20261014a (owned animation events: shootp1 has no events).
+
+**Changed:** merged main 31b0f57 (owner's friendly setup) into the branch. Policing: ai_goal_police distances from the goal point; policing conditions/target independent of notarget; policing BuildScheduleTestBits and SelectFailSchedule; SetSchedule clears conditions (keeps COND_IN_PVS); baton request synced at selection; SetIdealState(SelectIdealState()) and no forced alert->idle; NPC_TranslateActivity angry idle; SetTurnActivity/GetStoppedActivity ACT_IDLE; harass point at the cop's floor height; diagnostics last_failed_task/blocked_moves. NPC weapons: `npc_weapons.rs` + generated `npc_acttables.rs`, Weapon_Equip/CanUse/TranslateActivity, shot regulator, humanoid TASK_RANGE_ATTACK1, attack conditions, CheckAmmo/SCHED_RELOAD, reload events, weapon world-model sequences and their events (Weapon_SetActivity/Operator_FrameUpdate), shot trajectory with proficiency spread, NPC FireBullets through the shared hit path (`gameplay::apply_hit`, `npc_fire_bullets`, `Physics::shot_ray`), weapon rigs loaded at map load (`models::append_rigs`), rig `activities`, metrocop preloads for pistol/SMG1. Unarmed NPCs' melee events hit nothing. F4/npc_create hull fit no longer start-solid on the floor.
+
+**Why:** owner checklist (terminal cop warnings) and owner reports/direction (unarmed cops hit; real NPC weapon system wired to F4).
+
+**Tested how:** hl2-simulation 278 (new: police goal point, noclip policing with 4-6 s spacing, unarmed melee, weapon CanUse/spread/fire/reload/shotgun, NPC bullets vs player hull), workspace tests (two known release-only should_panic failures), owned tests (HL2_ROOT) all pass, strict Clippy, fmt. Native oracle T020836Z (terminal cop ent_text, 13 frames) vs packaged artifacts/s18/ai-terminal-cop-80m: same schedule/state/animation order. Packaged d1_canals_01 artifacts/s18/ai-pistol-cop-yard6: map pistol cop fires bursts, reloads, 46 shots/35 hits on a suitless player.
+
+**Result:** policing matches native's observed sequence; armed metrocops shoot and reload through SDK-shaped weapon code.
+
+**Still broken or not tested:** NPC pistol fire not compared with native (cadence, hit rate; our player target is the hull, not hitboxes); weapons not drawn in NPC hands, no muzzle flash/tracer rendering; NPC per-class health and hitgroups (owner: native cops die faster); NPCs not dropped to the floor (StartNPC) or falling; F4 overlay redesign; npc_metropolice's own ranged schedules; the plaza walk-up escalation got faster (native timing unknown).
+
+**Next:** STATUS session 18 "Open".
 ## 2026-10-15: main CI fix (impact table address identity)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
@@ -32,6 +316,51 @@
 
 **Next:** exercise native picker/clipboard on supported desktops when computer use is available. Existing campaign work remains separate.
 
+## 2026-10-14 session 17: metrocop AI fixes from the first packaged AI-on runs (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Fixes the cloud sessions' SDK-only AI code (`claude-opus-5-5`, cloud) found in its first packaged runs.
+
+**Changed:** (1) the metrocop AI's activities (ACT_PUSH_PLAYER, baton on/off, police harass, melee, flinches, weapon-translated move/idle/attack) are preloaded for npc_metropolice models (`models::METROPOLICE_AI_ACTIVITIES`): before, their sequences were never loaded, so shove/baton tasks failed and schedules reselected every think; (2) Weapon_TranslateActivity in `SceneMotor::set_activity` from the SDK stunstick/pistol/SMG1 acttables (`ai::host::weapon_translate_activity`; kept only when the model has the result), so ACT_MELEE_ATTACK1 plays the stunstick swing; (3) CAI_SentenceBase::Speak gating: FOkToMakeSound/JustMadeSound per NPC (equal or lower priority culled until 2 + U(1.5, 2.0) s, SDK priorities per sentence group, pain/die always), diagnostics `culled_sentences`; (4) `ai::Conditions` serializes as condition names (a u128 above u64::MAX blanked the whole `ai` report: "number out of range"); the report shows serialization errors instead of null; (5) Weapon_StunStick.Melee_Hit/Melee_Miss preloaded (the hit was refused at playback).
+
+**Why:** owner: metrocops shove and escalate when the player walks up close, not only on +USE; validation checklist steps 3-4.
+
+**Tested how:** hl2-simulation 270, owned tests (HL2_ROOT, all pass), strict Clippy, fmt. Packaged d1_trainstation_02 `--ai`, plaza cop #427: (a) +USE x3 from 50 units (SDK PrecriminalUse: warnings only, no shove at that range): warning 1 line, baton activation animation at 2, AdministerJustice swing at 3 knocks the player ~100 units back, return to post; before the fixes the cop never animated and queued a BACK_UP sentence every think (~80 in 13 s). (b) Walking into him: pushplayer shoves from warning 1, baton at 2, swing at 3 (player pushed back ~100 units), re-approach -> repeated swings with stunstick hit sounds; 3 sentences spoken, 7 culled; health stays 100 (precriminal). Native reference: research 14a native-metrocop movie (plaza cop swing, red fade, punch, displacement, health 100); not a side-by-side timing comparison.
+
+**Result:** the trainstation metrocop escalation chain runs in the packaged game.
+
+**Still broken or not tested:** NPC weapon models (baton not in hand); red fade/punch visuals not checked in captures; native timing comparison; checklist 5 (scripted cops with AI on) and 6 (F4 spawns); policing warnings at the terminal cop (route); citizen +USE speech.
+
+**Next:** STATUS session 17.
+## 2026-10-14 session 17: NPC random look targets and head turns (DESIGN 14h, `wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `attention` gains the CAI_BaseActor random look queue: ramped interests (CAI_InterestTarget_t::Interest), position targets, `LookTargets::maintain` (explicit interests cut random ones to ramp + 0.2 s and delay the next pick 1 s; else PickLookTarget(1.5, 2.5): PickRandomLookTarget over drawn studio-model entities and the player within 360 units, a moving player or 1 in 3 standing held 1-4 s, others random importance x10 NPC x10 moving, FVisible + ValidHeadTarget, fewer considered than RandomInt(0,5) -> MakeRandomLookTarget 128 units ahead at influence 0.01; next pick at duration - 0.4), `attention::think` every 0.1 s for animated-face classes (cops, Combine soldiers, citizens, Barney, Alyx, Breen, Eli, Kleiner, Mossman, Monk, Dog, generic actors) with or without `--ai`, COND_IN_PVS gating from the host's BSP PVS (`eyes::attention_pvs`; outside the PVS head and eyes keep their last values; unknown fails open). Head control takes random + explicit interests at Interest() x HeadTargetValidity with EyePosition targets (NPC eyes attachment). Eyes take the newest valid active interest (explicit first); the old nearest-visible fallback (which also ignored walls for the player: it excluded the world entity id) stays only for actors without an animated face (cyclers). Report keys `random_look_targets`, `heads`.
+
+**Why:** owner report (session 17): citizens side-eye the player with their eyes only and stare forever; native turns the head and glances periodically.
+
+**Tested how:** unit tests (Interest ramp curve, glance expiry/truncation/explicit priority, made-up point and scripted actors), hl2-simulation 270 passed, strict Clippy, fmt. Packaged d1_trainstation_02 fly eye (-4110,-2180,128) yaw 290 beside the dispenser queue (#580-582), 13 s: #580 turns his head up to ~49 degrees toward the player, holds 1-2 s and looks ahead again, about half the samples on the player; #581 alternates between #580 and the player; #582 looks at the others or ahead. Native at the same spot (original-oracle T071459Z, 14 frames ~2 s apart): the front citizen's head is turned to the camera in roughly 60-70% of frames and ahead in the rest; no continuous stare in either. A first spot (eye -4180,-2256) was behind the dispenser wall (rejected; the dispenser correctly blocked sight). PVS gating on the player alone froze Kleiner on Barney's monitor (head pitched up, eyes rolled back; rejected), so the PVS test includes the active monitor's point_camera (CPointCamera::SetupVisibility): Kleiner's feed is back to 6 changed pixels, Breen's broadcast feed differs by 1186 pixels from random glances when no LOOKAT is active (not verified against native). Regression batch artifacts/s17-look2-regression (player-only gating): 25/17/26 (doll01 only), no panics.
+
+**Result:** NPCs glance at the player and around with head turns instead of staring.
+
+**Still broken or not tested:** Breen's broadcast glances vs native; citizen +USE speech (TLK_USE via the response system: "We can't be seen talking", owner); tactical (enemy), navigation look-ahead and combat look-forward branches; synthetic queues; expressions; moving brush entities as candidates; entity sphere order (ours: player first, then load order); native random stream; no numerical native head-angle comparison (frames only); the citizen model variety (natives use random citizen heads).
+
+**Next:** AI-on checklist (warnings/shove at the plaza and terminal cops), NPC weapon models, merge after validation.
+## 2026-10-14 session 17: step 14 merge onto main (local validation) and metrocop idle (`local/validate-npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Builds on the cloud sessions' `wip/cloud-npc-ai-20261010` (Claude Code cloud, `claude-opus-5-5`, SDK-only).
+
+**Changed:** merged `wip/cloud-npc-ai-20261010` onto main 675c9df (conflicts kept both sides: report keys ai/npc_spawns + phys_explosions/gibs, `--ai` + `--frag-swept-box` help, the AI's pre-move player impulse before the gravity-gun max speed, Scene `spawned` + `keyvalue_overrides`, physics `add_entity_hull` after the constraint code). The owned HEV sentence length test skips METROPOLICE_* (their `{Len 1.5}` is a placeholder). **Metrocop idle (owner report: cops lean as if against a wall):** cops without DefaultAnim played "Idle_Baton" (a sequence with no activity; leaning forward, arm across the chest); they now start (and return after scripts) on ACT_IDLE translated by their weapon's acttable (pistol -> ACT_IDLE_PISTOL, smg1/ar2/shotgun -> ACT_IDLE_SMG1, stunstick none) with weighted selection (batonidle1 x2 / batonidle2 x1); rigs preload ACT_IDLE_PISTOL/ACT_IDLE_SMG1. Oracle (private): `!cmd` view suffix runs ORACLE_CMD (backup run_view_oracle.py.bak-20261014b).
+
+**Why:** owner direction (session 17): merge the physics/arsenal work, then step 14; owner report on the cop idle pose.
+
+**Tested how:** workspace tests (hl2-simulation 266 + new `metrocops_idle_on_their_weapon_translated_idle_activity`; hl2-bevy's two release-only should_panic image tests fail as before), owned tests (HL2_ROOT, all pass after the HEV test fix), strict Clippy, fmt. AI-off regression batch artifacts/s17-ai-regression (before the idle fix): 25/17/26 (doll01 only), finals vs s17-regression max pixel <= 7 (exposure noise), Breen/Kleiner feeds identical. Native (original-oracle): T065205Z ent_text shows terminal_side_cop idling on sequence 8 batonidle2 (ACT_IDLE, SCHED_IDLE_STAND, behavior Policing) upright with arms down; T065343Z a prop_dynamic police.mdl on batonidle1 is upright too; T065122Z at 80 units the cop runs SCHED_POLICE_FACE_ALONG_GOAL with ACT_POLICE_HARASS2. Our offline decode of batonidle1/2 is smooth across its 30-frame sections (the clip decoder was not the cause). Packaged after the fix: cop #577 upright, arms down, same view as native (artifacts/s17/cop577-fixed-compare.png). d1_trainstation_02 launch to frame 30 with the spawn pool: ~7.5 s (main not timed side by side).
+
+**Result:** metrocops idle like native (minus the baton in hand).
+
+**Still broken or not tested:** NPC weapon models (native cops hold the baton); AI-on plaza/terminal checks (checklist 3-6) in progress: the hall walk to terminal_side_cop hits the hall wall (route needed); citizens/Barney keep their idle_subtle default (not compared); head/eye attention (owner: NPCs stare with their eyes only; native turns the head and glances periodically).
+
+**Next:** AI-on validation, NPC head/look attention research, weapon models.
 ## 2026-10-14 session 17: explosive props (`wip/cloud-physics-20261010`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
@@ -404,6 +733,133 @@ Per-process recordings: native blip onsets match ours (0, 1.057, 2.102, 2.415, 2
 **Still broken or not tested:** native draws Sprite-shader materials with `$nosrgb` 1 (SDK sprite_dx9.cpp default: no sRGB read/write, TONEMAP_SCALE_GAMMA), i.e. additive in gamma space into the integer-HDR framebuffer; ours adds in linear space, so the trail core is about half as bright (red excess ~50 vs ~100) and looks thinner. CBeamSegDraw geometry was checked against the SDK's compiled tier2.lib (half width per side, vertex colour = rgb + alpha). Gamma-space sprite blending is a renderer item for all sprites (planned, not started). Explosion timing vs native not measured (not in view); lob/roll not compared; regression batch not run; the remaining four weapons.
 
 **Next:** lob/roll native comparison, then crossbow, RPG, bug bait, gravity gun; gamma-space sprite blending as a separate renderer step (DESIGN 11f).
+## 2026-10-12 cloud session: runtime entity creation steps 1-3 started (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `Scene::initial_state` factored out of Scene::new; `Scene::spawned` / `spawn_entity` / `entity` / `ent` (spawned entities leaked `&'static`); 23 runtime lookups in entities.rs plus AI speech and eye tracking safe for spawned ids; `AiRuntime::add_actor`.
+
+**Why:** owner decision: spawn like Source (DESIGN 14r) instead of the load-time pool.
+
+**Tested how:** unit tests (spawned entity state/lookup, 40 scene+physics ticks with a spawned cop and a Kill input, runtime-spawned cop gets an AI actor and thinks); workspace tests; strict Clippy (ca1a40b failed it: the command chain did not gate on Clippy; fixed next commit); fmt.
+
+**Result:** passes on Linux; the host does not call spawn_entity yet (F4 still uses the pool).
+
+**Still broken or not tested:** steps 3 (controller, colliders), 4 (async late precache), 5 (Bevy instancing), 6 (remove pool).
+
+**Next:** DESIGN 14r step 3 remainder.
+
+## 2026-10-12 cloud session: runtime entity creation plan (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** AGENTS.md asset-read rule clarified (no blocking reads in frame systems; runtime loads via asynchronous workers; entities may be created at runtime); DESIGN "14r" plan for runtime entity creation with late precache.
+
+**Why:** owner: spawning should work like HL2/Garry's Mod (Source's CC_NPC_Create creates entities and late-precaches at runtime).
+
+**Tested how:** documentation only (no code change).
+
+**Result:** plan recorded; the F4 pool stays until 14r steps land.
+
+**Still broken or not tested:** everything in 14r.
+
+**Next:** 14r step 1.
+
+## 2026-10-12 cloud session: F4 roster, scrolling list and AI debug switches (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** 41 HL2 NPC classes with SDK default models in the F4 pool; scrolling class list with weapon choices; F4 debug keys I (AI on/off, stopping NPCs to idle), O (ignore the player), P (stance toward the player).
+
+**Why:** owner: missing NPCs, a scrolling list, and debug switches to watch NPCs without the player or the AI interfering.
+
+**Tested how:** unit tests (pool covers every class, list scrolls, ignored player is not shoved, forced hate makes the player the enemy, AI off clears schedules); strict Clippy; fmt; workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** visuals, load time of ~30 extra models, AI only for metrocops, no console equivalents.
+
+**Next:** STATUS AI checklist item 6.
+
+## 2026-10-12 cloud session: F4 spawns real NPCs (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** load-time hidden spawn pool (3 per F4 class, SDK default models); F4 Enter / npc_create activate the next slot at the CC_NPC_Create placement; cop baton from the equipment; overlay shows the last result.
+
+**Why:** owner: F4 placed nothing ("why does F4 still not work").
+
+**Tested how:** unit tests (pool slots, hidden pooled cop does not think, placed cop thinks and warns); strict Clippy; fmt; workspace tests.
+
+**Result:** passes on Linux. Not run in the game (cloud: no owned files/native).
+
+**Still broken or not tested:** visual placement, weapon models in hands, AI for non-cop classes, names, load-time cost of the extra models.
+
+**Next:** STATUS AI checklist item 6.
+
+## 2026-10-10 cloud session: AI host wiring, npc_metropolice, F4 overlay (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `ai::host` (SceneMotor, PhysicsSight, PhysicsPlacement), `ai::runtime` (NPCThink loop, off by default, yields to scripts/scenes), `ai::metropolice` (npc_metropolice.cpp precriminal behavior: shove, warnings, baton, stunstick, AdministerJustice, PrecriminalUse, police goal via SetPoliceGoal), scene AI hooks (activity, yaw, anim events, inputs), npc_metropolice as AI-only ground actor; hl2-bevy AI tick in the NPC stage, player hits (damage/impulse/fade), `--ai` / console `ai_enable`, metrocop sentences, +USE on cops, F4 spawn overlay and `npc_create*` routing (placement logged only).
+
+**Why:** owner step 14: trainstation metrocops through their real AI logic; F4 developer spawns.
+
+**Tested how:** unit tests with synthetic worlds (motor yaw, sight, placement, think loop off/on, scripted yield, SetPoliceGoal warnings and outputs, +USE warnings, console routing); workspace `cargo test --locked`; strict Clippy (exit 0); fmt.
+
+**Result:** passes on Linux. Not run in the game: no owned files or native HL2 in the cloud.
+
+**Still broken or not tested:** everything visual/audio/timing (not tested (cloud: no owned files/native)); runtime NPC creation (plan in DESIGN 14); citizens/Combine; view punch on this branch; thrown-object hook; gameplay sound insertion into CSoundEnt; think throttling.
+
+**Next:** STATUS AI LOCAL VALIDATION CHECKLIST (plaza comparison with AI on, regression batch with AI off).
+
+## 2026-10-10 cloud session: policing behavior (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `ai::police` (ai_goal_police + CAI_PolicingBehavior from SDK 2013); Behavior::select_schedule takes the NPC mutably; TASK_WAIT_RANDOM; face tasks fall back to the remembered enemy position.
+
+**Why:** owner: trainstation metrocops must hold posts and escalate through the real logic (step 14).
+
+**Tested how:** unit tests (warning cadence/outputs/baton/hostility, suppress on crossing the radius, knock-out plane, return to post); strict Clippy/fmt; hl2-bevy cargo check.
+
+**Result:** passes on Linux; not wired into the game.
+
+**Still broken or not tested:** the npc_metropolice class, host wiring, sentences/gestures in game, native comparison.
+
+**Next:** STATUS handoff checklist step 3.
+
+## 2026-10-10 cloud session: AI schedules, senses, squads, spawn model (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** `ai::schedule` (+ generated default schedule table), `ai::senses`, `ai::squad`, `ai::spawn` (npc_create commands, F4 overlay model).
+
+**Why:** step 14 core (owner priority 1).
+
+**Tested how:** unit tests (13 ai:: tests), strict Clippy/fmt on Linux.
+
+**Result:** builds/passes on Linux; no runtime change (not wired).
+
+**Still broken or not tested:** host adapters, per-class NPCs, F4 drawing; everything vs native.
+
+**Next:** see STATUS checklist step 3.
+
+## 2026-10-10 cloud session: step 14 AI core start (`wip/cloud-npc-ai-20261010`)
+
+**Agent/model:** Claude Code cloud session (Linux sandbox), `claude-opus-5-5` per the session environment. No subagents.
+
+**Changed:** DESIGN step 14 plan; `hl2-simulation/src/ai/` conditions, NPC state selection, enemy memory, relationship table (SDK 2013).
+
+**Why:** owner priority 1 (step 14), prepared in the cloud.
+
+**Tested how:** unit tests; strict Clippy/fmt on Linux.
+
+**Result:** builds and passes on Linux; not wired into the game.
+
+**Still broken or not tested:** everything behavioral; see STATUS handoff.
+
+**Next:** schedules/tasks, senses, squads, F4/npc_create data model, metropolice.
 
 ## 2026-10-09 session 10 (later): arsenal WIP (frag grenade), suit logon
 

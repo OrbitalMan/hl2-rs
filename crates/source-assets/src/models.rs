@@ -14,6 +14,19 @@ pub fn read_eye_position(vfs: &Vfs, model: &str) -> Result<Vec3> {
         .with_context(|| format!("missing model {model}"))?;
     eye_position(&data).with_context(|| format!("studio eye position: {model}"))
 }
+/// Studio header hull_min/hull_max (studiohdr_t offsets 104/116): the box
+/// CreatePhysicsProp sweeps to place a prop.
+pub fn read_hull(vfs: &Vfs, model: &str) -> Result<(Vec3, Vec3)> {
+    let data = vfs
+        .read(model)?
+        .with_context(|| format!("missing model {model}"))?;
+    eye_position(&data).with_context(|| format!("studio header: {model}"))?;
+    let (mins, maxs) = (vec3(&data, 104)?, vec3(&data, 116)?);
+    if !(mins.is_finite() && maxs.is_finite()) || mins.cmpgt(maxs).any() {
+        bail!("invalid studio hull: {model}");
+    }
+    Ok((mins, maxs))
+}
 fn eye_position(data: &[u8]) -> Result<Vec3> {
     if data.len() > 64 * 1024 * 1024
         || bytes(data, 0, 4)? != b"IDST"
@@ -765,6 +778,12 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         if instance.entity.is_some() && !world.rigs.contains_key(&instance.asset_key()) {
             let mut wanted = [
                 "ACT_IDLE",
+                // Weapon-translated metrocop idles (weapon_pistol/smg1 acttables).
+                "ACT_IDLE_PISTOL",
+                "ACT_IDLE_SMG1",
+                // Stunstick acttable results for the metrocop shove/baton chain.
+                "ACT_MELEE_ATTACK_SWING",
+                "ACT_IDLE_ANGRY_MELEE",
                 "idle_subtle",
                 "idle_baton",
                 "walk_all",
@@ -785,6 +804,18 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             .into_iter()
             .map(String::from)
             .collect::<BTreeSet<_>>();
+            // npc_metropolice AI activities (hl2-simulation ai::metropolice/police and the
+            // weapon acttables): the cloud AI branch requested them at runtime only, so
+            // their sequences were never loaded and every task using them failed.
+            if instance.kind == "npc_metropolice" {
+                wanted.extend(METROPOLICE_AI_ACTIVITIES.iter().map(|a| a.to_lowercase()));
+            }
+            if matches!(
+                instance.kind.as_str(),
+                "npc_citizen" | "npc_barney" | "npc_alyx" | "npc_combine_s"
+            ) {
+                wanted.extend(HUMANOID_AI_ACTIVITIES.iter().map(|a| a.to_lowercase()));
+            }
             for e in &world.entities {
                 for key in [
                     "DefaultAnim",
@@ -943,6 +974,29 @@ pub fn used_chunk_models(world: &World) -> Vec<String> {
 }
 /// Adds a non-map model's .phy solid (and supported pieces) to the world under its
 /// skin-0 asset key, e.g. a thrown frag's w_grenade.phy. Returns the reason on failure.
+/// Rigs of models that have no map instance (NPC weapon world models: their sequences'
+/// events drive NPC firing, DESIGN 14w), with every activity's sequence, keyed like
+/// instances (`model#0`). Returns the models that failed to load.
+pub fn append_rigs(world: &mut World, vfs: &Vfs, models: &[String]) -> Vec<String> {
+    let mut failed = Vec::new();
+    for model in models {
+        let key = format!("{}#0", model.to_lowercase());
+        if world.rigs.contains_key(&key) {
+            continue;
+        }
+        let loaded = crate::animation::load(vfs, model, &Default::default()).and_then(|first| {
+            let wanted = first.activities.iter().map(|a| a.to_lowercase()).collect();
+            crate::animation::load(vfs, model, &wanted)
+        });
+        match loaded {
+            Ok(rig) => {
+                world.rigs.insert(key, rig);
+            }
+            Err(e) => failed.push(format!("{model}: {e:#}")),
+        }
+    }
+    failed
+}
 pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result<()> {
     let key = format!("{}#0", model.to_lowercase());
     let (solid, pieces) = read_physics(vfs, model)?.context("model has no .phy")?;
@@ -952,6 +1006,173 @@ pub fn append_model_physics(world: &mut World, vfs: &Vfs, model: &str) -> Result
 }
 /// studiohdr_t keyvalueindex/keyvaluesize (offsets 312/316 in MDL 44-49): the model's
 /// $keyvalues text (prop_data, physgun_interactions, ...).
+/// Activities the metrocop AI sets (class schedules, policing, flinches, melee) and
+/// their stunstick/pistol/SMG1 acttable translations.
+/// (DESIGN 14w adds the pistol, SMG1 and stunstick acttable results.)
+pub const METROPOLICE_AI_ACTIVITIES: &[&str] = &[
+    "ACT_PUSH_PLAYER",
+    "ACT_MELEE_ATTACK1",
+    "ACT_MELEE_ATTACK_SWING",
+    "ACT_ACTIVATE_BATON",
+    "ACT_DEACTIVATE_BATON",
+    "ACT_POLICE_HARASS1",
+    "ACT_POLICE_HARASS2",
+    "ACT_IDLE_ANGRY",
+    "ACT_IDLE_ANGRY_MELEE",
+    "ACT_IDLE_ANGRY_PISTOL",
+    "ACT_IDLE_ANGRY_SMG1",
+    "ACT_WALK",
+    "ACT_RUN",
+    "ACT_WALK_PISTOL",
+    "ACT_RUN_PISTOL",
+    "ACT_WALK_RIFLE",
+    "ACT_RUN_RIFLE",
+    "ACT_WALK_ANGRY",
+    "ACT_SMALL_FLINCH",
+    "ACT_BIG_FLINCH",
+    "ACT_FLINCH_PHYSICS",
+    "ACT_COWER",
+    "ACT_RANGE_ATTACK_PISTOL",
+    "ACT_RANGE_ATTACK_SMG1",
+    "ACT_GESTURE_RANGE_ATTACK_PISTOL",
+    "ACT_GESTURE_RANGE_ATTACK_SMG1",
+    "ACT_RELOAD_PISTOL",
+    "ACT_RELOAD_SMG1",
+    "ACT_DUCK_DODGE",
+    "ACT_TO_COMBAT_SOUND",
+    "ACT_COVER_PISTOL_LOW",
+    "ACT_COVER_SMG1_LOW",
+    "ACT_GESTURE_RELOAD_PISTOL",
+    "ACT_GESTURE_RELOAD_SMG1",
+    "ACT_IDLE_PISTOL",
+    "ACT_IDLE_SMG1",
+    "ACT_IDLE_SMG1_RELAXED",
+    "ACT_IDLE_SMG1_STIMULATED",
+    "ACT_RANGE_AIM_PISTOL_LOW",
+    "ACT_RANGE_AIM_SMG1_LOW",
+    "ACT_RANGE_ATTACK1",
+    "ACT_RANGE_ATTACK_SMG1_LOW",
+    "ACT_RELOAD",
+    "ACT_RELOAD_PISTOL_LOW",
+    "ACT_RELOAD_SMG1_LOW",
+    "ACT_RUN_AIM_PISTOL",
+    "ACT_RUN_AIM_RIFLE",
+    "ACT_RUN_CROUCH_AIM_RIFLE",
+    "ACT_RUN_CROUCH_RIFLE",
+    "ACT_RUN_RIFLE_RELAXED",
+    "ACT_RUN_RIFLE_STIMULATED",
+    "ACT_WALK_AIM_PISTOL",
+    "ACT_WALK_AIM_RIFLE",
+    "ACT_WALK_CROUCH_AIM_RIFLE",
+    "ACT_WALK_CROUCH_RIFLE",
+    "ACT_WALK_RIFLE_RELAXED",
+    "ACT_WALK_RIFLE_STIMULATED",
+];
+/// Activities the humanoid AI classes (npc_citizen, npc_barney, npc_alyx, npc_combine_s;
+/// hl2-simulation ai::humanoid and the base schedules) set, and every acttable result of
+/// the weapons they carry (SMG1, AR2, shotgun, pistol, RPG, Alyx gun, crowbar; a test in
+/// hl2-simulation keeps this in sync with its SDK acttables).
+pub const HUMANOID_AI_ACTIVITIES: &[&str] = &[
+    "ACT_IDLE_ANGRY",
+    "ACT_WALK",
+    "ACT_RUN",
+    "ACT_WALK_AIM",
+    "ACT_RUN_AIM",
+    "ACT_RANGE_ATTACK1",
+    "ACT_RANGE_ATTACK2",
+    "ACT_COMBINE_THROW_GRENADE",
+    "ACT_COMBINE_AR2_ALTFIRE",
+    "ACT_RELOAD",
+    "ACT_SMALL_FLINCH",
+    "ACT_BIG_FLINCH",
+    "ACT_FLINCH_PHYSICS",
+    "ACT_COWER",
+    "ACT_COVER_LOW",
+    "ACT_RUN_PROTECTED",
+    "ACT_TURN_LEFT",
+    "ACT_TURN_RIGHT",
+    "ACT_MELEE_ATTACK1",
+    "ACT_COVER_LOW_RPG",
+    "ACT_COVER_PISTOL_LOW",
+    "ACT_COVER_SMG1_LOW",
+    "ACT_CROUCHIDLE_STIMULATED",
+    "ACT_GESTURE_RANGE_ATTACK_AR2",
+    "ACT_GESTURE_RANGE_ATTACK_PISTOL",
+    "ACT_GESTURE_RANGE_ATTACK_SHOTGUN",
+    "ACT_GESTURE_RANGE_ATTACK_SMG1",
+    "ACT_GESTURE_RELOAD_PISTOL",
+    "ACT_GESTURE_RELOAD_SHOTGUN",
+    "ACT_GESTURE_RELOAD_SMG1",
+    "ACT_IDLE_AIM_RIFLE_STIMULATED",
+    "ACT_IDLE_ANGRY_MELEE",
+    "ACT_IDLE_ANGRY_PISTOL",
+    "ACT_IDLE_ANGRY_RPG",
+    "ACT_IDLE_ANGRY_SHOTGUN",
+    "ACT_IDLE_ANGRY_SMG1",
+    "ACT_IDLE_PISTOL",
+    "ACT_IDLE_RPG",
+    "ACT_IDLE_RPG_RELAXED",
+    "ACT_IDLE_SHOTGUN_AGITATED",
+    "ACT_IDLE_SHOTGUN_RELAXED",
+    "ACT_IDLE_SHOTGUN_STIMULATED",
+    "ACT_IDLE_SMG1",
+    "ACT_IDLE_SMG1_RELAXED",
+    "ACT_IDLE_SMG1_STIMULATED",
+    "ACT_IDLE_STEALTH_PISTOL",
+    "ACT_IDLE_STIMULATED",
+    "ACT_MELEE_ATTACK_SWING",
+    "ACT_RANGE_AIM_AR2_LOW",
+    "ACT_RANGE_AIM_PISTOL_LOW",
+    "ACT_RANGE_AIM_SMG1_LOW",
+    "ACT_RANGE_ATTACK_AR2",
+    "ACT_RANGE_ATTACK_PISTOL",
+    "ACT_RANGE_ATTACK_PISTOL_LOW",
+    "ACT_RANGE_ATTACK_RPG",
+    "ACT_RANGE_ATTACK_SHOTGUN",
+    "ACT_RANGE_ATTACK_SHOTGUN_LOW",
+    "ACT_RANGE_ATTACK_SMG1",
+    "ACT_RANGE_ATTACK_SMG1_LOW",
+    "ACT_READINESS_PISTOL_AGITATED_TO_STIMULATED",
+    "ACT_READINESS_PISTOL_RELAXED_TO_STIMULATED",
+    "ACT_READINESS_PISTOL_RELAXED_TO_STIMULATED_WALK",
+    "ACT_READINESS_PISTOL_STIMULATED_TO_RELAXED",
+    "ACT_RELOAD_PISTOL",
+    "ACT_RELOAD_PISTOL_LOW",
+    "ACT_RELOAD_SHOTGUN",
+    "ACT_RELOAD_SHOTGUN_LOW",
+    "ACT_RELOAD_SMG1",
+    "ACT_RELOAD_SMG1_LOW",
+    "ACT_RUN_AIM_PISTOL",
+    "ACT_RUN_AIM_RIFLE",
+    "ACT_RUN_AIM_RIFLE_STIMULATED",
+    "ACT_RUN_AIM_SHOTGUN",
+    "ACT_RUN_AIM_STEALTH_PISTOL",
+    "ACT_RUN_CROUCH_AIM_RIFLE",
+    "ACT_RUN_CROUCH_RIFLE",
+    "ACT_RUN_CROUCH_RPG",
+    "ACT_RUN_PISTOL",
+    "ACT_RUN_RIFLE",
+    "ACT_RUN_RIFLE_RELAXED",
+    "ACT_RUN_RIFLE_STIMULATED",
+    "ACT_RUN_RPG",
+    "ACT_RUN_STEALTH_PISTOL",
+    "ACT_RUN_STIMULATED",
+    "ACT_WALK_AIM_PISTOL",
+    "ACT_WALK_AIM_RIFLE",
+    "ACT_WALK_AIM_RIFLE_STIMULATED",
+    "ACT_WALK_AIM_SHOTGUN",
+    "ACT_WALK_AIM_STEALTH_PISTOL",
+    "ACT_WALK_CROUCH_AIM_RIFLE",
+    "ACT_WALK_CROUCH_RIFLE",
+    "ACT_WALK_CROUCH_RPG",
+    "ACT_WALK_PISTOL",
+    "ACT_WALK_RIFLE",
+    "ACT_WALK_RIFLE_RELAXED",
+    "ACT_WALK_RIFLE_STIMULATED",
+    "ACT_WALK_RPG",
+    "ACT_WALK_STEALTH_PISTOL",
+    "ACT_WALK_STIMULATED",
+];
 pub fn studio_keyvalues(mdl: &[u8]) -> Result<Option<String>> {
     if bytes(mdl, 0, 4)? != b"IDST" {
         bail!("model magic mismatch");

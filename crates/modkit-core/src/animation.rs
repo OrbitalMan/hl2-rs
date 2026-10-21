@@ -19,6 +19,14 @@ pub struct Attachment {
     pub bone: usize,
     pub local: Mat4,
 }
+/// Studio hitbox (mstudiobbox_t of hitbox set 0): a bone-local box and its hitgroup.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Hitbox {
+    pub bone: usize,
+    pub group: i32,
+    pub mins: Vec3,
+    pub maxs: Vec3,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Bone {
     pub name: String,
@@ -225,10 +233,15 @@ impl AutoLayer {
         } else {
             weight * s
         };
-        Ok(Some((
-            (cycle - self.start) / (self.end - self.start),
-            weight,
-        )))
+        // An all-NaN ramp (retail female_shared.mdl layer_walk_p_aiming) passes every
+        // SDK comparison above at full weight, and the SDK hands the NaN child cycle to
+        // AccumulatePose; what retail then does is not established, so the child is
+        // skipped here (open question, STATUS).
+        let child_cycle = (cycle - self.start) / (self.end - self.start);
+        if !child_cycle.is_finite() || !weight.is_finite() {
+            return Ok(None);
+        }
+        Ok(Some((child_cycle, weight)))
     }
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -627,6 +640,13 @@ pub struct Rig {
     /// Attachments of the root model, in model order.
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// Every sequence activity of the model and its included models (upper case),
+    /// loaded or not: SelectWeightedSequence availability (Weapon_CanUse).
+    #[serde(default)]
+    pub activities: std::collections::BTreeSet<String>,
+    /// Hitbox set 0 of the root model (bullet traces and hitgroups).
+    #[serde(default)]
+    pub hitboxes: Vec<Hitbox>,
 }
 impl Rig {
     pub fn attachment(&self, name: &str) -> Option<&Attachment> {
@@ -1298,6 +1318,14 @@ mod tests {
         constant.end = constant.start;
         assert_eq!(constant.sample(0.9, 0.7), Ok(Some((0.9, 0.7))));
         assert!(ramp(autolayer_flags::POSE).sample(0.5, 1.).is_err());
+        let nan = AutoLayer {
+            start: f32::NAN,
+            peak: f32::NAN,
+            tail: f32::NAN,
+            end: f32::NAN,
+            ..ramp(0)
+        };
+        assert_eq!(nan.sample(0.5, 1.), Ok(None));
     }
     fn layered_rig() -> Rig {
         let bone = Bone {

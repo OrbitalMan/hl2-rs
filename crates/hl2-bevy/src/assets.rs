@@ -22,7 +22,7 @@ const MAX_MATERIALS: usize = 16384;
 /// Animation frames, each with its authored mip chain (largest first).
 pub type TextureFrames = Arc<Vec<Arc<Vec<Image>>>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TwoTexture {
     pub base_frames: TextureFrames,
     pub second_frames: TextureFrames,
@@ -48,6 +48,8 @@ pub struct LoadedMap {
     pub materials: BTreeMap<String, MaterialData>,
     pub texture_errors: Vec<String>,
     pub models: serde_json::Value,
+    /// The map's mounted content (its pak included) for runtime model loads.
+    pub vfs: Arc<Vfs>,
 }
 
 pub fn map_metadata(loaded: &LoadedMap) -> serde_json::Value {
@@ -67,7 +69,7 @@ pub fn map_metadata(loaded: &LoadedMap) -> serde_json::Value {
             "owned_eye_dx8_fallbacks":loaded.materials.iter().filter(|(_,m)|m.eye_fallback).map(|(n,_)|n).collect::<Vec<_>>()}})
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MaterialData {
     pub base: Option<Arc<Image>>,
     /// Normalized VTF key shared by both decoded textures and GPU image handles.
@@ -190,8 +192,50 @@ pub fn load_with_canvas(
     // Static infodecals land on world brush faces only, before static props are merged.
     let mut decal_errors = Vec::new();
     add_static_decals(&mut world, &vfs, &mut decal_errors);
+    // F4 / npc_create spawn pool: hidden NPCs every load-time system builds.
+    hl2_simulation::ai::spawn::append_pool(&mut world);
+    // CNPC_Citizen::SelectModel (citizen types, random heads), before models load.
+    hl2_simulation::citizens::select_models(&mut world, hl2_simulation::ai::spawn::POOL_KEY);
     let model_report = models::append_models(&mut world, &vfs);
     let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
+    // NPC weapon world models: their sequence events fire NPC weapons (DESIGN 14w).
+    let weapon_models: Vec<String> = hl2_simulation::npc_weapons::definitions(&vfs)
+        .map(|defs| {
+            defs.into_values()
+                .map(|d| d.world_model)
+                .filter(|m| !m.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    for failure in models::append_rigs(&mut world, &vfs, &weapon_models) {
+        world.warnings.push(failure);
+    }
+    // The player model's hitboxes take NPC bullets (CHL2_Player::Spawn).
+    for failure in models::append_rigs(
+        &mut world,
+        &vfs,
+        &[hl2_simulation::gameplay::PLAYER_MODEL.to_owned()],
+    ) {
+        world.warnings.push(failure);
+    }
+    // ... and drawn bone-merged in their owners' hands (CBaseCombatWeapon::Equip).
+    for model in &weapon_models {
+        let key = format!("{}#0", model.to_lowercase());
+        if world.model_assets.contains_key(&key) {
+            continue;
+        }
+        match models::read_model(&vfs, model, 0) {
+            Ok(surfaces) => {
+                world.model_assets.insert(key, surfaces);
+            }
+            Err(error) => world.warnings.push(format!("{model}: {error:#}")),
+        }
+    }
+    // Dropped NPC weapons are VPhysics objects (CBaseCombatWeapon::FallInit): their
+    // world models' .phy (a model without one is not dropped).
+    for model in &weapon_models {
+        let _ = models::append_model_physics(&mut world, &vfs, model);
+    }
     // The thrown frag is a VPhysics object (CGrenadeFrag::CreateVPhysics): a Rapier body
     // from w_grenade.phy (12-sided prism as a round cylinder, the .phy's IVP inertia) and
     // SDK spawn orientation. Session 13 replay against five native throws (lob, roll,
@@ -217,6 +261,14 @@ pub fn load_with_canvas(
             .flatten()
             .map(|s| s.material.clone()),
     );
+    for model in &weapon_models {
+        if let Some(surfaces) = world
+            .model_assets
+            .get(&format!("{}#0", model.to_lowercase()))
+        {
+            names.extend(surfaces.iter().map(|s| s.material.clone()));
+        }
+    }
     for weapon in gameplay.weapons.values() {
         for skin in 0..2 {
             if let Some(surfaces) = world
@@ -329,6 +381,82 @@ pub fn load_with_canvas(
         materials,
         texture_errors,
         models: serde_json::to_value(model_report)?,
+        vfs: Arc::new(vfs),
+    })
+}
+
+/// A model loaded after the map (late precache, DESIGN 14r part B): its world tables
+/// (`world`: one prop_physics instance through the map's model loader: mesh, rig,
+/// .phy solid/pieces, propdata, breaks, illumination), the materials not already
+/// loaded, and its studio hull.
+pub struct PreparedModel {
+    pub world: World,
+    pub materials: BTreeMap<String, MaterialData>,
+    pub hull: (glam::Vec3, glam::Vec3),
+    /// Its breakable gibs/chunks by render key (the map preloads these per prop).
+    pub gibs: BTreeMap<String, Vec<modkit_core::Surface>>,
+}
+/// Load a model on a worker thread (no GPU work): `known` materials are skipped.
+pub fn prepare_model(
+    vfs: &Vfs,
+    model: &str,
+    class: &str,
+    known: &std::collections::BTreeSet<String>,
+) -> Result<PreparedModel> {
+    let mut world = World {
+        entities: vec![modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), class.into()),
+                ("model".into(), model.into()),
+            ],
+        }],
+        ..Default::default()
+    };
+    let report = models::append_models(&mut world, vfs);
+    if world.model_assets.is_empty() {
+        bail!("{model}: {}", report.errors.join("; "));
+    }
+    let _ = models::append_break_physics(&mut world, vfs);
+    let rig_failures = models::append_rigs(&mut world, vfs, &[]);
+    world.warnings.extend(rig_failures);
+    let hull = models::read_hull(vfs, model)?;
+    let mut gibs = BTreeMap::new();
+    for (path, skin) in crate::effects::gib_models(&world) {
+        match crate::effects::read_effect_model(vfs, &path, skin) {
+            Ok(surfaces) => {
+                gibs.insert(hl2_simulation::gibs::render_key(&path, skin), surfaces);
+            }
+            Err(e) => world.warnings.push(format!("{path}: {e:#}")),
+        }
+    }
+    let mut materials = BTreeMap::new();
+    let (mut cache, mut frames, mut decoded, mut errors) =
+        (BTreeMap::new(), BTreeMap::new(), 0usize, Vec::new());
+    let names: std::collections::BTreeSet<String> = world
+        .model_assets
+        .values()
+        .chain(gibs.values())
+        .flatten()
+        .map(|s| s.material.clone())
+        .filter(|m| !known.contains(m))
+        .collect();
+    for name in names {
+        let material = load_material(
+            vfs,
+            &name,
+            &mut cache,
+            &mut frames,
+            &mut decoded,
+            &mut errors,
+        );
+        materials.insert(name, material);
+    }
+    world.warnings.extend(errors);
+    Ok(PreparedModel {
+        world,
+        materials,
+        hull,
+        gibs,
     })
 }
 
@@ -502,8 +630,45 @@ fn material_condition(test: &str) -> bool {
     value != negate
 }
 
+/// DirectX-level blocks inside a material (`">=dx90_20b" { ... }`, `"<dx90" { ... }`):
+/// whether the block applies on a DX level 95 renderer (SM3 HDR, the owner's native
+/// setting). `dx90_20b` (ps2.0b) sits between levels 90 and 95. Other keys are not
+/// DX-level blocks (None).
+fn dx_level_block(key: &str) -> Option<bool> {
+    const LEVEL: f32 = 95.;
+    let key = key.to_ascii_lowercase();
+    let (op, rest) = ["<=", ">=", "<", ">"]
+        .into_iter()
+        .find_map(|op| key.strip_prefix(op).map(|rest| (op, rest)))
+        .unwrap_or(("=", key.as_str()));
+    let digits = rest.strip_prefix("dx")?;
+    let (number, b20) = digits
+        .strip_suffix("_20b")
+        .map_or((digits, false), |n| (n, true));
+    let level = number.parse::<f32>().ok()? + if b20 { 0.5 } else { 0. };
+    Some(match op {
+        "<=" => LEVEL <= level,
+        ">=" => LEVEL >= level,
+        "<" => LEVEL < level,
+        ">" => LEVEL > level,
+        _ => LEVEL == level,
+    })
+}
+/// Direct material vars plus the DX-level blocks that apply (their vars win).
+fn material_properties(entries: &[Entry]) -> BTreeMap<String, String> {
+    let mut properties = direct_properties(entries);
+    for entry in entries {
+        if matches!(entry.value, Value::Block(_)) && dx_level_block(&entry.key) == Some(true) {
+            properties.extend(direct_properties(entry.children()));
+        }
+    }
+    properties
+}
+
 // Reuse the bounded KeyValues decoder, preserving direct material parameters and
-// Patch insert/replace semantics. Only the authored Eyes_dx8 fallback for EyeRefract is selected; other DX blocks/proxies remain unsupported.
+// Patch insert/replace semantics. DX-level blocks are evaluated for level 95; the authored
+// Eyes_dx8 fallback is selected for EyeRefract; other shader fallbacks/proxies remain
+// unsupported.
 fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
     if depth > 8 {
         bail!("VMT include cycle/depth limit");
@@ -534,7 +699,7 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
     if !root.key.eq_ignore_ascii_case("patch") {
         return Ok(Definition {
             shader: root.key.clone(),
-            properties: direct_properties(root.children()),
+            properties: material_properties(root.children()),
             proxies: root
                 .get("Proxies")
                 .map_or(vec![], |p| p.children().to_vec()),
@@ -1020,6 +1185,20 @@ fn cached_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dx_level_blocks_apply_like_a_dx95_renderer() {
+        assert_eq!(dx_level_block(">=dx90_20b"), Some(true));
+        assert_eq!(dx_level_block("<dx90_20b"), Some(false));
+        assert_eq!(dx_level_block("<dx90"), Some(false));
+        assert_eq!(dx_level_block(">dx90"), Some(true));
+        assert_eq!(dx_level_block("dx95"), Some(true));
+        assert_eq!(dx_level_block("Proxies"), None);
+        // combine_soldier/combinesoldiersheet.vmt: the base texture lives only there.
+        let text = "\"VertexLitGeneric\" { \"$model\" 1 \">=dx90_20b\" { \"$baseTexture\" \"a\" } \"<dx90_20b\" { \"$baseTexture\" \"b\" } }";
+        let entries = keyvalues::parse(text).unwrap();
+        let p = material_properties(entries[0].children());
+        assert_eq!(p.get("$basetexture").map(String::as_str), Some("a"));
+    }
 
     #[test]
     fn self_illum_needs_a_translucent_base() {

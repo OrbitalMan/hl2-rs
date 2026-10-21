@@ -104,6 +104,10 @@ pub struct Projectile {
     pub body: Option<rapier3d::prelude::RigidBodyHandle>,
     /// The swept frag lies on a floor and rolls about its long axis.
     pub grounded: bool,
+    /// The NPC that launched this missile (CMissile::Create's owner), if not the player.
+    pub npc_owner: Option<usize>,
+    /// That NPC's guiding laser dot (TASK_CIT_RPG_AUGER), set by the host each tick.
+    pub npc_dot: Option<crate::weapon_rpg::LaserDot>,
 }
 impl Projectile {
     pub fn model(&self) -> &'static str {
@@ -216,6 +220,8 @@ pub struct Projectiles {
     pub laser_dot: Option<crate::weapon_rpg::LaserDot>,
     /// Missile deaths/removals this tick; the host notifies the RPG.
     pub missile_events: Vec<crate::weapon_rpg::MissileEvent>,
+    /// NPC-owned missiles that exploded or left the world this tick (by owner).
+    pub npc_missiles_died: Vec<usize>,
     /// Thrown bug bait splats this tick (step 14 antlion reactions consume them).
     pub bugbait_events: Vec<crate::weapon_bugbait::BugBaitEvent>,
     next_id: u64,
@@ -337,7 +343,32 @@ impl Projectiles {
             },
             body: None,
             grounded: false,
+            npc_owner: None,
+            npc_dot: None,
         });
+    }
+    /// An NPC's combine ball (CWeaponAR2::FireNPCSecondaryAttack -> CreateCombineBall with
+    /// the NPC as owner: the ball never strikes its shooter).
+    pub fn spawn_npc_ball(&mut self, launch: ProjectileSpawn, owner: usize, scene: &mut Scene) {
+        let count = self.active.len();
+        self.spawn(launch, scene);
+        if let Some(ball) = self.active.get_mut(count) {
+            ball.hit_entities.push(owner);
+        }
+    }
+    /// An NPC's RPG missile (CWeaponRPG::Operator_HandleAnimEvent -> CMissile::Create with
+    /// the NPC as owner). Returns the projectile id.
+    pub fn spawn_npc_missile(
+        &mut self,
+        launch: ProjectileSpawn,
+        owner: usize,
+        scene: &mut Scene,
+    ) -> Option<u64> {
+        let count = self.active.len();
+        self.spawn(launch, scene);
+        let missile = self.active.get_mut(count)?;
+        missile.npc_owner = Some(owner);
+        Some(missile.id)
     }
     /// CBreakableProp::Break -> ExplosionCreate for the explosive props broken by this
     /// tick's damage (SURFACEONLY). Native explodes before PropBreakableCreateAll, so
@@ -393,8 +424,12 @@ impl Projectiles {
             if projectile.position.abs().max_element() > 16384. {
                 self.diagnostics.out_of_world += 1;
                 if projectile.kind == ProjectileKind::RpgMissile {
-                    self.missile_events
-                        .push(crate::weapon_rpg::MissileEvent::Removed);
+                    if let Some(owner) = projectile.npc_owner {
+                        self.npc_missiles_died.push(owner);
+                    } else {
+                        self.missile_events
+                            .push(crate::weapon_rpg::MissileEvent::Removed);
+                    }
                 }
                 continue;
             }
@@ -553,10 +588,16 @@ impl Projectiles {
                     }
                 }
                 ProjectileKind::RpgMissile => {
+                    // SeekThink follows only dots of the missile's own owner.
+                    let dot = if projectile.npc_owner.is_some() {
+                        projectile.npc_dot
+                    } else {
+                        self.laser_dot
+                    };
                     if let crate::weapon_rpg::MissileOutcome::Explode =
                         crate::weapon_rpg::missile_tick(
                             &mut projectile,
-                            self.laser_dot.as_ref(),
+                            dot.as_ref(),
                             scene,
                             physics,
                             dt,
@@ -581,8 +622,12 @@ impl Projectiles {
                             player_ducked,
                             &mut damage,
                         );
-                        self.missile_events
-                            .push(crate::weapon_rpg::MissileEvent::Died);
+                        if let Some(owner) = projectile.npc_owner {
+                            self.npc_missiles_died.push(owner);
+                        } else {
+                            self.missile_events
+                                .push(crate::weapon_rpg::MissileEvent::Died);
+                        }
                         alive = false;
                     }
                 }
@@ -659,7 +704,11 @@ impl Projectiles {
                                 .is_some_and(|name| !name.is_empty())
                             {
                                 self.diagnostics.unsupported_damage_filters += 1;
-                            } else if !friendly_or_vital(entity.class()) {
+                            } else if ball_dissolves(
+                                entity.class(),
+                                scene.globals.is_on("gordon_precriminal")
+                                    || scene.globals.is_on("citizens_passive"),
+                            ) {
                                 projectile.hit_entities.push(hit.entity);
                                 damage.push(Damage {
                                     target: DamageTarget::Entity(hit.entity),
@@ -1046,22 +1095,52 @@ fn frag_vphysics_update(
         }
     }
 }
-fn friendly_or_vital(class: &str) -> bool {
-    // Native class relationships/EFL_NO_DISSOLVE are not reconstructed yet.
-    // These known HL2 allies/vital actors must not silently be treated as enemies.
-    matches!(
-        class,
-        "npc_citizen"
-            | "npc_barney"
-            | "npc_alyx"
-            | "npc_eli"
-            | "npc_kleiner"
-            | "npc_mossman"
-            | "npc_vortigaunt"
-            | "npc_gman"
-            | "npc_dog"
-            | "npc_bullseye"
-    )
+/// CPropCombineBall::IsAttractiveTarget for a player's ball: not striders, nor the
+/// player's allies (CLASS_PLAYER_ALLY / _VITAL); passive citizens still attract it.
+fn ball_attracted(class: &str, citizens_passive: bool) -> bool {
+    use crate::ai::relationships::{classify, Class};
+    class != "npc_strider"
+        && !matches!(
+            classify(class, citizens_passive),
+            Class::Player | Class::PlayerAlly | Class::PlayerAllyVital
+        )
+}
+/// CPropCombineBall::OnHitEntity for a player's ball: no hit on an NPC whose
+/// IRelationType toward the owner (the player) is D_LI; otherwise DissolveEntity, which
+/// refuses EFL_NO_DISSOLVE (set in Spawn by every citizen, Alyx, Barney, Breen, Eli,
+/// Kleiner, Mossman, the G-Man, scanners, manhacks, rollermines, turrets, gunships,
+/// antlion guards and bullseyes; SDK 2013 hl2/npc_*.cpp). The ball bounces either way.
+/// F4 per-spawn allegiance is not consulted here yet.
+fn ball_dissolves(class: &str, citizens_passive: bool) -> bool {
+    use crate::ai::relationships::{classify, Class, Disposition, Relationships};
+    const NO_DISSOLVE: &[&str] = &[
+        "npc_citizen",
+        "npc_alyx",
+        "npc_barney",
+        "npc_breen",
+        "npc_eli",
+        "npc_kleiner",
+        "npc_mossman",
+        "npc_gman",
+        "npc_fisherman",
+        "npc_cscanner",
+        "npc_clawscanner",
+        "npc_manhack",
+        "npc_rollermine",
+        "npc_turret_floor",
+        "npc_turret_ceiling",
+        "npc_turret_ground",
+        "npc_combinegunship",
+        "npc_antlionguard",
+        "npc_bullseye",
+        "npc_strider",
+    ];
+    if NO_DISSOLVE.contains(&class) {
+        return false;
+    }
+    let subject = classify(class, citizens_passive);
+    subject == Class::None
+        || Relationships::default().get(subject, Class::Player).0 != Disposition::LI
 }
 fn ball_hittable_entity(entity: &modkit_core::Entity) -> bool {
     let push = matches!(
@@ -1097,8 +1176,11 @@ fn guide_ball(projectile: &mut Projectile, world: &World, scene: &Scene, physics
     let mut best = None;
     for (id, entity) in world.entities.iter().enumerate() {
         if !entity.class().starts_with("npc_")
-            || friendly_or_vital(entity.class())
-            || entity.class() == "npc_strider"
+            || !ball_attracted(
+                entity.class(),
+                scene.globals.is_on("gordon_precriminal")
+                    || scene.globals.is_on("citizens_passive"),
+            )
             || scene.states[id].killed
             || !scene.states[id].visible
         {
@@ -1129,6 +1211,22 @@ fn guide_ball(projectile: &mut Projectile, world: &World, scene: &Scene, physics
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn player_combine_balls_dissolve_enemies_and_bounce_off_no_dissolve_and_allies() {
+        use super::ball_dissolves;
+        assert!(ball_dissolves("npc_metropolice", true));
+        assert!(ball_dissolves("npc_combine_s", false));
+        assert!(ball_dissolves("npc_zombie", false));
+        assert!(ball_dissolves("npc_antlion", false));
+        // EFL_NO_DISSOLVE: citizens (passive or rebel), vital allies, scanners.
+        assert!(!ball_dissolves("npc_citizen", true));
+        assert!(!ball_dissolves("npc_citizen", false));
+        assert!(!ball_dissolves("npc_barney", false));
+        assert!(!ball_dissolves("npc_cscanner", false));
+        // D_LI toward the player: the vortigaunt and the dog are not hit.
+        assert!(!ball_dissolves("npc_vortigaunt", false));
+        assert!(!ball_dissolves("npc_dog", false));
+    }
     #[test]
     fn interposing_props_absorb_blast_by_mass_instead_of_shielding() {
         // Synthetic: a 5 kg and a 400 kg prop between a blast at the origin and a target
@@ -1271,6 +1369,8 @@ mod tests {
             solid_at: 0.,
             body: None,
             grounded: false,
+            npc_owner: None,
+            npc_dot: None,
         };
         let physics = Physics::new(&World::default());
         let mut t = 0.045;

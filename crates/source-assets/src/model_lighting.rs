@@ -137,6 +137,7 @@ pub fn read_with(lumps: &[Vec<u8>], versions: &[u32], hdr: bool) -> Result<Light
         leaves,
         ambient,
         lights,
+        dynamic_minlight: 1.,
     })
 }
 

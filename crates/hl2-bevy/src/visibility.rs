@@ -66,17 +66,19 @@ impl SourceVisibility {
         serde_json::json!({"enabled":!self.disabled,"index_available":self.index.is_some(),"view_clusters":self.clusters,"cached_rows":self.rows.len(),"checked_draws":self.checked,"culled_draws":self.culled,"reused_bounds_tests":self.reused,"error":self.error,"policy":"current animated bounds; union of active world/monitor views, fail open without valid PVS; sky/viewmodels excluded; area portals and occluders remain incomplete"})
     }
 }
+type DrawItem = (
+    &'static mut PvsDraw,
+    &'static mut Visibility,
+    &'static GlobalTransform,
+    &'static Aabb,
+    Option<&'static crate::rendering::SourceEntity>,
+    Option<&'static crate::rendering::NpcWeaponDraw>,
+);
 pub fn present(
     mut visibility: ResMut<SourceVisibility>,
     game: Res<crate::gameplay::Gameplay>,
     cameras: Query<(&Camera, &GlobalTransform, Option<&RenderLayers>)>,
-    mut draws: Query<(
-        &mut PvsDraw,
-        &mut Visibility,
-        &GlobalTransform,
-        &Aabb,
-        Option<&crate::rendering::SourceEntity>,
-    )>,
+    mut draws: Query<DrawItem>,
     performance: Option<Res<crate::performance::Performance>>,
 ) {
     let _timing = crate::performance::scope(performance.as_deref(), "source_pvs");
@@ -118,11 +120,9 @@ pub fn present(
         visibility.view_epoch = visibility.view_epoch.wrapping_add(1);
     }
     visibility.unrestricted = unrestricted;
-    for (mut pvs, mut draw, transform, aabb, owner) in &mut draws {
-        let scene_hidden = owner.is_some_and(|owner| {
-            let s = &game.scene.states[owner.0];
-            !s.visible || s.killed
-        });
+    for (mut pvs, mut draw, transform, aabb, owner, weapon) in &mut draws {
+        let scene_hidden =
+            owner.is_some_and(|owner| crate::rendering::draw_hidden(&game, owner.0, weapon));
         visibility.checked += 1;
         let culled = if unrestricted || scene_hidden {
             false
