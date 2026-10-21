@@ -2035,11 +2035,12 @@ impl AiRuntime {
                 }
             }
         }
-        // CNPC_Combine::SelectCombatSchedule's flush grenade without a squad:
-        // CanGrenadeEnemy(false) -> CanThrowGrenade(last seen position) ->
-        // CheckCanThrowGrenade (VecCheckThrow at 650 in view and visible, else a high
-        // VecCheckToss with 64 units of headroom). Squad slots and the 4-unit hull check of
-        // the throw are not modeled.
+        // CNPC_Combine grenades without a squad: CanGrenadeEnemy(false) (the flush, at the
+        // last seen position) and CanGrenadeEnemy() (the last known position, e.g. the 20%
+        // grenade before reloading) -> CanThrowGrenade -> CheckCanThrowGrenade (VecCheckThrow
+        // at 650 in view and visible, else a high VecCheckToss with 64 units of headroom).
+        // Probed here without side effects; the class applies them when it asks. Squad
+        // slots and the 4-unit hull of the throw traces are not modeled.
         let moving = scene.states[id].is_moving();
         let enemy_now = actor.npc.enemy.map(|e| {
             if e == PLAYER {
@@ -2053,65 +2054,61 @@ impl AiRuntime {
             .npc
             .enemy
             .and_then(|e| actor.npc.enemies.find(Some(e)))
-            .map(|m| (m.time_last_seen, m.last_seen_position));
+            .map(|m| (m.time_last_seen, m.last_seen_position, m.last_known));
         if let AiClass::Humanoid(h) = &mut actor.class {
-            h.grenade_ready = false;
-            if let (true, Some(current), Some((last_time, last_seen))) = (
-                h.kind == humanoid::Kind::Combine && h.grenades > 0 && !seen_enemy,
-                enemy_now,
-                memory,
-            ) {
-                if now >= h.next_grenade_check
+            // The previous think's CanGrenadeEnemy outcomes.
+            for outcome in h.grenade_outcomes.drain(..) {
+                *self
+                    .diagnostics
+                    .grenade_checks
+                    .entry(outcome.into())
+                    .or_default() += 1;
+            }
+            h.throw_probes = Default::default();
+            h.flush_window = false;
+            if let (true, Some((last_time, last_seen, last_known))) =
+                (h.kind == humanoid::Kind::Combine && h.grenades > 0, memory)
+            {
+                h.flush_window = !seen_enemy
                     && now - last_time <= 3.
-                    && current.distance(last_seen) <= 256.
-                {
-                    let distance = last_seen.distance(origin);
-                    let outcome = if !(128. ..=1024.).contains(&distance) {
-                        h.next_grenade_check = now + 1.;
-                        "out_of_range"
-                    } else if moving {
-                        "moving"
+                    && enemy_now.is_some_and(|p| p.distance(last_seen) <= 256.);
+                let probe = |target: Vec3| {
+                    if !(128. ..=1024.).contains(&target.distance(origin)) {
+                        return humanoid::ThrowProbe::OutOfRange;
+                    }
+                    if moving {
+                        return humanoid::ThrowProbe::Moving;
+                    }
+                    let in_view =
+                        senses::in_view_cone(&viewer, target) && sight.visible(eye, target, &[id]);
+                    let bits = ((now * 1000.) as u64) ^ (id as u64).wrapping_mul(0x9e37_79b9);
+                    let jitter = [0u64, 1, 2, 3].map(|i| {
+                        (bits
+                            .wrapping_mul(6_364_136_223_846_793_005)
+                            .wrapping_add(i.wrapping_mul(1_442_695_040_888_963_407))
+                            >> 40) as f32
+                            / (1u64 << 24) as f32
+                    });
+                    let toss = if in_view {
+                        vec_check_throw(physics, id, eye, target, 650.)
+                    } else if physics
+                        .projectile_ray(eye, eye + Vec3::Z * 64., &[id])
+                        .is_none()
+                    {
+                        vec_check_toss(physics, id, eye, target, facing, jitter)
                     } else {
-                        let in_view = senses::in_view_cone(&viewer, last_seen)
-                            && sight.visible(eye, last_seen, &[id]);
-                        let bits = ((now * 1000.) as u64) ^ (id as u64).wrapping_mul(0x9e37_79b9);
-                        let jitter = [0u64, 1, 2, 3].map(|i| {
-                            (bits
-                                .wrapping_mul(6_364_136_223_846_793_005)
-                                .wrapping_add(i.wrapping_mul(1_442_695_040_888_963_407))
-                                >> 40) as f32
-                                / (1u64 << 24) as f32
-                        });
-                        let toss = if in_view {
-                            vec_check_throw(physics, id, eye, last_seen, 650.)
-                        } else if physics
-                            .projectile_ray(eye, eye + Vec3::Z * 64., &[id])
-                            .is_none()
-                        {
-                            vec_check_toss(physics, id, eye, last_seen, facing, jitter)
-                        } else {
-                            None
-                        };
-                        h.next_grenade_check = now + 1.;
-                        if let Some(velocity) = toss {
-                            h.toss_velocity = velocity;
-                            h.grenade_ready = true;
-                            if in_view {
-                                "ready_throw"
-                            } else {
-                                "ready_toss"
-                            }
-                        } else if in_view {
-                            "no_throw"
-                        } else {
-                            "no_toss"
-                        }
+                        None
                     };
-                    *self
-                        .diagnostics
-                        .grenade_checks
-                        .entry(outcome.into())
-                        .or_default() += 1;
+                    match toss {
+                        Some(velocity) => humanoid::ThrowProbe::Ready { velocity, in_view },
+                        None => humanoid::ThrowProbe::Blocked { in_view },
+                    }
+                };
+                if now >= h.next_grenade_check {
+                    if h.flush_window {
+                        h.throw_probes.last_seen = Some(probe(last_seen));
+                    }
+                    h.throw_probes.last_known = Some(probe(last_known));
                 }
             }
         }

@@ -151,6 +151,12 @@ const COMBINE_SCHEDULES: &[(&str, &str)] = &[
          TASK_SET_SCHEDULE SCHEDULE:SCHED_COMBINE_WAIT_IN_COVER Interrupts",
     ),
     (
+        "SCHED_COMBINE_GRENADE_AND_RELOAD",
+        "Tasks TASK_STOP_MOVING 0 TASK_COMBINE_FACE_TOSS_DIR 0 TASK_ANNOUNCE_ATTACK 2 \
+         TASK_PLAY_SEQUENCE ACTIVITY:ACT_RANGE_ATTACK2 TASK_COMBINE_DEFER_SQUAD_GRENADES 0 \
+         TASK_SET_SCHEDULE SCHEDULE:SCHED_HIDE_AND_RELOAD Interrupts",
+    ),
+    (
         "SCHED_COMBINE_TAKECOVER_FAILED",
         "Tasks TASK_STOP_MOVING 0 Interrupts",
     ),
@@ -236,10 +242,19 @@ pub struct Humanoid {
     pub next_grenade_check: f64,
     /// m_vecTossVelocity from the last successful CheckCanThrowGrenade.
     pub toss_velocity: Vec3,
-    /// CanGrenadeEnemy succeeded this think (computed by the runtime, which owns the
-    /// traces).
+    /// This think's side-effect-free CheckCanThrowGrenade results (computed by the
+    /// runtime, which owns the traces): toward the enemy's last seen and last known
+    /// positions. `can_grenade_enemy` applies CanThrowGrenade's gate and next-check time
+    /// only when a schedule branch asks, like the SDK's lazy calls.
     #[serde(skip)]
-    pub grenade_ready: bool,
+    pub throw_probes: ThrowProbes,
+    /// The flush window: the enemy unseen for at most COMBINE_GRENADE_FLUSH_TIME (3 s) and
+    /// within COMBINE_GRENADE_FLUSH_DIST (256) of where it was last seen.
+    #[serde(skip)]
+    pub flush_window: bool,
+    /// CanGrenadeEnemy outcomes this think (runtime diagnostics).
+    #[serde(skip)]
+    pub grenade_outcomes: Vec<&'static str>,
     /// CNPC_Combine TASK_RANGE_ATTACK1: m_nShots left in the burst, m_flShotDelay
     /// (GetFireRate) and m_flNextAttack.
     pub shots: i32,
@@ -247,6 +262,19 @@ pub struct Humanoid {
     next_attack: f64,
     /// The class's random stream (random->RandomInt in the class code).
     seed: u64,
+}
+/// A CheckCanThrowGrenade result without its side effects.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ThrowProbe {
+    OutOfRange,
+    Moving,
+    Blocked { in_view: bool },
+    Ready { velocity: Vec3, in_view: bool },
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ThrowProbes {
+    pub last_seen: Option<ThrowProbe>,
+    pub last_known: Option<ThrowProbe>,
 }
 impl Humanoid {
     pub fn new(kind: Kind, armed: bool, seed: u64) -> Self {
@@ -263,11 +291,46 @@ impl Humanoid {
             grenades: 0,
             next_grenade_check: 0.,
             toss_velocity: Vec3::ZERO,
-            grenade_ready: false,
+            throw_probes: ThrowProbes::default(),
+            flush_window: false,
+            grenade_outcomes: Vec::new(),
             shots: 0,
             shot_delay: 0.,
             next_attack: 0.,
         }
+    }
+    /// CNPC_Combine::CanGrenadeEnemy(bUseFreeKnowledge) -> CanThrowGrenade: no grenades or
+    /// before m_flNextGrenadeCheck: no; out of 128..1024: no, check again in 1 s; moving:
+    /// no; else CheckCanThrowGrenade: the toss velocity on success, next check in 1 s
+    /// either way.
+    pub fn can_grenade_enemy(&mut self, free_knowledge: bool) -> bool {
+        if self.grenades < 1 || self.now < self.next_grenade_check {
+            return false;
+        }
+        let probe = if free_knowledge {
+            self.throw_probes.last_known
+        } else {
+            self.throw_probes.last_seen
+        };
+        let (outcome, ready) = match probe {
+            None => return false,
+            Some(ThrowProbe::OutOfRange) => {
+                self.next_grenade_check = self.now + 1.;
+                ("out_of_range", false)
+            }
+            Some(ThrowProbe::Moving) => ("moving", false),
+            Some(ThrowProbe::Blocked { in_view }) => {
+                self.next_grenade_check = self.now + 1.;
+                (if in_view { "no_throw" } else { "no_toss" }, false)
+            }
+            Some(ThrowProbe::Ready { velocity, in_view }) => {
+                self.next_grenade_check = self.now + 1.;
+                self.toss_velocity = velocity;
+                (if in_view { "ready_throw" } else { "ready_toss" }, true)
+            }
+        };
+        self.grenade_outcomes.push(outcome);
+        ready
     }
     /// random->RandomInt(min, max).
     fn random_int(&mut self, min: u32, max: u32) -> u32 {
@@ -416,8 +479,8 @@ impl Humanoid {
             return Some("SCHED_RANGE_ATTACK1".into());
         }
         // The flush: an enemy out of sight for at most 3 s and within 256 units of where it
-        // was last seen gets a grenade (CanGrenadeEnemy(false), checked by the runtime).
-        if !c.has(COND_SEE_ENEMY) && self.grenade_ready {
+        // was last seen gets a grenade (CanGrenadeEnemy(false): its last seen position).
+        if !c.has(COND_SEE_ENEMY) && self.flush_window && self.can_grenade_enemy(false) {
             return Some("SCHED_RANGE_ATTACK2".into());
         }
         if c.has(COND_ENEMY_OCCLUDED) {
@@ -433,7 +496,7 @@ impl Humanoid {
         None
     }
     /// CNPC_Combine::TranslateSchedule without a squad.
-    fn translate_combine(&self, name: &str, npc: &AiNpc) -> String {
+    fn translate_combine(&mut self, name: &str, npc: &AiNpc) -> String {
         let c = npc.conditions;
         match name {
             // The 50% grenade cover needs COND_CAN_RANGE_ATTACK2 (no grenades yet).
@@ -457,7 +520,15 @@ impl Humanoid {
             }
             "SCHED_COMBINE_ASSAULT" => "SCHED_COMBINE_ASSAULT".into(),
             "SCHED_ESTABLISH_LINE_OF_FIRE" => "SCHED_COMBINE_ESTABLISH_LINE_OF_FIRE".into(),
-            "SCHED_HIDE_AND_RELOAD" => "SCHED_COMBINE_HIDE_AND_RELOAD".into(),
+            // "If I COULD throw a grenade and I need to reload, 20% chance I'll throw a
+            // grenade before I hide to reload" (CanGrenadeEnemy() at the last known position).
+            "SCHED_HIDE_AND_RELOAD" => {
+                if self.can_grenade_enemy(true) && self.random_int(0, 100) < 20 {
+                    "SCHED_COMBINE_GRENADE_AND_RELOAD".into()
+                } else {
+                    "SCHED_COMBINE_HIDE_AND_RELOAD".into()
+                }
+            }
             // The NPC weapons have no bits_CAP_WEAPON_RANGE_ATTACK2: the innate toss.
             "SCHED_RANGE_ATTACK2" => "SCHED_COMBINE_RANGE_ATTACK2".into(),
             "SCHED_RANGE_ATTACK1" => {
@@ -886,5 +957,45 @@ mod tests {
             // its first frame advance), then the completing think.
             assert!((now - 0.1 * f64::from(burst)).abs() < 1e-6, "{now} {burst}");
         }
+    }
+    #[test]
+    fn soldiers_throw_before_reloading_one_time_in_five_when_they_can() {
+        let npc = AiNpc::new(1);
+        let ready = ThrowProbe::Ready {
+            velocity: Vec3::new(300., 0., 200.),
+            in_view: true,
+        };
+        let mut throws = 0;
+        for seed in 1..=1000 {
+            let mut h = Humanoid::new(Kind::Combine, true, seed);
+            h.grenades = 5;
+            h.now = 10.;
+            h.throw_probes.last_known = Some(ready);
+            let name = h.translate_combine("SCHED_HIDE_AND_RELOAD", &npc);
+            // CanGrenadeEnemy ran (and succeeded) before the dice: next check in 1 s.
+            assert_eq!(h.next_grenade_check, 11.);
+            assert_eq!(h.toss_velocity, Vec3::new(300., 0., 200.));
+            if name == "SCHED_COMBINE_GRENADE_AND_RELOAD" {
+                throws += 1;
+            } else {
+                assert_eq!(name, "SCHED_COMBINE_HIDE_AND_RELOAD");
+            }
+        }
+        assert!((150..=250).contains(&throws), "{throws}");
+        // A blocked throw, or a check before m_flNextGrenadeCheck, never throws.
+        let mut h = Humanoid::new(Kind::Combine, true, 3);
+        h.grenades = 5;
+        h.now = 10.;
+        h.throw_probes.last_known = Some(ThrowProbe::Blocked { in_view: false });
+        assert!(!h.can_grenade_enemy(true));
+        assert_eq!(h.next_grenade_check, 11.);
+        h.throw_probes.last_known = Some(ready);
+        assert!(!h.can_grenade_enemy(true));
+        h.now = 11.;
+        assert!(h.can_grenade_enemy(true));
+        // No grenades left: no.
+        h.grenades = 0;
+        h.now = 20.;
+        assert!(!h.can_grenade_enemy(true));
     }
 }

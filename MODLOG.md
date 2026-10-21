@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-21 session 25: native soldier comparisons, soldiers/citizens move, grenade-before-reload (`wip/npc-ai-20261014`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: native oracle runs with per-process audio and ent_text (private npc-burst-20261020), SDK 2013 npc_combine.cpp (TranslateSchedule SCHED_HIDE_AND_RELOAD, CanGrenadeEnemy/CanThrowGrenade/CheckCanThrowGrenade, flush rule), player TraceAttack.
+
+**Changed:** per-weapon locomotion variants and AI ground registration for npc_combine_s/npc_citizen; lazy CanGrenadeEnemy with side-effect-free throw probes and the 20% grenade-before-reload; AR2Impact and TraceBleed for NPC hits on the player; DESIGN 14n session 25 plan.
+
+**Why:** owner request: native comparisons of AR2 cadence, reload pauses, flush grenades (and citizen/cop cadence, not reached).
+
+**Tested how / Result:** unit + owned locomotion test; Clippy/fmt; packaged hall runs (hall-ar2 matches the native reload cycle and alcove; flush runs: no throw by the seeded 20% roll). Regression batch **not run** (usage limit).
+
+**Still broken or not tested:** regression batch; citizen/cop cadence vs native; packaged grenade-before-reload throw; AR2 impacts on the player vs native.
+
+**Next:** regression batch vs s24-regression, then the remaining comparisons.
+
 ## 2026-10-20 session 24: AR2 tracer blend, combine reload, native NPC burst cadence, F4 grenades and the first packaged flush throw (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (sprite_dx9.cpp render modes, npc_combine.cpp HandleAnimEvent/StartTask/RunTask/NPC_TranslateActivity/CanThrowGrenade/CheckCanThrowGrenade, baseanimating.cpp StudioFrameAdvanceInternal/GetLastVisibleCycle/DispatchAnimEvents, basehlcombatweapon.cpp WeaponSoundRealtime, weapon_smg1.cpp/weapon_ar2.cpp FireNPCPrimaryAttack, ai_basehumanoid.cpp BuildScheduleTestBits/StartTaskRangeAttack1/RunTaskRangeAttack1, ai_basenpc_schedule.cpp RunAttackTask, ai_basenpc.cpp NPCThink, h_ai.cpp VecCheckToss); owned MDL/VMT reads (combine_soldier_anims events and fade times, w_* weapon sequences, gunshiptracer.vmt); native per-process audio of an npc_create SMG1 soldier (private work/hl2-decompiled/npc-burst-20261020).

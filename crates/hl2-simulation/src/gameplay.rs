@@ -2048,6 +2048,31 @@ fn trace_bleed(
     let Some(color) = blood_color(class) else {
         return;
     };
+    bleed_traces(
+        physics,
+        world,
+        &[id],
+        hit.position,
+        direction,
+        damage,
+        color,
+        uniform,
+        blood,
+    );
+}
+/// TraceBleed's traces from `position` (excluding `ignore`).
+#[allow(clippy::too_many_arguments)]
+fn bleed_traces(
+    physics: &Physics,
+    world: &World,
+    ignore: &[usize],
+    position: Vec3,
+    direction: Vec3,
+    damage: f32,
+    color: BloodColor,
+    uniform: &mut dyn FnMut() -> f32,
+    blood: &mut Vec<(crate::physics::RayHit, BloodColor)>,
+) {
     if damage <= 0. {
         return;
     }
@@ -2061,16 +2086,13 @@ fn trace_bleed(
     for _ in 0..count {
         let jitter = Vec3::new(uniform(), uniform(), uniform()) * noise;
         let trace = -direction + jitter;
-        let end = hit.position + trace * -172.;
-        if let Some(b) = physics
-            .projectile_ray(hit.position, end, &[id])
-            .filter(|b| {
-                world
-                    .entities
-                    .get(b.entity)
-                    .is_none_or(|e| !e.class().starts_with("npc_"))
-            })
-        {
+        let end = position + trace * -172.;
+        if let Some(b) = physics.projectile_ray(position, end, ignore).filter(|b| {
+            world
+                .entities
+                .get(b.entity)
+                .is_none_or(|e| !e.class().starts_with("npc_"))
+        }) {
             blood.push((b, color));
         }
     }
@@ -2187,6 +2209,24 @@ pub fn npc_fire_bullets(
         });
         if let Some(t) = player_distance.filter(|t| *t < world_distance) {
             out.player_hits.push((shot.origin, shot.damage));
+            // CBasePlayer::TraceAttack bleeds before OnTakeDamage (which refuses the damage
+            // while gordon_invulnerable is on), and CWeaponAR2::DoImpactEffect adds its
+            // AR2Impact on the player too (native hall run: both show on a player hit).
+            let point = shot.origin + direction * t;
+            if shot.weapon == "weapon_ar2" {
+                out.ar2_impacts.push((point - direction, -direction));
+            }
+            bleed_traces(
+                physics,
+                world,
+                &[shot.attacker],
+                point,
+                direction,
+                shot.damage,
+                BloodColor::Red,
+                uniform,
+                &mut out.blood,
+            );
             if shot.tracer {
                 out.tracers.push((
                     shot.attacker,

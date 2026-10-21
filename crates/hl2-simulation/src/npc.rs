@@ -352,6 +352,9 @@ fn segment_crosses_box(a: Vec3, b: Vec3, lo: Vec3, hi: Vec3) -> bool {
 pub struct Locomotion {
     tracks: BTreeMap<MoveStyle, RootMotion>,
     failures: BTreeMap<MoveStyle, GoalBlockReason>,
+    /// The sequence of each style when it is not the default walk_all/run_all (a
+    /// weapon-translated ACT_WALK_RIFLE/ACT_RUN_RIFLE sequence, say).
+    names: BTreeMap<MoveStyle, String>,
 }
 impl Locomotion {
     /// Load once at map/actor setup. Simulation ticks never access the VFS.
@@ -361,16 +364,42 @@ impl Locomotion {
         Ok(Self::from_sequences(&sequences))
     }
     pub fn from_sequences(sequences: &BTreeMap<String, MotionSequence>) -> Self {
+        Self::from_named(
+            sequences,
+            [
+                (
+                    MoveStyle::Walk,
+                    MoveStyle::Walk.sequence(),
+                    MoveStyle::Walk.activity(),
+                ),
+                (
+                    MoveStyle::Run,
+                    MoveStyle::Run.sequence(),
+                    MoveStyle::Run.activity(),
+                ),
+            ],
+        )
+    }
+    /// Tracks from named looping sequences with their expected activities (the
+    /// sequence SelectWeightedSequence picks for the translated ACT_WALK/ACT_RUN).
+    pub fn from_named(
+        sequences: &BTreeMap<String, MotionSequence>,
+        styles: [(MoveStyle, &str, &str); 2],
+    ) -> Self {
         let mut result = Self::default();
-        for style in [MoveStyle::Walk, MoveStyle::Run] {
+        for (style, name, activity) in styles {
+            let key = name.to_lowercase();
+            if key != style.sequence() {
+                result.names.insert(style, name.to_owned());
+            }
             let checked = sequences
-                .get(style.sequence())
-                .ok_or_else(|| GoalBlockReason::MissingLocomotion(style.sequence().to_owned()))
+                .get(&key)
+                .ok_or_else(|| GoalBlockReason::MissingLocomotion(name.to_owned()))
                 .and_then(|sequence| {
-                    if sequence.activity_name != style.activity() || sequence.flags & 1 == 0 {
-                        return Err(GoalBlockReason::UnsupportedLocomotion(
-                            style.sequence().to_owned(),
-                        ));
+                    if !sequence.activity_name.eq_ignore_ascii_case(activity)
+                        || sequence.flags & 1 == 0
+                    {
+                        return Err(GoalBlockReason::UnsupportedLocomotion(name.to_owned()));
                     }
                     let track = sequence.blends.get(sequence.central_blend).ok_or_else(|| {
                         GoalBlockReason::UnsupportedLocomotion("central blend index".to_owned())
@@ -392,8 +421,19 @@ impl Locomotion {
     pub fn required_clips(&self) -> BTreeSet<String> {
         self.tracks
             .keys()
-            .map(|style| style.sequence().to_owned())
+            .map(|style| self.sequence_name(*style))
             .collect()
+    }
+    /// The sequence a style plays.
+    pub fn sequence_name(&self, style: MoveStyle) -> String {
+        self.names
+            .get(&style)
+            .cloned()
+            .unwrap_or_else(|| style.sequence().to_owned())
+    }
+    /// Both styles have tracks.
+    pub fn complete(&self) -> bool {
+        self.failures.is_empty() && self.tracks.len() == 2
     }
     fn track(&self, style: MoveStyle) -> Result<&RootMotion, GoalBlockReason> {
         self.tracks.get(&style).ok_or_else(|| {
@@ -468,6 +508,8 @@ struct Actor {
     scale: f32,
     ground: GroundConfig,
     locomotion: Locomotion,
+    /// Locomotion per active weapon class ("" unarmed), preloaded (`set_locomotion`).
+    variants: BTreeMap<String, Locomotion>,
     view_offset: Option<Vec3>,
 }
 struct Goal {
@@ -547,6 +589,31 @@ impl Controller {
         self.register_actor(entity, model_scale, ground, locomotion)?;
         self.ai_only.insert(entity);
         Ok(())
+    }
+    /// The locomotion variants of an AI actor by weapon class (Weapon_TranslateActivity
+    /// of ACT_WALK/ACT_RUN on its model), preloaded at map load.
+    pub fn set_locomotion_variants(
+        &mut self,
+        entity: usize,
+        variants: BTreeMap<String, Locomotion>,
+    ) {
+        if let Some(actor) = self.actors.get_mut(&entity) {
+            actor.variants = variants;
+        }
+    }
+    /// Weapon_Equip: move with the new weapon's walk/run sequences (unchanged when the
+    /// model has no variant for it). Moves already running keep their track.
+    pub fn set_locomotion(&mut self, entity: usize, weapon: &str) -> bool {
+        let Some(actor) = self.actors.get_mut(&entity) else {
+            return false;
+        };
+        match actor.variants.get(weapon) {
+            Some(locomotion) => {
+                actor.locomotion = locomotion.clone();
+                true
+            }
+            None => false,
+        }
     }
     /// Usable node feet and the usable ground links of each node (the graph search's
     /// filters); None without a graph or beyond the native node limit.
@@ -665,7 +732,7 @@ impl Controller {
         if let Some(goal) = self.goals.get_mut(&key) {
             if goal.state != GoalState::Canceled {
                 goal.state = GoalState::Canceled;
-                self.pending.push(update(key, goal, &self.doors));
+                self.pending.push(update(key, goal, &self.doors, None));
             }
         }
     }
@@ -699,6 +766,7 @@ impl Controller {
                 scale: model_scale,
                 ground,
                 locomotion,
+                variants: BTreeMap::new(),
                 view_offset: None,
             },
         );
@@ -734,10 +802,12 @@ impl Controller {
                 route_nodes: goal.route.nodes.clone(),
                 route_feet: goal.route.feet.clone(),
                 next_waypoint: goal.next,
-                sequence: goal
-                    .state
-                    .is_moving()
-                    .then(|| goal.request.style.sequence().to_owned()),
+                sequence: goal.state.is_moving().then(|| {
+                    self.actors.get(&key.actor).map_or_else(
+                        || goal.request.style.sequence().to_owned(),
+                        |a| a.locomotion.sequence_name(goal.request.style),
+                    )
+                }),
                 animation_time: goal.animation_time,
                 motor_eta: None,
                 contact_normal: goal.contact_normal,
@@ -839,7 +909,11 @@ impl Controller {
         }
         // A rejected competing scene never owns the actor's pose or animation.
         if goal.state != GoalState::Blocked(GoalBlockReason::ActorBusy) {
-            self.pending.push(update(key, &goal, &self.doors));
+            let name = self
+                .actors
+                .get(&key.actor)
+                .map(|a| a.locomotion.sequence_name(goal.request.style));
+            self.pending.push(update(key, &goal, &self.doors, name));
         }
         self.goals.insert(key, goal);
         self.status(key).cloned().unwrap()
@@ -850,7 +924,7 @@ impl Controller {
                 let owned = goal.state != GoalState::Blocked(GoalBlockReason::ActorBusy);
                 goal.state = GoalState::Canceled;
                 if owned {
-                    self.pending.push(update(*key, goal, &self.doors));
+                    self.pending.push(update(*key, goal, &self.doors, None));
                 }
             }
         }
@@ -878,7 +952,11 @@ impl Controller {
                 goal.state,
                 GoalState::Blocked(GoalBlockReason::InvalidInput)
             ) {
-                updates.push(update(*key, goal, &self.doors));
+                let name = self
+                    .actors
+                    .get(&key.actor)
+                    .map(|a| a.locomotion.sequence_name(goal.request.style));
+                updates.push(update(*key, goal, &self.doors, name));
                 continue;
             }
             let outcome = (|| {
@@ -929,12 +1007,16 @@ impl Controller {
             if let Err(reason) = outcome {
                 goal.state = GoalState::Blocked(reason);
             }
-            updates.push(update(*key, goal, &self.doors));
+            let name = self
+                .actors
+                .get(&key.actor)
+                .map(|a| a.locomotion.sequence_name(goal.request.style));
+            updates.push(update(*key, goal, &self.doors, name));
         }
         updates
     }
 }
-fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>) -> MoveUpdate {
+fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>, name: Option<String>) -> MoveUpdate {
     // Navigators open a route door ahead of contact: request it while walking the door
     // segment or within 96 units of its start.
     let ahead = |index: usize| goal.route.doors.get(index).copied().flatten();
@@ -961,7 +1043,7 @@ fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>) -> MoveUpdate {
         sequence: goal
             .state
             .is_moving()
-            .then(|| goal.request.style.sequence().to_owned()),
+            .then(|| name.unwrap_or_else(|| goal.request.style.sequence().to_owned())),
         animation_time: goal.animation_time,
         state: goal.state.clone(),
         contact_normal: goal.contact_normal,

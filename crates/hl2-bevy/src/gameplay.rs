@@ -482,6 +482,8 @@ impl Gameplay {
                     self.scene.ai_set_yaw(id, p.yaw);
                     self.ai
                         .set_equipment(id, &request.classname, &request.equipment);
+                    // Its walk/run follow the new weapon (preloaded variants).
+                    self.npcs.set_locomotion(id, &request.equipment);
                     self.ai
                         .set_player_disposition(id, request.allegiance.disposition());
                     if let Some(grenades) = request.grenades {
