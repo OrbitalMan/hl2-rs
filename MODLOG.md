@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-21 session 27: silent far gunfire fixed, F4 Props tab, prop_physics_create/ent_create, combine attack announcement, hand-pose weapon drops (`wip/runtime-entities-20261021`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: retail engine.dll through the private Ghidra project (distance-variant mixers 100a3070/100a39b0, per-buffer channel volume 100a1db0, MIX_PaintChannels 100a47d0, SND_PickDynamicChannel 1008e990/1008ff40, channel stop time +0xa0 in 100a07d0, DSP convar registrations), installed scripts/dsp_presets.txt and soundscapes, SDK 2013 (c_soundscape.cpp, props.cpp CC_Prop_Physics_Create/CreatePhysicsProp/CBaseProp::Spawn, baseentity.cpp CC_Ent_Create, npc_combine.cpp TASK_ANNOUNCE_ATTACK, basecombatcharacter.cpp FInViewCone/Weapon_Drop, player.cpp m_flFieldOfView).
+
+**Changed:** spatial sound players start at their distance gain (audio.rs); Vfs::list_files/physics_prop_models (source-assets); F4 overlay Tab/Props tab with folders, PageUp/PageDown and panel headings; console prop_physics_create and ent_create (hl2-ui parser routing next to npc_create, owner-approved; ai::spawn::Console); combine TASK_ANNOUNCE_ATTACK with the enemy's view cone (PlayerState.facing, Context.enemy_sees_me); Scene::merged_model_frame for Weapon_Drop poses; despawn of killed runtime entities' draws.
+
+**Why:** owner playtest notes (far NPC gunfire never heard; owner test layout on the street: soldier at the station entrance, player at the pallet spot), owner requests (props in their own F4 tab with all installed props; the console route), DESIGN 14r leftovers and the step 14 speech list.
+
+**Tested how / Result:** per-process recordings of native (oracle, street layout, DSP on/off) and ours before/after: far shots -99 dB before (silent), audible after with a far/near difference close to native; hl2-simulation 331 unit tests, hl2-ui console test, workspace release tests (two known release-only failures), strict Clippy/fmt; packaged fixtures artifacts/s27 (propstab, console, announce, battle-drop, drop-view); regression artifacts/s27-regression (17/17, 26/26, 25/26 known doll01; diffs within 6 levels except Kleiner mouth flex 17 px).
+
+**Still broken or not tested:** owner listening of the near "saw"; room DSP (native dsp_off shows little difference; not implemented); squad speech and citizens' response rules; type-to-filter in the Props tab; ent_create of non-NPC/non-prop classes; late precache of NPC classes outside the F4 list; gibs as entities; native drop rest pose and announcement timing; owned suite not rerun (no preload changes).
+
+**Next:** owner listening, squad/citizen speech, remaining 14r leftovers, merge into wip/npc-ai-20261014.
+
 ## 2026-10-21 session 26: runtime entities (14r part A, maker copies, part B props and weapon drops), NPC footsteps and speech (`wip/runtime-entities-20261021`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 (ai_concommands.cpp CC_NPC_Create, monstermaker.cpp CTemplateNPCMaker::MakeNPC, const.h MAX_EDICT_BITS, props.cpp CC_Prop_Physics_Create/CreatePhysicsProp, basecombatcharacter.cpp Event_Killed/Weapon_Drop, basecombatweapon_shared.cpp Drop, c_baseanimating.cpp FireEvent/MaterialFootstepSound, ai_basenpc.cpp sound hooks, npc_combine.cpp/npc_metropolice.cpp speech); installed d1_canals_01/d1_trainstation_02 entity lumps and hl2_misc_dir.vpk listing read-only; a temporary owned animation-event probe (not committed).
