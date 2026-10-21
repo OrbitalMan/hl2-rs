@@ -654,9 +654,16 @@ impl Console {
                 if name != "npc_create_equipment" {
                     cheat()?;
                 }
+                // Re-quote arguments with spaces (ent_create angles "0 90 0").
                 return Ok(Some(Effect::NpcCommand(
-                    std::iter::once(name.as_str())
-                        .chain(args.iter().map(String::as_str))
+                    std::iter::once(name.clone())
+                        .chain(args.iter().map(|a| {
+                            if a.is_empty() || a.contains(char::is_whitespace) {
+                                format!("\"{a}\"")
+                            } else {
+                                a.clone()
+                            }
+                        }))
                         .collect::<Vec<_>>()
                         .join(" "),
                 )));
@@ -1284,6 +1291,13 @@ mod tests {
                 Effect::NpcCommand("prop_physics_create props_c17/oildrum001".into()),
                 Effect::NpcCommand("ent_create npc_metropolice targetname cop9".into()),
             ]
+        );
+        // Quoted values keep their spaces for the spawn parser.
+        assert_eq!(
+            console.submit("ent_create npc_citizen angles \"0 180 0\""),
+            vec![Effect::NpcCommand(
+                "ent_create npc_citizen angles \"0 180 0\"".into()
+            )]
         );
     }
     #[test]
