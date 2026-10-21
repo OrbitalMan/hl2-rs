@@ -7,6 +7,7 @@ use crate::{
 };
 use bevy::{mesh::VertexAttributeValues, prelude::*};
 use std::collections::BTreeMap;
+#[derive(Clone)]
 struct Actor {
     key: String,
     gaze: source_assets::eyes::Gaze,
@@ -50,6 +51,12 @@ impl Eyes {
             }
         }
         result
+    }
+    /// A runtime spawn of a template's model (DESIGN 14r part A) tracks like it.
+    pub fn copy_actor(&mut self, template: usize, entity: usize) {
+        if let Some(actor) = self.actors.get(&template).cloned() {
+            self.actors.insert(entity, actor);
+        }
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"draws":self.draws,"pose_samples":self.pose_samples,"attachment_actors":self.attachment_actors,"origins":self.origins,"tracking_player":self.tracking_player,"tracking_npc":self.tracking_npc,"tracking_entity":self.tracking_entity,"tracking_scene":self.tracking_scene,"projections":self.projections,

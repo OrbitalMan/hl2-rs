@@ -3,8 +3,9 @@
 //!
 //! MapEntity_ParseAllEntities removes NPCs with SF_NPC_TEMPLATE at map spawn (their
 //! keyvalues become the maker's template); the Scene holds them killed. A maker's first
-//! spawn activates that held entity; later copies need runtime entities (DESIGN 14r) and
-//! are counted as unsupported. StartNPC runs once per NPC on its first live tick.
+//! spawn activates that held entity; later spawns are new entities copied from it
+//! (`copy_requests`, created by the host with DESIGN 14r runtime entities, then
+//! `adopt`ed). StartNPC runs once per NPC on its first live tick.
 use std::collections::{BTreeMap, BTreeSet};
 
 use glam::Vec3;
@@ -101,6 +102,22 @@ pub struct Viewer {
     pub notarget: bool,
 }
 
+/// A maker spawn that needs a new entity copied from the held template (the template
+/// was used already or another maker shares it): CTemplateNPCMaker::MakeNPC's
+/// MapEntity_ParseEntity of the template data. The host creates it (runtime
+/// entities) and calls `NpcMakers::adopt` with the new id.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct CopyRequest {
+    pub maker: usize,
+    pub template: usize,
+    pub origin: Vec3,
+    pub yaw: f32,
+    /// The copy's spawnflags: SF_NPC_TEMPLATE removed, SF_NPC_FALL_TO_GROUND per the
+    /// maker (NO_DROP keeps the template's, radius spawns add it).
+    pub spawnflags: u32,
+    pub destination: Option<usize>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct NpcMakers {
     pub makers: BTreeMap<usize, Maker>,
@@ -115,6 +132,8 @@ pub struct NpcMakers {
     destination_free_at: BTreeMap<usize, f64>,
     rng: u32,
     pub diagnostics: MakerDiagnostics,
+    /// Copies waiting for the host this tick.
+    pub copy_requests: Vec<CopyRequest>,
 }
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct MakerDiagnostics {
@@ -122,7 +141,10 @@ pub struct MakerDiagnostics {
     pub floor_drops: usize,
     pub floor_failures: usize,
     pub landed: usize,
-    pub repeat_spawns_unsupported: usize,
+    /// Spawns made as new entities (copies of a held template).
+    pub copies: usize,
+    /// Copies the host could not create (entity limit, missing template model).
+    pub copy_failures: usize,
 }
 
 impl NpcMakers {
@@ -548,14 +570,9 @@ impl NpcMakers {
             scene.unsupported_input("npc_template_maker", "missing-template");
             return;
         };
-        // The held template exists once; makers sharing a TemplateName (and every
-        // later copy) need new entity instances.
-        if maker.template_used || !self.held.contains(&template) {
-            // A second copy needs a new entity instance (DESIGN 14r).
-            self.diagnostics.repeat_spawns_unsupported += 1;
-            scene.unsupported_input("npc_template_maker", "repeat-spawn (DESIGN 14r)");
-            return;
-        }
+        // The held template exists once; makers sharing a TemplateName and every later
+        // spawn create a new entity from it.
+        let copy = maker.template_used || !self.held.contains(&template);
         let class = world.entities[template].class();
         let maker_entity = &world.entities[id];
         let (origin, yaw) = if radius_mode {
@@ -580,26 +597,6 @@ impl NpcMakers {
         } else {
             (maker_entity.origin(), yaw(maker_entity))
         };
-        if let Some(dest) = destination {
-            // CNPCSpawnDestination::OnSpawnedNPC.
-            if world.entities[dest]
-                .get("RenameNPC")
-                .is_some_and(|n| !n.is_empty())
-            {
-                scene.unsupported_input("info_npc_spawn_destination", "RenameNPC");
-            }
-            scene.fire(dest, "OnSpawnNPC", template);
-            let delay = number(&world.entities[dest], "ReuseDelay", 1.);
-            self.destination_free_at
-                .insert(dest, scene.time + f64::from(delay));
-        }
-        let state = &mut scene.states[template];
-        state.killed = false;
-        state.visible = true;
-        state.enabled = true;
-        state.origin = origin;
-        state.rotation = crate::physics::angles(Vec3::new(0., yaw, 0.));
-        self.held.remove(&template);
         // Radius spawns add SF_NPC_FALL_TO_GROUND; other spawns remove it unless the
         // maker has NO_DROP (the template's own flag then stays).
         let template_flags = flags(&world.entities[template]);
@@ -610,23 +607,101 @@ impl NpcMakers {
         } else {
             template_flags & SF_NPC_FALL_TO_GROUND != 0
         };
-        self.started.remove(&template);
+        if maker.flags & SF_NPCMAKER_INF_CHILD == 0 {
+            // Counted now so this tick's later checks see a queued copy too.
+            self.makers.get_mut(&id).expect("maker").max_npcs -= 1;
+        }
+        if copy {
+            let spawnflags = (template_flags & !SF_NPC_TEMPLATE & !SF_NPC_FALL_TO_GROUND)
+                | if falls { SF_NPC_FALL_TO_GROUND } else { 0 };
+            self.copy_requests.push(CopyRequest {
+                maker: id,
+                template,
+                origin,
+                yaw,
+                spawnflags,
+                destination,
+            });
+            return;
+        }
+        let state = &mut scene.states[template];
+        state.killed = false;
+        state.visible = true;
+        state.enabled = true;
+        state.origin = origin;
+        state.rotation = crate::physics::angles(Vec3::new(0., yaw, 0.));
+        self.held.remove(&template);
+        self.makers.get_mut(&id).expect("maker").template_used = true;
+        self.finish_spawn(world, scene, id, template, falls, destination);
+    }
+
+    /// The host created a requested copy as entity `child` (None: it could not).
+    pub fn adopt(
+        &mut self,
+        world: &World,
+        scene: &mut Scene,
+        request: &CopyRequest,
+        child: Option<usize>,
+    ) {
+        let Some(child) = child else {
+            self.diagnostics.copy_failures += 1;
+            // Not made: the count goes back.
+            if let Some(m) = self.makers.get_mut(&request.maker) {
+                if m.flags & SF_NPCMAKER_INF_CHILD == 0 {
+                    m.max_npcs += 1;
+                }
+            }
+            return;
+        };
+        self.diagnostics.copies += 1;
+        let falls = request.spawnflags & SF_NPC_FALL_TO_GROUND != 0;
+        self.finish_spawn(
+            world,
+            scene,
+            request.maker,
+            child,
+            falls,
+            request.destination,
+        );
+    }
+
+    /// The rest of MakeNPC for a spawned child: destination reuse, StartNPC/fall state,
+    /// live children, OnSpawnNPC (activator = the child) and OnAllSpawned.
+    fn finish_spawn(
+        &mut self,
+        world: &World,
+        scene: &mut Scene,
+        id: usize,
+        child: usize,
+        falls: bool,
+        destination: Option<usize>,
+    ) {
+        if let Some(dest) = destination {
+            // CNPCSpawnDestination::OnSpawnedNPC.
+            if world.entities[dest]
+                .get("RenameNPC")
+                .is_some_and(|n| !n.is_empty())
+            {
+                scene.unsupported_input("info_npc_spawn_destination", "RenameNPC");
+            }
+            scene.fire(dest, "OnSpawnNPC", child);
+            let delay = number(&world.entities[dest], "ReuseDelay", 1.);
+            self.destination_free_at
+                .insert(dest, scene.time + f64::from(delay));
+        }
+        self.started.remove(&child);
         if falls {
-            self.started.insert(template);
-            self.falling.insert(template, 0.);
+            self.started.insert(child);
+            self.falling.insert(child, 0.);
         }
         self.diagnostics.spawned += 1;
         let maker = self.makers.get_mut(&id).expect("maker");
-        maker.template_used = true;
-        maker.live.push(template);
-        scene.fire(id, "OnSpawnNPC", template);
-        if maker.flags & SF_NPCMAKER_INF_CHILD == 0 {
-            maker.max_npcs -= 1;
-            if maker.depleted() {
-                scene.fire(id, "OnAllSpawned", id);
-                maker.disabled = true;
-                maker.next_think = None;
-            }
+        maker.live.push(child);
+        scene.fire(id, "OnSpawnNPC", child);
+        if maker.flags & SF_NPCMAKER_INF_CHILD == 0 && maker.depleted() {
+            scene.fire(id, "OnAllSpawned", id);
+            maker.disabled = true;
+            maker.next_think = None;
         }
     }
 
@@ -865,7 +940,7 @@ mod tests {
 
     #[test]
     fn template_npcs_are_held_and_the_maker_spawns_one_on_the_floor() {
-        let world = floor_world(vec![
+        let mut world = floor_world(vec![
             entity(&[("classname", "worldspawn")]),
             entity(&[
                 ("classname", "npc_metropolice"),
@@ -916,17 +991,41 @@ mod tests {
         assert_eq!(makers.diagnostics.floor_drops, 1);
         // Depleted after one: OnAllSpawned and no further thinking.
         assert!(makers.makers[&2].disabled && makers.makers[&2].depleted());
-        // The other maker cannot spawn the same entity again (DESIGN 14r).
+        // The other maker spawns a new entity copied from the template (DESIGN 14r):
+        // the maker queues it, the host creates it and the maker adopts it.
         scene.send_named("maker2", "Spawn", "", 0.);
         scene.tick(&world, Vec3::splat(9999.), 0.015);
         tick(&world, &mut scene, &physics, None, 0.015);
-        assert!(scene.makers.makers[&3].live.is_empty());
-        assert_eq!(scene.makers.diagnostics.repeat_spawns_unsupported, 1);
         assert!((scene.states[1].origin.x - 100.).abs() < 0.1);
-        // The child dies: DeathNotice -> live count 0.
+        let requests = std::mem::take(&mut scene.makers.copy_requests);
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
+        assert_eq!((request.maker, request.template), (3, 1));
+        assert_eq!(request.origin, Vec3::new(-100., 0., 40.));
+        // SF_NPC_TEMPLATE removed; no NO_DROP: no fall flag.
+        assert_eq!(request.spawnflags, 0);
+        let child = world.entities.len();
+        let (copy, _) =
+            crate::ai::spawn::instantiate(&world, 1, child, request.origin, request.yaw);
+        let id = scene.spawn_entity(&mut world, copy);
+        let mut makers = std::mem::take(&mut scene.makers);
+        makers.adopt(&world, &mut scene, request, Some(id));
+        scene.makers = makers;
+        assert_eq!(scene.makers.makers[&3].live, vec![id]);
+        assert_eq!(scene.makers.diagnostics.copies, 1);
+        assert!(scene.makers.makers[&3].disabled);
+        // StartNPC slams the copy to the floor on its first tick.
+        tick(&world, &mut scene, &physics, None, 0.015);
+        assert!(
+            scene.states[id].origin.z.abs() < 0.1,
+            "{:?}",
+            scene.states[id].origin
+        );
+        // The first child dies: DeathNotice -> live count 0.
         scene.states[1].killed = true;
         tick(&world, &mut scene, &physics, None, 0.015);
         assert!(scene.makers.makers[&2].live.is_empty());
+        assert_eq!(scene.makers.makers[&3].live, vec![id]);
     }
 
     #[test]

@@ -1325,7 +1325,10 @@ impl AiRuntime {
     }
     /// A runtime-spawned entity (DESIGN 14r step 3): give it an AI actor when its
     /// class has a behavior. True when one was added.
+    /// Every runtime spawn calls it (also non-AI classes): the sight candidate list is
+    /// rebuilt to include the new entity.
     pub fn add_actor(&mut self, id: usize, e: &modkit_core::Entity) -> bool {
+        self.npc_ids = None;
         match Self::actor_for(id, e, &self.weapon_defs) {
             Some(actor) => {
                 self.actors.insert(id, actor);
@@ -3242,7 +3245,7 @@ mod tests {
                 ("additionalequipment".into(), "weapon_stunstick".into()),
             ],
         };
-        let id = r.scene.spawn_entity(&r.world, cop.clone());
+        let id = r.scene.spawn_entity(&mut r.world, cop.clone());
         assert!(r.ai.add_actor(id, &cop));
         // Classes without an AI layer here (Kleiner: CAI_BaseActor, no combat).
         let kleiner = modkit_core::Entity {
@@ -3467,6 +3470,46 @@ mod tests {
         r.scene.states[1].killed = true;
         run(&mut r, 10, player_at(-3000.));
         assert_eq!(r.ai.actors[&0].npc.enemy, None);
+    }
+    #[test]
+    fn an_npc_spawned_after_the_first_think_is_seen() {
+        // A friend cop thinks alone (the sight candidate list is built), then a foe cop
+        // is created at runtime in front of him (DESIGN 14r part A).
+        let world = World {
+            entities: vec![entity(&[
+                ("classname", "npc_metropolice"),
+                ("origin", "0 0 0"),
+                ("angles", "0 0 0"),
+                ("additionalequipment", "weapon_pistol"),
+            ])],
+            ..Default::default()
+        };
+        let scene = Scene::new(&world);
+        let physics = Physics::new(&world);
+        let ai = AiRuntime::new(&world, None);
+        let mut r = Rig {
+            world,
+            scene,
+            physics,
+            controller: Controller::new(None, Default::default()),
+            ai,
+        };
+        r.ai.enabled = true;
+        r.ai.set_player_disposition(0, Some(Disposition::LI));
+        run(&mut r, 10, player_at(-3000.));
+        assert_eq!(r.ai.actors[&0].npc.enemy, None);
+        let foe = entity(&[
+            ("classname", "npc_metropolice"),
+            ("origin", "300 0 0"),
+            ("angles", "0 180 0"),
+            ("additionalequipment", "weapon_pistol"),
+        ]);
+        let id = r.scene.spawn_entity(&mut r.world, foe.clone());
+        assert!(r.ai.add_actor(id, &foe));
+        r.ai.set_player_disposition(id, Some(Disposition::HT));
+        run(&mut r, 20, player_at(-3000.));
+        assert_eq!(r.ai.actors[&0].npc.enemy, Some(id));
+        assert_eq!(r.ai.actors[&id].npc.enemy, Some(0));
     }
     #[test]
     fn stunstick_swings_strike_only_hated_npcs_in_the_swept_box() {

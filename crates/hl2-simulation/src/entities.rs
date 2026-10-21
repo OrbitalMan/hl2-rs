@@ -275,11 +275,6 @@ pub struct Scene {
     pub states: Vec<State>,
     /// KeyValues set at runtime by AddOutput, by (entity, lowercase key).
     pub keyvalue_overrides: BTreeMap<(usize, String), String>,
-    /// Entities created at runtime (DESIGN 14r): id = world.entities.len() + index,
-    /// so map entity ids never change; states[id] covers both. Leaked so lookups can
-    /// return references tied to `world` only (spawns are rare and small; a map
-    /// change drops the Scene but not these few hundred bytes each).
-    pub spawned: Vec<&'static Entity>,
     pub time: f64,
     sequence: u64,
     random: u64,
@@ -492,28 +487,26 @@ impl Scene {
         s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
         s
     }
-    /// CreateEntityByName + DispatchSpawn's state part: append a runtime entity and
-    /// its spawn state; returns its id (never reused; removal marks it killed).
-    /// Physics, actors, AI and the host register it separately (14r steps 3-5).
-    pub fn spawn_entity(&mut self, world: &World, entity: Entity) -> usize {
+    /// CreateEntityByName + DispatchSpawn's state part: append a runtime entity to the
+    /// world (the host owns it: DESIGN 14r part A grows the map's World in place) and
+    /// its spawn state; returns its id (never reused; removal marks it killed). Map
+    /// entity ids never change. Physics, actors, AI and the host register it
+    /// separately.
+    pub fn spawn_entity(&mut self, world: &mut World, entity: Entity) -> usize {
         let state = Self::initial_state(world, &entity, &mut self.diagnostics);
         let id = self.states.len();
-        debug_assert_eq!(id, world.entities.len() + self.spawned.len());
+        debug_assert_eq!(id, world.entities.len());
         self.states.push(state);
-        self.spawned.push(Box::leak(Box::new(entity)));
+        world.entities.push(entity);
         id
     }
     /// A map or runtime entity by id.
     pub fn entity<'a>(&self, world: &'a World, id: usize) -> Option<&'a Entity> {
-        world.entities.get(id).or_else(|| {
-            self.spawned
-                .get(id.checked_sub(world.entities.len())?)
-                .copied()
-        })
+        world.entities.get(id)
     }
     /// A map or runtime entity by a known-valid id (state indices).
     fn ent<'a>(&self, world: &'a World, id: usize) -> &'a Entity {
-        self.entity(world, id).expect("entity id within states")
+        &world.entities[id]
     }
     pub fn new(world: &World) -> Self {
         Self::with_campaign(world, true)
@@ -521,7 +514,6 @@ impl Scene {
     pub fn with_campaign(world: &World, new_game: bool) -> Self {
         let mut scene = Self {
             states: Vec::new(),
-            spawned: Vec::new(),
             time: 0.,
             sequence: 0,
             random: 1,
@@ -3355,7 +3347,7 @@ mod tests {
     #[test]
     fn runtime_entities_append_after_map_entities() {
         // Synthetic: one map entity, then a spawned cop.
-        let world = World {
+        let mut world = World {
             entities: vec![Entity {
                 properties: vec![("classname".into(), "info_target".into())],
             }],
@@ -3363,7 +3355,7 @@ mod tests {
         };
         let mut scene = Scene::new(&world);
         let id = scene.spawn_entity(
-            &world,
+            &mut world,
             Entity {
                 properties: vec![
                     ("classname".into(), "npc_metropolice".into()),

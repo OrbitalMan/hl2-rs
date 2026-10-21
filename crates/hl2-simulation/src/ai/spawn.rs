@@ -2,9 +2,11 @@
 //! at the crosshair) and the Source console commands npc_create / npc_create_aimed /
 //! npc_create_equipment (ai_concommands.cpp CC_NPC_Create, CC_NPC_Create_Aimed). The
 //! class/weapon lists are developer choices, not SDK data. Placement follows the SDK.
-//! The running world's entity tables are fixed at map load, so spawning activates a
-//! hidden pooled entity appended at load (`append_pool`): every load-time system
-//! (models, animation, physics, AI) builds it like a map NPC.
+//! Hidden template entities per class are appended at map load (`append_pool`), so
+//! every load-time system (models, animation, physics, AI) loads and builds that
+//! class like a map NPC; each spawn then creates a new entity copied from a template
+//! (DESIGN 14r part A: `instantiate`), so any number can be created, like
+//! CreateEntityByName after the class is precached.
 use glam::Vec3;
 use serde::Serialize;
 
@@ -212,6 +214,56 @@ pub fn append_pool(world: &mut modkit_core::World) {
             world.entities.push(modkit_core::Entity { properties });
         }
     }
+}
+/// Source's edict limit (MAX_EDICT_BITS 11, a compile-time constant tied to the
+/// network entity handles): native npc_create past it fails in ED_Alloc ("no free
+/// edicts"). Runtime spawns stop at this many live entities; the host's
+/// `--max-edicts N` changes it (0: no limit), which native cannot.
+pub static MAX_EDICTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(2048);
+/// The hidden template entities of an overlay entry (a class or citizen variant), in
+/// load order: spawns cycle through them (citizen templates carry different heads).
+pub fn templates(world: &modkit_core::World, label: &str) -> Vec<usize> {
+    world
+        .entities
+        .iter()
+        .enumerate()
+        .filter_map(|(id, e)| (e.get(POOL_KEY) == Some(label)).then_some(id))
+        .collect()
+}
+/// A new entity copied from a template (DESIGN 14r part A): its keyvalues without the
+/// pool marker, at `origin` facing `yaw` (DispatchSpawn + Teleport of CC_NPC_Create),
+/// and its model instance (same model/skin/scale) for the new id. The caller appends
+/// both (`Scene::spawn_entity`, then `world.model_instances`).
+pub fn instantiate(
+    world: &modkit_core::World,
+    template: usize,
+    id: usize,
+    origin: Vec3,
+    yaw: f32,
+) -> (modkit_core::Entity, Option<modkit_core::ModelInstance>) {
+    let mut entity = world.entities[template].clone();
+    entity.properties.retain(|(k, _)| k != POOL_KEY);
+    for (key, value) in [
+        ("origin", format!("{} {} {}", origin.x, origin.y, origin.z)),
+        ("angles", format!("0 {yaw} 0")),
+    ] {
+        entity
+            .properties
+            .retain(|(k, _)| !k.eq_ignore_ascii_case(key));
+        entity.properties.push((key.into(), value));
+    }
+    let instance = world
+        .model_instances
+        .iter()
+        .find(|i| i.entity == Some(template))
+        .map(|i| modkit_core::ModelInstance {
+            origin,
+            angles: Vec3::new(0., yaw, 0.),
+            entity: Some(id),
+            background: false,
+            ..i.clone()
+        });
+    (entity, instance)
 }
 /// The first unused pooled entity of an overlay entry (a class or citizen variant).
 pub fn free_slot(

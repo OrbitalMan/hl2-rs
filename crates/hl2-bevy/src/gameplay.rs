@@ -157,8 +157,7 @@ pub struct Gameplay {
     /// F4 developer NPC spawn overlay and the npc_create* console state.
     pub spawn_overlay: hl2_simulation::ai::spawn::Overlay,
     pub spawn_console: hl2_simulation::ai::spawn::Console,
-    /// Spawn requests and their CC_NPC_Create placement; runtime entity creation is not
-    /// implemented (DESIGN step 14 note), so nothing is created yet.
+    /// Spawn requests, their CC_NPC_Create placement and the created entity.
     pub spawn_log: Vec<serde_json::Value>,
     /// Muzzle flashes and tracers made by recent ticks, numbered for the effects system
     /// (which keeps the newest number it consumed); entries older than 0.5 s are dropped.
@@ -166,8 +165,15 @@ pub struct Gameplay {
     pub shot_serial: u64,
     /// Active stunsticks' attachment-1 frames this tick (C_WeaponStunStick glow).
     pub stunstick_glows: Vec<glam::Mat4>,
-    /// Pooled spawn entities already placed.
-    pub spawn_used: std::collections::BTreeSet<usize>,
+    /// Runtime spawns per overlay entry (they cycle through its templates).
+    pub spawn_counts: BTreeMap<String, usize>,
+    /// Runtime-spawned entities waiting for their draws: (template, new entity); the
+    /// host clones the template's meshes (`rendering::spawn_runtime_draws`).
+    pub render_spawns: Vec<(usize, usize)>,
+    /// Runtime-spawned entity ids (DESIGN 14r part A), in creation order.
+    pub runtime_entities: Vec<usize>,
+    /// Spawns that had to copy the World because another Arc held it (should stay 0).
+    pub world_copies: usize,
 }
 /// The weapons each F4 class can be given: Weapon_CanUse on its pooled spawn's
 /// loaded model (every activity of the model, loaded or not).
@@ -386,7 +392,10 @@ impl Gameplay {
             shot_effects: Vec::new(),
             shot_serial: 0,
             stunstick_glows: Vec::new(),
-            spawn_used: Default::default(),
+            spawn_counts: Default::default(),
+            render_spawns: Vec::new(),
+            runtime_entities: Vec::new(),
+            world_copies: 0,
         }
     }
     pub fn load_with_campaign(
@@ -424,7 +433,10 @@ impl Gameplay {
             shot_effects: Vec::new(),
             shot_serial: 0,
             stunstick_glows: Vec::new(),
-            spawn_used: Default::default(),
+            spawn_counts: Default::default(),
+            render_spawns: Vec::new(),
+            runtime_entities: Vec::new(),
+            world_copies: 0,
             player_damage,
             damage_messages: Vec::new(),
             suit: Default::default(),
@@ -453,13 +465,12 @@ impl Gameplay {
         })
     }
     /// An npc_create request (F4 Enter or the console): CC_NPC_Create placement from
-    /// the eye along the aim, then the next hidden pooled entity of the class is
-    /// moved there and shown (runtime entity creation is not available; the pool is
-    /// appended at map load).
+    /// the eye along the aim, then a new entity copied from the class's hidden template
+    /// (DESIGN 14r part A: the template made the map load every asset of the class).
     pub fn request_spawn(
         &mut self,
         request: hl2_simulation::ai::spawn::SpawnRequest,
-        physics: &Physics,
+        physics: &mut Physics,
         eye: Vec3,
         forward: Vec3,
     ) -> String {
@@ -472,28 +483,8 @@ impl Gameplay {
         );
         let mut entity = None;
         let message = match &placement {
-            Ok(p) => match spawn::free_slot(&self.world, request.pool_label(), &self.spawn_used) {
-                Some(id) => {
-                    self.spawn_used.insert(id);
-                    let state = &mut self.scene.states[id];
-                    state.origin = p.origin;
-                    state.visible = true;
-                    state.enabled = true;
-                    self.scene.ai_set_yaw(id, p.yaw);
-                    self.ai
-                        .set_equipment(id, &request.classname, &request.equipment);
-                    // Its walk/run follow the new weapon (preloaded variants).
-                    self.npcs.set_locomotion(id, &request.equipment);
-                    self.ai
-                        .set_player_disposition(id, request.allegiance.disposition());
-                    if let Some(grenades) = request.grenades {
-                        self.ai.set_grenades(id, grenades);
-                    }
-                    // The new weapon's idle (Weapon_TranslateActivity of ACT_IDLE); the AI
-                    // picks its own activities from here when it runs this class.
-                    let idle = hl2_simulation::entities::weapon_idle_activity(&request.equipment);
-                    let world = self.world.clone();
-                    self.scene.ai_set_activity(&world, id, idle);
+            Ok(p) => match self.spawn_from_template(&request, p.origin, p.yaw, physics) {
+                Ok(id) => {
                     entity = Some(id);
                     format!(
                         "Created {} ({}) at {:.0} {:.0} {:.0} yaw {:.0} (entity {id})",
@@ -509,16 +500,104 @@ impl Gameplay {
                         p.yaw
                     )
                 }
-                None => format!(
-                    "Can't create {}: all {} pooled slots are in use",
-                    request.classname,
-                    spawn::pool_count(&request.classname)
-                ),
+                Err(e) => e,
             },
             Err(e) => e.clone(),
         };
         self.spawn_log.push(serde_json::json!({"request":request,"placement":placement.ok(),"entity":entity,"message":message}));
         message
+    }
+    /// CreateEntityByName + DispatchSpawn + Activate of a copy of a loaded entity (an F4
+    /// class template or a maker's template NPC; DESIGN 14r part A): the template's
+    /// keyvalues at `origin` facing `yaw` (optionally other spawnflags), its model
+    /// instance, colliders, AI actor, movement registration and (next frame) draws.
+    /// The map's World grows in place (no copy while nothing else holds it).
+    pub fn create_from_template(
+        &mut self,
+        template: usize,
+        origin: Vec3,
+        yaw: f32,
+        spawnflags: Option<u32>,
+        physics: &mut Physics,
+    ) -> Result<usize, String> {
+        use hl2_simulation::ai::spawn;
+        let live = self
+            .runtime_entities
+            .iter()
+            .filter(|id| !self.scene.states[**id].killed)
+            .count();
+        let limit = spawn::MAX_EDICTS.load(std::sync::atomic::Ordering::Relaxed);
+        if limit > 0 && live >= limit {
+            return Err(format!(
+                "{limit} runtime entities alive (ED_Alloc: no free edicts; --max-edicts)"
+            ));
+        }
+        if Arc::strong_count(&self.world) > 1 {
+            self.world_copies += 1;
+        }
+        let world = Arc::make_mut(&mut self.world);
+        let id = world.entities.len();
+        let (mut new_entity, instance) = spawn::instantiate(world, template, id, origin, yaw);
+        if let Some(flags) = spawnflags {
+            new_entity
+                .properties
+                .retain(|(k, _)| !k.eq_ignore_ascii_case("spawnflags"));
+            new_entity
+                .properties
+                .push(("spawnflags".into(), flags.to_string()));
+        }
+        let spawned = self.scene.spawn_entity(world, new_entity.clone());
+        debug_assert_eq!(spawned, id);
+        if let Some(instance) = instance {
+            world.model_instances.push(instance.clone());
+            physics.add_spawned_instance(world, &instance);
+        }
+        self.runtime_entities.push(id);
+        self.ai.add_actor(id, &new_entity);
+        self.npcs.copy_actor(template, id);
+        self.render_spawns.push((template, id));
+        self.scene.ai_set_yaw(id, yaw);
+        Ok(id)
+    }
+    /// The F4/npc_create part: a class template, then the request's weapon, side and
+    /// grenades.
+    fn spawn_from_template(
+        &mut self,
+        request: &hl2_simulation::ai::spawn::SpawnRequest,
+        origin: Vec3,
+        yaw: f32,
+        physics: &mut Physics,
+    ) -> Result<usize, String> {
+        use hl2_simulation::ai::spawn;
+        let label = request.pool_label().to_owned();
+        let templates = spawn::templates(&self.world, &label);
+        if templates.is_empty() {
+            return Err(format!(
+                "Can't create {}: the class was not loaded on this map",
+                request.classname
+            ));
+        }
+        let count = self.spawn_counts.entry(label).or_default();
+        let template = templates[*count % templates.len()];
+        *count += 1;
+        let id = self
+            .create_from_template(template, origin, yaw, None, physics)
+            .map_err(|e| format!("Can't create {}: {e}", request.classname))?;
+        self.ai
+            .set_equipment(id, &request.classname, &request.equipment);
+        // Its walk/run follow the new weapon (preloaded variants).
+        self.npcs.set_locomotion(id, &request.equipment);
+        self.ai
+            .set_player_disposition(id, request.allegiance.disposition());
+        if let Some(grenades) = request.grenades {
+            self.ai.set_grenades(id, grenades);
+        }
+        // The new weapon's idle (Weapon_TranslateActivity of ACT_IDLE); the AI picks its
+        // own activities from here when it runs this class.
+        let idle = hl2_simulation::entities::weapon_idle_activity(&request.equipment);
+        let world = self.world.clone();
+        self.scene.ai_set_activity(&world, id, idle);
+        Ok(id)
     }
     fn push_shot_effect(&mut self, effect: ShotEffect) {
         self.shot_serial += 1;
@@ -728,6 +807,22 @@ impl Gameplay {
             }),
             TICK,
         );
+        // Maker spawns after the first: new entities copied from the held template.
+        for request in std::mem::take(&mut self.scene.makers.copy_requests) {
+            let child = self
+                .create_from_template(
+                    request.template,
+                    request.origin,
+                    request.yaw,
+                    Some(request.spawnflags),
+                    physics,
+                )
+                .ok();
+            let world = self.world.clone();
+            let mut makers = std::mem::take(&mut self.scene.makers);
+            makers.adopt(&world, &mut self.scene, &request, child);
+            self.scene.makers = makers;
+        }
         self.inventory.advance_projectile_fire(
             &self.world,
             &mut self.scene,
@@ -1290,7 +1385,7 @@ impl Gameplay {
         serde_json::json!({"time":self.scene.time,"inventory":self.inventory,"carrying":self.inventory.carrying(),"player_damage":self.player_damage,"viewmodel":{"animation":self.inventory.animation,"at":self.inventory.animation_at,"frag":self.inventory.frag},"suit":self.suit,"globals":self.scene.globals,"pending":self.selection.pending,"gesture_compose_errors":compose_errors,
             "entities":entities,"io":self.scene.diagnostics,"choreography":self.scene.choreography_states(&self.world),
             "animations":self.scene.animation_states(&self.world),"look_targets":self.scene.look_targets.report(),"random_look_targets":self.scene.look_targets.random_report(),"heads":self.scene.heads.iter().map(|(id,h)| (id.to_string(), h.goal.to_array())).collect::<std::collections::BTreeMap<_,_>>(),"gesture_layers":self.scene.gestures.report(),"monitors":self.scene.monitors,"npc_goals":self.npcs.snapshots(),
-            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"spawn_overlay":self.spawn_overlay,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
+            "ai":serde_json::to_value(&self.ai).unwrap_or_else(|e| serde_json::json!({"report_error":e.to_string()})),"npc_spawns":self.spawn_log,"runtime_entities":{"created":self.runtime_entities.len(),"live":self.runtime_entities.iter().filter(|id| !self.scene.states[**id].killed).count(),"world_copies":self.world_copies},"spawn_overlay":self.spawn_overlay,"npc_makers":{"diagnostics":self.scene.makers.diagnostics,"live":self.scene.makers.makers.values().map(|m| (m.id.to_string(), m.live.clone())).collect::<std::collections::BTreeMap<_,_>>()},"last_npc_hit":self.scene.last_npc_hit,"npc_health":self.world.entities.iter().enumerate().filter(|(id,e)| e.class().starts_with("npc_") && self.scene.states[*id].value != 0.).map(|(id,_)| (id.to_string(), self.scene.states[id].value)).collect::<std::collections::BTreeMap<_,_>>(),"phys_explosions":self.phys_explosions,"gibs":{"active":self.gibs.active,"spawned":self.gibs.spawned,"removed":self.gibs.removed,"skipped":self.gibs.skipped},"projectiles":{"active":self.projectiles.active,"effects":self.projectiles.effects,"diagnostics":self.projectiles.diagnostics},"impacts":{"studio_created":self.impacts.studio_created,"created":self.impacts.created,"unclippable":self.impacts.unclippable,"active":self.impacts.marks.len(),"errors":self.impacts.errors},"transition":self.scene.transition,
             "unplayed_sounds":self.unplayed_sounds,"queued_sounds":self.sound_requests.len(),"recent_sound_cues":self.sound_cues})
     }
 }

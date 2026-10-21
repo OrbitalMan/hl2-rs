@@ -633,6 +633,20 @@ impl Controller {
             .get(&entity)
             .is_some_and(|a| a.locomotion.has_aim())
     }
+    /// A runtime spawn of a template's model and class (DESIGN 14r part A): the same
+    /// hull, locomotion variants and eye offset, with no goal. False without a
+    /// registered template.
+    pub fn copy_actor(&mut self, template: usize, entity: usize) -> bool {
+        let Some(mut actor) = self.actors.get(&template).cloned() else {
+            return false;
+        };
+        actor.aiming = false;
+        self.actors.insert(entity, actor);
+        if self.ai_only.contains(&template) {
+            self.ai_only.insert(entity);
+        }
+        true
+    }
     pub fn set_locomotion(&mut self, entity: usize, weapon: &str) -> bool {
         let Some(actor) = self.actors.get_mut(&entity) else {
             return false;

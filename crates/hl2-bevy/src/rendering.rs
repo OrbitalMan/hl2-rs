@@ -1475,6 +1475,175 @@ pub fn spawn_map(
     stats.skin_joints = skeletons.values().map(|s| s.joints.len()).sum();
     stats.materials = material_handles.len();
 }
+type TemplateDraw<'a> = (
+    &'a SourceEntity,
+    &'a Mesh3d,
+    &'a MeshMaterial3d<SourceMaterial>,
+    Option<&'a Name>,
+    Option<&'a bevy::camera::visibility::RenderLayers>,
+    Option<&'a DrawTriangles>,
+    Option<&'a NpcWeaponDraw>,
+    Option<&'a EyeMesh>,
+    Option<&'a ModelLit>,
+    Option<&'a AnimatedMesh>,
+    Has<crate::visibility::PvsDraw>,
+);
+/// Runtime spawns (DESIGN 14r part A): build the new entity's draws from its template's
+/// draws built at map load. Static GPU-skinned meshes are shared; meshes the CPU
+/// rewrites per entity (flex faces, eyes, CPU skinning) and lit materials (per-entity
+/// light state) are copied; the entity gets its own skeleton and its weapons are
+/// bone-merged onto it.
+pub fn spawn_runtime_draws(
+    mut commands: Commands,
+    mut game: ResMut<crate::gameplay::Gameplay>,
+    mut eyes: ResMut<crate::eyes::Eyes>,
+    draws: Query<TemplateDraw>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<SourceMaterial>>,
+    mut inverse_binds: ResMut<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
+) {
+    if game.render_spawns.is_empty() {
+        return;
+    }
+    let world = game.world.clone();
+    for (template, id) in std::mem::take(&mut game.render_spawns) {
+        eyes.copy_actor(template, id);
+        let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(id)) else {
+            continue;
+        };
+        let rig = world
+            .rigs
+            .get(&instance.asset_key())
+            .filter(|rig| !rig.bones.is_empty() && rig.bones.len() < 256);
+        let state = &game.scene.states[id];
+        let transform = entity_transform(state.origin, state.rotation);
+        let mut skeleton: Option<crate::gpu_skinning::Skeleton> = None;
+        let template_draws: Vec<_> = draws.iter().filter(|d| d.0.0 == template).collect();
+        // The body first: bone-merged weapons follow its skeleton.
+        let (body, weapons): (Vec<_>, Vec<_>) =
+            template_draws.into_iter().partition(|d| d.6.is_none());
+        for (_, mesh, material, name, layers, triangles, weapon, eye, lit, animation, pvs) in
+            body.into_iter().chain(weapons)
+        {
+            let gpu = match (animation.and_then(|a| a.gpu.as_ref()), weapon) {
+                (None, _) => None,
+                (Some(_), None) => {
+                    let Some(rig) = rig else { continue };
+                    if skeleton.is_none() {
+                        let root = commands
+                            .spawn((
+                                crate::campaign::MapOwned,
+                                Transform::IDENTITY,
+                                Visibility::Inherited,
+                                SourceEntity(id),
+                            ))
+                            .id();
+                        skeleton = Some(crate::gpu_skinning::Skeleton::spawn(
+                            &mut commands,
+                            &mut inverse_binds,
+                            rig,
+                            instance.scale,
+                            root,
+                        ));
+                    }
+                    skeleton.clone()
+                }
+                (Some(_), Some(NpcWeaponDraw(key))) => {
+                    let (Some(owner), Some(owner_rig), Some(weapon_rig)) =
+                        (skeleton.as_ref(), rig, world.rigs.get(key))
+                    else {
+                        continue;
+                    };
+                    Some(crate::gpu_skinning::Skeleton::merged(
+                        &mut inverse_binds,
+                        weapon_rig,
+                        owner_rig,
+                        owner,
+                        instance.scale,
+                    ))
+                }
+            };
+            let private_mesh =
+                eye.is_some() || animation.is_some_and(|a| a.gpu.is_none() || !a.flex.is_empty());
+            let mesh = if private_mesh {
+                match meshes.get(&mesh.0).cloned() {
+                    Some(copy) => meshes.add(copy),
+                    None => continue,
+                }
+            } else {
+                mesh.0.clone()
+            };
+            let material = if lit.is_some() {
+                match materials.get(&material.0).cloned() {
+                    Some(copy) => materials.add(copy),
+                    None => continue,
+                }
+            } else {
+                material.0.clone()
+            };
+            let mut draw = commands.spawn((
+                crate::campaign::MapOwned,
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                transform,
+                SourceEntity(id),
+            ));
+            if let Some(name) = name {
+                draw.insert(name.clone());
+            }
+            if let Some(layers) = layers {
+                draw.insert(layers.clone());
+            }
+            if pvs {
+                draw.insert(crate::visibility::PvsDraw::default());
+            }
+            if let Some(triangles) = triangles {
+                draw.insert(DrawTriangles(triangles.0));
+            }
+            if let Some(weapon) = weapon {
+                draw.insert(NpcWeaponDraw(weapon.0.clone()));
+            }
+            if let Some(eye) = eye {
+                draw.insert(EyeMesh {
+                    key: eye.key.clone(),
+                    eye: eye.eye.clone(),
+                    scale: eye.scale,
+                });
+            }
+            if let Some(lit) = lit {
+                draw.insert(ModelLit {
+                    entity: Some(id),
+                    key: lit.key.clone(),
+                    scale: lit.scale,
+                    half_lambert: lit.half_lambert,
+                    last: None,
+                    dynamic: false,
+                });
+            }
+            if let Some(animation) = animation {
+                if let Some(skeleton) = &gpu {
+                    draw.insert((
+                        skeleton.component(),
+                        bevy::camera::visibility::DynamicSkinnedMeshBounds,
+                    ));
+                }
+                draw.insert(AnimatedMesh {
+                    sampled: None,
+                    gpu,
+                    entity: Some(id),
+                    weapon: animation.weapon.clone(),
+                    key: animation.key.clone(),
+                    scale: animation.scale,
+                    bind: animation.bind.clone(),
+                    normals: animation.normals.clone(),
+                    flex: animation.flex.clone(),
+                    flex_base: animation.flex_base.clone(),
+                    flex_signature: 0,
+                });
+            }
+        }
+    }
+}
 /// Source render color/alpha of an entity (rendercolor, renderamt when rendermode != 0).
 fn entity_modulation(world: &modkit_core::World, id: usize) -> Vec4 {
     let Some(e) = world.entities.get(id) else {

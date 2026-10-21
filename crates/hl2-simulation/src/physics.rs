@@ -820,247 +820,7 @@ impl Physics {
         }
         let mut shape_cache = BTreeMap::new();
         for instance in &world.model_instances {
-            if instance.background {
-                continue;
-            }
-            if !instance.solid {
-                continue;
-            }
-            let Some(asset) = world.model_assets.get(&instance.asset_key()) else {
-                continue;
-            };
-            // prop_physics spawnflags: 1 start asleep, 8 motion disabled (static until
-            // EnableMotion, which is not implemented).
-            let prop_flags = instance
-                .entity
-                .and_then(|id| world.entities.get(id))
-                .and_then(|e| e.get("spawnflags"))
-                .and_then(|f| f.parse::<u32>().ok())
-                .unwrap_or(0);
-            let dynamic = instance.kind.starts_with("prop_physics") && prop_flags & 8 == 0;
-            // The installed rotating door's VVD bind mesh points along X, but
-            // its idle sequence turns the panel along Y. Use the same initial
-            // skinned pose as rendering before applying the entity's swing.
-            // Keep other model collision policies unchanged.
-            let clip = (instance.kind == "prop_door_rotating").then(|| {
-                instance
-                    .entity
-                    .and_then(|id| world.entities.get(id))
-                    .and_then(|e| e.get("DefaultAnim"))
-                    .unwrap_or("idle")
-                    .to_lowercase()
-            });
-            // VPhysics props use their authored .phy pieces once the model loader
-            // read the solid parameters (CPhysicsProp::CreateVPhysics); otherwise
-            // the prior render-hull policy stays.
-            let authored = dynamic
-                .then(|| world.model_physics.get(&instance.asset_key()))
-                .flatten();
-            let native_eligible = (instance.kind == "static_prop"
-                && instance.solid_mode == Some(6))
-                || authored.is_some();
-            let key = (instance.asset_key(), dynamic, clip.clone(), native_eligible);
-            let cached = shape_cache.entry(key).or_insert_with(|| {
-                let pieces = native_eligible
-                    .then(|| world.model_collision.get(&instance.asset_key()))
-                    .flatten();
-                if let Some(pieces) = pieces.filter(|pieces| !pieces.is_empty()) {
-                    // Preserve authored convex decomposition. Merging all
-                    // vertices into one hull fills bench/railing openings.
-                    let shapes = pieces
-                        .iter()
-                        .map(|piece| {
-                            if piece.vertices.len() < 4
-                                || !piece.vertices.iter().all(|point| point.is_finite())
-                            {
-                                return None;
-                            }
-                            SharedShape::convex_hull(
-                                &piece
-                                    .vertices
-                                    .iter()
-                                    .map(|point| Point::from(vector(*point)))
-                                    .collect::<Vec<_>>(),
-                            )
-                        })
-                        .collect::<Option<Vec<_>>>();
-                    if let Some(shapes) = shapes {
-                        return PropShapes {
-                            shapes,
-                            native: true,
-                            native_failed: false,
-                        };
-                    }
-                }
-                let matrices = clip.as_ref().and_then(|name| {
-                    world
-                        .rigs
-                        .get(&instance.asset_key())
-                        .filter(|rig| rig.clips.contains_key(name))
-                        .map(|rig| rig.matrices(name, 0.))
-                });
-                PropShapes {
-                    shapes: mesh_shape(asset, dynamic, matrices.as_deref())
-                        .into_iter()
-                        .collect(),
-                    native: false,
-                    // An invalid native piece never silently removes part of
-                    // the collider: the complete model uses the mesh fallback.
-                    native_failed: pieces.is_some(),
-                }
-            });
-            if cached.shapes.is_empty() {
-                p.skipped += 1;
-                continue;
-            }
-            // Scaled props need separately scaled meshes; skip their collider rather than use a wrong size.
-            if (instance.scale - 1.).abs() > 0.001 {
-                p.skipped += 1;
-                continue;
-            }
-            p.native_shape_count += usize::from(cached.native) * cached.shapes.len();
-            p.native_shape_fallbacks += usize::from(cached.native_failed);
-            let position = pose(instance.origin, angles(instance.angles));
-            let entity = instance.entity;
-            let keyvalue = |key: &str| {
-                instance
-                    .entity
-                    .and_then(|id| world.entities.get(id))
-                    .and_then(|e| e.get(key))
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .filter(|v| v.is_finite())
-            };
-            let solid = authored.map(|solid| authored_solid(solid, keyvalue));
-            let (linear_damping, angular_damping) = solid
-                .as_ref()
-                .map_or((0.05, 0.1), |s| (s.damping, s.rotdamping));
-            let masses = solid
-                .as_ref()
-                .map(|s| authored_mass_properties(&cached.shapes, s.mass, s.inertia));
-            let body = dynamic.then(|| {
-                p.bodies.insert(
-                    RigidBodyBuilder::dynamic()
-                        .additional_mass_properties(masses.unwrap_or_default())
-                        .position(position)
-                        .sleeping(prop_flags & 1 != 0)
-                        .linear_damping(linear_damping)
-                        .angular_damping(angular_damping),
-                )
-            });
-            if let (Some(id), Some(body)) = (entity, body) {
-                p.ccd_gated.insert(body, 0.);
-                p.dynamic.insert(id, body);
-                if world
-                    .entities
-                    .get(id)
-                    .and_then(|e| e.get("spawnflags"))
-                    .and_then(|v| v.trim().parse::<u32>().ok())
-                    .is_some_and(|flags| flags & 0x200 != 0)
-                {
-                    p.no_pickup.insert(id);
-                }
-            }
-            if let (Some(body), Some(fractions)) =
-                (body, solid.as_ref().and_then(|s| s.drag_fractions))
-            {
-                p.drag_fractions.insert(body, fractions);
-            }
-            let material = solid
-                .as_ref()
-                .and_then(|s| surface_material(world, &s.surfaceprop));
-            if let (Some(id), Some(s)) = (entity, &solid) {
-                p.prop_materials.insert(id, s.surfaceprop.clone());
-            }
-            let surfaceprop = solid.as_ref().map(|s| s.surfaceprop.clone());
-            for shape in &cached.shapes {
-                let collider = match material {
-                    // VPhysics multiplies both surfaces' friction and elasticity
-                    // (frag fit: grenade 0.9 x concrete 0.8). Rapier restitution is
-                    // not IVP elasticity: "native fit needed".
-                    Some(m) => ColliderBuilder::new(shape.clone())
-                        .friction(m.friction)
-                        .restitution(restitution(m))
-                        .friction_combine_rule(CoefficientCombineRule::Multiply)
-                        .restitution_combine_rule(CoefficientCombineRule::Multiply),
-                    None => ColliderBuilder::new(shape.clone())
-                        .friction(0.7)
-                        .restitution(0.05),
-                }
-                .user_data(entity.map_or(0, |i| i as u128 + 1));
-                let c = match body {
-                    Some(body) => {
-                        // Authored bodies carry their mass on the body; pieces add none.
-                        let collider = match &masses {
-                            Some(_) => collider.density(0.),
-                            None => collider.mass(10.),
-                        }
-                        .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
-                        .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS);
-                        p.colliders
-                            .insert_with_parent(collider, body, &mut p.bodies)
-                    }
-                    None => p.colliders.insert(collider.position(position)),
-                };
-                if let Some(id) = entity {
-                    p.entity_colliders.entry(id).or_default().push(c);
-                }
-                if let Some(name) = &surfaceprop {
-                    p.collider_materials.insert(c, name.clone());
-                }
-                if instance.kind.starts_with("npc_") {
-                    p.colliders[c]
-                        .set_collision_groups(InteractionGroups::new(NPC_GROUP, Group::ALL));
-                } else if body.is_some() && prop_flags & 4 != 0 {
-                    p.colliders[c].set_collision_groups(DEBRIS_GROUPS);
-                }
-                p.npc_collider_contents.insert(
-                    c,
-                    if instance.kind.starts_with("npc_") {
-                        CONTENTS_MONSTER
-                    } else {
-                        1
-                    },
-                );
-            }
-            // SOLID_BBOX NPCs: movement and physics collide with the class hull box at
-            // the entity origin (never rotated); the model shape stays for traces.
-            if let (Some(id), Some((mins, maxs))) = (entity, npc_hull(&instance.kind)) {
-                for c in p.entity_colliders.get(&id).cloned().unwrap_or_default() {
-                    if let Some(collider) = p.colliders.get_mut(c) {
-                        collider.set_active_collision_types(ActiveCollisionTypes::empty());
-                        collider.set_active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
-                    }
-                    p.npc_hitboxes.insert(c);
-                    p.world_sides.hitboxes.insert(c);
-                }
-                let half = (maxs - mins) * 0.5;
-                let hull = p.colliders.insert(
-                    ColliderBuilder::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
-                        .translation(vector(instance.origin + (mins + maxs) * 0.5))
-                        .friction(0.7)
-                        .user_data(id as u128 + 1)
-                        .collision_groups(InteractionGroups::new(
-                            HULL_GROUP,
-                            Group::ALL
-                                .difference(PROJECTILE_GROUP)
-                                .difference(SHADOW_GROUP),
-                        )),
-                );
-                p.npc_collider_contents.insert(hull, CONTENTS_MONSTER);
-                if let Some(s) = &solid {
-                    p.collider_materials.insert(hull, s.surfaceprop.clone());
-                }
-                p.npc_hulls.insert(id, (hull, mins, maxs));
-                // Bullets trace the studio hitboxes (CBaseAnimating::TestHitboxes),
-                // not the render mesh: one box per hitbox, posed per tick.
-                if let Some(rig) = world
-                    .rigs
-                    .get(&instance.asset_key())
-                    .filter(|rig| !rig.hitboxes.is_empty())
-                {
-                    p.use_studio_hitboxes(id, instance, rig);
-                }
-            }
+            p.add_model_instance(world, instance, &mut shape_cache);
         }
         // Fold additional (authored) mass properties in before the first query.
         for handle in p.dynamic.values() {
@@ -1316,6 +1076,277 @@ impl Physics {
         // colliders, so replacing them moves the center.
         body.set_additional_mass_properties(snapped_props, true);
         body.recompute_mass_properties_from_colliders(&self.colliders);
+    }
+    /// One model instance's colliders (props, NPC hull + studio hitboxes), shared by
+    /// map load and runtime spawns (DESIGN 14r). `shape_cache` shares convex shapes
+    /// between instances of one model.
+    fn add_model_instance(
+        &mut self,
+        world: &World,
+        instance: &modkit_core::ModelInstance,
+        shape_cache: &mut BTreeMap<(String, bool, Option<String>, bool), PropShapes>,
+    ) {
+        if instance.background {
+            return;
+        }
+        if !instance.solid {
+            return;
+        }
+        let Some(asset) = world.model_assets.get(&instance.asset_key()) else {
+            return;
+        };
+        // prop_physics spawnflags: 1 start asleep, 8 motion disabled (static until
+        // EnableMotion, which is not implemented).
+        let prop_flags = instance
+            .entity
+            .and_then(|id| world.entities.get(id))
+            .and_then(|e| e.get("spawnflags"))
+            .and_then(|f| f.parse::<u32>().ok())
+            .unwrap_or(0);
+        let dynamic = instance.kind.starts_with("prop_physics") && prop_flags & 8 == 0;
+        // The installed rotating door's VVD bind mesh points along X, but
+        // its idle sequence turns the panel along Y. Use the same initial
+        // skinned pose as rendering before applying the entity's swing.
+        // Keep other model collision policies unchanged.
+        let clip = (instance.kind == "prop_door_rotating").then(|| {
+            instance
+                .entity
+                .and_then(|id| world.entities.get(id))
+                .and_then(|e| e.get("DefaultAnim"))
+                .unwrap_or("idle")
+                .to_lowercase()
+        });
+        // VPhysics props use their authored .phy pieces once the model loader
+        // read the solid parameters (CPhysicsProp::CreateVPhysics); otherwise
+        // the prior render-hull policy stays.
+        let authored = dynamic
+            .then(|| world.model_physics.get(&instance.asset_key()))
+            .flatten();
+        let native_eligible = (instance.kind == "static_prop" && instance.solid_mode == Some(6))
+            || authored.is_some();
+        let key = (instance.asset_key(), dynamic, clip.clone(), native_eligible);
+        let cached = shape_cache.entry(key).or_insert_with(|| {
+            let pieces = native_eligible
+                .then(|| world.model_collision.get(&instance.asset_key()))
+                .flatten();
+            if let Some(pieces) = pieces.filter(|pieces| !pieces.is_empty()) {
+                // Preserve authored convex decomposition. Merging all
+                // vertices into one hull fills bench/railing openings.
+                let shapes = pieces
+                    .iter()
+                    .map(|piece| {
+                        if piece.vertices.len() < 4
+                            || !piece.vertices.iter().all(|point| point.is_finite())
+                        {
+                            return None;
+                        }
+                        SharedShape::convex_hull(
+                            &piece
+                                .vertices
+                                .iter()
+                                .map(|point| Point::from(vector(*point)))
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<Option<Vec<_>>>();
+                if let Some(shapes) = shapes {
+                    return PropShapes {
+                        shapes,
+                        native: true,
+                        native_failed: false,
+                    };
+                }
+            }
+            let matrices = clip.as_ref().and_then(|name| {
+                world
+                    .rigs
+                    .get(&instance.asset_key())
+                    .filter(|rig| rig.clips.contains_key(name))
+                    .map(|rig| rig.matrices(name, 0.))
+            });
+            PropShapes {
+                shapes: mesh_shape(asset, dynamic, matrices.as_deref())
+                    .into_iter()
+                    .collect(),
+                native: false,
+                // An invalid native piece never silently removes part of
+                // the collider: the complete model uses the mesh fallback.
+                native_failed: pieces.is_some(),
+            }
+        });
+        if cached.shapes.is_empty() {
+            self.skipped += 1;
+            return;
+        }
+        // Scaled props need separately scaled meshes; skip their collider rather than use a wrong size.
+        if (instance.scale - 1.).abs() > 0.001 {
+            self.skipped += 1;
+            return;
+        }
+        self.native_shape_count += usize::from(cached.native) * cached.shapes.len();
+        self.native_shape_fallbacks += usize::from(cached.native_failed);
+        let position = pose(instance.origin, angles(instance.angles));
+        let entity = instance.entity;
+        let keyvalue = |key: &str| {
+            instance
+                .entity
+                .and_then(|id| world.entities.get(id))
+                .and_then(|e| e.get(key))
+                .and_then(|v| v.parse::<f32>().ok())
+                .filter(|v| v.is_finite())
+        };
+        let solid = authored.map(|solid| authored_solid(solid, keyvalue));
+        let (linear_damping, angular_damping) = solid
+            .as_ref()
+            .map_or((0.05, 0.1), |s| (s.damping, s.rotdamping));
+        let masses = solid
+            .as_ref()
+            .map(|s| authored_mass_properties(&cached.shapes, s.mass, s.inertia));
+        let body = dynamic.then(|| {
+            self.bodies.insert(
+                RigidBodyBuilder::dynamic()
+                    .additional_mass_properties(masses.unwrap_or_default())
+                    .position(position)
+                    .sleeping(prop_flags & 1 != 0)
+                    .linear_damping(linear_damping)
+                    .angular_damping(angular_damping),
+            )
+        });
+        if let (Some(id), Some(body)) = (entity, body) {
+            self.ccd_gated.insert(body, 0.);
+            self.dynamic.insert(id, body);
+            if world
+                .entities
+                .get(id)
+                .and_then(|e| e.get("spawnflags"))
+                .and_then(|v| v.trim().parse::<u32>().ok())
+                .is_some_and(|flags| flags & 0x200 != 0)
+            {
+                self.no_pickup.insert(id);
+            }
+        }
+        if let (Some(body), Some(fractions)) = (body, solid.as_ref().and_then(|s| s.drag_fractions))
+        {
+            self.drag_fractions.insert(body, fractions);
+        }
+        let material = solid
+            .as_ref()
+            .and_then(|s| surface_material(world, &s.surfaceprop));
+        if let (Some(id), Some(s)) = (entity, &solid) {
+            self.prop_materials.insert(id, s.surfaceprop.clone());
+        }
+        let surfaceprop = solid.as_ref().map(|s| s.surfaceprop.clone());
+        for shape in &cached.shapes {
+            let collider = match material {
+                // VPhysics multiplies both surfaces' friction and elasticity
+                // (frag fit: grenade 0.9 x concrete 0.8). Rapier restitution is
+                // not IVP elasticity: "native fit needed".
+                Some(m) => ColliderBuilder::new(shape.clone())
+                    .friction(m.friction)
+                    .restitution(restitution(m))
+                    .friction_combine_rule(CoefficientCombineRule::Multiply)
+                    .restitution_combine_rule(CoefficientCombineRule::Multiply),
+                None => ColliderBuilder::new(shape.clone())
+                    .friction(0.7)
+                    .restitution(0.05),
+            }
+            .user_data(entity.map_or(0, |i| i as u128 + 1));
+            let c = match body {
+                Some(body) => {
+                    // Authored bodies carry their mass on the body; pieces add none.
+                    let collider = match &masses {
+                        Some(_) => collider.density(0.),
+                        None => collider.mass(10.),
+                    }
+                    .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                    .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS);
+                    self.colliders
+                        .insert_with_parent(collider, body, &mut self.bodies)
+                }
+                None => self.colliders.insert(collider.position(position)),
+            };
+            if let Some(id) = entity {
+                self.entity_colliders.entry(id).or_default().push(c);
+            }
+            if let Some(name) = &surfaceprop {
+                self.collider_materials.insert(c, name.clone());
+            }
+            if instance.kind.starts_with("npc_") {
+                self.colliders[c]
+                    .set_collision_groups(InteractionGroups::new(NPC_GROUP, Group::ALL));
+            } else if body.is_some() && prop_flags & 4 != 0 {
+                self.colliders[c].set_collision_groups(DEBRIS_GROUPS);
+            }
+            self.npc_collider_contents.insert(
+                c,
+                if instance.kind.starts_with("npc_") {
+                    CONTENTS_MONSTER
+                } else {
+                    1
+                },
+            );
+        }
+        // SOLID_BBOX NPCs: movement and physics collide with the class hull box at
+        // the entity origin (never rotated); the model shape stays for traces.
+        if let (Some(id), Some((mins, maxs))) = (entity, npc_hull(&instance.kind)) {
+            for c in self.entity_colliders.get(&id).cloned().unwrap_or_default() {
+                if let Some(collider) = self.colliders.get_mut(c) {
+                    collider.set_active_collision_types(ActiveCollisionTypes::empty());
+                    collider.set_active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
+                }
+                self.npc_hitboxes.insert(c);
+                self.world_sides.hitboxes.insert(c);
+            }
+            let half = (maxs - mins) * 0.5;
+            let hull = self.colliders.insert(
+                ColliderBuilder::cuboid(half.x * SCALE, half.y * SCALE, half.z * SCALE)
+                    .translation(vector(instance.origin + (mins + maxs) * 0.5))
+                    .friction(0.7)
+                    .user_data(id as u128 + 1)
+                    .collision_groups(InteractionGroups::new(
+                        HULL_GROUP,
+                        Group::ALL
+                            .difference(PROJECTILE_GROUP)
+                            .difference(SHADOW_GROUP),
+                    )),
+            );
+            self.npc_collider_contents.insert(hull, CONTENTS_MONSTER);
+            if let Some(s) = &solid {
+                self.collider_materials.insert(hull, s.surfaceprop.clone());
+            }
+            self.npc_hulls.insert(id, (hull, mins, maxs));
+            // Bullets trace the studio hitboxes (CBaseAnimating::TestHitboxes),
+            // not the render mesh: one box per hitbox, posed per tick.
+            if let Some(rig) = world
+                .rigs
+                .get(&instance.asset_key())
+                .filter(|rig| !rig.hitboxes.is_empty())
+            {
+                self.use_studio_hitboxes(id, instance, rig);
+            }
+        }
+    }
+    /// A runtime-spawned entity's model instance (DESIGN 14r part A): the same
+    /// colliders as a map entity of its model; queries see them after the next
+    /// refresh_entity_queries.
+    pub fn add_spawned_instance(&mut self, world: &World, instance: &modkit_core::ModelInstance) {
+        let before: std::collections::HashSet<ColliderHandle> =
+            self.colliders.iter().map(|(h, _)| h).collect();
+        self.add_model_instance(world, instance, &mut BTreeMap::new());
+        let added: Vec<ColliderHandle> = self
+            .colliders
+            .iter()
+            .map(|(h, _)| h)
+            .filter(|h| !before.contains(h))
+            .collect();
+        self.changed_entity_colliders.extend(added);
+        let handle = instance
+            .entity
+            .and_then(|id| self.dynamic.get(&id))
+            .copied();
+        if let Some(body) = handle.and_then(|h| self.bodies.get_mut(h)) {
+            body.recompute_mass_properties_from_colliders(&self.colliders);
+        }
     }
     /// Dynamic bodies the island manager keeps awake.
     pub fn awake_bodies(&self) -> usize {
@@ -3313,6 +3344,77 @@ mod tests {
             .projectile_sweep(start, end, ProjectileHull::Box(Vec3::splat(3.)), &[])
             .is_none());
         assert!(physics.entity_closest_point(0, start).is_none());
+    }
+    #[test]
+    fn runtime_spawn_copies_a_template_npc_with_hull_and_trace_shape() {
+        // Synthetic citizen template (an 8-unit column 60 tall, not game data) far below
+        // the map, then a runtime copy at x 200 (DESIGN 14r part A).
+        let instance = modkit_core::ModelInstance {
+            background: false,
+            model: "synthetic_citizen.mdl".into(),
+            origin: crate::ai::spawn::POOL_ORIGIN,
+            angles: Vec3::ZERO,
+            skin: 0,
+            scale: 1.,
+            kind: "npc_citizen".into(),
+            solid: true,
+            solid_mode: Some(2),
+            entity: Some(0),
+        };
+        let key = instance.asset_key();
+        let mut world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_citizen".into()),
+                    (crate::ai::spawn::POOL_KEY.into(), "npc_citizen".into()),
+                ],
+            }],
+            model_assets: BTreeMap::from([(
+                key,
+                vec![box_surface(Vec3::new(-4., -4., 0.), Vec3::new(4., 4., 60.))],
+            )]),
+            model_instances: vec![instance],
+            ..Default::default()
+        };
+        let mut physics = Physics::new(&world);
+        let mut scene = crate::entities::Scene::new(&world);
+        let origin = Vec3::new(200., 0., 0.);
+        let (entity, instance) = crate::ai::spawn::instantiate(&world, 0, 1, origin, 90.);
+        assert_eq!(entity.get(crate::ai::spawn::POOL_KEY), None);
+        assert_eq!(entity.get("angles"), Some("0 90 0"));
+        let id = scene.spawn_entity(&mut world, entity);
+        assert_eq!(id, 1);
+        assert!(scene.states[id].visible);
+        let instance = instance.unwrap();
+        assert_eq!((instance.entity, instance.origin), (Some(1), origin));
+        world.model_instances.push(instance.clone());
+        physics.add_spawned_instance(&world, &instance);
+        physics.refresh_entity_queries();
+        // The hull carries a fall at its top; a shot into the column names the new id.
+        let fall = physics.trace_hull(
+            Vec3::new(220., 0., 100.),
+            Vec3::new(220., 0., 0.),
+            Vec3::splat(-16.).with_z(0.),
+            Vec3::splat(16.).with_z(72.),
+        );
+        assert!(
+            (100. - fall.fraction * 100. - 72.).abs() < 0.1,
+            "{}",
+            fall.fraction
+        );
+        let hit = physics
+            .impact_ray(Vec3::new(200., 0., 100.), -Vec3::Z, 200.)
+            .unwrap();
+        assert_eq!(hit.entity, 1);
+        // The template keeps its own colliders far below.
+        let template = physics
+            .impact_ray(
+                origin.with_x(0.) + crate::ai::spawn::POOL_ORIGIN + Vec3::Z * 100.,
+                -Vec3::Z,
+                200.,
+            )
+            .unwrap();
+        assert_eq!(template.entity, 0);
     }
     #[test]
     fn npc_hull_box_carries_the_player_while_traces_hit_the_model_shape() {

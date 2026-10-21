@@ -309,7 +309,7 @@ impl Simulation {
     }
     /// One F4 overlay key; a spawn returns its console message.
     pub fn spawn_overlay_key(
-        &self,
+        &mut self,
         game: &mut crate::gameplay::Gameplay,
         key: hl2_simulation::ai::spawn::OverlayKey,
     ) -> Option<String> {
@@ -328,9 +328,9 @@ impl Simulation {
             }
         }
     }
-    /// npc_create placement from the player's eye along the aim (logged only).
+    /// npc_create from the player's eye along the aim (a new runtime entity).
     pub fn spawn_npc(
-        &self,
+        &mut self,
         game: &mut crate::gameplay::Gameplay,
         request: hl2_simulation::ai::spawn::SpawnRequest,
     ) -> String {
@@ -339,7 +339,7 @@ impl Simulation {
             self.pitch.cos() * self.yaw.sin(),
             self.pitch.sin(),
         );
-        game.request_spawn(request, &self.physics, self.eye, forward)
+        game.request_spawn(request, &mut self.physics, self.eye, forward)
     }
     fn step(
         &mut self,
