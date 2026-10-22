@@ -323,7 +323,7 @@ pub struct Scene {
     pub prop_breaks: Vec<crate::gibs::PropBreak>,
     /// Explosive props broken this tick (CBreakableProp::Break -> ExplosionCreate):
     /// world-space center, integer magnitude and radius.
-    pub prop_explosions: Vec<(Vec3, f32, f32)>,
+    pub prop_explosions: Vec<(Vec3, f32, f32, bool)>,
     /// env_physexplosion entities whose Explode input arrived (phys_explosion).
     pub phys_explosions: Vec<usize>,
     /// env_physimpact entities whose Impact input arrived (phys_explosion).

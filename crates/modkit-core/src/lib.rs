@@ -196,6 +196,10 @@ pub struct PropData {
     pub explosive_resist: bool,
     #[serde(default)]
     pub ignite_halfhealth: bool,
+    /// physgun_interactions onbreak explode_fire (PROPINTER_PHYSGUN_BREAK_EXPLODE: the gas
+    /// can's PropaneTank.Burst instead of the explosion sound).
+    #[serde(default)]
+    pub break_explode: bool,
 }
 impl Default for PropData {
     fn default() -> Self {
@@ -213,6 +217,7 @@ impl Default for PropData {
             flammable: false,
             explosive_resist: false,
             ignite_halfhealth: false,
+            break_explode: false,
         }
     }
 }

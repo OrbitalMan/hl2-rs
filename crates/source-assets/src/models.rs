@@ -1467,6 +1467,7 @@ pub fn resolve_prop_data(
         data.flammable |= interaction("fire_interactions", "flammable", "yes");
         data.explosive_resist |= interaction("fire_interactions", "explosive_resist", "yes");
         data.ignite_halfhealth |= interaction("fire_interactions", "ignite", "halfhealth");
+        data.break_explode |= interaction("physgun_interactions", "onbreak", "explode_fire");
         let text = |key: &str| {
             block
                 .children()
@@ -2029,6 +2030,27 @@ mod owned_prop_data {
                 "{model}"
             );
         }
+        // The gas can: a small blast with PropaneTank.Burst (onbreak explode_fire).
+        let gas = data("models/props_junk/gascan001a.mdl");
+        assert_eq!(
+            (
+                gas.explosive_damage,
+                gas.explosive_radius,
+                gas.break_explode
+            ),
+            (Some(25.), Some(80.), true)
+        );
+        assert!(!data("models/props_c17/oildrum001_explosive.mdl").break_explode);
+        let propane = data("models/props_junk/propane_tank001a.mdl");
+        assert_eq!(
+            (
+                propane.explosive_damage,
+                propane.explosive_radius,
+                propane.break_explode,
+                propane.flammable
+            ),
+            (Some(1.), Some(50.), true, true)
+        );
         assert_eq!((pallet.breakable_count, pallet.breakable_skin), (6, 0));
         assert_eq!(pallet.damage_table, None);
         // Cardboard.small: bullets 0.5, no chunk set.

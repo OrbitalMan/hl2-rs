@@ -384,7 +384,8 @@ impl Projectiles {
         player_ducked: bool,
     ) -> Vec<Damage> {
         let mut damage = Vec::new();
-        for (center, magnitude, radius) in std::mem::take(&mut scene.prop_explosions) {
+        for (center, magnitude, radius, burst) in std::mem::take(&mut scene.prop_explosions) {
+            let sounds = scene.sounds.len();
             self.grenade_explosion(
                 center,
                 magnitude,
@@ -397,6 +398,13 @@ impl Projectiles {
                 player_ducked,
                 &mut damage,
             );
+            if burst {
+                scene.sounds.truncate(sounds);
+                scene.sounds.push(crate::sounds::SoundRequest {
+                    origin: Some(center),
+                    .."PropaneTank.Burst".into()
+                });
+            }
         }
         damage
     }

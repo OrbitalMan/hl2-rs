@@ -300,6 +300,7 @@ const FUNC_BREAKABLE_DAMAGE: modkit_core::PropData = modkit_core::PropData {
     flammable: false,
     explosive_resist: false,
     ignite_halfhealth: false,
+    break_explode: false,
 };
 /// GetBreakableDamage (props.cpp) for a breakable with prop data (CBreakableProp,
 /// modifiers default 1): bullets x dmg.bullets (buckshot twice that), clubs x dmg.club,
@@ -1597,6 +1598,7 @@ impl Inventory {
                             let explode_radius = own
                                 .and_then(|d| d.explosive_radius)
                                 .unwrap_or_else(|| key("ExplodeRadius"));
+                            let burst = own.is_some_and(|d| d.break_explode);
                             if explode_damage > 0. || explode_radius > 0. {
                                 let scale = entity
                                     .get("modelscale")
@@ -1614,7 +1616,19 @@ impl Inventory {
                                     .entity_body(id)
                                     .and_then(|b| physics.center_of_mass(b))
                                     .unwrap_or(scene.states[id].origin);
-                                scene.prop_explosions.push((center, magnitude, radius));
+                                // PROPINTER_PHYSGUN_BREAK_EXPLODE: SF_ENVEXPLOSION_NOSOUND
+                                // and PropaneTank.Burst instead.
+                                scene
+                                    .prop_explosions
+                                    .push((center, magnitude, radius, burst));
+                            } else if burst {
+                                // No explode damage: ExplosionCreate(origin, 1, radius)
+                                // with its sound.
+                                let center = physics
+                                    .entity_body(id)
+                                    .and_then(|b| physics.center_of_mass(b))
+                                    .unwrap_or(scene.states[id].origin);
+                                scene.prop_explosions.push((center, 1., 2., false));
                             }
                         }
                         // PropBreakableCreateAll takes the prop's pose and motion.
@@ -2789,7 +2803,7 @@ mod tests {
         );
         assert!(scene.states[0].killed && scene.states[1].killed);
         assert_eq!(scene.prop_explosions.len(), 1);
-        let (_, magnitude, radius) = scene.prop_explosions[0];
+        let (_, magnitude, radius, _) = scene.prop_explosions[0];
         assert_eq!((magnitude, radius), (100., 250.));
     }
     #[test]

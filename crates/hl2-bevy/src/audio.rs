@@ -408,6 +408,8 @@ impl PreparedAudio {
                 "NPC_Combine.WeaponBash",
                 // npc_combine.cpp COMBINE_AE_BEGIN_ALTFIRE (elites).
                 "Weapon_CombineGuard.Special1",
+                // props.cpp CBreakableProp::Break with PROPINTER_PHYSGUN_BREAK_EXPLODE.
+                "PropaneTank.Burst",
             ]
             .into_iter()
             .chain(hl2_simulation::ai::zombie::SOUNDS.iter().copied())
