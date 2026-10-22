@@ -23,6 +23,9 @@ pub struct Phy {
     pub drag_fractions: Vec3,
     /// Preserves duplicate sections/keys; mass/material mapping is separate work.
     pub keyvalues: Vec<keyvalues::Entry>,
+    /// The terminal convexes' client-data words (IVP_Compact_Ledge offset 4): 0 in
+    /// prop PHYs; set in ragdoll solids (`read_solids`).
+    pub ledge_data: Vec<i32>,
 }
 
 fn relative(data: &[u8], base: usize, field: usize) -> Result<usize> {
@@ -37,6 +40,9 @@ fn relative(data: &[u8], base: usize, field: usize) -> Result<usize> {
 /// Reads only the proved static/single-solid format. Every range stays within
 /// its solid; pointers cannot escape into the file header or KeyValues tail.
 pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
+    read_solid(data, mdl_checksum, false)
+}
+fn read_solid(data: &[u8], mdl_checksum: u32, ragdoll: bool) -> Result<Phy> {
     if data.len() > 64 * 1024 * 1024 {
         bail!("PHY file exceeds reader budget");
     }
@@ -82,6 +88,7 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
     let mut visited = BTreeSet::new();
     let mut leaves = BTreeSet::new();
     let mut pieces = Vec::new();
+    let mut ledge_data = Vec::new();
     let mut triangle_budget = 0usize;
     while let Some((node, depth)) = pending.pop() {
         if depth > 128 || visited.len() >= 4096 || !visited.insert(node) {
@@ -102,9 +109,11 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
             // Internal convexes describe acceleration-tree bounds, not pieces.
             // Their second field is a tree pointer, not a bone assignment.
             if flags & 3 == 0 && leaves.insert(leaf) {
-                if i32le(compact, leaf + 4)? != 0 {
+                let client = i32le(compact, leaf + 4)?;
+                if client != 0 && !ragdoll {
                     bail!("unsupported PHY terminal bone assignment");
                 }
+                ledge_data.push(client);
                 let count = usize::from(u16le(compact, leaf + 12)?);
                 triangle_budget = triangle_budget
                     .checked_add(count)
@@ -190,6 +199,7 @@ pub fn read(data: &[u8], mdl_checksum: u32) -> Result<Phy> {
         rotation_inertia,
         drag_fractions,
         keyvalues,
+        ledge_data,
     })
 }
 
@@ -256,6 +266,36 @@ pub fn solids(entries: &[keyvalues::Entry]) -> Vec<modkit_core::PhysicsSolid> {
             solid
         })
         .collect()
+}
+
+/// Every solid of a multi-solid (ragdoll) PHY, each read like a single-solid file:
+/// the solid's bytes behind a one-solid header and an empty KeyValues tail, so the
+/// proven reader's bounds and IVPS checks apply unchanged. Index i is solid i of
+/// the ragdoll KeyValues.
+pub fn read_solids(data: &[u8], mdl_checksum: u32) -> Result<Vec<Phy>> {
+    if data.len() > 64 * 1024 * 1024 || u32le(data, 0)? != 16 {
+        bail!("unsupported PHY header");
+    }
+    let count = u32le(data, 8)? as usize;
+    if count == 0 || count > 128 {
+        bail!("unsupported PHY solid count");
+    }
+    let mut solids = Vec::with_capacity(count);
+    let mut at = 16usize;
+    for _ in 0..count {
+        let size = usize::try_from(u32le(data, at)?)?;
+        let solid = bytes(data, at, size.checked_add(4).context("PHY size overflow")?)?;
+        let mut single = Vec::with_capacity(solid.len() + 17);
+        single.extend_from_slice(&16u32.to_le_bytes());
+        single.extend_from_slice(&0u32.to_le_bytes());
+        single.extend_from_slice(&1u32.to_le_bytes());
+        single.extend_from_slice(&mdl_checksum.to_le_bytes());
+        single.extend_from_slice(solid);
+        single.push(0);
+        solids.push(read_solid(&single, mdl_checksum, true)?);
+        at += 4 + size;
+    }
+    Ok(solids)
 }
 
 /// One ragdoll solid (a bone's physics body) from a multi-solid PHY.
@@ -530,6 +570,19 @@ mod ragdoll_tests {
             );
             assert!(r.solids.iter().all(|s| s.mass > 0.), "{path}");
         }
+        // Per-bone geometry: every solid of the cop reads with convex pieces.
+        let data = vfs.read("models/police.phy").unwrap().unwrap();
+        let checksum = u32le(&data, 12).unwrap();
+        let solids = read_solids(&data, checksum).unwrap();
+        assert_eq!(solids.len(), 15);
+        assert!(solids.iter().all(|s| !s.pieces.is_empty()));
+        // Ragdoll ledges carry a distinct nonzero client-data word per solid (police:
+        // 1, 4, 10, 15, ...; likely the studio bone index, not yet checked against the
+        // MDL bones).
+        let words: Vec<i32> = solids.iter().flat_map(|s| s.ledge_data.clone()).collect();
+        assert_eq!(words.len(), 15);
+        assert!(words.iter().all(|w| *w > 0));
+        assert_eq!(words.iter().collect::<BTreeSet<_>>().len(), 15);
         // A prop's single solid is not a ragdoll.
         let barrel = vfs
             .read("models/props_c17/oildrum001.phy")
