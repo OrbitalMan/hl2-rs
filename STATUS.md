@@ -4,6 +4,14 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Video Advanced FOV options cvar parity (`crates/hl2-ui/src/console`, `crates/hl2-ui/src/console/commands`):**
+  - Implemented console cvars for all FOV sliders in Options > Video > Advanced:
+    - `fov_desired`: retail cvar alias for `fov`, queries and assigns desired horizontal 4:3 field of view (50..120).
+    - `vertical_fov`: queries, assigns, and clamps vertical field of view (0 = automatic, clamped to 40..100).
+    - `viewmodel_fov`: queries, assigns, and clamps viewmodel field of view (40..80, default 54).
+  - All three cvars integrate directly with camera rendering in `hl2-bevy::simulation` (`self.fov`, `self.vertical_fov`, `self.viewmodel_fov`) and `hl2-bevy::video`.
+  - Added unit test `video_fov_cvars_query_set_clamp_and_cvar_value` in `crates/hl2-ui/src/console.rs`.
+
 - **Video HDR option audit, central localization fallbacks & render pipeline status (`crates/hl2-ui`, `crates/hl2-bevy`):**
   - Audited retail `OptionsSubVideo.res` controls for High Dynamic Range (`HDR Label` and `HDR` ComboBox):
     1. UI Layout & Visibility: Retail layout specifies `visible 1 [!$OSX]` and `visible 0 [$OSX]`. `hl2-ui::gameui::settings::force_visible(Panel::Video, "HDR" | "HDR Label")` ensures the controls remain visible and enabled on macOS and Windows/Linux.

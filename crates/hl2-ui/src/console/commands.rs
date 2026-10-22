@@ -241,6 +241,21 @@ pub const COMMANDS: &[Spec] = &[
         &[Arg::Free],
     ),
     cvar(
+        "fov_desired",
+        "fov_desired [degrees]: query or set desired field of view (alias for fov)",
+        &[Arg::Free],
+    ),
+    cvar(
+        "vertical_fov",
+        "vertical_fov [degrees]: query or set vertical field of view (0 = automatic)",
+        &[Arg::Free],
+    ),
+    cvar(
+        "viewmodel_fov",
+        "viewmodel_fov [degrees]: query or set viewmodel field of view",
+        &[Arg::Free],
+    ),
+    cvar(
         "mat_hdr_level",
         "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)",
         &[Arg::Values(&["0", "1", "2"])],

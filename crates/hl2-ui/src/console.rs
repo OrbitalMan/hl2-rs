@@ -2223,7 +2223,7 @@ impl Console {
                     return Err(usage());
                 }
             }
-            "fov" => {
+            "fov" | "fov_desired" => {
                 if args.is_empty() {
                     self.log(format!("\"fov\" = \"{:.0}\"", self.config.video.fov));
                 } else if args.len() == 1 {
@@ -2232,6 +2232,44 @@ impl Console {
                     self.config.video.fov = fov;
                     let _ = self.config.save();
                     self.log(format!("fov {:.0}", fov));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "vertical_fov" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"vertical_fov\" = \"{:.0}\"",
+                        self.config.video.vertical_fov
+                    ));
+                } else if args.len() == 1 {
+                    let fov: f32 = args[0].parse().map_err(|_| usage())?;
+                    let fov = if fov <= 0.0 {
+                        0.0
+                    } else {
+                        fov.clamp(40.0, 100.0)
+                    };
+                    self.config.video.vertical_fov = fov;
+                    let _ = self.config.save();
+                    self.log(format!("vertical_fov {:.0}", fov));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "viewmodel_fov" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"viewmodel_fov\" = \"{:.0}\"",
+                        self.config.video.viewmodel_fov
+                    ));
+                } else if args.len() == 1 {
+                    let fov: f32 = args[0].parse().map_err(|_| usage())?;
+                    let fov = fov.clamp(40.0, 80.0);
+                    self.config.video.viewmodel_fov = fov;
+                    let _ = self.config.save();
+                    self.log(format!("viewmodel_fov {:.0}", fov));
                     return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
                 } else {
                     return Err(usage());
@@ -2380,7 +2418,9 @@ impl Console {
             "sk_autoaim_scale1" | "m_autoaim_scale" => {
                 format!("{:.2}", c.mouse.aim_assist_scale)
             }
-            "fov" => format!("{:.0}", c.video.fov),
+            "fov" | "fov_desired" => format!("{:.0}", c.video.fov),
+            "vertical_fov" => format!("{:.0}", c.video.vertical_fov),
+            "viewmodel_fov" => format!("{:.0}", c.video.viewmodel_fov),
             "mat_hdr_level" => c.video.hdr.level().to_string(),
             "background_map" => self.background_map()?.to_owned(),
             "con_filter_enable" => self.con_filter.to_string(),
@@ -8541,5 +8581,46 @@ mod tests {
         console.submit("mat_hdr_level 3");
         assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
         assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn video_fov_cvars_query_set_clamp_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // fov & fov_desired
+        assert_eq!(console.cvar_value("fov").as_deref(), Some("75"));
+        assert_eq!(console.cvar_value("fov_desired").as_deref(), Some("75"));
+
+        console.submit("fov_desired 90");
+        assert_eq!(console.config.video.fov, 90.0);
+        assert_eq!(console.cvar_value("fov").as_deref(), Some("90"));
+        assert_eq!(console.cvar_value("fov_desired").as_deref(), Some("90"));
+
+        console.submit("fov 105");
+        assert_eq!(console.config.video.fov, 105.0);
+
+        // vertical_fov
+        assert_eq!(console.cvar_value("vertical_fov").as_deref(), Some("0"));
+        console.submit("vertical_fov 60");
+        assert_eq!(console.config.video.vertical_fov, 60.0);
+        assert_eq!(console.cvar_value("vertical_fov").as_deref(), Some("60"));
+
+        console.submit("vertical_fov 0");
+        assert_eq!(console.config.video.vertical_fov, 0.0);
+
+        console.submit("vertical_fov 150");
+        assert_eq!(console.config.video.vertical_fov, 100.0); // clamped to 100
+
+        // viewmodel_fov
+        assert_eq!(console.cvar_value("viewmodel_fov").as_deref(), Some("54"));
+        console.submit("viewmodel_fov 65");
+        assert_eq!(console.config.video.viewmodel_fov, 65.0);
+        assert_eq!(console.cvar_value("viewmodel_fov").as_deref(), Some("65"));
+
+        console.submit("viewmodel_fov 20");
+        assert_eq!(console.config.video.viewmodel_fov, 40.0); // clamped to 40
+        console.submit("viewmodel_fov 120");
+        assert_eq!(console.config.video.viewmodel_fov, 80.0); // clamped to 80
     }
 }

@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-22 Video Advanced FOV options cvar parity
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added cvar specifications to `COMMANDS`: `fov_desired`, `vertical_fov`, and `viewmodel_fov`.
+- `crates/hl2-ui/src/console.rs`:
+  - Added execution handlers in `interpret()` and query reporting in `cvar_value()` for `fov_desired`, `vertical_fov`, and `viewmodel_fov`.
+  - Added unit test `video_fov_cvars_query_set_clamp_and_cvar_value`.
+- `STATUS.md`:
+  - Documented cvar parity and runtime simulation camera hookup for Video Advanced FOV controls.
+
+**Why:** User request:
+"Check every option in Options > Video > Advanced, Implement the placeholders/unfinished ones. Report if some feature implementation acceptance criteria is unclear, document it as unfinished. Conclude each new option implementation with a commit."
+
+**Tested how:**
+- `bash scripts/checks/validate.sh`: 371 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `bash scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Parity between Options > Video > Advanced FOV sliders and console cvars, with runtime simulation camera scaling.
+
+**Still broken or not tested:** None for FOV controls.
+
+**Next:** Implement next Video Advanced option group.
+
 ## 2026-10-22 Video HDR option audit, central localization fallbacks & render pipeline status
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
