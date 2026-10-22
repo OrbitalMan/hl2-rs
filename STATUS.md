@@ -1,5 +1,9 @@
 # STATUS
 
+## Offline pickup saved-state checkpoint (2026-10-22)
+
+Private scene-crate-attach-20261022j is sealed:17 retained files/13 external bindings,two exact bodies/646 bounded instruction records. Selected pickup code captures mass and rotational damping before temporary carry setters; the selected physics object then receives a separate mass1 request. Detach uses the same numeric array indices in a newly enumerated list, so membership/order and actual dynamic restoration still need verification. Ordinary +use passes false for alternate-child search and caches its physics pointer before pickup notification. No native launch, input or game interference; no Rust edits/builds. Live carry/throw/window/exit and Rust parity remain **not tested**. Original authored gaps remain unchanged.
+
 ## Offline storage research handoff sealed (2026-10-22)
 
 Six private supplements are sealed; all work after the owner's game-preservation instruction stayed offline. The separate late detach supplement checks three exact bodies/370 bounded instruction records/12 external identities,20 retained files. It requests saved mass/rotational damping restoration before the parent's later throw mass query; its false-clear branch calls a velocity clamp. Actual saved/live values, dynamic physics behavior and resulting motion remain untested. The existing five-root navigator remains66 distinct bodies/69 retained occurrences/five raw-only startup gaps; the late three-body root is separate.

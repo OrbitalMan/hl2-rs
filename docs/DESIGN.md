@@ -1,5 +1,11 @@
 # Design
 
+## Pickup saved arrays and current-list identity (2026-10-22)
+
+The selected retail Attach path captures each enumerated mass and rotational damping before requesting reduced carry mass and damping10. Its load accumulator sums getter values; the selected physics object later receives a separate mass1/drag-off request. Preserve the retail single-precision count-factor arithmetic; SDK n/7.5 is a reference expression rather than a proven bit-exact replacement. The later Detach path applies saved slots by current enumeration index, without a pointer remap in these selected bodies. Bind list/pointer identity and actual values before treating restoration as equivalent to authored physics.
+
+Ordinary +use supplies false for alternate-child search, with a physics pointer cached before notification. Do not reinterpret pickup output as attachment success, a cached pointer as a lifetime guarantee, or the post-attach haptic feedback call as simulation force. No implementation change. Next offline questions are the prop-class list contract and collision-damage dispatch; runtime waits under the owner's game-preservation instruction.
+
 ## Detach restoration and next observation boundary (2026-10-22)
 
 The late selected retail detach path requests drag/wake, saved mass, rotational damping and held-flag updates for each nonnull enumerated physics object before velocity handling. Nonzero clear requests zero vectors/contact-strain clearing; false-clear requests a velocity clamp using effective parent-sourced limits. Thus the selected primary-throw path can alter velocity before applying its later vectors. Saved-value initialization/list membership, actual physics setters/units and callback mutations remain unresolved; a setter request is not proof of the later observed mass or velocity. Preserve the approximate SSE arithmetic rather than promoting a bit-exact standard normalization formula.

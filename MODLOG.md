@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline pickup saved-state milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Primary agent completed Attach research. Independent static workers physics_list and queued_damage are researching separate follow-ups; their unfinished findings are not promoted here.
+
+**Changed / Why:** Sealed the narrow saved-mass/rotational-damping capture, temporary carry setters and ordinary +use caller order while preserving the owner's running game.
+
+**Tested how / Result:**17 retained files/13 external bindings,two exact bodies/646 byte-matched records; predecessor use/detach seals pass. Complete identities, byte sites, constants and pinned reference excerpts checked. No Rust changes/builds or native launch.
+
+**Still broken or not tested / Next:** Actual saved/restored values, list membership/order, dynamic physics/units, carry/throw/window/exit and Rust parity untested. Continue bounded offline list-contract and damage-dispatch research; commit/push reviewed docs and leave a clean checkpoint near quota.
+
 ## 2026-10-22 offline detach supplement and final research handoff
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. The earlier material static worker exit_registration contributed exit/use/throw evidence; the late detach supplement and handoff were completed by the primary agent.

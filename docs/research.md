@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Sealed AttachEntity saved-state supplement (2026-10-22)
+
+The private scene-crate-attach-20261022j supplement checks two full-identity baseline/original bodies,646 byte-matched records and13 external identities. It resolves selected saved-mass/damping capture and temporary setter order, ordinary caller false flags, and numeric index correspondence with the earlier sealed detach lane. Actual values/dynamic physics/list stability remain unobserved. One retained body repeats earlier Init evidence; the Attach body is newly reviewed. Earlier frozen roots and their five-root navigator are unchanged.
+
+The owner requested their running game remain undisturbed. This continuation is offline; no native execution, Rust implementation, first-map completion or parity claim follows. The existing private window-exit handoff remains the predecessor, with a newer continuation to be left at this run's closeout.
+
 ## Final offline storage-window continuation (2026-10-22)
 
 Private `scene-crate-detach-20261022i` adds three exact identities outside the earlier five-root navigator: the detach helper and its two selected velocity helpers. Its seal passes20 retained files/12 external bindings/370 byte-matched records, including duplicate/padding/truncated-window records explicitly bounded in the guide. Saved-mass/damping setter requests precede the velocity branch and the parent's later mass query; false-clear can request a clamp. No actual restored state, physical units or native result is observed. The original five roots remain frozen and their66-body/69-occurrence navigator unchanged.

@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Saved-state capture acceptance (2026-10-22)
+
+Run C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-crate-attach-20261022j/verify_seal.py. Expected passed:true,17 retained files/13 bindings,two exact bodies/646 bounded records. The verifier checks immutable complete identities/bodies, caller flags and callback-before-attach order, exact mass/damping accesses/setters, count-factor constants, pinned SDK excerpts and matching detach offsets; the seal checks closed files and receipt. Windows can include padding/neighbors and do not establish full ABI/CFG coverage.
+
+A failed predecessor .c read is retained; its exact caller JSON was freshly retrieved. Saved live values, native list contract/stability, dynamic mass/damping effects/units, carry/throw/window/exit and Rust parity are **not tested**. Documentation/whitelist checks are appropriate; no gameplay build or Rust tests for this research-only milestone.
+
 ## Offline handoff and detach acceptance (2026-10-22)
 
 Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-crate-detach-20261022i/verify_seal.py`: expected passed:true,20 retained files/12 bindings/three exact bodies/370 bounded instruction records. It checks immutable full-identity DB bodies, file-backed selected calls/branches/constants, pinned source excerpts and the closed file set/receipt. The original five root seals were also checked again, and `../../work/publishing/verify-window-exit-index-20261022d.py` still checks66 distinct bodies/69 occurrences/five missing startup stubs. The late detach root is separate from that inventory.
