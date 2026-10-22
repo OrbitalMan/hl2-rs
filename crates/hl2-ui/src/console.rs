@@ -2356,6 +2356,183 @@ impl Console {
                     return Err(usage());
                 }
             }
+            "mat_picmip" => {
+                if args.is_empty() {
+                    let val = match self.config.video.advanced.texture_detail {
+                        crate::config::TextureDetail::VeryHigh => -1,
+                        crate::config::TextureDetail::High => 0,
+                        crate::config::TextureDetail::Medium => 1,
+                        crate::config::TextureDetail::Low => 2,
+                    };
+                    self.log(format!("\"mat_picmip\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let detail = match args[0].as_str() {
+                        "-1" => crate::config::TextureDetail::VeryHigh,
+                        "0" => crate::config::TextureDetail::High,
+                        "1" => crate::config::TextureDetail::Medium,
+                        "2" => crate::config::TextureDetail::Low,
+                        _ => return Err(usage()),
+                    };
+                    self.config.video.advanced.texture_detail = detail;
+                    let _ = self.config.save();
+                    let val = match detail {
+                        crate::config::TextureDetail::VeryHigh => -1,
+                        crate::config::TextureDetail::High => 0,
+                        crate::config::TextureDetail::Medium => 1,
+                        crate::config::TextureDetail::Low => 2,
+                    };
+                    self.log(format!("mat_picmip {val}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_reducefillrate" => {
+                if args.is_empty() {
+                    let val = u8::from(
+                        self.config.video.advanced.shader_detail
+                            == crate::config::ShaderDetail::Low,
+                    );
+                    self.log(format!("\"mat_reducefillrate\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.shader_detail = if on {
+                        crate::config::ShaderDetail::Low
+                    } else {
+                        crate::config::ShaderDetail::High
+                    };
+                    let _ = self.config.save();
+                    self.log(format!("mat_reducefillrate {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "r_rootlod" => {
+                if args.is_empty() {
+                    let val = match self.config.video.advanced.model_detail {
+                        crate::config::ModelDetail::High => 0,
+                        crate::config::ModelDetail::Medium => 1,
+                        crate::config::ModelDetail::Low => 2,
+                    };
+                    self.log(format!("\"r_rootlod\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let detail = match args[0].as_str() {
+                        "0" => crate::config::ModelDetail::High,
+                        "1" => crate::config::ModelDetail::Medium,
+                        "2" => crate::config::ModelDetail::Low,
+                        _ => return Err(usage()),
+                    };
+                    self.config.video.advanced.model_detail = detail;
+                    let _ = self.config.save();
+                    let val = match detail {
+                        crate::config::ModelDetail::High => 0,
+                        crate::config::ModelDetail::Medium => 1,
+                        crate::config::ModelDetail::Low => 2,
+                    };
+                    self.log(format!("r_rootlod {val}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "r_waterforceexpensive" => {
+                if args.is_empty() {
+                    let val = u8::from(
+                        self.config.video.advanced.water_detail
+                            != crate::config::WaterDetail::Simple,
+                    );
+                    self.log(format!("\"r_waterforceexpensive\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.water_detail =
+                        match (on, self.config.video.advanced.water_detail) {
+                            (false, _) => crate::config::WaterDetail::Simple,
+                            (true, crate::config::WaterDetail::Simple) => {
+                                crate::config::WaterDetail::World
+                            }
+                            (true, other) => other,
+                        };
+                    let _ = self.config.save();
+                    self.log(format!("r_waterforceexpensive {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "r_waterforcereflectentities" => {
+                if args.is_empty() {
+                    let val = u8::from(
+                        self.config.video.advanced.water_detail == crate::config::WaterDetail::All,
+                    );
+                    self.log(format!("\"r_waterforcereflectentities\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.water_detail = if on {
+                        crate::config::WaterDetail::All
+                    } else if self.config.video.advanced.water_detail
+                        == crate::config::WaterDetail::All
+                    {
+                        crate::config::WaterDetail::World
+                    } else {
+                        self.config.video.advanced.water_detail
+                    };
+                    let _ = self.config.save();
+                    self.log(format!("r_waterforcereflectentities {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "r_shadowrendertotexture" => {
+                if args.is_empty() {
+                    let val = u8::from(
+                        self.config.video.advanced.shadow_detail
+                            != crate::config::ShadowDetail::Low,
+                    );
+                    self.log(format!("\"r_shadowrendertotexture\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.shadow_detail =
+                        match (on, self.config.video.advanced.shadow_detail) {
+                            (false, _) => crate::config::ShadowDetail::Low,
+                            (true, crate::config::ShadowDetail::Low) => {
+                                crate::config::ShadowDetail::High
+                            }
+                            (true, other) => other,
+                        };
+                    let _ = self.config.save();
+                    self.log(format!("r_shadowrendertotexture {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "r_flashlightdepthtexture" => {
+                if args.is_empty() {
+                    let val = u8::from(
+                        self.config.video.advanced.shadow_detail
+                            == crate::config::ShadowDetail::High,
+                    );
+                    self.log(format!("\"r_flashlightdepthtexture\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.shadow_detail = if on {
+                        crate::config::ShadowDetail::High
+                    } else if self.config.video.advanced.shadow_detail
+                        == crate::config::ShadowDetail::High
+                    {
+                        crate::config::ShadowDetail::Medium
+                    } else {
+                        self.config.video.advanced.shadow_detail
+                    };
+                    let _ = self.config.save();
+                    self.log(format!("r_flashlightdepthtexture {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
             "mat_setvideomode" => {
                 let [w, h, windowed] = args else {
                     return Err(usage());
@@ -2496,6 +2673,39 @@ impl Console {
                 }
             }
             "mat_vsync" => u8::from(c.video.advanced.vsync).to_string(),
+            "r_rootlod" => match c.video.advanced.model_detail {
+                crate::config::ModelDetail::High => "0",
+                crate::config::ModelDetail::Medium => "1",
+                crate::config::ModelDetail::Low => "2",
+            }
+            .to_string(),
+            "mat_picmip" => match c.video.advanced.texture_detail {
+                crate::config::TextureDetail::VeryHigh => "-1",
+                crate::config::TextureDetail::High => "0",
+                crate::config::TextureDetail::Medium => "1",
+                crate::config::TextureDetail::Low => "2",
+            }
+            .to_string(),
+            "mat_reducefillrate" => {
+                u8::from(c.video.advanced.shader_detail == crate::config::ShaderDetail::Low)
+                    .to_string()
+            }
+            "r_waterforceexpensive" => {
+                u8::from(c.video.advanced.water_detail != crate::config::WaterDetail::Simple)
+                    .to_string()
+            }
+            "r_waterforcereflectentities" => {
+                u8::from(c.video.advanced.water_detail == crate::config::WaterDetail::All)
+                    .to_string()
+            }
+            "r_shadowrendertotexture" => {
+                u8::from(c.video.advanced.shadow_detail != crate::config::ShadowDetail::Low)
+                    .to_string()
+            }
+            "r_flashlightdepthtexture" => {
+                u8::from(c.video.advanced.shadow_detail == crate::config::ShadowDetail::High)
+                    .to_string()
+            }
             "background_map" => self.background_map()?.to_owned(),
             "con_filter_enable" => self.con_filter.to_string(),
             "con_filter_text" => self.con_filter_text.clone(),
@@ -8746,5 +8956,142 @@ mod tests {
         assert_eq!(console.cvar_value("mat_queue_mode").as_deref(), Some("-1"));
         console.submit("mat_queue_mode 2");
         assert!(console.config.video.advanced.multicore);
+    }
+
+    #[test]
+    fn video_advanced_detail_cvars_query_set_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // r_rootlod: 0=High, 1=Medium, 2=Low
+        assert_eq!(console.cvar_value("r_rootlod").as_deref(), Some("0"));
+        console.submit("r_rootlod 1");
+        assert_eq!(
+            console.config.video.advanced.model_detail,
+            crate::config::ModelDetail::Medium
+        );
+        assert_eq!(console.cvar_value("r_rootlod").as_deref(), Some("1"));
+        console.submit("r_rootlod 2");
+        assert_eq!(
+            console.config.video.advanced.model_detail,
+            crate::config::ModelDetail::Low
+        );
+        assert_eq!(console.cvar_value("r_rootlod").as_deref(), Some("2"));
+        console.submit("r_rootlod 0");
+        assert_eq!(
+            console.config.video.advanced.model_detail,
+            crate::config::ModelDetail::High
+        );
+
+        // mat_picmip: -1=VeryHigh, 0=High, 1=Medium, 2=Low
+        assert_eq!(console.cvar_value("mat_picmip").as_deref(), Some("0"));
+        console.submit("mat_picmip -1");
+        assert_eq!(
+            console.config.video.advanced.texture_detail,
+            crate::config::TextureDetail::VeryHigh
+        );
+        assert_eq!(console.cvar_value("mat_picmip").as_deref(), Some("-1"));
+        console.submit("mat_picmip 1");
+        assert_eq!(
+            console.config.video.advanced.texture_detail,
+            crate::config::TextureDetail::Medium
+        );
+        assert_eq!(console.cvar_value("mat_picmip").as_deref(), Some("1"));
+        console.submit("mat_picmip 2");
+        assert_eq!(
+            console.config.video.advanced.texture_detail,
+            crate::config::TextureDetail::Low
+        );
+        assert_eq!(console.cvar_value("mat_picmip").as_deref(), Some("2"));
+
+        // mat_reducefillrate: 0=High, 1=Low
+        assert_eq!(
+            console.cvar_value("mat_reducefillrate").as_deref(),
+            Some("0")
+        );
+        console.submit("mat_reducefillrate 1");
+        assert_eq!(
+            console.config.video.advanced.shader_detail,
+            crate::config::ShaderDetail::Low
+        );
+        assert_eq!(
+            console.cvar_value("mat_reducefillrate").as_deref(),
+            Some("1")
+        );
+        console.submit("mat_reducefillrate 0");
+        assert_eq!(
+            console.config.video.advanced.shader_detail,
+            crate::config::ShaderDetail::High
+        );
+
+        // r_waterforceexpensive & r_waterforcereflectentities
+        // WaterDetail: Simple (0, 0), World (1, 0), All (1, 1)
+        assert_eq!(
+            console.cvar_value("r_waterforceexpensive").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            console.cvar_value("r_waterforcereflectentities").as_deref(),
+            Some("0")
+        );
+        console.submit("r_waterforcereflectentities 1");
+        assert_eq!(
+            console.config.video.advanced.water_detail,
+            crate::config::WaterDetail::All
+        );
+        assert_eq!(
+            console.cvar_value("r_waterforcereflectentities").as_deref(),
+            Some("1")
+        );
+        console.submit("r_waterforceexpensive 0");
+        assert_eq!(
+            console.config.video.advanced.water_detail,
+            crate::config::WaterDetail::Simple
+        );
+        assert_eq!(
+            console.cvar_value("r_waterforceexpensive").as_deref(),
+            Some("0")
+        );
+        assert_eq!(
+            console.cvar_value("r_waterforcereflectentities").as_deref(),
+            Some("0")
+        );
+
+        // r_shadowrendertotexture & r_flashlightdepthtexture
+        // ShadowDetail: Low (0, 0), Medium (1, 0), High (1, 1)
+        assert_eq!(
+            console.cvar_value("r_shadowrendertotexture").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            console.cvar_value("r_flashlightdepthtexture").as_deref(),
+            Some("1")
+        );
+        console.submit("r_flashlightdepthtexture 0");
+        assert_eq!(
+            console.config.video.advanced.shadow_detail,
+            crate::config::ShadowDetail::Medium
+        );
+        assert_eq!(
+            console.cvar_value("r_shadowrendertotexture").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            console.cvar_value("r_flashlightdepthtexture").as_deref(),
+            Some("0")
+        );
+        console.submit("r_shadowrendertotexture 0");
+        assert_eq!(
+            console.config.video.advanced.shadow_detail,
+            crate::config::ShadowDetail::Low
+        );
+        assert_eq!(
+            console.cvar_value("r_shadowrendertotexture").as_deref(),
+            Some("0")
+        );
+        assert_eq!(
+            console.cvar_value("r_flashlightdepthtexture").as_deref(),
+            Some("0")
+        );
     }
 }

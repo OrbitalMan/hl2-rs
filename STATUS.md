@@ -4,6 +4,24 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Video Advanced detail options cvar parity & runtime status (`crates/hl2-ui`):**
+  - Implemented console cvars for all detail options in Options > Video > Advanced:
+    - `r_rootlod`: queries and sets model detail (`0` = High, `1` = Medium, `2` = Low). Maps to `ModelDetail`.
+    - `mat_picmip`: queries and sets texture detail (`-1` = Very High, `0` = High, `1` = Medium, `2` = Low). Maps to `TextureDetail`.
+    - `mat_reducefillrate`: queries and toggles reduced shader fillrate (`0` = High/Very High, `1` = Low). Maps to `ShaderDetail`.
+    - `r_waterforceexpensive`: queries and toggles expensive water reflections (`0` = Simple, `1` = World/All). Maps to `WaterDetail`.
+    - `r_waterforcereflectentities`: queries and toggles water entity reflections (`0` = World only, `1` = All). Maps to `WaterDetail`.
+    - `r_shadowrendertotexture`: queries and toggles dynamic RTT shadows (`0` = Low, `1` = Medium/High). Maps to `ShadowDetail`.
+    - `r_flashlightdepthtexture`: queries and toggles depth texture flashlight shadows (`0` = Medium, `1` = High). Maps to `ShadowDetail`.
+  - Added unit test `video_advanced_detail_cvars_query_set_and_cvar_value` in `crates/hl2-ui/src/console.rs`.
+  - **Documented as Unfinished in Runtime (Geometry, Texture & Shadow Passes)**:
+    - Per `crates/hl2-ui/src/config.rs:172`: `/// Video > Advanced. Only vsync changes rendering today; the detail levels are stored.`
+    - Model LOD: Retail decimation uses `.dx90.vtx` and StudioModel body part root LOD levels. In `hl2-bevy`, models render at base LOD 0 without mesh decimation.
+    - Texture Picmip: Retail drops top-level mipmaps during VTF decompression/uploading (`mip_level = max(0, picmip)`). In `source-assets::vtf`, textures load full mip chains without bias.
+    - Shader Detail: In retail Source, `mat_reducefillrate 1` disables specular highlights, lightmap bicubic filtering, and simplifies fragment programs. Bevy uses StandardMaterial PBR.
+    - Water Reflections: Retail executes separate planar mirror render passes with frustum clipping for world brushes (`r_waterforceexpensive 1`) and entities (`r_waterforcereflectentities 1`). Bevy does not run secondary planar water cameras.
+    - Shadows: Retail renders dynamic depth map buffers for flashlight projection and character shadow textures. Bevy uses cascaded shadow maps for directional sunlight only.
+
 - **Video Advanced presentation options cvar parity & runtime status (`crates/hl2-ui`, `crates/hl2-bevy`):**
   - Implemented console cvars for Video Advanced presentation controls:
     - `mat_vsync`: queries and toggles vertical sync (`0` or `1`). Directly integrated with `hl2-bevy::video` to configure Winit window `PresentMode::AutoVsync` vs `PresentMode::AutoNoVsync`.

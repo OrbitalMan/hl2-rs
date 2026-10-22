@@ -271,13 +271,48 @@ pub const COMMANDS: &[Spec] = &[
         BOOLEAN,
     ),
     cvar(
+        "mat_picmip",
+        "mat_picmip [-1|0|1|2]: query or set texture detail (-1=very high, 0=high, 1=medium, 2=low)",
+        &[Arg::Values(&["-1", "0", "1", "2"])],
+    ),
+    cvar(
         "mat_queue_mode",
         "mat_queue_mode [-1|0|1|2]: query or set multicore rendering (-1=multicore, 0=single threaded)",
         &[Arg::Values(&["-1", "0", "1", "2"])],
     ),
     cvar(
+        "mat_reducefillrate",
+        "mat_reducefillrate [0|1]: query or toggle reduced shader fillrate (0=high, 1=low)",
+        BOOLEAN,
+    ),
+    cvar(
         "mat_vsync",
         "mat_vsync [0|1]: query or toggle vertical sync",
+        BOOLEAN,
+    ),
+    cvar(
+        "r_flashlightdepthtexture",
+        "r_flashlightdepthtexture [0|1]: query or toggle depth texture flashlight shadows (0=medium, 1=high)",
+        BOOLEAN,
+    ),
+    cvar(
+        "r_rootlod",
+        "r_rootlod [0|1|2]: query or set model detail (0=high, 1=medium, 2=low)",
+        &[Arg::Values(&["0", "1", "2"])],
+    ),
+    cvar(
+        "r_shadowrendertotexture",
+        "r_shadowrendertotexture [0|1]: query or toggle dynamic render-to-texture shadows (0=low, 1=medium/high)",
+        BOOLEAN,
+    ),
+    cvar(
+        "r_waterforceexpensive",
+        "r_waterforceexpensive [0|1]: query or toggle expensive water reflections (0=simple, 1=world/all)",
+        BOOLEAN,
+    ),
+    cvar(
+        "r_waterforcereflectentities",
+        "r_waterforcereflectentities [0|1]: query or toggle water entity reflections (0=world only, 1=all)",
         BOOLEAN,
     ),
     command(

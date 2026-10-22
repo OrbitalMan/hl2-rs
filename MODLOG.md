@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-22 Video Advanced detail options cvar parity & runtime status
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added cvar specifications to `COMMANDS`: `mat_picmip`, `mat_reducefillrate`, `r_rootlod`, `r_waterforceexpensive`, `r_waterforcereflectentities`, `r_shadowrendertotexture`, and `r_flashlightdepthtexture`.
+- `crates/hl2-ui/src/console.rs`:
+  - Added execution handlers in `interpret()` and query reporting in `cvar_value()` for `mat_picmip`, `mat_reducefillrate`, `r_rootlod`, `r_waterforceexpensive`, `r_waterforcereflectentities`, `r_shadowrendertotexture`, and `r_flashlightdepthtexture`.
+  - Added unit test `video_advanced_detail_cvars_query_set_and_cvar_value`.
+- `STATUS.md`:
+  - Documented cvar parity and runtime status for model LOD, texture picmip, shader detail, water planar reflection passes, and dynamic shadows.
+
+**Why:** User request:
+"Check every option in Options > Video > Advanced, Implement the placeholders/unfinished ones. Report if some feature implementation acceptance criteria is unclear, document it as unfinished. Conclude each new option implementation with a commit."
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 374 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Parity between Options > Video > Advanced detail controls and console cvars, with full documentation of unmodeled runtime geometry, texture, and shadow passes.
+
+**Still broken or not tested:** Model LOD decimation, texture mip bias, shader fillrate reduction, planar water reflections, and dynamic depth shadows.
+
+**Next:** Implement filtering and antialiasing options (`mat_forceaniso`, `mat_trilinear`, `mat_antialias`).
+
 ## 2026-10-22 Video Advanced presentation options cvar parity & runtime status
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
