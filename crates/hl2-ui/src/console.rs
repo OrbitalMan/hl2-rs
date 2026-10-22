@@ -86,6 +86,13 @@ pub enum Mode {
 #[derive(Debug, PartialEq)]
 pub enum Effect {
     Loadout,
+    /// ai_enable: None toggles.
+    AiEnable(Option<bool>),
+    /// ai_disable (CC_AI_Disable): toggle the AI, Source's messages.
+    AiDisable,
+    /// npc_create / npc_create_aimed / npc_create_equipment / prop_physics_create /
+    /// ent_create, the whole line.
+    NpcCommand(String),
     Noclip(Option<bool>),
     Getpos,
     Setpos {
@@ -1761,6 +1768,43 @@ impl Console {
                 };
                 cheat()?;
                 return Ok(Some(Effect::Noclip(value)));
+            }
+            "npc_create"
+            | "npc_create_aimed"
+            | "npc_create_equipment"
+            | "prop_physics_create"
+            | "ent_create" => {
+                if name != "npc_create_equipment" {
+                    cheat()?;
+                }
+                // Re-quote arguments with spaces (ent_create angles "0 90 0").
+                return Ok(Some(Effect::NpcCommand(
+                    std::iter::once(name.clone())
+                        .chain(args.iter().map(|a| {
+                            if a.is_empty() || a.contains(char::is_whitespace) {
+                                format!("\"{a}\"")
+                            } else {
+                                a.clone()
+                            }
+                        }))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )));
+            }
+            "ai_disable" => {
+                if !args.is_empty() {
+                    return Err(usage());
+                }
+                cheat()?;
+                return Ok(Some(Effect::AiDisable));
+            }
+            "ai_enable" => {
+                let value = match args {
+                    [] => None,
+                    [value] => Some(boolean(value).ok_or_else(usage)?),
+                    _ => return Err(usage()),
+                };
+                return Ok(Some(Effect::AiEnable(value)));
             }
             "getpos" => {
                 if !args.is_empty() {
@@ -3891,6 +3935,53 @@ mod tests {
         assert!(console.cheats);
         assert!(console.submit("sv_cheats 0; impulse 101").is_empty());
         assert!(!console.cheats);
+    }
+    #[test]
+    fn npc_create_is_a_cheat_but_its_equipment_cvar_is_not() {
+        let mut console = Console::default();
+        assert_eq!(
+            console.submit("npc_create npc_metropolice; npc_create_equipment weapon_stunstick"),
+            vec![Effect::NpcCommand(
+                "npc_create_equipment weapon_stunstick".into()
+            )]
+        );
+        assert_eq!(
+            console.submit("sv_cheats 1; npc_create_aimed npc_metropolice cop1"),
+            vec![Effect::NpcCommand(
+                "npc_create_aimed npc_metropolice cop1".into()
+            )]
+        );
+    }
+    #[test]
+    fn prop_physics_create_and_ent_create_are_cheats_routed_with_npc_create() {
+        let mut console = Console::default();
+        assert_eq!(
+            console.submit("prop_physics_create props_c17/oildrum001"),
+            vec![]
+        );
+        assert_eq!(
+            console.submit("sv_cheats 1; prop_physics_create props_c17/oildrum001; ent_create npc_metropolice targetname cop9"),
+            vec![
+                Effect::NpcCommand("prop_physics_create props_c17/oildrum001".into()),
+                Effect::NpcCommand("ent_create npc_metropolice targetname cop9".into()),
+            ]
+        );
+        // Quoted values keep their spaces for the spawn parser.
+        assert_eq!(
+            console.submit("ent_create npc_citizen angles \"0 180 0\""),
+            vec![Effect::NpcCommand(
+                "ent_create npc_citizen angles \"0 180 0\"".into()
+            )]
+        );
+    }
+    #[test]
+    fn ai_disable_is_a_cheat_toggle_without_arguments() {
+        let mut console = Console::default();
+        assert_eq!(console.submit("ai_disable"), vec![]);
+        assert_eq!(
+            console.submit("sv_cheats 1; ai_disable; ai_disable 1"),
+            vec![Effect::AiDisable]
+        );
     }
     #[test]
     fn quoted_separators_are_text_and_bad_quotes_execute_nothing() {

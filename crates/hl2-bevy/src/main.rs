@@ -15,9 +15,11 @@ mod material_proxies;
 mod monitors;
 mod performance;
 mod rendering;
+mod runtime_props;
 mod setup;
 mod simulation;
 mod sky;
+mod spawn_panel;
 mod studio_decals;
 mod tonemap;
 mod ui_host;
@@ -89,6 +91,9 @@ struct Options {
     /// `--capture` reads the presented window instead of the game frame (checks of the
     /// presentation itself: scaling, letterboxing, brightness).
     capture_window: bool,
+    /// Windowed position on the desktop (top-left corner, virtual-screen pixels; may be
+    /// on another monitor, e.g. negative X left of the primary).
+    window_at: Option<(i32, i32)>,
     /// Fixed HDR tonemap scale (Source mat_force_tonemap_scale); None = auto exposure.
     tonemap_scale: Option<f32>,
     /// `--fake-monitor`: the Video page lists resolutions for this monitor instead of the
@@ -162,6 +167,7 @@ impl Options {
             no_focus: false,
             background: false,
             capture_window: false,
+            window_at: None,
             tonemap_scale: None,
             fake_monitor: None,
             main_menu: false,
@@ -232,6 +238,22 @@ impl Options {
                 "--no-focus" => options.no_focus = true,
                 "--background" => options.background = true,
                 "--capture-window" => options.capture_window = true,
+                "--window-at" => {
+                    let x = next(&mut args)?.parse()?;
+                    let y = next(&mut args)?.parse()?;
+                    options.window_at = Some((x, y));
+                }
+                // Runtime entity limit (Source: MAX_EDICT_BITS 11 = 2048, compiled in);
+                // 0 = no limit.
+                "--max-edicts" => hl2_simulation::ai::spawn::MAX_EDICTS.store(
+                    next(&mut args)?.parse()?,
+                    std::sync::atomic::Ordering::Relaxed,
+                ),
+                // Step 14 AI think loop (default on like Source's ai_disabled 0; console ai_enable).
+                "--ai" => gameplay::AI_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed),
+                "--no-ai" => {
+                    gameplay::AI_ENABLED.store(false, std::sync::atomic::Ordering::Relaxed)
+                }
                 "--tonemap-scale" => {
                     let scale: f32 = next(&mut args)?.parse()?;
                     if !(scale.is_finite() && scale > 0.) {
@@ -251,6 +273,9 @@ impl Options {
                 "--help" | "-h" => {
                     println!("Usage: hl2-bevy [OPTIONS]\n");
                     println!("Options:");
+                    println!(
+                        "      --ai                            Enable NPC AI think loop (default: enabled)"
+                    );
                     println!(
                         "      --audio-trace <path.jsonl>      Record audio cue and soundscape events to a JSONL trace file"
                     );
@@ -312,11 +337,15 @@ impl Options {
                         "      --map <name>                    Map to load directly into gameplay (e.g. d1_trainstation_01)"
                     );
                     println!(
+                        "      --max-edicts <count>            Runtime entity limit (default: 2048, 0 for unlimited)"
+                    );
+                    println!(
                         "      --movement-script <path.json>   Replay recorded player inputs from a movement script fixture (requires --map)"
                     );
                     println!(
                         "      --mute-ambient                  Mute looping ambient soundscapes and background environment audio"
                     );
+                    println!("      --no-ai                         Disable NPC AI think loop");
                     println!(
                         "      --no-focus                      Launch window without requesting input focus (for unattended test runs)"
                     );
@@ -355,6 +384,9 @@ impl Options {
                     );
                     println!(
                         "      --width <pixels>                Window width in pixels (320..=8192, default from video config)"
+                    );
+                    println!(
+                        "      --window-at <x> <y>             Initial window position on desktop in pixels"
                     );
                     println!(
                         "      --windowed                      Start in windowed display mode"
@@ -625,6 +657,11 @@ fn main() -> Result<()> {
                 // A background run has no OS window to lose focus to: it counts as
                 // focused, so gameplay does not pause itself.
                 focused: options.background || !options.no_focus,
+                position: options
+                    .window_at
+                    .map_or(bevy::window::WindowPosition::Automatic, |(x, y)| {
+                        bevy::window::WindowPosition::At(IVec2::new(x, y))
+                    }),
                 present_mode: if options.uncapped {
                     bevy::window::PresentMode::AutoNoVsync
                 } else {
@@ -726,6 +763,7 @@ fn main() -> Result<()> {
                 sky::present,
                 monitors::present,
                 monitors::present_materials,
+                eyes::attention_pvs,
                 material_proxies::present,
                 canvas_renderer::present,
             )
@@ -733,8 +771,25 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
+            runtime_props::poll
+                .run_if(resource_exists::<runtime_props::RuntimeProps>)
+                .before(rendering::present_entities),
+        )
+        .add_systems(
+            PostUpdate,
+            rendering::spawn_runtime_draws
+                .before(rendering::present_entities)
+                .before(eyes::present),
+        )
+        .add_systems(
+            PostUpdate,
+            rendering::despawn_killed_runtime_draws.before(rendering::spawn_runtime_draws),
+        )
+        .add_systems(
+            PostUpdate,
             rendering::present_lighting
                 .after(rendering::present_entities)
+                .after(effects::present)
                 .before(TransformSystems::Propagate),
         )
         .add_systems(
@@ -1011,6 +1066,7 @@ pub(crate) fn install_map(
         no_pvs,
     ));
     commands.insert_resource(rendering::FlexModels(loaded.flexes.clone()));
+    commands.insert_resource(runtime_props::RuntimeProps::new(loaded.vfs.clone()));
     let camera_target = monitors::install(&loaded, commands, images);
     rendering::spawn_map(
         &loaded,

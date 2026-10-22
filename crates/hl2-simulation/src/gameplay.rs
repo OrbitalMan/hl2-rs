@@ -336,6 +336,21 @@ pub fn fall_damage(fall_speed: f32) -> f32 {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Inventory {
+    /// Player tracers this tick (start, end, view right): FireBullets m_iTracerFreq 2 for
+    /// the pistol, SMG1 and AR2 (CBaseCombatWeapon / CHLMachineGun::PrimaryAttack),
+    /// none for the 357 and shotgun; ComputeTracerStartPosition's player offset.
+    #[serde(skip)]
+    /// Tracer requests (start, end, view right, AR2Tracer: the weapon_ar2 type).
+    pub tracer_requests: Vec<(Vec3, Vec3, Vec3, bool)>,
+    /// CWeaponAR2::DoImpactEffect AR2Impact requests (origin, surface normal).
+    pub ar2_impacts: Vec<(Vec3, Vec3)>,
+    #[serde(skip)]
+    tracer_count: u32,
+    /// CBasePlayer::DoMuzzleFlash calls (the viewmodel's muzzle-flash parity, which
+    /// lights models through an elight): pistol, SMG1, AR2 and 357 primary attacks,
+    /// both shotgun attacks and the AR2 ball launch (DelayedAttack).
+    #[serde(skip)]
+    pub muzzle_flash_count: u64,
     #[serde(skip)]
     /// Bullet/melee hits with whether melee and the shot direction.
     pub impacts: Vec<(crate::physics::RayHit, bool, Vec3)>,
@@ -429,6 +444,10 @@ pub struct Inventory {
 impl Default for Inventory {
     fn default() -> Self {
         Self {
+            tracer_requests: Vec::new(),
+            ar2_impacts: Vec::new(),
+            tracer_count: 0,
+            muzzle_flash_count: 0,
             impacts: Vec::new(),
             blood: Vec::new(),
             projectile_spawns: Vec::new(),
@@ -838,6 +857,16 @@ impl Inventory {
                         let w = &weapons[class];
                         if !self.owned.contains_key(class) {
                             self.give(class, weapons, scene.time);
+                            // Weapon_Equip keeps the weapon's own clip (an NPC's drop
+                            // was refilled by Weapon_Drop).
+                            if let Some(clip) = e
+                                .get("ammo")
+                                .and_then(|v| v.parse::<i32>().ok())
+                                .filter(|_| w.magazine > 0)
+                            {
+                                self.owned
+                                    .insert(class.to_owned(), clip.clamp(0, w.magazine));
+                            }
                             true
                         } else {
                             let ammo = e
@@ -1154,6 +1183,12 @@ impl Inventory {
         self.last_shot = scene.time;
         self.soonest_attack = scene.time + 0.1;
         self.shots += rounds as u64;
+        if matches!(
+            self.active.as_str(),
+            "weapon_pistol" | "weapon_smg1" | "weapon_ar2" | "weapon_357" | "weapon_shotgun"
+        ) {
+            self.muzzle_flash_count += 1;
+        }
         self.animate(fire_animation(&self.active, self.burst), scene.time);
         let spread_cone = match self.active.as_str() {
             "weapon_pistol" => {
@@ -1183,10 +1218,27 @@ impl Inventory {
                 let hit = if melee {
                     melee_trace(physics, scene, eye, aim)
                 } else {
-                    physics.impact_ray(eye, aim, f32::from_bits(0x475db3d7))
+                    physics.bullet_ray(eye, aim, f32::from_bits(0x475db3d7), &[])
                 };
+                if !melee
+                    && matches!(
+                        w.class.as_str(),
+                        "weapon_pistol" | "weapon_smg1" | "weapon_ar2"
+                    )
+                {
+                    if self.tracer_count.is_multiple_of(2) {
+                        let right = direction.cross(Vec3::Z).normalize_or(Vec3::NEG_Y);
+                        let start = eye + Vec3::new(0., 0., -4.) + right * 2. + direction * 16.;
+                        let end = hit
+                            .as_ref()
+                            .map_or(eye + aim * MAX_TRACE_LENGTH, |h| h.position);
+                        self.tracer_requests
+                            .push((start, end, right, w.class == "weapon_ar2"));
+                    }
+                    self.tracer_count = self.tracer_count.wrapping_add(1);
+                }
                 if let Some(hit) = hit {
-                    self.hit(world, scene, physics, w, hit, aim, melee);
+                    self.hit(world, scene, physics, w, hit, aim, melee, eye);
                 }
             }
         }
@@ -1241,6 +1293,7 @@ impl Inventory {
         self.next_attack = scene.time + duration(world, w, "altfire");
         self.last_shot = scene.time;
         self.shots += 1;
+        self.muzzle_flash_count += 1;
         self.animate("altfire", scene.time);
         let direction = direction.normalize_or_zero();
         // CWeaponShotgun::SecondaryAttack fires a fixed twelve pellets, rather
@@ -1248,8 +1301,8 @@ impl Inventory {
         for _ in 0..12 {
             let aim = self.spread(direction, cone(10.));
             self.bullets += 1;
-            if let Some(hit) = physics.impact_ray(eye, aim, f32::from_bits(0x475db3d7)) {
-                self.hit(world, scene, physics, w, hit, aim, false);
+            if let Some(hit) = physics.bullet_ray(eye, aim, f32::from_bits(0x475db3d7), &[]) {
+                self.hit(world, scene, physics, w, hit, aim, false, eye);
             }
         }
         if shells > 2 {
@@ -1338,6 +1391,9 @@ impl Inventory {
         play_sound(scene, weapon, "double_shot", world, "");
         self.animate(animation, scene.time);
         self.shots += 1;
+        if ball {
+            self.muzzle_flash_count += 1;
+        }
         self.last_shot = scene.time;
         self.set_ammo(
             &weapon.secondary_ammo_type,
@@ -1399,6 +1455,7 @@ impl Inventory {
                     let Some(entity) = world.entities.get(id) else {
                         continue;
                     };
+                    let class_health = scene.skill.npc_entity_health(entity);
                     let Some(state) = scene.states.get_mut(id) else {
                         continue;
                     };
@@ -1447,7 +1504,11 @@ impl Inventory {
                         state.value = 0.;
                     } else {
                         if state.value <= 0. {
-                            state.value = health.unwrap_or(40.);
+                            state.value = if npc {
+                                class_health.or(health).unwrap_or(40.)
+                            } else {
+                                health.unwrap_or(40.)
+                            };
                         }
                         // CBreakable (func_breakable, func_physbox) starts from the
                         // func_breakdmg_* convars instead of 1.
@@ -1464,6 +1525,9 @@ impl Inventory {
                     if dead {
                         self.kills += 1;
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
+                        if npc {
+                            scene.npc_deaths.push(id);
+                        }
                         // CBreakableProp::Break -> PhysBreakSound: the surfaceprop's break
                         // cue from the world at the prop (it is about to be removed).
                         if let Some(name) = (!npc)
@@ -1565,75 +1629,43 @@ impl Inventory {
         hit: crate::physics::RayHit,
         direction: Vec3,
         melee: bool,
+        eye: Vec3,
     ) {
-        let id = hit.entity;
-        let entity = world.entities.get(id);
-        let flesh = entity.is_some_and(|e| e.class().starts_with("npc_"));
         // SDK UTIL_ImpactTrace: every bullet and player-crowbar hit plays the hit surface's
         // impact sound (Impacts::add). The player crowbar has no melee_hit cue of its own;
         // WeaponSound(MELEE_HIT) is the NPC-operator path.
         self.impacts.push((hit, melee, direction));
+        // CBasePlayer::DoImpactEffect -> the active weapon's: the AR2 adds AR2Impact at
+        // endpos + normal before the base impact.
+        if weapon.class == "weapon_ar2" && !melee {
+            self.ar2_impacts
+                .push((hit.position + hit.normal, hit.normal));
+        }
         if melee {
             self.animate("hitcenter1", scene.time);
         }
         self.hits += 1;
-        // VPhysicsTakeDamage: ApplyForceOffset(damage force, hit point). Bullets carry
-        // their ammo's CalculateBulletDamageForce impulse, melee CalculateMeleeDamageForce
-        // (damage x ImpulseScale(75, 4)), both kg in/s with phys_pushscale 1.
-        let force = if melee {
-            weapon.damage * 75. * 4.
-        } else {
-            bullet_impulse(&weapon.ammo_type)
-        };
-        physics.impulse_at(id, direction * (force / 39.37), hit.position);
-        if let Some(e) = entity {
-            if !flesh {
-                // Breakables take the shot through the entity damage path like every
-                // other damage source (CBreakableProp::OnTakeDamage: prop_data health,
-                // GetBreakableDamage modifiers, break sound, gibs); that path decides
-                // whether the entity can break. Buckshot ammo adds DMG_BUCKSHOT, the
-                // crowbar/stunstick deal DMG_CLUB.
-                if matches!(e.class(), "func_breakable" | "func_physbox")
-                    || e.class().starts_with("prop_physics")
-                {
-                    use crate::player_damage::{DMG_BUCKSHOT, DMG_BULLET, DMG_CLUB};
-                    let kind = if melee {
-                        DMG_CLUB
-                    } else if weapon.ammo_type.eq_ignore_ascii_case("Buckshot") {
-                        DMG_BULLET | DMG_BUCKSHOT
-                    } else {
-                        DMG_BULLET
-                    };
-                    scene.entity_damage.push(crate::projectiles::Damage {
-                        target: crate::projectiles::DamageTarget::Entity(id),
-                        amount: weapon.damage,
-                        kind,
-                        dissolve: false,
-                        direction,
-                        origin: hit.position,
-                    });
-                }
-                return;
-            }
-            self.trace_bleed(physics, world, id, &hit, direction, weapon.damage);
-            let explicit_health = e.get("health").and_then(|v| v.parse::<f32>().ok());
-            if scene.states[id].value <= 0. {
-                scene.states[id].value = explicit_health.filter(|v| *v > 0.).unwrap_or(40.);
-            }
-            scene.states[id].value -= weapon.damage;
-            scene.fire(id, "OnDamaged", usize::MAX);
-            if scene.states[id].value <= 0. {
-                self.kills += 1;
-                scene.fire(id, "OnDeath", usize::MAX);
-                scene.states[id].killed = true;
-                scene.states[id].visible = false;
-                physics.set_entity(
-                    id,
-                    scene.states[id].origin,
-                    scene.states[id].rotation,
-                    false,
-                );
-            }
+        let mut blood = std::mem::take(&mut self.blood);
+        let killed = apply_hit(
+            world,
+            scene,
+            physics,
+            weapon.damage,
+            &weapon.ammo_type,
+            &hit,
+            direction,
+            melee,
+            HitSource {
+                player: true,
+                // GetAbsOrigin: the eye minus the standing view offset.
+                origin: eye - Vec3::Z * 64.,
+            },
+            &mut || self.random(),
+            &mut blood,
+        );
+        self.blood = blood;
+        if killed {
+            self.kills += 1;
         }
     }
     /// CWeaponFrag::ItemPostFrame with the base attack dispatch: animation events
@@ -1836,57 +1868,453 @@ impl Inventory {
         let up = right.cross(direction).normalize_or_zero();
         (direction + right * x * spread_cone + up * y * spread_cone).normalize_or_zero()
     }
-    /// CBaseEntity::TraceBleed for a bullet/club hit on an NPC: 1/2/4 traces (damage
-    /// < 10 / < 25 / more) continuing the shot direction with +/-0.1/0.2/0.3 noise per
-    /// axis for 172 units (MASK_SOLID_BRUSHONLY minus grates, ignoring the NPC); each hit
-    /// gets a Blood (red) or YellowBlood decal (UTIL_BloodDecalTrace). Mechanical NPCs
-    /// do not bleed.
-    fn trace_bleed(
-        &mut self,
-        physics: &Physics,
-        world: &World,
-        id: usize,
-        hit: &crate::physics::RayHit,
-        direction: Vec3,
-        damage: f32,
-    ) {
-        let class = world.entities.get(id).map_or("", |e| e.class());
-        let Some(color) = blood_color(class) else {
-            return;
-        };
-        if damage <= 0. {
-            return;
-        }
-        let (noise, count) = if damage < 10. {
-            (0.1, 1)
-        } else if damage < 25. {
-            (0.2, 2)
-        } else {
-            (0.3, 4)
-        };
-        for _ in 0..count {
-            let jitter = Vec3::new(self.random(), self.random(), self.random()) * noise;
-            let trace = -direction + jitter;
-            let end = hit.position + trace * -172.;
-            if let Some(blood) = physics
-                .projectile_ray(hit.position, end, &[id])
-                .filter(|b| {
-                    world
-                        .entities
-                        .get(b.entity)
-                        .is_none_or(|e| !e.class().starts_with("npc_"))
-                })
-            {
-                self.blood.push((blood, color));
-            }
-        }
-    }
     pub(crate) fn random(&mut self) -> f32 {
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 7;
         self.rng ^= self.rng << 17;
         (self.rng as u32 as f32 / u32::MAX as f32) * 2. - 1.
     }
+}
+/// The struck entity's side of one bullet or club hit, shared by the player's weapons
+/// and NPC operators: VPhysicsTakeDamage's force at the hit point (bullets: the ammo's
+/// CalculateBulletDamageForce impulse; melee: damage x ImpulseScale(75, 4), kg in/s with
+/// phys_pushscale 1), breakables through the entity damage path (DMG_BULLET, plus
+/// DMG_BUCKSHOT for Buckshot, DMG_CLUB for clubs), and NPC health with TraceBleed.
+/// `uniform` returns values in [-1, 1]. True when the hit killed an NPC.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_hit(
+    world: &World,
+    scene: &mut Scene,
+    physics: &mut Physics,
+    damage: f32,
+    ammo_type: &str,
+    hit: &crate::physics::RayHit,
+    direction: Vec3,
+    melee: bool,
+    attacker: HitSource,
+    uniform: &mut dyn FnMut() -> f32,
+    blood: &mut Vec<(crate::physics::RayHit, BloodColor)>,
+) -> bool {
+    let id = hit.entity;
+    let entity = world.entities.get(id);
+    let flesh = entity.is_some_and(|e| e.class().starts_with("npc_"));
+    let force = if melee {
+        damage * 75. * 4.
+    } else {
+        bullet_impulse(ammo_type)
+    };
+    physics.impulse_at(id, direction * (force / 39.37), hit.position);
+    let Some(e) = entity else {
+        return false;
+    };
+    if !flesh {
+        // Breakables take the shot through the entity damage path like every other
+        // damage source (CBreakableProp::OnTakeDamage: prop_data health,
+        // GetBreakableDamage modifiers, break sound, gibs); that path decides whether
+        // the entity can break.
+        if matches!(e.class(), "func_breakable" | "func_physbox")
+            || e.class().starts_with("prop_physics")
+        {
+            use crate::player_damage::{DMG_BUCKSHOT, DMG_BULLET, DMG_CLUB};
+            let kind = if melee {
+                DMG_CLUB
+            } else if ammo_type.eq_ignore_ascii_case("Buckshot") {
+                DMG_BULLET | DMG_BUCKSHOT
+            } else {
+                DMG_BULLET
+            };
+            scene.entity_damage.push(crate::projectiles::Damage {
+                target: crate::projectiles::DamageTarget::Entity(id),
+                amount: damage,
+                kind,
+                dissolve: false,
+                direction,
+                origin: hit.position,
+            });
+        }
+        return false;
+    }
+    // CHalfLife2::GetAmmoDamage: the player's shots on NPCs scale by skill
+    // (AdjustPlayerDamageInflicted); CAI_BaseNPC::TraceAttack then scales by the
+    // hitbox's hitgroup before blood and TraceBleed.
+    let damage = if attacker.player {
+        damage * scene.skill.player_inflict_scale()
+    } else {
+        damage
+    };
+    let buckshot = !melee && ammo_type.eq_ignore_ascii_case("Buckshot");
+    let distance = (scene.states[id].origin - attacker.origin).length();
+    if scene.states[id].value <= 0. {
+        scene.states[id].value = npc_spawn_health(scene, e);
+    }
+    // CAI_BaseHumanoid::TraceAttack: a player's headshot on a humanoid that never had
+    // the player as an enemy, within SNEAK_ATTACK_DIST 360, deals its full health
+    // (then the head multiplier). Native: idle cop 40 -> -80, alert 35 -> -70.
+    let sneak = attacker.player
+        && hit.hitgroup == crate::skill::HITGROUP_HEAD
+        && crate::skill::Skill::is_humanoid(e.class())
+        && !scene.npc_knows_player.contains(&id)
+        && distance <= 360.;
+    let damage = if sneak {
+        scene.states[id].value
+    } else {
+        damage
+    };
+    let damage = scene
+        .skill
+        .npc_hit_damage(e.class(), damage, hit.hitgroup, buckshot, distance);
+    trace_bleed(physics, world, id, hit, direction, damage, uniform, blood);
+    scene.last_npc_hit = Some(NpcHitReport {
+        entity: id,
+        hitgroup: hit.hitgroup,
+        damage,
+        health_after: scene.states[id].value - damage,
+        distance,
+        sneak_attack: sneak,
+    });
+    scene.states[id].value -= damage;
+    scene.npc_damage.push((id, attacker.player, damage));
+    scene.fire(id, "OnDamaged", usize::MAX);
+    if scene.states[id].value <= 0. {
+        scene.fire(id, "OnDeath", usize::MAX);
+        scene.npc_deaths.push(id);
+        scene.states[id].killed = true;
+        scene.states[id].visible = false;
+        physics.set_entity(
+            id,
+            scene.states[id].origin,
+            scene.states[id].rotation,
+            false,
+        );
+        return true;
+    }
+    false
+}
+/// Who fired a bullet or swung a club: the player's hits scale by skill
+/// (AdjustPlayerDamageInflicted); the origin feeds distance-dependent multipliers.
+#[derive(Clone, Copy, Debug)]
+pub struct HitSource {
+    pub player: bool,
+    pub origin: Vec3,
+}
+/// The last bullet/club hit on an NPC (diagnostics for native health comparisons).
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct NpcHitReport {
+    pub entity: usize,
+    pub hitgroup: i32,
+    pub damage: f32,
+    pub health_after: f32,
+    pub distance: f32,
+    pub sneak_attack: bool,
+}
+/// An NPC's health before its first damage: the class's Spawn value from skill.cfg
+/// (`Skill::npc_health`), else the map's health keyvalue, else 40.
+pub fn npc_spawn_health(scene: &Scene, e: &modkit_core::Entity) -> f32 {
+    scene.skill.npc_entity_health(e).unwrap_or_else(|| {
+        e.get("health")
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| *v > 0.)
+            .unwrap_or(40.)
+    })
+}
+/// Studio hitbox poses for this tick (the entity collider pose stage): every NPC with
+/// hitboxes takes its animated skeleton; dead/hidden ones are disabled.
+pub fn pose_npc_hitboxes(world: &World, scene: &Scene, physics: &mut Physics) {
+    for (id, key) in physics.studio_hitbox_entities() {
+        let Some(state) = scene.states.get(id) else {
+            continue;
+        };
+        let enabled = state.collides();
+        let skin = if enabled {
+            world
+                .rigs
+                .get(&key)
+                .map(|rig| scene.actor_matrices(rig, id))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        physics.set_npc_hitboxes(
+            id,
+            glam::Mat4::from_rotation_translation(state.rotation, state.origin),
+            &skin,
+            enabled,
+        );
+    }
+}
+/// CBaseEntity::TraceBleed for a bullet/club hit on an NPC: 1/2/4 traces (damage
+/// < 10 / < 25 / more) continuing the shot direction with +/-0.1/0.2/0.3 noise per
+/// axis for 172 units (MASK_SOLID_BRUSHONLY minus grates, ignoring the NPC); each hit
+/// gets a Blood (red) or YellowBlood decal (UTIL_BloodDecalTrace). Mechanical NPCs
+/// do not bleed.
+#[allow(clippy::too_many_arguments)]
+fn trace_bleed(
+    physics: &Physics,
+    world: &World,
+    id: usize,
+    hit: &crate::physics::RayHit,
+    direction: Vec3,
+    damage: f32,
+    uniform: &mut dyn FnMut() -> f32,
+    blood: &mut Vec<(crate::physics::RayHit, BloodColor)>,
+) {
+    let class = world.entities.get(id).map_or("", |e| e.class());
+    let Some(color) = blood_color(class) else {
+        return;
+    };
+    bleed_traces(
+        physics,
+        world,
+        &[id],
+        hit.position,
+        direction,
+        damage,
+        color,
+        uniform,
+        blood,
+    );
+}
+/// TraceBleed's traces from `position` (excluding `ignore`).
+#[allow(clippy::too_many_arguments)]
+fn bleed_traces(
+    physics: &Physics,
+    world: &World,
+    ignore: &[usize],
+    position: Vec3,
+    direction: Vec3,
+    damage: f32,
+    color: BloodColor,
+    uniform: &mut dyn FnMut() -> f32,
+    blood: &mut Vec<(crate::physics::RayHit, BloodColor)>,
+) {
+    if damage <= 0. {
+        return;
+    }
+    let (noise, count) = if damage < 10. {
+        (0.1, 1)
+    } else if damage < 25. {
+        (0.2, 2)
+    } else {
+        (0.3, 4)
+    };
+    for _ in 0..count {
+        let jitter = Vec3::new(uniform(), uniform(), uniform()) * noise;
+        let trace = -direction + jitter;
+        let end = position + trace * -172.;
+        if let Some(b) = physics.projectile_ray(position, end, ignore).filter(|b| {
+            world
+                .entities
+                .get(b.entity)
+                .is_none_or(|e| !e.class().starts_with("npc_"))
+        }) {
+            blood.push((b, color));
+        }
+    }
+}
+/// What an NPC weapon's FireBullets did this tick, for the host's effects and the
+/// player damage path.
+#[derive(Default)]
+pub struct NpcBullets {
+    /// World/entity hits with the shot direction (UTIL_ImpactTrace).
+    pub impacts: Vec<(crate::physics::RayHit, Vec3)>,
+    pub blood: Vec<(crate::physics::RayHit, BloodColor)>,
+    /// (attacker origin, damage) per pellet that struck the player.
+    pub player_hits: Vec<(Vec3, f32)>,
+    /// Tracer segments (shooter, start, end, AR2Tracer).
+    pub tracers: Vec<(usize, Vec3, Vec3, bool)>,
+    /// AR2Impact requests (CAI_BaseNPC::DoImpactEffect -> CWeaponAR2): origin, normal.
+    pub ar2_impacts: Vec<(Vec3, Vec3)>,
+    /// (victim, attacker) per pellet that struck an NPC.
+    pub npc_hits: Vec<(usize, usize)>,
+}
+/// MAX_TRACE_LENGTH.
+pub const MAX_TRACE_LENGTH: f32 = 56755.84;
+/// The player as an NPC bullet target.
+#[derive(Clone, Copy, Debug)]
+pub struct PlayerTarget {
+    pub feet: Vec3,
+    pub crouched: bool,
+    /// The model yaw (eye yaw) in degrees.
+    pub yaw: f32,
+}
+/// The player model whose hitboxes NPC bullets trace (CHL2_Player::Spawn
+/// SetModel("models/player.mdl")).
+pub const PLAYER_MODEL: &str = "models/player.mdl";
+/// The player's studio hitboxes (hitbox set 0 of models/player.mdl, all HITGROUP_GENERIC
+/// in retail) posed from its ACT_IDLE sequence idle01 at `time`, model angles (0, yaw,
+/// 0) at the feet: the entry distance of a ray, or None. Without the rig the caller
+/// keeps the hull.
+pub fn player_hitbox_distance(
+    world: &World,
+    target: PlayerTarget,
+    time: f32,
+    origin: Vec3,
+    direction: Vec3,
+) -> Option<Option<f32>> {
+    let rig = world.rigs.get(&format!("{PLAYER_MODEL}#0"))?;
+    if rig.hitboxes.is_empty() {
+        return None;
+    }
+    let skin = rig.matrices("idle01", time);
+    let base = glam::Mat4::from_rotation_translation(
+        glam::Quat::from_rotation_z(target.yaw.to_radians()),
+        target.feet,
+    );
+    let mut best: Option<f32> = None;
+    for hitbox in &rig.hitboxes {
+        let Some(bone) = rig.bones.get(hitbox.bone) else {
+            continue;
+        };
+        let bind = bone.inverse_bind.inverse();
+        let model = skin.get(hitbox.bone).map_or(bind, |m| *m * bind);
+        let frame = base * model;
+        let inverse = frame.inverse();
+        let local_origin = inverse.transform_point3(origin);
+        let local_direction = inverse.transform_vector3(direction);
+        let length = local_direction.length();
+        if length < 1e-6 {
+            continue;
+        }
+        if let Some(t) = ray_box(
+            local_origin,
+            local_direction / length,
+            hitbox.mins,
+            hitbox.maxs,
+        ) {
+            // Back to world distance along the unit world direction.
+            let t = t / length;
+            best = Some(best.map_or(t, |b: f32| b.min(t)));
+        }
+    }
+    Some(best)
+}
+/// FireBullets for an NPC shot: each pellet traces MASK_SHOT from the shoot position
+/// (skipping the shooter). The player is hit like the engine's ClipRayToCollideable with
+/// CONTENTS_HITBOX: the ray must enter its standing or ducked hull (VEC_HULL /
+/// VEC_DUCK_HULL) and then one of its model's hitboxes (`player_hitbox_distance`; the
+/// hull alone without the rig). Other hits go through `apply_hit`.
+pub fn npc_fire_bullets(
+    world: &World,
+    scene: &mut Scene,
+    physics: &mut Physics,
+    shot: &crate::npc_weapons::NpcShot,
+    player: Option<PlayerTarget>,
+    uniform: &mut dyn FnMut() -> f32,
+    out: &mut NpcBullets,
+) {
+    for &direction in &shot.directions {
+        let hit = physics.bullet_ray(shot.origin, direction, MAX_TRACE_LENGTH, &[shot.attacker]);
+        let world_distance = hit
+            .as_ref()
+            .map_or(MAX_TRACE_LENGTH, |h| (h.position - shot.origin).length());
+        let time = scene.time as f32;
+        let player_distance = player.and_then(|target| {
+            let top = if target.crouched { 36. } else { 72. };
+            let hull = ray_box(
+                shot.origin,
+                direction,
+                target.feet + Vec3::new(-16., -16., 0.),
+                target.feet + Vec3::new(16., 16., top),
+            )?;
+            match player_hitbox_distance(world, target, time, shot.origin, direction) {
+                None => Some(hull),
+                Some(hitbox) => hitbox,
+            }
+        });
+        if let Some(t) = player_distance.filter(|t| *t < world_distance) {
+            out.player_hits.push((shot.origin, shot.damage));
+            // CBasePlayer::TraceAttack bleeds before OnTakeDamage (which refuses the damage
+            // while gordon_invulnerable is on), and CWeaponAR2::DoImpactEffect adds its
+            // AR2Impact on the player too (native hall run: both show on a player hit).
+            let point = shot.origin + direction * t;
+            if shot.weapon == "weapon_ar2" {
+                out.ar2_impacts.push((point - direction, -direction));
+            }
+            bleed_traces(
+                physics,
+                world,
+                &[shot.attacker],
+                point,
+                direction,
+                shot.damage,
+                BloodColor::Red,
+                uniform,
+                &mut out.blood,
+            );
+            if shot.tracer {
+                out.tracers.push((
+                    shot.attacker,
+                    shot.origin,
+                    shot.origin + direction * t,
+                    shot.weapon == "weapon_ar2",
+                ));
+            }
+            continue;
+        }
+        if shot.tracer {
+            out.tracers.push((
+                shot.attacker,
+                shot.origin,
+                shot.origin + direction * world_distance.min(8192.),
+                shot.weapon == "weapon_ar2",
+            ));
+        }
+        if let Some(hit) = hit {
+            if world
+                .entities
+                .get(hit.entity)
+                .is_some_and(|e| e.class().starts_with("npc_"))
+            {
+                out.npc_hits.push((hit.entity, shot.attacker));
+            }
+            if shot.weapon == "weapon_ar2" {
+                out.ar2_impacts
+                    .push((hit.position + hit.normal, hit.normal));
+            }
+            out.impacts.push((hit, direction));
+            apply_hit(
+                world,
+                scene,
+                physics,
+                shot.damage,
+                &shot.ammo_type,
+                &hit,
+                direction,
+                false,
+                HitSource {
+                    player: false,
+                    origin: shot.origin,
+                },
+                uniform,
+                &mut out.blood,
+            );
+        }
+    }
+}
+/// Ray (unit direction) against an axis-aligned box: the entry distance.
+fn ray_box(origin: Vec3, direction: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let (mut near, mut far) = (0f32, f32::MAX);
+    for axis in 0..3 {
+        if direction[axis].abs() < 1e-8 {
+            if origin[axis] < min[axis] || origin[axis] > max[axis] {
+                return None;
+            }
+            continue;
+        }
+        let (mut a, mut b) = (
+            (min[axis] - origin[axis]) / direction[axis],
+            (max[axis] - origin[axis]) / direction[axis],
+        );
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        near = near.max(a);
+        far = far.min(b);
+        if near > far {
+            return None;
+        }
+    }
+    Some(near)
 }
 fn melee_trace(
     physics: &Physics,
@@ -2259,11 +2687,23 @@ mod tests {
             entity: 0,
             position: Vec3::ZERO,
             normal: -Vec3::X,
+            hitgroup: 0,
         };
         let mut inv = Inventory::default();
         let count = |inv: &mut Inventory, id: usize, damage: f32| {
             inv.blood.clear();
-            inv.trace_bleed(&physics, &world, id, &hit, Vec3::X, damage);
+            let mut blood = std::mem::take(&mut inv.blood);
+            trace_bleed(
+                &physics,
+                &world,
+                id,
+                &hit,
+                Vec3::X,
+                damage,
+                &mut || inv.random(),
+                &mut blood,
+            );
+            inv.blood = blood;
             inv.blood.len()
         };
         // 1 / 2 / 4 traces by damage, all reaching the wall within 172 units.
@@ -2594,6 +3034,161 @@ mod tests {
         world
     }
     #[test]
+    fn npc_bullets_hit_the_player_hull_before_the_wall_else_the_wall() {
+        // Wall face at x = 100 (z -50..50); the shooter at x = 0 fires along +X.
+        let world = impact_wall();
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        physics.refresh_queries();
+        let shot = crate::npc_weapons::NpcShot {
+            attacker: 99,
+            weapon: "weapon_pistol".into(),
+            origin: Vec3::new(0., 0., 10.),
+            directions: vec![Vec3::X],
+            damage: 3.,
+            ammo_type: "Pistol".into(),
+            tracer: true,
+            missile: false,
+        };
+        let mut uniform = || 0.;
+        let mut out = NpcBullets::default();
+        npc_fire_bullets(
+            &world,
+            &mut scene,
+            &mut physics,
+            &shot,
+            Some(PlayerTarget {
+                feet: Vec3::new(60., 0., -10.),
+                crouched: false,
+                yaw: 180.,
+            }),
+            &mut uniform,
+            &mut out,
+        );
+        assert_eq!(out.player_hits.len(), 1);
+        assert!(out.impacts.is_empty());
+        assert!((out.tracers[0].2.x - 44.).abs() < 1e-3, "{:?}", out.tracers);
+        // A player behind the wall (or ducked below the line) is not hit.
+        let mut out = NpcBullets::default();
+        npc_fire_bullets(
+            &world,
+            &mut scene,
+            &mut physics,
+            &shot,
+            Some(PlayerTarget {
+                feet: Vec3::new(150., 0., -10.),
+                crouched: false,
+                yaw: 180.,
+            }),
+            &mut uniform,
+            &mut out,
+        );
+        assert!(out.player_hits.is_empty());
+        assert_eq!(out.impacts.len(), 1);
+        assert!((out.impacts[0].0.position.x - 100.).abs() < 0.5);
+    }
+    #[test]
+    fn npc_bullets_need_a_player_hitbox_inside_the_hull() {
+        // One "head" hitbox on a root bone: a ray through the hull below it misses.
+        let bone = modkit_core::animation::Bone {
+            name: "root".into(),
+            parent: None,
+            bind: modkit_core::animation::Pose {
+                position: Vec3::ZERO,
+                rotation: glam::Quat::IDENTITY,
+            },
+            inverse_bind: glam::Mat4::IDENTITY,
+        };
+        let rig = modkit_core::animation::Rig {
+            bones: vec![bone],
+            hitboxes: vec![modkit_core::animation::Hitbox {
+                bone: 0,
+                group: 0,
+                mins: Vec3::new(-4., -4., 56.),
+                maxs: Vec3::new(4., 4., 66.),
+            }],
+            ..Default::default()
+        };
+        let world = World {
+            rigs: [(format!("{PLAYER_MODEL}#0"), rig)].into(),
+            ..Default::default()
+        };
+        let target = PlayerTarget {
+            feet: Vec3::new(100., 0., 0.),
+            crouched: false,
+            yaw: 90.,
+        };
+        let head = player_hitbox_distance(&world, target, 0., Vec3::new(0., 0., 60.), Vec3::X);
+        assert!((head.unwrap().unwrap() - 96.).abs() < 1e-3);
+        let chest = player_hitbox_distance(&world, target, 0., Vec3::new(0., 0., 40.), Vec3::X);
+        assert_eq!(chest, Some(None));
+        // Without the rig the hull stands in.
+        assert_eq!(
+            player_hitbox_distance(&World::default(), target, 0., Vec3::ZERO, Vec3::X),
+            None
+        );
+    }
+    #[test]
+    fn player_headshots_sneak_attack_unaware_humanoids_like_native() {
+        // Native (oracle T163611Z, cop #257 at ~80 units): chest 40 -> 35, then a
+        // headshot 35 -> -70 (full health x sk_npc_head 3).
+        let world = World {
+            entities: vec![modkit_core::Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("origin".into(), "80 0 0".into()),
+                ],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let mut physics = Physics::new(&world);
+        let mut uniform = || 0.5;
+        let mut blood = Vec::new();
+        let player = HitSource {
+            player: true,
+            origin: Vec3::ZERO,
+        };
+        let mut shoot = |scene: &mut Scene, hitgroup: i32, attacker: HitSource| {
+            let hit = crate::physics::RayHit {
+                entity: 0,
+                position: Vec3::new(70., 0., 50.),
+                normal: -Vec3::X,
+                hitgroup,
+            };
+            apply_hit(
+                &world,
+                scene,
+                &mut physics,
+                5.,
+                "Pistol",
+                &hit,
+                Vec3::X,
+                false,
+                attacker,
+                &mut uniform,
+                &mut blood,
+            )
+        };
+        shoot(&mut scene, crate::skill::HITGROUP_CHEST, player);
+        assert_eq!(scene.states[0].value, 35.);
+        let killed = shoot(&mut scene, crate::skill::HITGROUP_HEAD, player);
+        assert!(killed);
+        assert_eq!(scene.states[0].value, -70.);
+        // An NPC that knows the player, or a shot from beyond 360 units: 5 x 3.
+        let mut scene = Scene::new(&world);
+        scene.npc_knows_player.insert(0);
+        shoot(&mut scene, crate::skill::HITGROUP_HEAD, player);
+        assert_eq!(scene.states[0].value, 25.);
+        let mut scene = Scene::new(&world);
+        let far = HitSource {
+            player: true,
+            origin: Vec3::new(-400., 0., 0.),
+        };
+        shoot(&mut scene, crate::skill::HITGROUP_HEAD, far);
+        assert_eq!(scene.states[0].value, 25.);
+    }
+    #[test]
     fn reload_transfers_only_available_ammunition() {
         let defs = definitions();
         let world = World::default();
@@ -2891,6 +3486,24 @@ mod tests {
         assert_eq!(inv.reserve_for("weapon_pistol", &defs), 0);
     }
 
+    #[test]
+    fn a_dropped_weapon_keeps_its_clip_when_equipped() {
+        // An NPC's SMG1 drop carries 25 rounds (Weapon_Drop); Weapon_Equip keeps them.
+        let defs = definitions();
+        let mut world = World::default();
+        world.entities.push(modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "weapon_smg1".into()),
+                ("origin".into(), "0 0 24".into()),
+                ("ammo".into(), "25".into()),
+            ],
+        });
+        let mut scene = Scene::new(&world);
+        let mut inv = Inventory::default();
+        inv.tick(&world, &mut scene, &defs, Vec3::ZERO, false, 0.015);
+        assert!(scene.states[0].killed);
+        assert_eq!(inv.owned.get("weapon_smg1"), Some(&25));
+    }
     #[test]
     fn secondary_ammo_pickups_clamp_independently_and_full_pickups_remain() {
         let defs = definitions();

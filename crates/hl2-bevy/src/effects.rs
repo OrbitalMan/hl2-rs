@@ -24,36 +24,45 @@ pub struct PreparedEffects {
     pub models: BTreeMap<String, Vec<Surface>>,
     model_errors: Vec<String>,
 }
+/// Gib models are precached with their breakable props (PrecacheGibsForModel), in the
+/// skins they can take: the parent's (BreakModelCreateSingle) or a chunk set's
+/// breakable_skin; propdata chunk models only where a prop uses them.
+pub fn gib_models(world: &modkit_core::World) -> std::collections::BTreeSet<(String, i32)> {
+    let mut gibs = std::collections::BTreeSet::new();
+    for instance in &world.model_instances {
+        let key = instance.asset_key();
+        if let Some(list) = world.model_breaks.get(&key) {
+            for gib in list.iter().filter(|gib| !gib.ragdoll) {
+                gibs.insert((gib.model.clone(), instance.skin as i32));
+            }
+        } else if let Some(data) = world.model_prop_data.get(&key) {
+            let set = data.breakable_model.as_deref().and_then(|name| {
+                world
+                    .breakable_chunks
+                    .iter()
+                    .find(|(set, _)| set.starts_with(name))
+            });
+            if let Some((_, models)) = set.filter(|_| data.health > 0. && data.breakable_count > 0)
+            {
+                for model in models {
+                    gibs.insert((model.clone(), data.breakable_skin));
+                }
+            }
+        }
+    }
+    gibs
+}
+/// One projectile/gib model posed at sequence 0 frame 0 (setup or worker threads).
+pub fn read_effect_model(vfs: &Vfs, path: &str, skin: i32) -> anyhow::Result<Vec<Surface>> {
+    let mut surfaces = models::read_model(vfs, path, skin.max(0) as usize)?;
+    pose_sequence_zero(vfs, path, &mut surfaces)?;
+    Ok(surfaces)
+}
 impl PreparedEffects {
     pub fn load(vfs: &Vfs, world: &modkit_core::World) -> Self {
         let mut model_errors = Vec::new();
         let mut loaded = BTreeMap::new();
-        // Gib models are precached with their breakable props (PrecacheGibsForModel), in
-        // the skins they can take: the parent's (BreakModelCreateSingle) or a chunk
-        // set's breakable_skin; propdata chunk models only where a prop uses them.
-        let mut gibs: std::collections::BTreeSet<(String, i32)> = std::collections::BTreeSet::new();
-        for instance in &world.model_instances {
-            let key = instance.asset_key();
-            if let Some(list) = world.model_breaks.get(&key) {
-                for gib in list.iter().filter(|gib| !gib.ragdoll) {
-                    gibs.insert((gib.model.clone(), instance.skin as i32));
-                }
-            } else if let Some(data) = world.model_prop_data.get(&key) {
-                let set = data.breakable_model.as_deref().and_then(|name| {
-                    world
-                        .breakable_chunks
-                        .iter()
-                        .find(|(set, _)| set.starts_with(name))
-                });
-                if let Some((_, models)) =
-                    set.filter(|_| data.health > 0. && data.breakable_count > 0)
-                {
-                    for model in models {
-                        gibs.insert((model.clone(), data.breakable_skin));
-                    }
-                }
-            }
-        }
+        let gibs = gib_models(world);
         let fixed = [
             hl2_simulation::projectiles::GRENADE_MODEL,
             hl2_simulation::projectiles::FRAG_MODEL,
@@ -69,10 +78,7 @@ impl PreparedEffects {
             if loaded.contains_key(&key) {
                 continue;
             }
-            match models::read_model(vfs, &path, skin.max(0) as usize).and_then(|mut surfaces| {
-                pose_sequence_zero(vfs, &path, &mut surfaces)?;
-                Ok(surfaces)
-            }) {
+            match read_effect_model(vfs, &path, skin) {
                 Ok(surfaces) => {
                     loaded.insert(key, surfaces);
                 }
@@ -191,6 +197,14 @@ fn effect_blend(kind: usize) -> Option<BlendState> {
             },
             alpha: BlendComponent::OVER,
         }),
+        hl2_simulation::projectile_visuals::KIND_ALPHA_ADD => Some(BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent::OVER,
+        }),
         4 => Some(BlendState {
             color: BlendComponent {
                 src_factor: BlendFactor::Dst,
@@ -221,6 +235,51 @@ struct QuadDraw {
 }
 /// One projectile model surface: mesh and material.
 type ModelPart = (Handle<Mesh>, Handle<rendering::SourceMaterial>);
+impl Effects {
+    /// Gib models loaded after the map (DESIGN 14r part B) by render key, textured from
+    /// the model cache like the map's gibs.
+    pub fn add_models(
+        &mut self,
+        models: BTreeMap<String, Vec<Surface>>,
+        cache: &rendering::ModelCache,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<rendering::SourceMaterial>,
+    ) {
+        for (key, surfaces) in models {
+            if self.grenade_meshes.contains_key(&key) {
+                continue;
+            }
+            let parts = surfaces
+                .iter()
+                .map(|surface| {
+                    let fallback = crate::assets::MaterialData::default();
+                    let definition = cache
+                        .definitions
+                        .get(&surface.material)
+                        .unwrap_or(&fallback);
+                    let base = definition
+                        .base_path
+                        .as_ref()
+                        .and_then(|p| cache.textures.get(p))
+                        .unwrap_or(&cache.white)
+                        .clone();
+                    let material = materials.add(rendering::make_material(
+                        definition,
+                        base,
+                        cache.white.clone(),
+                        None,
+                        (&cache.white, &cache.black_cube),
+                    ));
+                    (
+                        meshes.add(rendering::mesh_from_surface(surface, definition)),
+                        material,
+                    )
+                })
+                .collect();
+            self.grenade_meshes.insert(key, parts);
+        }
+    }
+}
 #[derive(Resource)]
 pub struct Effects {
     source: ProjectileVisuals,
@@ -245,6 +304,14 @@ pub struct Effects {
     load_sparks: f64,
     /// The newest gravity gun EFFECT_LAUNCH already given its GaussExplosion.
     launch_sparks: f64,
+    /// The newest shot effect consumed (Gameplay::shot_effects) and the start time of the
+    /// newest viewmodel fire animation given its AE_MUZZLEFLASH.
+    shot_serial: u64,
+    player_flash: f64,
+    /// The newest Inventory::muzzle_flash_count given its viewmodel elight.
+    player_muzzle_lights: u64,
+    /// Scene time of the last elight decay (CL_DecayLights runs once per frame).
+    elight_time: f64,
     model_errors: Vec<String>,
     draws: usize,
     grenade_draws: usize,
@@ -262,6 +329,7 @@ impl Effects {
         serde_json::json!({"sprite_draws":self.draws,"pooled_quads":self.quads.len(),
             "viewmodel_sprite_draws":self.viewmodel_draws,"stuck_bolt_draws":self.stuck.len(),
             "grenade_draws":self.grenade_draws,"gib_draws":self.gib_draws,"decal_draws":self.mark_draws,"pose_mismatches":self.pose_mismatches, "observed_decals":self.observed_decals,"observed_grenades":self.observed_grenades,
+            "muzzle_flashes":self.source.muzzle.flashes,"tracers":self.source.muzzle.tracers_made,
             "ball_frames":self.source.ball_frames,"effect_frames":self.source.effect_frames,
             "particle_emitters":self.source.particles.diagnostics,"missing_particle_draws":self.source.missing_particle_draws,
             "sprite_errors":self.source.errors,"model_errors":self.model_errors,
@@ -289,7 +357,12 @@ pub fn install(
             effects.add(EffectMaterial {
                 texture,
                 parameters: Vec4::new(
-                    if sprite.kind == 1 { 0.5 } else { 0.001 },
+                    // kRenderTransAlphaAdd still adds the colour of zero-alpha texels.
+                    match sprite.kind {
+                        1 => 0.5,
+                        hl2_simulation::projectile_visuals::KIND_ALPHA_ADD => -1.,
+                        _ => 0.001,
+                    },
                     f32::from(sprite.kind == 0),
                     1.,
                     0.,
@@ -389,6 +462,10 @@ pub fn install(
         rng: 0x2545_f491_4f6c_dd1d,
         load_sparks: f64::NEG_INFINITY,
         launch_sparks: f64::NEG_INFINITY,
+        shot_serial: 0,
+        player_flash: f64::NEG_INFINITY,
+        player_muzzle_lights: 0,
+        elight_time: 0.,
         model_errors: loaded.effects.model_errors.clone(),
         draws: 0,
         grenade_draws: 0,
@@ -515,7 +592,50 @@ fn viewmodel_quads(
                 .fold(f64::NEG_INFINITY, f64::max)
         })
         .filter(|at| *at > effects.load_sparks);
-    if described.sprites.is_empty() && described.beams.is_empty() && new_load.is_none() {
+    // AE_MUZZLEFLASH on the viewmodel's fire sequence (cycle 0 in the owned models).
+    let elapsed_fire = (game.scene.time - game.inventory.animation_at).max(0.) as f32;
+    let flash_due = (game.inventory.animation_at > effects.player_flash)
+        .then_some(())
+        .and_then(|()| {
+            game.weapons
+                .get(&game.inventory.active)
+                .and_then(|w| {
+                    game.world
+                        .rigs
+                        .get(&format!("{}#0", w.viewmodel.to_lowercase()))
+                })
+                .and_then(|rig| {
+                    let clip = rig.clips.get(&game.inventory.animation)?;
+                    clip.events
+                        .iter()
+                        .filter(|e| e.cycle * clip.duration() <= elapsed_fire)
+                        .find_map(|e| {
+                            use hl2_simulation::muzzle_effects as fx;
+                            if e.name.eq_ignore_ascii_case("AE_MUZZLEFLASH") {
+                                return fx::parse(&e.options);
+                            }
+                            // Obsolete CL_EVENT_MUZZLEFLASH0-3 (the RPG): attachment n.
+                            let (kind, index) = fx::parse_obsolete(e.id, &e.options)?;
+                            Some((kind, rig.attachments.get(index)?.name.clone()))
+                        })
+                })
+        });
+    let first_person_live = effects
+        .source
+        .muzzle
+        .emitters
+        .iter()
+        .any(|e| e.first_person);
+    // CBasePlayer::DoMuzzleFlash -> the viewmodel's ProcessMuzzleFlashEvent elight.
+    let muzzle_light_due = game.inventory.muzzle_flash_count != effects.player_muzzle_lights;
+    if described.sprites.is_empty()
+        && described.beams.is_empty()
+        && new_load.is_none()
+        && flash_due.is_none()
+        && !first_person_live
+        && !muzzle_light_due
+    {
+        effects.player_muzzle_lights = game.inventory.muzzle_flash_count;
         return Vec::new();
     }
     let Some(rig) = game.weapons.get(&game.inventory.active).and_then(|w| {
@@ -551,6 +671,29 @@ fn viewmodel_quads(
     let up = right.cross(forward);
     let factor = (world_fov.to_radians() * 0.5).tan() / (viewmodel_fov.to_radians() * 0.5).tan();
     let eye = glam::Vec3::from_array(sim.eye().to_array());
+    if muzzle_light_due {
+        effects.player_muzzle_lights = game.inventory.muzzle_flash_count;
+        // GetAttachment(1) on the viewmodel is FormatViewModelAttachment'ed into the world.
+        if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
+            && viewmodel_fov > 0.
+        {
+            let world = eye + forward * local.x - right * local.y * factor + up * local.z * factor;
+            let rng = &mut effects.rng;
+            let mut random = || {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                (*rng >> 40) as f32 / (1u32 << 24) as f32
+            };
+            effects.source.muzzle.elights.muzzle_flash(
+                VIEWMODEL_LIGHT_KEY,
+                world,
+                false,
+                game.scene.time,
+                &mut random,
+            );
+        }
+    }
     if let Some(at) = new_load {
         effects.load_sparks = at;
         if let Some(local) = vm::anchor_position(rig, &matrices, &vm::Anchor::Index(1))
@@ -601,6 +744,37 @@ fn viewmodel_quads(
             });
         }
     }
+    if let Some((kind, attachment)) = flash_due {
+        effects.player_flash = game.inventory.animation_at;
+        if let Some(frame) = rig
+            .attachment(&attachment)
+            .and_then(|a| rig.attachment_matrix(&matrices, a))
+        {
+            let rng = &mut effects.rng;
+            let mut random = || {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                (*rng >> 40) as f32 / (1u32 << 24) as f32
+            };
+            effects.source.muzzle.flash(
+                kind,
+                true,
+                frame,
+                game.inventory.animation_at,
+                &mut random,
+            );
+        }
+    }
+    // First-person flashes draw in viewmodel space at the viewmodel camera's scale.
+    let mut flashes = effects.source.muzzle.particle_quads(
+        true,
+        game.scene.time,
+        -glam::Vec3::Y,
+        glam::Vec3::Z,
+        vm::attachment_size_factor(viewmodel_fov, fov),
+    );
+    flashes.retain(|q| effects.source.sprites.contains_key(&q.material));
     let sprites = &effects.source.sprites;
     let rng = &mut effects.rng;
     let mut random = || {
@@ -609,14 +783,85 @@ fn viewmodel_quads(
         *rng ^= *rng << 17;
         (*rng >> 40) as f32 / (1u32 << 24) as f32
     };
-    vm::viewmodel_quads(
+    let mut quads = vm::viewmodel_quads(
         &described,
         &|anchor| vm::anchor_position(rig, &matrices, anchor),
         &|material| sprites.get(material).map(|s| f32::from(s.image.width)),
         &mut random,
         vm::attachment_size_factor(viewmodel_fov, world_fov),
-    )
+    );
+    quads.extend(flashes);
+    quads
 }
+/// New muzzle flashes and tracers from the simulation's shot effect log.
+/// The viewmodel's entity index in muzzle elight keys (any index no map entity uses).
+const VIEWMODEL_LIGHT_KEY: usize = 0xF_FFFF;
+impl Effects {
+    /// Live entity lights (elights) as dworldlight_t for model lighting.
+    pub(crate) fn elights(&self, floor: f32) -> Vec<modkit_core::lighting::WorldLight> {
+        self.source
+            .muzzle
+            .elights
+            .active()
+            .map(|l| l.dynamic_light().world_light(floor))
+            .collect()
+    }
+}
+fn shot_effects(game: &Gameplay, effects: &mut Effects) {
+    use crate::gameplay::ShotEffect;
+    use hl2_simulation::muzzle_effects as fx;
+    let Effects {
+        source,
+        rng,
+        shot_serial,
+        ..
+    } = effects;
+    let mut random = || {
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        (*rng >> 40) as f32 / (1u32 << 24) as f32
+    };
+    for (serial, at, effect) in &game.shot_effects {
+        if *serial <= *shot_serial {
+            continue;
+        }
+        *shot_serial = *serial;
+        match effect {
+            ShotEffect::NpcFlash(kind, frame) => {
+                source.muzzle.flash(*kind, false, *frame, *at, &mut random)
+            }
+            ShotEffect::MuzzleLight(npc, origin, combine) => {
+                source
+                    .muzzle
+                    .elights
+                    .muzzle_flash(*npc, *origin, *combine, *at, &mut random)
+            }
+            ShotEffect::NpcTracer(start, end, ar2) => source.muzzle.tracer(if *ar2 {
+                fx::npc_ar2_tracer(*start, *end, *at, &mut random)
+            } else {
+                fx::npc_tracer(*start, *end, *at, &mut random)
+            }),
+            ShotEffect::PlayerTracer(start, end, right, ar2) => source.muzzle.tracer(if *ar2 {
+                fx::player_ar2_tracer(*start, *end, *right, *at, &mut random)
+            } else {
+                fx::player_tracer(*start, *end, *right, *at, &mut random)
+            }),
+            ShotEffect::Ar2Impact(origin, normal) => {
+                source
+                    .muzzle
+                    .surface_quads
+                    .push(fx::SurfaceQuad::ar2_impact(
+                        *origin,
+                        *normal,
+                        *at,
+                        &mut random,
+                    ))
+            }
+        }
+    }
+}
+
 pub fn present(
     mut commands: Commands,
     mut effects: ResMut<Effects>,
@@ -628,6 +873,15 @@ pub fn present(
 ) {
     let (yaw, pitch) = sim.view_angles();
     let direction = glam::Vec3::from_array(crate::source_direction(yaw, pitch).to_array());
+    // CL_DecayLights before this frame's new elights.
+    let frametime = (game.scene.time - effects.elight_time).max(0.) as f32;
+    effects.elight_time = game.scene.time;
+    effects
+        .source
+        .muzzle
+        .elights
+        .decay(game.scene.time, frametime);
+    shot_effects(&game, &mut effects);
     effects.source.frame(
         &game.projectiles,
         glam::Vec3::from_array(sim.view_origin().to_array()),
@@ -636,6 +890,32 @@ pub fn present(
         !sim.world_running(),
         &sim.physics,
     );
+    // Active stunsticks' halos (C_WeaponStunStick::DrawModel), new sizes every frame.
+    if effects
+        .source
+        .sprites
+        .contains_key(hl2_simulation::muzzle_effects::STUNSTICK_GLOW)
+    {
+        let right = direction.cross(glam::Vec3::Z).normalize_or(glam::Vec3::Y);
+        let up = right.cross(direction).normalize_or(glam::Vec3::Z);
+        let Effects { source, rng, .. } = &mut *effects;
+        let mut random = || {
+            *rng ^= *rng << 13;
+            *rng ^= *rng >> 7;
+            *rng ^= *rng << 17;
+            (*rng >> 40) as f32 / (1u32 << 24) as f32
+        };
+        for frame in &game.stunstick_glows {
+            source
+                .quads
+                .extend(hl2_simulation::muzzle_effects::stunstick_glow(
+                    *frame,
+                    right,
+                    up,
+                    &mut random,
+                ));
+        }
+    }
     effects.draws = effects.source.quads.len();
     let quads = std::mem::take(&mut effects.source.quads);
     let Effects {

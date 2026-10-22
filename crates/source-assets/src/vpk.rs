@@ -2,7 +2,7 @@
 use crate::{bytes, keyvalues, u16le, u32le};
 use anyhow::{bail, Context, Result};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -410,6 +410,71 @@ impl Vfs {
             return self.material_property(&include, key, depth + 1);
         }
         Ok(None)
+    }
+    /// Every mounted file under `prefix` (a normalized directory such as "models/")
+    /// ending in `suffix`: map pak, custom folders/VPKs, base VPKs and loose folders.
+    /// Zero-byte loose placeholders are skipped (they never shadow archived files).
+    pub fn list_files(&self, prefix: &str, suffix: &str) -> BTreeSet<String> {
+        let wanted = |p: &str| p.starts_with(prefix) && p.ends_with(suffix);
+        let mut found: BTreeSet<String> = self
+            .embedded
+            .keys()
+            .filter(|p| wanted(p))
+            .cloned()
+            .collect();
+        for layer in &self.layers {
+            match layer {
+                Layer::Pak(vpk) => {
+                    for entry in vpk.entries.keys() {
+                        if wanted(entry) {
+                            found.insert(entry.clone());
+                        }
+                    }
+                }
+                Layer::Dir(folder) => {
+                    let mut stack = vec![folder.join(prefix)];
+                    while let Some(dir) = stack.pop() {
+                        let Ok(read) = std::fs::read_dir(&dir) else {
+                            continue;
+                        };
+                        for entry in read.flatten() {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                stack.push(path);
+                            } else if entry.metadata().is_ok_and(|m| m.len() > 0) {
+                                let name = path
+                                    .strip_prefix(folder)
+                                    .ok()
+                                    .and_then(|p| normalize(&p.to_string_lossy()).ok());
+                                if let Some(name) = name.filter(|n| wanted(n)) {
+                                    found.insert(name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        found
+    }
+    /// Models that can spawn as physics props (`prop_physics_create`: CreatePhysicsProp
+    /// requires the model's vcollide, i.e. a .phy beside the .mdl), relative to models/
+    /// and grouped by folder.
+    pub fn physics_prop_models(&self) -> BTreeMap<String, Vec<String>> {
+        let phys = self.list_files("models/", ".phy");
+        let mut folders: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for mdl in self.list_files("models/", ".mdl") {
+            if !phys.contains(&format!("{}.phy", mdl.trim_end_matches(".mdl"))) {
+                continue;
+            }
+            let relative = &mdl["models/".len()..];
+            let folder = relative.rsplit_once('/').map_or("", |(f, _)| f);
+            folders
+                .entry(folder.to_owned())
+                .or_default()
+                .push(relative.to_owned());
+        }
+        folders
     }
     pub fn resolve_material_name(&self, name: &str) -> Option<String> {
         let suffix = format!("/{}.vmt", name.to_lowercase());

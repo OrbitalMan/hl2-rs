@@ -5,7 +5,7 @@ use source_assets::{
     sounds::{ActorGender, ActorRegistry, Wave},
     vpk::Vfs,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Cursor, ErrorKind};
 use symphonia::core::{
     audio::SampleBuffer, codecs::DecoderOptions, errors::Error as DecodeError,
@@ -546,6 +546,38 @@ pub fn playback_path(wave: &str) -> String {
         .to_owned()
 }
 
+/// SDK soundchars.h TestSoundChar(name, CHAR_DISTVARIANT): '^' as the first character, or
+/// the second after another sound character.
+pub fn distance_variant_name(wave: &str) -> bool {
+    let mut chars = wave.chars();
+    match chars.next() {
+        Some('^') => true,
+        Some(c) if "*?!#><@)}".contains(c) => chars.next() == Some('^'),
+        _ => false,
+    }
+}
+
+/// Retail engine.dll SND_Spatialize (1008f4d0): a distance-variant channel's crossfade from
+/// the wave's left (near) channel to its right (far) channel, 0 at 240 units or closer and
+/// 1 from 1320 (constants 1031da0c/1031da20, x 1/1080 at 1031d8f0; the distance is
+/// truncated to whole units). Doppler ('>') channels keep 0.
+pub fn distance_mix(distance: f32) -> f32 {
+    const NEAR: f32 = 240.;
+    const FAR: f32 = 1320.;
+    (distance.trunc().clamp(NEAR, FAR) - NEAR) * (1. / 1080.)
+}
+
+/// Retail engine.dll distance-variant stereo mixers (100a3070 16-bit, 100a3840 8-bit): each
+/// output sample is near + (far - near) x distmix, mixed as a mono source.
+pub fn distance_variant_mono(stereo: &[f32], distmix: f32) -> Vec<f32> {
+    stereo
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[near, far]| near + (far - near) * distmix)
+        .collect()
+}
+
 pub fn raw_wave(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.contains(".wav") || lower.contains(".mp3")
@@ -666,6 +698,8 @@ fn script_params(entry: &source_assets::keyvalues::Entry) -> ScriptParams {
 
 pub struct Library {
     names: BTreeMap<String, Vec<Wave>>,
+    /// Playback paths of waves marked CHAR_DISTVARIANT ('^').
+    distance_variants: BTreeSet<String>,
     params: BTreeMap<String, ScriptParams>,
     actors: ActorRegistry,
     available: HashMap<String, Vec<bool>>,
@@ -690,7 +724,7 @@ impl Library {
             .with_context(|| format!("sound script absent: {name}"))
     }
     pub fn new(vfs: &Vfs) -> Self {
-        let mut names = BTreeMap::new();
+        let mut names: BTreeMap<String, Vec<Wave>> = BTreeMap::new();
         let mut params = BTreeMap::new();
         let mut errors = BTreeMap::new();
         let actors = match (|| -> Result<ActorRegistry> {
@@ -752,8 +786,15 @@ impl Library {
             eprintln!("Sound manifest: {e:#}");
             errors.insert("scripts/game_sounds_manifest.txt".into(), format!("{e:#}"));
         }
+        let distance_variants = names
+            .values()
+            .flatten()
+            .filter(|wave| distance_variant_name(&wave.path))
+            .map(|wave| playback_path(&wave.path))
+            .collect();
         Self {
             names,
+            distance_variants,
             params,
             actors,
             available: HashMap::new(),
@@ -783,6 +824,10 @@ impl Library {
         (volume, pitch, p.soundlevel)
     }
     /// Script volume/pitch/soundlevel; raw waves use the SDK defaults.
+    /// Whether a playback path is a distance-variant stereo wave (left near, right far).
+    pub fn distance_variant(&self, path: &str) -> bool {
+        self.distance_variants.contains(path)
+    }
     pub fn params(&self, name: &str) -> ScriptParams {
         self.params
             .get(&name.to_ascii_lowercase())
@@ -1023,12 +1068,168 @@ impl WeaponAnimationSounds {
     }
 }
 
+/// Studio client sound events of entity animations (C_BaseAnimating::FireEvent): the
+/// sounds NPC sequences carry. Combine soldiers, metrocops and citizens have no footstep
+/// code in their server classes; their walk/run sequences carry CL_EVENT_FOOTSTEP_LEFT/
+/// RIGHT (6004/6005, options "NPC_CombineS", "NPC_MetroPolice", "NPC_Citizen"). Before
+/// this only the viewmodel's events played, so NPCs walked silently (owner report).
+#[derive(Default)]
+pub struct EntityAnimationSounds {
+    /// Per entity: (clip, start marker, elapsed and origin at the last tick).
+    previous: BTreeMap<usize, (String, f64, f32, glam::Vec3)>,
+}
+/// One client event's sound.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AnimationSound {
+    /// CL_EVENT_SOUND (5004 / AE_CL_PLAYSOUND), or CL_EVENT_FOOTSTEP_LEFT/RIGHT: a named
+    /// script sound from the entity.
+    Named(SoundRequest),
+    /// CL_EVENT_MFOOTSTEP_* (6006-6009): MaterialFootstepSound, the surfaceprop's
+    /// stepleft/stepright 48 units under the foot, at this volume.
+    Material {
+        entity: usize,
+        origin: glam::Vec3,
+        left: bool,
+        volume: f32,
+    },
+}
+/// CL_EVENT_FOOTSTEP_LEFT (6004) / RIGHT (6005): "<options>.FootstepLeft", or
+/// "RunFootstep..." above RUN_SPEED_ESTIMATE (150 u/s, EstimateAbsVelocity 2D); empty
+/// options mean "NPC_CombineS".
+pub fn footstep_name(options: &str, left: bool, speed_2d: f32) -> String {
+    let prefix = match options.trim() {
+        "" => "NPC_CombineS",
+        prefix => prefix,
+    };
+    format!(
+        "{prefix}.{}Footstep{}",
+        if speed_2d > 150. { "Run" } else { "" },
+        if left { "Left" } else { "Right" }
+    )
+}
+/// Every script sound name a rig's client events can play (for preloading).
+pub fn animation_sound_names(rig: &modkit_core::animation::Rig) -> Vec<String> {
+    let mut names = Vec::new();
+    for event in rig.clips.values().flat_map(|c| &c.events) {
+        match event.id {
+            6004 | 6005 => {
+                for speed in [0., 200.] {
+                    names.push(footstep_name(&event.options, event.id == 6004, speed));
+                }
+            }
+            _ if is_sound_event(event) => names.push(event.options.trim().to_owned()),
+            _ => {}
+        }
+    }
+    names
+}
+impl EntityAnimationSounds {
+    pub fn events(
+        &mut self,
+        world: &modkit_core::World,
+        scene: &crate::entities::Scene,
+        dt: f32,
+    ) -> Vec<AnimationSound> {
+        let mut out = Vec::new();
+        for instance in &world.model_instances {
+            let Some(id) = instance.entity else {
+                continue;
+            };
+            let Some(state) = scene.states.get(id) else {
+                continue;
+            };
+            if state.killed || !state.visible {
+                self.previous.remove(&id);
+                continue;
+            }
+            let Some(clip) = world
+                .rigs
+                .get(&instance.asset_key())
+                .and_then(|rig| rig.clips.get(&state.animation))
+            else {
+                continue;
+            };
+            if !clip.events.iter().any(is_client_sound) {
+                self.previous.remove(&id);
+                continue;
+            }
+            let elapsed = scene.animation_time(id);
+            let marker = state.animation_started;
+            let last = self.previous.get(&id);
+            let speed_2d = last.map_or(0., |(.., origin)| {
+                (state.origin - *origin).truncate().length() / dt.max(1e-4)
+            });
+            let previous = last
+                .filter(|(animation, started, ..)| {
+                    *animation == state.animation && *started == marker
+                })
+                .map(|(_, _, elapsed, _)| *elapsed);
+            if let Some(previous) = previous {
+                for event in clip.events_between(previous, elapsed) {
+                    let named = |name: String| {
+                        AnimationSound::Named(SoundRequest {
+                            origin: Some(state.origin),
+                            emitter: Some(id as u64),
+                            ..name.as_str().into()
+                        })
+                    };
+                    match event.id {
+                        6004 | 6005 => out.push(named(footstep_name(
+                            &event.options,
+                            event.id == 6004,
+                            speed_2d,
+                        ))),
+                        6006..=6009 => out.push(AnimationSound::Material {
+                            entity: id,
+                            origin: state.origin,
+                            left: event.id % 2 == 0,
+                            volume: if event.id < 6008 { 0.5 } else { 1. },
+                        }),
+                        _ if is_sound_event(event) => {
+                            out.push(named(event.options.trim().to_owned()))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            self.previous
+                .insert(id, (state.animation.clone(), marker, elapsed, state.origin));
+        }
+        out
+    }
+}
+fn is_sound_event(event: &modkit_core::animation::ClipEvent) -> bool {
+    (event.id == 5004 || event.name.eq_ignore_ascii_case("AE_CL_PLAYSOUND"))
+        && !event.options.trim().is_empty()
+}
+fn is_client_sound(event: &modkit_core::animation::ClipEvent) -> bool {
+    is_sound_event(event) || (6004..=6009).contains(&event.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn distance_variants_crossfade_near_to_far_like_retail() {
+        assert!(distance_variant_name("^weapons/smg1/npc_smg1_fire1.wav"));
+        assert!(distance_variant_name(")^weapons/x.wav"));
+        assert!(!distance_variant_name("weapons/shotgun/shotgun_fire6.wav"));
+        assert!(!distance_variant_name("weapons/^x.wav"));
+        assert_eq!(distance_mix(0.), 0.);
+        assert_eq!(distance_mix(240.9), 0.);
+        assert!((distance_mix(780.) - 0.5).abs() < 1e-6);
+        assert_eq!(distance_mix(1320.), 1.);
+        assert_eq!(distance_mix(5000.), 1.);
+        let stereo = [1., -1., 0.5, 0.25];
+        assert_eq!(distance_variant_mono(&stereo, 0.), vec![1., 0.5]);
+        assert_eq!(distance_variant_mono(&stereo, 1.), vec![-1., 0.25]);
+        assert_eq!(distance_variant_mono(&stereo, 0.5), vec![0., 0.375]);
+    }
+
     fn speech_audio() -> Library {
         Library {
+            distance_variants: BTreeSet::new(),
             params: BTreeMap::new(),
             names: [
                 (
@@ -1136,6 +1337,83 @@ mod tests {
         }
     }
 
+    #[test]
+    fn npc_walk_sequences_play_their_footstep_events() {
+        use modkit_core::{
+            animation::{Clip, ClipEvent, Rig},
+            Entity, ModelInstance, World,
+        };
+        let step = |cycle, id: i32, options: &str| ClipEvent {
+            cycle,
+            id,
+            flags: 0,
+            name: String::new(),
+            options: options.into(),
+        };
+        let mut world = World::default();
+        world.entities.push(Entity {
+            properties: vec![("classname".into(), "npc_combine_s".into())],
+        });
+        world.model_instances.push(ModelInstance {
+            background: false,
+            model: "models/test.mdl".into(),
+            origin: glam::Vec3::ZERO,
+            angles: glam::Vec3::ZERO,
+            skin: 0,
+            scale: 1.,
+            kind: "npc_combine_s".into(),
+            solid: true,
+            solid_mode: None,
+            entity: Some(0),
+        });
+        // combine_soldier runall: 6004 at 0.389, 6005 at 0.889 ("NPC_CombineS").
+        world.rigs.insert(
+            "models/test.mdl#0".into(),
+            Rig {
+                clips: [(
+                    "runall".into(),
+                    Clip {
+                        layer: Default::default(),
+                        fps: 2.,
+                        looping: true,
+                        frames: vec![vec![]; 3],
+                        events: vec![step(0.389, 6004, "NPC_CombineS"), step(0.889, 6005, "")],
+                    },
+                )]
+                .into(),
+                ..Default::default()
+            },
+        );
+        let mut scene = crate::entities::Scene::new(&world);
+        scene.states[0].animation = "runall".into();
+        scene.states[0].animation_started = 0.;
+        let mut sounds = EntityAnimationSounds::default();
+        let mut names = Vec::new();
+        for tick in 0..100 {
+            scene.time = tick as f64 * 0.015;
+            // Running at 200 u/s, then standing still for the last half second.
+            if tick < 67 {
+                scene.states[0].origin.x = tick as f32 * 3.;
+            }
+            for sound in sounds.events(&world, &scene, 0.015) {
+                if let AnimationSound::Named(request) = sound {
+                    names.push(request.name);
+                }
+            }
+        }
+        assert_eq!(
+            names,
+            [
+                "NPC_CombineS.RunFootstepLeft",
+                "NPC_CombineS.RunFootstepRight",
+                "NPC_CombineS.FootstepLeft"
+            ]
+        );
+        assert_eq!(
+            footstep_name("NPC_MetroPolice", false, 0.),
+            "NPC_MetroPolice.FootstepRight"
+        );
+    }
     #[test]
     fn viewmodel_cues_fire_once_through_pause_and_animation_restart() {
         use crate::gameplay::{Inventory, Weapon};

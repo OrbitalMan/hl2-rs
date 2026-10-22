@@ -279,6 +279,8 @@ pub(crate) fn controls(
     if !sim.commands.is_empty() {
         return;
     }
+    let overlay_open = game.as_ref().is_some_and(|g| g.spawn_overlay.open);
+    let typing = game.as_ref().is_some_and(|g| g.spawn_overlay.typing);
     let cfg = ui.as_ref().map(|u| &u.source.config);
     let devices = Devices {
         keys: &keys,
@@ -290,18 +292,21 @@ pub(crate) fn controls(
     }
     if let Some(game) = game.as_deref_mut() {
         game.buttons(
-            devices.pressed("+attack", cfg),
-            devices.pressed("+attack2", cfg),
+            devices.pressed("+attack", cfg) && !overlay_open,
+            devices.pressed("+attack2", cfg) && !overlay_open,
         );
     }
     sim.input = Input::default();
-    if sim.paused() || sim.transition || cursor.grab_mode == CursorGrabMode::None {
+    if sim.paused() || sim.transition || (cursor.grab_mode == CursorGrabMode::None && !overlay_open)
+    {
         if let Some(game) = game.as_deref_mut() {
             game.consume_attacks();
         }
         return;
     }
-    if let Some(game) = game.as_deref_mut() {
+    if let Some(game) = game.as_deref_mut()
+        && !typing
+    {
         use crate::gameplay::Action;
         for (name, action) in [
             ("loadout", Action::Loadout),
@@ -325,12 +330,17 @@ pub(crate) fn controls(
             }
         }
     }
-    let settings = cfg.map_or(&DEFAULTS.mouse, |c| &c.mouse);
-    let [dx, dy] = mouse_filter.apply([mouse.delta.x, mouse.delta.y], settings);
-    let radians = hl2_ui::input::MOUSE_DEGREES_PER_COUNT.to_radians();
-    sim.yaw -= dx * radians;
-    let pitch_sign = if settings.invert { -1.0 } else { 1.0 };
-    sim.pitch = (sim.pitch - dy * radians * pitch_sign).clamp(-1.55, 1.55);
+    if typing {
+        return;
+    }
+    if !overlay_open || buttons.pressed(MouseButton::Right) {
+        let settings = cfg.map_or(&DEFAULTS.mouse, |c| &c.mouse);
+        let [dx, dy] = mouse_filter.apply([mouse.delta.x, mouse.delta.y], settings);
+        let radians = hl2_ui::input::MOUSE_DEGREES_PER_COUNT.to_radians();
+        sim.yaw -= dx * radians;
+        let pitch_sign = if settings.invert { -1.0 } else { 1.0 };
+        sim.pitch = (sim.pitch - dy * radians * pitch_sign).clamp(-1.55, 1.55);
+    }
     if keys.just_pressed(KeyCode::F2) {
         let fly = !sim.flying();
         sim.set_fly(fly);

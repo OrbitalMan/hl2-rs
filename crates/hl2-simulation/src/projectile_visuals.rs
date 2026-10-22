@@ -74,6 +74,8 @@ pub struct ProjectileVisuals {
     spark_frame: f64,
     /// Viewmodel-space sprite/beam quads for the viewmodel camera (viewmodel_effects.rs).
     pub viewmodel_quads: Vec<Quad>,
+    /// Live muzzle flashes and bullet tracers (muzzle_effects.rs).
+    pub muzzle: crate::muzzle_effects::MuzzleEffects,
 }
 /// One CTrailParticles TrailParticle of FX_ElectricSpark.
 #[derive(Clone, Debug)]
@@ -130,9 +132,28 @@ pub fn load_sprite(vfs: &Vfs, material: &str) -> Result<Sprite> {
         ) {
             3
         } else {
-            material_kind(vfs, material)
+            sprite_kind(vfs, material)
         },
     })
+}
+/// Kind 5: src + dest * (1 - a), the sum of sprite_dx9.cpp's two kRenderTransAlphaAdd
+/// passes (src*a + dest*(1-a), then src*(1-a) + dest).
+pub const KIND_ALPHA_ADD: usize = 5;
+/// "Sprite" shader materials blend by $spriterendermode (sprite_dx9.cpp): kRenderGlow,
+/// kRenderTransAdd and kRenderWorldGlow add src*a; kRenderTransAlphaAdd (8:
+/// effects/gunshiptracer) is premultiplied. Before this, the AR2 tracer drew opaque and
+/// showed its texture's black background.
+fn sprite_kind(vfs: &Vfs, name: &str) -> usize {
+    let mode = vfs
+        .material_value(name, "$spriterendermode")
+        .ok()
+        .flatten()
+        .and_then(|value| value.trim().parse::<i32>().ok());
+    match mode {
+        Some(3 | 5 | 9) => 3,
+        Some(8) => KIND_ALPHA_ADD,
+        _ => material_kind(vfs, name),
+    }
 }
 /// Preserves the retained host's exact legacy flag precedence.
 pub fn material_kind(vfs: &Vfs, name: &str) -> usize {
@@ -202,6 +223,7 @@ impl ProjectileVisuals {
             sparks_seen: std::collections::HashSet::new(),
             spark_frame: 0.,
             viewmodel_quads: Vec::new(),
+            muzzle: Default::default(),
         }
     }
     fn range(&mut self, low: f32, high: f32) -> f32 {
@@ -336,6 +358,7 @@ impl ProjectileVisuals {
         for name in SPRITES
             .iter()
             .chain(crate::explosion_particles::MATERIALS)
+            .chain(crate::muzzle_effects::MATERIALS)
             .collect::<std::collections::BTreeSet<_>>()
         {
             match load_sprite(vfs, name) {
@@ -545,6 +568,12 @@ impl ProjectileVisuals {
     ) {
         self.quads.clear();
         let axes = basis(direction);
+        // NPC muzzle flashes and every tracer are world draws.
+        self.muzzle.retain(time);
+        let mut shots = self.muzzle.particle_quads(false, time, axes.0, axes.1, 1.);
+        shots.extend(self.muzzle.tracer_quads(time, eye));
+        shots.retain(|q| self.sprites.contains_key(&q.material));
+        self.quads.extend(shots);
         self.previous
             .retain(|id, _| projectiles.active.iter().any(|p| p.id == *id));
         for ball in projectiles

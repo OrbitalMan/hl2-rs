@@ -146,6 +146,14 @@ pub struct Hud {
     pub quads: usize,
     timing: FrameTiming,
     debug_lines: Vec<String>,
+    /// F4 overlay font (rasterized at setup).
+    spawn_font: Option<crate::spawn_panel::PanelFont>,
+    /// The F4 panel drawn last frame (report).
+    spawn_panel: Option<hl2_simulation::ai::spawn::Panel>,
+    /// The F4 panel's clickable rows drawn last frame (canvas pixels), for the pointer.
+    pub spawn_hits: Vec<([f32; 4], hl2_simulation::ai::spawn::PanelTarget)>,
+    /// F4 list rows that fit in the window.
+    pub spawn_rows: usize,
 }
 impl Hud {
     pub fn report(&self) -> serde_json::Value {
@@ -153,7 +161,7 @@ impl Hud {
         let state = captions.state.borrow();
         let captions = serde_json::json!({"dictionaries":captions.captions.dictionaries.iter().map(|d| d.len()).collect::<Vec<_>>(),
             "errors":captions.errors,"processed":state.processed,"queued":state.streams().collect::<Vec<_>>(),"recent":state.recent,"missing":state.missing});
-        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "frame":self.source.frame(), "panels":self.source.panel_rects(), "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"captions":captions})
+        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "frame":self.source.frame(), "panels":self.source.panel_rects(), "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"captions":captions, "spawn_overlay":self.spawn_panel})
     }
     pub fn new(source: hl2_ui::hud::WeaponHud) -> Self {
         Self {
@@ -165,6 +173,10 @@ impl Hud {
             quads: 0,
             timing: FrameTiming::default(),
             debug_lines: vec![],
+            spawn_font: crate::spawn_panel::PanelFont::load(18.),
+            spawn_panel: None,
+            spawn_hits: vec![],
+            spawn_rows: 0,
         }
     }
     fn material(
@@ -357,11 +369,55 @@ pub fn present(
             format!("HL2-RS  /  Rust runtime  /  {}", game.world.name),
             format!("{} triangles  |  {} textures  |  {} entities  |  {}  |  {:.0} fps", stats.triangles, textures, game.world.entities.len(), if sim.flying() { "FLY" } else { "WALK" }, hud.timing.fps()),
             "WASD / click: mouse / Esc pause / tilde console / F2 fly / Space,Ctrl vertical in fly / G prop impulse".into(),
-            "E use / Ctrl crouch / Space jump / R reload / 1-6 / wheel: weapon menu / Q last / F3 dev loadout / F1 overlay".into(),
+            "E use / Ctrl crouch / Space jump / R reload / 1-6 / wheel: weapon menu / Q last / F3 dev loadout / F1 overlay / F4 NPC spawn".into(),
             format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
         ];
+    }
+    if !hud.debug_lines.is_empty() {
         ui.source.draw_debug(&hud.debug_lines);
     }
+    // F4 NPC spawn panel (ours, outside the hl2-ui menus).
+    hud.spawn_panel = game.spawn_overlay.open.then(|| {
+        game.spawn_overlay
+            .panel(game.ai.enabled, game.ai.ignore_player)
+    });
+    // CAI_BaseNPC::PreThink: "A.I. Disabled..." at (0.7, 0.65) while ai_disable is on
+    // (HUD message font not reproduced: the developer font).
+    if !game.ai.enabled
+        && let Some(font) = &hud.spawn_font
+    {
+        font.text(
+            &hud.source.canvas,
+            "A.I. Disabled...",
+            width * 0.7,
+            height * 0.65,
+            hl2_ui::canvas::WHITE,
+        );
+    }
+    let hits = if let (Some(font), Some(panel)) = (&hud.spawn_font, &hud.spawn_panel) {
+        let message = game
+            .spawn_log
+            .last()
+            .and_then(|entry| entry["message"].as_str());
+        let hits = font.draw(&hud.source.canvas, panel, message);
+        // The panel can cover the screen center: mark where spawns aim (ours).
+        let (x, y) = ((width / 2.).round(), (height / 2.).round());
+        let canvas = &hud.source.canvas;
+        let dark = hl2_ui::canvas::Color::new(0., 0., 0., 0.8);
+        canvas.rectangle(x - 8., y - 2., 17., 5., dark);
+        canvas.rectangle(x - 2., y - 8., 5., 17., dark);
+        let mark = hl2_ui::canvas::Color::from_rgba(255, 238, 160, 255);
+        canvas.rectangle(x - 7., y - 1., 15., 3., mark);
+        canvas.rectangle(x - 1., y - 7., 3., 15., mark);
+        hits
+    } else {
+        vec![]
+    };
+    hud.spawn_hits = hits;
+    hud.spawn_rows = hud
+        .spawn_font
+        .as_ref()
+        .map_or(0, |font| font.rows_fit(height));
     ui.source.draw(clock.elapsed_secs_f64());
     game.scene
         .sounds

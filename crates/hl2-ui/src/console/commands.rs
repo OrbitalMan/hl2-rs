@@ -97,6 +97,41 @@ pub const COMMANDS: &[Spec] = &[
         "map <name>: load an installed map and reset the player inventory",
         &[Arg::Map],
     ),
+    command(
+        "npc_create",
+        "npc_create <class> [name]: place an NPC at the crosshair (cheat; spawning not implemented yet)",
+        &[Arg::Free, Arg::Free],
+    ),
+    command(
+        "npc_create_aimed",
+        "npc_create_aimed <class> [name]: like npc_create, facing the aim (cheat)",
+        &[Arg::Free, Arg::Free],
+    ),
+    command(
+        "npc_create_equipment",
+        "npc_create_equipment <weapon>: weapon for the next npc_create",
+        &[Arg::Free],
+    ),
+    command(
+        "prop_physics_create",
+        "prop_physics_create <model>: physics prop at the crosshair, model relative to models/ (cheat)",
+        &[Arg::Free],
+    ),
+    command(
+        "ent_create",
+        "ent_create <class> [key value ...]: create an entity at the crosshair; NPC classes and prop_physics with a model only (cheat)",
+        &[Arg::Free, Arg::Free],
+    ),
+    command(
+        "ai_disable",
+        "ai_disable: toggle all NPC AI off/on; disabled NPCs idle (cheat, Source command)",
+        &[],
+    ),
+    command(
+        "ai_enable",
+        "ai_enable [0|1]: switch the NPC AI think loop (ours, default 1; Source uses ai_disable)",
+        BOOLEAN,
+    ),
     command("clear", "clear: clear console output", &[]),
     command(
         "ent_fire",

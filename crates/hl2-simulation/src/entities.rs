@@ -141,8 +141,17 @@ pub struct State {
     animation_done: Option<f64>,
     scene_animation: Option<SceneAnimation>,
     movement_animation: Option<MovementAnimation>,
+    /// The AI motor's facing target while moving (AddFacingTarget: point, expiry); the
+    /// body turns to it and move_yaw keeps the legs on the path.
+    pub ai_move_facing: Option<(Vec3, f64)>,
     script_actor: Option<usize>,
     pub scripted_by: Option<usize>,
+    /// The scripted_sequence whose post idle holds this actor in NPC_STATE_SCRIPT
+    /// (SDK SCRIPT_POST_IDLE: m_hCine stays set until PostIdleDone's CineCleanup; with
+    /// SF_SCRIPT_LOOP_IN_POST_IDLE that is never, until cancelled or another script
+    /// takes the actor). Only the random look queue reads it; scene ownership stays
+    /// with `scripted_by`.
+    pub script_post_idle: Option<usize>,
     script_finish: Option<f64>,
     post_idle_done: Option<(f64, usize)>,
     shuffle: Vec<usize>,
@@ -167,6 +176,10 @@ pub struct State {
     pub parent: Option<Parent>,
 }
 impl State {
+    /// The actor plays authored locomotion (IsMoving for look-target choice).
+    pub fn is_moving(&self) -> bool {
+        self.movement_animation.is_some()
+    }
     /// Whether the entity's collider takes part in queries. Gear parented to an animated
     /// attachment (helmets on NPCs) moves with its parent's hierarchy and must not block
     /// that parent; native traces skip hierarchy children of the moving entity.
@@ -242,6 +255,24 @@ pub struct SceneAnimationState {
     pub origin: [f32; 3],
     pub yaw_degrees: f32,
 }
+/// The idle activity a metrocop starts and returns to (CAI_BaseNPC idles on ACT_IDLE;
+/// CBaseCombatCharacter::Weapon_TranslateActivity maps it through the held weapon's
+/// acttable: weapon_pistol -> ACT_IDLE_PISTOL, weapon_smg1/ar2/shotgun -> ACT_IDLE_SMG1;
+/// weapon_stunstick has no ACT_IDLE entry). The sequence is then a weighted choice
+/// (SelectWeightedSequence: police.mdl batonidle1 x2 / batonidle2 x1). Before this,
+/// every cop without DefaultAnim played "Idle_Baton", a sequence without an activity
+/// that leans forward with an arm across the chest (owner report, session 17).
+pub fn metropolice_idle_activity(entity: &Entity) -> &'static str {
+    weapon_idle_activity(entity.get("additionalequipment").unwrap_or(""))
+}
+/// ACT_IDLE through a held weapon's acttable (CAI_BaseNPC::TranslateActivity:
+/// NPC_TranslateActivity, identity at idle outside combat and the player's squad, then
+/// Weapon_TranslateActivity): weapon_pistol -> ACT_IDLE_PISTOL, weapon_smg1 ->
+/// ACT_IDLE_SMG1 ...; unarmed or a weapon without an ACT_IDLE row: ACT_IDLE.
+pub fn weapon_idle_activity(weapon: &str) -> &'static str {
+    crate::npc_weapons::translate(&weapon.trim().to_ascii_lowercase(), "ACT_IDLE")
+        .unwrap_or("ACT_IDLE")
+}
 pub struct Scene {
     pub states: Vec<State>,
     /// KeyValues set at runtime by AddOutput, by (entity, lowercase key).
@@ -301,8 +332,191 @@ pub struct Scene {
     player_feet: Vec3,
     /// Duration of the latest tick (NPC movement turning runs after the scene tick).
     tick_dt: f32,
+    /// Inputs for the AI (step 14): (target entity, lowercase input, parameter,
+    /// activator). The AI runtime drains them; without it they are dropped.
+    pub ai_inputs: Vec<(usize, String, String, usize)>,
+    /// npc_template_maker inputs for `npc_makers` (target, lowercase input, parameter).
+    pub maker_inputs: Vec<(usize, String, String)>,
+    /// Template NPCs and npc_template_makers (DESIGN 14s).
+    pub makers: crate::npc_makers::NpcMakers,
+    /// skill.cfg values (NPC health, hitgroup damage); SDK defaults when absent.
+    pub skill: crate::skill::Skill,
+    /// Diagnostics: the last bullet/club hit on an NPC.
+    pub last_npc_hit: Option<crate::gameplay::NpcHitReport>,
+    /// Bullet/club hits on NPCs this tick (victim, by the player, damage) for the AI's
+    /// OnTakeDamage_Alive conditions; the AI runtime drains it.
+    pub npc_damage: Vec<(usize, bool, f32)>,
+    /// NPCs killed by damage this tick (CBaseCombatCharacter::Event_Killed, not removal
+    /// by Kill inputs): the host drops their active weapons (DESIGN 14r part B).
+    pub npc_deaths: Vec<usize>,
+    /// NPCs whose AI has the player as enemy or in enemy memory (CAI_BaseHumanoid
+    /// sneak attacks exclude them); refreshed by the host after each AI tick.
+    pub npc_knows_player: std::collections::BTreeSet<usize>,
+    /// When the sequence the AI started last ends, per actor.
+    ai_sequence_end: BTreeMap<usize, f64>,
 }
 impl Scene {
+    /// The spawn state of one entity (map load and runtime spawns share this).
+    fn initial_state(world: &World, e: &Entity, diagnostics: &mut Diagnostics) -> State {
+        let base_rotation =
+            physics::angles(parse_vec3(e.get("angles").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO));
+        let flags = number(e, "spawnflags", 0.) as u32;
+        let model = e
+            .get("model")
+            .and_then(|m| m.strip_prefix('*'))
+            .and_then(|m| m.parse::<usize>().ok())
+            .and_then(|id| world.brush_models.iter().find(|m| m.id == id));
+        let bounds = model.map(|m| m.maxs - m.mins).unwrap_or(Vec3::splat(72.));
+        let direction = parse_vec3(e.get("movedir").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO);
+        let direction = if direction.x == -1. {
+            Vec3::Z
+        } else if direction.x == -2. {
+            -Vec3::Z
+        } else {
+            let p = direction.x.to_radians();
+            let y = direction.y.to_radians();
+            Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
+        };
+        let travel = number(
+            e,
+            "movedistance",
+            (bounds - Vec3::splat(2.))
+                .max(Vec3::ZERO)
+                .dot(direction.abs())
+                - number(e, "lip", 0.),
+        )
+        .max(0.01);
+        let rotating = matches!(e.class(), "func_door_rotating" | "prop_door_rotating");
+        let angle = if e.class() == "prop_door_rotating" {
+            let distance = number(e, "distance", 90.).abs();
+            (if distance == 0. { 90. } else { distance }).to_radians()
+                * if number(e, "opendir", 0.) as i32 == 2 {
+                    1.
+                } else {
+                    -1.
+                }
+        } else {
+            number(e, "distance", 90.).to_radians() * if flags & 2 != 0 { -1. } else { 1. }
+        };
+        let axis = if flags & 64 != 0 {
+            Vec3::X
+        } else if flags & 128 != 0 {
+            Vec3::Y
+        } else {
+            Vec3::Z
+        };
+        let fraction = if e.class() == "prop_door_rotating" {
+            number(e, "spawnpos", 0.).min(1.)
+        } else if matches!(e.class(), "func_door" | "func_door_rotating") && flags & 1 != 0 {
+            1.
+        } else {
+            0.
+        };
+        let speed = number(e, "speed", 100.).max(0.01);
+        let mut outputs = Vec::new();
+        for (k, v) in &e.properties {
+            if k.starts_with("On") || k == "OutValue" {
+                match output(k, v) {
+                    Some(o) => outputs.push(o),
+                    None => diagnostics.malformed_outputs += 1,
+                }
+            }
+        }
+        let enabled = e.get("StartDisabled") != Some("1") && e.get("startdisabled") != Some("1");
+        let mut s = State {
+            origin: e.origin(),
+            rotation: base_rotation,
+            // CDynamicProp::Spawn adds EF_NODRAW for StartDisabled.
+            visible: e.get("rendermode") != Some("10")
+                && e.get(crate::ai::spawn::POOL_KEY).is_none()
+                && (!matches!(
+                    e.class(),
+                    "func_brush" | "func_monitor" | "prop_dynamic" | "prop_dynamic_override"
+                ) || enabled),
+            enabled,
+            killed: false,
+            animation: e
+                .get("DefaultAnim")
+                .unwrap_or(if e.class() == "npc_metropolice" {
+                    "idle_baton"
+                } else if matches!(e.class(), "npc_citizen" | "npc_barney") {
+                    "idle_subtle"
+                } else {
+                    "idle"
+                })
+                .to_lowercase(),
+            animation_started: 0.,
+            default_animation: e.get("DefaultAnim").unwrap_or("").into(),
+            animation_done: None,
+            scene_animation: None,
+            movement_animation: None,
+            ai_move_facing: None,
+            script_actor: None,
+            scripted_by: None,
+            script_post_idle: None,
+            script_finish: None,
+            post_idle_done: None,
+            shuffle: Vec::new(),
+            last_shuffle: None,
+            base_origin: e.origin(),
+            base_rotation,
+            translation: if rotating {
+                Vec3::ZERO
+            } else {
+                direction * travel
+            },
+            angle: if rotating { angle } else { 0. },
+            axis,
+            fraction,
+            target: fraction,
+            rate: if rotating {
+                speed.to_radians() / angle.abs().max(0.001)
+            } else {
+                speed / travel
+            },
+            locked: flags & 2048 != 0 || e.get("locked") == Some("1"),
+            return_at: None,
+            wait: number(
+                e,
+                if e.class() == "prop_door_rotating" {
+                    "returndelay"
+                } else {
+                    "wait"
+                },
+                -1.,
+            ) as f64,
+            touching: false,
+            last_trigger: -1e6,
+            value: number(e, "startvalue", 0.),
+            timer_at: number(e, "RefireTime", 1.).max(0.015) as f64,
+            outputs,
+            parent: None,
+        };
+        s.origin = s.base_origin + s.translation * s.fraction;
+        s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
+        s
+    }
+    /// CreateEntityByName + DispatchSpawn's state part: append a runtime entity to the
+    /// world (the host owns it: DESIGN 14r part A grows the map's World in place) and
+    /// its spawn state; returns its id (never reused; removal marks it killed). Map
+    /// entity ids never change. Physics, actors, AI and the host register it
+    /// separately.
+    pub fn spawn_entity(&mut self, world: &mut World, entity: Entity) -> usize {
+        let state = Self::initial_state(world, &entity, &mut self.diagnostics);
+        let id = self.states.len();
+        debug_assert_eq!(id, world.entities.len());
+        self.states.push(state);
+        world.entities.push(entity);
+        id
+    }
+    /// A map or runtime entity by id.
+    pub fn entity<'a>(&self, world: &'a World, id: usize) -> Option<&'a Entity> {
+        world.entities.get(id)
+    }
+    /// A map or runtime entity by a known-valid id (state indices).
+    fn ent<'a>(&self, world: &'a World, id: usize) -> &'a Entity {
+        &world.entities[id]
+    }
     pub fn new(world: &World) -> Self {
         Self::with_campaign(world, true)
     }
@@ -333,6 +547,15 @@ impl Scene {
             choreography: BTreeMap::new(),
             movement_commands: Vec::new(),
             movement_ready: BTreeMap::new(),
+            ai_inputs: Vec::new(),
+            maker_inputs: Vec::new(),
+            makers: Default::default(),
+            skill: Default::default(),
+            last_npc_hit: None,
+            npc_damage: Vec::new(),
+            npc_deaths: Vec::new(),
+            npc_knows_player: Default::default(),
+            ai_sequence_end: BTreeMap::new(),
             look_targets: Default::default(),
             gestures: Default::default(),
             heads: BTreeMap::new(),
@@ -346,142 +569,8 @@ impl Scene {
             tick_dt: 0.,
         };
         for e in &world.entities {
-            let base_rotation = physics::angles(
-                parse_vec3(e.get("angles").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO),
-            );
-            let flags = number(e, "spawnflags", 0.) as u32;
-            let model = e
-                .get("model")
-                .and_then(|m| m.strip_prefix('*'))
-                .and_then(|m| m.parse::<usize>().ok())
-                .and_then(|id| world.brush_models.iter().find(|m| m.id == id));
-            let bounds = model.map(|m| m.maxs - m.mins).unwrap_or(Vec3::splat(72.));
-            let direction = parse_vec3(e.get("movedir").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO);
-            let direction = if direction.x == -1. {
-                Vec3::Z
-            } else if direction.x == -2. {
-                -Vec3::Z
-            } else {
-                let p = direction.x.to_radians();
-                let y = direction.y.to_radians();
-                Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
-            };
-            let travel = number(
-                e,
-                "movedistance",
-                (bounds - Vec3::splat(2.))
-                    .max(Vec3::ZERO)
-                    .dot(direction.abs())
-                    - number(e, "lip", 0.),
-            )
-            .max(0.01);
-            let rotating = matches!(e.class(), "func_door_rotating" | "prop_door_rotating");
-            let angle = if e.class() == "prop_door_rotating" {
-                let distance = number(e, "distance", 90.).abs();
-                (if distance == 0. { 90. } else { distance }).to_radians()
-                    * if number(e, "opendir", 0.) as i32 == 2 {
-                        1.
-                    } else {
-                        -1.
-                    }
-            } else {
-                number(e, "distance", 90.).to_radians() * if flags & 2 != 0 { -1. } else { 1. }
-            };
-            let axis = if flags & 64 != 0 {
-                Vec3::X
-            } else if flags & 128 != 0 {
-                Vec3::Y
-            } else {
-                Vec3::Z
-            };
-            let fraction = if e.class() == "prop_door_rotating" {
-                number(e, "spawnpos", 0.).min(1.)
-            } else if matches!(e.class(), "func_door" | "func_door_rotating") && flags & 1 != 0 {
-                1.
-            } else {
-                0.
-            };
-            let speed = number(e, "speed", 100.).max(0.01);
-            let mut outputs = Vec::new();
-            for (k, v) in &e.properties {
-                if k.starts_with("On") || k == "OutValue" {
-                    match output(k, v) {
-                        Some(o) => outputs.push(o),
-                        None => scene.diagnostics.malformed_outputs += 1,
-                    }
-                }
-            }
-            let enabled =
-                e.get("StartDisabled") != Some("1") && e.get("startdisabled") != Some("1");
-            let mut s = State {
-                origin: e.origin(),
-                rotation: base_rotation,
-                // CDynamicProp::Spawn adds EF_NODRAW for StartDisabled.
-                visible: e.get("rendermode") != Some("10")
-                    && (!matches!(
-                        e.class(),
-                        "func_brush" | "func_monitor" | "prop_dynamic" | "prop_dynamic_override"
-                    ) || enabled),
-                enabled,
-                killed: false,
-                animation: e
-                    .get("DefaultAnim")
-                    .unwrap_or(if e.class() == "npc_metropolice" {
-                        "idle_baton"
-                    } else if matches!(e.class(), "npc_citizen" | "npc_barney") {
-                        "idle_subtle"
-                    } else {
-                        "idle"
-                    })
-                    .to_lowercase(),
-                animation_started: 0.,
-                default_animation: e.get("DefaultAnim").unwrap_or("").into(),
-                animation_done: None,
-                scene_animation: None,
-                movement_animation: None,
-                script_actor: None,
-                scripted_by: None,
-                script_finish: None,
-                post_idle_done: None,
-                shuffle: Vec::new(),
-                last_shuffle: None,
-                base_origin: e.origin(),
-                base_rotation,
-                translation: if rotating {
-                    Vec3::ZERO
-                } else {
-                    direction * travel
-                },
-                angle: if rotating { angle } else { 0. },
-                axis,
-                fraction,
-                target: fraction,
-                rate: if rotating {
-                    speed.to_radians() / angle.abs().max(0.001)
-                } else {
-                    speed / travel
-                },
-                locked: flags & 2048 != 0 || e.get("locked") == Some("1"),
-                return_at: None,
-                wait: number(
-                    e,
-                    if e.class() == "prop_door_rotating" {
-                        "returndelay"
-                    } else {
-                        "wait"
-                    },
-                    -1.,
-                ) as f64,
-                touching: false,
-                last_trigger: -1e6,
-                value: number(e, "startvalue", 0.),
-                timer_at: number(e, "RefireTime", 1.).max(0.015) as f64,
-                outputs,
-                parent: None,
-            };
-            s.origin = s.base_origin + s.translation * s.fraction;
-            s.rotation = s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
-            scene.states.push(s);
+            let state = Self::initial_state(world, e, &mut scene.diagnostics);
+            scene.states.push(state);
         }
         // Preserve explicit/default labels and existing loaded poses. Unsupported
         // implicit NPC labels may resolve through the model-authored idle activity.
@@ -513,7 +602,21 @@ impl Scene {
                 scene.camera_activity(world, id, false);
             }
         }
+        // Metrocops without a DefaultAnim start on their (weapon-translated) idle activity,
+        // as do other weapon users given a weapon (a citizen's SMG1: ACT_IDLE_SMG1).
+        for id in 0..world.entities.len() {
+            let e = &world.entities[id];
+            if e.get("DefaultAnim").is_some() || !crate::npc_weapons::uses_weapons(e.class()) {
+                continue;
+            }
+            let weapon = e.get("additionalequipment").unwrap_or("");
+            if e.class() == "npc_metropolice" || !matches!(weapon.trim(), "" | "0") {
+                scene.animate_activity_if_present(world, id, weapon_idle_activity(weapon));
+            }
+        }
         scene.hold_template_children(world);
+        // MapEntity_ParseAllEntities removes SF_NPC_TEMPLATE NPCs (npc_template_maker).
+        scene.makers = crate::npc_makers::NpcMakers::new(world, &mut scene.states);
         // SetupParentsForSpawnList: `parentname` ("name" or "name,attachment") keeps the
         // spawn world pose. Parents still held by a point_template do not exist yet.
         for id in 0..world.entities.len() {
@@ -521,7 +624,7 @@ impl Scene {
             let Some(spec) = e.get("parentname").filter(|n| !n.is_empty()) else {
                 continue;
             };
-            if self_positioned(e.class()) || scene.template_pending(id) {
+            if self_positioned(e.class()) || scene.template_pending(id) || scene.makers.held(id) {
                 continue;
             }
             let (name, attachment) = match spec.split_once(',') {
@@ -534,7 +637,7 @@ impl Scene {
             }) else {
                 continue;
             };
-            if parent != id && !scene.template_pending(parent) {
+            if parent != id && !scene.template_pending(parent) && !scene.makers.held(parent) {
                 scene.set_parent(world, id, parent, attachment, true);
             }
         }
@@ -734,7 +837,7 @@ impl Scene {
             .and_then(|s| s.to_lowercase().strip_prefix("target").map(str::to_owned))
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|slot| (1..=8).contains(slot))
-            .and_then(|slot| world.entities[scene].get(&format!("target{slot}")))
+            .and_then(|slot| self.ent(world, scene).get(&format!("target{slot}")))
             .unwrap_or(name);
         if name.eq_ignore_ascii_case("!player") || name.eq_ignore_ascii_case("player") {
             return Some(Target::Player);
@@ -769,13 +872,17 @@ impl Scene {
     ) -> crate::sounds::SoundRequest {
         crate::sounds::SoundRequest {
             actor: Some(crate::sounds::SoundActor {
-                name: world.entities[actor].get("targetname").unwrap_or("").into(),
+                name: self
+                    .ent(world, actor)
+                    .get("targetname")
+                    .unwrap_or("")
+                    .into(),
                 model: world
                     .model_instances
                     .iter()
                     .find(|i| i.entity == Some(actor))
                     .map(|i| i.model.as_str())
-                    .unwrap_or(world.entities[actor].get("model").unwrap_or(""))
+                    .unwrap_or(self.ent(world, actor).get("model").unwrap_or(""))
                     .into(),
                 entity: Some(actor),
             }),
@@ -966,6 +1073,85 @@ impl Scene {
             })
             .collect()
     }
+    /// The world frame of an attachment on a bone-merged weapon model (`weapon_key` in
+    /// `World::rigs`) carried by NPC `id`: CBoneMergeCache gives the weapon bone its
+    /// owner's same-named bone (or keeps its bind offset from the nearest merged
+    /// ancestor). `index` is 1-based (GetAttachment) when `name` is None.
+    pub fn merged_attachment_frame(
+        &self,
+        world: &World,
+        id: usize,
+        weapon_key: &str,
+        name: Option<&str>,
+        index: usize,
+    ) -> Option<Mat4> {
+        let state = self.states.get(id)?;
+        let instance = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))?;
+        let rig = world.rigs.get(&instance.asset_key())?;
+        let weapon = world.rigs.get(weapon_key)?;
+        let attachment = match name {
+            Some(n) => weapon.attachment(n)?,
+            None => weapon.attachments.get(index.checked_sub(1)?)?,
+        };
+        let mut bone = Some(attachment.bone);
+        let (merged, owner) = loop {
+            let b = bone?;
+            if let Some(j) = rig
+                .bones
+                .iter()
+                .position(|o| o.name.eq_ignore_ascii_case(&weapon.bones[b].name))
+            {
+                break (b, j);
+            }
+            bone = weapon.bones[b].parent;
+        };
+        let skin = self.actor_matrices(rig, id);
+        let owner_bone = *skin.get(owner)? * rig.bones[owner].inverse_bind.inverse();
+        let model = owner_bone
+            * weapon.bones[merged].inverse_bind
+            * weapon.bones[attachment.bone].inverse_bind.inverse()
+            * attachment.local;
+        let (_, rotation, translation) = model.to_scale_rotation_translation();
+        Some(
+            Mat4::from_rotation_translation(state.rotation, state.origin)
+                * Mat4::from_rotation_translation(
+                    rotation.normalize(),
+                    translation * instance.scale,
+                ),
+        )
+    }
+    /// The world frame of a bone-merged model on `id` (an NPC's weapon): its first bone
+    /// that the owner also has (ValveBiped.Weapon_bone on HL2 weapons) sits on the owner's
+    /// bone, like Weapon_Drop's Weapon_bone transform times the inverse root bone.
+    pub fn merged_model_frame(&self, world: &World, id: usize, weapon_key: &str) -> Option<Mat4> {
+        let state = self.states.get(id)?;
+        let instance = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))?;
+        let rig = world.rigs.get(&instance.asset_key())?;
+        let weapon = world.rigs.get(weapon_key)?;
+        let (merged, owner) = weapon.bones.iter().enumerate().find_map(|(b, bone)| {
+            rig.bones
+                .iter()
+                .position(|o| o.name.eq_ignore_ascii_case(&bone.name))
+                .map(|j| (b, j))
+        })?;
+        let skin = self.actor_matrices(rig, id);
+        let owner_bone = *skin.get(owner)? * rig.bones[owner].inverse_bind.inverse();
+        let model = owner_bone * weapon.bones[merged].inverse_bind;
+        let (_, rotation, translation) = model.to_scale_rotation_translation();
+        Some(
+            Mat4::from_rotation_translation(state.rotation, state.origin)
+                * Mat4::from_rotation_translation(
+                    rotation.normalize(),
+                    translation * instance.scale,
+                ),
+        )
+    }
     /// SetParent/SetParentAttachment: keep the current world pose as a local offset, or
     /// snap onto the parent frame.
     fn set_parent(
@@ -977,7 +1163,7 @@ impl Scene {
         keep_offset: bool,
     ) {
         let Some(frame) = self.parent_frame(world, parent, attachment.as_deref()) else {
-            self.unsupported_input(world.entities[id].class(), "SetParent:missing-attachment");
+            self.unsupported_input(self.ent(world, id).class(), "SetParent:missing-attachment");
             return;
         };
         let (origin, rotation) = if keep_offset {
@@ -1109,14 +1295,36 @@ impl Scene {
         }
         hash
     }
+    /// A look target's EyePosition: the player's eye, an NPC's animated "eyes"
+    /// attachment (else origin + 64), another entity's origin, or the point itself.
+    pub fn look_position(&self, world: &World, target: crate::attention::Target) -> Option<Vec3> {
+        use crate::attention::Target;
+        match target {
+            Target::Player => Some(self.player_feet + Vec3::Z * 64.),
+            Target::Position(p) => Some(p),
+            Target::Entity(t) => {
+                let state = self.states.get(t).filter(|s| !s.killed)?;
+                if self.ent(world, t).class().starts_with("npc_") {
+                    let eyes = self.attachment_frames(world, t, &["eyes"])[0];
+                    Some(eyes.map_or(state.origin + Vec3::Z * 64., |m| m.w_axis.truncate()))
+                } else {
+                    Some(state.origin)
+                }
+            }
+        }
+    }
     /// MaintainLookTargets: blend this tick's interests into each NPC's head control.
     fn update_heads(&mut self, world: &World, dt: f32) {
-        let mut actors: BTreeSet<usize> = self.look_targets.report().keys().copied().collect();
+        let mut actors: BTreeSet<usize> = self.look_targets.actors().collect();
         actors.extend(self.heads.keys().copied());
         for actor in actors {
             let state = &self.states[actor];
-            if state.killed || !world.entities[actor].class().starts_with("npc_") {
+            if state.killed || !self.ent(world, actor).class().starts_with("npc_") {
                 self.heads.remove(&actor);
+                continue;
+            }
+            // Outside the player's PVS the head control keeps its last values.
+            if !self.look_targets.in_pvs(actor) {
                 continue;
             }
             // CAI_BaseActor: eye position from the animated "eyes" attachment; self-interest
@@ -1128,21 +1336,23 @@ impl Scene {
                 glam::Mat3::from_mat4(m)
             });
             let forward = frame.x_axis;
+            // Active interests (random, then explicit) at their ramped Interest(), scaled by
+            // HeadTargetValidity; targets are eye positions (CAI_InterestTarget_t::
+            // GetPosition -> EyePosition).
+            let now = self.time;
             let targets = self
                 .look_targets
-                .report()
-                .get(&actor)
-                .into_iter()
-                .flatten()
+                .active(actor)
                 .filter_map(|interest| {
+                    let value = interest.interest(now);
                     let position = match interest.target {
-                        crate::attention::Target::Player => self.player_feet + Vec3::Z * 64.,
                         crate::attention::Target::Entity(t) if t == actor => {
-                            return Some((forward, interest.importance));
+                            return Some((forward, value));
                         }
-                        crate::attention::Target::Entity(t) => self.states.get(t)?.origin,
+                        target => self.look_position(world, target)?,
                     };
-                    Some((position - eye, interest.importance))
+                    let validity = crate::attention::head_target_validity(eye, forward, position);
+                    Some((position - eye, value * validity))
                 })
                 .collect::<Vec<_>>();
             let head = self.heads.entry(actor).or_default();
@@ -1168,6 +1378,113 @@ impl Scene {
         }
         (self.time - state.animation_started).max(0.) as f32
     }
+    /// The actor belongs to a script: a scripted_sequence, a choreographed scene (as an
+    /// actor of a running playback or through its body animation) or a scene move.
+    /// The AI yields to it (NPC_STATE_SCRIPT / SCHED_AISCRIPT semantics).
+    pub fn ai_scripted(&self, id: usize) -> bool {
+        let Some(state) = self.states.get(id) else {
+            return true;
+        };
+        state.scripted_by.is_some()
+            || state.scene_animation.is_some()
+            || state
+                .movement_animation
+                .as_ref()
+                .is_some_and(|m| m.key.scene != crate::npc::AI_SCENE)
+            || self.choreography.values().any(|c| {
+                c.playback
+                    .as_ref()
+                    .is_some_and(|p| p.actors.contains(&Some(id)))
+            })
+            || self
+                .movement_ready
+                .keys()
+                .any(|k| k.actor == id && k.scene != crate::npc::AI_SCENE)
+    }
+    /// Play an activity or sequence on an actor for the AI (CAI_BaseNPC::SetActivity:
+    /// the model's weighted sequence for the activity). False when the rig has none.
+    pub fn ai_set_activity(&mut self, world: &World, id: usize, activity: &str) -> bool {
+        if !self.animate(world, id, activity, false) {
+            return false;
+        }
+        let finish = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|rig| rig.clips.get(&self.states[id].animation))
+            .map_or(0., sequence_finish);
+        self.ai_sequence_end.insert(id, self.time + finish);
+        true
+    }
+    /// Animation events (name, id) of the actor's current sequence whose time falls in
+    /// (from, to] (studio events, played once per sequence start).
+    pub fn ai_events(&self, world: &World, id: usize, from: f64, to: f64) -> Vec<(String, i32)> {
+        let Some(state) = self.states.get(id) else {
+            return Vec::new();
+        };
+        let Some(clip) = world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|rig| rig.clips.get(&state.animation))
+        else {
+            return Vec::new();
+        };
+        let duration = f64::from(clip.duration().max(0.015));
+        // DispatchAnimEvents: once a non-looping sequence is finished (flEnd = 1.01),
+        // its remaining events all fire.
+        let finished = state.animation_started + sequence_finish(clip);
+        clip.events
+            .iter()
+            .filter(|e| {
+                let mut at = state.animation_started + f64::from(e.cycle) * duration;
+                if !clip.looping {
+                    at = at.min(finished);
+                }
+                at > from && at <= to
+            })
+            .map(|e| (e.name.clone(), e.id))
+            .collect()
+    }
+    /// SequenceDuration of the actor's current sequence (0 without a clip).
+    pub fn ai_sequence_duration(&self, world: &World, id: usize) -> f32 {
+        world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .and_then(|rig| rig.clips.get(&self.states.get(id)?.animation))
+            .map_or(0., |clip| clip.duration().max(0.015))
+    }
+    /// The AI's current sequence is finished (m_bSequenceFinished, `sequence_finish`).
+    pub fn ai_activity_finished(&self, id: usize) -> bool {
+        self.ai_sequence_end
+            .get(&id)
+            .is_none_or(|end| self.time >= *end)
+    }
+    /// Accept movement updates for an AI goal (apply_movement only follows known keys).
+    pub fn ai_register_move(&mut self, key: crate::npc::GoalKey) {
+        self.movement_ready.insert(key, false);
+    }
+    pub fn ai_forget_move(&mut self, key: crate::npc::GoalKey) {
+        self.movement_ready.remove(&key);
+        if self
+            .states
+            .get(key.actor)
+            .and_then(|s| s.movement_animation.as_ref())
+            .is_some_and(|m| m.key == key)
+        {
+            self.restore_movement_animation(key.actor);
+        }
+    }
+    /// The AI turned the actor (CAI_Motor::UpdateYaw) while standing.
+    pub fn ai_set_yaw(&mut self, id: usize, yaw_degrees: f32) {
+        if let Some(state) = self.states.get_mut(id) {
+            state.rotation = physics::angles(Vec3::new(0., yaw_degrees, 0.));
+        }
+    }
     pub fn body_sequence_owner(&self, id: usize) -> Option<usize> {
         self.states
             .get(id)?
@@ -1189,8 +1506,8 @@ impl Scene {
                 });
                 ChoreographyState {
                     entity: *id,
-                    targetname: world.entities[*id].get("targetname").unwrap_or("").into(),
-                    file: world.entities[*id].get("SceneFile").unwrap_or("").into(),
+                    targetname: self.ent(world, *id).get("targetname").unwrap_or("").into(),
+                    file: self.ent(world, *id).get("SceneFile").unwrap_or("").into(),
                     elapsed: play.map(|p| p.elapsed),
                     pause: pause_reason.is_some(),
                     pause_reason,
@@ -1314,11 +1631,31 @@ impl Scene {
         }
         *ready = arrived;
         // CAI_Motor::MoveFacing/UpdateYaw: the body turns toward the path direction at
-        // MaxYawSpeed (45, x10 per second); move_yaw keeps the legs on the path.
+        // MaxYawSpeed x 10 degrees per second; move_yaw keeps the legs on the path.
+        // AI goals belong to npc_metropolice (CNPC_MetroPolice::MaxYawSpeed: ACT_RUN 15,
+        // ACT_WALK 25); scene moves keep the CAI_BaseNPC default 45.
+        let yaw_speed = match animation.map(|(sequence, _)| sequence) {
+            Some("run_all") if key.scene == crate::npc::AI_SCENE => 150.,
+            Some("walk_all") if key.scene == crate::npc::AI_SCENE => 250.,
+            _ => 450.,
+        };
         let forward = self.states[key.actor].rotation * Vec3::X;
         let current = forward.y.atan2(forward.x).to_degrees();
+        // CAI_BaseNPC::OverrideMoveFacing: an active facing target (move and shoot) turns
+        // the body toward it instead of the path.
+        let facing = self.states[key.actor]
+            .ai_move_facing
+            .filter(|(_, until)| self.time < *until && key.scene == crate::npc::AI_SCENE)
+            .map(|(point, _)| {
+                let d = point - feet;
+                d.y.atan2(d.x).to_degrees()
+            });
         let body = if animation.is_some() {
-            clamp_yaw(450. * self.tick_dt, current, yaw_degrees)
+            clamp_yaw(
+                yaw_speed * self.tick_dt,
+                current,
+                facing.unwrap_or(yaw_degrees),
+            )
         } else {
             yaw_degrees
         };
@@ -1467,6 +1804,7 @@ impl Scene {
                 crate::attention::Target::Player => self.player_feet,
                 crate::attention::Target::Entity(t) if t == actor => continue,
                 crate::attention::Target::Entity(t) => self.states[t].origin,
+                crate::attention::Target::Position(p) => p,
             };
             let forward = self.states[actor].rotation * Vec3::X;
             let current = forward.y.atan2(forward.x).to_degrees();
@@ -1644,7 +1982,7 @@ impl Scene {
                                 EventType::Face => {
                                     // StartFacingSceneEvent needs a target; NPCs turn in process_faces.
                                     if let Some(actor) = actor
-                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                        .filter(|a| self.ent(world, *a).class().starts_with("npc_"))
                                     {
                                         if let Some(target) = self.scene_look_target(
                                             world,
@@ -1664,7 +2002,7 @@ impl Scene {
                                 EventType::LookAt => {
                                     // CBaseFlex LOOKAT refreshes NPC interests; non-NPC flex actors are a no-op.
                                     if let Some(actor) = actor
-                                        .filter(|a| world.entities[*a].class().starts_with("npc_"))
+                                        .filter(|a| self.ent(world, *a).class().starts_with("npc_"))
                                     {
                                         if let Some(target) = self.scene_look_target(
                                             world,
@@ -1926,7 +2264,7 @@ impl Scene {
     /// anyone (damagemodel 1 doubles up to damagecap and forgives after 3 s without a
     /// hit); EndTouch deals damage x 0.5 to a toucher the last think did not hurt.
     fn trigger_hurt(&mut self, world: &World, id: usize, touching: Vec<usize>) {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let base = number(e, "damage", 0.);
         let cap = number(e, "damagecap", 20.);
         let doubling = number(e, "damagemodel", 0.) as u32 == 1;
@@ -1977,7 +2315,7 @@ impl Scene {
     /// CTriggerHurt::HurtEntity: filters and m_takedamage, then TakeDamage (negative
     /// damage heals); the damage comes from the trigger's origin. OnHurtPlayer/OnHurt.
     fn hurt_entity(&mut self, world: &World, id: usize, target: usize, amount: f32) -> bool {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let flags = number(e, "spawnflags", 0.) as u32;
         let kind = number(e, "damagetype", 0.) as u32;
         let player = target == PLAYER;
@@ -2056,9 +2394,13 @@ impl Scene {
             .collect()
     }
     pub fn send(&mut self, id: usize, input: &str, parameter: &str) {
+        self.send_delayed(id, input, parameter, 0.);
+    }
+    /// An input to an entity by id after `delay` seconds.
+    pub fn send_delayed(&mut self, id: usize, input: &str, parameter: &str, delay: f64) {
         self.sequence += 1;
         self.queue.push(Pending {
-            due: self.time,
+            due: self.time + delay,
             sequence: self.sequence,
             target: format!("#{id}"),
             input: input.into(),
@@ -2099,7 +2441,7 @@ impl Scene {
         if state.killed || state.locked || state.target != 0. {
             return;
         }
-        match world.entities[id].class() {
+        match self.ent(world, id).class() {
             "prop_door_rotating" => self.use_with_opener(world, id, Some(opener)),
             "func_door" | "func_door_rotating" => self.send(id, "Open", ""),
             _ => {}
@@ -2169,7 +2511,7 @@ impl Scene {
             return;
         }
         self.diagnostics.inputs_delivered += 1;
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let class = e.class();
         let input = p.input.to_lowercase();
         let value = p.parameter.parse::<f32>().unwrap_or(0.);
@@ -2184,6 +2526,35 @@ impl Scene {
             return;
         }
         if class == "env_global" && self.globals.input(e, &input, &p.parameter).0 {
+            return;
+        }
+        // AI inputs (step 14): npc_metropolice SetPoliceGoal / baton inputs and the
+        // ai_goal_police knock-out switches go to the AI runtime.
+        if class == "npc_template_maker" {
+            self.maker_inputs.push((id, input, p.parameter.clone()));
+            return;
+        }
+        if (class == "npc_metropolice"
+            && matches!(
+                input.as_str(),
+                "setpolicegoal" | "activatebaton" | "enablemanhacktoss" | "disablemanhacktoss"
+            ))
+            || (class == "ai_goal_police"
+                && matches!(input.as_str(), "enableknockout" | "disableknockout"))
+            || (class == "ai_goal_assault"
+                && matches!(
+                    input.as_str(),
+                    "activate" | "deactivate" | "beginassault" | "updateactors"
+                ))
+            || (class == "aiscripted_schedule"
+                && matches!(input.as_str(), "startschedule" | "stopschedule"))
+            || (matches!(class, "info_node_link" | "info_node_link_controller")
+                && matches!(input.as_str(), "turnon" | "turnoff"))
+            || (class == "ai_relationship"
+                && matches!(input.as_str(), "applyrelationship" | "revertrelationship"))
+        {
+            self.ai_inputs
+                .push((id, input, p.parameter.clone(), p.activator));
             return;
         }
         match input.as_str() {
@@ -2585,6 +2956,25 @@ impl Scene {
             _ => self.unsupported_input(class, &p.input),
         }
     }
+    /// HaveSequenceForActivity on the actor's loaded rig.
+    pub fn actor_has_activity(&self, world: &World, id: usize, activity: &str) -> bool {
+        world
+            .model_instances
+            .iter()
+            .find(|i| i.entity == Some(id))
+            .and_then(|i| world.rigs.get(&i.asset_key()))
+            .is_some_and(|r| {
+                r.sequences
+                    .iter()
+                    .any(|s| s.activity.eq_ignore_ascii_case(activity))
+            })
+    }
+    /// `animate` with an activity only when the actor's rig has a sequence for it.
+    fn animate_activity_if_present(&mut self, world: &World, id: usize, activity: &str) {
+        if self.actor_has_activity(world, id, activity) {
+            self.animate(world, id, activity, false);
+        }
+    }
     fn animate(&mut self, world: &World, id: usize, name: &str, finish: bool) -> bool {
         let key = world
             .model_instances
@@ -2601,7 +2991,7 @@ impl Scene {
         });
         let clip = rig.zip(resolved).and_then(|(r, label)| r.clips.get(label));
         let Some((clip, resolved)) = clip.zip(resolved) else {
-            self.unsupported_input(world.entities[id].class(), &format!("animation:{name}"));
+            self.unsupported_input(self.ent(world, id).class(), &format!("animation:{name}"));
             return false;
         };
         self.states[id].animation = resolved.to_owned();
@@ -2625,7 +3015,7 @@ impl Scene {
         }
     }
     fn begin_sequence(&mut self, world: &World, id: usize) {
-        let script = &world.entities[id];
+        let script = self.ent(world, id);
         let name = script.get("m_iszEntity").unwrap_or("");
         let actor = world
             .entities
@@ -2672,6 +3062,8 @@ impl Scene {
             self.unsupported_input("scripted_sequence", &format!("movement:{movement}"));
             return;
         }
+        // Another script takes the actor: the old post idle ends (m_hNextCine).
+        self.states[actor].script_post_idle = None;
         let play = script.get("m_iszPlay").unwrap_or("");
         if play.is_empty() {
             // Retail StartSequence completes a null action immediately, allowing the authored post idle.
@@ -2728,18 +3120,26 @@ impl Scene {
         }
     }
     fn end_sequence(&mut self, world: &World, id: usize, cancel: bool) {
+        if cancel {
+            for state in &mut self.states {
+                if state.script_post_idle == Some(id) {
+                    state.script_post_idle = None;
+                }
+            }
+        }
         let actor = self.states[id].script_actor.take();
         self.states[id].script_finish = None;
         self.states[id].post_idle_done = None;
         if let Some(actor) = actor {
             self.states[actor].scripted_by = None;
-            let name = world.entities[id]
+            let name = self
+                .ent(world, id)
                 .get("m_iszPostIdle")
                 .filter(|s| !s.is_empty())
-                .or(world.entities[actor].get("DefaultAnim"))
+                .or(self.ent(world, actor).get("DefaultAnim"))
                 .unwrap_or_else(|| {
-                    let preferred = if world.entities[actor].class() == "npc_metropolice" {
-                        "idle_baton"
+                    let preferred = if self.ent(world, actor).class() == "npc_metropolice" {
+                        metropolice_idle_activity(self.ent(world, actor))
                     } else {
                         "idle_subtle"
                     };
@@ -2748,7 +3148,9 @@ impl Scene {
                         .iter()
                         .find(|i| i.entity == Some(actor))
                         .and_then(|i| world.rigs.get(&i.asset_key()));
-                    if rig.is_some_and(|r| {
+                    if preferred.starts_with("ACT_") {
+                        preferred
+                    } else if rig.is_some_and(|r| {
                         !r.clips.contains_key(preferred)
                             && r.sequences
                                 .iter()
@@ -2771,7 +3173,8 @@ impl Scene {
             );
             if !cancel {
                 let duration = if animated
-                    && world.entities[id]
+                    && self
+                        .ent(world, id)
                         .get("m_iszPostIdle")
                         .is_some_and(|n| !n.is_empty())
                 {
@@ -2786,6 +3189,9 @@ impl Scene {
                     0.
                 };
                 self.states[id].post_idle_done = Some((self.time + duration as f64, actor));
+                if duration > 0. {
+                    self.states[actor].script_post_idle = Some(id);
+                }
             }
         }
     }
@@ -2800,7 +3206,7 @@ impl Scene {
             p.parameter = value.to_string();
         }
     }
-    fn unsupported_input(&mut self, class: &str, input: &str) {
+    pub fn unsupported_input(&mut self, class: &str, input: &str) {
         let key = format!("{class}.{input}");
         *self.diagnostics.unsupported.entry(key.clone()).or_default() += 1;
         if self.unsupported.insert(key.clone()) {
@@ -2836,13 +3242,19 @@ impl Scene {
             !values.is_empty()
         });
         for id in 0..world.entities.len() {
-            let e = &world.entities[id];
+            let e = self.ent(world, id);
             if self.states[id].killed {
                 continue;
             }
             if let Some((due, actor)) = self.states[id].post_idle_done {
                 if due <= self.time {
                     self.states[id].post_idle_done = None;
+                    // PostIdleDone: CineCleanup unless the script loops its post idle.
+                    if number(e, "spawnflags", 0.) as u32 & 256 == 0
+                        && self.states[actor].script_post_idle == Some(id)
+                    {
+                        self.states[actor].script_post_idle = None;
+                    }
                     self.fire(id, "OnPostIdleEndSequence", actor);
                 }
             }
@@ -2911,7 +3323,7 @@ impl Scene {
                 let player = clients && self.player_inside(world, id, player_feet);
                 let npc = if npcs && !player {
                     (0..self.states.len()).find(|&n| {
-                        world.entities[n].class().starts_with("npc_")
+                        self.ent(world, n).class().starts_with("npc_")
                             && !self.states[n].killed
                             && self.states[n].visible
                             && self.player_inside(world, id, self.states[n].origin)
@@ -2944,7 +3356,7 @@ impl Scene {
                     // Every touching player/NPC, before the trigger filters (Touch).
                     let mut touching: Vec<usize> = (0..self.states.len())
                         .filter(|&n| {
-                            world.entities[n].class().starts_with("npc_")
+                            self.ent(world, n).class().starts_with("npc_")
                                 && !self.states[n].killed
                                 && self.player_inside(world, id, self.states[n].origin)
                         })
@@ -3000,7 +3412,7 @@ impl Scene {
         self.diagnostics.budget_exhaustions += 1;
     }
     fn player_inside(&self, world: &World, id: usize, feet: Vec3) -> bool {
-        let e = &world.entities[id];
+        let e = self.ent(world, id);
         let Some(model) = e
             .get("model")
             .and_then(|s| s.strip_prefix('*'))
@@ -3036,16 +3448,90 @@ fn clamp_yaw(speed: f32, current: f32, target: f32) -> f32 {
     let step = angle_diff(target, current).clamp(-speed, speed);
     (current + step).rem_euclid(360.)
 }
-fn glob(pattern: &str, value: &str) -> bool {
+pub(crate) fn glob(pattern: &str, value: &str) -> bool {
     if let Some((first, last)) = pattern.split_once('*') {
         value.starts_with(first) && value.ends_with(last)
     } else {
         pattern == value
     }
 }
+/// Seconds after its start when CBaseAnimating::StudioFrameAdvanceInternal marks a
+/// sequence finished (m_bSequenceFinished, read by IsActivityFinished): at its end, or
+/// for a non-looping sequence once the cycle passes GetLastVisibleCycle (one minus
+/// fadeouttime times the cycle rate), i.e. fadeouttime (0.2 s on the HL2 shoot/reload
+/// sequences) before the end; a sequence shorter than its fade-out finishes at the first frame advance. Native
+/// NPCs therefore restart 0.1-0.28 s shoot sequences every think (0.1 s), not once
+/// they play through.
+pub fn sequence_finish(clip: &modkit_core::animation::Clip) -> f64 {
+    let duration = clip.duration().max(0.015);
+    if clip.looping {
+        f64::from(duration)
+    } else {
+        f64::from((duration - clip.layer.fade_out).max(0.001))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sequences_finish_at_the_last_visible_cycle_like_studio_frame_advance() {
+        let clip = |frames: usize, fps: f32, looping: bool| modkit_core::animation::Clip {
+            events: Vec::new(),
+            fps,
+            looping,
+            frames: vec![Vec::new(); frames],
+            layer: modkit_core::animation::ClipLayer {
+                fade_out: 0.2,
+                ..Default::default()
+            },
+        };
+        // shootSMG1s (5 frames at 30 fps, 0.133 s): finished at the first advance.
+        assert!((sequence_finish(&clip(5, 30., false)) - 0.001).abs() < 1e-6);
+        // reload (66 frames at 30 fps, 2.167 s): 0.2 s before the end.
+        assert!((sequence_finish(&clip(66, 30., false)) - (65. / 30. - 0.2)).abs() < 1e-5);
+        // Looping sequences finish when they wrap.
+        assert!((sequence_finish(&clip(66, 30., true)) - 65. / 30.).abs() < 1e-5);
+    }
+    #[test]
+    fn runtime_entities_append_after_map_entities() {
+        // Synthetic: one map entity, then a spawned cop.
+        let mut world = World {
+            entities: vec![Entity {
+                properties: vec![("classname".into(), "info_target".into())],
+            }],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        let id = scene.spawn_entity(
+            &mut world,
+            Entity {
+                properties: vec![
+                    ("classname".into(), "npc_metropolice".into()),
+                    ("origin".into(), "10 20 30".into()),
+                ],
+            },
+        );
+        assert_eq!(id, 1);
+        assert_eq!(scene.states.len(), 2);
+        assert_eq!(scene.states[id].origin, Vec3::new(10., 20., 30.));
+        assert!(scene.states[id].visible);
+        assert_eq!(scene.states[id].animation, "idle_baton");
+        assert_eq!(scene.entity(&world, id).unwrap().class(), "npc_metropolice");
+        assert_eq!(scene.entity(&world, 0).unwrap().class(), "info_target");
+        assert!(scene.entity(&world, 2).is_none());
+        // Runtime loops (I/O queue, heads, look targets, physics poses) tolerate the
+        // spawned id: tick a while with the player nearby and an input sent to it.
+        let mut physics = crate::physics::Physics::new(&world);
+        scene.send(id, "Kill", "");
+        for _ in 0..40 {
+            scene.tick(&world, Vec3::new(40., 20., 30.), 0.015);
+            for (index, state) in scene.states.iter().enumerate() {
+                physics.set_entity(index, state.origin, state.rotation, state.collides());
+            }
+        }
+        assert!(scene.states[id].killed);
+    }
     fn entity(class: &str, name: &str, values: &[(&str, &str)]) -> Entity {
         Entity {
             properties: [("classname", class), ("targetname", name)]
@@ -4276,6 +4762,82 @@ mod tests {
         );
     }
     #[test]
+    fn metrocops_idle_on_their_weapon_translated_idle_activity() {
+        // Synthetic police rig: Idle_Baton (no activity), batonidle1/2 (ACT_IDLE) and
+        // smg1idle1 (ACT_IDLE_SMG1); a stunstick cop, an SMG cop, one with DefaultAnim.
+        use modkit_core::{
+            animation::{Clip, Rig, Sequence},
+            ModelInstance,
+        };
+        let clip = || Clip {
+            layer: Default::default(),
+            events: Vec::new(),
+            fps: 30.,
+            looping: true,
+            frames: vec![vec![]; 10],
+        };
+        let seq = |name: &str, activity: &str, weight: i32, order: u32| Sequence {
+            name: name.into(),
+            activity: activity.into(),
+            weight,
+            order,
+        };
+        let w = World {
+            entities: vec![
+                entity(
+                    "npc_metropolice",
+                    "a",
+                    &[("additionalequipment", "weapon_stunstick")],
+                ),
+                entity(
+                    "npc_metropolice",
+                    "b",
+                    &[("additionalequipment", "weapon_smg1")],
+                ),
+                entity("npc_metropolice", "c", &[("DefaultAnim", "Idle_Baton")]),
+            ],
+            model_instances: (0..3)
+                .map(|id| ModelInstance {
+                    background: false,
+                    model: "police.mdl".into(),
+                    origin: Vec3::ZERO,
+                    angles: Vec3::ZERO,
+                    skin: 0,
+                    scale: 1.,
+                    kind: "npc_metropolice".into(),
+                    solid: false,
+                    solid_mode: None,
+                    entity: Some(id),
+                })
+                .collect(),
+            rigs: BTreeMap::from([(
+                "police.mdl#0".into(),
+                Rig {
+                    clips: ["idle_baton", "batonidle1", "batonidle2", "smg1idle1"]
+                        .into_iter()
+                        .map(|n| (n.to_string(), clip()))
+                        .collect(),
+                    sequences: vec![
+                        seq("idle_baton", "", 0, 0),
+                        seq("batonidle1", "ACT_IDLE", 2, 1),
+                        seq("batonidle2", "ACT_IDLE", 1, 2),
+                        seq("smg1idle1", "ACT_IDLE_SMG1", 2, 3),
+                    ],
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let scene = Scene::new(&w);
+        assert!(
+            ["batonidle1", "batonidle2"].contains(&scene.states[0].animation.as_str()),
+            "{}",
+            scene.states[0].animation
+        );
+        assert_eq!(scene.states[1].animation, "smg1idle1");
+        assert_eq!(scene.states[2].animation, "idle_baton");
+    }
+    #[test]
     fn combine_cameras_deploy_retract_and_redeploy() {
         use modkit_core::{
             animation::{Clip, Rig, Sequence},
@@ -4783,6 +5345,24 @@ mod tests {
         assert!(scene.states[1].scripted_by.is_none());
         let post = scene.states[0].post_idle_done.unwrap().0;
         assert!((post - scene.time - 2.).abs() < 0.0001);
+        // SCRIPT_POST_IDLE keeps the actor in NPC_STATE_SCRIPT until PostIdleDone.
+        assert_eq!(scene.states[1].script_post_idle, Some(0));
+        scene.tick(&world, Vec3::ZERO, 2.1);
+        assert!(scene.states[1].script_post_idle.is_none());
+        // SF_SCRIPT_LOOP_IN_POST_IDLE (256) holds it until the script is cancelled.
+        let mut looping = world.clone();
+        looping.entities[0]
+            .properties
+            .push(("spawnflags".into(), "256".into()));
+        let mut scene = Scene::new(&looping);
+        scene.send(0, "BeginSequence", "");
+        for _ in 0..4 {
+            scene.tick(&looping, Vec3::ZERO, 2.1);
+        }
+        assert_eq!(scene.states[1].script_post_idle, Some(0));
+        scene.send(0, "CancelSequence", "");
+        scene.tick(&looping, Vec3::ZERO, 0.015);
+        assert!(scene.states[1].script_post_idle.is_none());
         world.entities[1]
             .properties
             .push(("DefaultAnim".into(), "authored_missing".into()));

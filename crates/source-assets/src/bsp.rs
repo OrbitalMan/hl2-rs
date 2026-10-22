@@ -113,10 +113,23 @@ impl Bsp {
     }
     /// Leaf ambient samples, world lights and the leaf tree for model lighting.
     pub fn model_lighting(&self) -> Result<modkit_core::lighting::LightingData> {
-        crate::model_lighting::read(&self.lumps, &self.lump_versions)
+        let mut data = crate::model_lighting::read(&self.lumps, &self.lump_versions)?;
+        data.dynamic_minlight = self.dynamic_minlight();
+        Ok(data)
     }
     pub fn model_lighting_with(&self, hdr: bool) -> Result<modkit_core::lighting::LightingData> {
-        crate::model_lighting::read_with(&self.lumps, &self.lump_versions, hdr)
+        let mut data = crate::model_lighting::read_with(&self.lumps, &self.lump_versions, hdr)?;
+        data.dynamic_minlight = self.dynamic_minlight();
+        Ok(data)
+    }
+    /// LUMP_MAP_FLAGS (59) and the BSP version select the dynamic-light minlight floor.
+    fn dynamic_minlight(&self) -> f32 {
+        let flags = self
+            .lumps
+            .get(59)
+            .and_then(|l| l.get(..4))
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        modkit_core::lighting::dynamic_minlight_floor(self.version, flags)
     }
     pub fn visibility_index(&self) -> Result<crate::visibility::VisibilityIndex> {
         crate::visibility::VisibilityIndex::new(&self.lumps, self.lump_versions[10])
@@ -619,7 +632,10 @@ impl Bsp {
         for id in world_brushes {
             let b = brushes.get(id).context("brush index")?;
             let contents = u32le(b, 8)?;
-            if model_index == 0 && contents & (1 | 0x10000 | 0x20000) == 0 {
+            // World brushes that block anything (MASK_PLAYERSOLID / MASK_NPCSOLID /
+            // MASK_SOLID): solid, window (0x2), grate (0x8: chain-link and scissor gates)
+            // and player/monster clips; water, ladders and the like stay out.
+            if model_index == 0 && contents & (1 | 0x2 | 0x8 | 0x10000 | 0x20000) == 0 {
                 continue;
             }
             let start = usize::try_from(i32le(b, 0)?)?;

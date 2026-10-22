@@ -295,6 +295,23 @@ impl Simulation {
                         .give("weapon_crowbar", &game.weapons, game.scene.time);
                     ui.source.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
                 }
+                Effect::AiEnable(value) => {
+                    let on = value.unwrap_or(!game.ai.enabled);
+                    game.ai.enabled = on;
+                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                    ui.source.log(format!("ai_enable {}", u8::from(on)));
+                }
+                // CC_AI_Disable: a toggle; DevMsg "AI Disabled." / "AI Enabled.".
+                Effect::AiDisable => {
+                    let on = !game.ai.enabled;
+                    game.ai.enabled = on;
+                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                    ui.source.log(String::from(if on {
+                        "AI Enabled."
+                    } else {
+                        "AI Disabled."
+                    }));
+                }
                 Effect::Noclip(value) => {
                     self.fly = value.unwrap_or(!self.fly);
                     self.player = Player::new(self.eye);
@@ -353,6 +370,22 @@ impl Simulation {
                             .log(format!("Queued {target}.{input} after {delay} seconds."));
                     }
                 }
+                Effect::NpcCommand(line) => match game.spawn_console.parse(&line) {
+                    Ok(Some(hl2_simulation::ai::spawn::Command::Spawn(request))) => {
+                        let message = self.spawn_npc(game, request);
+                        ui.source.log(message);
+                    }
+                    Ok(Some(hl2_simulation::ai::spawn::Command::SetEquipment(value))) => {
+                        ui.source.log(format!("npc_create_equipment {value}"));
+                    }
+                    Ok(Some(hl2_simulation::ai::spawn::Command::SpawnProp(model))) => {
+                        let model = crate::runtime_props::model_path(&model);
+                        ui.source.log(format!("prop_physics_create {model}"));
+                        game.prop_requests.push((model, self.eye, self.forward()));
+                    }
+                    Ok(None) => {}
+                    Err(e) => ui.source.log(e),
+                },
                 Effect::Quit => ui.quit_requested = true,
                 Effect::ApplyConfig(cfg) => {
                     self.fov = cfg.video.fov;
@@ -375,6 +408,63 @@ impl Simulation {
                 }
             }
         }
+    }
+    /// One F4 overlay key; a spawn returns its console message.
+    pub fn spawn_overlay_key(
+        &mut self,
+        game: &mut crate::gameplay::Gameplay,
+        key: hl2_simulation::ai::spawn::OverlayKey,
+    ) -> Option<String> {
+        let command = game.spawn_overlay.key(key);
+        self.spawn_overlay_command(game, command)
+    }
+    /// Carry out what an F4 overlay key or click asked; a spawn returns its console message.
+    pub fn spawn_overlay_command(
+        &mut self,
+        game: &mut crate::gameplay::Gameplay,
+        command: Option<hl2_simulation::ai::spawn::OverlayCommand>,
+    ) -> Option<String> {
+        use hl2_simulation::ai::spawn::OverlayCommand;
+        match command? {
+            OverlayCommand::Spawn(request) => Some(self.spawn_npc(game, request)),
+            OverlayCommand::SpawnProp(model) => {
+                let model = crate::runtime_props::model_path(&model);
+                let message = format!("prop_physics_create {model}");
+                game.prop_requests.push((model, self.eye, self.forward()));
+                Some(message)
+            }
+            OverlayCommand::ToggleNotarget => {
+                game.ai.ignore_player = !game.ai.ignore_player;
+                None
+            }
+            OverlayCommand::ToggleAi => {
+                let on = !game.ai.enabled;
+                game.ai.enabled = on;
+                crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                None
+            }
+        }
+    }
+    /// The view direction (Source axes).
+    fn forward(&self) -> glam::Vec3 {
+        glam::Vec3::new(
+            self.pitch.cos() * self.yaw.cos(),
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+        )
+    }
+    /// npc_create from the player's eye along the aim (a new runtime entity).
+    pub fn spawn_npc(
+        &mut self,
+        game: &mut crate::gameplay::Gameplay,
+        request: hl2_simulation::ai::spawn::SpawnRequest,
+    ) -> String {
+        let forward = glam::Vec3::new(
+            self.pitch.cos() * self.yaw.cos(),
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+        );
+        game.request_spawn(request, &mut self.physics, self.eye, forward)
     }
     pub(crate) fn step(
         &mut self,
@@ -502,6 +592,10 @@ impl Simulation {
                     noclip: false,
                 };
                 let feet = self.player.feet;
+                // NPC hits push the player (ApplyAbsVelocityImpulse) before the move.
+                if let Some(game) = game.as_deref_mut() {
+                    self.player.velocity += std::mem::take(&mut game.player_impulse);
+                }
                 // SetMaxSpeed from the weapons stage (gravity gun load) for this step.
                 self.input.max_speed = game
                     .as_deref()
@@ -642,6 +736,7 @@ impl Plugin for MovementPlugin {
         );
     }
 }
+
 fn fixed_step(
     mut sim: ResMut<Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,

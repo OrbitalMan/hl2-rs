@@ -78,6 +78,36 @@ impl Plugin for UiPlugin {
     }
 }
 
+#[derive(Default)]
+pub struct KeyRepeat {
+    key: Option<KeyCode>,
+    wait: f32,
+    overlay_cursor: bool,
+}
+const REPEAT_DELAY: f32 = 0.35;
+const REPEAT_INTERVAL: f32 = 0.04;
+impl KeyRepeat {
+    fn update(
+        &mut self,
+        input: &ButtonInput<KeyCode>,
+        keys: &[KeyCode],
+        dt: f32,
+    ) -> Option<(KeyCode, usize)> {
+        if let Some(&key) = keys.iter().find(|k| input.just_pressed(**k)) {
+            (self.key, self.wait) = (Some(key), REPEAT_DELAY);
+            return Some((key, 1));
+        }
+        let key = self.key.filter(|k| input.pressed(*k))?;
+        self.wait -= dt;
+        let mut presses = 0;
+        while self.wait <= 0. {
+            presses += 1;
+            self.wait += REPEAT_INTERVAL;
+        }
+        (presses > 0).then_some((key, presses))
+    }
+}
+
 type UiInputDevices<'w, 's> = (
     Res<'w, ButtonInput<KeyCode>>,
     Res<'w, ButtonInput<MouseButton>>,
@@ -100,6 +130,8 @@ pub fn update_ui(
     mut exit: MessageWriter<AppExit>,
     mut ui: Option<ResMut<crate::ui_host::Console>>,
     global_volume: Option<ResMut<bevy::audio::GlobalVolume>>,
+    hud: Option<Res<crate::canvas_renderer::Hud>>,
+    mut repeat: Local<KeyRepeat>,
 ) {
     if keys.just_pressed(KeyCode::F10) {
         if let Some(ui) = ui.as_deref_mut() {
@@ -134,12 +166,23 @@ pub fn update_ui(
     }
     sim.transition = false;
     sim.focused = window.focused;
+    if let (Some(game), Some(hud)) = (game.as_deref_mut(), hud.as_deref()) {
+        game.spawn_overlay.rows_visible = hud.spawn_rows;
+    }
     let cancel_selection = keys.just_pressed(KeyCode::Escape)
         && !sim.paused
         && game.as_ref().is_some_and(|g| g.selection.pending.is_some());
     if cancel_selection && let Some(game) = game.as_deref_mut() {
         game.actions.push(crate::gameplay::Action::Cancel);
     }
+    let cancel_overlay = keys.just_pressed(KeyCode::Escape)
+        && !sim.paused
+        && !cancel_selection
+        && game
+            .as_deref_mut()
+            .is_some_and(|g| g.spawn_overlay.escape());
+    let cancel_selection = cancel_selection || cancel_overlay;
+    let overlay_open = game.as_ref().is_some_and(|g| g.spawn_overlay.open);
     if let Some(ui) = ui.as_deref_mut() {
         let before = ui.source.mode();
         resize_canvas(&ui.source.canvas, video_viewport.as_deref(), &window);
@@ -183,7 +226,7 @@ pub fn update_ui(
                 text: if modifiers.ctrl || modifiers.command {
                     String::new()
                 } else {
-                    text
+                    text.clone()
                 },
                 ctrl: modifiers.ctrl,
                 shift: modifiers.shift,
@@ -230,6 +273,7 @@ pub fn update_ui(
             cursor.visible = sim.paused;
             sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
         } else if !sim.paused
+            && !overlay_open
             && buttons.just_pressed(MouseButton::Left)
             && cursor.grab_mode == CursorGrabMode::None
         {
@@ -238,6 +282,23 @@ pub fn update_ui(
             cursor.visible = false;
             sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
         }
+        if !sim.paused && window.focused {
+            if overlay_open {
+                let grab = if buttons.pressed(MouseButton::Right) {
+                    CursorGrabMode::Locked
+                } else {
+                    CursorGrabMode::None
+                };
+                if cursor.grab_mode != grab {
+                    cursor.grab_mode = grab;
+                    cursor.visible = grab == CursorGrabMode::None;
+                }
+            } else if repeat.overlay_cursor {
+                cursor.grab_mode = CursorGrabMode::Locked;
+                cursor.visible = false;
+            }
+        }
+        repeat.overlay_cursor = overlay_open;
         if ui.quit_requested {
             exit.write(AppExit::Success);
         }
@@ -249,7 +310,7 @@ pub fn update_ui(
             cursor.grab_mode = CursorGrabMode::None;
             cursor.visible = true;
             sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
-        } else if buttons.just_pressed(MouseButton::Left) {
+        } else if buttons.just_pressed(MouseButton::Left) && (sim.paused || !overlay_open) {
             sim.transition = sim.paused || cursor.grab_mode == CursorGrabMode::None;
             if sim.transition {
                 sim.jump_suppressed |= crate::input::action_pressed("+jump", &keys, &buttons, cfg);
@@ -257,6 +318,80 @@ pub fn update_ui(
             sim.paused = false;
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
+        }
+    }
+    let typing = game.as_ref().is_some_and(|g| g.spawn_overlay.typing);
+    if let Some(game) = game.as_deref_mut()
+        && !sim.paused
+        && !sim.transition
+    {
+        use hl2_simulation::ai::spawn::OverlayKey;
+        let mut pressed: Vec<OverlayKey> = [
+            (KeyCode::F4, OverlayKey::Toggle),
+            (KeyCode::ArrowLeft, OverlayKey::Left),
+            (KeyCode::ArrowRight, OverlayKey::Right),
+            (KeyCode::Enter, OverlayKey::Enter),
+            (KeyCode::Tab, OverlayKey::Tab),
+        ]
+        .into_iter()
+        .filter(|(key, _)| keys.just_pressed(*key))
+        .map(|(_, overlay)| overlay)
+        .collect();
+        let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        if overlay_open
+            && !typing
+            && (text.contains('/') || (ctrl && keys.just_pressed(KeyCode::KeyF)))
+        {
+            pressed.push(OverlayKey::Filter);
+        }
+        let dt = real_time.as_deref().map_or(0., |t| t.delta_secs());
+        if let Some((key, presses)) = repeat.update(
+            &keys,
+            &[
+                KeyCode::ArrowUp,
+                KeyCode::ArrowDown,
+                KeyCode::PageUp,
+                KeyCode::PageDown,
+                KeyCode::Backspace,
+            ],
+            dt,
+        ) {
+            let overlay = match key {
+                KeyCode::ArrowUp => OverlayKey::Up,
+                KeyCode::ArrowDown => OverlayKey::Down,
+                KeyCode::PageUp => OverlayKey::PageUp,
+                KeyCode::PageDown => OverlayKey::PageDown,
+                _ => OverlayKey::Backspace,
+            };
+            pressed.extend(std::iter::repeat_n(overlay, presses));
+        }
+        if typing {
+            game.spawn_overlay.type_text(&text);
+        }
+        let mut messages = Vec::new();
+        for overlay in pressed {
+            messages.extend(sim.spawn_overlay_key(game, overlay));
+        }
+        let pointer = window
+            .cursor_position()
+            .filter(|_| overlay_open && cursor.grab_mode == CursorGrabMode::None);
+        if let (Some(pointer), Some(hud)) = (pointer, hud.as_deref()) {
+            if buttons.just_pressed(MouseButton::Left)
+                && let Some(target) = crate::spawn_panel::hit(&hud.spawn_hits, pointer.x, pointer.y)
+            {
+                let command = game.spawn_overlay.click(target);
+                messages.extend(sim.spawn_overlay_command(game, command));
+            }
+            if wheel != 0. {
+                let rows = -wheel * 3.;
+                let column = crate::spawn_panel::column_at(&hud.spawn_hits, pointer.x);
+                game.spawn_overlay.scroll(column, rows.round() as isize);
+            }
+        }
+        if let Some(ui) = ui.as_deref_mut() {
+            for message in messages {
+                ui.source.log(message);
+            }
         }
     }
 }

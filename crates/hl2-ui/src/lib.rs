@@ -12,3 +12,6 @@ mod native_font;
 pub mod proportional;
 pub mod tuning;
 pub mod viewport;
+
+/// Embedded MIT-licensed fallback / developer font bytes (ProggyClean).
+pub const PROGGY_CLEAN: &[u8] = include_bytes!("../assets/fonts/ProggyClean.ttf");

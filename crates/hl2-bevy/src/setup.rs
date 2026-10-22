@@ -377,9 +377,7 @@ fn capture_preview(
 }
 
 fn screen(mut commands: Commands, mut fonts: ResMut<Assets<Font>>, setup: Res<Setup>) {
-    let font = fonts.add(Font::from_bytes(
-        include_bytes!("../../hl2-ui/assets/fonts/ProggyClean.ttf").to_vec(),
-    ));
+    let font = fonts.add(Font::from_bytes(hl2_ui::PROGGY_CLEAN.to_vec()));
     let normal = TextFont {
         font: font.into(),
         font_size: FontSize::Px(20.),

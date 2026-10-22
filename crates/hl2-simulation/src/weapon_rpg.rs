@@ -85,6 +85,19 @@ pub struct LaserDot {
     next_think: f64,
 }
 impl LaserDot {
+    /// An NPC's dot (CWeaponRPG::UpdateNPCLaserPosition: the NPC sets the position
+    /// directly; no aim trace, no target entity, no sprite).
+    pub fn npc(position: Vec3, owner_center: Vec3) -> Self {
+        Self {
+            position,
+            normal: Vec3::ZERO,
+            target: None,
+            on: true,
+            scale: 0.,
+            owner_center,
+            next_think: 0.,
+        }
+    }
     /// CLaserDot::GetChasePosition.
     pub fn chase_position(&self) -> Vec3 {
         self.position - self.normal * 10.
@@ -257,7 +270,9 @@ impl Inventory {
             return;
         }
         let forward = forward.normalize_or_zero();
-        let hit = physics.impact_ray(eye, forward, MAX_TRACE_LENGTH);
+        // CWeaponRPG::UpdateLaserPosition: UTIL_TraceLine(MASK_SHOT & ~CONTENTS_WINDOW)
+        // (passing windows is not modeled).
+        let hit = physics.bullet_ray(eye, forward, MAX_TRACE_LENGTH, &[]);
         let mut random = self.random();
         let Some(dot) = &mut self.rpg.dot else {
             return;

@@ -310,7 +310,43 @@ pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
         }
         Err(e) => rig.warnings.push(format!("{path}: attachments: {e:#}")),
     }
+    match hitboxes(&data) {
+        Ok(hitboxes) => rig.hitboxes = hitboxes,
+        Err(e) => rig.warnings.push(format!("{path}: hitboxes: {e:#}")),
+    }
     Ok(rig)
+}
+/// Hitbox set 0 (studiohdr_t numhitboxsets @172, hitboxsetindex @176; mstudiohitboxset_t
+/// name, numhitboxes, hitboxindex; mstudiobbox_t 68 bytes: bone, group, bbmin, bbmax).
+pub fn hitboxes(data: &[u8]) -> Result<Vec<modkit_core::animation::Hitbox>> {
+    let sets = offset(data, 172)?;
+    if sets == 0 {
+        return Ok(Vec::new());
+    }
+    let set = offset(data, 176)?;
+    bytes(data, set, 12)?;
+    let count = offset(data, set + 4)?;
+    if count > 512 {
+        bail!("MDL hitbox set exceeds 512 boxes");
+    }
+    let base = relative(data, set, set + 8)?;
+    bytes(data, base, count * 68)?;
+    let bones = offset(data, 156)?;
+    (0..count)
+        .map(|i| {
+            let at = base + i * 68;
+            let bone = offset(data, at)?;
+            if bone >= bones {
+                bail!("hitbox bone outside skeleton");
+            }
+            Ok(modkit_core::animation::Hitbox {
+                bone,
+                group: i32le(data, at + 4)?,
+                mins: vec3(data, at + 8)?,
+                maxs: vec3(data, at + 20)?,
+            })
+        })
+        .collect()
 }
 /// The model's own sequence names in index order (not included models).
 pub fn sequence_names(vfs: &Vfs, path: &str) -> Result<Vec<String>> {
@@ -477,15 +513,22 @@ fn autolayer_records(data: &[u8], at: usize) -> Result<Vec<RawAutoLayer>> {
                 child: usize::try_from(i16le(data, at)?).context("negative autolayer sequence")?,
                 pose: i16le(data, at + 2)?,
                 flags: u32le(data, at + 4)?,
+                // Read raw like the SDK's mstudioautolayer_t: retail female_shared.mdl
+                // has an all-NaN ramp (layer_walk_p_aiming), and rejecting it dropped
+                // every clip of every female citizen.
                 ramp: [
-                    f32le(data, at + 8)?,
-                    f32le(data, at + 12)?,
-                    f32le(data, at + 16)?,
-                    f32le(data, at + 20)?,
+                    raw_f32(data, at + 8)?,
+                    raw_f32(data, at + 12)?,
+                    raw_f32(data, at + 16)?,
+                    raw_f32(data, at + 20)?,
                 ],
             })
         })
         .collect()
+}
+/// A float as stored, NaN/infinity included.
+fn raw_f32(data: &[u8], at: usize) -> Result<f32> {
+    Ok(f32::from_le_bytes(bytes(data, at, 4)?.try_into()?))
 }
 /// `mdlkeyvalue { faceposer { ... } }` from the sequence keyvalue text. Text that does
 /// not parse is treated as absent, like a failed KeyValues load.
@@ -640,6 +683,9 @@ fn load_sequences(
     let mut selected = BTreeSet::new();
     for id in 0..sequences {
         let metadata = sequence_metadata(data, base + id * 212)?;
+        if !metadata.activity.is_empty() {
+            rig.activities.insert(metadata.activity.to_uppercase());
+        }
         let autoplay = u32le(data, base + id * 212 + 12)? & sequence_flags::AUTOPLAY != 0;
         if autoplay
             || wanted.contains(&metadata.name)
@@ -1003,14 +1049,15 @@ mod tests {
             [auto.start, auto.peak, auto.tail, auto.end],
             [0.1, 0.3, 0.7, 0.9]
         );
-        // Out-of-table child, negative child, nonfinite ramp and weight are rejected.
+        // Out-of-table and negative children are rejected; ramps are kept as stored
+        // (retail female_shared.mdl has an all-NaN one), non-finite weights rejected.
         assert!(sequence_layer(&data, 0, &bones, &remap, 1, 0).is_err());
         let mut bad = data.clone();
         bad[480..482].copy_from_slice(&(-2i16).to_le_bytes());
         assert!(autolayer_records(&bad, 0).is_err());
-        let mut bad = data.clone();
-        bad[492..496].copy_from_slice(&f32::INFINITY.to_le_bytes());
-        assert!(autolayer_records(&bad, 0).is_err());
+        let mut nan = data.clone();
+        nan[492..496].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(autolayer_records(&nan, 0).unwrap()[0].ramp[1].is_nan());
         for field in [524, 108] {
             let mut bad = data.clone();
             bad[field..field + 4].copy_from_slice(&f32::NAN.to_le_bytes());
@@ -1123,5 +1170,106 @@ mod owned_weapon_tests {
                 .any(|e| e.id == id && (e.cycle - cycle).abs() < 1e-4));
         }
         assert_eq!(rig.clips["draw"].frames.len(), 39);
+    }
+    #[test]
+    #[ignore = "requires owned installed HL2"]
+    fn owned_police_hitbox_set_has_head_chest_and_limbs() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let data = vfs.read("models/police.mdl").unwrap().unwrap();
+        let boxes = super::hitboxes(&data).unwrap();
+        let skeleton = super::bones(&data).unwrap();
+        let name = |b: usize| skeleton[b].bone.name.to_lowercase();
+        // HITGROUP_HEAD 1 on the head bone; chest/stomach/arms/legs present.
+        assert!(boxes
+            .iter()
+            .any(|h| h.group == 1 && name(h.bone).contains("head")));
+        for group in [2, 3, 4, 5, 6, 7] {
+            assert!(boxes.iter().any(|h| h.group == group), "group {group}");
+        }
+        assert!(boxes.iter().all(|h| h.mins.cmple(h.maxs).all()));
+    }
+    #[test]
+    #[ignore = "requires owned installed HL2"]
+    fn owned_npc_weapon_world_models_bone_merge_onto_actor_skeletons() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        let names = |model: &str| -> Vec<String> {
+            let data = vfs.read(model).unwrap().unwrap();
+            super::bones(&data)
+                .unwrap()
+                .into_iter()
+                .map(|b| b.bone.name)
+                .collect()
+        };
+        for actor in ["models/police.mdl", "models/humans/group01/male_07.mdl"] {
+            let skeleton = names(actor);
+            for weapon in [
+                "models/weapons/w_pistol.mdl",
+                "models/weapons/w_smg1.mdl",
+                "models/weapons/w_stunbaton.mdl",
+            ] {
+                let bones = names(weapon);
+                eprintln!("{weapon}: {bones:?}");
+                // EF_BONEMERGE: at least one weapon bone matches an actor bone by name.
+                assert!(
+                    bones
+                        .iter()
+                        .any(|b| skeleton.iter().any(|s| s.eq_ignore_ascii_case(b))),
+                    "{weapon} on {actor}"
+                );
+            }
+        }
+    }
+    #[test]
+    #[ignore = "requires owned installed HL2"]
+    fn owned_weapon_models_carry_muzzle_flash_events() {
+        let vfs = crate::vpk::Vfs::mount(&crate::install::discover().unwrap()).unwrap();
+        // (model, sequence, event name, options): the events muzzle_effects dispatches.
+        for (model, sequence, name, options) in [
+            (
+                "models/weapons/v_pistol.mdl",
+                "fire",
+                "AE_MUZZLEFLASH",
+                "PISTOL muzzle",
+            ),
+            (
+                "models/weapons/v_smg1.mdl",
+                "fire01",
+                "AE_MUZZLEFLASH",
+                "SMG1 MUZZLE",
+            ),
+            (
+                "models/weapons/v_357.mdl",
+                "fire",
+                "AE_MUZZLEFLASH",
+                "357 muzzle",
+            ),
+            (
+                "models/weapons/w_pistol.mdl",
+                "attack1",
+                "AE_NPC_MUZZLEFLASH",
+                "PISTOL MUZZLE",
+            ),
+            (
+                "models/weapons/w_smg1.mdl",
+                "attack1",
+                "AE_NPC_MUZZLEFLASH",
+                "SMG1 MUZZLE",
+            ),
+        ] {
+            let first = super::load(&vfs, model, &Default::default()).unwrap();
+            let wanted = first.activities.iter().map(|a| a.to_lowercase()).collect();
+            let rig = super::load(&vfs, model, &wanted).unwrap();
+            let clip = rig
+                .clips
+                .get(sequence)
+                .unwrap_or_else(|| panic!("{model} {sequence}"));
+            assert!(
+                clip.events.iter().any(|e| e.name == name
+                    && e.options.eq_ignore_ascii_case(options)
+                    && e.cycle == 0.),
+                "{model} {sequence}: {:?}",
+                clip.events
+            );
+        }
     }
 }

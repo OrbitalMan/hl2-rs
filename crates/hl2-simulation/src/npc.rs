@@ -9,6 +9,8 @@ use serde::Serialize;
 use source_assets::{models::MotionSequence, navigation::Graph, vpk::Vfs};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// GoalKey::scene reserved for AI navigation goals (step 14); scenes use entity ids.
+pub const AI_SCENE: usize = usize::MAX - 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct GoalKey {
     pub scene: usize,
@@ -128,14 +130,35 @@ pub struct GoalSnapshot {
 pub struct NavRestrictions {
     pub unusable_nodes: BTreeSet<usize>,
     pub unusable_links: BTreeSet<usize>,
-    pub dynamic_link_state_unknown: bool,
+    /// CAI_DynamicLink: graph links each info_node_link / info_node_link_controller
+    /// entity controls.
+    pub dynamic: BTreeMap<usize, Vec<usize>>,
+    /// Links whose dynamic link is LINK_OFF (bits_LINK_OFF).
+    pub off_links: BTreeSet<usize>,
+    /// info_node_link entities whose nodes or link are not in the graph (the SDK creates
+    /// a missing link when hull bits are set; not modeled).
+    pub missing_dynamic: usize,
 }
+/// MAX_NODE_LINK_DIST / MAX_AIR_NODE_LINK_DIST (ai_node.h).
+const MAX_NODE_LINK_DIST: f32 = 60. * 12.;
+const MAX_AIR_NODE_LINK_DIST: f32 = 120. * 12.;
 impl NavRestrictions {
-    /// Exclude hinted nodes rather than pretending to implement hint locks.
-    /// Dynamic controllers require runtime state not present in the AIN file.
+    /// Exclude hinted nodes rather than pretending to implement hint locks. Dynamic
+    /// links (CAI_DynamicLink::InitDynamicLinks) take their initial state: an
+    /// info_node_link controls the link between its StartNode/EndNode editor ids; an
+    /// info_node_link_controller (GenerateLinksFromVolume) every link whose nodes lie
+    /// within MAX_NODE_LINK_DIST (air: MAX_AIR_NODE_LINK_DIST) of its center and whose
+    /// segment crosses its box grown by one unit.
     pub fn from_world(world: &World, graph: &Graph) -> Self {
         let mut result = Self::default();
-        for entity in &world.entities {
+        let node_of = |id: i32| graph.hammer_ids.iter().position(|h| *h == id);
+        let link_of = |a: usize, b: usize| {
+            graph.links.iter().position(|l| {
+                (l.source == a && l.destination == b) || (l.source == b && l.destination == a)
+            })
+        };
+        for (entity_id, entity) in world.entities.iter().enumerate() {
+            let off = entity.get("initialstate").is_some_and(|v| v.trim() == "0");
             match entity.class() {
                 "info_node_hint" => {
                     if let Some(id) = entity.get("nodeid").and_then(|s| s.parse::<i32>().ok()) {
@@ -146,20 +169,195 @@ impl NavRestrictions {
                         }
                     }
                 }
-                "info_node_link" | "info_node_link_controller" => {
-                    result.dynamic_link_state_unknown = true;
+                "info_node_link" => {
+                    let id = |k: &str| entity.get(k).and_then(|v| v.trim().parse::<i32>().ok());
+                    let link = id("StartNode")
+                        .and_then(node_of)
+                        .zip(id("EndNode").and_then(node_of))
+                        .and_then(|(a, b)| link_of(a, b));
+                    match link {
+                        Some(link) => {
+                            result.dynamic.insert(entity_id, vec![link]);
+                            if off {
+                                result.off_links.insert(link);
+                            }
+                        }
+                        None => result.missing_dynamic += 1,
+                    }
+                }
+                "info_node_link_controller" => {
+                    let origin = entity.origin();
+                    let vec = |k: &str| {
+                        modkit_core::parse_vec3(entity.get(k).unwrap_or("0 0 0"))
+                            .unwrap_or(Vec3::ZERO)
+                    };
+                    let (mins, maxs) = (origin + vec("mins"), origin + vec("maxs"));
+                    let center = (mins + maxs) * 0.5;
+                    let air = entity
+                        .get("useairlinkradius")
+                        .is_some_and(|v| v.trim() == "1");
+                    let reach = if air {
+                        MAX_AIR_NODE_LINK_DIST
+                    } else {
+                        MAX_NODE_LINK_DIST
+                    } + 0.1;
+                    let (lo, hi) = (mins - Vec3::ONE, maxs + Vec3::ONE);
+                    let links: Vec<usize> = graph
+                        .links
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| {
+                            let (Some(a), Some(b)) =
+                                (graph.nodes.get(l.source), graph.nodes.get(l.destination))
+                            else {
+                                return false;
+                            };
+                            a.origin.distance(center) < reach
+                                && b.origin.distance(center) < reach
+                                && segment_crosses_box(a.origin, b.origin, lo, hi)
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    if off {
+                        result.off_links.extend(links.iter().copied());
+                    }
+                    result.dynamic.insert(entity_id, links);
                 }
                 _ => {}
             }
         }
         result
     }
+    /// TurnOn / TurnOff of a dynamic link entity; false when it controls nothing.
+    pub fn set_dynamic(&mut self, entity: usize, on: bool) -> bool {
+        let Some(links) = self.dynamic.get(&entity) else {
+            return false;
+        };
+        for link in links {
+            if on {
+                self.off_links.remove(link);
+            } else {
+                self.off_links.insert(*link);
+            }
+        }
+        true
+    }
+}
+/// ROUTE_SIMPLIFY_TIME_DELAY (in the PVS, AIStrongOpt off).
+const ROUTE_SIMPLIFY_DELAY: f32 = 0.5;
+/// MIN_ANGLE_COS_SIMPLIFY: 40 degrees left or right of the current heading.
+const MIN_ANGLE_COS_SIMPLIFY: f32 = 0.766;
+/// CAI_Navigator::SimplifyPathForward with the full scan parameters (32 ft out, points
+/// within 12 ft, 3 ft increments, four samples): head straight for the farthest
+/// reachable point along the path ahead, else skip to the next waypoint when it is
+/// reachable and nearer than the scan distance. Points must lie within 40 degrees of the
+/// current heading unless `forced` (the first simplification of a path).
+fn simplify_path_forward<W: NpcCollisionWorld>(
+    world: &W,
+    actor: &Actor,
+    goal: &mut Goal,
+    query: Query<'_>,
+    forced: bool,
+) {
+    const SCAN_DIST: f32 = 32. * 12.;
+    const RADIUS: f32 = 12. * 12.;
+    const INCREMENT: f32 = 3. * 12.;
+    const MAX_SAMPLES: usize = 4;
+    let feet = goal.feet;
+    let points = &goal.route.feet;
+    let next = goal.next;
+    // The goal waypoint is not reducible.
+    if next + 1 >= points.len() {
+        return;
+    }
+    let flat = |v: Vec3| v * Vec3::new(1., 1., 0.);
+    let heading = flat(points[next] - feet).normalize_or_zero();
+    let attempt = |p: Vec3| {
+        forced || flat(p - feet).normalize_or_zero().dot(heading) > MIN_ANGLE_COS_SIMPLIFY
+    };
+    let reachable = |p: Vec3| {
+        let moved = npc_probe::ground_move(world, feet, p, actor.ground, query);
+        moved.completed && flat(moved.end - p).length() < 1.
+    };
+    // Walk out along the path: (point, waypoint index of the segment start, skip test).
+    let mut samples = Vec::new();
+    let mut remaining = SCAN_DIST - flat(points[next] - feet).length();
+    let (mut at, mut wp) = (points[next], next);
+    while remaining > 0. && wp + 1 < points.len() {
+        let to_next = flat(points[wp + 1] - at).length();
+        if to_next < INCREMENT * 1.1 {
+            at = points[wp + 1];
+            remaining -= to_next;
+            wp += 1;
+        } else {
+            at += (points[wp + 1] - points[wp]).normalize_or_zero() * INCREMENT;
+            remaining -= INCREMENT;
+        }
+        let skip = flat(at - feet).length() > RADIUS + 0.1;
+        samples.push((at, wp, skip));
+    }
+    let mut tests = 0;
+    for &(point, segment, skip) in samples.iter().rev() {
+        if skip || tests >= MAX_SAMPLES || !attempt(point) {
+            continue;
+        }
+        tests += 1;
+        if reachable(point) {
+            // SimplifyPathInsertSimplification: the point replaces the waypoints up to
+            // its segment start.
+            goal.route.feet[segment] = point;
+            if let Some(door) = goal.route.doors.get_mut(segment) {
+                *door = None;
+            }
+            goal.next = segment;
+            return;
+        }
+    }
+    let following = points[next + 1];
+    if attempt(following) && flat(following - feet).length() < SCAN_DIST && reachable(following) {
+        goal.next = next + 1;
+        if let Some(door) = goal.route.doors.get_mut(next + 1) {
+            *door = None;
+        }
+    }
+}
+/// IsBoxIntersectingRay for the segment a -> b.
+fn segment_crosses_box(a: Vec3, b: Vec3, lo: Vec3, hi: Vec3) -> bool {
+    let d = b - a;
+    let (mut t0, mut t1) = (0f32, 1f32);
+    for axis in 0..3 {
+        if d[axis].abs() < 1e-6 {
+            if a[axis] < lo[axis] || a[axis] > hi[axis] {
+                return false;
+            }
+            continue;
+        }
+        let (mut x, mut y) = (
+            (lo[axis] - a[axis]) / d[axis],
+            (hi[axis] - a[axis]) / d[axis],
+        );
+        if x > y {
+            std::mem::swap(&mut x, &mut y);
+        }
+        t0 = t0.max(x);
+        t1 = t1.min(y);
+        if t0 > t1 {
+            return false;
+        }
+    }
+    true
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Locomotion {
     tracks: BTreeMap<MoveStyle, RootMotion>,
     failures: BTreeMap<MoveStyle, GoalBlockReason>,
+    /// The sequence of each style when it is not the default walk_all/run_all (a
+    /// weapon-translated ACT_WALK_RIFLE/ACT_RUN_RIFLE sequence, say).
+    names: BTreeMap<MoveStyle, String>,
+    /// The aiming walk/run (Weapon_TranslateActivity of ACT_WALK_AIM/ACT_RUN_AIM) that
+    /// move and shoot plays over the same root-motion track.
+    aim_names: BTreeMap<MoveStyle, String>,
 }
 impl Locomotion {
     /// Load once at map/actor setup. Simulation ticks never access the VFS.
@@ -169,16 +367,42 @@ impl Locomotion {
         Ok(Self::from_sequences(&sequences))
     }
     pub fn from_sequences(sequences: &BTreeMap<String, MotionSequence>) -> Self {
+        Self::from_named(
+            sequences,
+            [
+                (
+                    MoveStyle::Walk,
+                    MoveStyle::Walk.sequence(),
+                    MoveStyle::Walk.activity(),
+                ),
+                (
+                    MoveStyle::Run,
+                    MoveStyle::Run.sequence(),
+                    MoveStyle::Run.activity(),
+                ),
+            ],
+        )
+    }
+    /// Tracks from named looping sequences with their expected activities (the
+    /// sequence SelectWeightedSequence picks for the translated ACT_WALK/ACT_RUN).
+    pub fn from_named(
+        sequences: &BTreeMap<String, MotionSequence>,
+        styles: [(MoveStyle, &str, &str); 2],
+    ) -> Self {
         let mut result = Self::default();
-        for style in [MoveStyle::Walk, MoveStyle::Run] {
+        for (style, name, activity) in styles {
+            let key = name.to_lowercase();
+            if key != style.sequence() {
+                result.names.insert(style, name.to_owned());
+            }
             let checked = sequences
-                .get(style.sequence())
-                .ok_or_else(|| GoalBlockReason::MissingLocomotion(style.sequence().to_owned()))
+                .get(&key)
+                .ok_or_else(|| GoalBlockReason::MissingLocomotion(name.to_owned()))
                 .and_then(|sequence| {
-                    if sequence.activity_name != style.activity() || sequence.flags & 1 == 0 {
-                        return Err(GoalBlockReason::UnsupportedLocomotion(
-                            style.sequence().to_owned(),
-                        ));
+                    if !sequence.activity_name.eq_ignore_ascii_case(activity)
+                        || sequence.flags & 1 == 0
+                    {
+                        return Err(GoalBlockReason::UnsupportedLocomotion(name.to_owned()));
                     }
                     let track = sequence.blends.get(sequence.central_blend).ok_or_else(|| {
                         GoalBlockReason::UnsupportedLocomotion("central blend index".to_owned())
@@ -200,8 +424,32 @@ impl Locomotion {
     pub fn required_clips(&self) -> BTreeSet<String> {
         self.tracks
             .keys()
-            .map(|style| style.sequence().to_owned())
+            .map(|style| self.sequence_name(*style))
             .collect()
+    }
+    /// The sequence a style plays.
+    /// Set the aiming sequences (both styles, or none).
+    pub fn set_aim(&mut self, walk: String, run: String) {
+        self.aim_names = [(MoveStyle::Walk, walk), (MoveStyle::Run, run)].into();
+    }
+    pub fn has_aim(&self) -> bool {
+        self.aim_names.len() == 2
+    }
+    fn played_name(&self, style: MoveStyle, aiming: bool) -> String {
+        match self.aim_names.get(&style).filter(|_| aiming) {
+            Some(name) => name.clone(),
+            None => self.sequence_name(style),
+        }
+    }
+    pub fn sequence_name(&self, style: MoveStyle) -> String {
+        self.names
+            .get(&style)
+            .cloned()
+            .unwrap_or_else(|| style.sequence().to_owned())
+    }
+    /// Both styles have tracks.
+    pub fn complete(&self) -> bool {
+        self.failures.is_empty() && self.tracks.len() == 2
     }
     fn track(&self, style: MoveStyle) -> Result<&RootMotion, GoalBlockReason> {
         self.tracks.get(&style).ok_or_else(|| {
@@ -276,7 +524,11 @@ struct Actor {
     scale: f32,
     ground: GroundConfig,
     locomotion: Locomotion,
+    /// Locomotion per active weapon class ("" unarmed), preloaded (`set_locomotion`).
+    variants: BTreeMap<String, Locomotion>,
     view_offset: Option<Vec3>,
+    /// Move and shoot: play the aiming walk/run.
+    aiming: bool,
 }
 struct Goal {
     request: MoveRequest,
@@ -289,6 +541,10 @@ struct Goal {
     animation_time: f32,
     retry_time: f32,
     contact_normal: Vec3,
+    /// CAI_Navigator m_flNextSimplifyTime as seconds left (AI goals).
+    simplify_in: f32,
+    /// The path was simplified once (bFirstForPath forces the first attempt).
+    simplified: bool,
 }
 #[derive(Clone, Debug, Default)]
 struct Route {
@@ -305,6 +561,9 @@ pub struct Controller {
     pending: Vec<MoveUpdate>,
     /// Door entities NPC routes may pass through by opening them.
     doors: BTreeSet<usize>,
+    /// Actors registered only for AI goals: scene requests for them stay blocked as
+    /// before (MissingActor), so scripted behavior does not change.
+    ai_only: BTreeSet<usize>,
 }
 impl Controller {
     /// Doors that block a graph link do not invalidate it; NPCs open them on contact.
@@ -322,6 +581,10 @@ impl Controller {
             .map(|(id, _)| id)
             .collect();
     }
+    /// info_node_link / info_node_link_controller TurnOn / TurnOff.
+    pub fn set_dynamic_link(&mut self, entity: usize, on: bool) -> bool {
+        self.restrictions.set_dynamic(entity, on)
+    }
     pub fn new(graph: Option<Graph>, restrictions: NavRestrictions) -> Self {
         Self {
             graph,
@@ -330,6 +593,201 @@ impl Controller {
             goals: BTreeMap::new(),
             pending: Vec::new(),
             doors: BTreeSet::new(),
+            ai_only: BTreeSet::new(),
+        }
+    }
+    /// register_actor for an actor that only AI goals (GoalKey::scene == AI_SCENE) move.
+    pub fn register_ai_actor(
+        &mut self,
+        entity: usize,
+        model_scale: f32,
+        ground: GroundConfig,
+        locomotion: Locomotion,
+    ) -> Result<(), GoalBlockReason> {
+        self.register_actor(entity, model_scale, ground, locomotion)?;
+        self.ai_only.insert(entity);
+        Ok(())
+    }
+    /// The locomotion variants of an AI actor by weapon class (Weapon_TranslateActivity
+    /// of ACT_WALK/ACT_RUN on its model), preloaded at map load.
+    pub fn set_locomotion_variants(
+        &mut self,
+        entity: usize,
+        variants: BTreeMap<String, Locomotion>,
+    ) {
+        if let Some(actor) = self.actors.get_mut(&entity) {
+            actor.variants = variants;
+        }
+    }
+    /// Weapon_Equip: move with the new weapon's walk/run sequences (unchanged when the
+    /// model has no variant for it). Moves already running keep their track.
+    /// CAI_MoveAndShootOverlay::UpdateMoveShootActivity: the aiming walk/run on or off.
+    pub fn set_move_aim(&mut self, entity: usize, aiming: bool) {
+        if let Some(actor) = self.actors.get_mut(&entity) {
+            actor.aiming = aiming && actor.locomotion.has_aim();
+        }
+    }
+    /// The model has both aiming locomotions for the current weapon.
+    pub fn has_move_aim(&self, entity: usize) -> bool {
+        self.actors
+            .get(&entity)
+            .is_some_and(|a| a.locomotion.has_aim())
+    }
+    /// A runtime spawn of a template's model and class (DESIGN 14r part A): the same
+    /// hull, locomotion variants and eye offset, with no goal. False without a
+    /// registered template.
+    pub fn copy_actor(&mut self, template: usize, entity: usize) -> bool {
+        let Some(mut actor) = self.actors.get(&template).cloned() else {
+            return false;
+        };
+        actor.aiming = false;
+        self.actors.insert(entity, actor);
+        if self.ai_only.contains(&template) {
+            self.ai_only.insert(entity);
+        }
+        true
+    }
+    pub fn set_locomotion(&mut self, entity: usize, weapon: &str) -> bool {
+        let Some(actor) = self.actors.get_mut(&entity) else {
+            return false;
+        };
+        match actor.variants.get(weapon) {
+            Some(locomotion) => {
+                actor.locomotion = locomotion.clone();
+                true
+            }
+            None => false,
+        }
+    }
+    /// Usable node feet and the usable ground links of each node (the graph search's
+    /// filters); None without a graph or beyond the native node limit.
+    fn usable_graph(&self) -> Option<UsableGraph> {
+        let graph = self.graph.as_ref()?;
+        let restrictions = &self.restrictions;
+        let count = graph.nodes.len();
+        if count == 0 || count > 1500 {
+            return None;
+        }
+        let positions: Vec<_> = (0..count)
+            .map(|n| node_feet(graph, n, restrictions))
+            .collect();
+        let mut adjacent = vec![Vec::new(); count];
+        for (index, link) in graph.links.iter().enumerate() {
+            if link.source < count
+                && link.destination < count
+                && link.accepted_move_types[0] & 1 != 0
+                && !restrictions.unusable_links.contains(&index)
+                && !restrictions.off_links.contains(&index)
+                && positions[link.source].is_some()
+                && positions[link.destination].is_some()
+            {
+                adjacent[link.source].push(link.destination);
+                adjacent[link.destination].push(link.source);
+            }
+        }
+        Some((positions, adjacent))
+    }
+    /// CAI_TacticalServices::FindCoverNode: from the usable node nearest `near` (the
+    /// NPC), visit nodes nearest-first by straight distance from `near` and return the
+    /// feet of the first whose distance lies in [min, max) and that `is_cover` accepts.
+    /// A neighbor joins the list only while it is nearer to `near` than 1.5 x its
+    /// squared distance to the threat (keeps cover searches from running toward the
+    /// threat). Node locks, hint cover activities and climb nodes are not modeled.
+    pub fn find_cover_node(
+        &self,
+        near: Vec3,
+        threat: Vec3,
+        min: f32,
+        max: f32,
+        mut is_cover: impl FnMut(Vec3) -> bool,
+    ) -> Option<Vec3> {
+        let (positions, adjacent) = self.usable_graph()?;
+        let count = positions.len();
+        let start = nearest_usable(&positions, near)?;
+        let max = if max <= 0. { 784. } else { max };
+        let min = min.min(0.5 * max);
+        let (min_sq, max_sq) = (min * min, max * max);
+        let mut visited = vec![false; count];
+        visited[start] = true;
+        let mut open = vec![(start, 0f32)];
+        while let Some(node) = pop_nearest(&mut open) {
+            let feet = positions[node].expect("usable");
+            let distance = feet.distance_squared(near);
+            if distance >= min_sq && distance < max_sq && is_cover(feet) {
+                return Some(feet);
+            }
+            for &next in &adjacent[node] {
+                if visited[next] {
+                    continue;
+                }
+                let p = positions[next].expect("usable");
+                let d = p.distance_squared(near);
+                if d < p.distance_squared(threat) * 1.5 {
+                    open.push((next, d));
+                }
+                visited[next] = true;
+            }
+        }
+        None
+    }
+    /// CAI_TacticalServices::FindLosNode (FLANKTYPE_NONE): from the usable node nearest
+    /// `origin` (the NPC), visit nodes nearest-first by distance from `origin`, skipping
+    /// the start node, and return the feet of the first whose distance to `threat` lies
+    /// in (min, max) and that `can_shoot` accepts (TestShootPosition).
+    pub fn find_los_node(
+        &self,
+        origin: Vec3,
+        threat: Vec3,
+        min: f32,
+        max: f32,
+        mut can_shoot: impl FnMut(Vec3) -> bool,
+    ) -> Option<Vec3> {
+        let (positions, adjacent) = self.usable_graph()?;
+        let count = positions.len();
+        let start = nearest_usable(&positions, origin)?;
+        let mut visited = vec![false; count];
+        visited[start] = true;
+        let mut open = vec![(start, 0f32)];
+        while let Some(node) = pop_nearest(&mut open) {
+            let feet = positions[node].expect("usable");
+            if node != start {
+                let threat_distance = feet.distance(threat);
+                if threat_distance < max && threat_distance > min && can_shoot(feet) {
+                    return Some(feet);
+                }
+            }
+            for &next in &adjacent[node] {
+                if !visited[next] {
+                    visited[next] = true;
+                    open.push((
+                        next,
+                        positions[next].expect("usable").distance_squared(origin),
+                    ));
+                }
+            }
+        }
+        None
+    }
+    pub fn has_actor(&self, entity: usize) -> bool {
+        self.actors.contains_key(&entity)
+    }
+    /// Stop one goal (the AI's TASK_STOP_MOVING); the actor keeps its pose.
+    pub fn cancel(&mut self, key: GoalKey) {
+        if let Some(goal) = self.goals.get_mut(&key) {
+            if goal.state != GoalState::Canceled {
+                goal.state = GoalState::Canceled;
+                self.pending.push(update(key, goal, &self.doors, None));
+            }
+        }
+    }
+    /// Drop a finished goal's record.
+    pub fn forget(&mut self, key: GoalKey) {
+        if self
+            .goals
+            .get(&key)
+            .is_some_and(|g| matches!(g.state, GoalState::Arrived | GoalState::Canceled))
+        {
+            self.goals.remove(&key);
         }
     }
     pub fn register_actor(
@@ -352,7 +810,9 @@ impl Controller {
                 scale: model_scale,
                 ground,
                 locomotion,
+                variants: BTreeMap::new(),
                 view_offset: None,
+                aiming: false,
             },
         );
         Ok(())
@@ -387,10 +847,12 @@ impl Controller {
                 route_nodes: goal.route.nodes.clone(),
                 route_feet: goal.route.feet.clone(),
                 next_waypoint: goal.next,
-                sequence: goal
-                    .state
-                    .is_moving()
-                    .then(|| goal.request.style.sequence().to_owned()),
+                sequence: goal.state.is_moving().then(|| {
+                    self.actors.get(&key.actor).map_or_else(
+                        || goal.request.style.sequence().to_owned(),
+                        |a| a.locomotion.played_name(goal.request.style, a.aiming),
+                    )
+                }),
                 animation_time: goal.animation_time,
                 motor_eta: None,
                 contact_normal: goal.contact_normal,
@@ -416,6 +878,8 @@ impl Controller {
             animation_time: 0.,
             retry_time: 0.,
             contact_normal: Vec3::ZERO,
+            simplify_in: 0.,
+            simplified: false,
         };
         let prepared = (|| {
             if pose.entity != key.actor
@@ -429,6 +893,9 @@ impl Controller {
             }
             if pose.scripted_by.is_some() {
                 return Err(GoalBlockReason::ScriptOwned);
+            }
+            if key.scene != AI_SCENE && self.ai_only.contains(&key.actor) {
+                return Err(GoalBlockReason::MissingActor);
             }
             if self.goals.iter().any(|(other, g)| {
                 other.actor == key.actor
@@ -487,7 +954,11 @@ impl Controller {
         }
         // A rejected competing scene never owns the actor's pose or animation.
         if goal.state != GoalState::Blocked(GoalBlockReason::ActorBusy) {
-            self.pending.push(update(key, &goal, &self.doors));
+            let name = self
+                .actors
+                .get(&key.actor)
+                .map(|a| a.locomotion.played_name(goal.request.style, a.aiming));
+            self.pending.push(update(key, &goal, &self.doors, name));
         }
         self.goals.insert(key, goal);
         self.status(key).cloned().unwrap()
@@ -498,7 +969,7 @@ impl Controller {
                 let owned = goal.state != GoalState::Blocked(GoalBlockReason::ActorBusy);
                 goal.state = GoalState::Canceled;
                 if owned {
-                    self.pending.push(update(*key, goal, &self.doors));
+                    self.pending.push(update(*key, goal, &self.doors, None));
                 }
             }
         }
@@ -526,7 +997,11 @@ impl Controller {
                 goal.state,
                 GoalState::Blocked(GoalBlockReason::InvalidInput)
             ) {
-                updates.push(update(*key, goal, &self.doors));
+                let name = self
+                    .actors
+                    .get(&key.actor)
+                    .map(|a| a.locomotion.played_name(goal.request.style, a.aiming));
+                updates.push(update(*key, goal, &self.doors, name));
                 continue;
             }
             let outcome = (|| {
@@ -577,12 +1052,16 @@ impl Controller {
             if let Err(reason) = outcome {
                 goal.state = GoalState::Blocked(reason);
             }
-            updates.push(update(*key, goal, &self.doors));
+            let name = self
+                .actors
+                .get(&key.actor)
+                .map(|a| a.locomotion.played_name(goal.request.style, a.aiming));
+            updates.push(update(*key, goal, &self.doors, name));
         }
         updates
     }
 }
-fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>) -> MoveUpdate {
+fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>, name: Option<String>) -> MoveUpdate {
     // Navigators open a route door ahead of contact: request it while walking the door
     // segment or within 96 units of its start.
     let ahead = |index: usize| goal.route.doors.get(index).copied().flatten();
@@ -609,7 +1088,7 @@ fn update(key: GoalKey, goal: &Goal, doors: &BTreeSet<usize>) -> MoveUpdate {
         sequence: goal
             .state
             .is_moving()
-            .then(|| goal.request.style.sequence().to_owned()),
+            .then(|| name.unwrap_or_else(|| goal.request.style.sequence().to_owned())),
         animation_time: goal.animation_time,
         state: goal.state.clone(),
         contact_normal: goal.contact_normal,
@@ -644,6 +1123,20 @@ fn advance<W: NpcCollisionWorld>(
     if (goal.feet - goal.request.target_feet).truncate().length() <= arrival {
         goal.state = GoalState::Arrived;
         return Ok(());
+    }
+    // CAI_Navigator::SimplifyPath for AI goals (scene moves keep their routes).
+    if key.scene == AI_SCENE {
+        goal.simplify_in -= dt;
+        if goal.simplify_in <= 0. {
+            goal.simplify_in = ROUTE_SIMPLIFY_DELAY;
+            let forced = !goal.simplified;
+            goal.simplified = true;
+            let plain = Query {
+                excluded_entities: &excluded,
+                ..Default::default()
+            };
+            simplify_path_forward(world, actor, goal, plain, forced);
+        }
     }
     let duration = track
         .duration()
@@ -744,6 +1237,22 @@ fn advance<W: NpcCollisionWorld>(
     Err(GoalBlockReason::SearchBudget)
 }
 
+/// Usable node feet and each node's usable neighbors.
+type UsableGraph = (Vec<Option<Vec3>>, Vec<Vec<usize>>);
+/// NearestNodeToPoint over the usable nodes.
+fn nearest_usable(positions: &[Option<Vec3>], point: Vec3) -> Option<usize> {
+    positions
+        .iter()
+        .enumerate()
+        .filter_map(|(n, p)| p.map(|p| (n, p.distance_squared(point))))
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+        .map(|(n, _)| n)
+}
+/// CNodeList::ElementAtHead + RemoveAtHead: the open node with the least key.
+fn pop_nearest(open: &mut Vec<(usize, f32)>) -> Option<usize> {
+    let best = (0..open.len()).min_by(|&a, &b| open[a].1.total_cmp(&open[b].1))?;
+    Some(open.swap_remove(best).0)
+}
 fn node_feet(graph: &Graph, node: usize, restrictions: &NavRestrictions) -> Option<Vec3> {
     let value = graph.nodes.get(node)?;
     if value.node_type != 2 || value.info != 0 || restrictions.unusable_nodes.contains(&node) {
@@ -862,9 +1371,6 @@ fn plan<W: NpcCollisionWorld>(
         });
     }
     let graph = graph.ok_or(GoalBlockReason::MissingGraph)?;
-    if restrictions.dynamic_link_state_unknown {
-        return Err(GoalBlockReason::UnsupportedGraphState);
-    }
     let view = actor
         .view_offset
         .ok_or(GoalBlockReason::MissingViewOffset)?;
@@ -949,6 +1455,7 @@ fn search(
         }
         if link.accepted_move_types[0] & 1 != 0
             && !restrictions.unusable_links.contains(&index)
+            && !restrictions.off_links.contains(&index)
             && positions[link.source].is_some()
             && positions[link.destination].is_some()
         {
@@ -1125,6 +1632,97 @@ mod tests {
             .unwrap();
         controller.set_view_offset(7, Vec3::Z * 70.).unwrap();
         controller
+    }
+    #[test]
+    fn path_simplification_cuts_corners_within_the_heading_cone() {
+        let physics = Physics::new(&world(vec![]));
+        let controller = make_controller(None);
+        let actor = &controller.actors[&7];
+        let excluded = [7];
+        let query = Query {
+            excluded_entities: &excluded,
+            ..Default::default()
+        };
+        let route = Route {
+            nodes: vec![],
+            feet: vec![
+                Vec3::new(150., 0., 0.),
+                Vec3::new(150., 150., 0.),
+                Vec3::new(150., 400., 0.),
+            ],
+            doors: vec![None; 3],
+        };
+        let mut goal = Goal {
+            request: request(Vec3::new(150., 400., 0.)),
+            tolerance: 0.1,
+            state: GoalState::Moving,
+            route,
+            next: 0,
+            feet: Vec3::ZERO,
+            yaw: 0.,
+            animation_time: 0.,
+            retry_time: 0.,
+            contact_normal: Vec3::ZERO,
+            simplify_in: 0.,
+            simplified: false,
+        };
+        // Every scan point lies beyond 12 ft: the first (forced) pass skips to the next
+        // reachable waypoint.
+        simplify_path_forward(&physics, actor, &mut goal, query, true);
+        assert_eq!(goal.next, 1);
+        // Near the corner, heading +X: the nearest point up the next leg is inside the
+        // 40-degree cone and replaces the corner; farther points are outside it.
+        goal.next = 0;
+        goal.feet = Vec3::new(100., 0., 0.);
+        simplify_path_forward(&physics, actor, &mut goal, query, false);
+        assert_eq!(goal.next, 0);
+        assert!((goal.route.feet[0] - Vec3::new(150., 36., 0.)).length() < 0.01);
+    }
+    #[test]
+    fn dynamic_links_take_their_initial_state_and_toggle() {
+        // Nodes 0-1-2 in a row (editor ids 0..2); a link entity turns 1-2 off, a
+        // controller box across 0-1 starts on.
+        let g = graph(
+            &[Vec3::ZERO, Vec3::new(200., 0., 0.), Vec3::new(400., 0., 0.)],
+            &[(0, 1), (1, 2)],
+        );
+        let entity = |pairs: &[(&str, &str)]| modkit_core::Entity {
+            properties: pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        };
+        let world = World {
+            entities: vec![
+                entity(&[
+                    ("classname", "info_node_link"),
+                    ("StartNode", "2"),
+                    ("EndNode", "1"),
+                    ("initialstate", "0"),
+                ]),
+                entity(&[
+                    ("classname", "info_node_link_controller"),
+                    ("origin", "100 0 0"),
+                    ("mins", "-8 -64 -64"),
+                    ("maxs", "8 64 64"),
+                    ("initialstate", "1"),
+                ]),
+                entity(&[
+                    ("classname", "info_node_link"),
+                    ("StartNode", "0"),
+                    ("EndNode", "2"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let mut r = NavRestrictions::from_world(&world, &g);
+        assert_eq!(r.dynamic[&0], [1]);
+        assert_eq!(r.dynamic[&1], [0]);
+        assert_eq!(r.missing_dynamic, 1);
+        assert_eq!(r.off_links, [1].into());
+        assert!(r.set_dynamic(0, true) && r.off_links.is_empty());
+        assert!(r.set_dynamic(1, false) && r.off_links == [0].into());
+        assert!(!r.set_dynamic(2, true));
     }
     fn graph(points: &[Vec3], edges: &[(usize, usize)]) -> Graph {
         Graph {
@@ -1456,5 +2054,29 @@ mod tests {
             assert!((track.duration().unwrap() - duration).abs() < 0.00001);
             println!("{style:?}: central owned root distance={distance}, duration={duration}");
         }
+    }
+    #[test]
+    fn tactical_searches_pick_the_nearest_cover_and_line_of_fire_nodes() {
+        // Synthetic chain of nodes along +X; node 0 under the NPC.
+        let points: Vec<Vec3> = (0..6).map(|i| Vec3::new(i as f32 * 100., 0., 0.)).collect();
+        let edges: Vec<(usize, usize)> = (0..5).map(|i| (i, i + 1)).collect();
+        let controller = Controller::new(Some(graph(&points, &edges)), NavRestrictions::default());
+        // Threat far behind (-X): every node is "cover" past x 250; the nearest wins.
+        let threat = Vec3::new(-1000., 0., 0.);
+        let cover = controller.find_cover_node(Vec3::ZERO, threat, 0., 1024., |p| p.x > 250.);
+        assert_eq!(cover, Some(Vec3::new(300., 0., 0.)));
+        // A threat ahead (+X 450): nodes nearer to it than 1/1.5 of their distance to us
+        // are not expanded, so the search cannot run through the threat.
+        let ahead = Vec3::new(450., 0., 0.);
+        let cover = controller.find_cover_node(Vec3::ZERO, ahead, 0., 1024., |p| p.x > 450.);
+        assert_eq!(cover, None);
+        // Line of fire: skips the start node, needs (min, max) to the threat.
+        let los = controller.find_los_node(Vec3::ZERO, ahead, 0., 300., |_| true);
+        assert_eq!(los, Some(Vec3::new(200., 0., 0.)));
+        let los = controller.find_los_node(Vec3::ZERO, ahead, 0., 1024., |p| p.x >= 500.);
+        assert_eq!(los, Some(Vec3::new(500., 0., 0.)));
+        assert!(Controller::new(None, NavRestrictions::default())
+            .find_los_node(Vec3::ZERO, ahead, 0., 1024., |_| true)
+            .is_none());
     }
 }

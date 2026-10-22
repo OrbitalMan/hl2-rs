@@ -105,6 +105,29 @@ pub struct LightingData {
     pub leaves: Vec<LightLeaf>,
     pub ambient: Vec<AmbientSample>,
     pub lights: Vec<WorldLight>,
+    /// The engine's per-map floor for dynamic-light minlight (`dynamic_minlight_floor`).
+    #[serde(default = "default_dynamic_minlight")]
+    pub dynamic_minlight: f32,
+}
+fn default_dynamic_minlight() -> f32 {
+    1.
+}
+/// Retail CMapLoadHelper::Init (engine.dll 0x101d7e30, reviewed privately) sets the
+/// minlight floor of dlight -> dworldlight_t per map: BSP version < 20 -> 0.078125;
+/// else from LUMP_MAP_FLAGS: LVLFLAGS_BAKED_STATIC_PROP_LIGHTING_NONHDR (0x100) ->
+/// 0.078125, _HDR (0x200) -> 0.01953125, neither -> 1/256; without the lump it keeps
+/// its previous value (1.0 initially). A material-system query (vtable +0xd8, likely
+/// InEditorMode) forces 1/256; it is false in ordinary play (inferred).
+pub fn dynamic_minlight_floor(bsp_version: u32, map_flags: Option<u32>) -> f32 {
+    if bsp_version < 20 {
+        return 0.078125;
+    }
+    match map_flags {
+        Some(f) if f & 0x100 != 0 => 0.078125,
+        Some(f) if f & 0x200 != 0 => 0.019_531_25,
+        Some(_) => 1. / 256.,
+        None => 1.,
+    }
 }
 
 /// studiohdr_t illumposition (model space) and flags.
@@ -144,9 +167,66 @@ pub struct ShaderLight {
 pub struct LightState {
     pub ambient: [Vec3; 6],
     pub lights: Vec<ShaderLight>,
-    /// World light indices kept as local lights, strongest selection first.
+    /// World light indices kept as local lights, strongest selection first;
+    /// `DYNAMIC_SOURCE` for a dynamic (entity) light added by `add_dynamic`.
     #[serde(default)]
     pub sources: Vec<usize>,
+    /// Selection importance of each local light: luminance(intensity) * ratio.
+    #[serde(default)]
+    pub importance: Vec<f32>,
+}
+/// Whether a dynamic light reaches the 32 x 32 x 128 light-cache cell around `point`
+/// (retail engine.dll 0x101d71a0 cell, 0x1026b870 squared box distance <= radius^2).
+pub fn dynamic_reaches(point: Vec3, light: &WorldLight) -> bool {
+    let cell = Vec3::new(32., 32., 128.);
+    let mins = (point / cell).floor() * cell;
+    let maxs = mins + cell;
+    let outside = (mins - light.origin)
+        .max(light.origin - maxs)
+        .max(Vec3::ZERO);
+    outside.length_squared() <= light.radius * light.radius
+}
+/// `LightState::sources` entry of a dynamic light.
+pub const DYNAMIC_SOURCE: usize = usize::MAX;
+
+/// The dlight_t fields an entity light (CL_AllocElight) carries into model lighting.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DynamicLight {
+    pub origin: Vec3,
+    pub radius: f32,
+    /// ColorRGBExp32.
+    pub color: [u8; 3],
+    pub exponent: i8,
+    pub minlight: f32,
+}
+impl DynamicLight {
+    /// Retail engine dlight -> dworldlight_t (engine.dll 0x101d9920, reviewed privately):
+    /// intensity = rgb * 2^exponent / 255, emit_point, radius >= 0.1, no constant or
+    /// linear term and quadratic = 1 / (radius^2 * max(minlight, floor)), so the light is
+    /// `minlight` times its intensity at its radius and grows as 1/d^2 inside it.
+    /// `floor` is `LightingData::dynamic_minlight`.
+    pub fn world_light(&self, floor: f32) -> WorldLight {
+        let scale = 2f32.powi(i32::from(self.exponent)) / 255.;
+        let radius = self.radius.max(0.1);
+        let minlight = if self.minlight <= floor {
+            floor
+        } else {
+            self.minlight
+        };
+        WorldLight {
+            origin: self.origin,
+            intensity: Vec3::from_array(self.color.map(f32::from)) * scale,
+            normal: Vec3::ZERO,
+            kind: EmitType::Point,
+            style: 0,
+            stopdot: 0.,
+            stopdot2: 0.,
+            exponent: 0.,
+            radius,
+            attenuation: [0., 0., 1. / (radius * minlight * radius)],
+            flags: 0,
+        }
+    }
 }
 
 fn luminance(c: Vec3) -> f32 {
@@ -359,13 +439,83 @@ impl LightingData {
                 add_to_cube(&mut state.ambient, light.intensity, direction, scale);
             }
         }
-        for (index, _) in kept {
+        for (index, lum) in kept {
             if let Some(shader) = shader_light(&self.lights[index]) {
                 state.lights.push(shader);
                 state.sources.push(index);
+                state.importance.push(lum);
             }
         }
         state
+    }
+    /// Retail ComputeDynamicLighting for one entity light (engine.dll 0x101d54a0 ->
+    /// 0x101d5cf0 with the dynamic flags): skipped when the light is farther than its
+    /// radius from the 32 x 32 x 128 light-cache cell around `point`; the ratio at
+    /// `point` is the bare falloff (no radius test, no visibility trace); the light
+    /// always takes a local slot, evicting the weakest light into the ambient cube.
+    pub fn add_dynamic(&self, state: &mut LightState, point: Vec3, light: &WorldLight) {
+        if !dynamic_reaches(point, light) {
+            return;
+        }
+        let delta = light.origin - point;
+        let distance_squared = delta.length_squared();
+        let [c, l, q] = light.attenuation;
+        let ratio = 1. / (q * distance_squared + l * distance_squared.sqrt() + c);
+        if !ratio.is_finite()
+            || ratio <= 0.
+            || light.intensity.max_element() * ratio < WORLD_LIGHT_MIN
+        {
+            return;
+        }
+        let Some(shader) = shader_light(light) else {
+            return;
+        };
+        let importance = luminance(light.intensity) * ratio;
+        if state.lights.len() < MAX_LOCAL_LIGHTS {
+            state.lights.push(shader);
+            state.sources.push(DYNAMIC_SOURCE);
+            state.importance.push(importance);
+            return;
+        }
+        // The eviction threshold is 100000 for dynamic lights instead of their own importance.
+        let Some(weakest) = state
+            .importance
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| **i < 100_000.)
+            .min_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(i, _)| i)
+        else {
+            return;
+        };
+        let old = std::mem::replace(&mut state.lights[weakest], shader);
+        let old_source = std::mem::replace(&mut state.sources[weakest], DYNAMIC_SOURCE);
+        let old_importance = std::mem::replace(&mut state.importance[weakest], importance);
+        let ratio = old_importance / luminance(old.color);
+        match self.lights.get(old_source) {
+            Some(world) if world.kind == EmitType::Sky => {
+                let direction = -world.normal;
+                add_to_cube(
+                    &mut state.ambient,
+                    world.intensity,
+                    direction,
+                    angular(world, direction) * ratio,
+                );
+            }
+            Some(world) => {
+                let direction = (world.origin - point).normalize_or_zero();
+                add_to_cube(
+                    &mut state.ambient,
+                    world.intensity,
+                    direction,
+                    angular(world, direction) * ratio,
+                );
+            }
+            None => {
+                let direction = (old.position - point).normalize_or_zero();
+                add_to_cube(&mut state.ambient, old.color, direction, ratio);
+            }
+        }
     }
     /// Draw-time ambient boost for models with STUDIOHDR_FLAGS_AMBIENT_BOOST.
     pub fn boost(&self, state: &mut LightState, origin: Vec3) {
@@ -586,6 +736,7 @@ mod tests {
             leaves: vec![leaf(0), leaf(1)],
             ambient: Vec::new(),
             lights: Vec::new(),
+            dynamic_minlight: 1.,
         }
     }
     fn point_light(origin: Vec3, intensity: f32) -> WorldLight {
@@ -663,6 +814,66 @@ mod tests {
         assert_eq!(data.state_at(Vec3::new(10., 0., 0.)), LightState::default());
     }
     #[test]
+    fn muzzle_elight_converts_and_always_takes_a_local_slot() {
+        // C_BaseAnimating::ProcessMuzzleFlashEvent: (255, 192, 64) exponent 5, radius 48.
+        let muzzle = DynamicLight {
+            origin: Vec3::new(10., 0., 20.),
+            radius: 48.,
+            color: [255, 192, 64],
+            exponent: 5,
+            minlight: 0.,
+        }
+        .world_light(1.);
+        assert!((muzzle.intensity - Vec3::new(32., 24.094118, 8.031373)).length() < 1e-4);
+        assert_eq!(muzzle.attenuation, [0., 0., 1. / 2304.]);
+        // HL2 BSP 20 maps with baked HDR static-prop lighting (0x200): 0.01953125.
+        assert_eq!(dynamic_minlight_floor(20, Some(0x200)), 0.019_531_25);
+        assert_eq!(dynamic_minlight_floor(20, Some(0x203)), 0.019_531_25);
+        assert_eq!(dynamic_minlight_floor(20, Some(0x100)), 0.078125);
+        assert_eq!(dynamic_minlight_floor(19, None), 0.078125);
+        assert_eq!(dynamic_minlight_floor(20, Some(0)), 1. / 256.);
+        let hdr = DynamicLight {
+            origin: Vec3::ZERO,
+            radius: 48.,
+            color: [255, 192, 64],
+            exponent: 5,
+            minlight: 0.,
+        }
+        .world_light(0.019_531_25);
+        assert_eq!(hdr.attenuation[2], 1. / (2304. * 0.019_531_25));
+        let mut data = split_world();
+        data.lights = (1..=4)
+            .map(|i| point_light(Vec3::new(10., 0., 100.), i as f32 * 1000.))
+            .collect();
+        let point = Vec3::new(10., 0., 0.);
+        let mut state = data.state_at(point);
+        assert_eq!(state.sources, vec![0, 1, 2, 3]);
+        assert_eq!(state.ambient[4], Vec3::ZERO);
+        data.add_dynamic(&mut state, point, &muzzle);
+        // The weakest world light (1000 / 100^2) moves into the +Z face.
+        assert_eq!(state.sources, vec![DYNAMIC_SOURCE, 1, 2, 3]);
+        assert!((state.ambient[4].x - 0.1).abs() < 1e-5);
+        assert_eq!(state.lights[0].attenuation, muzzle.attenuation);
+        // Ratio at the point: 48^2 / 20^2.
+        let lum = 32. * 0.299 + 24.094118 * 0.587 + 8.031373 * 0.114;
+        assert!((state.importance[0] - lum * 5.76).abs() < 1e-3);
+        // Beyond its radius from the 32 x 32 x 128 cell around the point: no effect.
+        let far = DynamicLight {
+            origin: Vec3::new(10., 0., 200.),
+            ..DynamicLight {
+                origin: Vec3::ZERO,
+                radius: 48.,
+                color: [255, 192, 64],
+                exponent: 5,
+                minlight: 0.,
+            }
+        }
+        .world_light(1.);
+        let before = state.clone();
+        data.add_dynamic(&mut state, point, &far);
+        assert_eq!(state, before);
+    }
+    #[test]
     fn ambient_cube_cleared_lights_skip_baked_lights_and_boost_dark_cubes() {
         let mut data = split_world();
         let mut baked = point_light(Vec3::new(10., 0., 100.), 1000.);
@@ -701,6 +912,7 @@ mod tests {
                 outer: 0.,
             }],
             sources: vec![0],
+            importance: vec![1.],
         };
         assert_eq!(state.ambient_light(Vec3::NEG_X), Vec3::Y);
         let up = state.vertex_light(Vec3::ZERO, Vec3::Z, false);
