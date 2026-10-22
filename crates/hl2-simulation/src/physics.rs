@@ -2486,6 +2486,25 @@ impl Physics {
         let e = aabb?.extents();
         Some(Vec3::new(e.x, e.y, e.z) / SCALE)
     }
+    /// The world-space box around the entity's colliders (units).
+    pub fn entity_world_bounds(&self, id: usize) -> Option<(Vec3, Vec3)> {
+        let colliders = self.entity_colliders.get(&id)?;
+        let mut aabb: Option<rapier3d::parry::bounding_volume::Aabb> = None;
+        for c in colliders {
+            if let Some(collider) = self.colliders.get(*c) {
+                let b = collider.compute_aabb();
+                aabb = Some(match aabb {
+                    Some(a) => a.merged(&b),
+                    None => b,
+                });
+            }
+        }
+        let a = aabb?;
+        Some((
+            Vec3::new(a.mins.x, a.mins.y, a.mins.z) / SCALE,
+            Vec3::new(a.maxs.x, a.maxs.y, a.maxs.z) / SCALE,
+        ))
+    }
     /// The entity's VPhysics body (map prop or bound runtime body).
     pub fn entity_body(&self, id: usize) -> Option<RigidBodyHandle> {
         self.dynamic.get(&id).copied()
