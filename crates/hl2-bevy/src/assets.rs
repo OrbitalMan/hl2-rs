@@ -1697,7 +1697,7 @@ mod owned_frag_replay {
             (hl2_ui::config::Antialiasing::None, 1, Msaa::Off),
             (hl2_ui::config::Antialiasing::X2, 2, Msaa::Sample2),
             (hl2_ui::config::Antialiasing::X4, 4, Msaa::Sample4),
-            (hl2_ui::config::Antialiasing::X8, 8, Msaa::Sample8),
+            (hl2_ui::config::Antialiasing::X8, 8, Msaa::Sample4),
         ] {
             assert_eq!(aa.samples(), expected_samples);
             assert_eq!(crate::video::msaa_for(aa), expected_msaa);

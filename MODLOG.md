@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-22 Safe clamp for Antialiasing sample count (avoid WebGPU/Metal sample count 8 crash)
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-bevy/src/video.rs`:
+  - Updated `msaa_for(Antialiasing) -> Msaa` to clamp `Antialiasing::X8` (and `X4`) to `Msaa::Sample4`.
+  - Added architectural documentation detailing WebGPU specification guarantees (`[1, 4]`) and Metal limits (`[1, 2, 4]`), which reject 8 samples for standard color (`Rgba8UnormSrgb`) and depth (`Depth32Float`) render targets.
+  - Updated unit tests `test_msaa_for_antialiasing` and `test_sync_antialiasing_updates_scene_cameras_and_leaves_present_camera_off` to assert `msaa_for(Antialiasing::X8) == Msaa::Sample4`.
+- `crates/hl2-bevy/src/assets.rs`:
+  - Updated `antialiasing_and_filtering_affect_fidelity_settings_and_samplers` to assert `msaa_for(Antialiasing::X8) == Msaa::Sample4`.
+- `STATUS.md`:
+  - Documented the WebGPU/Metal sample count limitation and safe clamping fix.
+
+**Why:** User bug report:
+Game crashed on launch with:
+"Caught rendering error: Validation Error
+Caused by:
+  In Device::create_texture, label = 'main_texture_sampled'
+    Sample count 8 is not supported by format Rgba8UnormSrgb on this device. The WebGPU spec guarantees [1, 4] samples are supported by this format. With the TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES feature your device supports [1, 2, 4]."
+When launched with 8x MSAA configured or recommended, wgpu/Metal failed texture allocation. Clamping `X8` to `Msaa::Sample4` prevents crashes while safely preserving multisampling across all supported backends.
+
+**Tested how:**
+- `bash scripts/checks/validate.sh`: 385 `hl2-ui` tests, 101 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) clean; `cargo fmt --check` clean.
+- `bash scripts/checks/check_windows.sh`: Windows cross-compilation target check passed.
+- Built release binary `bin/hl2-bevy` with `scripts/build-bevy.sh`.
+- Replay / capture test: `bin/hl2-bevy` ran 240 frames, successfully captured main menu screenshot to `artifacts/menu_capture.png`, and exited with status 0 and zero GPU validation errors.
+
+**Result:**
+`hl2-bevy` launches cleanly and safely initializes scene cameras with up to 4x MSAA without WebGPU/Metal validation crashes.
+
 ## 2026-10-22 Antialiasing mode and Filtering mode runtime rendering fidelity and performance impact
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

@@ -531,13 +531,18 @@ pub(crate) fn sync_present_mode(
 }
 
 /// Converts the UI antialiasing choice into Bevy's multisampling setting.
+///
+/// WebGPU specifications guarantee sample counts `[1, 4]`, and Metal supports `[1, 2, 4]`.
+/// Sample count 8 is not universally supported for color (`Rgba8UnormSrgb`) or depth (`Depth32Float`)
+/// textures and triggers fatal GPU validation errors during texture creation on many platforms
+/// (including Apple Silicon Metal). 8x antialiasing is therefore safely clamped to 4x MSAA
+/// (`Msaa::Sample4`).
 #[inline]
 pub fn msaa_for(aa: hl2_ui::config::Antialiasing) -> Msaa {
     match aa {
         hl2_ui::config::Antialiasing::None => Msaa::Off,
         hl2_ui::config::Antialiasing::X2 => Msaa::Sample2,
-        hl2_ui::config::Antialiasing::X4 => Msaa::Sample4,
-        hl2_ui::config::Antialiasing::X8 => Msaa::Sample8,
+        hl2_ui::config::Antialiasing::X4 | hl2_ui::config::Antialiasing::X8 => Msaa::Sample4,
     }
 }
 
@@ -1722,7 +1727,7 @@ mod tests {
         assert_eq!(msaa_for(hl2_ui::config::Antialiasing::None), Msaa::Off);
         assert_eq!(msaa_for(hl2_ui::config::Antialiasing::X2), Msaa::Sample2);
         assert_eq!(msaa_for(hl2_ui::config::Antialiasing::X4), Msaa::Sample4);
-        assert_eq!(msaa_for(hl2_ui::config::Antialiasing::X8), Msaa::Sample8);
+        assert_eq!(msaa_for(hl2_ui::config::Antialiasing::X8), Msaa::Sample4);
     }
 
     #[test]
@@ -1751,7 +1756,7 @@ mod tests {
         );
         assert_eq!(*app.world().get::<Msaa>(present_cam).unwrap(), Msaa::Off);
 
-        // Update config to 8X
+        // Update config to 8X (safely clamped to Sample4)
         app.world_mut()
             .resource_mut::<crate::ui_host::Console>()
             .source
@@ -1762,10 +1767,28 @@ mod tests {
 
         app.world_mut().run_system_once(sync_antialiasing).unwrap();
 
-        assert_eq!(*app.world().get::<Msaa>(scene_cam).unwrap(), Msaa::Sample8);
+        assert_eq!(*app.world().get::<Msaa>(scene_cam).unwrap(), Msaa::Sample4);
         assert_eq!(
             *app.world().get::<Msaa>(viewmodel_cam).unwrap(),
-            Msaa::Sample8
+            Msaa::Sample4
+        );
+        assert_eq!(*app.world().get::<Msaa>(present_cam).unwrap(), Msaa::Off);
+
+        // Update config to 2X
+        app.world_mut()
+            .resource_mut::<crate::ui_host::Console>()
+            .source
+            .config
+            .video
+            .advanced
+            .antialiasing = hl2_ui::config::Antialiasing::X2;
+
+        app.world_mut().run_system_once(sync_antialiasing).unwrap();
+
+        assert_eq!(*app.world().get::<Msaa>(scene_cam).unwrap(), Msaa::Sample2);
+        assert_eq!(
+            *app.world().get::<Msaa>(viewmodel_cam).unwrap(),
+            Msaa::Sample2
         );
         assert_eq!(*app.world().get::<Msaa>(present_cam).unwrap(), Msaa::Off);
     }

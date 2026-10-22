@@ -4,9 +4,17 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Antialiasing mode safe clamping for WebGPU/Metal sample count limits (`crates/hl2-bevy`):**
+  - Resolved fatal WebGPU/Metal texture validation crash (`Sample count 8 is not supported by format Rgba8UnormSrgb on this device`):
+    - WebGPU guarantees sample counts `[1, 4]`, and Metal supports `[1, 2, 4]`, rejecting 8 samples for standard color and depth attachments.
+    - Updated `crates/hl2-bevy/src/video.rs`: `msaa_for(Antialiasing)` now clamps `Antialiasing::X8` (and `X4`) safely to `Msaa::Sample4`.
+  - Verified tests & runtime:
+    - Unit tests: `test_msaa_for_antialiasing`, `test_sync_antialiasing_updates_scene_cameras_and_leaves_present_camera_off`, `antialiasing_and_filtering_affect_fidelity_settings_and_samplers`.
+    - Packaged game verification: `bin/hl2-bevy` ran 240 frames cleanly and captured `artifacts/menu_capture.png` with exit code 0.
+
 - **Antialiasing mode and Filtering mode runtime rendering fidelity & performance impact (`crates/hl2-ui`, `crates/hl2-bevy`):**
   - Connected Options > Video > Advanced Antialiasing mode and Filtering mode to Bevy multisampling and wgpu texture sampler descriptors:
-    - `Antialiasing` (`mat_antialias`): None maps to `Msaa::Off`, X2 maps to `Msaa::Sample2`, X4 maps to `Msaa::Sample4`, and X8 maps to `Msaa::Sample8`.
+    - `Antialiasing` (`mat_antialias`): None maps to `Msaa::Off`, X2 maps to `Msaa::Sample2`, X4 and X8 map safely to `Msaa::Sample4`.
     - `sync_antialiasing` system dynamically updates all 3D scene cameras (`FlyCamera`, `ViewmodelCamera`, `SkyCamera`, UI camera) to the active sample count while keeping `PresentCamera` at `Msaa::Off`.
     - `Filtering` (`mat_trilinear` / `mat_forceaniso`): Bilinear sets `mipmap_filter = Nearest, aniso = 1`; Trilinear sets `mipmap_filter = Linear, aniso = 1`; Anisotropic 2X, 4X, 8X, 16X set `mipmap_filter = Linear, aniso = 2, 4, 8, 16`.
     - `apply_filtering_to_images` and `sync_filtering` dynamically update material texture sampler descriptors in `Assets<Image>`, keeping nearest glyph caches and 1x presentation quad samplers intact.
