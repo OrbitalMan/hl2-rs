@@ -1,5 +1,9 @@
 # Design
 
+## Offline research continuation boundary (2026-10-22)
+
+The sealed pickup/dispatch handoff connects named crate settings, use/frame/target dispatch, saved carry state, target requests and error consumer/writer dataflow. It establishes no dynamic callback ordering or solver fidelity. Any next virtual implementation investigation must first bind a concrete class/module/hash/address and reuse existing server-integration evidence; a missing binding stops that line. No full corpus/solver expansion or automatic native replay is authorized by this checkpoint. Precise continuation and final receipt are in private work/publishing/research-pickup-dispatch-continuation-20261022j.md and research-pickup-dispatch-closeout-20261022j.json.
+
 ## Grab callback dataflow and evidence accounting (2026-10-22)
 
 The selected grab callback copies stored target parameters, passes that copy/arrival/callback float into a physics interface, stores its returned scalar as arrival, then adds the callback argument to errorTime. Arrival and errorTime remain distinct fields. This closes the bounded static producer/consumer link with the error query, while actual callback interleaving and physics law stay untested. Zero output vectors do not imply zero motion: earlier physics calls remain explicit boundaries.

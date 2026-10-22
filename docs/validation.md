@@ -1,5 +1,9 @@
 # Local validation — 2026-10-05
 
+## Offline research final publication boundary (2026-10-22)
+
+Final private closeout checks scoped documentation-only commits, unchanged whitelist, published HEAD against the actual branch remote, empty staged index/clean tree and private handoff/navigator/seal hashes. See research-pickup-dispatch-closeout-20261022j.json. Root and navigator acceptance commands above establish static provenance; publication checks establish Git hygiene only. No Rust tests/builds, native launches/captures, actual motion/break/exit or Rust parity were tested.
+
 ## Callback writer and navigator acceptance (2026-10-22)
 
 Run private python -B scene-grab-error-writer-20261022v/verify_seal.py for24 retained files/21 externals, one new/four reused exact bodies,117 byte records and selected class/registration/field spans. Run publishing/verify-pickup-dispatch-index-20261022j.py for13 roots/57 distinct bodies/63 per-root identity occurrences/64 source paths/five navigation-only occurrences. Builder gated every selected root's seal; independent navigator acceptance rechecks closed sets, exact DB BLOBs, source hashes, full pagination, reused/resource-only filters and rejected arguments. Do not rerun producers into frozen roots.

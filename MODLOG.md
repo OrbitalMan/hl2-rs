@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 Codex offline research handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list and queued_damage are credited in their milestone entries; all worker tasks completed.
+
+**Changed / Why:** Recorded precise private pickup/dispatch continuation and lean prompt, sealed evidence inventory, preserved failures/gaps and offline-only next step.
+
+**Tested how / Result:** All13 seals and independent navigator checks pass; final closeout records scoped docs, clean index/tree, actual remote HEAD and private artifact hashes after commit/push. Inventory57 distinct/63 per-root body identities/64 source paths includes five navigation-only occurrences.
+
+**Still broken or not tested / Next:** Native ordering/physics/carry/window/exit and Rust parity untested, first_map_finished:false. Follow the private continuation, preserve the owner's running game and Claude's implementation, and revalidate before any new bounded discovery.
+
 ## 2026-10-22 offline callback-writer and navigator milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material worker queued_damage completed V, inherited model family/exact identifier unavailable; primary reviewed/sealed V and built/independently checked the navigator.

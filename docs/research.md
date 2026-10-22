@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Pickup/dispatch handoff receipt (2026-10-22)
+
+Private research-pickup-dispatch-continuation-20261022j.md and next-research-prompt-20261022j.txt retain all13 sealed roots, provenance, failures, original native state/gaps, query commands and bounded next work. research-pickup-dispatch-closeout-20261022j.json records final publication/remote/tree/index/quota and artifact hashes after push. Historical D..H66/69/startup gaps and I remain separate from J..V57/63 inventory. No new native or Rust parity evidence was produced.
+
 ## Sealed callback writer and finite private navigator (2026-10-22)
 
 V scene-grab-error-writer-20261022v uses the known pickup factory, raw constructor vptr and RTTI/slot0 to bind one new exact callback, plus four reused exact bodies. Its117 byte records include106 callback-window and11 rejected-preview records; only complete cited sites support claims. Two finite navigation operations/six pointer spans/21 externals and the retained RTTI-length verifier failure are checked; no solver helper or exact constructor body was added.

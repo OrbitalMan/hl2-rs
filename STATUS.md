@@ -1,5 +1,11 @@
 # STATUS
 
+## Codex offline research handoff (2026-10-22)
+
+Current private continuation: work/publishing/research-pickup-dispatch-continuation-20261022j.md; lean prompt: next-research-prompt-20261022j.txt; final publication/remote/tree/quota receipt: research-pickup-dispatch-closeout-20261022j.json in the same directory. J..V are sealed13 roots/361 retained files,57 distinct exact bodies/63 per-root identity occurrences/64 export paths/five navigation-only occurrences. These are inventory counts, not semantic/runtime completion. Native material/tools remain outside Git; reviewed docs are committed/pushed.
+
+Keep the owner's running game undisturbed: offline only until that constraint is explicitly lifted. No native/process/UI/input or Rust actions occurred. Actual input/callback order, current physics/units, carry/throw/window break/crossing/exit, ordinary campaign completion and Rust parity **not tested**. first_map_finished:false; original scene gaps and separate legacy missing startup procedures preserved. Next optional static boundary is the concrete physics virtual implementation, only after exact class/module binding and reuse of existing evidence.
+
 ## Offline grab callback and evidence navigator checkpoint (2026-10-22)
 
 The class/slot-bound grab callback now connects stored target/arrival parameters to the selected physics virtual and adds its float argument to errorTime. This supplies a static replenishment writer for the separately verified error consumer/reset. Actual callback ordering, cadence, solver behavior, units and motion remain untested. V is sealed24 retained files/21 external bindings; one new exact body/four reused, with raw constructor/RTTI spans excluded from body counts.
