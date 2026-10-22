@@ -10,6 +10,16 @@
 
 **Still broken or not tested / Next:** Dense trace gap1376..1673, unfinished storage continuation and a stopped control replay remain rejected/partial. Follow the measured clear queue lane and repeat SECTION observation with bounded sampled groups and a fresh uninstrumented control. Full playback, exit and Rust parity remain untested; canonical16 gaps remain.
 
+## 2026-10-22 session 30, part 2: particle runtime (burning props), burning zombies, ragdoll keyvalues (`wip/squads-20261022`)
+
+- Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.
+- Changed: VTF sheet reader; `pcf_runtime` (PCF systems with children, burning_fx operator subset, sheet-animated sprites, SpriteCard overbright, lock to model center) drawn through the effect quads; burning props start/stop burning_character; zombie fire rules, Ignite inputs, on-fire activities; `phy::ragdoll` KeyValues reader.
+- Why: prompt step 2 (flame visuals), owner question about ragdolls.
+- Tested how: owned tests (sheet layout, burning_character runtime, NPC ragdolls), hl2-simulation 354 unit tests, strict Clippy/fmt, packaged barrel-burn and zombie-burn, native oracle burning barrel A/B (burn-native-vs-ours.png), regression artifacts/s30-regression-b.
+- Result: see STATUS "Current session 30".
+- Still broken or not tested: operators follow PCF parameter names (closed particle library not decompiled); smoke dual sequence/frame blending, warp/pre-age, scorch, burning ragdolls; ragdoll geometry/joints/death spawn.
+- Next: owner playtest; ragdolls (b)-(c) or particle operator decompiles per the owner.
+
 ## 2026-10-22 session 30: NPC retargeting (ChooseEnemy), can cop reaction/walk-off (actbusy), speech-only scenes keep AI, citizen die voice gender, F4 citizen heads (`wip/squads-20261022`)
 
 - Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.
