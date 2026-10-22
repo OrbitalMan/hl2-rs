@@ -88,7 +88,8 @@ Claude Code desktop, `claude-opus-5-5`. No subagents. Branch `wip/squads-2026102
 
 Open (next, in order):
 - Owner playtest of session 30 (retargeting, can throw/pass/walk-off, voices, F4 citizens); native A/B of the can throw (one hit or several); merge wip/squads-20261022 into main when the owner agrees.
-- Ragdolls (owner question): step (a) keyvalues done; next multi-solid geometry, joints, death spawn (DESIGN 14n session 30 (11)).
+- **Performance report (@OrbitalMan via the owner, 2026-10-22, not reproduced):** after the can cop chased him to the street ladder and swung, FPS dropped to ~4 until the cop was killed (low settings). Checked: no movement-goal leak (npc_goals stays at 2 in the dense chase run). Leading hypothesis (untested): the chase loop re-selects SCHED_CHASE_ENEMY every think while m_flChasePlayerTime runs and rebuilds the chase path each time; against an unreachable player (on/near a ladder) each failed search explores the whole node graph ~10 times a second. SDK mitigation not ported: m_UnreachableEnts / RememberUnreachable + COND_ENEMY_UNREACHABLE and the fail schedules. Next: reproduce with a ladder-side fixture and a per-think path-search counter/timer, then port the unreachable memory.
+- Ragdolls (owner question): step (a) done (keyvalues + per-bone solid geometry `phy::read_solids`; ledge client data looks like the bone index, unverified); next joints and death spawn (DESIGN 14n session 30 (11)).
 - Particles: decompile the retail operators used by burning_fx (client.dll links the particle library) and replace the parameter-name guesses; dual sequences/frame blending; then other PCF effects (blood_impact, fire_01, rocket_fx).
 - Then natural attacks (fast zombie, headcrabs: need ragdolls for crab release), cop chatter rate, session 28 leftovers.
 
