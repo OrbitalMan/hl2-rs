@@ -172,13 +172,13 @@ pub fn read_dmx(data: &[u8]) -> Result<Vec<Element>> {
             attributes: Vec::new(),
         });
     }
-    for element in 0..element_count {
+    for element in &mut elements {
         let n = r.count(4096, "attribute")?;
         for _ in 0..n {
             let name = string(&mut r)?;
             let kind = r.u8()?;
             let value = r.value(kind, element_count)?;
-            elements[element].attributes.push((name, value));
+            element.attributes.push((name, value));
         }
     }
     Ok(elements)
