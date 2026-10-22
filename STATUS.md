@@ -1,5 +1,11 @@
 # STATUS
 
+## Natural customs, pen and Barney introduction (2026-10-22, research only)
+
+A controlled ordinary native route now reaches the train crossing,turnstile,customs queue,security pen and Barney corridor. Two selected instrumented windows retain25 requested choreography controllers,168 requests/166 accepted nested starts,2183 events/1005 paired calls and164 original-BSP caller/output joins. Actual controller generations and accepted actor/model generations reconstruct from raw bytes. Genuine directing/takeaway,pen and security_intro_01/01b requests are observed. security_intro_01b remains flagged playing about89.220 game seconds after acceptance;individual loop rewinds/audio replay are not validated.
+
+Three initial Barney actor reads remain rejected after a cached-slot mismatch;a later V2 lookup independently binds barney/models/barney.mdl. Three unscoped output-only records also remain unpromoted. The pen trigger's first delayed request retains its unnamed*49 caller;three later requests have null caller but retain the player activator. This is observed argument state,not an event-queue implementation proof. Scoped OnStart uses scene self/self/0. Private acceptance/query: ../../work/hl2-decompiled/scene-customs-route-20261022;seal461 files/33 bindings,ten exact bodies,54 player snapshots and4416 motion samples. Owned game closed,Frida detached,checked installed identities unchanged. Full playback,SECTION recovery,helmet reveal,map exit and Rust parity remain **not tested**. Next: genuine doorway/room transition with fresh scoped output identity. Handoff: ../../work/publishing/research-customs-pen-continuation-20261022.md. Reviewed research docs committed;Rust implementation remains separate.
+
 ## Native first-map grate crossing (2026-10-22, research only)
 
 The prior y=-1969.96875 stop now has a bounded explanation and crossing. Original BSP world brush2040 has grate contents0x18000008 and bounds x[-5414,-5296],y[-1988,-1986],z[16,48]. Live player bounds are (-16,-16,0)..(16,16,72); the predicted near boundary matches the native stop with0.03125 separation. A fresh process without Frida again stops there under moveright, then crosses with moveright+jump and lands beyond it at(-5367.256348,-2155.968994,-31.96875). Sampled peak56.426250 and feet48.03125 across the brush are raw-state evidence, not a general jump-law claim.

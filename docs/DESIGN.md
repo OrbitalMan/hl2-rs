@@ -1,5 +1,13 @@
 # Design
 
+## Native customs/pen route: input and output context (2026-10-22)
+
+The new instrumented route observes25 authored choreography controller names and genuine customs/pen/Barney introduction requests. Current controller and accepted actor slot/serial/table identities are checked.164 caller-name/output relationships independently join the original BSP. Start acceptance remains separate from complete scene playback;the first pen actor generation was rejected and a later fresh lookup supplies only a later-phase Barney binding.
+
+Preserve input identity across delayed outputs carefully: security_freeze receives the player and still-valid unnamed trigger model*49 (BSP358);weapon_point_1/2 and security_pen_01 later receive the player but null caller. Their relative timings corroborate the authored0.1/0.3/0.4/5.9-second chain. The mechanism of caller invalidation and full queue dispatch remain unobserved. Native scoped OnStart uses the scene as activator/caller with delay0. Do not blindly propagate the incoming player or an expired earlier caller into that output.
+
+Three stale actor reads and three cached-name output-only records remain unpromoted. Future observation must bind output identity to a matching active playback call and live generation. security_intro_01b remains flagged playing about89.220 game seconds after acceptance,which is bounded continuation evidence rather than individual rewind/audio proof. The next research step is the natural doorway/SECTION transition before helmet reveal. Private sealed supplement/query guide: ../../work/hl2-decompiled/scene-customs-route-20261022/CLAUDE-START-HERE.md. No Rust parity or full-map completion claim.
+
 ## First-map grate crossing and input telemetry (2026-10-22, research only)
 
 The prior train-side blocker is authored world brush2040: grate bit0x8, x[-5414,-5296],y[-1988,-1986],z[16,48]. Its +Y plane distance-1986 and the live16-unit player half-width predict the retained center boundary-1970; native separation is0.03125. A no-Frida route with actual moveright/jump input crosses at feet48.03125 and lands beyond at z=-31.96875. Preserve the authored brush rather than inferring that the stopped player proves broken input or deleting collision. This finite correspondence does not certify the full Source collision/jump/step law.

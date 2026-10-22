@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 natural customs, security pen and Barney introduction research
+
+**Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Added a sealed private native-route supplement and paged implementation-review guide;updated shared research documentation. Observed actual authored requests/actor bindings instead of advancing the second map or seeding campaign actors. No Rust implementation changes.
+
+**Tested how / Result:** Ten exact bodies,six relocated entries per script,2183 selected events/1005 pairs,25 controller names,168 requests/166 accepted nested starts and164 authored caller joins pass.54 player snapshots and4416 motion samples retain the ordinary route to Barney's introduction. Seal461 files/33 bindings and five query cases pass. Three actor reads,three unscoped outputs and one empty input guard capture remain unpromoted. Game closed,Frida detached,checked installed identities unchanged. Reviewed documentation committed separately.
+
+**Still broken or not tested / Next:** No full scene/SECTION/helmet reveal/exit or Rust parity validation. Continue the natural doorway/room transition with fresh output identity and actor readiness;preserve16 gaps and missing exact procedures. Private handoff research-customs-pen-continuation-20261022.md.
+
 ## 2026-10-22 native grate crossing and player input evidence
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.

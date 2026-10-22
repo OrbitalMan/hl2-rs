@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Natural customs, pen and introduction supplement (2026-10-22)
+
+Private ../../work/hl2-decompiled/scene-customs-route-20261022/CLAUDE-START-HERE.md joins25 observed choreography controllers to the sealed authored base.168 requests/166 accepted nested starts,2183 events/1005 pairs,164 original-BSP caller joins and raw controller/actor generations pass acceptance. A genuine route spawned Barney and reached security_intro_01/01b. Three stale-slot actor reads and three unscoped output records remain explicitly unpromoted;later binding never repairs an earlier timestamp. Selected pen inputs show a valid player activator with a null caller after the initial*49 trigger request. Full event-queue mechanics,scene playback and Rust parity remain untested. Raw/seal acceptance passes461 files/33 bindings;game closed and checked installed identities unchanged. Latest handoff: ../../work/publishing/research-customs-pen-continuation-20261022.md. Stay on the first map and preserve16 gaps.
+
 ## Measured first-map grate crossing (2026-10-22)
 
 Private ../../work/hl2-decompiled/scene-doorway-route-20261022/README.md resolves the retained side boundary to world brush2040 and records a fresh no-Frida moveright/jump crossing. One exact server.dll baseline/original metadata initializer and six live/PE input-field bindings support617 raw motion samples across eight captures, preserving the rejected direct-button path. Both native collision bounds and brush planes independently decode from retained bytes. Verification/seal pass99 private files/seven external bindings. Full train-exit route, scene playback, first-map completion and Rust parity remain untested; customs/security research continues separately. Reviewed shared documentation is committed; raw research remains private.
