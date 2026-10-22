@@ -34,12 +34,33 @@ pub struct Ragdolls {
     /// Deaths without a ragdoll (no .phy ragdoll, rig or instance).
     pub skipped: u32,
     pub removed: u32,
+    /// Every NPC's origin at the previous tick (its root velocity at death).
+    last_origins: BTreeMap<usize, Vec3>,
 }
 
 impl Ragdolls {
+    /// RagdollApplyAnimationAsVelocity approximated by root motion: each NPC's origin
+    /// change over the last tick, for the ragdolls of NPCs that die on the next one.
+    pub fn track(&mut self, world: &World, scene: &Scene) {
+        self.last_origins.clear();
+        for (id, entity) in world.entities.iter().enumerate() {
+            if entity.class().starts_with("npc_") {
+                if let Some(state) = scene.states.get(id).filter(|s| !s.killed) {
+                    self.last_origins.insert(id, state.origin);
+                }
+            }
+        }
+    }
     /// RagdollCreate for an NPC killed this tick: bodies at their bones' current world
     /// matrices, the death force (scene.npc_death_forces) on the solid nearest the hit.
-    pub fn spawn(&mut self, world: &World, scene: &mut Scene, physics: &mut Physics, id: usize) {
+    pub fn spawn(
+        &mut self,
+        world: &World,
+        scene: &mut Scene,
+        physics: &mut Physics,
+        id: usize,
+        dt: f32,
+    ) {
         let Some(instance) = world.model_instances.iter().find(|i| i.entity == Some(id)) else {
             self.skipped += 1;
             return;
@@ -77,8 +98,15 @@ impl Ragdolls {
                 (translation, rotation.normalize())
             })
             .collect();
+        // Root velocity over the last tick (a teleport or respawn is not motion).
+        let velocity = self
+            .last_origins
+            .get(&id)
+            .map(|last| (state.origin - *last) / dt.max(1e-3))
+            .filter(|v| v.length() < 1000.)
+            .unwrap_or(Vec3::ZERO);
         self.serial += 1;
-        let bodies = physics.spawn_ragdoll(world, model, &poses, Vec3::ZERO, self.serial);
+        let bodies = physics.spawn_ragdoll(world, model, &poses, velocity, self.serial);
         if bodies.len() != model.bodies.len() {
             physics.remove_ragdoll(&bodies);
             self.skipped += 1;

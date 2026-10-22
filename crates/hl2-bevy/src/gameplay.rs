@@ -606,8 +606,10 @@ impl Gameplay {
         // Event_Killed -> BecomeRagdollOnClient before the weapon leaves the hand.
         for &npc in &deaths {
             let world = self.world.clone();
-            self.ragdolls.spawn(&world, &mut self.scene, physics, npc);
+            self.ragdolls
+                .spawn(&world, &mut self.scene, physics, npc, TICK);
         }
+        self.ragdolls.track(&self.world, &self.scene);
         self.scene.npc_death_forces.clear();
         for npc in deaths {
             let Some(class) = self.ai.weapon_class(npc) else {
