@@ -17,6 +17,7 @@ use super::relationships::{classify, Class, Disposition, Relationships};
 use super::schedule::{AiNpc, Behavior, Context, Schedules};
 use super::senses::{self, SightWorld, SoundEnt, Viewer};
 use super::state::{select_ideal_state, NpcState, StateInputs};
+use super::zombie::{self, Zombie};
 use crate::{
     entities::Scene,
     npc::{Controller, GoalKey},
@@ -269,6 +270,7 @@ pub struct MeleeHit {
 pub enum AiClass {
     Metropolice(Box<Metropolice>),
     Humanoid(Box<Humanoid>),
+    Zombie(Box<Zombie>),
 }
 impl AiClass {
     pub fn cop(&self) -> Option<&Metropolice> {
@@ -294,12 +296,14 @@ impl AiClass {
         match self {
             Self::Metropolice(cop) => cop.assault.as_ref(),
             Self::Humanoid(h) => h.assault.as_ref(),
+            Self::Zombie(z) => z.assault.as_ref(),
         }
     }
     pub fn assault_mut(&mut self) -> &mut Option<assault::Assault> {
         match self {
             Self::Metropolice(cop) => &mut cop.assault,
             Self::Humanoid(h) => &mut h.assault,
+            Self::Zombie(z) => &mut z.assault,
         }
     }
     /// The aiscripted_schedule goal (position, run).
@@ -307,24 +311,28 @@ impl AiClass {
         match self {
             Self::Metropolice(cop) => cop.script_goal,
             Self::Humanoid(h) => h.script_goal,
+            Self::Zombie(z) => z.script_goal,
         }
     }
     fn script_goal_mut(&mut self) -> &mut Option<(Vec3, bool)> {
         match self {
             Self::Metropolice(cop) => &mut cop.script_goal,
             Self::Humanoid(h) => &mut h.script_goal,
+            Self::Zombie(z) => &mut z.script_goal,
         }
     }
     fn requests_mut(&mut self) -> &mut Vec<CopRequest> {
         match self {
             Self::Metropolice(cop) => &mut cop.requests,
             Self::Humanoid(h) => &mut h.requests,
+            Self::Zombie(z) => &mut z.requests,
         }
     }
     fn behavior_mut(&mut self) -> &mut dyn Behavior {
         match self {
             Self::Metropolice(cop) => cop.as_mut(),
             Self::Humanoid(h) => h.as_mut(),
+            Self::Zombie(z) => z.as_mut(),
         }
     }
     /// m_flFieldOfView.
@@ -332,6 +340,7 @@ impl AiClass {
         match self {
             Self::Metropolice(_) => METROPOLICE_FOV,
             Self::Humanoid(h) => h.kind.field_of_view(),
+            Self::Zombie(_) => zombie::FIELD_OF_VIEW,
         }
     }
     /// GetSoundInterests.
@@ -339,6 +348,11 @@ impl AiClass {
         match self {
             Self::Metropolice(_) => METROPOLICE_SOUNDS,
             Self::Humanoid(h) => h.kind.sound_interests(),
+            // CAI_BaseNPC::GetSoundInterests (SOUND_PLAYER_VEHICLE has no source here).
+            Self::Zombie(_) => {
+                use super::senses::sound;
+                sound::WORLD | sound::COMBAT | sound::PLAYER | sound::BULLET_IMPACT
+            }
         }
     }
 }
@@ -395,9 +409,28 @@ pub struct AiActor {
     enemy_eluded: bool,
     #[serde(skip)]
     death_spoken: bool,
+    /// CAI_BaseNPC m_SquadName (the `squadname` keyvalue) until InitSquad joins it.
+    #[serde(skip)]
+    squad_name: Option<String>,
+    /// The squad joined (CAI_SquadManager::FindCreateSquad).
+    pub squad: Option<String>,
+    /// SetEnemy by SquadNewEnemy since the last think (COND_NEW_ENEMY).
+    #[serde(skip)]
+    squad_new_enemy: bool,
+    /// ChooseEnemy's serial and fail timer.
+    #[serde(skip)]
+    choose: super::enemy_choice::ChooseState,
+    /// CNPC_MetroPolice m_nIdleChatterType (COP_CHATTER_*).
+    pub idle_chatter: u8,
+    /// bits_MEMORY_PLAYER_HARASSED.
+    #[serde(skip)]
+    harassed: bool,
     /// CNPC_Combine::m_flStopMoveShootTime.
     #[serde(skip)]
     stop_move_shoot: Option<f64>,
+    /// m_flNextDecisionTime for the idle sound roll (UpdateEfficiency's interval).
+    #[serde(skip)]
+    next_idle_decision: f64,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Diagnostics {
@@ -419,6 +452,14 @@ pub struct Diagnostics {
     pub bullet_hits_on_player: u64,
     /// Player-ally concepts by outcome ("TLK_WOUND:spoken", "TLK_STARTCOMBAT:semaphore").
     pub ally_speech: BTreeMap<String, u32>,
+    /// Sentence groups spoken, and those MatchesCriteria refused (e.g. IN_SQUAD lines of
+    /// an NPC without a squad of two).
+    pub sentence_groups: BTreeMap<String, u32>,
+    pub criteria_refused: BTreeMap<String, u32>,
+    /// Squad events: joins, deaths, SquadNewEnemy enemies given, memories shared.
+    pub squad_events: BTreeMap<String, u32>,
+    /// g_interactionHitByPlayerThrownPhysObj dispatches.
+    pub thrown_object_hits: u64,
 }
 #[derive(Serialize)]
 pub struct AiRuntime {
@@ -443,6 +484,10 @@ pub struct AiRuntime {
     combine_kick_damage: f32,
     /// sk_combine_guard_kick (the elite's SetKickDamage).
     combine_guard_kick_damage: f32,
+    /// sk_zombie_dmg_one_slash (every claw event; the ConVar default is 0).
+    zombie_slash_damage: f32,
+    /// sk_zombie_poison_dmg_spit (the poison zombie's bite).
+    zombie_poison_spit_damage: f32,
     /// NPC weapon definitions (installed scripts and skill.cfg).
     #[serde(skip)]
     weapon_defs: BTreeMap<String, NpcWeaponDef>,
@@ -509,6 +554,124 @@ pub struct AiRuntime {
     pub relationship_overrides: BTreeMap<(usize, usize), Disposition>,
     #[serde(skip)]
     applied_relationships: BTreeMap<usize, Vec<(usize, usize)>>,
+    /// CAI_SquadManager: squads by name.
+    pub squads: BTreeMap<String, super::squad::Squad>,
+    /// scripts/actbusy.txt busy animations (activity entries).
+    #[serde(skip)]
+    busy_anims: Vec<super::actbusy::BusyAnim>,
+    /// The map's info_node_hint entities (CAI_HintManager's hints).
+    #[serde(skip)]
+    busy_hints: Vec<super::actbusy::HintCandidate>,
+    /// CAI_Hint::Lock: hint entity -> the NPC using it.
+    pub hint_locks: BTreeMap<usize, usize>,
+    /// ai_goal_actbusy busysearchrange (SetBusySearchRange changes it).
+    actbusy_ranges: BTreeMap<usize, f32>,
+    /// Squad work a think asked for (applied right after it).
+    #[serde(skip)]
+    squad_events: Vec<SquadEvent>,
+    /// IdleSound lines a think chose (spoken right after it).
+    #[serde(skip)]
+    idle_lines: Vec<IdleLine>,
+}
+/// METROPOLICE_CHATTER_WAIT_FOR_RESPONSE / ASK_QUESTION / RESPONSE (+ the question type).
+const COP_CHATTER_WAIT_FOR_RESPONSE: u8 = 0;
+const COP_CHATTER_ASK_QUESTION: u8 = 1;
+const COP_CHATTER_RESPONSE: u8 = 2;
+/// An IdleSound line and what speaking it changes (only when Speak succeeds).
+#[derive(Clone, Copy, Debug)]
+struct IdleLine {
+    id: usize,
+    group: &'static str,
+    then: IdleThen,
+}
+#[derive(Clone, Copy, Debug)]
+enum IdleThen {
+    Nothing,
+    /// g_fCombineQuestion.
+    CombineQuestion(u8),
+    /// Remember (and SquadRemember) bits_MEMORY_PLAYER_HARASSED.
+    CopHarassed,
+    /// The squadmates answer this question type; the asker waits.
+    CopAsked(u8),
+    /// The squadmates may ask again.
+    CopAnswered,
+}
+/// CAI_Squad calls a member's think makes on the others.
+#[derive(Clone, Debug)]
+enum SquadEvent {
+    /// CAI_Squad::UpdateEnemyMemory: a first-hand sighting shared with the squad.
+    Memory {
+        squad: String,
+        from: usize,
+        enemy: usize,
+        position: Vec3,
+    },
+    /// CAI_Squad::SquadNewEnemy (SelectIdealState, idle/alert with COND_NEW_ENEMY).
+    NewEnemy { squad: String, enemy: usize },
+}
+/// SentenceCriteria_t of a CAI_SentenceBase::Speak call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Criteria {
+    Always,
+    /// Obeys the gag spawnflag outside combat.
+    Normal,
+    /// The default: a squad of more than one.
+    InSquad,
+    SquadLeader,
+}
+/// The criteria npc_metropolice.cpp, ai_behavior_police.cpp and npc_combine.cpp pass for
+/// each sentence group (Speak's default is SENTENCE_CRITERIA_IN_SQUAD).
+fn sentence_criteria(group: &str) -> Criteria {
+    if group.starts_with("METROPOLICE_PAIN")
+        || matches!(
+            group,
+            "METROPOLICE_DIE"
+                | "METROPOLICE_ON_FIRE"
+                | "METROPOLICE_HIT_BY_PHYSOBJECT"
+                | "COMBINE_PAIN"
+                | "COMBINE_TAUNT"
+                | "COMBINE_COVER"
+                | "COMBINE_DIE"
+        )
+    {
+        Criteria::Always
+    } else if [
+        "METROPOLICE_MOVE_ALONG",
+        "METROPOLICE_BACK_UP",
+        "METROPOLICE_DANGER",
+        "METROPOLICE_IDLE_HARASS_PLAYER",
+    ]
+    .iter()
+    .any(|g| group.starts_with(g))
+        || matches!(
+            group,
+            "METROPOLICE_MANHACK_KILLED"
+                | "METROPOLICE_LAST_OF_SQUAD"
+                | "METROPOLICE_FREEZE"
+                | "METROPOLICE_OVER_HERE"
+                | "METROPOLICE_HES_RUNNING"
+                | "METROPOLICE_TAKE_HIM_DOWN"
+                | "METROPOLICE_ARREST_IN_POS"
+                | "METROPOLICE_COVER_HEAVY_DAMAGE"
+                | "METROPOLICE_ACTIVATE_BATON"
+                | "METROPOLICE_DEACTIVATE_BATON"
+                | "COMBINE_LAST_OF_SQUAD"
+                | "COMBINE_GREN"
+                | "COMBINE_DANGER"
+        )
+    {
+        Criteria::Normal
+    } else if matches!(
+        group,
+        "METROPOLICE_SO_BEGIN"
+            | "METROPOLICE_SO_END"
+            | "METROPOLICE_AS_ADV_RALLY"
+            | "METROPOLICE_AS_ADV_ASSAULT"
+    ) {
+        Criteria::SquadLeader
+    } else {
+        Criteria::InSquad
+    }
 }
 /// A pair-keyed map as a list of (subject, target, value) for the JSON report.
 fn serialize_pairs<S: serde::Serializer, V: Serialize>(
@@ -570,6 +733,7 @@ fn sentence_priority(group: &str) -> i32 {
                 | "COMBINE_COVER"
                 | "COMBINE_DIE"
                 | "COMBINE_PLAYERHIT"
+                | "COMBINE_LAST_OF_SQUAD"
         )
     {
         -1
@@ -593,10 +757,52 @@ impl AiRuntime {
         super::police::add_schedules(&mut schedules);
         super::metropolice::add_schedules(&mut schedules);
         humanoid::add_schedules(&mut schedules);
+        zombie::add_schedules(&mut schedules);
+        super::actbusy::add_schedules(&mut schedules);
+        let busy_anims = vfs
+            .and_then(|vfs| vfs.read("scripts/actbusy.txt").ok().flatten())
+            .map(|text| super::actbusy::parse_busy_anims(&String::from_utf8_lossy(&text)))
+            .unwrap_or_default();
+        let busy_hints = world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.class() == "info_node_hint")
+            .map(|(id, e)| {
+                let int = |k: &str| e.get(k).and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+                super::actbusy::HintCandidate {
+                    entity: id,
+                    origin: e.origin(),
+                    yaw: yaw_keyvalue(e),
+                    hint_type: int("hinttype"),
+                    group: e.get("Group").unwrap_or("").trim().to_owned(),
+                    activity: e.get("hintactivity").unwrap_or("").trim().to_owned(),
+                    disabled: int("StartHintDisabled") != 0,
+                    min_state: int("MinimumState"),
+                    max_state: int("MaximumState"),
+                }
+            })
+            .collect();
+        let actbusy_ranges = world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.class() == "ai_goal_actbusy")
+            .map(|(id, e)| {
+                (
+                    id,
+                    e.get("busysearchrange")
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(2048.),
+                )
+            })
+            .collect();
         let mut stunstick_sounds = (None, None);
         let mut stunstick_damage = None;
         let mut combine_kick_damage = 0.;
         let mut combine_guard_kick_damage = 0.;
+        let mut zombie_slash_damage = 0.;
+        let mut zombie_poison_spit_damage = 0.;
         if let Some(vfs) = vfs {
             if let Ok(Some(skill)) = vfs.read("cfg/skill.cfg") {
                 if let Ok(tokens) = keyvalues::tokens(&String::from_utf8_lossy(&skill)) {
@@ -621,6 +827,20 @@ impl AiRuntime {
                         .and_then(|p| p[1].parse::<f32>().ok())
                     {
                         combine_guard_kick_damage = value;
+                    }
+                    if let Some(value) = tokens
+                        .windows(2)
+                        .find(|p| p[0].eq_ignore_ascii_case("sk_zombie_dmg_one_slash"))
+                        .and_then(|p| p[1].parse::<f32>().ok())
+                    {
+                        zombie_slash_damage = value;
+                    }
+                    if let Some(value) = tokens
+                        .windows(2)
+                        .find(|p| p[0].eq_ignore_ascii_case("sk_zombie_poison_dmg_spit"))
+                        .and_then(|p| p[1].parse::<f32>().ok())
+                    {
+                        zombie_poison_spit_damage = value;
                     }
                 }
             }
@@ -700,6 +920,13 @@ impl AiRuntime {
             npc_ids: None,
             relationship_overrides: BTreeMap::new(),
             applied_relationships: BTreeMap::new(),
+            squads: BTreeMap::new(),
+            busy_anims,
+            busy_hints,
+            hint_locks: BTreeMap::new(),
+            actbusy_ranges,
+            squad_events: Vec::new(),
+            idle_lines: Vec::new(),
             schedules,
             relationships: Relationships::default(),
             sounds: SoundEnt::default(),
@@ -710,6 +937,8 @@ impl AiRuntime {
             stunstick_damage,
             combine_kick_damage,
             combine_guard_kick_damage,
+            zombie_slash_damage,
+            zombie_poison_spit_damage,
             weapon_defs,
             shots: Vec::new(),
             muzzle_flashes: Vec::new(),
@@ -814,6 +1043,10 @@ impl AiRuntime {
                 self.scripted_schedule_input(world, scene, target, &input);
                 continue;
             }
+            if class == "ai_goal_actbusy" {
+                self.actbusy_goal_input(world, scene, target, &input, &parameter);
+                continue;
+            }
             if class == "ai_relationship" {
                 self.apply_relationship(world, scene, target, input == "applyrelationship");
                 continue;
@@ -871,6 +1104,98 @@ impl AiRuntime {
                 }
                 _ => {}
             }
+        }
+    }
+    /// ai_goal_actbusy inputs: Activate (EnableGoal on its actors), Deactivate,
+    /// ForceNPCToActBusy ("<npc> [hint] [teleport] [nearest] [$activity] [max time]";
+    /// a named hint, teleports and forced activities are not reconstructed) and
+    /// SetBusySearchRange. Only metrocops host the behavior so far.
+    fn actbusy_goal_input(
+        &mut self,
+        world: &World,
+        scene: &Scene,
+        goal: usize,
+        input: &str,
+        parameter: &str,
+    ) {
+        let now = scene.time;
+        let range = self.actbusy_ranges.get(&goal).copied().unwrap_or(2048.);
+        match input {
+            "activate" | "deactivate" => {
+                for id in self.goal_actors(world, goal) {
+                    let Some(actor) = self.actors.get_mut(&id) else {
+                        continue;
+                    };
+                    let AiClass::Metropolice(cop) = &mut actor.class else {
+                        continue;
+                    };
+                    if input == "activate" {
+                        if !cop.actbusy.enabled {
+                            cop.actbusy.enable(Some(goal), range, now);
+                        }
+                    } else {
+                        cop.actbusy.disable(&mut actor.npc, now);
+                    }
+                }
+            }
+            "forcenpctoactbusy" => {
+                let mut tokens = parameter.split_whitespace();
+                let name = tokens.next().unwrap_or("").to_lowercase();
+                let mut nearest = false;
+                let mut max_time = None;
+                for token in tokens {
+                    match token {
+                        "nearest" => nearest = true,
+                        t if t.starts_with("teleport")
+                            || t.starts_with('$')
+                            || t.starts_with("see:") =>
+                        {
+                            *self
+                                .diagnostics
+                                .unknown_goals
+                                .entry(format!("actbusy {t}"))
+                                .or_default() += 1;
+                        }
+                        t => match t.parse::<f32>() {
+                            Ok(v) => max_time = Some(v),
+                            // A hint node name.
+                            Err(_) => {
+                                *self
+                                    .diagnostics
+                                    .unknown_goals
+                                    .entry(format!("actbusy hint {t}"))
+                                    .or_default() += 1;
+                            }
+                        },
+                    }
+                }
+                let target = self.actors.keys().copied().find(|&id| {
+                    world.entities.get(id).is_some_and(|e| {
+                        crate::entities::glob(
+                            &name,
+                            &e.get("targetname").unwrap_or("").to_lowercase(),
+                        )
+                    })
+                });
+                let Some(actor) = target.and_then(|id| self.actors.get_mut(&id)) else {
+                    *self
+                        .diagnostics
+                        .unknown_goals
+                        .entry(format!("actbusy npc {name}"))
+                        .or_default() += 1;
+                    return;
+                };
+                if let AiClass::Metropolice(cop) = &mut actor.class {
+                    cop.actbusy
+                        .force(Some(goal), range, max_time, nearest, &mut actor.npc, now);
+                }
+            }
+            "setbusysearchrange" => {
+                if let Ok(v) = parameter.trim().parse() {
+                    self.actbusy_ranges.insert(goal, v);
+                }
+            }
+            _ => {}
         }
     }
     /// CAI_GoalEntity actors: the NPCs whose targetname (SearchType 0) or classname
@@ -1326,10 +1651,11 @@ impl AiRuntime {
         defs: &BTreeMap<String, NpcWeaponDef>,
     ) -> Option<AiActor> {
         let kind = humanoid::Kind::for_class(e.class());
-        if e.class() != "npc_metropolice" && kind.is_none() {
+        let zombie = zombie::Kind::for_class(e.class());
+        if e.class() != "npc_metropolice" && kind.is_none() && zombie.is_none() {
             return None;
         }
-        let flags = e
+        let flags: u32 = e
             .get("spawnflags")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
@@ -1340,6 +1666,11 @@ impl AiRuntime {
         let mut npc = AiNpc::new(id);
         npc.shot_regulator = Self::regulator(e.class(), weapon.as_ref(), defs, id);
         let class = match kind {
+            _ if zombie.is_some() => AiClass::Zombie(Box::new(Zombie::new(
+                zombie.unwrap_or(zombie::Kind::Classic),
+                flags & SF_NPC_GAG != 0,
+                0x3c6e_f372_fe94_f82b ^ id as u64,
+            ))),
             Some(kind) => {
                 let mut h =
                     Humanoid::new(kind, weapon.is_some(), 0x6a09_e667_f3bc_c909 ^ id as u64);
@@ -1377,6 +1708,17 @@ impl AiRuntime {
             next_lost_sound: 0.,
             enemy_eluded: false,
             death_spoken: false,
+            squad_name: e
+                .get("squadname")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            squad: None,
+            squad_new_enemy: false,
+            choose: Default::default(),
+            idle_chatter: COP_CHATTER_ASK_QUESTION,
+            harassed: false,
+            next_idle_decision: 0.,
         })
     }
     /// The NumGrenades keyvalue of a spawned CNPC_Combine (F4; DESIGN 14r would set it
@@ -1534,6 +1876,7 @@ impl AiRuntime {
         let now = scene.time;
         self.sounds.purge(now);
         let precriminal = scene.globals.is_on("gordon_precriminal");
+        self.update_squads(world, scene);
         let ids: Vec<usize> = self.actors.keys().copied().collect();
         for id in ids {
             let state = &scene.states[id];
@@ -1625,6 +1968,25 @@ impl AiRuntime {
                         // Class animation events.
                         if let Some(cop) = class.cop_mut() {
                             cop.anim_event(&name, event, &ctx, knock_out);
+                        } else if let AiClass::Zombie(z) = class {
+                            // CNPC_BaseZombie::HandleAnimEvent: claws and class sounds.
+                            let rolls = ((uniform() + 1.) * 0.5, (uniform() + 1.) * 0.5);
+                            if let Some((punch, impulse)) =
+                                zombie::claw_punch(&name, ctx.yaw, rolls)
+                            {
+                                let yaw = ctx.yaw.to_radians();
+                                z.requests.push(CopRequest::Claw {
+                                    start: ctx.origin + Vec3::Z * 36.,
+                                    forward: Vec3::new(yaw.cos(), yaw.sin(), 0.),
+                                    punch,
+                                    impulse,
+                                    reach: z.kind.claw_reach(),
+                                    bite: name.eq_ignore_ascii_case("AE_ZOMBIE_POISON_SPIT"),
+                                });
+                            } else if let Some(sound) = zombie::event_sound(&name) {
+                                let cue = z.kind.cue(sound);
+                                z.requests.push(CopRequest::Sound(cue));
+                            }
                         } else if let AiClass::Humanoid(h) = class {
                             // CNPC_Combine::HandleAnimEvent COMBINE_AE_KICK (3); the other
                             // humanoid AE_* events are not modeled yet.
@@ -1784,6 +2146,225 @@ impl AiRuntime {
                 player,
                 precriminal,
             );
+            self.apply_squad_events(scene);
+            self.speak_idle_lines(world, scene);
+        }
+    }
+    /// IdleSound's lines, and their effects when Speak succeeds.
+    fn speak_idle_lines(&mut self, world: &World, scene: &mut Scene) {
+        for line in std::mem::take(&mut self.idle_lines) {
+            if !self.say(line.id, line.group, world, scene) {
+                continue;
+            }
+            let squadmates: Vec<usize> = self.actors[&line.id]
+                .squad
+                .as_ref()
+                .and_then(|n| self.squads.get(n))
+                .map_or(Vec::new(), |s| {
+                    s.members
+                        .iter()
+                        .copied()
+                        .filter(|m| *m != line.id)
+                        .collect()
+                });
+            let mut set = |id: usize, f: &mut dyn FnMut(&mut AiActor)| {
+                if let Some(actor) = self.actors.get_mut(&id) {
+                    f(actor);
+                }
+            };
+            match line.then {
+                IdleThen::Nothing => {}
+                IdleThen::CombineQuestion(q) => self.combine_question = q,
+                IdleThen::CopHarassed => {
+                    for m in std::iter::once(line.id).chain(squadmates) {
+                        set(m, &mut |a| a.harassed = true);
+                    }
+                }
+                IdleThen::CopAsked(question) => {
+                    set(line.id, &mut |a| {
+                        a.idle_chatter = COP_CHATTER_WAIT_FOR_RESPONSE
+                    });
+                    for m in squadmates {
+                        set(m, &mut |a| a.idle_chatter = COP_CHATTER_RESPONSE + question);
+                    }
+                }
+                IdleThen::CopAnswered => {
+                    for m in std::iter::once(line.id).chain(squadmates) {
+                        set(m, &mut |a| a.idle_chatter = COP_CHATTER_ASK_QUESTION);
+                    }
+                }
+            }
+        }
+    }
+    /// CAI_BaseNPC::InitSquad for NPCs in the world (map NPCs on the first tick, maker
+    /// and runtime copies when they appear; hidden templates never join), and
+    /// Event_Killed's RemoveFromSquad(death) -> NotifyDeadFriend for the killed.
+    fn update_squads(&mut self, world: &World, scene: &mut Scene) {
+        let ids: Vec<usize> = self.actors.keys().copied().collect();
+        for id in ids {
+            let state = &scene.states[id];
+            let actor = &self.actors[&id];
+            if state.killed {
+                if let Some(name) = actor.squad.clone() {
+                    self.remove_from_squad(id, &name, true, world, scene);
+                }
+                continue;
+            }
+            if actor.squad.is_none() && state.visible {
+                if let Some(name) = actor.squad_name.clone() {
+                    self.add_to_squad(id, &name, scene.time);
+                }
+            }
+        }
+    }
+    /// CAI_Squad::AddToSquad: join in order; a later member learns the first member's
+    /// enemies (UpdateEnemyMemory informed by it, not first-hand).
+    fn add_to_squad(&mut self, id: usize, name: &str, now: f64) {
+        let squad = self
+            .squads
+            .entry(name.to_owned())
+            .or_insert_with(|| super::squad::Squad::new(name));
+        squad.add(id);
+        let first = squad.members[0];
+        *self
+            .diagnostics
+            .squad_events
+            .entry("join".into())
+            .or_default() += 1;
+        let known = if first == id {
+            Vec::new()
+        } else {
+            self.actors[&first].npc.enemies.known()
+        };
+        let actor = self.actors.get_mut(&id).expect("actor");
+        actor.squad = Some(name.to_owned());
+        for (enemy, position) in known {
+            actor
+                .npc
+                .enemies
+                .update(Some(enemy), position, 0., false, now);
+        }
+    }
+    /// CAI_Squad::RemoveFromSquad; on death the remaining members get NotifyDeadFriend.
+    fn remove_from_squad(
+        &mut self,
+        id: usize,
+        name: &str,
+        death: bool,
+        world: &World,
+        scene: &mut Scene,
+    ) {
+        let Some(squad) = self.squads.get_mut(name) else {
+            return;
+        };
+        squad.remove(id);
+        let members = squad.members.clone();
+        let remaining = squad.num_members();
+        if let Some(actor) = self.actors.get_mut(&id) {
+            actor.squad = None;
+            actor.squad_name = None;
+        }
+        if !death {
+            return;
+        }
+        *self
+            .diagnostics
+            .squad_events
+            .entry("death".into())
+            .or_default() += 1;
+        let friend_class = world.entities.get(id).map_or("", |e| e.class());
+        for member in members {
+            if scene.states.get(member).is_none_or(|s| s.killed) {
+                continue;
+            }
+            let Some(actor) = self.actors.get_mut(&member) else {
+                continue;
+            };
+            // CNPC_MetroPolice::NotifyDeadFriend resets idle chatter waiting for an answer.
+            if actor.class.cop().is_some()
+                && friend_class != "npc_manhack"
+                && actor.idle_chatter == COP_CHATTER_WAIT_FOR_RESPONSE
+            {
+                actor.idle_chatter = COP_CHATTER_ASK_QUESTION;
+            }
+            // NotifyDeadFriend: CNPC_MetroPolice (no line for a dead manhack) and
+            // CNPC_Combine; LAST_OF_SQUAD when fewer than two remain.
+            let group = match &actor.class {
+                AiClass::Metropolice(_) if friend_class != "npc_manhack" => {
+                    Some(if remaining < 2 {
+                        "METROPOLICE_LAST_OF_SQUAD"
+                    } else {
+                        "METROPOLICE_MAN_DOWN"
+                    })
+                }
+                AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine => {
+                    Some(if remaining < 2 {
+                        "COMBINE_LAST_OF_SQUAD"
+                    } else {
+                        "COMBINE_MAN_DOWN"
+                    })
+                }
+                _ => None,
+            };
+            if let Some(group) = group {
+                self.say(member, group, world, scene);
+            }
+        }
+    }
+    /// Squad calls made by the last think: shared first-hand sightings
+    /// (CAI_Squad::UpdateEnemyMemory) and SquadNewEnemy (a member without an enemy, or
+    /// whose other enemy is unseen for over 3 s, takes the new one).
+    fn apply_squad_events(&mut self, scene: &Scene) {
+        let now = scene.time;
+        for event in std::mem::take(&mut self.squad_events) {
+            let (name, from) = match &event {
+                SquadEvent::Memory { squad, from, .. } => (squad, Some(*from)),
+                SquadEvent::NewEnemy { squad, .. } => (squad, None),
+            };
+            let Some(squad) = self.squads.get(name) else {
+                continue;
+            };
+            let members: Vec<usize> = squad.members.clone();
+            for member in members {
+                if Some(member) == from || scene.states.get(member).is_none_or(|s| s.killed) {
+                    continue;
+                }
+                let Some(actor) = self.actors.get_mut(&member) else {
+                    continue;
+                };
+                match &event {
+                    SquadEvent::Memory {
+                        enemy, position, ..
+                    } => {
+                        actor
+                            .npc
+                            .enemies
+                            .update(Some(*enemy), *position, 0., false, now);
+                        *self
+                            .diagnostics
+                            .squad_events
+                            .entry("memory".into())
+                            .or_default() += 1;
+                    }
+                    SquadEvent::NewEnemy { enemy, .. } => {
+                        let current = actor.npc.enemy;
+                        if super::squad::should_take_squad_enemy(
+                            current,
+                            *enemy,
+                            actor.npc.conditions.has(COND_SEE_ENEMY),
+                            now - actor.npc.enemies.last_time_seen(current),
+                        ) {
+                            actor.npc.enemy = Some(*enemy);
+                            actor.squad_new_enemy = true;
+                            *self
+                                .diagnostics
+                                .squad_events
+                                .entry("new_enemy".into())
+                                .or_default() += 1;
+                        }
+                    }
+                }
+            }
         }
     }
     /// Would a stunstick hit knock the player out (the cop's policing goal)?
@@ -1897,6 +2478,8 @@ impl AiRuntime {
         // Speech dice (ShouldPlayIdleSound RandomInt(0, 99), IdleSound's choices,
         // the lost-sound delay U(5, 15)).
         let speech_rolls = [self.random(), self.random(), self.random(), self.random()];
+        // FindHint's bits_HINT_NODE_RANDOM pick.
+        let hint_roll = self.random();
         // The active gun's firing data and clip (GatherAttackConditions, CheckAmmo).
         let gun = self.actors[&id].weapon.as_ref().and_then(|w| {
             self.weapon_def(&w.class)
@@ -1965,6 +2548,18 @@ impl AiRuntime {
             })
             .map(|other| (other, scene.states[other].origin))
             .collect();
+        // CAI_PolicingBehavior::GatherConditions: the goal entity is gone (killed, e.g.
+        // the can cop's OnKnockOut -> cupcop_policegoal Kill): the behavior disables.
+        if let Some(cop) = self.actors.get_mut(&id).and_then(|a| a.class.cop_mut()) {
+            if cop
+                .policing
+                .as_ref()
+                .is_some_and(|p| scene.states.get(p.goal.entity).is_none_or(|s| s.killed))
+            {
+                cop.policing = None;
+                cop.chase_until = 0.;
+            }
+        }
         // Policing goal state (the goal entity can change through inputs).
         let goal_entity = self.actors[&id]
             .class
@@ -2002,6 +2597,37 @@ impl AiRuntime {
         } else {
             Vec::new()
         };
+        // IRelationType/IRelationPriority (and IsAlive) of every NPC this think may weigh
+        // in BestEnemy: remembered ones, sighted ones and the attacker.
+        let npc_relations: BTreeMap<usize, (Disposition, i32)> = {
+            let actor = &self.actors[&id];
+            actor
+                .npc
+                .enemies
+                .known()
+                .into_iter()
+                .map(|(e, _)| e)
+                .chain(seen_npcs.iter().map(|&(e, _)| e))
+                .chain(actor.damaged_by)
+                .filter(|&e| e != PLAYER)
+                .filter(|&e| scene.states.get(e).is_some_and(|s| !s.killed && s.visible))
+                .map(|e| {
+                    let class =
+                        classify(world.entities.get(e).map_or("", |x| x.class()), precriminal);
+                    (
+                        e,
+                        (
+                            self.npc_disposition(world, id, e, precriminal),
+                            self.relationships.get(my_class, class).1,
+                        ),
+                    )
+                })
+                .collect()
+        };
+        let player_priority = self
+            .relationships
+            .get(my_class, classify("player", precriminal))
+            .1;
         let actor = self.actors.get_mut(&id).expect("actor");
         actor.npc.conditions = Conditions::default();
         // CheckAmmo: an empty clip (NPCs have unlimited reserve ammunition), and
@@ -2057,6 +2683,7 @@ impl AiRuntime {
                 h.armed = actor.weapon.is_some();
                 precriminal_hate
             }
+            AiClass::Zombie(_) => precriminal_hate,
         };
         // A cop keeps the player as its enemy for the rest of a chase.
         let chasing = actor.class.cop().is_some_and(|cop| cop.chase_until > now);
@@ -2072,23 +2699,16 @@ impl AiRuntime {
             None => class_hates_player,
         };
         let previous_enemy = actor.npc.enemy;
+        // SetEnemy from the squad (SquadNewEnemy) since the last think.
+        if std::mem::take(&mut actor.squad_new_enemy) {
+            actor.npc.conditions.set(COND_NEW_ENEMY);
+        }
         if hates && player_visible {
             actor.npc.conditions.set(COND_SEE_HATE);
             actor
                 .npc
                 .enemies
                 .update(Some(PLAYER), player.feet, 0., true, now);
-            if actor.npc.enemy.is_none() {
-                actor.npc.enemy = Some(PLAYER);
-            }
-        }
-        if !hates && actor.npc.enemy == Some(PLAYER) && !chasing {
-            actor.npc.enemy = None;
-        }
-        // ChooseEnemy rejects a notarget player (BestEnemy), e.g. one the policing
-        // behavior made its enemy with SetEnemy (native: the cop falls back to alert).
-        if player.noclip && actor.npc.enemy == Some(PLAYER) {
-            actor.npc.enemy = None;
         }
         // CAI_BaseNPC::OnTakeDamage_Alive: any damage is light, more than 20 heavy; a
         // hated player attacker is remembered (UpdateEnemyMemory) and becomes the enemy
@@ -2105,12 +2725,9 @@ impl AiRuntime {
                 .npc
                 .enemies
                 .update(Some(PLAYER), player.feet, 0., true, now);
-            if actor.npc.enemy.is_none() {
-                actor.npc.enemy = Some(PLAYER);
-            }
         }
-        // Damage from an NPC: COND_LIGHT_DAMAGE, the attacker remembered where it stands and
-        // made the enemy when there is none (unless liked).
+        // Damage from an NPC: COND_LIGHT_DAMAGE, the attacker remembered where it stands
+        // (unless liked); ChooseEnemy weighs it.
         if let Some(attacker) = actor.damaged_by.take() {
             actor.npc.conditions.set(COND_LIGHT_DAMAGE);
             if let Some(state) = scene.states.get(attacker).filter(|s| !s.killed) {
@@ -2119,28 +2736,13 @@ impl AiRuntime {
                         .npc
                         .enemies
                         .update(Some(attacker), state.origin, 0., true, now);
-                    if actor.npc.enemy.is_none() {
-                        actor.npc.enemy = Some(attacker);
-                    }
                 }
             }
         }
-        // Hated NPCs in sight: memory, and BestEnemy (the nearest) when there is none.
+        // Hated NPCs in sight: memory (BestEnemy below weighs them).
         for &(other, feet) in &seen_npcs {
             actor.npc.conditions.set(COND_SEE_HATE);
             actor.npc.enemies.update(Some(other), feet, 0., true, now);
-        }
-        if let Some(e) = actor.npc.enemy.filter(|&e| e != PLAYER) {
-            if scene.states.get(e).is_none_or(|s| s.killed || !s.visible) {
-                actor.npc.conditions.set(COND_ENEMY_DEAD);
-                actor.npc.enemy = None;
-            }
-        }
-        if actor.npc.enemy.is_none() {
-            actor.npc.enemy = seen_npcs
-                .iter()
-                .min_by(|a, b| a.1.distance(origin).total_cmp(&b.1.distance(origin)))
-                .map(|&(other, _)| other);
         }
         actor.npc.enemies.refresh(
             now,
@@ -2159,12 +2761,140 @@ impl AiRuntime {
                 }
             },
         );
+        // ChooseEnemy (GatherConditions after RefreshMemories): only when the running
+        // schedule can be interrupted by COND_NEW_ENEMY (or COND_LOST_ENEMY with an eluded
+        // enemy), or there is none; ShouldChooseNewEnemy, then BestEnemy over the memory.
+        // A killed NPC enemy is gone at once (its entity no longer thinks), like an
+        // EHANDLE that went NULL.
+        {
+            let relation = |e: usize| -> super::enemy_choice::Relation {
+                if e == PLAYER {
+                    // FL_NOTARGET (noclip here) and IsAlive; the policing chase keeps him.
+                    (!player.noclip && !player.dead).then_some((
+                        if hates || chasing {
+                            Disposition::HT
+                        } else {
+                            Disposition::NU
+                        },
+                        player_priority,
+                    ))
+                } else {
+                    npc_relations.get(&e).copied()
+                }
+            };
+            let initial = actor.npc.enemy;
+            let went_null = initial.is_some_and(|e| {
+                e != PLAYER && scene.states.get(e).is_none_or(|s| s.killed || !s.visible)
+            });
+            let eluded = went_null
+                || initial
+                    .is_some_and(|e| actor.npc.enemies.find(Some(e)).is_some_and(|m| m.eluded));
+            let schedule = actor
+                .npc
+                .schedule
+                .as_ref()
+                .and_then(|n| self.schedules.0.get(n));
+            let (new_enemy_interrupts, lost_enemy_interrupts) = match schedule {
+                Some(s) if actor.npc.task < s.tasks.len() => {
+                    let custom = actor.class.behavior_mut().custom_interrupts(&actor.npc);
+                    let all = s.interrupts.union(custom);
+                    (all.has(COND_NEW_ENEMY), all.has(COND_LOST_ENEMY))
+                }
+                _ => (true, true),
+            };
+            let skip = !went_null && !new_enemy_interrupts && !(lost_enemy_interrupts && eluded);
+            if !skip {
+                let c = actor.npc.conditions;
+                let sees_hostile = c.has(COND_SEE_HATE) || c.has(COND_SEE_FEAR);
+                let mut chosen = if went_null { None } else { initial };
+                if super::enemy_choice::should_choose_new_enemy(
+                    chosen,
+                    &actor.npc.enemies,
+                    &mut actor.choose,
+                    chosen.and_then(relation),
+                    sees_hostile,
+                    false,
+                    now,
+                ) {
+                    let position = |e: usize| {
+                        if e == PLAYER {
+                            Some(player.feet)
+                        } else {
+                            scene.states.get(e).map(|s| s.origin)
+                        }
+                    };
+                    chosen = super::enemy_choice::best_enemy(
+                        &actor.npc.enemies,
+                        now,
+                        relation,
+                        |e| position(e).map_or(f32::MAX, |p| p.distance_squared(origin)),
+                        |e| {
+                            if e == PLAYER {
+                                player_visible
+                            } else {
+                                seen_npcs.iter().any(|&(o, _)| o == e)
+                            }
+                        },
+                        |e| {
+                            if e == PLAYER {
+                                player.center().distance(origin) < senses::LOOK_DISTANCE && fvisible
+                            } else {
+                                position(e).is_some_and(|p| {
+                                    let center = p + Vec3::Z * 36.;
+                                    center.distance(origin) < senses::LOOK_DISTANCE
+                                        && sight.visible(eye, center, &[id, e])
+                                })
+                            }
+                        },
+                    );
+                }
+                if chosen != initial || went_null {
+                    if went_null {
+                        actor.npc.conditions.set(COND_ENEMY_DEAD);
+                    }
+                    actor.npc.enemy = chosen;
+                    // Forget(bits_MEMORY_HAD_LOS): the LOS outputs fire again.
+                    actor.npc.had_enemy_los = false;
+                    if chosen.is_none() && !went_null {
+                        actor.npc.conditions.set(COND_ENEMY_WENT_NULL);
+                        if eluded {
+                            actor.npc.conditions.set(COND_LOST_ENEMY);
+                        }
+                    }
+                    if chosen.is_none() {
+                        let requests = actor.class.requests_mut();
+                        if initial == Some(PLAYER) {
+                            requests.push(CopRequest::Output("OnLostPlayer"));
+                        }
+                        if initial.is_some() {
+                            requests.push(CopRequest::Output("OnLostEnemy"));
+                        }
+                    }
+                }
+            }
+        }
+        // UpdateEnemyMemory first-hand -> CAI_Squad::UpdateEnemyMemory to the others.
+        if let Some(squad) = &actor.squad {
+            for (enemy, position) in actor.npc.enemies.seen_at(now) {
+                self.squad_events.push(SquadEvent::Memory {
+                    squad: squad.clone(),
+                    from: id,
+                    enemy,
+                    position,
+                });
+            }
+        }
         let has_baton = actor.class.cop().is_some_and(|cop| cop.has_baton);
         // bits_CAP_INNATE_MELEE_ATTACK1: the combine soldier's kick.
         let innate_kick = actor
             .class
             .humanoid()
             .is_some_and(|h| h.kind == humanoid::Kind::Combine);
+        // bits_CAP_INNATE_MELEE_ATTACK1: zombie claws.
+        let claws = match &actor.class {
+            AiClass::Zombie(z) => Some(z.kind.claw_reach()),
+            _ => None,
+        };
         if let Some(enemy) = actor.npc.enemy {
             if previous_enemy != Some(enemy) {
                 actor.npc.conditions.set(COND_NEW_ENEMY);
@@ -2297,10 +3027,40 @@ impl AiRuntime {
                         actor.npc.conditions.set(COND_CAN_MELEE_ATTACK1);
                     }
                 }
+                // CNPC_BaseZombie::MeleeAttack1Conditions: within the claw reach (origin
+                // to origin), facing within 0.7, and the cube hull swept along the facing
+                // meets the enemy (an NPC or breakable in the way is not modeled).
+                if let Some(reach) = claws {
+                    let to = t_feet - origin;
+                    let forward = facing.truncate().normalize_or_zero().extend(0.);
+                    let dot = to.truncate().normalize_or_zero().dot(forward.truncate());
+                    let start = origin + Vec3::Z * 36.;
+                    let end = start + forward * reach;
+                    let half = if enemy == PLAYER { 16. } else { 13. };
+                    let cube = Vec3::splat(13.);
+                    let reaches = super::metropolice::segment_hits_box(
+                        start,
+                        end,
+                        t_feet + Vec3::new(-half, -half, 0.) - cube,
+                        t_feet + Vec3::new(half, half, 72.) + cube,
+                    );
+                    let distance = to.length() * zombie::CLAW_REACH / reach;
+                    actor
+                        .npc
+                        .conditions
+                        .set(zombie::melee_condition(distance, dot, reaches));
+                }
             } else {
                 actor.npc.conditions.set(COND_ENEMY_OCCLUDED);
-                if now - actor.npc.enemies.last_time_seen(Some(enemy)) > 10. {
-                    actor.npc.conditions.set(COND_LOST_ENEMY);
+            }
+            // GatherEnemyConditions: not seen for 8 s and standing at its last known
+            // position (2D within 48 units) without seeing it: the enemy eluded me
+            // (MarkEnemyAsEluded; the next ChooseEnemy drops it with COND_LOST_ENEMY).
+            if now - actor.npc.enemies.last_time_seen(Some(enemy)) > 8. && !seen {
+                if let Some(lkp) = actor.npc.enemies.find(Some(enemy)).map(|m| m.last_known) {
+                    if (lkp - origin).truncate().length() < 48. {
+                        actor.npc.enemies.mark_eluded(Some(enemy));
+                    }
                 }
             }
         }
@@ -2483,47 +3243,104 @@ impl AiRuntime {
                     .and_then(|v| v.trim().parse::<u32>().ok())
                     .is_some_and(|f| f & SF_NPC_GAG != 0)
             });
-            if matches!(actor.npc.state, NpcState::Idle | NpcState::Alert)
-                && (speech_rolls[0] * 100.) as u32 == 0
-                && !gagged
-            {
+            let idle_or_alert = matches!(actor.npc.state, NpcState::Idle | NpcState::Alert);
+            // GatherConditions samples (and rolls IdleSound) only with a player in the
+            // NPC's PVS, or in combat, once per decision (UpdateEfficiency's interval):
+            // cops out of sight never chatter and far ones roll less often.
+            let in_pvs = scene.look_targets.in_pvs(id);
+            let to_npc = origin - player.eye();
+            let player_facing = in_pvs && player.facing.dot(to_npc.normalize_or_zero()) > 0.;
+            let decision_due = now >= actor.next_idle_decision;
+            if decision_due {
+                let efficiency = super::efficiency::efficiency(
+                    actor.npc.state,
+                    in_pvs,
+                    player_facing,
+                    to_npc.length(),
+                );
+                actor.next_idle_decision = now + efficiency.decision_interval() - 1e-6;
+            }
+            let samples = decision_due && (in_pvs || actor.npc.state == NpcState::Combat);
+            // CNPC_MetroPolice::ShouldPlayIdleSound: a cop a squadmate asked answers as soon
+            // as FOkToMakeSound allows (the squad's gate, else his own; never gagged).
+            let cop_answers = cop && idle_or_alert && actor.idle_chatter >= COP_CHATTER_RESPONSE;
+            let should_play = if !samples {
+                false
+            } else if cop_answers {
+                !gagged
+                    && match actor.squad.as_ref().and_then(|n| self.squads.get(n)) {
+                        Some(squad) => squad.ok_to_make_sound(0, now),
+                        None => self
+                            .sound_wait
+                            .get(&id)
+                            .is_none_or(|&(until, last)| now > until || 0 > last),
+                    }
+            } else {
+                idle_or_alert && (speech_rolls[0] * 100.) as u32 == 0 && !gagged
+            };
+            if should_play {
                 let pick = speech_rolls[1];
+                let choice = ((speech_rolls[3] * 3.) as u8).min(2);
+                let mut idle = |group: &'static str, then: IdleThen| {
+                    self.idle_lines.push(IdleLine { id, group, then });
+                };
                 match &actor.class {
                     // CNPC_Combine::IdleSound: a check-in or question the next idle soldier
-                    // answers, or a statement (g_fCombineQuestion).
+                    // answers, or a statement (g_fCombineQuestion, set when spoken).
                     AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine => {
                         match self.combine_question {
                             0 if pick < 0.5 => {}
-                            0 => {
-                                let choice = (speech_rolls[3] * 3.) as u32;
-                                lines.push(
-                                    ["COMBINE_CHECK", "COMBINE_QUEST", "COMBINE_IDLE"]
-                                        [choice.min(2) as usize],
-                                );
-                                self.combine_question = match choice {
-                                    0 => 1,
-                                    1 => 2,
-                                    _ => 0,
-                                };
-                            }
-                            1 => {
-                                lines.push("COMBINE_CLEAR");
-                                self.combine_question = 0;
-                            }
-                            _ => {
-                                lines.push("COMBINE_ANSWER");
-                                self.combine_question = 0;
-                            }
+                            0 => idle(
+                                ["COMBINE_CHECK", "COMBINE_QUEST", "COMBINE_IDLE"]
+                                    [usize::from(choice)],
+                                IdleThen::CombineQuestion([1, 2, 0][usize::from(choice)]),
+                            ),
+                            1 => idle("COMBINE_CLEAR", IdleThen::CombineQuestion(0)),
+                            _ => idle("COMBINE_ANSWER", IdleThen::CombineQuestion(0)),
                         }
                     }
-                    // CNPC_MetroPolice::IdleSound without a squad: half the time an idle
-                    // line (the criminal variant when the player is one); the harassment
-                    // line is the policing behavior's.
-                    AiClass::Metropolice(_) if pick >= 0.5 => lines.push(if player_criminal {
-                        "METROPOLICE_IDLE_CR"
-                    } else {
-                        "METROPOLICE_IDLE"
-                    }),
+                    // CNPC_MetroPolice::IdleSound: a precriminal player within 128 units is
+                    // harassed once (bits_MEMORY_PLAYER_HARASSED, shared by the squad); else
+                    // half the time a squad cop asks a check-in or question his squadmates
+                    // answer (g_interactionMetrocopIdleChatter), or anyone says an idle line.
+                    AiClass::Metropolice(_) => match actor.idle_chatter {
+                        COP_CHATTER_WAIT_FOR_RESPONSE => {}
+                        COP_CHATTER_ASK_QUESTION => {
+                            let near = !player_criminal
+                                && (player.center() - (origin + Vec3::Z * 36.)).length_squared()
+                                    < 128. * 128.;
+                            if near && !actor.harassed {
+                                idle("METROPOLICE_IDLE_HARASS_PLAYER", IdleThen::CopHarassed);
+                            } else if pick >= 0.5 {
+                                let criminal = usize::from(player_criminal);
+                                if actor.squad.is_none() || choice == 2 {
+                                    idle(
+                                        ["METROPOLICE_IDLE", "METROPOLICE_IDLE_CR"][criminal],
+                                        IdleThen::Nothing,
+                                    );
+                                } else {
+                                    idle(
+                                        [
+                                            ["METROPOLICE_IDLE_CHECK", "METROPOLICE_IDLE_QUEST"],
+                                            [
+                                                "METROPOLICE_IDLE_CHECK_CR",
+                                                "METROPOLICE_IDLE_QUEST_CR",
+                                            ],
+                                        ][criminal][usize::from(choice)],
+                                        IdleThen::CopAsked(choice),
+                                    );
+                                }
+                            }
+                        }
+                        response => idle(
+                            [
+                                ["METROPOLICE_IDLE_CLEAR", "METROPOLICE_IDLE_ANSWER"],
+                                ["METROPOLICE_IDLE_CLEAR_CR", "METROPOLICE_IDLE_ANSWER_CR"],
+                            ][usize::from(player_criminal)]
+                                [usize::from((response - COP_CHATTER_RESPONSE).min(1))],
+                            IdleThen::CopAnswered,
+                        ),
+                    },
                     _ => {}
                 }
             }
@@ -2537,7 +3354,17 @@ impl AiRuntime {
         actor.npc.conditions = actor.npc.conditions.union(heard);
         ctx.best_sound = best.map(|s| s.origin);
         ctx.best_sound_volume = best.map_or(0., |s| s.volume);
-        // SelectIdealState.
+        // SelectIdealState: squad members idle or alert share a new enemy first.
+        if let (Some(squad), Some(enemy)) = (&actor.squad, actor.npc.enemy) {
+            if matches!(actor.npc.state, NpcState::Idle | NpcState::Alert)
+                && actor.npc.conditions.has(COND_NEW_ENEMY)
+            {
+                self.squad_events.push(SquadEvent::NewEnemy {
+                    squad: squad.clone(),
+                    enemy,
+                });
+            }
+        }
         let (ideal, _) = select_ideal_state(
             actor.npc.state,
             &StateInputs {
@@ -2595,6 +3422,39 @@ impl AiRuntime {
         actor.origin = origin.to_array();
         actor.yaw = yaw_of(scene, id);
         actor.next_think = now + THINK_INTERVAL;
+        // CZombie::PrescheduleThink's idle moans.
+        // CAI_ActBusyBehavior::FindActBusyHintNode for a behavior about to search.
+        if let AiClass::Metropolice(cop) = &mut actor.class {
+            cop.actbusy.candidate = None;
+            if cop.actbusy.wants_hint(now) {
+                let group = world
+                    .entities
+                    .get(id)
+                    .and_then(|e| e.get("hintgroup"))
+                    .unwrap_or("")
+                    .trim();
+                let state = match actor.npc.state {
+                    NpcState::Combat => 3,
+                    NpcState::Alert => 2,
+                    _ => 1,
+                };
+                let locks = &self.hint_locks;
+                cop.actbusy.candidate = super::actbusy::find_hint(
+                    &self.busy_hints,
+                    &self.busy_anims,
+                    group,
+                    origin,
+                    cop.actbusy.search_range,
+                    state,
+                    |hint| locks.get(&hint).is_some_and(|&holder| holder != id),
+                    cop.actbusy.use_nearest,
+                    hint_roll,
+                );
+            }
+        }
+        if let AiClass::Zombie(z) = &mut actor.class {
+            z.moan(now, actor.npc.state == NpcState::Combat);
+        }
         // MaxYawSpeed and NPC_TranslateActivity's ACT_IDLE_ANGRY by class.
         let weapon_drawn = actor.weapon.is_some();
         let (yaw_speed, idle_angry) = match &actor.class {
@@ -2612,7 +3472,9 @@ impl AiRuntime {
                 h.kind.max_yaw_speed(&actor.npc.activity),
                 weapon_drawn && h.idle_angry(actor.npc.state, now),
             ),
+            AiClass::Zombie(_) => (zombie::max_yaw_speed(&actor.npc.activity), false),
         };
+        let on_fire = matches!(&actor.class, AiClass::Zombie(_)) && scene.fires.burning(id);
         let mut motor = SceneMotor {
             entity: id,
             world,
@@ -2627,6 +3489,8 @@ impl AiRuntime {
             idle_angry,
             weapon: actor.weapon.as_ref().map(|w| w.class.clone()),
             combine: matches!(&actor.class, AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine),
+            walk_only: matches!(&actor.class, AiClass::Zombie(_)),
+            on_fire,
             weapon_activity: None,
             blocked_moves: &mut self.diagnostics.blocked_moves,
         };
@@ -2804,6 +3668,22 @@ impl AiRuntime {
                 scene.fire(goal, output, id);
             }
         }
+        // Actbusy hint locks (CAI_Hint::Lock/Unlock) and goal outputs.
+        if let Some(cop) = actor.class.cop_mut() {
+            for hint in cop.actbusy.released.drain(..) {
+                if self.hint_locks.get(&hint) == Some(&id) {
+                    self.hint_locks.remove(&hint);
+                }
+            }
+            if let Some(hint) = &cop.actbusy.hint {
+                self.hint_locks.insert(hint.entity, id);
+            }
+            if let Some(goal) = cop.actbusy.goal {
+                for output in std::mem::take(&mut cop.actbusy.outputs) {
+                    scene.fire(goal, output, id);
+                }
+            }
+        }
         self.apply_requests(id, world, scene, physics, player);
     }
     /// CAI_SentenceBase::Speak: FOkToMakeSound (no squads yet) culls a sentence of equal
@@ -2902,30 +3782,78 @@ impl AiRuntime {
         let origin = state.origin;
         scene.sounds.push(crate::sounds::SoundRequest {
             origin: Some(origin + Vec3::Z * 64.),
+            // GenderExpandString needs the speaker's model: without it a `$gender`
+            // wave picks from both genders (owner report: female citizens said male
+            // pain lines and the reverse).
             actor: Some(crate::sounds::SoundActor {
                 name: e.get("targetname").unwrap_or("").into(),
-                model: String::new(),
+                model: model.to_owned(),
                 entity: Some(id),
             }),
             ..sound.into()
         });
         true
     }
+    /// CAI_SentenceBase::Speak: MatchesCriteria (the group's SentenceCriteria_t), then a
+    /// prioritized line asks FOkToMakeSound (the squad's gate in a squad, else the NPC's)
+    /// and JustMadeSound(priority, 2 s) sets the NPC's and the squad's waits to
+    /// 2 + U(1.5, 2.0) s. False when refused or culled.
     fn say(&mut self, id: usize, group: &'static str, world: &World, scene: &mut Scene) -> bool {
         let origin = scene.states[id].origin;
+        let Some(actor) = self.actors.get(&id) else {
+            return false;
+        };
+        let squad = actor.squad.as_ref().and_then(|name| self.squads.get(name));
+        let gagged = actor.npc.state != NpcState::Combat
+            && world.entities.get(id).is_some_and(|e| {
+                e.get("spawnflags")
+                    .and_then(|v| v.trim().parse::<u32>().ok())
+                    .is_some_and(|f| f & SF_NPC_GAG != 0)
+            });
+        let matches = match sentence_criteria(group) {
+            Criteria::Always => true,
+            Criteria::Normal => !gagged,
+            Criteria::InSquad => !gagged && squad.is_some_and(|s| s.num_members() > 1),
+            Criteria::SquadLeader => {
+                !gagged && squad.is_some_and(|s| s.num_members() > 1 && s.leader() == Some(id))
+            }
+        };
+        if !matches {
+            *self
+                .diagnostics
+                .criteria_refused
+                .entry(group.into())
+                .or_default() += 1;
+            return false;
+        }
+        let squad_name = actor.squad.clone();
         let priority = sentence_priority(group);
         if priority >= 0 {
             let now = scene.time;
-            if let Some(&(until, last)) = self.sound_wait.get(&id) {
-                if now <= until && priority <= last {
-                    self.diagnostics.culled_sentences += 1;
-                    return false;
-                }
+            let ok = match squad_name.as_ref().and_then(|n| self.squads.get(n)) {
+                Some(squad) => squad.ok_to_make_sound(priority, now),
+                None => self
+                    .sound_wait
+                    .get(&id)
+                    .is_none_or(|&(until, last)| now > until || priority > last),
+            };
+            if !ok {
+                self.diagnostics.culled_sentences += 1;
+                return false;
             }
             let wait = now + 2. + 1.5 + 0.5 * f64::from(self.random());
             self.sound_wait.insert(id, (wait, priority));
+            let squad_wait = now + 2. + 1.5 + 0.5 * f64::from(self.random());
+            if let Some(squad) = squad_name.as_ref().and_then(|n| self.squads.get_mut(n)) {
+                squad.just_made_sound(priority, squad_wait);
+            }
         }
         self.diagnostics.sentences += 1;
+        *self
+            .diagnostics
+            .sentence_groups
+            .entry(group.into())
+            .or_default() += 1;
         scene.sounds.push(crate::sounds::SoundRequest {
             origin: Some(origin + Vec3::Z * 64.),
             actor: Some(crate::sounds::SoundActor {
@@ -2960,6 +3888,28 @@ impl AiRuntime {
             return;
         };
         let state = &scene.states[id];
+        // CZombie / CNPC_PoisonZombie PainSound and DeathSound.
+        if let AiClass::Zombie(z) = &actor.class {
+            let kind = z.kind;
+            let cue = if state.killed {
+                if std::mem::replace(&mut actor.death_spoken, true) {
+                    return;
+                }
+                kind.cue("Zombie.Die")
+            } else {
+                if now < actor.next_pain_sound || state.value <= 0. {
+                    return;
+                }
+                actor.next_pain_sound = now + 1.;
+                kind.cue("Zombie.Pain")
+            };
+            let origin = state.origin;
+            scene.sounds.push(crate::sounds::SoundRequest {
+                origin: Some(origin + Vec3::Z * 64.),
+                ..cue.into()
+            });
+            return;
+        }
         // CAI_PlayerAlly::PainSound speaks TLK_WOUND; the companions' DeathSound emits
         // their die sound (CNPC_Citizen/CNPC_Barney/CNPC_Alyx).
         if matches!(&actor.class, AiClass::Humanoid(h) if matches!(h.kind, humanoid::Kind::Companion { .. }))
@@ -2974,8 +3924,21 @@ impl AiRuntime {
                     _ => "NPC_Citizen.Die",
                 };
                 let origin = state.origin;
+                // EmitSound from the NPC: GenderExpandString reads its model (the
+                // citizens' die waves are vo/npc/$gender01/pain*.wav; owner report: dying
+                // citizens moaned in the other gender's voice).
+                let model = world
+                    .model_instances
+                    .iter()
+                    .find(|i| i.entity == Some(id))
+                    .map_or("", |i| i.model.as_str());
                 scene.sounds.push(crate::sounds::SoundRequest {
                     origin: Some(origin + Vec3::Z * 64.),
+                    actor: Some(crate::sounds::SoundActor {
+                        name: e.get("targetname").unwrap_or("").into(),
+                        model: model.to_owned(),
+                        entity: Some(id),
+                    }),
                     ..die.into()
                 });
                 return;
@@ -3137,6 +4100,79 @@ impl AiRuntime {
                         // Wait six seconds before even looking again.
                         h.next_grenade_check = now + 6.;
                     }
+                }
+                CopRequest::Claw {
+                    start,
+                    forward,
+                    punch,
+                    impulse,
+                    reach,
+                    bite,
+                } => {
+                    let enemy = self.actors[&id].npc.enemy;
+                    let enemy_center = enemy.map(|e| {
+                        if e == PLAYER {
+                            player.center()
+                        } else {
+                            scene.states[e].origin + Vec3::Z * 36.
+                        }
+                    });
+                    // ClawAttack: no swing through a wall between the zombie and its
+                    // enemy (an 8-unit hull to the enemy's center, brushes only).
+                    let sight = PhysicsSight { physics, world };
+                    let ignore: Vec<usize> = std::iter::once(id).chain(enemy).collect();
+                    if enemy_center.is_some_and(|c| !sight.visible(start, c, &ignore)) {
+                        continue;
+                    }
+                    let end = start + forward * reach;
+                    let (mins, maxs) = (-Vec3::splat(13.), Vec3::splat(13.));
+                    let damage = if bite {
+                        self.zombie_poison_spit_damage
+                    } else {
+                        self.zombie_slash_damage
+                    };
+                    let player_hit = enemy == Some(PLAYER)
+                        && super::metropolice::segment_hits_box(
+                            start,
+                            end,
+                            player.feet + Vec3::new(-16., -16., 0.) - maxs,
+                            player.feet + Vec3::new(16., 16., 72.) - mins,
+                        );
+                    let hit = if player_hit {
+                        self.player_hits.push(PlayerHit {
+                            attacker: id,
+                            damage,
+                            punch,
+                            impulse,
+                            fade: None,
+                        });
+                        self.diagnostics.player_hits += 1;
+                        true
+                    } else if let Some(victim) =
+                        self.melee_victim(id, world, scene, start, end, mins, maxs)
+                    {
+                        self.diagnostics.npc_melee_hits += 1;
+                        let center = scene.states[victim].origin + Vec3::Z * 36.;
+                        self.melee_hits.push(MeleeHit {
+                            attacker: id,
+                            victim,
+                            damage,
+                            position: center,
+                            direction: forward,
+                        });
+                        true
+                    } else {
+                        false
+                    };
+                    scene.sounds.push(crate::sounds::SoundRequest {
+                        origin: Some(origin + Vec3::Z * 36.),
+                        ..String::from(if hit {
+                            "Zombie.AttackHit"
+                        } else {
+                            "Zombie.AttackMiss"
+                        })
+                        .into()
+                    });
                 }
                 CopRequest::Kick { start, forward } => {
                     let end = start + forward * 70.;
@@ -3317,7 +4353,27 @@ impl AiRuntime {
     }
     /// g_interactionHitByPlayerThrownPhysObj for an NPC struck by a prop the player
     /// launched or threw (the host's physics-collision hook).
-    pub fn hit_by_player_thrown_object(&mut self, id: usize, scene: &Scene) {
+    /// g_interactionHitByPlayerThrownPhysObj from `prop`. CNPC_MetroPolice also fires
+    /// OnCupCopped when the prop is named cupcop_can.
+    pub fn hit_by_player_thrown_object(
+        &mut self,
+        id: usize,
+        prop: usize,
+        world: &World,
+        scene: &mut Scene,
+    ) {
+        let cop = self
+            .actors
+            .get(&id)
+            .is_some_and(|a| a.class.cop().is_some());
+        let can = world
+            .entities
+            .get(prop)
+            .and_then(|e| e.get("targetname"))
+            .is_some_and(|n| n.eq_ignore_ascii_case("cupcop_can"));
+        if cop && can {
+            scene.fire(id, "OnCupCopped", usize::MAX);
+        }
         let now = scene.time;
         let random = self.random();
         let Some(actor) = self.actors.get_mut(&id) else {
@@ -3334,6 +4390,7 @@ impl AiRuntime {
         if let AiClass::Metropolice(cop) = &mut actor.class {
             cop.hit_by_player_thrown_object(&mut actor.npc, &ctx);
         }
+        self.diagnostics.thrown_object_hits += 1;
     }
     /// +USE on an AI NPC (npc_metropolice's SetUse(PrecriminalUse)). False when the AI
     /// is off or `id` is not an AI cop, so the host falls back to the ordinary use (the
@@ -3373,6 +4430,7 @@ impl AiRuntime {
                         .is_some_and(|w| w.class == "weapon_stunstick");
                 }
                 AiClass::Humanoid(h) => h.armed = weapon.is_some(),
+                AiClass::Zombie(_) => {}
             }
             actor.weapon = weapon;
             actor.npc.shot_regulator = regulator;
@@ -3995,6 +5053,161 @@ mod tests {
             sentence_parameters("#COMBINE_DIE"),
             Some(COMBINE_SENTENCE_PARAMETERS)
         );
+    }
+    #[test]
+    fn squads_share_enemies_gate_lines_and_mourn_their_dead() {
+        // Three soldiers of squad "s" (the last two face away from the player) and a
+        // squadless one far away.
+        let soldier = |name: &str, origin: &str, yaw: &str, squad: &str| {
+            let angles = format!("0 {yaw} 0");
+            let mut pairs = vec![
+                ("classname", "npc_combine_s"),
+                ("targetname", name),
+                ("origin", origin),
+                ("angles", angles.as_str()),
+            ];
+            if !squad.is_empty() {
+                pairs.push(("squadname", squad));
+            }
+            entity(&pairs)
+        };
+        let world = World {
+            entities: vec![
+                soldier("a", "0 0 0", "0", "s"),
+                soldier("b", "0 200 0", "180", "s"),
+                soldier("c", "0 -200 0", "180", "s"),
+                soldier("lone", "0 3000 0", "180", ""),
+            ],
+            ..Default::default()
+        };
+        let mut r = Rig {
+            scene: Scene::new(&world),
+            physics: Physics::new(&world),
+            controller: Controller::new(None, Default::default()),
+            ai: AiRuntime::new(&world, None),
+            world,
+        };
+        r.ai.enabled = true;
+        let far = player_at(-5000.);
+        run(&mut r, 1, far);
+        let squad = &r.ai.squads["s"];
+        assert_eq!(
+            (squad.members.clone(), squad.leader()),
+            (vec![0, 1, 2], Some(0))
+        );
+        assert!(r.ai.actors[&3].squad.is_none());
+        // IN_SQUAD lines need a squad of two; NORMAL ones do not.
+        let world = r.world.clone();
+        assert!(!r.ai.say(3, "COMBINE_IDLE", &world, &mut r.scene));
+        assert!(r.ai.say(3, "COMBINE_DANGER", &world, &mut r.scene));
+        assert!(r.ai.say(0, "COMBINE_IDLE", &world, &mut r.scene));
+        // The squad's sound gate: another member's normal line waits.
+        assert!(!r.ai.say(1, "COMBINE_IDLE", &world, &mut r.scene));
+        assert!(r.ai.say(1, "COMBINE_ALERT", &world, &mut r.scene));
+        // Only the leader sees the player; SquadNewEnemy gives him to the others.
+        run(&mut r, 12, player_at(300.));
+        assert_eq!(r.ai.actors[&0].npc.enemy, Some(PLAYER));
+        for member in [1, 2] {
+            assert_eq!(
+                r.ai.actors[&member].npc.enemy,
+                Some(PLAYER),
+                "member {member}"
+            );
+            assert!(r.ai.actors[&member]
+                .npc
+                .enemies
+                .find(Some(PLAYER))
+                .is_some());
+        }
+        assert!(r.ai.diagnostics.squad_events["new_enemy"] >= 2);
+        assert!(r.ai.diagnostics.squad_events["memory"] >= 2);
+        // A death: MAN_DOWN while two remain (one member speaks; the squad gate culls the
+        // other's), LAST_OF_SQUAD for the last one. The earlier lines' waits are over.
+        r.ai.squads.get_mut("s").expect("squad").sound_wait = 0.;
+        r.ai.sound_wait.clear();
+        r.scene.sounds.clear();
+        r.scene.states[2].killed = true;
+        run(&mut r, 1, far);
+        assert_eq!(r.ai.squads["s"].members, [0, 1]);
+        let spoken = |r: &Rig| -> Vec<String> {
+            r.scene
+                .sounds
+                .iter()
+                .filter(|s| {
+                    s.name.starts_with("#COMBINE_MAN_DOWN") || s.name.starts_with("#COMBINE_LAST")
+                })
+                .map(|s| s.name.clone())
+                .collect()
+        };
+        assert_eq!(spoken(&r), ["#COMBINE_MAN_DOWN"]);
+        r.scene.sounds.clear();
+        r.scene.states[1].killed = true;
+        run(&mut r, 1, far);
+        assert_eq!(spoken(&r), ["#COMBINE_LAST_OF_SQUAD"]);
+        assert_eq!(r.ai.squads["s"].leader(), None);
+    }
+    #[test]
+    fn squad_cops_ask_and_answer_idle_chatter_and_harass_a_near_player_once() {
+        let cop = |name: &str, x: &str| {
+            entity(&[
+                ("classname", "npc_metropolice"),
+                ("targetname", name),
+                ("origin", x),
+                ("squadname", "pair"),
+            ])
+        };
+        let world = World {
+            entities: vec![
+                cop("a", "0 0 0"),
+                cop("b", "0 300 0"),
+                entity(&[
+                    ("classname", "env_global"),
+                    ("globalstate", "gordon_precriminal"),
+                    ("initialstate", "1"),
+                    ("spawnflags", "1"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let mut r = Rig {
+            scene: Scene::new(&world),
+            physics: Physics::new(&world),
+            controller: Controller::new(None, Default::default()),
+            ai: AiRuntime::new(&world, None),
+            world,
+        };
+        r.ai.enabled = true;
+        run(&mut r, 1, player_at(-5000.));
+        let world = r.world.clone();
+        // A spoken question makes the asker wait and his squadmate answer it.
+        r.ai.idle_lines.push(IdleLine {
+            id: 0,
+            group: "METROPOLICE_IDLE_QUEST",
+            then: IdleThen::CopAsked(1),
+        });
+        r.ai.speak_idle_lines(&world, &mut r.scene);
+        assert_eq!(r.ai.actors[&0].idle_chatter, COP_CHATTER_WAIT_FOR_RESPONSE);
+        assert_eq!(r.ai.actors[&1].idle_chatter, COP_CHATTER_RESPONSE + 1);
+        // The answer waits for the squad's sound gate, then comes on the next thinks.
+        r.scene.sounds.clear();
+        run(&mut r, 400, player_at(-5000.));
+        assert!(r
+            .scene
+            .sounds
+            .iter()
+            .any(|s| s.name == "#METROPOLICE_IDLE_ANSWER"));
+        assert_eq!(r.ai.actors[&0].idle_chatter, COP_CHATTER_ASK_QUESTION);
+        assert_eq!(r.ai.actors[&1].idle_chatter, COP_CHATTER_ASK_QUESTION);
+        // Harassment is remembered by the whole squad.
+        r.ai.idle_lines.push(IdleLine {
+            id: 1,
+            group: "METROPOLICE_IDLE_HARASS_PLAYER",
+            then: IdleThen::CopHarassed,
+        });
+        r.ai.squads.get_mut("pair").expect("squad").sound_wait = 0.;
+        r.ai.sound_wait.clear();
+        r.ai.speak_idle_lines(&world, &mut r.scene);
+        assert!(r.ai.actors[&0].harassed && r.ai.actors[&1].harassed);
     }
     #[test]
     fn an_npc_spawned_after_the_first_think_is_seen() {

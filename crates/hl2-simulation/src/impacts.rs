@@ -333,9 +333,12 @@ impl Impacts {
         let Some((receiver, center)) = receiver(surfaces_ref, center, normal, gap) else {
             return Err(true);
         };
-        let prop = self
-            .surfaceprops
-            .get(&receiver.material)
+        // A trace against a VPhysics prop reports its collision model's surfaceprop
+        // (the .phy solid's, e.g. the gas can's "metal"), not the texture's.
+        let prop = physics
+            .prop_materials
+            .get(&hit.entity)
+            .or_else(|| self.surfaceprops.get(&receiver.material))
             .cloned()
             .unwrap_or_else(|| "default".into());
         let surfaces = match posed {

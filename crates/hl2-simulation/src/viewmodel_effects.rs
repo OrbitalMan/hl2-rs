@@ -120,7 +120,7 @@ impl Inventory {
                 });
             }
             "weapon_physcannon" => {
-                let holding = self.physcannon.held.is_some();
+                let holding = self.physcannon.held.is_some() || self.physcannon.holding_effect;
                 let ready = !holding && self.physcannon.open;
                 // DoEffectIdle flickers the glow sprites every frame (16-24, 0.3-0.35).
                 for name in GLOW_ATTACHMENTS {

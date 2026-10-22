@@ -130,6 +130,9 @@ impl GrabController {
         alignment: Option<f32>,
     ) -> Option<Self> {
         let handle = physics.dynamic.get(&id).copied()?;
+        // CPlayerPickupController::Init / Physgun_OnPhysGunPickup: held debris becomes
+        // interactive debris.
+        physics.make_interactive_debris(id);
         let current = rotation(physics, id).unwrap_or_default();
         let target = center(physics, id)?;
         let authored = physics.bodies.get(handle)?.colliders().iter().all(|c| {

@@ -4,6 +4,7 @@
 //! extracting it does not establish equivalence with Valve's VPhysics solver.
 
 pub mod drag;
+pub mod fire;
 pub mod npc_probe;
 pub mod physics;
 
@@ -41,6 +42,7 @@ pub mod weapon_rpg;
 pub mod campaign;
 pub mod explosion_particles;
 pub mod impacts;
+pub mod pcf_runtime;
 pub mod projectile_visuals;
 
 pub mod attention;

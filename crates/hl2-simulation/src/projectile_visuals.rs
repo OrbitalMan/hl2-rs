@@ -76,6 +76,10 @@ pub struct ProjectileVisuals {
     pub viewmodel_quads: Vec<Quad>,
     /// Live muzzle flashes and bullet tracers (muzzle_effects.rs).
     pub muzzle: crate::muzzle_effects::MuzzleEffects,
+    /// PCF systems (C_EntityFlame's burning_character) and their running effects.
+    pub pcf_library: crate::pcf_runtime::Library,
+    pub pcf: crate::pcf_runtime::Runtime,
+    pcf_time: f64,
 }
 /// One CTrailParticles TrailParticle of FX_ElectricSpark.
 #[derive(Clone, Debug)]
@@ -104,13 +108,17 @@ struct Puff {
     material: usize,
 }
 pub fn load_sprite(vfs: &Vfs, material: &str) -> Result<Sprite> {
+    load_sprite_sized(vfs, material, 512)
+}
+/// `load_sprite` decoded at up to `max_dimension` (sheet textures pack many frames).
+pub fn load_sprite_sized(vfs: &Vfs, material: &str, max_dimension: usize) -> Result<Sprite> {
     let base = vfs
         .base_texture(material)?
         .context("projectile sprite base texture missing")?;
     let data = vfs
         .read(&format!("materials/{}.vtf", base.trim_end_matches(".vtf")))?
         .context("projectile sprite texture missing")?;
-    let image = vtf::decode(&data, 512)?;
+    let image = vtf::decode(&data, max_dimension)?;
     Ok(Sprite {
         image: std::sync::Arc::new(image),
         // Entity render modes, not the VMTs, make these additive: the frag's
@@ -224,7 +232,48 @@ impl ProjectileVisuals {
             spark_frame: 0.,
             viewmodel_quads: Vec::new(),
             muzzle: Default::default(),
+            pcf_library: Default::default(),
+            pcf: Default::default(),
+            pcf_time: 0.,
         }
+    }
+    /// C_EntityFlame for each burning entity (owner, control points): "burning_character"
+    /// starts on a new flame and stops (live particles finish) when its flame ends;
+    /// then every effect advances by the scene time since the last frame (0 while
+    /// paused) and its sprites join this frame's quads. Call after `frame`.
+    pub fn burning(
+        &mut self,
+        flames: &[(usize, crate::pcf_runtime::ControlPoints)],
+        eye: Vec3,
+        direction: Vec3,
+        time: f64,
+        paused: bool,
+    ) {
+        for owner in self.pcf.owners() {
+            if !flames.iter().any(|(id, _)| *id == owner) {
+                self.pcf.stop(owner);
+            }
+        }
+        for (owner, points) in flames {
+            self.pcf.start(
+                *owner,
+                crate::pcf_runtime::BURNING_CHARACTER,
+                *points,
+                &self.pcf_library,
+            );
+        }
+        let dt = if paused {
+            0.
+        } else {
+            (time - self.pcf_time).clamp(0., 0.1) as f32
+        };
+        self.pcf_time = time;
+        if dt > 0. {
+            self.pcf.simulate(dt, &self.pcf_library);
+        }
+        let mut quads = self.pcf.draw(eye, direction, &self.pcf_library);
+        quads.retain(|q| self.sprites.contains_key(&q.material));
+        self.quads.extend(quads);
     }
     fn range(&mut self, low: f32, high: f32) -> f32 {
         low + (high - low) * self.random()
@@ -355,6 +404,33 @@ impl ProjectileVisuals {
     }
     pub fn new(vfs: &Vfs) -> Self {
         let mut result = Self::empty();
+        let (library, errors) = crate::pcf_runtime::load(vfs);
+        for e in errors {
+            result.errors.insert("pcf".into(), e);
+        }
+        for name in library.materials() {
+            match load_sprite_sized(vfs, &name, 1024) {
+                Ok(mut sprite) => {
+                    // SpriteCard: $addself flames add (ONE, ONE_MINUS_SRC_ALPHA in
+                    // spritecard_dx9; approximated as additive), smoke alpha-blends.
+                    sprite.kind = if vfs
+                        .material_value(&name, "$addself")
+                        .ok()
+                        .flatten()
+                        .is_some()
+                    {
+                        3
+                    } else {
+                        2
+                    };
+                    result.sprites.insert(name, sprite);
+                }
+                Err(error) => {
+                    result.errors.insert(name, format!("{error:#}"));
+                }
+            }
+        }
+        result.pcf_library = library;
         for name in SPRITES
             .iter()
             .chain(crate::explosion_particles::MATERIALS)

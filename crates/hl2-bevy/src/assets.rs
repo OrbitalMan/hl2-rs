@@ -1410,6 +1410,7 @@ mod tests {
             angles: Default::default(),
             scale: 1.,
             skin: 0,
+            body: 0,
             kind: "prop_dynamic".into(),
             solid: false,
             solid_mode: None,

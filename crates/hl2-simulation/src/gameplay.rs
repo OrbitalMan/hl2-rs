@@ -297,6 +297,10 @@ const FUNC_BREAKABLE_DAMAGE: modkit_core::PropData = modkit_core::PropData {
     breakable_skin: 0,
     explosive_damage: None,
     explosive_radius: None,
+    flammable: false,
+    explosive_resist: false,
+    ignite_halfhealth: false,
+    break_explode: false,
 };
 /// GetBreakableDamage (props.cpp) for a breakable with prop data (CBreakableProp,
 /// modifiers default 1): bullets x dmg.bullets (buckshot twice that), clubs x dmg.club,
@@ -1514,15 +1518,80 @@ impl Inventory {
                         // func_breakdmg_* convars instead of 1.
                         let brush = matches!(entity.class(), "func_breakable" | "func_physbox")
                             .then_some(&FUNC_BREAKABLE_DAMAGE);
-                        state.value -= if npc {
+                        let mut amount = if npc {
                             damage.amount
                         } else {
                             breakable_damage(damage.amount, damage.kind, data.or(brush))
                         };
+                        // CBreakableProp::OnTakeDamage's fire rules (prop_data
+                        // fire_interactions; *_override props keep their own data out).
+                        if let Some(own) =
+                            data.filter(|_| !npc && !entity.class().ends_with("_override"))
+                        {
+                            let center = physics
+                                .entity_body(id)
+                                .and_then(|b| physics.center_of_mass(b))
+                                .unwrap_or(state.origin);
+                            let size = physics
+                                .entity_extents(id)
+                                .map_or(16., |e| (e.x + e.y) * 0.5);
+                            match scene.fires.prop_damage(
+                                id,
+                                own.into(),
+                                &mut state.value,
+                                health.unwrap_or(40.),
+                                amount,
+                                damage.kind,
+                                damage.origin,
+                                center,
+                                size,
+                                scene.time,
+                            ) {
+                                Some(a) => amount = a,
+                                None => continue,
+                            }
+                        }
+                        // CNPC_BaseZombie::OnTakeDamage_Alive: burning zombies take only
+                        // their own flame's damage; enough burn damage ignites them for
+                        // 100 s with health capped to about ten seconds of burning
+                        // (FLAME_DIRECT_DAMAGE_PER_SEC x (ZOMBIE_BURN_TIME +- noise)).
+                        if npc && crate::ai::zombie::is_zombie_class(entity.class()) {
+                            let max = class_health.or(health).unwrap_or(50.);
+                            match scene.fires.zombie_damage(
+                                id,
+                                amount,
+                                damage.kind,
+                                max,
+                                scene.time,
+                            ) {
+                                None => continue,
+                                Some(true) => {
+                                    let center = state.origin + Vec3::Z * 36.;
+                                    let roll = crate::fire::roll_public(id, scene.time);
+                                    if scene.fires.ignite(
+                                        id,
+                                        crate::fire::Interactions {
+                                            flammable: true,
+                                            ..Default::default()
+                                        },
+                                        100.,
+                                        16.,
+                                        center,
+                                        scene.time,
+                                    ) {
+                                        state.value = state.value.min(5. * (10. + 4. * roll - 2.));
+                                    }
+                                }
+                                Some(false) => {}
+                            }
+                        }
+                        state.value -= amount;
                     }
                     let dead = state.value <= 0.;
                     scene.fire(id, "OnDamaged", usize::MAX);
                     if dead {
+                        let origin = scene.states[id].origin;
+                        scene.fires.extinguish(id, origin);
                         self.kills += 1;
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
                         if npc {
@@ -1563,6 +1632,7 @@ impl Inventory {
                             let explode_radius = own
                                 .and_then(|d| d.explosive_radius)
                                 .unwrap_or_else(|| key("ExplodeRadius"));
+                            let burst = own.is_some_and(|d| d.break_explode);
                             if explode_damage > 0. || explode_radius > 0. {
                                 let scale = entity
                                     .get("modelscale")
@@ -1580,7 +1650,19 @@ impl Inventory {
                                     .entity_body(id)
                                     .and_then(|b| physics.center_of_mass(b))
                                     .unwrap_or(scene.states[id].origin);
-                                scene.prop_explosions.push((center, magnitude, radius));
+                                // PROPINTER_PHYSGUN_BREAK_EXPLODE: SF_ENVEXPLOSION_NOSOUND
+                                // and PropaneTank.Burst instead.
+                                scene
+                                    .prop_explosions
+                                    .push((center, magnitude, radius, burst));
+                            } else if burst {
+                                // No explode damage: ExplosionCreate(origin, 1, radius)
+                                // with its sound.
+                                let center = physics
+                                    .entity_body(id)
+                                    .and_then(|b| physics.center_of_mass(b))
+                                    .unwrap_or(scene.states[id].origin);
+                                scene.prop_explosions.push((center, 1., 2., false));
                             }
                         }
                         // PropBreakableCreateAll takes the prop's pose and motion.
@@ -2755,7 +2837,7 @@ mod tests {
         );
         assert!(scene.states[0].killed && scene.states[1].killed);
         assert_eq!(scene.prop_explosions.len(), 1);
-        let (_, magnitude, radius) = scene.prop_explosions[0];
+        let (_, magnitude, radius, _) = scene.prop_explosions[0];
         assert_eq!((magnitude, radius), (100., 250.));
     }
     #[test]

@@ -527,7 +527,7 @@ impl Gameplay {
     }
     /// CreateEntityByName + DispatchSpawn + Activate of a copy of a loaded entity (an F4
     /// class template or a maker's template NPC; DESIGN 14r part A): the template's
-    /// keyvalues at `origin` facing `yaw` (optionally other spawnflags), its model
+    /// keyvalues at `origin` facing `yaw` (with `overrides` replacing keys), its model
     /// instance, colliders, AI actor, movement registration and (next frame) draws.
     /// The map's World grows in place (no copy while nothing else holds it).
     pub fn create_from_template(
@@ -535,19 +535,19 @@ impl Gameplay {
         template: usize,
         origin: Vec3,
         yaw: f32,
-        spawnflags: Option<u32>,
+        overrides: &[(&str, String)],
         physics: &mut Physics,
     ) -> Result<usize, String> {
         use hl2_simulation::ai::spawn;
         let id = self.world.entities.len();
         let (mut new_entity, instance) = spawn::instantiate(&self.world, template, id, origin, yaw);
-        if let Some(flags) = spawnflags {
+        // Keyvalues set before DispatchSpawn (maker spawnflags, npc_create's name,
+        // ent_create's targetname/squadname).
+        for (key, value) in overrides {
             new_entity
                 .properties
-                .retain(|(k, _)| !k.eq_ignore_ascii_case("spawnflags"));
-            new_entity
-                .properties
-                .push(("spawnflags".into(), flags.to_string()));
+                .retain(|(k, _)| !k.eq_ignore_ascii_case(key));
+            new_entity.properties.push(((*key).into(), value.clone()));
         }
         let id = self.insert_entity(new_entity, instance, physics)?;
         self.npcs.copy_actor(template, id);
@@ -667,6 +667,7 @@ impl Gameplay {
                 origin,
                 angles,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 // A VPhysics object like a physics prop (its .phy and propdata).
                 kind: "prop_physics".into(),
@@ -739,11 +740,26 @@ impl Gameplay {
                 request.classname
             ));
         }
-        let count = self.spawn_counts.entry(label).or_default();
-        let template = templates[*count % templates.len()];
-        *count += 1;
+        let template = if label == "npc_citizen" {
+            // CNPC_Citizen::SelectModel: the least-used head among living citizens.
+            let roll = self.ai.uniform() * 0.5 + 0.5;
+            let states = &self.scene.states;
+            hl2_simulation::citizens::least_used_template(
+                &self.world,
+                &templates,
+                spawn::POOL_KEY,
+                |id| states.get(id).is_some_and(|s| !s.killed),
+                roll,
+            )
+            .unwrap_or(templates[0])
+        } else {
+            let count = self.spawn_counts.entry(label).or_default();
+            let template = templates[*count % templates.len()];
+            *count += 1;
+            template
+        };
         let id = self
-            .create_from_template(template, origin, yaw, None, physics)
+            .create_from_template(template, origin, yaw, &request.keyvalues(), physics)
             .map_err(|e| format!("Can't create {}: {e}", request.classname))?;
         self.ai
             .set_equipment(id, &request.classname, &request.equipment);
@@ -956,6 +972,16 @@ impl Gameplay {
             }
             self.select(result);
         }
+        // VPhysics objects move in the physics world; scene logic (trigger touches of
+        // physics objects and their filters) reads their current pose.
+        for &id in physics.dynamic.keys() {
+            if let (Some((origin, rotation)), Some(state)) =
+                (physics.entity_pose(id), self.scene.states.get_mut(id))
+            {
+                state.origin = origin;
+                state.rotation = rotation;
+            }
+        }
         self.scene.tick(&self.world, player.feet, TICK);
         // npc_template_maker spawns and CAI_BaseNPC::StartNPC floor drops (DESIGN 14s).
         hl2_simulation::npc_makers::tick(
@@ -978,7 +1004,7 @@ impl Gameplay {
                     request.template,
                     request.origin,
                     request.yaw,
-                    Some(request.spawnflags),
+                    &[("spawnflags", request.spawnflags.to_string())],
                     physics,
                 )
                 .ok();
@@ -1000,6 +1026,7 @@ impl Gameplay {
         if carrying {
             self.inventory.carry_tick(
                 &self.weapons,
+                &self.world,
                 &mut self.scene,
                 physics,
                 eye,
@@ -1421,6 +1448,37 @@ impl Gameplay {
         // env_physexplosion pushes (and blast damage) from this tick's inputs.
         self.phys_explosions
             .apply(&self.world, &mut self.scene, physics);
+        self.phys_explosions
+            .apply_impacts(&self.world, &mut self.scene, physics);
+        // CEntityFlame::FlameThink: burning props hurt themselves and what is near them.
+        if !self.scene.fires.flames.is_empty() {
+            let states = &self.scene.states;
+            let center = |id: usize| -> Option<glam::Vec3> {
+                let state = states.get(id).filter(|s| !s.killed)?;
+                Some(
+                    physics
+                        .entity_body(id)
+                        .and_then(|b| physics.center_of_mass(b))
+                        .unwrap_or(state.origin + glam::Vec3::Z * 36.),
+                )
+            };
+            let others: Vec<(usize, glam::Vec3)> = self
+                .world
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| {
+                    e.class().starts_with("prop_physics") || e.class().starts_with("npc_")
+                })
+                .filter_map(|(id, _)| center(id).map(|c| (id, c)))
+                .collect();
+            let player_center = (!player.dead).then(|| player.feet + glam::Vec3::Z * 36.);
+            let burns = self
+                .scene
+                .fires
+                .think(self.scene.time, center, &others, player_center);
+            damage.extend(burns);
+        }
         // trigger_hurt touchers from this tick's scene logic share the entity path.
         damage.append(&mut self.scene.entity_damage);
         self.inventory
@@ -1441,6 +1499,8 @@ impl Gameplay {
             self.inventory
                 .apply_projectile_damage(blast, &self.world, &mut self.scene, physics);
         }
+        let fire_sounds = std::mem::take(&mut self.scene.fires.sounds);
+        self.scene.sounds.extend(fire_sounds);
         // PropBreakableCreateAll for props broken by this tick's damage.
         self.gibs.spawn(
             std::mem::take(&mut self.scene.prop_breaks),
@@ -1469,8 +1529,30 @@ impl Gameplay {
             &self.world,
             &mut self.scene,
             &mut physics.launched,
+            &mut physics.thrown_by_player,
             &held,
         );
+        // VPhysicsUpdate: a sleeping prop forgets that the player threw it.
+        let sleeping: Vec<usize> = physics
+            .thrown_by_player
+            .iter()
+            .copied()
+            .filter(|id| {
+                physics
+                    .dynamic
+                    .get(id)
+                    .and_then(|h| physics.bodies.get(*h))
+                    .is_none_or(|b| b.is_sleeping())
+            })
+            .collect();
+        for id in sleeping {
+            physics.thrown_by_player.remove(&id);
+        }
+        for (prop, npc) in std::mem::take(&mut self.scene.thrown_hits) {
+            let world = self.world.clone();
+            self.ai
+                .hit_by_player_thrown_object(npc, prop, &world, &mut self.scene);
+        }
         // Gib poses and SUB_FadeOut (not while seen or held).
         self.gibs
             .tick(physics, self.scene.time, TICK, eye, direction, held);

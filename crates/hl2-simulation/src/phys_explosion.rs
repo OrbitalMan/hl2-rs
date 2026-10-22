@@ -13,6 +13,13 @@
 //! Not modeled: SF_PHYSEXPLOSION_PUSH_PLAYER / DISORIENT_PLAYER (counted in
 //! `unsupported`), the target center is the body's center of mass rather than the
 //! collision bounds' center (BodyTarget -> WorldSpaceCenter).
+//!
+//! env_physimpact (CPhysImpact::InputImpact) shares the module: a trace from the entity
+//! along its angles, or toward its direction entity (UTIL_PointAtNamedEntity), for
+//! `distance` (default 256; spawnflag 2: MAX_TRACE_LENGTH), and an impulse of
+//! `magnitude` (scaled by 1 - fraction unless spawnflag 1 or 2; x mass with spawnflag 4)
+//! at the hit point along the hit's inverse normal (spawnflag 8: along the trace). The
+//! d1_trainstation_02 can cop's itemhit sequence knocks the can over with it.
 use crate::{
     entities::Scene,
     physics::Physics,
@@ -30,6 +37,9 @@ const SF_TEST_LOS: u32 = 0x8;
 pub struct PhysExplosions {
     pub explosions: u64,
     pub pushes: u64,
+    /// env_physimpact Impact inputs, and those whose trace hit a physics body.
+    pub impacts: u64,
+    pub impact_pushes: u64,
     pub unsupported: u64,
     #[serde(skip)]
     rng: u64,
@@ -109,6 +119,94 @@ impl PhysExplosions {
                     });
                 }
             }
+        }
+    }
+}
+
+impl PhysExplosions {
+    /// CPhysImpact::InputImpact for every env_physimpact whose Impact input arrived.
+    pub fn apply_impacts(&mut self, world: &World, scene: &mut Scene, physics: &mut Physics) {
+        const NOFALLOFF: u32 = 0x1;
+        const INFINITE_LENGTH: u32 = 0x2;
+        const IGNORE_MASS: u32 = 0x4;
+        const IGNORE_NORMAL: u32 = 0x8;
+        for id in std::mem::take(&mut scene.phys_impacts) {
+            let Some(e) = world.entities.get(id) else {
+                continue;
+            };
+            self.impacts += 1;
+            let number = |key: &str| {
+                e.get(key)
+                    .and_then(|v| v.trim().parse::<f32>().ok())
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(0.)
+            };
+            let flags = number("spawnflags") as u32;
+            let start = scene.states.get(id).map_or(e.origin(), |s| s.origin);
+            // PointAtEntity: face the named entity's origin, else the entity's angles.
+            let aimed = e
+                .get("directionentityname")
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .and_then(|name| {
+                    world.entities.iter().enumerate().find(|(t, x)| {
+                        !scene.states[*t].killed
+                            && x.get("targetname")
+                                .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                    })
+                })
+                .map(|(t, _)| {
+                    physics
+                        .entity_pose(t)
+                        .map_or(scene.states[t].origin, |(position, _)| position)
+                        - start
+                });
+            let direction = aimed
+                .unwrap_or_else(|| {
+                    let a = modkit_core::parse_vec3(e.get("angles").unwrap_or("0 0 0"))
+                        .unwrap_or(Vec3::ZERO);
+                    let (pitch, yaw) = (a.x.to_radians(), a.y.to_radians());
+                    Vec3::new(
+                        pitch.cos() * yaw.cos(),
+                        pitch.cos() * yaw.sin(),
+                        -pitch.sin(),
+                    )
+                })
+                .normalize_or_zero();
+            let distance = if flags & INFINITE_LENGTH != 0 {
+                crate::ai::spawn::MAX_TRACE_LENGTH
+            } else {
+                let d = number("distance");
+                if d == 0. {
+                    256.
+                } else {
+                    d
+                }
+            };
+            let end = start + direction * distance;
+            let Some(hit) = physics.projectile_ray(start, end, &[id]) else {
+                continue;
+            };
+            if physics.entity_body(hit.entity).is_none() {
+                continue;
+            }
+            let fraction = start.distance(hit.position) / distance;
+            let mut damage = if flags & (NOFALLOFF | INFINITE_LENGTH) != 0 {
+                number("magnitude")
+            } else {
+                number("magnitude") * (1. - fraction)
+            };
+            if flags & IGNORE_MASS != 0 {
+                damage *= physics.entity_mass(hit.entity).unwrap_or(1.);
+            }
+            let push = if flags & IGNORE_NORMAL != 0 {
+                direction
+            } else {
+                -hit.normal
+            };
+            // ApplyForceOffset takes kg in/s.
+            physics.impulse_at(hit.entity, push * (damage / 39.37), hit.position);
+            self.impact_pushes += 1;
         }
     }
 }

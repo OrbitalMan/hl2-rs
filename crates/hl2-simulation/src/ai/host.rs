@@ -35,6 +35,10 @@ pub struct SceneMotor<'a> {
     /// CNPC_Combine::NPC_TranslateActivity: ACT_RANGE_ATTACK2 is the grenade throw
     /// (ACT_COMBINE_THROW_GRENADE; combine_soldier has no ACT_RANGE_ATTACK2 sequence).
     pub combine: bool,
+    /// CZombie::NPC_TranslateActivity: ACT_RUN becomes ACT_WALK (routes walk).
+    pub walk_only: bool,
+    /// CNPC_BaseZombie::NPC_TranslateActivity while IsOnFire.
+    pub on_fire: bool,
     /// Weapon_SetActivity requests of this think: (weapon activity, NPC sequence
     /// duration), applied by the runtime to the weapon's world model.
     pub weapon_activity: Option<(String, f32)>,
@@ -76,9 +80,19 @@ impl Motor for SceneMotor<'_> {
             "ACT_IDLE_ANGRY"
         } else if self.combine && activity == "ACT_RANGE_ATTACK2" {
             "ACT_COMBINE_THROW_GRENADE"
+        } else if self.walk_only && activity == "ACT_RUN" {
+            "ACT_WALK"
         } else {
             activity
         };
+        let on_fire = match activity {
+            "ACT_WALK" | "ACT_RUN_ON_FIRE" if self.on_fire => Some("ACT_WALK_ON_FIRE"),
+            "ACT_IDLE" if self.on_fire => Some("ACT_IDLE_ON_FIRE"),
+            _ => None,
+        };
+        let activity = on_fire
+            .filter(|a| self.scene.actor_has_activity(self.world, self.entity, a))
+            .unwrap_or(activity);
         let translated = crate::npc_weapons::translate(weapon, activity)
             .filter(|t| self.scene.actor_has_activity(self.world, self.entity, t));
         let activity = translated.unwrap_or(activity);
@@ -120,6 +134,7 @@ impl Motor for SceneMotor<'_> {
         angle_diff(ideal, next).abs() <= 0.006
     }
     fn path_to(&mut self, goal: Vec3, run: bool) -> bool {
+        let run = run && !self.walk_only;
         // Goal entities often float above the floor (the d1_canals_01 rally point is 32
         // units up); ground routes end on the floor below (CAI_MoveProbe::FloorPoint over
         // the step height and a little more), else at the goal as given.

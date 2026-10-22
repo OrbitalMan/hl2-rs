@@ -75,7 +75,21 @@ const DEBRIS_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(SHADOW_GROUP)
         .difference(HULL_GROUP)
         .difference(NPC_GROUP)
-        .difference(PROJECTILE_GROUP),
+        .difference(PROJECTILE_GROUP)
+        .difference(INTERACTIVE_DEBRIS_GROUP),
+);
+/// COLLISION_GROUP_INTERACTIVE_DEBRIS: a debris prop the player picked up, punted or
+/// threw (CPlayerPickupController::Init, Physgun_OnPhysGunPickup) collides with
+/// everything but debris, other interactive debris and the player (movement and
+/// shadow), so a thrown can hits NPCs; it converts back to debris when its body falls
+/// asleep (CBaseEntity::VPhysicsUpdate).
+const INTERACTIVE_DEBRIS_GROUP: Group = Group::GROUP_7;
+const INTERACTIVE_DEBRIS_GROUPS: InteractionGroups = InteractionGroups::new(
+    INTERACTIVE_DEBRIS_GROUP,
+    Group::ALL
+        .difference(DEBRIS_GROUP)
+        .difference(INTERACTIVE_DEBRIS_GROUP)
+        .difference(SHADOW_GROUP),
 );
 const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
@@ -91,7 +105,8 @@ const PLAYER_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL
         .difference(PROJECTILE_GROUP)
         .difference(SHADOW_GROUP)
-        .difference(DEBRIS_GROUP),
+        .difference(DEBRIS_GROUP)
+        .difference(INTERACTIVE_DEBRIS_GROUP),
 );
 /// The SDK hull (mins, maxs) of npc_* classes (SetHullType), for those done so far.
 pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
@@ -597,6 +612,8 @@ pub struct Physics {
     pub air_density: f32,
     /// Drag geometry per dynamic body, computed once from its colliders.
     drag_geometry: HashMap<RigidBodyHandle, Option<crate::drag::DragGeometry>>,
+    /// Debris bodies the player touched (COLLISION_GROUP_INTERACTIVE_DEBRIS).
+    interactive_debris: std::collections::HashSet<RigidBodyHandle>,
     /// Bodies with drag disabled (EnableDrag(false): a held object's controlled body).
     pub drag_disabled: std::collections::HashSet<RigidBodyHandle>,
     /// VPhysics constraints created at load, and those that could not be.
@@ -630,6 +647,10 @@ pub struct Physics {
     /// Props launched by the gravity gun whose first collision has not happened yet
     /// (CPhysicsProp m_bFirstCollisionAfterLaunch).
     pub launched: std::collections::HashSet<usize>,
+    /// Props the player threw from a +USE carry (CPhysicsProp m_bThrownByPlayer): the
+    /// next NPC they hit gets g_interactionHitByPlayerThrownPhysObj; cleared then or
+    /// when the body sleeps.
+    pub thrown_by_player: std::collections::HashSet<usize>,
     /// Props with SF_PHYSPROP_PREVENT_PICKUP (0x200): FVPHYSICS_NO_PLAYER_PICKUP and
     /// CPhysicsProp::CanBePickedUpByPhyscannon false.
     pub no_pickup: std::collections::HashSet<usize>,
@@ -1657,6 +1678,7 @@ impl Physics {
         self.resolved_collisions = resolved;
         self.collect_collisions(&before);
         self.changed_entity_colliders.clear();
+        self.settle_interactive_debris();
     }
     /// New contacts of this step as VPhysics collision events: the pre-step relative
     /// speed along the contact normal (collisionSpeed) and the time since the pair last
@@ -2062,6 +2084,59 @@ impl Physics {
         self.entity_colliders.insert(id, colliders);
         self.dynamic.insert(id, handle);
     }
+    /// COLLISION_GROUP_DEBRIS -> COLLISION_GROUP_INTERACTIVE_DEBRIS when the player
+    /// picks up, punts or holds the entity (other groups are left alone).
+    pub fn make_interactive_debris(&mut self, id: usize) {
+        let Some(&handle) = self.dynamic.get(&id) else {
+            return;
+        };
+        let Some(body) = self.bodies.get(handle) else {
+            return;
+        };
+        let mut changed = false;
+        for collider in body.colliders().to_vec() {
+            if let Some(c) = self.colliders.get_mut(collider) {
+                if c.collision_groups() == DEBRIS_GROUPS {
+                    c.set_collision_groups(INTERACTIVE_DEBRIS_GROUPS);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.interactive_debris.insert(handle);
+        }
+    }
+    pub fn is_interactive_debris(&self, id: usize) -> bool {
+        self.dynamic
+            .get(&id)
+            .is_some_and(|h| self.interactive_debris.contains(h))
+    }
+    /// Interactive debris converts back to debris when it comes to rest.
+    fn settle_interactive_debris(&mut self) {
+        if self.interactive_debris.is_empty() {
+            return;
+        }
+        let bodies = &self.bodies;
+        let asleep: Vec<RigidBodyHandle> = self
+            .interactive_debris
+            .iter()
+            .copied()
+            .filter(|h| bodies.get(*h).is_none_or(|b| b.is_sleeping()))
+            .collect();
+        for handle in asleep {
+            self.interactive_debris.remove(&handle);
+            let Some(body) = self.bodies.get(handle) else {
+                continue;
+            };
+            for collider in body.colliders().to_vec() {
+                if let Some(c) = self.colliders.get_mut(collider) {
+                    if c.collision_groups() == INTERACTIVE_DEBRIS_GROUPS {
+                        c.set_collision_groups(DEBRIS_GROUPS);
+                    }
+                }
+            }
+        }
+    }
     /// COLLISION_GROUP_DEBRIS for a runtime prop body (a debris gib): it keeps colliding
     /// with the world and ordinary props only.
     pub fn set_body_debris(&mut self, handle: RigidBodyHandle) {
@@ -2393,6 +2468,42 @@ impl Physics {
             b.set_linvel(vector(velocity), true);
             b.set_angvel(vector![w.x, w.y, w.z], true);
         }
+    }
+    /// The size of the world-space box around the entity's colliders (an approximation
+    /// of its OBB size for CEntityFlame's m_flSize).
+    pub fn entity_extents(&self, id: usize) -> Option<Vec3> {
+        let colliders = self.entity_colliders.get(&id)?;
+        let mut aabb: Option<rapier3d::parry::bounding_volume::Aabb> = None;
+        for c in colliders {
+            if let Some(collider) = self.colliders.get(*c) {
+                let b = collider.compute_aabb();
+                aabb = Some(match aabb {
+                    Some(a) => a.merged(&b),
+                    None => b,
+                });
+            }
+        }
+        let e = aabb?.extents();
+        Some(Vec3::new(e.x, e.y, e.z) / SCALE)
+    }
+    /// The world-space box around the entity's colliders (units).
+    pub fn entity_world_bounds(&self, id: usize) -> Option<(Vec3, Vec3)> {
+        let colliders = self.entity_colliders.get(&id)?;
+        let mut aabb: Option<rapier3d::parry::bounding_volume::Aabb> = None;
+        for c in colliders {
+            if let Some(collider) = self.colliders.get(*c) {
+                let b = collider.compute_aabb();
+                aabb = Some(match aabb {
+                    Some(a) => a.merged(&b),
+                    None => b,
+                });
+            }
+        }
+        let a = aabb?;
+        Some((
+            Vec3::new(a.mins.x, a.mins.y, a.mins.z) / SCALE,
+            Vec3::new(a.maxs.x, a.maxs.y, a.maxs.z) / SCALE,
+        ))
     }
     /// The entity's VPhysics body (map prop or bound runtime body).
     pub fn entity_body(&self, id: usize) -> Option<RigidBodyHandle> {
@@ -3024,7 +3135,7 @@ impl CollisionWorld for Physics {
                     && !collider.is_sensor()
                     && !matches!(
                         collider.collision_groups().memberships,
-                        PROJECTILE_GROUP | SHADOW_GROUP | DEBRIS_GROUP
+                        PROJECTILE_GROUP | SHADOW_GROUP | DEBRIS_GROUP | INTERACTIVE_DEBRIS_GROUP
                     )
                     && !self.world_brush_contents.contains_key(handle)
                     && !self.npc_hitboxes.contains(handle)
@@ -3174,6 +3285,7 @@ mod tests {
             origin: Vec3::ZERO,
             angles: Vec3::ZERO,
             skin: 0,
+            body: 0,
             scale: 1.,
             kind: "prop_door_rotating".into(),
             solid: true,
@@ -3355,6 +3467,7 @@ mod tests {
             origin: crate::ai::spawn::POOL_ORIGIN,
             angles: Vec3::ZERO,
             skin: 0,
+            body: 0,
             scale: 1.,
             kind: "npc_citizen".into(),
             solid: true,
@@ -3425,6 +3538,7 @@ mod tests {
             origin: Vec3::ZERO,
             angles: Vec3::new(0., 30., 0.),
             skin: 0,
+            body: 0,
             scale: 1.,
             kind: "npc_citizen".into(),
             solid: true,
@@ -3540,6 +3654,7 @@ mod tests {
             origin: Vec3::new(100., 200., 20.),
             angles: Vec3::new(0., 90., 0.),
             skin: 0,
+            body: 0,
             scale: 1.,
             kind: "static_prop".into(),
             solid: true,
@@ -3682,6 +3797,50 @@ mod tests {
             let pick = physics.pick_ray(Vec3::new(0., 200., 40.), Vec3::X, 200.);
             assert_eq!(pick.map(|h| h.entity), Some(0), "flags {flags}");
         }
+    }
+    #[test]
+    fn picked_up_debris_hits_npcs_until_it_sleeps() {
+        let mut world = native_prop_world();
+        world.model_instances[0].kind = "prop_physics".into();
+        world.model_instances[0].entity = Some(0);
+        world.entities.push(modkit_core::Entity {
+            properties: vec![
+                ("classname".into(), "prop_physics".into()),
+                ("spawnflags".into(), "4".into()),
+            ],
+        });
+        let mut physics = Physics::new(&world);
+        let hull = InteractionGroups::new(
+            HULL_GROUP,
+            Group::ALL
+                .difference(PROJECTILE_GROUP)
+                .difference(SHADOW_GROUP),
+        );
+        let groups = |physics: &Physics| {
+            let body = &physics.bodies[physics.dynamic[&0]];
+            physics.colliders[body.colliders()[0]].collision_groups()
+        };
+        assert!(!groups(&physics).test(hull));
+        physics.make_interactive_debris(0);
+        assert!(physics.is_interactive_debris(0));
+        // NPC hulls collide; the player and other debris still do not.
+        assert!(groups(&physics).test(hull));
+        assert!(!groups(&physics).test(PLAYER_GROUPS));
+        assert!(!groups(&physics).test(DEBRIS_GROUPS));
+        physics.refresh_queries();
+        let sweep = physics.trace_hull(
+            Vec3::new(0., 200., 10.),
+            Vec3::new(200., 200., 10.),
+            Vec3::new(-16., -16., 0.),
+            Vec3::new(16., 16., 72.),
+        );
+        assert_eq!(sweep.fraction, 1.);
+        // At rest it is debris again.
+        let handle = physics.dynamic[&0];
+        physics.bodies[handle].sleep();
+        physics.tick(TICK);
+        assert!(!physics.is_interactive_debris(0));
+        assert_eq!(groups(&physics), DEBRIS_GROUPS);
     }
     #[test]
     fn hinged_prop_keeps_its_pivot_while_ropes_stay_off() {
