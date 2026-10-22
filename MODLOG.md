@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 static exit preparation checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Prepared the next storage exit observation with two exact retail touch/gate candidates and duplicate-preserving authored routing. Kept the native material private and sealed separately.
+
+**Tested how / Result:** Static seal passes13 files/eight bindings, two exact bodies/280 PE instruction records,27 BSP entities/47 output edges/five submodels. No game launch or Rust changes. Reviewed documentation committed separately.
+
+**Still broken or not tested / Next:** SDK-correlated method names still require retail class/live-trigger binding. Latch ordering and the distinct output member inform the next observer; they do not establish a fired exit. Ordinary crate/window escape, map exit and Rust parity remain untested. Use the private section/storage continuation and both sealed guides.
+
 ## 2026-10-22 sealed SECTION repeat, control and storage research
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.

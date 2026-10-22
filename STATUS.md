@@ -1,5 +1,9 @@
 # STATUS
 
+## Static exit preparation addendum (2026-10-22)
+
+Private `scene-exit-plan-20261022c` is separately sealed (13 files/eight bindings): two additional exact retail bodies, 280 checked PE instruction records, 27 authored entities/47 duplicate-preserving output edges and five submodels. SDK-correlated touch/gate candidates show a latch set before later rejection branches and an output member distinct from scene OnStart. Retail class/live-trigger binding is still required before runtime use. No new game was launched; crate/window escape and map exit remain **not tested**. Continue from the sealed storage handoff, preserving first_map_finished:false and the original authored gaps.
+
 ## Sealed SECTION/storage native research (2026-10-22)
 
 This closes the pending repeat/control work in the earlier doorway milestone. The private lane `scene-section-route-20261022b` is sealed: 1,504 files/52 external bindings; six offline static/raw audits pass. The selected sampled native trace retains 677 contiguous events, 157 complete call pairs, 19 observed hook-entry byte witnesses and five scoped OnStart outputs through `security_04`. All three SECTION automatic resumes are retained; a fresh native process without Frida attached by this task corroborates their pause/recovery states in 14,003 passive samples. Seven `security_intro_01b` clock rewinds are also retained while it remains playing.

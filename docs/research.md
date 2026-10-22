@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Bounded exit-function preparation (2026-10-22)
+
+Separately sealed private `scene-exit-plan-20261022c` retains two additional exact path/hash/address/baseline/original bodies and 280 checked PE instruction records. A specific diagnostic selects a touch candidate and its direct change-level gate callee; SDK-correlated names are separate from the still-unbound retail class/live trigger. The selected gate latches before later rejection branches and uses a different output member from scene OnStart. The supplement also binds 27 original-BSP entities, 47 ordered output edges preserving duplicates and five submodels. Thirteen files/eight external identities pass verify_seal.py. This prepares the next input-led crate/window/exit experiment; no game was launched and first-map exit/Rust parity remain untested.
+
 ## Sealed SECTION, loop and storage supplement (2026-10-22)
 
 Private `../../work/hl2-decompiled/scene-section-route-20261022b` is sealed at 1,504 files/52 bindings. README.md and CLAUDE-START-HERE.md explain the evidence; query.py provides paged summary/resumes/starts/eta views. Acceptance checks 23 core plus eight distinct ETA baseline/original bodies and 1,310 instruction records. Selected V5 observation has 677 contiguous emitted events, 157 complete call pairs and five fresh-generation scoped OnStart outputs. Three automatic SECTION resumes are verified under PauseThink after successful completion checks. A separate fresh native VM_READ control retains 14,003 samples and all three pause/recovery windows. Its first watch also retains seven intro01b clock rewinds with unchanged controller generation/choreography pointer and playing state.

@@ -1,5 +1,9 @@
 # Local validation — 2026-10-05
 
+## Static exit-plan acceptance (2026-10-22)
+
+Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-exit-plan-20261022c/verify_seal.py`. Expected passed:true, sealed_files:13, external_bindings:8; acceptance exact_bodies:2, instruction_records:280, authored_entities:27, duplicate_preserving_edges:47, models:5. It verifies immutable exact body identities, PE instruction bytes, original-BSP entity/brush/model bytes and repeated output rows. Retail class registration/live trigger binding, runtime exit and Rust parity remain false/untested. No native game was launched for this static addendum; no gameplay build or Rust tests were required.
+
 ## Final SECTION/storage acceptance (2026-10-22)
 
 Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-section-route-20261022b/verify_seal.py` offline. Expected passed:true, sealed_files:1504, external_bindings:52, distinct_exact_native_bodies:31 and native_first_map_finished/rust_parity_tested:false. It checks the exact file set and external identities, repeats verify_static.py, verify_v3_windows.py, eta/verify.py, verify_control.py, verify_v5.py and verify_loop.py, and checks bounded queries/observer receipts. No gameplay rebuild is required for this documentation-only publication.

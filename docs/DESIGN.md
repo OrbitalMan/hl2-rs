@@ -1,5 +1,9 @@
 # Design
 
+## Next exit observer plan, static preparation (2026-10-22)
+
+The two exact retail touch/gate candidates in private `scene-exit-plan-20261022c` are SDK-correlated; bind retail registration/dispatch and live trigger generation before hooking them. The reviewed gate writes a latch before subsequent rejection checks, so method entry alone cannot establish a completed transition. Its output member differs from scene OnStart. Retain input-led crossing, raw trigger/latch state, actual map identity and captures together; use a fresh process after a rejected transition when needed, without editing the latch. Authored output edges must preserve duplicate keys: storage trigger746 has four OnTrigger rows. Static bounds and authored targets are guidance, not runtime crossing evidence. No Rust change or completed native exit is claimed.
+
 ## SECTION repeat/control closure and ETA supplement (2026-10-22)
 
 The sampled retail repeat now retains all three native PauseThink -> CheckEventCompletion true -> ResumePlayback groups: intro02 near scene1.680024 and7.605196, security03 near6.884836. Fourteen complete sampled pause groups include every observed transition; 155 unchanged pause frames are intentionally omitted. The emitted sequence is contiguous, not an every-frame recording. The fresh passive control independently observes the same three scene-clock plateaus/recoveries while global time advances; it does not prove native method order or timing fidelity. Preserve separate clocks, actual registered conditions and fresh generation-bound output identities. The repeated intro01b clock rewinds support looping, without establishing audio/event replay fidelity.
