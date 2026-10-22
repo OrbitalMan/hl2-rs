@@ -411,6 +411,7 @@ impl PreparedAudio {
             ]
             .into_iter()
             .chain(hl2_simulation::ai::zombie::SOUNDS.iter().copied())
+            .chain(hl2_simulation::fire::SOUNDS.iter().copied())
             .map(str::to_owned),
         );
         let mut paths = BTreeSet::new();

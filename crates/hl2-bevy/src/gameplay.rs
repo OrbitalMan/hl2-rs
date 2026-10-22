@@ -1435,6 +1435,35 @@ impl Gameplay {
             .apply(&self.world, &mut self.scene, physics);
         self.phys_explosions
             .apply_impacts(&self.world, &mut self.scene, physics);
+        // CEntityFlame::FlameThink: burning props hurt themselves and what is near them.
+        if !self.scene.fires.flames.is_empty() {
+            let states = &self.scene.states;
+            let center = |id: usize| -> Option<glam::Vec3> {
+                let state = states.get(id).filter(|s| !s.killed)?;
+                Some(
+                    physics
+                        .entity_body(id)
+                        .and_then(|b| physics.center_of_mass(b))
+                        .unwrap_or(state.origin + glam::Vec3::Z * 36.),
+                )
+            };
+            let others: Vec<(usize, glam::Vec3)> = self
+                .world
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| {
+                    e.class().starts_with("prop_physics") || e.class().starts_with("npc_")
+                })
+                .filter_map(|(id, _)| center(id).map(|c| (id, c)))
+                .collect();
+            let player_center = (!player.dead).then(|| player.feet + glam::Vec3::Z * 36.);
+            let burns = self
+                .scene
+                .fires
+                .think(self.scene.time, center, &others, player_center);
+            damage.extend(burns);
+        }
         // trigger_hurt touchers from this tick's scene logic share the entity path.
         damage.append(&mut self.scene.entity_damage);
         self.inventory
@@ -1455,6 +1484,8 @@ impl Gameplay {
             self.inventory
                 .apply_projectile_damage(blast, &self.world, &mut self.scene, physics);
         }
+        let fire_sounds = std::mem::take(&mut self.scene.fires.sounds);
+        self.scene.sounds.extend(fire_sounds);
         // PropBreakableCreateAll for props broken by this tick's damage.
         self.gibs.spawn(
             std::mem::take(&mut self.scene.prop_breaks),

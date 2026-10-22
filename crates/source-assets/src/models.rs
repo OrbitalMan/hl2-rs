@@ -1420,6 +1420,11 @@ pub fn resolve_prop_data(
         .iter()
         .flat_map(|e| std::iter::once(e).chain(e.children()))
         .find(|e| e.key.eq_ignore_ascii_case("prop_data"))?;
+    // The model's interaction sections are the prop_data block's siblings.
+    let siblings: Vec<crate::keyvalues::Entry> = entries
+        .iter()
+        .find(|e| e.children().iter().any(|c| std::ptr::eq(c, block)))
+        .map_or_else(|| entries.clone(), |parent| parent.children().to_vec());
     fn section<'a>(
         entries: &'a [crate::keyvalues::Entry],
         name: &str,
@@ -1437,6 +1442,7 @@ pub fn resolve_prop_data(
     fn apply(
         prop_data: &[crate::keyvalues::Entry],
         block: &crate::keyvalues::Entry,
+        interactions: &[crate::keyvalues::Entry],
         depth: usize,
         data: &mut modkit_core::PropData,
     ) {
@@ -1446,8 +1452,21 @@ pub fn resolve_prop_data(
             .filter(|_| depth < 8)
             .and_then(|base| section(prop_data, base))
         {
-            apply(prop_data, base, depth + 1, data);
+            // ParsePropFromBase: a base's interactions are inside its own section.
+            apply(prop_data, base, base.children(), depth + 1, data);
         }
+        // sPropdataInteractionSections: a key set to exactly this value sets the flag.
+        let interaction = |section: &str, key: &str, value: &str| {
+            interactions
+                .iter()
+                .find(|e| e.key.eq_ignore_ascii_case(section))
+                .and_then(|e| e.get(key))
+                .and_then(|e| e.text())
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case(value))
+        };
+        data.flammable |= interaction("fire_interactions", "flammable", "yes");
+        data.explosive_resist |= interaction("fire_interactions", "explosive_resist", "yes");
+        data.ignite_halfhealth |= interaction("fire_interactions", "ignite", "halfhealth");
         let text = |key: &str| {
             block
                 .children()
@@ -1490,7 +1509,7 @@ pub fn resolve_prop_data(
         }
     }
     let mut data = modkit_core::PropData::default();
-    apply(prop_data, block, 0, &mut data);
+    apply(prop_data, block, &siblings, 0, &mut data);
     Some(data)
 }
 /// CPropData::ParsePropDataFile: the "BreakableModels" chunk sets in file order, model
@@ -1990,6 +2009,26 @@ mod owned_prop_data {
             (50., 0.75, 2., 1.5)
         );
         assert_eq!(pallet.breakable_model.as_deref(), Some("WoodChunks"));
+        for (model, flags) in [
+            (
+                "models/props_c17/oildrum001_explosive.mdl",
+                (true, true, true),
+            ),
+            ("models/props_junk/gascan001a.mdl", (true, false, false)),
+            (
+                "models/props_junk/wood_pallet001a.mdl",
+                (false, false, false),
+            ),
+            ("models/props_c17/oildrum001.mdl", (false, false, false)),
+        ] {
+            // fire_interactions (flammable, explosive_resist, ignite halfhealth).
+            let d = data(model);
+            assert_eq!(
+                (d.flammable, d.explosive_resist, d.ignite_halfhealth),
+                flags,
+                "{model}"
+            );
+        }
         assert_eq!((pallet.breakable_count, pallet.breakable_skin), (6, 0));
         assert_eq!(pallet.damage_table, None);
         // Cardboard.small: bullets 0.5, no chunk set.

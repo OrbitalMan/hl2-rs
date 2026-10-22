@@ -314,6 +314,8 @@ pub struct Scene {
     pub globals: crate::globals::Globals,
     /// Damage dealt to entities by scene logic (trigger_hurt) this tick.
     pub entity_damage: Vec<crate::projectiles::Damage>,
+    /// Burning props (CEntityFlame).
+    pub fires: crate::fire::Fires,
     /// Player-thrown or launched props that hit an NPC this tick (prop, NPC):
     /// g_interactionHitByPlayerThrownPhysObj for the AI.
     pub thrown_hits: Vec<(usize, usize)>,
@@ -557,6 +559,7 @@ impl Scene {
             player_damage: Vec::new(),
             globals: crate::globals::Globals::spawn(world),
             entity_damage: Vec::new(),
+            fires: Default::default(),
             prop_breaks: Vec::new(),
             prop_explosions: Vec::new(),
             phys_explosions: Vec::new(),

@@ -188,6 +188,14 @@ pub struct PropData {
     /// override the entity's ExplodeDamage / ExplodeRadius keyvalues).
     pub explosive_damage: Option<f32>,
     pub explosive_radius: Option<f32>,
+    /// fire_interactions (PROPINTER_FIRE_FLAMMABLE, _EXPLOSIVE_RESIST,
+    /// _IGNITE_HALFHEALTH): the model's sections beside prop_data, or a base's own.
+    #[serde(default)]
+    pub flammable: bool,
+    #[serde(default)]
+    pub explosive_resist: bool,
+    #[serde(default)]
+    pub ignite_halfhealth: bool,
 }
 impl Default for PropData {
     fn default() -> Self {
@@ -202,6 +210,9 @@ impl Default for PropData {
             breakable_skin: 0,
             explosive_damage: None,
             explosive_radius: None,
+            flammable: false,
+            explosive_resist: false,
+            ignite_halfhealth: false,
         }
     }
 }

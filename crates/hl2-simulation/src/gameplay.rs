@@ -297,6 +297,9 @@ const FUNC_BREAKABLE_DAMAGE: modkit_core::PropData = modkit_core::PropData {
     breakable_skin: 0,
     explosive_damage: None,
     explosive_radius: None,
+    flammable: false,
+    explosive_resist: false,
+    ignite_halfhealth: false,
 };
 /// GetBreakableDamage (props.cpp) for a breakable with prop data (CBreakableProp,
 /// modifiers default 1): bullets x dmg.bullets (buckshot twice that), clubs x dmg.club,
@@ -1514,15 +1517,46 @@ impl Inventory {
                         // func_breakdmg_* convars instead of 1.
                         let brush = matches!(entity.class(), "func_breakable" | "func_physbox")
                             .then_some(&FUNC_BREAKABLE_DAMAGE);
-                        state.value -= if npc {
+                        let mut amount = if npc {
                             damage.amount
                         } else {
                             breakable_damage(damage.amount, damage.kind, data.or(brush))
                         };
+                        // CBreakableProp::OnTakeDamage's fire rules (prop_data
+                        // fire_interactions; *_override props keep their own data out).
+                        if let Some(own) =
+                            data.filter(|_| !npc && !entity.class().ends_with("_override"))
+                        {
+                            let center = physics
+                                .entity_body(id)
+                                .and_then(|b| physics.center_of_mass(b))
+                                .unwrap_or(state.origin);
+                            let size = physics
+                                .entity_extents(id)
+                                .map_or(16., |e| (e.x + e.y) * 0.5);
+                            match scene.fires.prop_damage(
+                                id,
+                                own.into(),
+                                &mut state.value,
+                                health.unwrap_or(40.),
+                                amount,
+                                damage.kind,
+                                damage.origin,
+                                center,
+                                size,
+                                scene.time,
+                            ) {
+                                Some(a) => amount = a,
+                                None => continue,
+                            }
+                        }
+                        state.value -= amount;
                     }
                     let dead = state.value <= 0.;
                     scene.fire(id, "OnDamaged", usize::MAX);
                     if dead {
+                        let origin = scene.states[id].origin;
+                        scene.fires.extinguish(id, origin);
                         self.kills += 1;
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
                         if npc {
