@@ -1,5 +1,11 @@
 # Design
 
+## SECTION repeat/control closure and ETA supplement (2026-10-22)
+
+The sampled retail repeat now retains all three native PauseThink -> CheckEventCompletion true -> ResumePlayback groups: intro02 near scene1.680024 and7.605196, security03 near6.884836. Fourteen complete sampled pause groups include every observed transition; 155 unchanged pause frames are intentionally omitted. The emitted sequence is contiguous, not an every-frame recording. The fresh passive control independently observes the same three scene-clock plateaus/recoveries while global time advances; it does not prove native method order or timing fidelity. Preserve separate clocks, actual registered conditions and fresh generation-bound output identities. The repeated intro01b clock rewinds support looping, without establishing audio/event replay fidelity.
+
+The static Barney ETA supplement binds the observed class vtable to a blended-motor estimate before a -1 sentinel fallback. The reviewed fallback divides positive path distance by positive ideal speed; it is not a current-velocity formula. SDK labels, inferred signatures, exact retail arithmetic and unobserved runtime return values remain separate evidence levels. No typed ABI or Rust implementation is established. Private guide: `scene-section-route-20261022b/CLAUDE-START-HERE.md` and `eta/CONTRACT.md`; six audits and the closed-file seal pass. The input-led storage/ladder route starts security04, but the next crate/window escape and first-map exit are untested. Original authored gaps remain open.
+
 ## Retail SECTION callback and bounded runtime supplement (2026-10-22)
 
 Exact PE tables and RTTI bind the scene callback interface at object offset0x338 and its CheckEvent target. The reviewed retail path resolves an event's authored actor, delegates to registered actor readiness when found, and warns/returns ready when resolution fails. Preserve that bounded fallback rather than inventing a permanent missing-actor barrier. A non-automated pause still depends on the actual registered conditions; scene and global game clocks remain separate.

@@ -1,5 +1,11 @@
 # STATUS
 
+## Sealed SECTION/storage native research (2026-10-22)
+
+This closes the pending repeat/control work in the earlier doorway milestone. The private lane `scene-section-route-20261022b` is sealed: 1,504 files/52 external bindings; six offline static/raw audits pass. The selected sampled native trace retains 677 contiguous events, 157 complete call pairs, 19 observed hook-entry byte witnesses and five scoped OnStart outputs through `security_04`. All three SECTION automatic resumes are retained; a fresh native process without Frida attached by this task corroborates their pause/recovery states in 14,003 passive samples. Seven `security_intro_01b` clock rewinds are also retained while it remains playing.
+
+Normal input reaches storage, climbs the authored ladder and dismounts at approximately (-3342.135,92,80.031). Window escape/map exit, complete audiovisual replay, timing fidelity and Rust parity remain **not tested**; `first_map_finished:false`. Static evidence covers 31 distinct exact retail bodies/1,310 instruction records, including a bounded Barney ETA dispatch supplement whose runtime return and typed ABI are untested. Earlier dense-trace gaps and rejected routes remain explicit. No Rust changes/builds by Codex. Repeat the private `verify_seal.py`; the next research step is ordinary crate/window escape from that platform. The original 16 authored gaps, four missing exact procedures and 16h closure correction remain unchanged.
+
 ## Doorway/SECTION research milestone (2026-10-22, research only)
 
 A genuine first-map native route now enters Barney's room and reaches security_01/02/03. Retained-byte checks pass 23 exact retail bodies, 19 entry signatures, 988 instruction records, 1,183 closed call pairs and 12 scoped OnStart outputs. Native automatic resume is observed for security_intro_02 at scene time7.605485 and security_03 at6.883860; the first intro SECTION pause is also retained. The dense trace has an explicit missing seq1376..1673 interval, so continuous recovery/timing is not certified. A capture shows Barney's uncovered face after the reveal; the complete reveal animation/audio is not validated.

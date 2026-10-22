@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 sealed SECTION repeat, control and storage research
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Sealed private native SECTION/ETA evidence and input-led storage/ladder continuation; added a read-only verifier, paged query and Claude implementation/research handoff. Native material stays outside Git. No Rust implementation changes.
+
+**Tested how / Result:** Six static/raw audits pass; 1504 files/52 external bindings sealed.31 exact bodies/1310 instruction records; sampled native677 events/157 call pairs/5 scoped starts; all3 automatic resumes plus fresh14,003-sample control corroboration. Seven intro01b clock rewinds and genuine storage security04 start retained. Ladder climb/dismount raw bytes and capture checked. Owned research processes closed with checked installed identities unchanged. Reviewed shared docs published separately.
+
+**Still broken or not tested / Next:** Earlier V3 gap/rejected approaches remain explicit. First map unfinished; full audiovisual replay, timing fidelity, runtime ETA/ABI and Rust parity untested. Next: ordinary crate/window escape from storage platform, keeping original16 authored gaps and four missing exact procedures. Private `work/publishing/research-section-storage-continuation-20261022b.md` carries reproduction and provenance.
+
 ## 2026-10-22 doorway SECTION callback and native room milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
