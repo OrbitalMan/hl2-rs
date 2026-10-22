@@ -24,7 +24,8 @@ pub struct Phy {
     /// Preserves duplicate sections/keys; mass/material mapping is separate work.
     pub keyvalues: Vec<keyvalues::Entry>,
     /// The terminal convexes' client-data words (IVP_Compact_Ledge offset 4): 0 in
-    /// prop PHYs; set in ragdoll solids (`read_solids`).
+    /// prop PHYs; in ragdoll solids the simulated bone's studio index + 1 (police.phy
+    /// solids 0-9 against police.mdl's bones and the solids' "name" keys).
     pub ledge_data: Vec<i32>,
 }
 
@@ -271,7 +272,7 @@ pub fn solids(entries: &[keyvalues::Entry]) -> Vec<modkit_core::PhysicsSolid> {
 /// Every solid of a multi-solid (ragdoll) PHY, each read like a single-solid file:
 /// the solid's bytes behind a one-solid header and an empty KeyValues tail, so the
 /// proven reader's bounds and IVPS checks apply unchanged. Index i is solid i of
-/// the ragdoll KeyValues.
+/// the ragdoll KeyValues; `ledge_data` holds its bone's studio index + 1.
 pub fn read_solids(data: &[u8], mdl_checksum: u32) -> Result<Vec<Phy>> {
     if data.len() > 64 * 1024 * 1024 || u32le(data, 0)? != 16 {
         bail!("unsupported PHY header");
@@ -576,9 +577,8 @@ mod ragdoll_tests {
         let solids = read_solids(&data, checksum).unwrap();
         assert_eq!(solids.len(), 15);
         assert!(solids.iter().all(|s| !s.pieces.is_empty()));
-        // Ragdoll ledges carry a distinct nonzero client-data word per solid (police:
-        // 1, 4, 10, 15, ...; likely the studio bone index, not yet checked against the
-        // MDL bones).
+        // Ragdoll ledges carry the bone's studio index + 1 (police: 1 = Bip01_Pelvis
+        // bone 0, 4 = Bip01_Spine2 bone 3, ...).
         let words: Vec<i32> = solids.iter().flat_map(|s| s.ledge_data.clone()).collect();
         assert_eq!(words.len(), 15);
         assert!(words.iter().all(|w| *w > 0));
