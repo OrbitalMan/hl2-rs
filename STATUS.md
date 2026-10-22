@@ -1,5 +1,11 @@
 # STATUS
 
+## Native first-map grate crossing (2026-10-22, research only)
+
+The prior y=-1969.96875 stop now has a bounded explanation and crossing. Original BSP world brush2040 has grate contents0x18000008 and bounds x[-5414,-5296],y[-1988,-1986],z[16,48]. Live player bounds are (-16,-16,0)..(16,16,72); the predicted near boundary matches the native stop with0.03125 separation. A fresh process without Frida again stops there under moveright, then crosses with moveright+jump and lands beyond it at(-5367.256348,-2155.968994,-31.96875). Sampled peak56.426250 and feet48.03125 across the brush are raw-state evidence, not a general jump-law claim.
+
+Private scene-doorway-route-20261022 acceptance passes one exact baseline/original player metadata body, six live input-field records with PE string witnesses, and617 raw motion samples in eight captures (including one rejected direct-button attempt). Fine alignment used reduced input magnitudes, restored450 before the decisive crossing. PID29660 closed; checked installed cfg/module identities match. Full train-exit route, first-map completion and Rust parity remain **not tested**. Next: genuine customs/security route observations in a separate private mount. Public research docs are committed; implementation work remains separate.
+
 ## First-map player-triggered passenger scene (2026-10-21, research only)
 
 Separate timed console press/release requests now establish native walking in d1_trainstation_01: instrumented300.869 units and fresh never-Frida-attached361.622 units,with raw player origin/velocity/clock/generation reads. At114.180 game seconds,trigger_lcs_trainride_sit requests lcs_trainride_sit_respond,policy0,with the actual player as incoming activator. Genuine citizen_train_2/male_07 binds,CheckActors1,OnStart and playing1/wait0 follow. Exact StartPlayback/raw output stack distinguish incoming player identity from OnStart's scene-self activator/caller. Fresh process corroborates the same scene playing at114.420. Six exact bodies/six relocated entries and512 events/253 paired calls pass;29 player snapshots and fresh named-state raw reconstruction pass.

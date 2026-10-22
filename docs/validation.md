@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Native grate crossing and player input checks (2026-10-22)
+
+Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-doorway-route-20261022/verify.py` and `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-doorway-route-20261022/verify_seal.py`. Expected passed:true,native_grate_crossing_verified:true,617 motion samples,eight captures,one exact native body,six live input records; seal99 files/seven external bindings. Acceptance reconstructs raw movement/input/clock/generation reads, independently compares live field-name strings to PE bytes, and checks BSP brush/side/plane ranges. It rejects the stationary direct-button attempt as input evidence. Native walk stops at the predicted boundary; jump crosses with feet>=48 over the grate and lands beyond it. Settled getpos corroborates raw feet+64 eye coordinates.
+
+PID29660 was never Frida-attached and closed with checked installed cfg/module identities unchanged. Fine alignment altered requested input magnitudes35 and restored450 before walk/jump. Pulse delays are not exact game durations. This is controlled native route evidence, not full map traversal or a packaged Rust test. No Cargo/build/Clippy/gameplay checks were run for these documentation changes; first_map_finished and rust_parity_tested remain false. The prior player-route seal remains unchanged.
+
 ## Session 29 owner playtest fixes, zombies, fire (2026-10-22)
 
 - Packaged runs (artifacts/s29, `run.sh <fixture> <frames>`): cancop-throw (pickup -> NPC_MetroPolice.Cupcop.PutItInTheTrash; thrown can: thrown_object_hits 1, logic_achievement.FireEvent 1, throwcan_trigger -> Cupcop.Failure), zombie-look (classic/fast/poison zombies with headcrab bodygroups, capture), zombie-hall (`ent_create npc_zombie` 190 units ahead of the walking player: chase, 9 claw hits in 19 s, zombie cues started after the preload), idle-plaza (60 s at (-2600,-2900,90): 6 METROPOLICE lines, 10 before), barrel-burn (`prop_physics_create props_c17/oildrum001_explosive.mdl`, two pistol shots: General.BurningObject at 2.85 s, explosion at 5.89 s).

@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 native grate crossing and player input evidence
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Added private BSP/PE/native input evidence and research documentation to resolve the prior first-map side boundary. No Rust implementation changes.
+
+**Tested how / Result:** One exact server.dll metadata body, six live/PE input-field bindings,617 raw motion samples/eight captures, and original BSP world brush2040 pass acceptance. A fresh no-Frida player stops at the matching plane, jumps across the32-unit grate, and lands beyond it. Private seal passes99 files/seven bindings; game closed and checked installed identities match. Reviewed public docs committed separately from concurrent implementation work.
+
+**Still broken or not tested / Next:** Full train-exit route, first-map completion, camera/audio/animation/SECTION behavior and Rust parity not tested. Continue toward genuine customs/security controllers, preserving all prior gaps and the rejected direct-button attempt.
+
 ## 2026-10-22 session 29: owner playtest fixes (thrown debris, can pickup outputs, voice gender, gravity gun hold glow), bodygroups and zombie headcrabs, npc_zombie AI, PVS-gated idle chatter, burning props, PCF reader, gas can/propane burst, poison zombie (`wip/squads-20261022`)
 
 - Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.

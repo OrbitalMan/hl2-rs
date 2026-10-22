@@ -1,5 +1,11 @@
 # Design
 
+## First-map grate crossing and input telemetry (2026-10-22, research only)
+
+The prior train-side blocker is authored world brush2040: grate bit0x8, x[-5414,-5296],y[-1988,-1986],z[16,48]. Its +Y plane distance-1986 and the live16-unit player half-width predict the retained center boundary-1970; native separation is0.03125. A no-Frida route with actual moveright/jump input crosses at feet48.03125 and lands beyond at z=-31.96875. Preserve the authored brush rather than inferring that the stopped player proves broken input or deleting collision. This finite correspondence does not certify the full Source collision/jump/step law.
+
+Exact server.dll101f7430 under the retained module/hash/baseline/original key plus six live52-byte metadata records bind m_nButtons+a80 and Last/Pressed/Released/Disabled/Forced fields. Raw button transitions now accompany clock/origin/velocity and generation rechecks. Requested pulse durations include console latency; lower input magnitude was used for alignment and restored before the decisive crossing. Private plan/results: ../../work/hl2-decompiled/scene-doorway-route-20261022. No Rust implementation or ordinary full-map parity was tested. Next observe genuine downstream callers/actors after the measured crossing.
+
 ## First-map walking and I/O identity supplement (2026-10-21, research only)
 
 Private bounded plan/results: ../../work/hl2-decompiled/scene-player-route-20261021/PLAN.md and README.md. Preserve authored first-map scope,validate player movement with separate timed console press/release and raw generation-bracketed player reads,then correlate the resulting native scene request with actual caller/activator/actor;compare a fresh process without Frida. No Rust implementation or second-map promotion.

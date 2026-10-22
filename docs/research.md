@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Measured first-map grate crossing (2026-10-22)
+
+Private ../../work/hl2-decompiled/scene-doorway-route-20261022/README.md resolves the retained side boundary to world brush2040 and records a fresh no-Frida moveright/jump crossing. One exact server.dll baseline/original metadata initializer and six live/PE input-field bindings support617 raw motion samples across eight captures, preserving the rejected direct-button path. Both native collision bounds and brush planes independently decode from retained bytes. Verification/seal pass99 private files/seven external bindings. Full train-exit route, scene playback, first-map completion and Rust parity remain untested; customs/security research continues separately. Reviewed shared documentation is committed; raw research remains private.
+
 ## Player walking and genuine passenger trigger (2026-10-21)
 
 Private ../../work/hl2-decompiled/scene-player-route-20261021/README.md establishes timed-console walking and a new native first-map start: trigger_lcs_trainride_sit -> lcs_trainride_sit_respond at114.180,policy0,actual player activator,genuine citizen_train_2/male_07,CheckActors1 and accepted playing state. Exact six-body baseline/original provenance,relocated entry checks,raw actor/player generations and512 events/253 call pairs remain retained. A fresh never-Frida-attached process corroborates walking and the same scene playing. Incoming player activator differs from scene OnStart's self/self/0 output identity. Trigger dispatch itself,full playback and Rust parity remain untested. Both games closed;checked installed identities unchanged. Train exit remains blocked/uncompleted. Latest handoff ../../work/publishing/research-player-route-continuation-20261021.md;stay on the first map and preserve16 gaps.
