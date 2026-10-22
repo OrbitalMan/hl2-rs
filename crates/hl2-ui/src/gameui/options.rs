@@ -5848,6 +5848,22 @@ pub(crate) mod tests {
         let multicore_ultra =
             Choice::Advanced(AdvancedChoice::Multicore).items(&ultra_env, &h.dialog.draft);
         assert_eq!(multicore_ultra[1], "gameui_enabled *");
+
+        // 3. Apple Silicon / Metal Hardware (e.g. M1 Pro) - 8X MSAA is gated
+        let apple_rec = SystemRecommendation::from_specs(
+            CpuSpecs::new(10),
+            GpuSpecs::new("Apple M1 Pro", GpuDeviceType::Integrated),
+        );
+        h.dialog.set_system_recommendation(apple_rec);
+        let apple_env = h.dialog.env();
+        let aa_apple =
+            Choice::Advanced(AdvancedChoice::Antialiasing).items(&apple_env, &h.dialog.draft);
+        assert_eq!(
+            aa_apple.len(),
+            3,
+            "8X MSAA must be gated on Apple Silicon / Metal hardware"
+        );
+        assert_eq!(aa_apple[2], "GameUI_4X *");
     }
 
     #[test]

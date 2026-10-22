@@ -75,6 +75,10 @@ pub struct GpuSpecs {
     pub device_type: GpuDeviceType,
     pub vendor_id: Option<u32>,
     pub device_id: Option<u32>,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub max_msaa_samples: Option<u32>,
 }
 
 impl GpuSpecs {
@@ -84,7 +88,78 @@ impl GpuSpecs {
             device_type,
             vendor_id: None,
             device_id: None,
+            backend: None,
+            max_msaa_samples: None,
         }
+    }
+
+    /// Maximum multisampling sample count supported by the hardware for color and depth textures.
+    ///
+    /// WebGPU guarantees [1, 4] samples. Metal limits color (Rgba8UnormSrgb) and depth (Depth32Float)
+    /// attachments to [1, 2, 4] samples. Many integrated GPUs and software renderers also do not support
+    /// 8 samples. Discrete GPUs on Vulkan / DirectX 12 support 8x MSAA.
+    pub fn max_msaa_samples(&self) -> u32 {
+        if let Some(samples) = self.max_msaa_samples {
+            return samples;
+        }
+        let name_lower = self.name.to_ascii_lowercase();
+        let backend_lower = self.backend.as_deref().unwrap_or("").to_ascii_lowercase();
+
+        // 1. Metal or Apple Silicon strictly supports up to 4 samples for color and depth render targets
+        if backend_lower.contains("metal") || name_lower.contains("apple") {
+            return 4;
+        }
+
+        // 2. Software / CPU renderers (llvmpipe, softpipe, basic render)
+        if self.device_type == GpuDeviceType::Cpu
+            || name_lower.contains("llvmpipe")
+            || name_lower.contains("softpipe")
+            || name_lower.contains("basic render")
+        {
+            return 2;
+        }
+
+        // 3. Integrated GPUs generally cap at 4 samples in WebGPU baseline
+        if self.device_type == GpuDeviceType::Integrated
+            || name_lower.contains("intel hd")
+            || name_lower.contains("intel uhd")
+            || name_lower.contains("adreno")
+            || name_lower.contains("mali")
+        {
+            return 4;
+        }
+
+        // 4. Discrete GPUs (NVIDIA GeForce, AMD Radeon, discrete Intel Arc) on Vulkan / DX12
+        if self.device_type == GpuDeviceType::Discrete {
+            return 8;
+        }
+
+        // Safe fallback for virtual/unknown hardware
+        4
+    }
+
+    /// Highest antialiasing mode supported by this hardware.
+    pub fn max_antialiasing(&self) -> Antialiasing {
+        match self.max_msaa_samples() {
+            s if s >= 8 => Antialiasing::X8,
+            s if s >= 4 => Antialiasing::X4,
+            s if s >= 2 => Antialiasing::X2,
+            _ => Antialiasing::None,
+        }
+    }
+
+    /// Antialiasing modes supported by this hardware.
+    pub fn supported_antialiasing(&self) -> Vec<Antialiasing> {
+        let max = self.max_antialiasing();
+        [
+            Antialiasing::None,
+            Antialiasing::X2,
+            Antialiasing::X4,
+            Antialiasing::X8,
+        ]
+        .into_iter()
+        .filter(|&aa| aa.samples() <= max.samples())
+        .collect()
     }
 }
 
@@ -124,6 +199,8 @@ impl SystemRecommendation {
                 device_type: GpuDeviceType::Integrated,
                 vendor_id: Some(0x106b),
                 device_id: None,
+                backend: Some("Metal".to_string()),
+                max_msaa_samples: Some(4),
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -133,6 +210,8 @@ impl SystemRecommendation {
                 device_type: GpuDeviceType::Discrete,
                 vendor_id: None,
                 device_id: None,
+                backend: None,
+                max_msaa_samples: None,
             }
         }
     }
@@ -140,7 +219,7 @@ impl SystemRecommendation {
     /// Derives recommendations deterministically from CPU and GPU specifications.
     pub fn from_specs(cpu: CpuSpecs, gpu: GpuSpecs) -> Self {
         let tier = Self::derive_tier(&cpu, &gpu);
-        let (video, hdr) = Self::settings_for_tier(tier, &cpu);
+        let (video, hdr) = Self::settings_for_tier(tier, &cpu, &gpu);
         Self {
             tier,
             cpu,
@@ -215,11 +294,13 @@ impl SystemRecommendation {
         }
     }
 
-    /// Generates recommended advanced video settings and HDR mode for a tier.
+    /// Generates recommended advanced video settings and HDR mode for a tier and GPU hardware.
     pub fn settings_for_tier(
         tier: HardwareTier,
         cpu: &CpuSpecs,
+        gpu: &GpuSpecs,
     ) -> (AdvancedVideoSettings, HdrMode) {
+        let max_aa = gpu.max_antialiasing();
         match tier {
             HardwareTier::Ultra => (
                 AdvancedVideoSettings {
@@ -229,7 +310,11 @@ impl SystemRecommendation {
                     water_detail: WaterDetail::All,
                     shadow_detail: ShadowDetail::High,
                     color_correction: true,
-                    antialiasing: Antialiasing::X8,
+                    antialiasing: if max_aa.samples() >= 8 {
+                        Antialiasing::X8
+                    } else {
+                        max_aa
+                    },
                     filtering: Filtering::Anisotropic16,
                     vsync: false,
                     motion_blur: false,
@@ -247,7 +332,11 @@ impl SystemRecommendation {
                     water_detail: WaterDetail::All,
                     shadow_detail: ShadowDetail::High,
                     color_correction: true,
-                    antialiasing: Antialiasing::X4,
+                    antialiasing: if max_aa.samples() >= 4 {
+                        Antialiasing::X4
+                    } else {
+                        max_aa
+                    },
                     filtering: Filtering::Anisotropic8,
                     vsync: false,
                     motion_blur: false,
@@ -265,7 +354,11 @@ impl SystemRecommendation {
                     water_detail: WaterDetail::World,
                     shadow_detail: ShadowDetail::Medium,
                     color_correction: true,
-                    antialiasing: Antialiasing::X2,
+                    antialiasing: if max_aa.samples() >= 2 {
+                        Antialiasing::X2
+                    } else {
+                        max_aa
+                    },
                     filtering: Filtering::Anisotropic4,
                     vsync: false,
                     motion_blur: false,
@@ -298,7 +391,16 @@ impl SystemRecommendation {
 
     /// The zero-based index of the recommended item for an `AdvancedChoice` combo box.
     pub fn recommended_advanced_index(&self, choice: AdvancedChoice) -> usize {
-        choice.selected(&self.video)
+        match choice {
+            AdvancedChoice::Antialiasing => {
+                let supported = self.gpu.supported_antialiasing();
+                supported
+                    .iter()
+                    .position(|&aa| aa == self.video.antialiasing)
+                    .unwrap_or(0)
+            }
+            other => other.selected(&self.video),
+        }
     }
 
     /// The zero-based index of the recommended item for `Choice::Hdr` (0 = None, 1 = Bloom, 2 = Full).
@@ -564,9 +666,9 @@ impl VideoBenchmarkSuite {
     /// Executes full profile benchmarks and produces an accordance report.
     pub fn run_preset_benchmarks(rec: &SystemRecommendation) -> BenchmarkReport {
         let (low_video, low_hdr) =
-            SystemRecommendation::settings_for_tier(HardwareTier::Low, &rec.cpu);
+            SystemRecommendation::settings_for_tier(HardwareTier::Low, &rec.cpu, &rec.gpu);
         let (ultra_video, ultra_hdr) =
-            SystemRecommendation::settings_for_tier(HardwareTier::Ultra, &rec.cpu);
+            SystemRecommendation::settings_for_tier(HardwareTier::Ultra, &rec.cpu, &rec.gpu);
 
         let low_profile = Self::evaluate(&low_video, low_hdr, rec);
         let recommended_profile = Self::evaluate(&rec.video, rec.hdr, rec);
@@ -749,6 +851,52 @@ mod tests {
         assert!(
             shadow_cost >= 0.0,
             "High shadows cost should be non-negative"
+        );
+    }
+
+    #[test]
+    fn hardware_aware_antialiasing_supported_modes_and_gating() {
+        // 1. Discrete GPU (Vulkan/DX12) - supports up to 8X
+        let discrete = GpuSpecs::new("GeForce RTX 4080", GpuDeviceType::Discrete);
+        assert_eq!(discrete.max_msaa_samples(), 8);
+        assert_eq!(discrete.max_antialiasing(), Antialiasing::X8);
+        assert_eq!(
+            discrete.supported_antialiasing(),
+            vec![
+                Antialiasing::None,
+                Antialiasing::X2,
+                Antialiasing::X4,
+                Antialiasing::X8
+            ]
+        );
+
+        // 2. Apple Silicon / Metal - capped to 4X
+        let apple = GpuSpecs::new("Apple M1 Pro", GpuDeviceType::Integrated);
+        assert_eq!(apple.max_msaa_samples(), 4);
+        assert_eq!(apple.max_antialiasing(), Antialiasing::X4);
+        assert_eq!(
+            apple.supported_antialiasing(),
+            vec![Antialiasing::None, Antialiasing::X2, Antialiasing::X4]
+        );
+
+        // Apple Silicon at Ultra tier (e.g. M1 Ultra) clamps recommended antialiasing to X4
+        let apple_ultra = GpuSpecs::new("Apple M1 Ultra", GpuDeviceType::Integrated);
+        let rec_apple = SystemRecommendation::from_specs(CpuSpecs::new(24), apple_ultra);
+        assert_eq!(rec_apple.tier, HardwareTier::Ultra);
+        assert_eq!(rec_apple.video.antialiasing, Antialiasing::X4);
+        assert_eq!(
+            rec_apple.recommended_advanced_index(AdvancedChoice::Antialiasing),
+            2,
+            "4X MSAA is index 2 among [None, 2X, 4X]"
+        );
+
+        // 3. CPU Software Renderer (llvmpipe) - capped to 2X
+        let cpu_gpu = GpuSpecs::new("llvmpipe", GpuDeviceType::Cpu);
+        assert_eq!(cpu_gpu.max_msaa_samples(), 2);
+        assert_eq!(cpu_gpu.max_antialiasing(), Antialiasing::X2);
+        assert_eq!(
+            cpu_gpu.supported_antialiasing(),
+            vec![Antialiasing::None, Antialiasing::X2]
         );
     }
 }

@@ -935,6 +935,7 @@ fn setup(
     status: Res<Status>,
     (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
     mut present_materials: ResMut<Assets<video::PresentMaterial>>,
+    adapter: Option<Res<RenderAdapterInfo>>,
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
     let map_name = loaded.world.name.clone();
@@ -971,6 +972,32 @@ fn setup(
     console_ui
         .source
         .level_loaded_for_map(&map_game, &map_name, prepared.1);
+    let max_samples = video::adapter_max_msaa_samples(adapter.as_deref());
+    if let Some(adapter) = adapter.as_deref() {
+        let device_type_str = format!("{:?}", adapter.0.device_type);
+        let device_type = match device_type_str.as_str() {
+            "DiscreteGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Discrete,
+            "IntegratedGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Integrated,
+            "Cpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Cpu,
+            "VirtualGpu" => hl2_ui::gameui::recommendation::GpuDeviceType::Virtual,
+            _ => hl2_ui::gameui::recommendation::GpuDeviceType::Other,
+        };
+        let gpu = hl2_ui::gameui::recommendation::GpuSpecs {
+            name: adapter.0.name.clone(),
+            device_type,
+            vendor_id: Some(adapter.0.vendor),
+            device_id: Some(adapter.0.device),
+            backend: Some(format!("{:?}", adapter.0.backend)),
+            max_msaa_samples: Some(max_samples),
+        };
+        let cpu = hl2_ui::gameui::recommendation::CpuSpecs::new(
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4),
+        );
+        let rec = hl2_ui::gameui::recommendation::SystemRecommendation::from_specs(cpu, gpu);
+        console_ui.source.set_system_recommendation(rec);
+    }
     if let Some(map) = &options.map {
         // A command-line map has no running game: it is not resolved against the game of the
         // saved menu background that was loaded first.
@@ -996,7 +1023,7 @@ fn setup(
         options.flexible_aspect,
         options.display_mode.effective() == hl2_ui::config::DisplayMode::Windowed,
     );
-    let msaa = video::msaa_for(options.config.video.advanced.antialiasing);
+    let msaa = video::msaa_for_hardware(options.config.video.advanced.antialiasing, max_samples);
     commands.spawn((
         Camera2d,
         Camera {

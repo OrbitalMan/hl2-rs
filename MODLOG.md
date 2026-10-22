@@ -1,6 +1,50 @@
 # MODLOG
 
-## 2026-10-22 Safe clamp for Antialiasing sample count (avoid WebGPU/Metal sample count 8 crash)
+## 2026-10-22 Hardware-aware Antialiasing capability detection and unsupported mode gating
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/gameui/recommendation.rs`:
+  - Extended `GpuSpecs` with `backend: Option<String>` and `max_msaa_samples: Option<u32>`.
+  - Added `GpuSpecs::max_msaa_samples(&self) -> u32`: detects maximum supported sample count on the detected hardware (Metal / Apple Silicon: 4, CPU/llvmpipe software renderers: 2, Integrated GPUs: 4, Discrete Vulkan/DirectX 12 GPUs: 8).
+  - Added `GpuSpecs::max_antialiasing(&self) -> Antialiasing` and `GpuSpecs::supported_antialiasing(&self) -> Vec<Antialiasing>`.
+  - Updated `settings_for_tier` to take `(tier, cpu, gpu)` and clamp recommended antialiasing on Ultra/High tiers so recommendations never exceed hardware capabilities.
+  - Updated `recommended_advanced_index` to resolve against `gpu.supported_antialiasing()`.
+  - Added unit test `hardware_aware_antialiasing_supported_modes_and_gating`.
+- `crates/hl2-ui/src/gameui/settings.rs`:
+  - Added `AdvancedChoice::tokens_with_rec(self, rec: Option<&SystemRecommendation>)`: dynamically gates unsupported antialiasing options in the Video > Advanced dialog based on the detected hardware's supported modes.
+  - Updated `Choice::items` to pass `env.recommendation` into `tokens_with_rec`.
+  - Updated `Choice::selected` to clamp unsupported antialiasing modes to the hardware's maximum supported mode and return the corresponding index within the gated choices.
+  - Updated `Choice::select` to select within the hardware's supported modes.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Added test assertions to `video_advanced_system_recommendation_scales_with_hardware_tiers` asserting that 8X MSAA is gated and excluded from the dropdown on Apple Silicon / Metal hardware, while remaining present on discrete GPUs (RTX 4090).
+- `crates/hl2-bevy/src/video.rs`:
+  - Restored 1:1 enum mapping in `msaa_for`: `None -> Off`, `X2 -> Sample2`, `X4 -> Sample4`, `X8 -> Sample8`.
+  - Added `adapter_max_msaa_samples(Option<&RenderAdapterInfo>) -> u32`: inspects the active GPU adapter's backend and device type to determine hardware limit (Metal/Apple Silicon: 4, Integrated: 4, Cpu: 2, Discrete Vulkan/DX12: 8).
+  - Added `msaa_for_hardware(aa: Antialiasing, max_samples: u32) -> Msaa`: converts antialiasing to Bevy `Msaa` clamped to the adapter's capabilities.
+  - Updated `sync_antialiasing` to query `Option<Res<RenderAdapterInfo>>` and apply `msaa_for_hardware`.
+  - Added unit test `test_msaa_for_hardware`.
+- `crates/hl2-bevy/src/main.rs`:
+  - In `setup`, probed `RenderAdapterInfo` to compute `max_samples` and initialize cameras with `msaa_for_hardware`.
+  - Forwarded detected `GpuSpecs` (with backend, device type, and `max_msaa_samples`) to `console_ui.source.set_system_recommendation` at startup so Video Advanced dialog choices reflect the actual hardware capabilities from launch.
+- `crates/hl2-bevy/src/assets.rs`:
+  - Updated benchmark tests to verify `msaa_for` 1:1 mappings and `msaa_for_hardware` clamp.
+- `STATUS.md`:
+  - Documented hardware-aware capability detection and unsupported mode gating.
+
+**Why:** User request:
+"better make it rather hardware than platform aware, and gate unssuported modes on per hardware capabilities and limitations basis"
+Previously, antialiasing was clamped globally to 4x. Now, modes are gated per-hardware: discrete GPUs on Vulkan / DirectX 12 can select and run full 8x MSAA, while Metal and integrated adapters gate out unsupported 8x MSAA from the UI and safely clamp external configs to 4x.
+
+**Tested how:**
+- `bash scripts/checks/validate.sh`: 386 `hl2-ui` tests, 102 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) clean; `cargo fmt --check` clean.
+- `bash scripts/checks/check_windows.sh`: Windows cross-compilation target check passed.
+- Built release binary `bin/hl2-bevy` with `scripts/build-bevy.sh`.
+- Replay / capture test: `bin/hl2-bevy` ran 240 frames, captured `artifacts/menu_capture.png`, and exited with status 0.
+
+**Result:**
+Hardware-aware capability gating cleanly excludes unsupported antialiasing modes from the Options > Video > Advanced dialog on constrained hardware (Metal / integrated GPUs) while preserving 8x MSAA for discrete desktop GPUs, completely preventing GPU validation crashes.
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
 

@@ -288,13 +288,31 @@ impl AdvancedChoice {
 
     /// Item tokens in combo order (the retail dialog's lists).
     pub fn tokens(self) -> Vec<&'static str> {
+        self.tokens_with_rec(None)
+    }
+
+    /// Item tokens in combo order, gated by hardware capabilities if a system recommendation is present.
+    pub fn tokens_with_rec(
+        self,
+        rec: Option<&crate::gameui::recommendation::SystemRecommendation>,
+    ) -> Vec<&'static str> {
         match self {
             Self::ModelDetail => listed_tokens::<ModelDetail>(),
             Self::TextureDetail => listed_tokens::<TextureDetail>(),
             Self::ShaderDetail => listed_tokens::<ShaderDetail>(),
             Self::WaterDetail => listed_tokens::<WaterDetail>(),
             Self::ShadowDetail => listed_tokens::<ShadowDetail>(),
-            Self::Antialiasing => listed_tokens::<Antialiasing>(),
+            Self::Antialiasing => {
+                if let Some(rec) = rec {
+                    rec.gpu
+                        .supported_antialiasing()
+                        .into_iter()
+                        .map(|aa| aa.token())
+                        .collect()
+                } else {
+                    listed_tokens::<Antialiasing>()
+                }
+            }
             Self::Filtering => listed_tokens::<Filtering>(),
             Self::ClassicEffects => CLASSIC_EFFECTS_TOKENS.to_vec(),
             _ => FLAG_TOKENS.to_vec(),
@@ -365,7 +383,7 @@ impl Choice {
                     .recommendation
                     .map(|r| r.recommended_advanced_index(advanced));
                 advanced
-                    .tokens()
+                    .tokens_with_rec(env.recommendation)
                     .into_iter()
                     .enumerate()
                     .map(|(i, t)| {
@@ -431,6 +449,20 @@ impl Choice {
             list.iter().position(|v| *v == value)
         }
         match self {
+            Self::Advanced(AdvancedChoice::Antialiasing) => {
+                if let Some(rec) = env.recommendation {
+                    let supported = rec.gpu.supported_antialiasing();
+                    let current = c.video.advanced.antialiasing;
+                    let clamped = if current.samples() > rec.gpu.max_msaa_samples() {
+                        rec.gpu.max_antialiasing()
+                    } else {
+                        current
+                    };
+                    supported.iter().position(|&aa| aa == clamped).or(Some(0))
+                } else {
+                    Some(AdvancedChoice::Antialiasing.selected(&c.video.advanced))
+                }
+            }
             Self::Advanced(advanced) => Some(advanced.selected(&c.video.advanced)),
             Self::GamepadAimAssist => find(&AimAssist::ALL, c.gamepad.aim_assist),
             Self::WeaponSelection => Some(listed_index(c.gamepad.weapon_selection)),
@@ -486,6 +518,16 @@ impl Choice {
         let resolutions = env.resolutions(draft);
         let c = &mut draft.config;
         match self {
+            Self::Advanced(AdvancedChoice::Antialiasing) => {
+                if let Some(rec) = env.recommendation {
+                    let supported = rec.gpu.supported_antialiasing();
+                    if let Some(&aa) = supported.get(index) {
+                        c.video.advanced.antialiasing = aa;
+                    }
+                } else {
+                    AdvancedChoice::Antialiasing.select(&mut c.video.advanced, index);
+                }
+            }
             Self::Advanced(advanced) => advanced.select(&mut c.video.advanced, index),
             Self::GamepadAimAssist => {
                 if let Some(v) = AimAssist::ALL.get(index) {

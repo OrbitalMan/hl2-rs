@@ -4,12 +4,15 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
-- **Antialiasing mode safe clamping for WebGPU/Metal sample count limits (`crates/hl2-bevy`):**
-  - Resolved fatal WebGPU/Metal texture validation crash (`Sample count 8 is not supported by format Rgba8UnormSrgb on this device`):
-    - WebGPU guarantees sample counts `[1, 4]`, and Metal supports `[1, 2, 4]`, rejecting 8 samples for standard color and depth attachments.
-    - Updated `crates/hl2-bevy/src/video.rs`: `msaa_for(Antialiasing)` now clamps `Antialiasing::X8` (and `X4`) safely to `Msaa::Sample4`.
+- **Hardware-aware Antialiasing capability detection and unsupported mode gating (`crates/hl2-ui`, `crates/hl2-bevy`):**
+  - Replaced global 4x clamp with hardware-aware capability detection:
+    - `GpuSpecs` detects hardware multisampling limits: Apple Silicon / Metal backend supports `[1, 2, 4]`, CPU software renderers support `[1, 2]`, integrated GPUs support `[1, 2, 4]`, while discrete desktop GPUs on Vulkan / DirectX 12 support `[1, 2, 4, 8]`.
+    - Options > Video > Advanced dialog dynamically gates unsupported antialiasing modes from the dropdown: systems limited to 4x MSAA only show `None`, `2X`, and `4X`, with `8X` excluded.
+    - System recommendations never recommend modes higher than the hardware's supported capabilities.
+    - `msaa_for` restores 1:1 mapping (`X8 -> Msaa::Sample8`), and `msaa_for_hardware` clamps to the probed adapter's sample count limits.
+    - `hl2-bevy::setup` probes `RenderAdapterInfo` and passes detected specs to `SystemRecommendation` on startup.
   - Verified tests & runtime:
-    - Unit tests: `test_msaa_for_antialiasing`, `test_sync_antialiasing_updates_scene_cameras_and_leaves_present_camera_off`, `antialiasing_and_filtering_affect_fidelity_settings_and_samplers`.
+    - Unit tests: `hardware_aware_antialiasing_supported_modes_and_gating`, `test_msaa_for_hardware`, `test_msaa_for_antialiasing`, `test_sync_antialiasing_updates_scene_cameras_and_leaves_present_camera_off`, `antialiasing_and_filtering_affect_fidelity_settings_and_samplers`.
     - Packaged game verification: `bin/hl2-bevy` ran 240 frames cleanly and captured `artifacts/menu_capture.png` with exit code 0.
 
 - **Antialiasing mode and Filtering mode runtime rendering fidelity & performance impact (`crates/hl2-ui`, `crates/hl2-bevy`):**
