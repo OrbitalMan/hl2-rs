@@ -32,6 +32,8 @@ pub struct Enemies {
     pub memories: BTreeMap<Option<usize>, EnemyInfo>,
     pub free_knowledge: f64,
     pub discard_time: f64,
+    /// m_serial: counts new memories (ShouldChooseNewEnemy).
+    serial: u64,
 }
 impl Default for Enemies {
     fn default() -> Self {
@@ -39,10 +41,14 @@ impl Default for Enemies {
             memories: BTreeMap::new(),
             free_knowledge: FREE_KNOWLEDGE_DURATION,
             discard_time: ENEMY_DISCARD_TIME,
+            serial: 0,
         }
     }
 }
 impl Enemies {
+    pub fn serial(&self) -> u64 {
+        self.serial
+    }
     /// UpdateMemory: returns true for a new memory.
     pub fn update(
         &mut self,
@@ -101,6 +107,7 @@ impl Enemies {
                 unforgettable: false,
             },
         );
+        self.serial += 1;
         true
     }
     /// RefreshMemories: discard dead/old memories; within the free-knowledge window the

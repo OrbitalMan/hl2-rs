@@ -880,7 +880,8 @@ pub fn queue(
     for request in &game.sound_requests {
         if let Some(trace) = trace.as_deref_mut() {
             trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused,
-                "ambient":request.ambient.map(|c| format!("{c:?}")),"stop":request.stop}));
+                "ambient":request.ambient.map(|c| format!("{c:?}")),"stop":request.stop,
+                "actor_model":request.actor.as_ref().map(|a| a.model.as_str()),"entity":request.actor.as_ref().and_then(|a| a.entity)}));
         }
     }
     for request in std::mem::take(&mut game.sound_requests) {

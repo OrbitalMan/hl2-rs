@@ -417,6 +417,9 @@ pub struct AiActor {
     /// SetEnemy by SquadNewEnemy since the last think (COND_NEW_ENEMY).
     #[serde(skip)]
     squad_new_enemy: bool,
+    /// ChooseEnemy's serial and fail timer.
+    #[serde(skip)]
+    choose: super::enemy_choice::ChooseState,
     /// CNPC_MetroPolice m_nIdleChatterType (COP_CHATTER_*).
     pub idle_chatter: u8,
     /// bits_MEMORY_PLAYER_HARASSED.
@@ -553,6 +556,16 @@ pub struct AiRuntime {
     applied_relationships: BTreeMap<usize, Vec<(usize, usize)>>,
     /// CAI_SquadManager: squads by name.
     pub squads: BTreeMap<String, super::squad::Squad>,
+    /// scripts/actbusy.txt busy animations (activity entries).
+    #[serde(skip)]
+    busy_anims: Vec<super::actbusy::BusyAnim>,
+    /// The map's info_node_hint entities (CAI_HintManager's hints).
+    #[serde(skip)]
+    busy_hints: Vec<super::actbusy::HintCandidate>,
+    /// CAI_Hint::Lock: hint entity -> the NPC using it.
+    pub hint_locks: BTreeMap<usize, usize>,
+    /// ai_goal_actbusy busysearchrange (SetBusySearchRange changes it).
+    actbusy_ranges: BTreeMap<usize, f32>,
     /// Squad work a think asked for (applied right after it).
     #[serde(skip)]
     squad_events: Vec<SquadEvent>,
@@ -745,6 +758,45 @@ impl AiRuntime {
         super::metropolice::add_schedules(&mut schedules);
         humanoid::add_schedules(&mut schedules);
         zombie::add_schedules(&mut schedules);
+        super::actbusy::add_schedules(&mut schedules);
+        let busy_anims = vfs
+            .and_then(|vfs| vfs.read("scripts/actbusy.txt").ok().flatten())
+            .map(|text| super::actbusy::parse_busy_anims(&String::from_utf8_lossy(&text)))
+            .unwrap_or_default();
+        let busy_hints = world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.class() == "info_node_hint")
+            .map(|(id, e)| {
+                let int = |k: &str| e.get(k).and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+                super::actbusy::HintCandidate {
+                    entity: id,
+                    origin: e.origin(),
+                    yaw: yaw_keyvalue(e),
+                    hint_type: int("hinttype"),
+                    group: e.get("Group").unwrap_or("").trim().to_owned(),
+                    activity: e.get("hintactivity").unwrap_or("").trim().to_owned(),
+                    disabled: int("StartHintDisabled") != 0,
+                    min_state: int("MinimumState"),
+                    max_state: int("MaximumState"),
+                }
+            })
+            .collect();
+        let actbusy_ranges = world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.class() == "ai_goal_actbusy")
+            .map(|(id, e)| {
+                (
+                    id,
+                    e.get("busysearchrange")
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(2048.),
+                )
+            })
+            .collect();
         let mut stunstick_sounds = (None, None);
         let mut stunstick_damage = None;
         let mut combine_kick_damage = 0.;
@@ -869,6 +921,10 @@ impl AiRuntime {
             relationship_overrides: BTreeMap::new(),
             applied_relationships: BTreeMap::new(),
             squads: BTreeMap::new(),
+            busy_anims,
+            busy_hints,
+            hint_locks: BTreeMap::new(),
+            actbusy_ranges,
             squad_events: Vec::new(),
             idle_lines: Vec::new(),
             schedules,
@@ -987,6 +1043,10 @@ impl AiRuntime {
                 self.scripted_schedule_input(world, scene, target, &input);
                 continue;
             }
+            if class == "ai_goal_actbusy" {
+                self.actbusy_goal_input(world, scene, target, &input, &parameter);
+                continue;
+            }
             if class == "ai_relationship" {
                 self.apply_relationship(world, scene, target, input == "applyrelationship");
                 continue;
@@ -1044,6 +1104,98 @@ impl AiRuntime {
                 }
                 _ => {}
             }
+        }
+    }
+    /// ai_goal_actbusy inputs: Activate (EnableGoal on its actors), Deactivate,
+    /// ForceNPCToActBusy ("<npc> [hint] [teleport] [nearest] [$activity] [max time]";
+    /// a named hint, teleports and forced activities are not reconstructed) and
+    /// SetBusySearchRange. Only metrocops host the behavior so far.
+    fn actbusy_goal_input(
+        &mut self,
+        world: &World,
+        scene: &Scene,
+        goal: usize,
+        input: &str,
+        parameter: &str,
+    ) {
+        let now = scene.time;
+        let range = self.actbusy_ranges.get(&goal).copied().unwrap_or(2048.);
+        match input {
+            "activate" | "deactivate" => {
+                for id in self.goal_actors(world, goal) {
+                    let Some(actor) = self.actors.get_mut(&id) else {
+                        continue;
+                    };
+                    let AiClass::Metropolice(cop) = &mut actor.class else {
+                        continue;
+                    };
+                    if input == "activate" {
+                        if !cop.actbusy.enabled {
+                            cop.actbusy.enable(Some(goal), range, now);
+                        }
+                    } else {
+                        cop.actbusy.disable(&mut actor.npc, now);
+                    }
+                }
+            }
+            "forcenpctoactbusy" => {
+                let mut tokens = parameter.split_whitespace();
+                let name = tokens.next().unwrap_or("").to_lowercase();
+                let mut nearest = false;
+                let mut max_time = None;
+                for token in tokens {
+                    match token {
+                        "nearest" => nearest = true,
+                        t if t.starts_with("teleport")
+                            || t.starts_with('$')
+                            || t.starts_with("see:") =>
+                        {
+                            *self
+                                .diagnostics
+                                .unknown_goals
+                                .entry(format!("actbusy {t}"))
+                                .or_default() += 1;
+                        }
+                        t => match t.parse::<f32>() {
+                            Ok(v) => max_time = Some(v),
+                            // A hint node name.
+                            Err(_) => {
+                                *self
+                                    .diagnostics
+                                    .unknown_goals
+                                    .entry(format!("actbusy hint {t}"))
+                                    .or_default() += 1;
+                            }
+                        },
+                    }
+                }
+                let target = self.actors.keys().copied().find(|&id| {
+                    world.entities.get(id).is_some_and(|e| {
+                        crate::entities::glob(
+                            &name,
+                            &e.get("targetname").unwrap_or("").to_lowercase(),
+                        )
+                    })
+                });
+                let Some(actor) = target.and_then(|id| self.actors.get_mut(&id)) else {
+                    *self
+                        .diagnostics
+                        .unknown_goals
+                        .entry(format!("actbusy npc {name}"))
+                        .or_default() += 1;
+                    return;
+                };
+                if let AiClass::Metropolice(cop) = &mut actor.class {
+                    cop.actbusy
+                        .force(Some(goal), range, max_time, nearest, &mut actor.npc, now);
+                }
+            }
+            "setbusysearchrange" => {
+                if let Ok(v) = parameter.trim().parse() {
+                    self.actbusy_ranges.insert(goal, v);
+                }
+            }
+            _ => {}
         }
     }
     /// CAI_GoalEntity actors: the NPCs whose targetname (SearchType 0) or classname
@@ -1563,6 +1715,7 @@ impl AiRuntime {
                 .map(str::to_owned),
             squad: None,
             squad_new_enemy: false,
+            choose: Default::default(),
             idle_chatter: COP_CHATTER_ASK_QUESTION,
             harassed: false,
             next_idle_decision: 0.,
@@ -2325,6 +2478,8 @@ impl AiRuntime {
         // Speech dice (ShouldPlayIdleSound RandomInt(0, 99), IdleSound's choices,
         // the lost-sound delay U(5, 15)).
         let speech_rolls = [self.random(), self.random(), self.random(), self.random()];
+        // FindHint's bits_HINT_NODE_RANDOM pick.
+        let hint_roll = self.random();
         // The active gun's firing data and clip (GatherAttackConditions, CheckAmmo).
         let gun = self.actors[&id].weapon.as_ref().and_then(|w| {
             self.weapon_def(&w.class)
@@ -2442,6 +2597,37 @@ impl AiRuntime {
         } else {
             Vec::new()
         };
+        // IRelationType/IRelationPriority (and IsAlive) of every NPC this think may weigh
+        // in BestEnemy: remembered ones, sighted ones and the attacker.
+        let npc_relations: BTreeMap<usize, (Disposition, i32)> = {
+            let actor = &self.actors[&id];
+            actor
+                .npc
+                .enemies
+                .known()
+                .into_iter()
+                .map(|(e, _)| e)
+                .chain(seen_npcs.iter().map(|&(e, _)| e))
+                .chain(actor.damaged_by)
+                .filter(|&e| e != PLAYER)
+                .filter(|&e| scene.states.get(e).is_some_and(|s| !s.killed && s.visible))
+                .map(|e| {
+                    let class =
+                        classify(world.entities.get(e).map_or("", |x| x.class()), precriminal);
+                    (
+                        e,
+                        (
+                            self.npc_disposition(world, id, e, precriminal),
+                            self.relationships.get(my_class, class).1,
+                        ),
+                    )
+                })
+                .collect()
+        };
+        let player_priority = self
+            .relationships
+            .get(my_class, classify("player", precriminal))
+            .1;
         let actor = self.actors.get_mut(&id).expect("actor");
         actor.npc.conditions = Conditions::default();
         // CheckAmmo: an empty clip (NPCs have unlimited reserve ammunition), and
@@ -2523,17 +2709,6 @@ impl AiRuntime {
                 .npc
                 .enemies
                 .update(Some(PLAYER), player.feet, 0., true, now);
-            if actor.npc.enemy.is_none() {
-                actor.npc.enemy = Some(PLAYER);
-            }
-        }
-        if !hates && actor.npc.enemy == Some(PLAYER) && !chasing {
-            actor.npc.enemy = None;
-        }
-        // ChooseEnemy rejects a notarget player (BestEnemy), e.g. one the policing
-        // behavior made its enemy with SetEnemy (native: the cop falls back to alert).
-        if player.noclip && actor.npc.enemy == Some(PLAYER) {
-            actor.npc.enemy = None;
         }
         // CAI_BaseNPC::OnTakeDamage_Alive: any damage is light, more than 20 heavy; a
         // hated player attacker is remembered (UpdateEnemyMemory) and becomes the enemy
@@ -2550,12 +2725,9 @@ impl AiRuntime {
                 .npc
                 .enemies
                 .update(Some(PLAYER), player.feet, 0., true, now);
-            if actor.npc.enemy.is_none() {
-                actor.npc.enemy = Some(PLAYER);
-            }
         }
-        // Damage from an NPC: COND_LIGHT_DAMAGE, the attacker remembered where it stands and
-        // made the enemy when there is none (unless liked).
+        // Damage from an NPC: COND_LIGHT_DAMAGE, the attacker remembered where it stands
+        // (unless liked); ChooseEnemy weighs it.
         if let Some(attacker) = actor.damaged_by.take() {
             actor.npc.conditions.set(COND_LIGHT_DAMAGE);
             if let Some(state) = scene.states.get(attacker).filter(|s| !s.killed) {
@@ -2564,28 +2736,13 @@ impl AiRuntime {
                         .npc
                         .enemies
                         .update(Some(attacker), state.origin, 0., true, now);
-                    if actor.npc.enemy.is_none() {
-                        actor.npc.enemy = Some(attacker);
-                    }
                 }
             }
         }
-        // Hated NPCs in sight: memory, and BestEnemy (the nearest) when there is none.
+        // Hated NPCs in sight: memory (BestEnemy below weighs them).
         for &(other, feet) in &seen_npcs {
             actor.npc.conditions.set(COND_SEE_HATE);
             actor.npc.enemies.update(Some(other), feet, 0., true, now);
-        }
-        if let Some(e) = actor.npc.enemy.filter(|&e| e != PLAYER) {
-            if scene.states.get(e).is_none_or(|s| s.killed || !s.visible) {
-                actor.npc.conditions.set(COND_ENEMY_DEAD);
-                actor.npc.enemy = None;
-            }
-        }
-        if actor.npc.enemy.is_none() {
-            actor.npc.enemy = seen_npcs
-                .iter()
-                .min_by(|a, b| a.1.distance(origin).total_cmp(&b.1.distance(origin)))
-                .map(|&(other, _)| other);
         }
         actor.npc.enemies.refresh(
             now,
@@ -2604,6 +2761,118 @@ impl AiRuntime {
                 }
             },
         );
+        // ChooseEnemy (GatherConditions after RefreshMemories): only when the running
+        // schedule can be interrupted by COND_NEW_ENEMY (or COND_LOST_ENEMY with an eluded
+        // enemy), or there is none; ShouldChooseNewEnemy, then BestEnemy over the memory.
+        // A killed NPC enemy is gone at once (its entity no longer thinks), like an
+        // EHANDLE that went NULL.
+        {
+            let relation = |e: usize| -> super::enemy_choice::Relation {
+                if e == PLAYER {
+                    // FL_NOTARGET (noclip here) and IsAlive; the policing chase keeps him.
+                    (!player.noclip && !player.dead).then_some((
+                        if hates || chasing {
+                            Disposition::HT
+                        } else {
+                            Disposition::NU
+                        },
+                        player_priority,
+                    ))
+                } else {
+                    npc_relations.get(&e).copied()
+                }
+            };
+            let initial = actor.npc.enemy;
+            let went_null = initial.is_some_and(|e| {
+                e != PLAYER && scene.states.get(e).is_none_or(|s| s.killed || !s.visible)
+            });
+            let eluded = went_null
+                || initial
+                    .is_some_and(|e| actor.npc.enemies.find(Some(e)).is_some_and(|m| m.eluded));
+            let schedule = actor
+                .npc
+                .schedule
+                .as_ref()
+                .and_then(|n| self.schedules.0.get(n));
+            let (new_enemy_interrupts, lost_enemy_interrupts) = match schedule {
+                Some(s) if actor.npc.task < s.tasks.len() => {
+                    let custom = actor.class.behavior_mut().custom_interrupts(&actor.npc);
+                    let all = s.interrupts.union(custom);
+                    (all.has(COND_NEW_ENEMY), all.has(COND_LOST_ENEMY))
+                }
+                _ => (true, true),
+            };
+            let skip = !went_null && !new_enemy_interrupts && !(lost_enemy_interrupts && eluded);
+            if !skip {
+                let c = actor.npc.conditions;
+                let sees_hostile = c.has(COND_SEE_HATE) || c.has(COND_SEE_FEAR);
+                let mut chosen = if went_null { None } else { initial };
+                if super::enemy_choice::should_choose_new_enemy(
+                    chosen,
+                    &actor.npc.enemies,
+                    &mut actor.choose,
+                    chosen.and_then(relation),
+                    sees_hostile,
+                    false,
+                    now,
+                ) {
+                    let position = |e: usize| {
+                        if e == PLAYER {
+                            Some(player.feet)
+                        } else {
+                            scene.states.get(e).map(|s| s.origin)
+                        }
+                    };
+                    chosen = super::enemy_choice::best_enemy(
+                        &actor.npc.enemies,
+                        now,
+                        relation,
+                        |e| position(e).map_or(f32::MAX, |p| p.distance_squared(origin)),
+                        |e| {
+                            if e == PLAYER {
+                                player_visible
+                            } else {
+                                seen_npcs.iter().any(|&(o, _)| o == e)
+                            }
+                        },
+                        |e| {
+                            if e == PLAYER {
+                                player.center().distance(origin) < senses::LOOK_DISTANCE && fvisible
+                            } else {
+                                position(e).is_some_and(|p| {
+                                    let center = p + Vec3::Z * 36.;
+                                    center.distance(origin) < senses::LOOK_DISTANCE
+                                        && sight.visible(eye, center, &[id, e])
+                                })
+                            }
+                        },
+                    );
+                }
+                if chosen != initial || went_null {
+                    if went_null {
+                        actor.npc.conditions.set(COND_ENEMY_DEAD);
+                    }
+                    actor.npc.enemy = chosen;
+                    // Forget(bits_MEMORY_HAD_LOS): the LOS outputs fire again.
+                    actor.npc.had_enemy_los = false;
+                    if chosen.is_none() && !went_null {
+                        actor.npc.conditions.set(COND_ENEMY_WENT_NULL);
+                        if eluded {
+                            actor.npc.conditions.set(COND_LOST_ENEMY);
+                        }
+                    }
+                    if chosen.is_none() {
+                        let requests = actor.class.requests_mut();
+                        if initial == Some(PLAYER) {
+                            requests.push(CopRequest::Output("OnLostPlayer"));
+                        }
+                        if initial.is_some() {
+                            requests.push(CopRequest::Output("OnLostEnemy"));
+                        }
+                    }
+                }
+            }
+        }
         // UpdateEnemyMemory first-hand -> CAI_Squad::UpdateEnemyMemory to the others.
         if let Some(squad) = &actor.squad {
             for (enemy, position) in actor.npc.enemies.seen_at(now) {
@@ -2783,8 +3052,15 @@ impl AiRuntime {
                 }
             } else {
                 actor.npc.conditions.set(COND_ENEMY_OCCLUDED);
-                if now - actor.npc.enemies.last_time_seen(Some(enemy)) > 10. {
-                    actor.npc.conditions.set(COND_LOST_ENEMY);
+            }
+            // GatherEnemyConditions: not seen for 8 s and standing at its last known
+            // position (2D within 48 units) without seeing it: the enemy eluded me
+            // (MarkEnemyAsEluded; the next ChooseEnemy drops it with COND_LOST_ENEMY).
+            if now - actor.npc.enemies.last_time_seen(Some(enemy)) > 8. && !seen {
+                if let Some(lkp) = actor.npc.enemies.find(Some(enemy)).map(|m| m.last_known) {
+                    if (lkp - origin).truncate().length() < 48. {
+                        actor.npc.enemies.mark_eluded(Some(enemy));
+                    }
                 }
             }
         }
@@ -3147,6 +3423,35 @@ impl AiRuntime {
         actor.yaw = yaw_of(scene, id);
         actor.next_think = now + THINK_INTERVAL;
         // CZombie::PrescheduleThink's idle moans.
+        // CAI_ActBusyBehavior::FindActBusyHintNode for a behavior about to search.
+        if let AiClass::Metropolice(cop) = &mut actor.class {
+            cop.actbusy.candidate = None;
+            if cop.actbusy.wants_hint(now) {
+                let group = world
+                    .entities
+                    .get(id)
+                    .and_then(|e| e.get("hintgroup"))
+                    .unwrap_or("")
+                    .trim();
+                let state = match actor.npc.state {
+                    NpcState::Combat => 3,
+                    NpcState::Alert => 2,
+                    _ => 1,
+                };
+                let locks = &self.hint_locks;
+                cop.actbusy.candidate = super::actbusy::find_hint(
+                    &self.busy_hints,
+                    &self.busy_anims,
+                    group,
+                    origin,
+                    cop.actbusy.search_range,
+                    state,
+                    |hint| locks.get(&hint).is_some_and(|&holder| holder != id),
+                    cop.actbusy.use_nearest,
+                    hint_roll,
+                );
+            }
+        }
         if let AiClass::Zombie(z) = &mut actor.class {
             z.moan(now, actor.npc.state == NpcState::Combat);
         }
@@ -3359,6 +3664,22 @@ impl AiRuntime {
             let goal = policing.goal.entity;
             for output in std::mem::take(&mut policing.outputs) {
                 scene.fire(goal, output, id);
+            }
+        }
+        // Actbusy hint locks (CAI_Hint::Lock/Unlock) and goal outputs.
+        if let Some(cop) = actor.class.cop_mut() {
+            for hint in cop.actbusy.released.drain(..) {
+                if self.hint_locks.get(&hint) == Some(&id) {
+                    self.hint_locks.remove(&hint);
+                }
+            }
+            if let Some(hint) = &cop.actbusy.hint {
+                self.hint_locks.insert(hint.entity, id);
+            }
+            if let Some(goal) = cop.actbusy.goal {
+                for output in std::mem::take(&mut cop.actbusy.outputs) {
+                    scene.fire(goal, output, id);
+                }
             }
         }
         self.apply_requests(id, world, scene, physics, player);
@@ -3601,8 +3922,21 @@ impl AiRuntime {
                     _ => "NPC_Citizen.Die",
                 };
                 let origin = state.origin;
+                // EmitSound from the NPC: GenderExpandString reads its model (the
+                // citizens' die waves are vo/npc/$gender01/pain*.wav; owner report: dying
+                // citizens moaned in the other gender's voice).
+                let model = world
+                    .model_instances
+                    .iter()
+                    .find(|i| i.entity == Some(id))
+                    .map_or("", |i| i.model.as_str());
                 scene.sounds.push(crate::sounds::SoundRequest {
                     origin: Some(origin + Vec3::Z * 64.),
+                    actor: Some(crate::sounds::SoundActor {
+                        name: e.get("targetname").unwrap_or("").into(),
+                        model: model.to_owned(),
+                        entity: Some(id),
+                    }),
                     ..die.into()
                 });
                 return;

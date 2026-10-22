@@ -185,6 +185,14 @@ pub struct Metropolice {
     pub assault: Option<Assault>,
     /// The assault behavior selected the current schedule.
     pub running_assault: bool,
+    /// CAI_ActBusyBehavior (ai_goal_actbusy Activate / ForceNPCToActBusy).
+    pub actbusy: super::actbusy::ActBusy,
+    /// The actbusy behavior selected the current schedule.
+    pub running_actbusy: bool,
+    /// HandleInteraction's COND_METROPOLICE_PHYSOBJECT_ASSAULT, raised between thinks
+    /// (a think starts with cleared conditions; GatherConditions sets it).
+    #[serde(skip)]
+    pub physobject_assault: bool,
     /// An aiscripted_schedule's goal position and run flag (StartSchedule).
     pub script_goal: Option<(Vec3, bool)>,
     /// NPC_TranslateActivity's angry idle (weapon drawn, in combat or baton on) as
@@ -241,6 +249,9 @@ impl Metropolice {
     }
     /// GatherConditions + PrescheduleThink (player proximity, look target, baton).
     pub fn gather_conditions(&mut self, npc: &mut AiNpc, ctx: &Context) {
+        if std::mem::take(&mut self.physobject_assault) {
+            npc.conditions.set(COND_METROPOLICE_PHYSOBJECT_ASSAULT);
+        }
         if !self.player_too_close {
             npc.conditions.clear(COND_METROPOLICE_PLAYER_TOO_CLOSE);
         }
@@ -345,7 +356,7 @@ impl Metropolice {
     /// HandleInteraction(g_interactionHitByPlayerThrownPhysObj).
     pub fn hit_by_player_thrown_object(&mut self, npc: &mut AiNpc, ctx: &Context) {
         if !self.scripted && npc.state != NpcState::Script {
-            npc.conditions.set(COND_METROPOLICE_PHYSOBJECT_ASSAULT);
+            self.physobject_assault = true;
         } else {
             self.administer_justice(npc, ctx);
         }
@@ -526,6 +537,7 @@ impl Metropolice {
     }
     fn select_inner(&mut self, npc: &mut AiNpc, ctx: &Context) -> String {
         self.running_behavior = false;
+        self.running_actbusy = false;
         if npc.conditions.has(COND_METROPOLICE_PHYSOBJECT_ASSAULT) {
             npc.conditions.clear(COND_METROPOLICE_PHYSOBJECT_ASSAULT);
             if !self.player_is_criminal() {
@@ -593,6 +605,19 @@ impl Metropolice {
                 // change condition now; the new schedule then clears it).
                 let want = policing.baton;
                 self.set_baton_state(npc, want);
+                return schedule.into();
+            }
+        }
+        // CAI_ActBusyBehavior, after policing in CNPC_MetroPolice's behavior order. Its
+        // base selection (BaseClass::SelectSchedule) is idle when there is no enemy, no
+        // combat and nothing to face.
+        if self.actbusy.can_select(npc, ctx.now) {
+            let base_idle = npc.state != NpcState::Combat
+                && npc.enemy.is_none()
+                && !(self.keep_facing_player && !self.player_is_criminal());
+            let base = if base_idle { "SCHED_IDLE_STAND" } else { "" };
+            if let Some(schedule) = self.actbusy.select(npc, ctx, base) {
+                self.running_actbusy = true;
                 return schedule.into();
             }
         }
@@ -786,6 +811,11 @@ impl Behavior for Metropolice {
                 }
             }
         }
+        if self.running_actbusy {
+            if let Some(status) = self.actbusy.start_task(npc, task, arg, ctx, motor) {
+                return Some(status);
+            }
+        }
         Some(match task {
             "TASK_METROPOLICE_ACTIVATE_BATON" => {
                 let activate = arg.number() != 0.;
@@ -871,6 +901,11 @@ impl Behavior for Metropolice {
                 if let Some(status) = assault.run_task(npc, task, arg, ctx, motor) {
                     return Some(status);
                 }
+            }
+        }
+        if self.running_actbusy {
+            if let Some(status) = self.actbusy.run_task(npc, task, arg, ctx, motor) {
+                return Some(status);
             }
         }
         match task {

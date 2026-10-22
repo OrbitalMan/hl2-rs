@@ -740,9 +740,24 @@ impl Gameplay {
                 request.classname
             ));
         }
-        let count = self.spawn_counts.entry(label).or_default();
-        let template = templates[*count % templates.len()];
-        *count += 1;
+        let template = if label == "npc_citizen" {
+            // CNPC_Citizen::SelectModel: the least-used head among living citizens.
+            let roll = self.ai.uniform() * 0.5 + 0.5;
+            let states = &self.scene.states;
+            hl2_simulation::citizens::least_used_template(
+                &self.world,
+                &templates,
+                spawn::POOL_KEY,
+                |id| states.get(id).is_some_and(|s| !s.killed),
+                roll,
+            )
+            .unwrap_or(templates[0])
+        } else {
+            let count = self.spawn_counts.entry(label).or_default();
+            let template = templates[*count % templates.len()];
+            *count += 1;
+            template
+        };
         let id = self
             .create_from_template(template, origin, yaw, &request.keyvalues(), physics)
             .map_err(|e| format!("Can't create {}: {e}", request.classname))?;

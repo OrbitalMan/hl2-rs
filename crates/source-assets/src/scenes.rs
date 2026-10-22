@@ -263,6 +263,25 @@ impl Event {
     pub fn resume_condition(&self) -> bool {
         self.flags & 1 != 0
     }
+    pub fn lock_body_facing(&self) -> bool {
+        self.flags & 2 != 0
+    }
+    /// Events whose start puts an NPC actor in SCHED_SCENE_GENERIC
+    /// (CBaseFlex::EnterSceneSequence: sequences, moves, faces, look-ats that do not lock
+    /// body facing, and the generic AI events); speech, expressions, flex animation and
+    /// triggers leave its AI running. Gestures are counted too (conservative: ours play
+    /// them on the scene's animation path).
+    pub fn takes_npc_ai(&self) -> bool {
+        match self.kind {
+            EventType::Sequence
+            | EventType::MoveTo
+            | EventType::Face
+            | EventType::Gesture
+            | EventType::Generic => true,
+            EventType::LookAt => !self.lock_body_facing(),
+            _ => false,
+        }
+    }
     /// Compiled BVCD ramps restore the default normalized-X Catmull-Rom curve.
     /// Text VCD edge/curve overrides are not represented by this binary format.
     pub fn intensity(&self, scene: &ChoreoScene, time: f32) -> f32 {

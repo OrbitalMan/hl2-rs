@@ -254,6 +254,16 @@ pub fn pool_count(class: &str) -> usize {
         _ => POOL_PER_CLASS,
     }
 }
+/// Pooled slots per overlay entry: plain npc_citizen keeps one template per random head
+/// (each spawn picks the least-used head like CNPC_Citizen::SelectModel), the rest
+/// `pool_count` of their class.
+pub fn pool_slots(label: &str) -> usize {
+    if label == "npc_citizen" {
+        crate::citizens::RANDOM_HEADS.len()
+    } else {
+        pool_count(spawn_class(label).0)
+    }
+}
 /// Append the hidden spawn pool to a freshly loaded map's entities (before models
 /// load). Existing entity ids are unchanged; the pool goes at the end.
 pub fn append_pool(world: &mut modkit_core::World) {
@@ -262,7 +272,11 @@ pub fn append_pool(world: &mut modkit_core::World) {
         let Some(model) = default_model(class) else {
             continue;
         };
-        for _ in 0..pool_count(class) {
+        // Plain npc_citizen keeps one template per random head: each spawn picks the
+        // least-used head like CNPC_Citizen::SelectModel (citizens::least_used_template);
+        // the variants keep POOL_PER_CLASS heads chosen at load.
+        let heads = *label == "npc_citizen";
+        for slot in 0..pool_slots(label) {
             let mut properties: Vec<(String, String)> = vec![
                 ("classname".into(), class.into()),
                 (
@@ -271,6 +285,12 @@ pub fn append_pool(world: &mut modkit_core::World) {
                 ),
                 (POOL_KEY.into(), (*label).into()),
             ];
+            if heads {
+                // A fixed head: SelectModel's non-random branch adds the group folder.
+                properties.push(("model".into(), crate::citizens::RANDOM_HEADS[slot].into()));
+                world.entities.push(modkit_core::Entity { properties });
+                continue;
+            }
             // Citizens get their head from SelectModel (citizens::select_models).
             if class != "npc_citizen" && !keyvalues.iter().any(|(k, _)| *k == "model") {
                 properties.push(("model".into(), model.into()));
@@ -1568,8 +1588,14 @@ mod tests {
         append_pool(&mut world);
         assert_eq!(
             world.entities.len(),
-            SPAWN_CLASSES.iter().map(|c| pool_count(c)).sum::<usize>()
+            SPAWN_CLASSES.iter().map(|c| pool_slots(c)).sum::<usize>()
         );
+        // Plain citizens: one template per random head, each with its fixed head.
+        let heads: Vec<&str> = templates(&world, "npc_citizen")
+            .into_iter()
+            .map(|id| world.entities[id].get("model").unwrap())
+            .collect();
+        assert_eq!(heads, crate::citizens::RANDOM_HEADS);
         assert!(SPAWN_CLASSES
             .iter()
             .all(|c| default_model(spawn_class(c).0).is_some()));

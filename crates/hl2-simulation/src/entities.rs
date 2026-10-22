@@ -1351,10 +1351,19 @@ impl Scene {
                 .movement_animation
                 .as_ref()
                 .is_some_and(|m| m.key.scene != crate::npc::AI_SCENE)
+            // A scene holds an NPC's AI only when it has events that enter
+            // SCHED_SCENE_GENERIC for it; speech-only scenes (the can cop's nags and
+            // "carry on" lines) leave the AI running, like native.
             || self.choreography.values().any(|c| {
-                c.playback
-                    .as_ref()
-                    .is_some_and(|p| p.actors.contains(&Some(id)))
+                c.playback.as_ref().is_some_and(|p| {
+                    p.actors.iter().enumerate().any(|(slot, a)| {
+                        *a == Some(id)
+                            && c.data
+                                .events
+                                .iter()
+                                .any(|e| e.actor == Some(slot) && e.active() && e.takes_npc_ai())
+                    })
+                })
             })
             || self
                 .movement_ready
@@ -2522,6 +2531,11 @@ impl Scene {
                 ))
             || (class == "aiscripted_schedule"
                 && matches!(input.as_str(), "startschedule" | "stopschedule"))
+            || (class == "ai_goal_actbusy"
+                && matches!(
+                    input.as_str(),
+                    "activate" | "deactivate" | "forcenpctoactbusy" | "setbusysearchrange"
+                ))
             || (matches!(class, "info_node_link" | "info_node_link_controller")
                 && matches!(input.as_str(), "turnon" | "turnoff"))
             || (class == "ai_relationship"

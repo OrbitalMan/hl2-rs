@@ -1255,6 +1255,8 @@ pub const METROPOLICE_AI_ACTIVITIES: &[&str] = &[
 /// model so classes added later find their sequences; classes add their own lists.
 pub const NPC_BASE_AI_ACTIVITIES: &[&str] = &[
     "ACT_IDLE",
+    // CAI_ActBusyBehavior's standing busy hint (scripts/actbusy.txt ACT_BUSY_STAND).
+    "ACT_BUSY_STAND",
     "ACT_IDLE_ANGRY",
     "ACT_WALK",
     "ACT_RUN",
