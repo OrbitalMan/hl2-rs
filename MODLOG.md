@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-22 Video Advanced presentation options cvar parity & runtime status
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added cvar specifications to `COMMANDS`: `mat_colorcorrection`, `mat_motion_blur_enabled`, `mat_queue_mode`, and `mat_vsync`.
+- `crates/hl2-ui/src/console.rs`:
+  - Added execution handlers in `interpret()` and query reporting in `cvar_value()` for `mat_colorcorrection`, `mat_motion_blur_enabled`, `mat_queue_mode`, and `mat_vsync`.
+  - Added unit test `video_advanced_presentation_cvars_query_set_and_cvar_value`.
+- `crates/hl2-ui/src/console/complete.rs`:
+  - Updated completion test to reflect `mat_colorcorrection` prefix matching.
+- `STATUS.md`:
+  - Documented cvar parity, Winit VSync integration in `hl2-bevy::video`, and runtime status of color correction, motion blur, and multicore queue mode.
+
+**Why:** User request:
+"Check every option in Options > Video > Advanced, Implement the placeholders/unfinished ones. Report if some feature implementation acceptance criteria is unclear, document it as unfinished. Conclude each new option implementation with a commit."
+
+**Tested how:**
+- `bash scripts/checks/validate.sh`: 372 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `bash scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Parity between Options > Video > Advanced presentation controls and console cvars, with runtime VSync switching in Bevy and clear documentation of unmodeled shader effects.
+
+**Still broken or not tested:** Color correction 3D LUTs and velocity motion blur post-processing passes.
+
+**Next:** Implement detail level options (model, texture, shader, water, shadow).
+
 ## 2026-10-22 Video Advanced FOV options cvar parity
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

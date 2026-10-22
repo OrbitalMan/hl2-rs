@@ -2280,7 +2280,7 @@ impl Console {
                     let val = u8::from(self.config.video.advanced.color_correction);
                     self.log(format!("\"mat_colorcorrection\" = \"{val}\""));
                 } else if args.len() == 1 {
-                    let on = parse_bool(args[0]).map_err(|_| usage())?;
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
                     self.config.video.advanced.color_correction = on;
                     let _ = self.config.save();
                     self.log(format!("mat_colorcorrection {}", u8::from(on)));
@@ -2311,7 +2311,7 @@ impl Console {
                     let val = u8::from(self.config.video.advanced.motion_blur);
                     self.log(format!("\"mat_motion_blur_enabled\" = \"{val}\""));
                 } else if args.len() == 1 {
-                    let on = parse_bool(args[0]).map_err(|_| usage())?;
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
                     self.config.video.advanced.motion_blur = on;
                     let _ = self.config.save();
                     self.log(format!("mat_motion_blur_enabled {}", u8::from(on)));
@@ -2347,7 +2347,7 @@ impl Console {
                     let val = u8::from(self.config.video.advanced.vsync);
                     self.log(format!("\"mat_vsync\" = \"{val}\""));
                 } else if args.len() == 1 {
-                    let on = parse_bool(args[0]).map_err(|_| usage())?;
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
                     self.config.video.advanced.vsync = on;
                     let _ = self.config.save();
                     self.log(format!("mat_vsync {}", u8::from(on)));
@@ -8713,16 +8713,28 @@ mod tests {
         assert_eq!(console.cvar_value("mat_vsync").as_deref(), Some("1"));
 
         // mat_colorcorrection
-        assert_eq!(console.cvar_value("mat_colorcorrection").as_deref(), Some("1"));
+        assert_eq!(
+            console.cvar_value("mat_colorcorrection").as_deref(),
+            Some("1")
+        );
         console.submit("mat_colorcorrection 0");
         assert!(!console.config.video.advanced.color_correction);
-        assert_eq!(console.cvar_value("mat_colorcorrection").as_deref(), Some("0"));
+        assert_eq!(
+            console.cvar_value("mat_colorcorrection").as_deref(),
+            Some("0")
+        );
 
         // mat_motion_blur_enabled
-        assert_eq!(console.cvar_value("mat_motion_blur_enabled").as_deref(), Some("1"));
+        assert_eq!(
+            console.cvar_value("mat_motion_blur_enabled").as_deref(),
+            Some("1")
+        );
         console.submit("mat_motion_blur_enabled 0");
         assert!(!console.config.video.advanced.motion_blur);
-        assert_eq!(console.cvar_value("mat_motion_blur_enabled").as_deref(), Some("0"));
+        assert_eq!(
+            console.cvar_value("mat_motion_blur_enabled").as_deref(),
+            Some("0")
+        );
 
         // mat_queue_mode
         assert_eq!(console.cvar_value("mat_queue_mode").as_deref(), Some("-1"));

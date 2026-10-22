@@ -4,6 +4,14 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Video Advanced presentation options cvar parity & runtime status (`crates/hl2-ui`, `crates/hl2-bevy`):**
+  - Implemented console cvars for Video Advanced presentation controls:
+    - `mat_vsync`: queries and toggles vertical sync (`0` or `1`). Directly integrated with `hl2-bevy::video` to configure Winit window `PresentMode::AutoVsync` vs `PresentMode::AutoNoVsync`.
+    - `mat_colorcorrection`: queries and toggles color correction (`0` or `1`). Color correction 3D LUT lookups and volume triggers are unmodeled in Bevy and documented as unfinished.
+    - `mat_motion_blur_enabled`: queries and toggles motion blur (`0` or `1`). Directional camera/object velocity motion blur passes are unmodeled in Bevy and documented as unfinished.
+    - `mat_queue_mode`: queries and assigns multicore rendering mode (`-1`/`1`/`2` = multicore, `0` = single threaded). In `hl2-bevy`, Bevy ECS already utilizes multi-threaded parallel task pools by default.
+  - Added unit test `video_advanced_presentation_cvars_query_set_and_cvar_value` in `crates/hl2-ui/src/console.rs`.
+
 - **Video Advanced FOV options cvar parity (`crates/hl2-ui/src/console`, `crates/hl2-ui/src/console/commands`):**
   - Implemented console cvars for all FOV sliders in Options > Video > Advanced:
     - `fov_desired`: retail cvar alias for `fov`, queries and assigns desired horizontal 4:3 field of view (50..120).

@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(words.head, "");
         assert_eq!(
             &texts(&words)[..4],
-            ["mainmenu", "map", "map_background", "mat_hdr_level"]
+            ["mainmenu", "map", "map_background", "mat_colorcorrection"]
         );
         assert!(words.items[1].detail.starts_with("load an installed map"));
         let maps = candidates("map d1", &sources);
