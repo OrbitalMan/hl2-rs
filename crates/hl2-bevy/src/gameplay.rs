@@ -956,6 +956,16 @@ impl Gameplay {
             }
             self.select(result);
         }
+        // VPhysics objects move in the physics world; scene logic (trigger touches of
+        // physics objects and their filters) reads their current pose.
+        for &id in physics.dynamic.keys() {
+            if let (Some((origin, rotation)), Some(state)) =
+                (physics.entity_pose(id), self.scene.states.get_mut(id))
+            {
+                state.origin = origin;
+                state.rotation = rotation;
+            }
+        }
         self.scene.tick(&self.world, player.feet, TICK);
         // npc_template_maker spawns and CAI_BaseNPC::StartNPC floor drops (DESIGN 14s).
         hl2_simulation::npc_makers::tick(
@@ -1421,6 +1431,8 @@ impl Gameplay {
         // env_physexplosion pushes (and blast damage) from this tick's inputs.
         self.phys_explosions
             .apply(&self.world, &mut self.scene, physics);
+        self.phys_explosions
+            .apply_impacts(&self.world, &mut self.scene, physics);
         // trigger_hurt touchers from this tick's scene logic share the entity path.
         damage.append(&mut self.scene.entity_damage);
         self.inventory

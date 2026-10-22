@@ -2325,6 +2325,18 @@ impl AiRuntime {
             })
             .map(|other| (other, scene.states[other].origin))
             .collect();
+        // CAI_PolicingBehavior::GatherConditions: the goal entity is gone (killed, e.g.
+        // the can cop's OnKnockOut -> cupcop_policegoal Kill): the behavior disables.
+        if let Some(cop) = self.actors.get_mut(&id).and_then(|a| a.class.cop_mut()) {
+            if cop
+                .policing
+                .as_ref()
+                .is_some_and(|p| scene.states.get(p.goal.entity).is_none_or(|s| s.killed))
+            {
+                cop.policing = None;
+                cop.chase_until = 0.;
+            }
+        }
         // Policing goal state (the goal entity can change through inputs).
         let goal_entity = self.actors[&id]
             .class
