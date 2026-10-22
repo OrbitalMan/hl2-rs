@@ -1,5 +1,11 @@
 # Design
 
+## Scale-key assignment and grab update result boundaries (2026-10-22)
+
+The selected CPhysicsProp descriptor array uses external massscale/inertiascale keys, float type1, KEY flag4 and canonical offsets+680/+684. The retained generic parser checks the KEY flag and external name, dispatches type1 conversion, then stores at object+descriptor.offset. Its exact ASCII comparison folds the authored mixed-case names; live locale and numeric conversion remain separate untested boundaries. Combined with Q's positive-only operations, authored zero massScale does not itself mean zero physical mass.
+
+Keep held target requests and completed physics behavior distinct. Pickup Use calls UpdateObject without consuming its boolean. Selected failure gates return0 without a Shutdown call in that routine; the success path stores target state through its helper and returns1 even after that helper's conditional DetachEntity(false) delegation. No inferred automatic drop, persistent attachment, target convergence, units or frame cadence should be implemented from those result values alone.
+
 ## Held-frame dispatch, input acceptance and authored mass boundary (2026-10-22)
 
 The selected class frame entry calls the base held-use branch, which resolves the latched entity, applies control/weapon guards and dispatches Use(player,player,2,2.0), or clears it. That branch needs no new use-key edge; complete scheduling/cadence is untested. Generic AcceptInput Use instead constructs inputdata and forwards its final output-ID as the numeric useType. Its true return reports handler invocation, not successful pickup or attachment. Keep these routes separate from logical-use-press clearing.

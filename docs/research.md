@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Sealed scale descriptors and grab update supplement (2026-10-22)
+
+R scene-crate-scale-fields-20261022r binds24 class descriptors/two scale KEY fields/five authored crate spellings with ten retained exact bodies(seven selected/three navigation-only),two reused bodies,1004 bounded byte records and17 external hashes. Selected ASCII folding supports the spelling bridge; alternate locale internals and numeric grammar are not expanded. Earlier Q negative output remains unchanged.
+
+S scene-grab-update-20261022s retains two new exact bodies/one reused caller,806 records/nine constants/eight false-result branches/five direct edges/16 externals. Pickup Use ignores UpdateObject's result. Target helper stores requests, re-resolves attachment and wakes physics or conditionally delegates detach; UpdateObject returns true after it. This is static control/data evidence, not actual carry/release/motion. Private roots are sealed53/17 and24/16; no native/Rust parity claim.
+
 ## Sealed input bridge, frame caller and owned PHY supplement (2026-10-22)
 
 Private N scene-use-input-20261022n checks two local bodies plus a reused initializer,528 records/four metadata stores/13 externals. O scene-held-use-frame-20261022o checks four exact bodies/208 records/22 externals and binds the guarded natural held-use caller. P scene-crate-authored-physics-20261022p checks two selected PHY CRC/SHA members,two MDL header ranges,14 property byte spans,one full-tail and one prefix ordered comparison; whole carrier hash unavailable. Its damaged suffix differs between the strict helper and SourcePP, with all raw bytes/failure retained.

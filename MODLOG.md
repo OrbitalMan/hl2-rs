@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline scale-key and grab-target milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list(R) and queued_damage(S), inherited model family/exact identifiers unavailable; primary reviewed and sealed both.
+
+**Changed / Why:** Bound authored crate scale key spelling to retail float destinations and clarified ignored UpdateObject results/target requests so the handoff cannot mistake acceptance or return values for native motion/release.
+
+**Tested how / Result:** R/S independent raw/identity/source checks pass; closed-set seals53/17 and24/16 files/bindings. R1004 and S806 bounded records; rejected navigation/admin reads retained. Native artifacts remain private and the owner's running game undisturbed.
+
+**Still broken or not tested / Next:** Live key assignment/locale/numeric conversion, carry error/state/motion, units/cadence, break/exit and Rust parity untested. Continue only bounded offline target-selection/error-metric questions, preserve original scene gaps and publish reviewed docs.
+
 ## 2026-10-22 offline frame/input and crate-resource milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material static workers physics_list completed O and queued_damage completed P, inherited model family/exact identifiers unavailable. Primary agent reviewed/sealed O/P and completed N/Q.

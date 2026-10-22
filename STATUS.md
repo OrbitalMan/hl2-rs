@@ -1,5 +1,11 @@
 # STATUS
 
+## Offline crate key and held-target checkpoint (2026-10-22)
+
+The selected retail class descriptors now bind the authored massScale/inertiaScale spellings through the parser's ASCII case-insensitive path to float fields+680/+684. This closes the earlier named-key static gap; live locale, conversion/assignment and resulting native physics remain untested. Q's exact-case negative search stays retained; R supplies the separate lowercase-descriptor evidence.
+
+The selected pickup Use caller ignores UpdateObject's boolean. False alone does not establish release; true follows target-request storage even when the helper later delegates detachment. Requested position/orientation and arrival fields are not observed motion or timing. R/S seals pass53/17 and24/16 retained-file/external-binding counts. Native carry/throw/window break/exit and Rust parity **not tested**; first_map_finished:false. Owner game undisturbed, no Rust changes.
+
 ## Offline held-frame and authored crate physics checkpoint (2026-10-22)
 
 The selected retail player-frame path now statically reaches the latched controller with useType2/value2 under control/weapon guards, without requiring a fresh use-key edge. The separate generic Use input path forwards its output-ID field as useType; input acceptance is not gameplay success. Actual scheduling, key timing, carry/throw and outputs remain untested.

@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Scale-key and grab-target static acceptance (2026-10-22)
+
+Run private python -B verify_seal.py under scene-crate-scale-fields-20261022r and scene-grab-update-20261022s. Expected53/17 and24/16 retained-file/external-binding counts. R independently checks descriptor bytes, key flag/type dispatch/name comparison/float destination, exact immutable DB bodies, owned BSP spellings and source references. S checks806 records, result handling, target-field stores, branch/call edges, constants and full exact-body identities. Historical unsealed acceptance labels describe pre-parent review; the enclosing closed-set seal is authoritative for freeze status.
+
+Actual native assignment/locale/conversion, both error readings, target movement/attachment, timing/units, carry/release/throw, window break/exit and Rust parity are **not tested**. No gameplay rebuild is needed for these research/documentation changes. Reviewed five-doc scope/whitelist checks and commit/push verification apply.
+
 ## Input/frame/resource/spawn acceptance (2026-10-22)
 
 Run private verify_seal.py under scene-use-input-20261022n, scene-held-use-frame-20261022o, scene-crate-authored-physics-20261022p and scene-crate-physics-spawn-20261022q with C:/Python310/python.exe -B. Expected retained-file/binding counts22/13,33/22,20/16,22/15. Native raw checks retain selected slots, calls, arguments, constants, full DB identities and pinned references. Resource acceptance independently compares exact selected VPK/member/header ranges, CRC/SHA, ordered prefix/full-tail data and14 property witnesses. Whole carrier identity and full damaged-tail grammar agreement are explicitly unavailable.
