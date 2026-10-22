@@ -57,11 +57,12 @@ pub const GROUND_HUMANS: [&str; 2] = ["npc_barney", "npc_kleiner"];
 /// Human-hull NPC classes registered for AI goals (step 14); scenes and scripted_sequences
 /// move them too while they own the actor. SetHullType(HULL_HUMAN) in CNPC_MetroPolice,
 /// CNPC_Combine and CNPC_PlayerCompanion (npc_citizen, npc_alyx) Spawn.
-pub const AI_GROUND_HUMANS: [&str; 4] = [
+pub const AI_GROUND_HUMANS: [&str; 5] = [
     "npc_metropolice",
     "npc_combine_s",
     "npc_citizen",
     "npc_alyx",
+    "npc_zombie",
 ];
 /// AI movers' walk/run per weapon class ("" unarmed): Weapon_TranslateActivity of
 /// ACT_WALK/ACT_RUN when the model has the result (else the base activity), played as
@@ -89,7 +90,10 @@ fn locomotion_variants(
     // Move and shoot's aiming walk/run (StartShootWhileMove needs both sequences).
     let mut aims = std::collections::BTreeMap::new();
     for weapon in std::iter::once("").chain(crate::npc_weapons::NPC_WEAPONS.iter().copied()) {
-        if let (Some(walk), Some(run)) = (pick(weapon, "ACT_WALK"), pick(weapon, "ACT_RUN")) {
+        // A model without ACT_RUN (the classic zombie, whose NPC_TranslateActivity
+        // walks instead) runs with its walk.
+        let walk = pick(weapon, "ACT_WALK");
+        if let (Some(walk), Some(run)) = (walk.clone(), pick(weapon, "ACT_RUN").or(walk)) {
             choices.push((weapon.to_owned(), walk, run));
         }
         if let (Some(walk), Some(run)) = (pick(weapon, "ACT_WALK_AIM"), pick(weapon, "ACT_RUN_AIM"))
@@ -438,5 +442,9 @@ mod tests {
             names(citizen, "weapon_smg1"),
             ("walkholdall1".into(), "run_holding_all".into())
         );
+        // The classic zombie has no ACT_RUN: it walks for both (CZombie translates
+        // ACT_RUN to ACT_WALK), on "walk" despite its 1e-4 sideways drift.
+        let zombie = "models/zombie/classic.mdl";
+        assert_eq!(names(zombie, ""), ("walk".into(), "walk".into()));
     }
 }

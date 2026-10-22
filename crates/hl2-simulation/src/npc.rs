@@ -483,11 +483,16 @@ fn validate_forward_track(track: &RootMotion) -> Result<(), GoalBlockReason> {
     let mut previous = 0.;
     for record in &track.records {
         let amount = (record.v0 + record.v1) * 0.5;
-        if record.direction.distance(Vec3::X) > 0.0001
+        // The classic zombie's walks drift sideways by ~1e-4 of their direction (0.01
+        // units a cycle); such drift is ignored, the track moves along +X.
+        let drift = record.cumulative_position - Vec3::X * (previous + amount);
+        if record.direction.distance(Vec3::X) > 0.001
             || record.end_yaw_degrees.abs() > 0.0001
             || record.v0 <= 0.
             || record.v1 <= 0.
-            || (record.cumulative_position - Vec3::X * (previous + amount)).length() > 0.001
+            || drift.x.abs() > 0.001
+            || drift.truncate().length() > 0.05
+            || drift.z.abs() > 0.001
         {
             return Err(error());
         }

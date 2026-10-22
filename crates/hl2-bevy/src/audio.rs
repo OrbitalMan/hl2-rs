@@ -410,6 +410,7 @@ impl PreparedAudio {
                 "Weapon_CombineGuard.Special1",
             ]
             .into_iter()
+            .chain(hl2_simulation::ai::zombie::SOUNDS.iter().copied())
             .map(str::to_owned),
         );
         let mut paths = BTreeSet::new();

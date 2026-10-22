@@ -137,6 +137,15 @@ pub enum CopRequest {
     /// CNPC_Combine COMBINE_AE_KICK: CheckTraceHullAttack(70, -(16,16,18), (16,16,18))
     /// from the body center along the facing; the runtime applies sk_combine_s_kick.
     Kick { start: Vec3, forward: Vec3 },
+    /// CNPC_BaseZombie::ClawAttack (AE_ZOMBIE_ATTACK_*): CheckTraceHullAttack(55, the
+    /// hull made a cube) from the body center along the facing for
+    /// sk_zombie_dmg_one_slash, with the swing's view and velocity punch.
+    Claw {
+        start: Vec3,
+        forward: Vec3,
+        punch: Vec3,
+        impulse: Vec3,
+    },
     /// CNPC_Combine COMBINE_AE_ALTFIRE (elites): a combine ball toward this point.
     AltFire(Vec3),
     /// CNPC_Combine COMBINE_AE_GREN_TOSS: Fraggrenade_Create at "lefthand" with

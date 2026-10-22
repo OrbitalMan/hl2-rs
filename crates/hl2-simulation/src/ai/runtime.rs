@@ -17,6 +17,7 @@ use super::relationships::{classify, Class, Disposition, Relationships};
 use super::schedule::{AiNpc, Behavior, Context, Schedules};
 use super::senses::{self, SightWorld, SoundEnt, Viewer};
 use super::state::{select_ideal_state, NpcState, StateInputs};
+use super::zombie::{self, Zombie};
 use crate::{
     entities::Scene,
     npc::{Controller, GoalKey},
@@ -269,6 +270,7 @@ pub struct MeleeHit {
 pub enum AiClass {
     Metropolice(Box<Metropolice>),
     Humanoid(Box<Humanoid>),
+    Zombie(Box<Zombie>),
 }
 impl AiClass {
     pub fn cop(&self) -> Option<&Metropolice> {
@@ -294,12 +296,14 @@ impl AiClass {
         match self {
             Self::Metropolice(cop) => cop.assault.as_ref(),
             Self::Humanoid(h) => h.assault.as_ref(),
+            Self::Zombie(z) => z.assault.as_ref(),
         }
     }
     pub fn assault_mut(&mut self) -> &mut Option<assault::Assault> {
         match self {
             Self::Metropolice(cop) => &mut cop.assault,
             Self::Humanoid(h) => &mut h.assault,
+            Self::Zombie(z) => &mut z.assault,
         }
     }
     /// The aiscripted_schedule goal (position, run).
@@ -307,24 +311,28 @@ impl AiClass {
         match self {
             Self::Metropolice(cop) => cop.script_goal,
             Self::Humanoid(h) => h.script_goal,
+            Self::Zombie(z) => z.script_goal,
         }
     }
     fn script_goal_mut(&mut self) -> &mut Option<(Vec3, bool)> {
         match self {
             Self::Metropolice(cop) => &mut cop.script_goal,
             Self::Humanoid(h) => &mut h.script_goal,
+            Self::Zombie(z) => &mut z.script_goal,
         }
     }
     fn requests_mut(&mut self) -> &mut Vec<CopRequest> {
         match self {
             Self::Metropolice(cop) => &mut cop.requests,
             Self::Humanoid(h) => &mut h.requests,
+            Self::Zombie(z) => &mut z.requests,
         }
     }
     fn behavior_mut(&mut self) -> &mut dyn Behavior {
         match self {
             Self::Metropolice(cop) => cop.as_mut(),
             Self::Humanoid(h) => h.as_mut(),
+            Self::Zombie(z) => z.as_mut(),
         }
     }
     /// m_flFieldOfView.
@@ -332,6 +340,7 @@ impl AiClass {
         match self {
             Self::Metropolice(_) => METROPOLICE_FOV,
             Self::Humanoid(h) => h.kind.field_of_view(),
+            Self::Zombie(_) => zombie::FIELD_OF_VIEW,
         }
     }
     /// GetSoundInterests.
@@ -339,6 +348,11 @@ impl AiClass {
         match self {
             Self::Metropolice(_) => METROPOLICE_SOUNDS,
             Self::Humanoid(h) => h.kind.sound_interests(),
+            // CAI_BaseNPC::GetSoundInterests (SOUND_PLAYER_VEHICLE has no source here).
+            Self::Zombie(_) => {
+                use super::senses::sound;
+                sound::WORLD | sound::COMBAT | sound::PLAYER | sound::BULLET_IMPACT
+            }
         }
     }
 }
@@ -411,6 +425,9 @@ pub struct AiActor {
     /// CNPC_Combine::m_flStopMoveShootTime.
     #[serde(skip)]
     stop_move_shoot: Option<f64>,
+    /// m_flNextDecisionTime for the idle sound roll (UpdateEfficiency's interval).
+    #[serde(skip)]
+    next_idle_decision: f64,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Diagnostics {
@@ -464,6 +481,8 @@ pub struct AiRuntime {
     combine_kick_damage: f32,
     /// sk_combine_guard_kick (the elite's SetKickDamage).
     combine_guard_kick_damage: f32,
+    /// sk_zombie_dmg_one_slash (every claw event; the ConVar default is 0).
+    zombie_slash_damage: f32,
     /// NPC weapon definitions (installed scripts and skill.cfg).
     #[serde(skip)]
     weapon_defs: BTreeMap<String, NpcWeaponDef>,
@@ -723,10 +742,12 @@ impl AiRuntime {
         super::police::add_schedules(&mut schedules);
         super::metropolice::add_schedules(&mut schedules);
         humanoid::add_schedules(&mut schedules);
+        zombie::add_schedules(&mut schedules);
         let mut stunstick_sounds = (None, None);
         let mut stunstick_damage = None;
         let mut combine_kick_damage = 0.;
         let mut combine_guard_kick_damage = 0.;
+        let mut zombie_slash_damage = 0.;
         if let Some(vfs) = vfs {
             if let Ok(Some(skill)) = vfs.read("cfg/skill.cfg") {
                 if let Ok(tokens) = keyvalues::tokens(&String::from_utf8_lossy(&skill)) {
@@ -751,6 +772,13 @@ impl AiRuntime {
                         .and_then(|p| p[1].parse::<f32>().ok())
                     {
                         combine_guard_kick_damage = value;
+                    }
+                    if let Some(value) = tokens
+                        .windows(2)
+                        .find(|p| p[0].eq_ignore_ascii_case("sk_zombie_dmg_one_slash"))
+                        .and_then(|p| p[1].parse::<f32>().ok())
+                    {
+                        zombie_slash_damage = value;
                     }
                 }
             }
@@ -843,6 +871,7 @@ impl AiRuntime {
             stunstick_damage,
             combine_kick_damage,
             combine_guard_kick_damage,
+            zombie_slash_damage,
             weapon_defs,
             shots: Vec::new(),
             muzzle_flashes: Vec::new(),
@@ -1459,10 +1488,11 @@ impl AiRuntime {
         defs: &BTreeMap<String, NpcWeaponDef>,
     ) -> Option<AiActor> {
         let kind = humanoid::Kind::for_class(e.class());
-        if e.class() != "npc_metropolice" && kind.is_none() {
+        let zombie = e.class() == "npc_zombie";
+        if e.class() != "npc_metropolice" && kind.is_none() && !zombie {
             return None;
         }
-        let flags = e
+        let flags: u32 = e
             .get("spawnflags")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
@@ -1473,6 +1503,10 @@ impl AiRuntime {
         let mut npc = AiNpc::new(id);
         npc.shot_regulator = Self::regulator(e.class(), weapon.as_ref(), defs, id);
         let class = match kind {
+            _ if zombie => AiClass::Zombie(Box::new(Zombie::new(
+                flags & SF_NPC_GAG != 0,
+                0x3c6e_f372_fe94_f82b ^ id as u64,
+            ))),
             Some(kind) => {
                 let mut h =
                     Humanoid::new(kind, weapon.is_some(), 0x6a09_e667_f3bc_c909 ^ id as u64);
@@ -1519,6 +1553,7 @@ impl AiRuntime {
             squad_new_enemy: false,
             idle_chatter: COP_CHATTER_ASK_QUESTION,
             harassed: false,
+            next_idle_decision: 0.,
         })
     }
     /// The NumGrenades keyvalue of a spawned CNPC_Combine (F4; DESIGN 14r would set it
@@ -1768,6 +1803,22 @@ impl AiRuntime {
                         // Class animation events.
                         if let Some(cop) = class.cop_mut() {
                             cop.anim_event(&name, event, &ctx, knock_out);
+                        } else if let AiClass::Zombie(z) = class {
+                            // CNPC_BaseZombie::HandleAnimEvent: claws and class sounds.
+                            let rolls = ((uniform() + 1.) * 0.5, (uniform() + 1.) * 0.5);
+                            if let Some((punch, impulse)) =
+                                zombie::claw_punch(&name, ctx.yaw, rolls)
+                            {
+                                let yaw = ctx.yaw.to_radians();
+                                z.requests.push(CopRequest::Claw {
+                                    start: ctx.origin + Vec3::Z * 36.,
+                                    forward: Vec3::new(yaw.cos(), yaw.sin(), 0.),
+                                    punch,
+                                    impulse,
+                                });
+                            } else if let Some(sound) = zombie::event_sound(&name) {
+                                z.requests.push(CopRequest::Sound(sound));
+                            }
                         } else if let AiClass::Humanoid(h) = class {
                             // CNPC_Combine::HandleAnimEvent COMBINE_AE_KICK (3); the other
                             // humanoid AE_* events are not modeled yet.
@@ -2431,6 +2482,7 @@ impl AiRuntime {
                 h.armed = actor.weapon.is_some();
                 precriminal_hate
             }
+            AiClass::Zombie(_) => precriminal_hate,
         };
         // A cop keeps the player as its enemy for the rest of a chase.
         let chasing = actor.class.cop().is_some_and(|cop| cop.chase_until > now);
@@ -2554,6 +2606,8 @@ impl AiRuntime {
             .class
             .humanoid()
             .is_some_and(|h| h.kind == humanoid::Kind::Combine);
+        // bits_CAP_INNATE_MELEE_ATTACK1: zombie claws.
+        let claws = matches!(actor.class, AiClass::Zombie(_));
         if let Some(enemy) = actor.npc.enemy {
             if previous_enemy != Some(enemy) {
                 actor.npc.conditions.set(COND_NEW_ENEMY);
@@ -2685,6 +2739,28 @@ impl AiRuntime {
                     {
                         actor.npc.conditions.set(COND_CAN_MELEE_ATTACK1);
                     }
+                }
+                // CNPC_BaseZombie::MeleeAttack1Conditions: within the claw reach (origin
+                // to origin), facing within 0.7, and the cube hull swept along the facing
+                // meets the enemy (an NPC or breakable in the way is not modeled).
+                if claws {
+                    let to = t_feet - origin;
+                    let forward = facing.truncate().normalize_or_zero().extend(0.);
+                    let dot = to.truncate().normalize_or_zero().dot(forward.truncate());
+                    let start = origin + Vec3::Z * 36.;
+                    let end = start + forward * zombie::CLAW_REACH;
+                    let half = if enemy == PLAYER { 16. } else { 13. };
+                    let cube = Vec3::splat(13.);
+                    let reaches = super::metropolice::segment_hits_box(
+                        start,
+                        end,
+                        t_feet + Vec3::new(-half, -half, 0.) - cube,
+                        t_feet + Vec3::new(half, half, 72.) + cube,
+                    );
+                    actor
+                        .npc
+                        .conditions
+                        .set(zombie::melee_condition(to.length(), dot, reaches));
                 }
             } else {
                 actor.npc.conditions.set(COND_ENEMY_OCCLUDED);
@@ -2873,10 +2949,29 @@ impl AiRuntime {
                     .is_some_and(|f| f & SF_NPC_GAG != 0)
             });
             let idle_or_alert = matches!(actor.npc.state, NpcState::Idle | NpcState::Alert);
+            // GatherConditions samples (and rolls IdleSound) only with a player in the
+            // NPC's PVS, or in combat, once per decision (UpdateEfficiency's interval):
+            // cops out of sight never chatter and far ones roll less often.
+            let in_pvs = scene.look_targets.in_pvs(id);
+            let to_npc = origin - player.eye();
+            let player_facing = in_pvs && player.facing.dot(to_npc.normalize_or_zero()) > 0.;
+            let decision_due = now >= actor.next_idle_decision;
+            if decision_due {
+                let efficiency = super::efficiency::efficiency(
+                    actor.npc.state,
+                    in_pvs,
+                    player_facing,
+                    to_npc.length(),
+                );
+                actor.next_idle_decision = now + efficiency.decision_interval() - 1e-6;
+            }
+            let samples = decision_due && (in_pvs || actor.npc.state == NpcState::Combat);
             // CNPC_MetroPolice::ShouldPlayIdleSound: a cop a squadmate asked answers as soon
             // as FOkToMakeSound allows (the squad's gate, else his own; never gagged).
             let cop_answers = cop && idle_or_alert && actor.idle_chatter >= COP_CHATTER_RESPONSE;
-            let should_play = if cop_answers {
+            let should_play = if !samples {
+                false
+            } else if cop_answers {
                 !gagged
                     && match actor.squad.as_ref().and_then(|n| self.squads.get(n)) {
                         Some(squad) => squad.ok_to_make_sound(0, now),
@@ -3032,6 +3127,10 @@ impl AiRuntime {
         actor.origin = origin.to_array();
         actor.yaw = yaw_of(scene, id);
         actor.next_think = now + THINK_INTERVAL;
+        // CZombie::PrescheduleThink's idle moans.
+        if let AiClass::Zombie(z) = &mut actor.class {
+            z.moan(now);
+        }
         // MaxYawSpeed and NPC_TranslateActivity's ACT_IDLE_ANGRY by class.
         let weapon_drawn = actor.weapon.is_some();
         let (yaw_speed, idle_angry) = match &actor.class {
@@ -3049,6 +3148,7 @@ impl AiRuntime {
                 h.kind.max_yaw_speed(&actor.npc.activity),
                 weapon_drawn && h.idle_angry(actor.npc.state, now),
             ),
+            AiClass::Zombie(_) => (zombie::max_yaw_speed(&actor.npc.activity), false),
         };
         let mut motor = SceneMotor {
             entity: id,
@@ -3064,6 +3164,7 @@ impl AiRuntime {
             idle_angry,
             weapon: actor.weapon.as_ref().map(|w| w.class.clone()),
             combine: matches!(&actor.class, AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine),
+            walk_only: matches!(&actor.class, AiClass::Zombie(_)),
             weapon_activity: None,
             blocked_moves: &mut self.diagnostics.blocked_moves,
         };
@@ -3445,6 +3546,27 @@ impl AiRuntime {
             return;
         };
         let state = &scene.states[id];
+        // CZombie::PainSound / DeathSound.
+        if matches!(&actor.class, AiClass::Zombie(_)) {
+            let cue = if state.killed {
+                if std::mem::replace(&mut actor.death_spoken, true) {
+                    return;
+                }
+                "Zombie.Die"
+            } else {
+                if now < actor.next_pain_sound || state.value <= 0. {
+                    return;
+                }
+                actor.next_pain_sound = now + 1.;
+                "Zombie.Pain"
+            };
+            let origin = state.origin;
+            scene.sounds.push(crate::sounds::SoundRequest {
+                origin: Some(origin + Vec3::Z * 64.),
+                ..cue.into()
+            });
+            return;
+        }
         // CAI_PlayerAlly::PainSound speaks TLK_WOUND; the companions' DeathSound emits
         // their die sound (CNPC_Citizen/CNPC_Barney/CNPC_Alyx).
         if matches!(&actor.class, AiClass::Humanoid(h) if matches!(h.kind, humanoid::Kind::Companion { .. }))
@@ -3622,6 +3744,73 @@ impl AiRuntime {
                         // Wait six seconds before even looking again.
                         h.next_grenade_check = now + 6.;
                     }
+                }
+                CopRequest::Claw {
+                    start,
+                    forward,
+                    punch,
+                    impulse,
+                } => {
+                    let enemy = self.actors[&id].npc.enemy;
+                    let enemy_center = enemy.map(|e| {
+                        if e == PLAYER {
+                            player.center()
+                        } else {
+                            scene.states[e].origin + Vec3::Z * 36.
+                        }
+                    });
+                    // ClawAttack: no swing through a wall between the zombie and its
+                    // enemy (an 8-unit hull to the enemy's center, brushes only).
+                    let sight = PhysicsSight { physics, world };
+                    let ignore: Vec<usize> = std::iter::once(id).chain(enemy).collect();
+                    if enemy_center.is_some_and(|c| !sight.visible(start, c, &ignore)) {
+                        continue;
+                    }
+                    let end = start + forward * zombie::CLAW_REACH;
+                    let (mins, maxs) = (-Vec3::splat(13.), Vec3::splat(13.));
+                    let damage = self.zombie_slash_damage;
+                    let player_hit = enemy == Some(PLAYER)
+                        && super::metropolice::segment_hits_box(
+                            start,
+                            end,
+                            player.feet + Vec3::new(-16., -16., 0.) - maxs,
+                            player.feet + Vec3::new(16., 16., 72.) - mins,
+                        );
+                    let hit = if player_hit {
+                        self.player_hits.push(PlayerHit {
+                            attacker: id,
+                            damage,
+                            punch,
+                            impulse,
+                            fade: None,
+                        });
+                        self.diagnostics.player_hits += 1;
+                        true
+                    } else if let Some(victim) =
+                        self.melee_victim(id, world, scene, start, end, mins, maxs)
+                    {
+                        self.diagnostics.npc_melee_hits += 1;
+                        let center = scene.states[victim].origin + Vec3::Z * 36.;
+                        self.melee_hits.push(MeleeHit {
+                            attacker: id,
+                            victim,
+                            damage,
+                            position: center,
+                            direction: forward,
+                        });
+                        true
+                    } else {
+                        false
+                    };
+                    scene.sounds.push(crate::sounds::SoundRequest {
+                        origin: Some(origin + Vec3::Z * 36.),
+                        ..String::from(if hit {
+                            "Zombie.AttackHit"
+                        } else {
+                            "Zombie.AttackMiss"
+                        })
+                        .into()
+                    });
                 }
                 CopRequest::Kick { start, forward } => {
                     let end = start + forward * 70.;
@@ -3879,6 +4068,7 @@ impl AiRuntime {
                         .is_some_and(|w| w.class == "weapon_stunstick");
                 }
                 AiClass::Humanoid(h) => h.armed = weapon.is_some(),
+                AiClass::Zombie(_) => {}
             }
             actor.weapon = weapon;
             actor.npc.shot_regulator = regulator;

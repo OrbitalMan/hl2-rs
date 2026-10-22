@@ -995,6 +995,9 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             ) {
                 wanted.extend(HUMANOID_AI_ACTIVITIES.iter().map(|a| a.to_lowercase()));
             }
+            if instance.kind.starts_with("npc_") {
+                wanted.extend(NPC_BASE_AI_ACTIVITIES.iter().map(|a| a.to_lowercase()));
+            }
             for e in &world.entities {
                 for key in [
                     "DefaultAnim",
@@ -1246,6 +1249,38 @@ pub const METROPOLICE_AI_ACTIVITIES: &[&str] = &[
     "ACT_WALK_CROUCH_RIFLE",
     "ACT_WALK_RIFLE_RELAXED",
     "ACT_WALK_RIFLE_STIMULATED",
+];
+/// Activities every npc_* class may set through the shared AI (the base schedules and
+/// tasks, flinches, natural attacks, deaths, jumps and leaps), loaded for every NPC
+/// model so classes added later find their sequences; classes add their own lists.
+pub const NPC_BASE_AI_ACTIVITIES: &[&str] = &[
+    "ACT_IDLE",
+    "ACT_IDLE_ANGRY",
+    "ACT_WALK",
+    "ACT_RUN",
+    "ACT_TURN_LEFT",
+    "ACT_TURN_RIGHT",
+    "ACT_MELEE_ATTACK1",
+    "ACT_MELEE_ATTACK2",
+    "ACT_RANGE_ATTACK1",
+    "ACT_RANGE_ATTACK2",
+    "ACT_RELOAD",
+    "ACT_SMALL_FLINCH",
+    "ACT_BIG_FLINCH",
+    "ACT_FLINCH_PHYSICS",
+    "ACT_COWER",
+    "ACT_DIESIMPLE",
+    "ACT_DIEBACKWARD",
+    "ACT_DIEFORWARD",
+    "ACT_DIEVIOLENT",
+    "ACT_JUMP",
+    "ACT_GLIDE",
+    "ACT_LAND",
+    "ACT_HOP",
+    "ACT_LEAP",
+    "ACT_CLIMB_UP",
+    "ACT_CLIMB_DOWN",
+    "ACT_CLIMB_DISMOUNT",
 ];
 /// Activities the humanoid AI classes (npc_citizen, npc_barney, npc_alyx, npc_combine_s;
 /// hl2-simulation ai::humanoid and the base schedules) set, and every acttable result of
