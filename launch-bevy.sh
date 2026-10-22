@@ -5,6 +5,63 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 cd "$PROJECT_ROOT"
 
+show_help() {
+    cat << 'EOF'
+Usage: ./launch-bevy.sh [OPTIONS]
+
+Options:
+      --audio-trace <path.jsonl>      Record audio cue and soundscape events to a JSONL trace file
+      --background                    Run headlessly without opening an OS window (for background replay / test runs)
+      --background-map <name>         Override the 3D background map loaded behind the main menu (default: background01)
+      --borderless                    Start in borderless windowed mode (native full-screen Space on macOS)
+      --capture <path.png>            Save screenshot of the final rendered frame to a PNG file
+      --capture-burst <count>         Capture a sequence of N frames to PNG files (requires --map)
+      --capture-live                  Capture frames live during interactive execution (requires --map)
+      --capture-monitor <path.png>    Capture an in-game camera monitor texture to a PNG file (requires --map)
+      --capture-window                Capture the presented OS window buffer rather than the internal game viewport
+      --cpu-skinning                  Use CPU vertex skinning instead of GPU compute skinning
+  -d, --debug                         Build and run the debug profile instead of release
+      --fake-monitor <spec>           Simulate a monitor with specified modes (e.g. 1920x1080,1280x720)
+      --fly                           Start with flight/noclip mode enabled (requires --map)
+      --frag-swept-box                Use swept-box physics query for frag grenade collision
+      --frames <count>                Exit automatically after rendering N frames (30..=36000)
+      --fullscreen                    Start in exclusive fullscreen display mode
+      --game <path>                   Path to Half-Life 2 installation (overrides saved preference and HL2_ROOT)
+      --height <pixels>               Window height in pixels (240..=8192, default from video config)
+  -h, --help                          Show this help message and exit
+      --main-menu                     Open the main menu (overlaid on top of --map if specified)
+      --map <name>                    Map to load directly into gameplay (e.g. d1_trainstation_01)
+      --movement-script <path.json>   Replay recorded player inputs from a movement script fixture (requires --map)
+      --mute-ambient                  Mute looping ambient soundscapes and background environment audio
+      --no-build                      Launch the existing binary without checking freshness or rebuilding
+      --no-focus                      Launch window without requesting input focus (for unattended test runs)
+      --no-pvs                        Disable BSP potential visible set (PVS) occlusion culling
+      --no-setup                      Fail with an error instead of opening setup if installation is missing
+      --pitch <degrees>               Set initial camera pitch angle in degrees (requires --map)
+      --position <x> <y> <z>          Set initial camera spawn coordinates (requires --map)
+      --profile                       Record CPU stage execution timings in the run report
+      --rebuild, --force-build        Force rebuilding the binary even if build artifacts are up to date
+      --report <path.json>            Path for simulation report output (default: artifacts/bevy-report.json)
+      --setup                         Open the setup dialog to choose/remember the Half-Life 2 folder
+      --setup-preview <path.png>      Capture a screenshot of the setup dialog and exit without loading a map
+      --tonemap-scale <scale>         Override HDR tonemapping exposure multiplier (positive float)
+      --uncapped                      Disable VSync to render and present frames unconstrained
+      --volume <0.0..1.0>             Set master audio volume level (default from audio config)
+      --width <pixels>                Window width in pixels (320..=8192, default from video config)
+      --windowed                      Start in windowed display mode
+      --world-partition               Enable spatial world partition culling
+      --yaw <degrees>                 Set initial camera yaw angle in degrees (requires --map)
+EOF
+}
+
+# If --help or -h is present, display help immediately and exit without running any build check
+for arg in "$@"; do
+    if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+        show_help
+        exit 0
+    fi
+done
+
 FORCE_REBUILD=0
 DEBUG_BUILD=0
 NO_BUILD=0

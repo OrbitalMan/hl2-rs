@@ -1,5 +1,36 @@
 # MODLOG
 
+## 2026-10-22 Launcher: Comprehensive alphabetical CLI help and early help dispatch in launch-bevy.sh
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `launch-bevy.sh`:
+  - Added early check for `--help` / `-h` before running any build or freshness checks. When `--help` or `-h` is passed, all other arguments are ignored, no build or clean checks are run, and the help screen is output immediately with exit status 0.
+  - Implemented comprehensive `show_help` listing all launcher, game, video, audio, capture, test, and engine options in alphabetical order (A to Z), one per line with aligned, helpful descriptions.
+  - Added all previously missing CLI flags (`--setup`, `--no-setup`, `--setup-preview`, `--background-map`, `--capture-window`, `--fake-monitor`, `--cpu-skinning`, `--no-pvs`, `--world-partition`, `--frag-swept-box`), and omitted removed/outdated ones (such as `--clean`).
+- `crates/hl2-bevy/src/main.rs`:
+  - Updated native `--help` output to match the clean alphabetical one-per-line format of `launch-bevy.sh`.
+
+**Why:** user request:
+1. Don't run build check and ignore all other arguments if `--help` argument is present.
+2. In help, list arguments one per line, with helpful description.
+3. Add all missing arguments, remove outdated or removed ones from help.
+4. Order the arguments in alphabetical order.
+
+**Tested how:**
+- Bash syntax check (`bash -n launch-bevy.sh`).
+- Verified `./launch-bevy.sh --help` and `./launch-bevy.sh -h` display line-by-line help immediately without build checks.
+- Verified `./launch-bevy.sh --rebuild --debug --map d1_trainstation_01 --help` ignores all other flags and displays help immediately.
+- Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
+
+**Result:** `launch-bevy.sh --help` returns instantly with a complete, structured, line-by-line reference of all launcher and engine arguments.
+
+**Still broken or not tested:** none.
+
+**Next:** continue UI polish / plugin modularization.
+
+
 ## 2026-10-22 Build/Docs: Automatic clean before build in launch-bevy.sh and expanded macOS instructions in README.md
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

@@ -249,11 +249,121 @@ impl Options {
                 "--main-menu" => options.main_menu = true,
                 "--background-map" => options.background_map = Some(next(&mut args)?),
                 "--help" | "-h" => {
+                    println!("Usage: hl2-bevy [OPTIONS]\n");
+                    println!("Options:");
                     println!(
-                        "Installation: auto-detect Steam or use the remembered folder.\n--setup: choose/remember the game folder; --no-setup: fail without opening setup.\n--game PATH and HL2_ROOT override the remembered folder.\n--setup-preview PNG: capture setup and exit without loading a map."
+                        "      --audio-trace <path.jsonl>      Record audio cue and soundscape events to a JSONL trace file"
                     );
                     println!(
-                        "HL2-RS Bevy migration preview (campaign incomplete).\n--game PATH --map NAME --main-menu --background-map NAME --width N --height N\n--windowed | --fullscreen | --borderless (default: the stored Video display mode; --frames/--capture/--movement-script runs start windowed; on macOS --borderless is the native full-screen Space)\nWithout --map, or when the map cannot be loaded, the main menu opens over the installed background map; --main-menu shows it over --map instead; --background-map overrides the background map.\n--position X Y Z --yaw DEGREES --pitch DEGREES (require --map)\n--frames N --capture PNG --capture-burst N --capture-monitor PNG --report JSON (burst/monitor captures require --map)\n--fly --movement-script JSON (require --map) --profile --uncapped --cpu-skinning --no-pvs --world-partition\n--volume 0..1 --audio-trace JSONL --mute-ambient --no-focus (start unfocused for unattended tests) --background (no window: unattended replays and captures stay off the desktop) --capture-window (capture the presented window, not the game frame) --tonemap-scale S (fixed HDR exposure) --fake-monitor WxH[,WxH...] (the Video page lists resolutions for this panel size and these reported modes instead of the real monitor's)\nClick to capture mouse; default keys (rebind in Options > Keyboard): WASD move, Space jump, Ctrl crouch (Alt on macOS), Shift sprint, Alt walk (Cmd on macOS). F1 toggles developer diagnostics/FPS; F2 toggles fly. F3 gives weapons; slots/wheel select; mouse buttons fire/confirm; R reloads; Q last weapon; E uses. Esc cancels selection then opens the pause menu; select Resume to continue. Tilde toggles the console. F10 quits."
+                        "      --background                    Run headlessly without opening an OS window (for background replay / test runs)"
+                    );
+                    println!(
+                        "      --background-map <name>         Override the 3D background map loaded behind the main menu (default: background01)"
+                    );
+                    println!(
+                        "      --borderless                    Start in borderless windowed mode (native full-screen Space on macOS)"
+                    );
+                    println!(
+                        "      --capture <path.png>            Save screenshot of the final rendered frame to a PNG file"
+                    );
+                    println!(
+                        "      --capture-burst <count>         Capture a sequence of N frames to PNG files (requires --map)"
+                    );
+                    println!(
+                        "      --capture-live                  Capture frames live during interactive execution (requires --map)"
+                    );
+                    println!(
+                        "      --capture-monitor <path.png>    Capture an in-game camera monitor texture to a PNG file (requires --map)"
+                    );
+                    println!(
+                        "      --capture-window                Capture the presented OS window buffer rather than the internal game viewport"
+                    );
+                    println!(
+                        "      --cpu-skinning                  Use CPU vertex skinning instead of GPU compute skinning"
+                    );
+                    println!(
+                        "      --fake-monitor <spec>           Simulate a monitor with specified modes (e.g. 1920x1080,1280x720)"
+                    );
+                    println!(
+                        "      --fly                           Start with flight/noclip mode enabled (requires --map)"
+                    );
+                    println!(
+                        "      --frag-swept-box                Use swept-box physics query for frag grenade collision"
+                    );
+                    println!(
+                        "      --frames <count>                Exit automatically after rendering N frames (30..=36000)"
+                    );
+                    println!(
+                        "      --fullscreen                    Start in exclusive fullscreen display mode"
+                    );
+                    println!(
+                        "      --game <path>                   Path to Half-Life 2 installation (overrides saved preference and HL2_ROOT)"
+                    );
+                    println!(
+                        "      --height <pixels>               Window height in pixels (240..=8192, default from video config)"
+                    );
+                    println!(
+                        "  -h, --help                          Show this help message and exit"
+                    );
+                    println!(
+                        "      --main-menu                     Open the main menu (overlaid on top of --map if specified)"
+                    );
+                    println!(
+                        "      --map <name>                    Map to load directly into gameplay (e.g. d1_trainstation_01)"
+                    );
+                    println!(
+                        "      --movement-script <path.json>   Replay recorded player inputs from a movement script fixture (requires --map)"
+                    );
+                    println!(
+                        "      --mute-ambient                  Mute looping ambient soundscapes and background environment audio"
+                    );
+                    println!(
+                        "      --no-focus                      Launch window without requesting input focus (for unattended test runs)"
+                    );
+                    println!(
+                        "      --no-pvs                        Disable BSP potential visible set (PVS) occlusion culling"
+                    );
+                    println!(
+                        "      --no-setup                      Fail with an error instead of opening setup if installation is missing"
+                    );
+                    println!(
+                        "      --pitch <degrees>               Set initial camera pitch angle in degrees (requires --map)"
+                    );
+                    println!(
+                        "      --position <x> <y> <z>          Set initial camera spawn coordinates (requires --map)"
+                    );
+                    println!(
+                        "      --profile                       Record CPU stage execution timings in the run report"
+                    );
+                    println!(
+                        "      --report <path.json>            Path for simulation report output (default: artifacts/bevy-report.json)"
+                    );
+                    println!(
+                        "      --setup                         Open the setup dialog to choose/remember the Half-Life 2 folder"
+                    );
+                    println!(
+                        "      --setup-preview <path.png>      Capture a screenshot of the setup dialog and exit without loading a map"
+                    );
+                    println!(
+                        "      --tonemap-scale <scale>         Override HDR tonemapping exposure multiplier (positive float)"
+                    );
+                    println!(
+                        "      --uncapped                      Disable VSync to render and present frames unconstrained"
+                    );
+                    println!(
+                        "      --volume <0.0..1.0>             Set master audio volume level (default from audio config)"
+                    );
+                    println!(
+                        "      --width <pixels>                Window width in pixels (320..=8192, default from video config)"
+                    );
+                    println!(
+                        "      --windowed                      Start in windowed display mode"
+                    );
+                    println!(
+                        "      --world-partition               Enable spatial world partition culling"
+                    );
+                    println!(
+                        "      --yaw <degrees>                 Set initial camera yaw angle in degrees (requires --map)"
                     );
                     std::process::exit(0);
                 }

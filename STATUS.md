@@ -4,6 +4,13 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Alphabetical line-by-line CLI help and early help dispatch in launch-bevy.sh & hl2-bevy (`launch-bevy.sh`, `crates/hl2-bevy`):**
+  - Added early `--help` / `-h` check in `launch-bevy.sh` before running build or freshness checks. Ignores all other arguments, skips all build checks/clean steps, and outputs help immediately with exit status 0.
+  - Implemented comprehensive `show_help` listing all launcher and engine options in alphabetical order (A to Z), one per line with aligned, helpful descriptions.
+  - Added all previously missing CLI flags (`--setup`, `--no-setup`, `--setup-preview`, `--background-map`, `--capture-window`, `--fake-monitor`, `--cpu-skinning`, `--no-pvs`, `--world-partition`, `--frag-swept-box`), and omitted removed/outdated options (`--clean`).
+  - Updated native `--help` in `crates/hl2-bevy/src/main.rs` to match the alphabetical one-per-line format.
+  - Verified with bash syntax checks (`bash -n launch-bevy.sh`), `./launch-bevy.sh --help`, `./launch-bevy.sh -h`, `./launch-bevy.sh --rebuild --debug --map d1_trainstation_01 --help`, `scripts/checks/validate.sh`, and `scripts/checks/check_windows.sh`.
+
 - **Automatic clean before build in launch-bevy.sh & expanded macOS instructions in README.md (`launch-bevy.sh`, `README.md`):**
   - Removed unused `--clean` argument parsing from `launch-bevy.sh`.
   - Configured `launch-bevy.sh` to automatically clean stale build remnants from `target/` (`scripts/clean-target.sh --stale`) prior to every build (whenever `NEEDS_BUILD` triggers), preventing disk bloat without wiping 3rd-party dependencies.
