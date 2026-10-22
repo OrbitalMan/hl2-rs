@@ -6,7 +6,7 @@
 
 **Changed / Why:** Recorded precise private pickup/dispatch continuation and lean prompt, sealed evidence inventory, preserved failures/gaps and offline-only next step.
 
-**Tested how / Result:** All13 seals and independent navigator checks pass; final closeout records scoped docs, clean index/tree, actual remote HEAD and private artifact hashes after commit/push. Inventory57 distinct/63 per-root body identities/64 source paths includes five navigation-only occurrences.
+**Tested how / Result:** All13 seals and independent navigator checks pass; final closeout records scoped docs, empty staged index, actual tree/remote status and private artifact hashes after commit/push. Concurrent edits appeared in crates/hl2-bevy/src/gameplay.rs and crates/hl2-simulation/src/npc.rs during closeout; Codex left those implementation files untouched and uncommitted. Inventory57 distinct/63 per-root body identities/64 source paths includes five navigation-only occurrences.
 
 **Still broken or not tested / Next:** Native ordering/physics/carry/window/exit and Rust parity untested, first_map_finished:false. Follow the private continuation, preserve the owner's running game and Claude's implementation, and revalidate before any new bounded discovery.
 
