@@ -1,5 +1,11 @@
 # Design
 
+## Detach restoration and next observation boundary (2026-10-22)
+
+The late selected retail detach path requests drag/wake, saved mass, rotational damping and held-flag updates for each nonnull enumerated physics object before velocity handling. Nonzero clear requests zero vectors/contact-strain clearing; false-clear requests a velocity clamp using effective parent-sourced limits. Thus the selected primary-throw path can alter velocity before applying its later vectors. Saved-value initialization/list membership, actual physics setters/units and callback mutations remain unresolved; a setter request is not proof of the later observed mass or velocity. Preserve the approximate SSE arithmetic rather than promoting a bit-exact standard normalization formula.
+
+No implementation work was performed. The next bounded runtime experiment, only when the owner's app-preservation constraint and ownership/cursor prerequisites permit it, must bind fresh canonical/interface generations, actual window health/profile state and actual crate/controller/physics values, then observe motion/damage/crossing/transition separately from outputs. The private offline continuation records this plan and the unchanged first-map boundary.
+
 ## Held-throw and glass-impact static boundaries (2026-10-22)
 
 Retail held-object Use checks owner/handle, release/secondary/error/movable guards before primary throw. Shutdown/drop notification precedes two later physics vector-application calls; a thrown flag or drop output therefore cannot prove those calls or actual motion. The mass scalar is clamped/remapped separately from pickup eligibility. Read the effective throw setting rather than substituting its raw startup default, and preserve indirect physics calls as unresolved until their target/units/behavior are verified. No initial-velocity or flight-trajectory contract follows from these static call sites.

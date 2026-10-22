@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline detach supplement and final research handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. The earlier material static worker exit_registration contributed exit/use/throw evidence; the late detach supplement and handoff were completed by the primary agent.
+
+**Changed / Why:** Sealed the narrow detach helper and selected velocity branches; left a six-root private handoff and lean next-chat prompt while preserving the owner's running game and Claude's implementation lane.
+
+**Tested how / Result:** Late seal passes20 retained files/12 bindings/three exact bodies/370 bounded records; original five seals and the corrected metadata navigator pass. Saved-mass/damping setter requests precede later throw mass querying; false-clear can clamp velocity. Reviewed documentation checks/publication are recorded separately; no Rust change/build or native launch.
+
+**Still broken or not tested / Next:** Actual restoration/settings/units/velocity, window interaction, exit and Rust parity untested; original gaps retained. Continue offline under the owner constraint. Later permitted idle-session research must observe fresh identities and resulting state/motion. Read the new private continuation/closeout; commit/push reviewed shared docs and verify the final checkout state before ending.
+
 ## 2026-10-22 offline throw/impact and private navigator checkpoint
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Material static worker exit_registration researched the throw branch with inherited model family; exact identifier unavailable.

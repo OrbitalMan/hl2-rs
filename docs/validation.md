@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Offline handoff and detach acceptance (2026-10-22)
+
+Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-crate-detach-20261022i/verify_seal.py`: expected passed:true,20 retained files/12 bindings/three exact bodies/370 bounded instruction records. It checks immutable full-identity DB bodies, file-backed selected calls/branches/constants, pinned source excerpts and the closed file set/receipt. The original five root seals were also checked again, and `../../work/publishing/verify-window-exit-index-20261022d.py` still checks66 distinct bodies/69 occurrences/five missing startup stubs. The late detach root is separate from that inventory.
+
+These are offline provenance/static checks. The initial short clear-helper listing ends inside an instruction and remains retained beside an extended loop/return window; only complete cited sites are promoted. No runtime game, gameplay rebuild, Rust tests or ordinary exit test occurred. The final private closeout checks reviewed documentation commit scope, actual remote identity and worktree/index state; any concurrent contributor changes must remain untouched and be reported accurately. Native live restoration/velocity/health/collision/break/exit and Rust parity are **not tested**.
+
 ## Throw/impact and continuation-index acceptance (2026-10-22)
 
 Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-crate-throw-20261022g/verify_seal.py`, the sibling `scene-window-impact-20261022h/verify_seal.py`, and `C:/Python310/python.exe -B ../../work/publishing/verify-window-exit-index-20261022d.py`. Expected seals:54 files/13 bindings/13 bodies/914 records;25 files/nine bindings/five bodies/463 records. The index checks five pinned manifests/receipts, exact source identities and all66 distinct pass14 body hashes/69 occurrences, plus five absent exact startup procedures and paged queries. It is metadata/identity acceptance, not a native execution or full semantic test.

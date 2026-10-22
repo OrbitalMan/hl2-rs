@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Final offline storage-window continuation (2026-10-22)
+
+Private `scene-crate-detach-20261022i` adds three exact identities outside the earlier five-root navigator: the detach helper and its two selected velocity helpers. Its seal passes20 retained files/12 external bindings/370 byte-matched records, including duplicate/padding/truncated-window records explicitly bounded in the guide. Saved-mass/damping setter requests precede the velocity branch and the parent's later mass query; false-clear can request a clamp. No actual restored state, physical units or native result is observed. The original five roots remain frozen and their66-body/69-occurrence navigator unchanged.
+
+Newest private handoff `work/publishing/research-window-exit-offline-continuation-20261022d.md` contains provenance, six-root inventory, exact read-only commands, rejected drafts and a later idle-session observation plan. `next-research-prompt-20261022d.txt` and the companion closeout receipt provide the lean entry/publication state. The owner requested the running game remain undisturbed; zero native games were started this run. Retain the original16 authored gaps/four missing scene procedures/16h correction. First-map completion, live window interaction/exit and Rust parity remain untested.
+
 ## Sealed held-throw and window-impact bridge (2026-10-22)
 
 Private `scene-crate-throw-20261022g` passes54 retained files/13 external identities,13 exact bodies/914 instruction records; `scene-window-impact-20261022h` passes25 files/nine identities,five bodies/463 records. The first binds Use/Shutdown/drop/application ordering and scalar/default sources without observing live settings or motion. The second binds the window collision virtual, default wrapper, callback forwarding and selected glass table bytes/lookup without executing collision damage or breaking glass. The owner's game remained undisturbed.

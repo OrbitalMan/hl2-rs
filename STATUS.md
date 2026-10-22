@@ -1,5 +1,11 @@
 # STATUS
 
+## Offline storage research handoff sealed (2026-10-22)
+
+Six private supplements are sealed; all work after the owner's game-preservation instruction stayed offline. The separate late detach supplement checks three exact bodies/370 bounded instruction records/12 external identities,20 retained files. It requests saved mass/rotational damping restoration before the parent's later throw mass query; its false-clear branch calls a velocity clamp. Actual saved/live values, dynamic physics behavior and resulting motion remain untested. The existing five-root navigator remains66 distinct bodies/69 retained occurrences/five raw-only startup gaps; the late three-body root is separate.
+
+Latest private handoff: `work/publishing/research-window-exit-offline-continuation-20261022d.md`; lean entry `next-research-prompt-20261022d.txt`; final publication/provenance receipt `research-window-exit-offline-closeout-20261022d.json`. These supersede the prior research-next-step pointer while preserving its actual native route. Do not retry native play or disturb the owner's existing game. First map unfinished, live window health/pickup/throw/break/exit and Rust parity **not tested**. No Rust changes/builds; original authored gaps remain.
+
 ## Offline throw/collision ordering checkpoint (2026-10-22)
 
 The held-object throw supplement `scene-crate-throw-20261022g` is sealed at54 retained files/13 bindings,13 exact bodies/914 instruction records. Primary throw calls Shutdown(true), including detachment/drop notification, before the physics application calls. The selected branch constructs a mass-scaled vector from the effective throw setting; the raw default1000 is not an observed live value, and the indirect physics methods/units/actual motion remain untested.
