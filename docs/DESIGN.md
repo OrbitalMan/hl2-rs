@@ -1,5 +1,13 @@
 # Design
 
+## First-map walking and I/O identity supplement (2026-10-21, research only)
+
+Private bounded plan/results: ../../work/hl2-decompiled/scene-player-route-20261021/PLAN.md and README.md. Preserve authored first-map scope,validate player movement with separate timed console press/release and raw generation-bracketed player reads,then correlate the resulting native scene request with actual caller/activator/actor;compare a fresh process without Frida. No Rust implementation or second-map promotion.
+
+Measured walking crosses trigger_lcs_trainride_sit and requests lcs_trainride_sit_respond at114.180 game seconds. Actual incoming activator is the measured player;caller is the authored trigger. Genuine citizen_train_2/male_07 is accepted under policy0 and playback starts;fresh never-attached state corroborates playback. Keep input/output activators distinct: exact StartPlayback10243280 and its raw FireOutput stack pass the scene itself as both OnStart activator and caller,with delay0. Do not propagate the incoming player identity to that output. Authored ordinal844/845 is distinct from live player slot1/actor slot425. Trigger Touch/output/event-queue dispatch itself remains unobserved;the request and authored OnStartTouch corroborate attribution. OnTrigger1 Pause/Resume4s is metadata only in this pass.
+
+Separate press/release requests work without sv_noclipduringpause override;the prior wait90 unchanged-position cause is still unknown. A strafe reaches an unresolved boundary at y=-1969.96875;no completed exit claim. Next use doorway brush/parent-transform evidence and short measured walking inputs before customs/security observation. Full map,animation/audio/camera/SECTION behavior and Rust parity remain open.
+
 ## First-map completion boundary and natural observation (2026-10-20)
 
 Owner requires first-map completion review before d1_trainstation_02. Revalidate authored joins,all retained native/static lanes and explicit closure failures;then observe original map requests with genuine actors/models in a new private write mount. Reuse exact native entry/relocation checks and owned-PID/focus guards. Record requested/accepted/output states,raw source clocks,actor generations and actual caller identities;compare a fresh process without Frida. No Rust implementation or automatic promotion from resource readiness to playback. Private bounded plan: ../../work/hl2-decompiled/scene-natural-firstmap-20261020/PLAN.md.

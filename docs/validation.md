@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## First-map player-triggered scene checks (2026-10-21)
+
+From checkout run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-player-route-20261021/verify.py` and `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-player-route-20261021/verify_seal.py`. Expected passed:true,512 events/253 paired calls,six exact baseline/original bodies/six relocated hook entries,and fresh_never_attached_playing_snapshot:true. Independent retained-byte checks reconstruct29 player snapshots plus fresh named scene/actor state,source clocks and entity generations,request input pointers and output self/self/0 identity. Instrumented actual player movement triggers the genuine policy0 passenger scene at114.180;fresh control observes it playing at114.420. Console positions corroborate settled raw feet+64 eye positions;in-motion timestamps are asynchronous.
+
+Both owned native processes closed;selected installed cfg/four-module identities match before/after. Frida changes executable memory and may perturb timing. Earlier wait90 unchanged-position rehearsal,SDK-only input-gate hypothesis,rejected output-activator checker and unresolved strafe boundary remain explicit. Capture labels train-exit/platform are not accepted exits. first_map_finished,ordinary_full_traversal_tested,train_exit_completed and rust_parity_tested remain false. No Rust edits/build/gameplay tests by this research pass;source implementation changes are concurrent work. Parent20261020 evidence/seal remains unchanged;historical16h closure correction and missing exact procedures persist.
+
 ## F4 overlay, ent_create and the main merge (session 28, 2026-10-21)
 
 - Unit tests: `ai::spawn` overlay clicks/scroll/filter/escape/common folder, ent_create placement and quoting; `spawn_panel` drawn-row hit test at 720 p; hl2-ui console routing keeps quoted values. Workspace release tests pass except the two known release-only should_panic image tests; owned suite (HL2_ROOT, `--ignored`) 54 pass; strict Clippy and fmt clean.

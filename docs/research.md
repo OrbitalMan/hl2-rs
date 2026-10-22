@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Player walking and genuine passenger trigger (2026-10-21)
+
+Private ../../work/hl2-decompiled/scene-player-route-20261021/README.md establishes timed-console walking and a new native first-map start: trigger_lcs_trainride_sit -> lcs_trainride_sit_respond at114.180,policy0,actual player activator,genuine citizen_train_2/male_07,CheckActors1 and accepted playing state. Exact six-body baseline/original provenance,relocated entry checks,raw actor/player generations and512 events/253 call pairs remain retained. A fresh never-Frida-attached process corroborates walking and the same scene playing. Incoming player activator differs from scene OnStart's self/self/0 output identity. Trigger dispatch itself,full playback and Rust parity remain untested. Both games closed;checked installed identities unchanged. Train exit remains blocked/uncompleted. Latest handoff ../../work/publishing/research-player-route-continuation-20261021.md;stay on the first map and preserve16 gaps.
+
 ## First-map completion check and natural starts (2026-10-20)
 
 Private ../../work/hl2-decompiled/scene-natural-firstmap-20261020/README.md records eleven passing retained first-map checks plus genuine intro and arrival scene-start observations. Original relay callers request the G-Man policy0 scene and citizen_train_1 policy1 endline;actual actor/model lookups,acceptance,OnStart and playing state are retained with exact six-body provenance. A fresh process without Frida corroborates G-Man playback and subsequent cleared state. Controller serials,relay queue dispatch,ordinary full traversal and Rust parity are not established. The first map is not finished beyond its bounded authored-data handoff;owner requires remaining first-map work before second-map promotion. The original16 gaps and closure erratum remain intact. Latest handoff: ../../work/publishing/research-firstmap-completion-continuation-20261020.md.

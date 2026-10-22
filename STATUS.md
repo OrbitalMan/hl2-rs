@@ -1,5 +1,11 @@
 # STATUS
 
+## First-map player-triggered passenger scene (2026-10-21, research only)
+
+Separate timed console press/release requests now establish native walking in d1_trainstation_01: instrumented300.869 units and fresh never-Frida-attached361.622 units,with raw player origin/velocity/clock/generation reads. At114.180 game seconds,trigger_lcs_trainride_sit requests lcs_trainride_sit_respond,policy0,with the actual player as incoming activator. Genuine citizen_train_2/male_07 binds,CheckActors1,OnStart and playing1/wait0 follow. Exact StartPlayback/raw output stack distinguish incoming player identity from OnStart's scene-self activator/caller. Fresh process corroborates the same scene playing at114.420. Six exact bodies/six relocated entries and512 events/253 paired calls pass;29 player snapshots and fresh named-state raw reconstruction pass.
+
+Both owned games closed,Frida detached,checked installed cfg/module identities unchanged. No input-gate override,teleport,noclip,seeded actors or direct scene Start. The earlier unchanged-position wait rehearsal remains rejected;its cause is unproven. Sideways movement stopped at y=-1969.96875;producer capture labels do not establish a train exit. Full scene/audio/animation/SECTION behavior,customs/Barney/full traversal and Rust parity remain **not tested**. Stay on the first map. Private acceptance: ../../work/hl2-decompiled/scene-player-route-20261021/verify.py and verify_seal.py;latest handoff ../../work/publishing/research-player-route-continuation-20261021.md. No Rust/build/Git mutations by this pass;concurrent implementation edits are separate. Next: doorway brush/parent transforms and short measured exit inputs,then a genuine customs/security controller.
+
 ## First-map completion audit and natural starts (2026-10-20, research only)
 
 Owner requires checking d1_trainstation_01 before advancing to d1_trainstation_02. The first map is **not finished** as runtime research or Rust parity. All eleven selected retained metadata/static checks pass, including the independent311-query audit; all66 authored controllers/620 event occurrences/16 recorded gaps remain accounted for. Missing exact procedures and the historical16h closure correction remain preserved. The second-map lane was not advanced.

@@ -86,6 +86,16 @@
 
 **Next:** regression/owned suite results, AI gesture layers, DESIGN 14r part A (runtime spawning of already-loaded classes).
 
+## 2026-10-21 first-map player-triggered passenger scene (research only)
+
+**Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Retained timed-console walking,player raw reads and genuine trigger/caller/actor playback evidence to close the prior unmeasured-movement gap. Added private scene-player-route-20261021 and a research handoff;updated research documentation only. Incoming player activator and OnStart scene-self identities are distinguished.
+
+**Tested how / Result:** Prior natural-start verifier/seal pass. New acceptance checks six exact bodies/six relocated entries,512 events/253 paired calls,29 player raw snapshots and fresh named-state reconstruction. Instrumented300.869-unit walk requests lcs_trainride_sit_respond at114.180 with genuine citizen_train_2/male_07;fresh never-attached361.622-unit walk corroborates playback at114.420. Both owned games closed;checked installed cfg/module identities unchanged. Repeat verify.py/verify_seal.py commands in docs/validation.md and the private handoff.
+
+**Still broken or not tested / Next:** Strafe stops at y=-1969.96875;no completed train exit. Full scene/audio/animation/SECTION outputs,customs/Barney/full traversal and Rust parity not tested. Inspect real doorway brush/parent transforms and use short measured exit inputs,then observe a genuine downstream controller. No Rust/build/Git mutations by this pass;concurrent Claude implementation is separate. Stay on first map;preserve16 gaps and missing exact procedures.
+
 ## 2026-10-21 session 24, second part (same chat): native soldier comparisons, soldiers/citizens move, grenade-before-reload (`wip/npc-ai-20261014`)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`, the same chat as the session 24 entry below (commit 9a20127's message wrongly says session 25). No subagents. Research: native oracle runs with per-process audio and ent_text (private npc-burst-20261020), SDK 2013 npc_combine.cpp (TranslateSchedule SCHED_HIDE_AND_RELOAD, CanGrenadeEnemy/CanThrowGrenade/CheckCanThrowGrenade, flush rule), player TraceAttack.
