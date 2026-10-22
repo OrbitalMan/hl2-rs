@@ -289,6 +289,7 @@ pub fn poll(
             options.no_pvs,
             options.world_partition,
         ),
+        ui.source.config.video.advanced.filtering,
     );
 }
 

@@ -103,6 +103,8 @@ struct Options {
     main_menu: bool,
     /// Override the startup main-menu background map.
     background_map: Option<String>,
+    /// Persisted user configuration.
+    config: hl2_ui::config::Config,
 }
 /// Rejects map-dependent arguments when no `--map` was given.
 fn require_map_for(map: Option<&str>, map_dependent: &[&str]) -> Result<()> {
@@ -172,6 +174,7 @@ impl Options {
             fake_monitor: None,
             main_menu: false,
             background_map: None,
+            config,
         };
         let mut explicit_mode = None;
         while let Some(arg) = args.next() {
@@ -739,6 +742,8 @@ fn main() -> Result<()> {
         .add_systems(PreUpdate, crate::video::present_frame)
         .add_systems(PostUpdate, crate::video::update_present_gamma)
         .add_systems(PostUpdate, crate::video::sync_present_mode)
+        .add_systems(PostUpdate, crate::video::sync_antialiasing)
+        .add_systems(PostUpdate, crate::video::sync_filtering)
         .add_systems(
             Update,
             (
@@ -957,6 +962,7 @@ fn setup(
             options.no_pvs,
             options.world_partition,
         ),
+        options.config.video.advanced.filtering,
     );
     let mut console_ui = ui_host::Console::new(ui);
     console_ui.source.set_history(console_host::load_history());
@@ -990,6 +996,7 @@ fn setup(
         options.flexible_aspect,
         options.display_mode.effective() == hl2_ui::config::DisplayMode::Windowed,
     );
+    let msaa = video::msaa_for(options.config.video.advanced.antialiasing);
     commands.spawn((
         Camera2d,
         Camera {
@@ -998,7 +1005,7 @@ fn setup(
             ..default()
         },
         Tonemapping::None,
-        Msaa::Off,
+        msaa,
         bevy::camera::visibility::RenderLayers::layer(2),
     ));
     commands.spawn((
@@ -1018,7 +1025,7 @@ fn setup(
             amount: 1.,
             presample: None,
         },
-        Msaa::Off,
+        msaa,
         Projection::Perspective(PerspectiveProjection {
             fov: 2.
                 * ((hl2_simulation::viewmodel_effects::VIEWMODEL_FOV.to_radians() / 2.).tan()
@@ -1033,7 +1040,7 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Tonemapping::None,
-        Msaa::Off,
+        msaa,
         Projection::Perspective(PerspectiveProjection {
             fov: 2. * ((75f32.to_radians() / 2.).tan() / (4. / 3.)).atan(),
             near: 1.,
@@ -1064,6 +1071,7 @@ pub(crate) fn install_map(
     (meshes, materials, images, sounds, effect_materials, inverse_binds): MapAssets,
     status: &Status,
     (cpu_skinning, no_pvs, world_partition): (bool, bool, bool),
+    filtering: hl2_ui::config::Filtering,
 ) -> hl2_ui::console::Console {
     {
         let mut stats = status.0.lock().expect("map stats");
@@ -1083,7 +1091,7 @@ pub(crate) fn install_map(
     commands.insert_resource(rendering::FlexModels(loaded.flexes.clone()));
     commands.insert_resource(runtime_props::RuntimeProps::new(loaded.vfs.clone()));
     let camera_target = monitors::install(&loaded, commands, images);
-    rendering::spawn_map(
+    rendering::spawn_map_filtered(
         &loaded,
         commands,
         (meshes, inverse_binds),
@@ -1091,6 +1099,7 @@ pub(crate) fn install_map(
         images,
         status,
         (&camera_target, cpu_skinning, world_partition),
+        filtering,
     );
     effects::install(
         &loaded,

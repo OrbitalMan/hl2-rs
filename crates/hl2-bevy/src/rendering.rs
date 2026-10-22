@@ -7,7 +7,7 @@ use crate::{
 use bevy::{
     asset::RenderAssetUsages,
     camera::primitives::{Aabb, MeshAabb},
-    image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
+    image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     mesh::{Indices, MeshVertexBufferLayoutRef},
     pbr::{MaterialPipeline, MaterialPipelineKey},
     prelude::*,
@@ -76,7 +76,12 @@ pub(crate) fn black_cube() -> Image {
     cube_image(1, false, vec![0; 6 * 4])
 }
 /// A six-layer cube texture: RGBA16F linear halves (HDR) or sRGB-encoded RGBA8 (LDR).
-pub(crate) fn cube_image(size: u16, hdr: bool, data: Vec<u8>) -> Image {
+pub(crate) fn cube_image_filtered(
+    size: u16,
+    hdr: bool,
+    data: Vec<u8>,
+    filtering: hl2_ui::config::Filtering,
+) -> Image {
     let mut image = Image::new(
         Extent3d {
             width: size.into(),
@@ -96,8 +101,21 @@ pub(crate) fn cube_image(size: u16, hdr: bool, data: Vec<u8>) -> Image {
         dimension: Some(TextureViewDimension::Cube),
         ..default()
     });
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor::linear());
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: if filtering.is_trilinear() {
+            ImageFilterMode::Linear
+        } else {
+            ImageFilterMode::Nearest
+        },
+        anisotropy_clamp: filtering.aniso(),
+        ..Default::default()
+    });
     image
+}
+pub(crate) fn cube_image(size: u16, hdr: bool, data: Vec<u8>) -> Image {
+    cube_image_filtered(size, hdr, data, hl2_ui::config::Filtering::Trilinear)
 }
 /// Source model lighting for one entity: ambient cube plus up to four local
 /// lights, positions/directions in Bevy space and colors linear.
@@ -210,23 +228,39 @@ impl Material for SourceMaterial {
         Ok(())
     }
 }
-/// A repeating sRGB texture with its authored VTF mip chain (largest first), sampled
-/// trilinearly like Source's default texture filtering.
-fn mip_image(chain: &[source_assets::vtf::Image]) -> Image {
-    let top = &chain[0];
-    let mut result = image(top.width, top.height, top.rgba.clone(), true);
-    // Image::new checks one level; the remaining mips follow it in the same buffer.
-    result.data = Some(
-        chain
-            .iter()
-            .flat_map(|mip| mip.rgba.iter().copied())
-            .collect(),
-    );
-    result.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
-    result.texture_descriptor.mip_level_count = chain.len() as u32;
-    result
+pub(crate) fn sampler_descriptor(
+    repeat: bool,
+    filtering: hl2_ui::config::Filtering,
+) -> ImageSamplerDescriptor {
+    let mode = if repeat {
+        ImageAddressMode::Repeat
+    } else {
+        ImageAddressMode::ClampToEdge
+    };
+    let mipmap_filter = if filtering.is_trilinear() {
+        ImageFilterMode::Linear
+    } else {
+        ImageFilterMode::Nearest
+    };
+    ImageSamplerDescriptor {
+        address_mode_u: mode,
+        address_mode_v: mode,
+        address_mode_w: mode,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter,
+        anisotropy_clamp: filtering.aniso(),
+        ..Default::default()
+    }
 }
-pub(crate) fn image(width: u16, height: u16, rgba: Vec<u8>, repeat: bool) -> Image {
+
+pub(crate) fn image_filtered(
+    width: u16,
+    height: u16,
+    rgba: Vec<u8>,
+    repeat: bool,
+    filtering: hl2_ui::config::Filtering,
+) -> Image {
     let mut image = Image::new(
         Extent3d {
             width: width.into(),
@@ -238,20 +272,43 @@ pub(crate) fn image(width: u16, height: u16, rgba: Vec<u8>, repeat: bool) -> Ima
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: if repeat {
-            ImageAddressMode::Repeat
-        } else {
-            ImageAddressMode::ClampToEdge
-        },
-        address_mode_v: if repeat {
-            ImageAddressMode::Repeat
-        } else {
-            ImageAddressMode::ClampToEdge
-        },
-        ..ImageSamplerDescriptor::linear()
-    });
+    image.sampler = ImageSampler::Descriptor(sampler_descriptor(repeat, filtering));
     image
+}
+
+/// A repeating sRGB texture with its authored VTF mip chain (largest first), sampled
+/// according to the configured filtering mode.
+pub(crate) fn mip_image_filtered(
+    chain: &[source_assets::vtf::Image],
+    filtering: hl2_ui::config::Filtering,
+) -> Image {
+    let top = &chain[0];
+    let mut result = image_filtered(top.width, top.height, top.rgba.clone(), true, filtering);
+    // Image::new checks one level; the remaining mips follow it in the same buffer.
+    result.data = Some(
+        chain
+            .iter()
+            .flat_map(|mip| mip.rgba.iter().copied())
+            .collect(),
+    );
+    result.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
+    result.texture_descriptor.mip_level_count = chain.len() as u32;
+    result
+}
+
+#[allow(dead_code)]
+fn mip_image(chain: &[source_assets::vtf::Image]) -> Image {
+    mip_image_filtered(chain, hl2_ui::config::Filtering::Trilinear)
+}
+
+pub(crate) fn image(width: u16, height: u16, rgba: Vec<u8>, repeat: bool) -> Image {
+    image_filtered(
+        width,
+        height,
+        rgba,
+        repeat,
+        hl2_ui::config::Filtering::Trilinear,
+    )
 }
 #[derive(Default)]
 struct Batch {
@@ -833,6 +890,7 @@ impl Owner {
     }
 }
 
+#[allow(dead_code)]
 pub fn spawn_map(
     loaded: &LoadedMap,
     commands: &mut Commands,
@@ -845,16 +903,43 @@ pub fn spawn_map(
     status: &Status,
     (camera_target, cpu_skinning, world_partition): (&Handle<Image>, bool, bool),
 ) {
+    spawn_map_filtered(
+        loaded,
+        commands,
+        (meshes, inverse_binds),
+        materials,
+        images,
+        status,
+        (camera_target, cpu_skinning, world_partition),
+        hl2_ui::config::Filtering::Trilinear,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_map_filtered(
+    loaded: &LoadedMap,
+    commands: &mut Commands,
+    (meshes, inverse_binds): (
+        &mut Assets<Mesh>,
+        &mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
+    ),
+    materials: &mut Assets<SourceMaterial>,
+    images: &mut Assets<Image>,
+    status: &Status,
+    (camera_target, cpu_skinning, world_partition): (&Handle<Image>, bool, bool),
+    filtering: hl2_ui::config::Filtering,
+) {
     let world = &loaded.world;
-    let white = images.add(image(1, 1, vec![255; 4], false));
+    let white = images.add(image_filtered(1, 1, vec![255; 4], false, filtering));
     let black_cube = images.add(black_cube());
-    let missing = images.add(image(
+    let missing = images.add(image_filtered(
         2,
         2,
         vec![
             255, 0, 255, 255, 30, 30, 30, 255, 30, 30, 30, 255, 255, 0, 255, 255,
         ],
         true,
+        filtering,
     ));
     let mut texture_handles: BTreeMap<String, Handle<Image>> = BTreeMap::new();
     let bases: BTreeMap<_, _> = loaded
@@ -868,7 +953,13 @@ pub fn spawn_map(
                     (Some(base), Some(path)) => texture_handles
                         .entry(path.clone())
                         .or_insert_with(|| {
-                            images.add(image(base.width, base.height, base.rgba.clone(), true))
+                            images.add(image_filtered(
+                                base.width,
+                                base.height,
+                                base.rgba.clone(),
+                                true,
+                                filtering,
+                            ))
                         })
                         .clone(),
                     _ => missing.clone(),
@@ -888,11 +979,12 @@ pub fn spawn_map(
                     let handle = texture_handles
                         .entry(path.clone())
                         .or_insert_with(|| {
-                            images.add(self::image(
+                            images.add(self::image_filtered(
                                 image.width,
                                 image.height,
                                 image.rgba.clone(),
                                 false,
+                                filtering,
                             ))
                         })
                         .clone();
@@ -913,8 +1005,13 @@ pub fn spawn_map(
                     let handle = texture_handles
                         .entry(format!("{path}#srgb"))
                         .or_insert_with(|| {
-                            let mut overlay =
-                                image(overlay.width, overlay.height, overlay.rgba.clone(), true);
+                            let mut overlay = image_filtered(
+                                overlay.width,
+                                overlay.height,
+                                overlay.rgba.clone(),
+                                true,
+                                filtering,
+                            );
                             overlay.texture_descriptor.format = TextureFormat::Rgba8UnormSrgb;
                             images.add(overlay)
                         })
@@ -935,7 +1032,7 @@ pub fn spawn_map(
                     .map(|(i, chain)| {
                         texture_handles
                             .entry(format!("{path}#frame{i}#mips#srgb"))
-                            .or_insert_with(|| images.add(mip_image(chain)))
+                            .or_insert_with(|| images.add(mip_image_filtered(chain, filtering)))
                             .clone()
                     })
                     .collect::<Vec<_>>()
@@ -952,7 +1049,14 @@ pub fn spawn_map(
             let (cube, path) = m.envmap.as_ref().zip(m.envmap_path.as_ref())?;
             let handle = texture_handles
                 .entry(format!("{path}#cube"))
-                .or_insert_with(|| images.add(cube_image(cube.size, cube.hdr, cube.faces.concat())))
+                .or_insert_with(|| {
+                    images.add(cube_image_filtered(
+                        cube.size,
+                        cube.hdr,
+                        cube.faces.concat(),
+                        filtering,
+                    ))
+                })
                 .clone();
             Some((name.clone(), handle))
         })
@@ -966,7 +1070,13 @@ pub fn spawn_map(
             let handle = texture_handles
                 .entry(path.clone())
                 .or_insert_with(|| {
-                    images.add(image(mask.width, mask.height, mask.rgba.clone(), true))
+                    images.add(image_filtered(
+                        mask.width,
+                        mask.height,
+                        mask.rgba.clone(),
+                        true,
+                        filtering,
+                    ))
                 })
                 .clone();
             Some((name.clone(), handle))
@@ -1695,15 +1805,36 @@ impl ModelCache {
         images: &mut Assets<Image>,
         loaded: BTreeMap<String, MaterialData>,
     ) {
+        self.add_materials_filtered(images, loaded, hl2_ui::config::Filtering::Trilinear);
+    }
+
+    pub fn add_materials_filtered(
+        &mut self,
+        images: &mut Assets<Image>,
+        loaded: BTreeMap<String, MaterialData>,
+        filtering: hl2_ui::config::Filtering,
+    ) {
         for (name, mut material) in loaded {
             if let (Some(base), Some(path)) = (&material.base, &material.base_path) {
                 self.textures.entry(path.clone()).or_insert_with(|| {
-                    images.add(image(base.width, base.height, base.rgba.clone(), true))
+                    images.add(image_filtered(
+                        base.width,
+                        base.height,
+                        base.rgba.clone(),
+                        true,
+                        filtering,
+                    ))
                 });
             }
             if let (Some(iris), Some(path)) = (&material.iris, &material.iris_path) {
                 self.textures.entry(path.clone()).or_insert_with(|| {
-                    images.add(image(iris.width, iris.height, iris.rgba.clone(), false))
+                    images.add(image_filtered(
+                        iris.width,
+                        iris.height,
+                        iris.rgba.clone(),
+                        false,
+                        filtering,
+                    ))
                 });
             }
             strip_pixels(&mut material);

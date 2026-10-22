@@ -1669,6 +1669,40 @@ mod owned_frag_replay {
             "low texture detail should have fewer bytes: high={high_tex_bytes}, low={low_tex_bytes}"
         );
     }
+
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn antialiasing_and_filtering_affect_fidelity_settings_and_samplers() {
+        use bevy::prelude::Msaa;
+        let root = source_assets::install::discover().unwrap();
+        let _loaded = super::load(&root, "hl2", "d1_trainstation_02").unwrap();
+
+        for (filtering, expected_aniso, expected_linear_mipmap) in [
+            (hl2_ui::config::Filtering::Bilinear, 1, false),
+            (hl2_ui::config::Filtering::Trilinear, 1, true),
+            (hl2_ui::config::Filtering::Anisotropic2, 2, true),
+            (hl2_ui::config::Filtering::Anisotropic4, 4, true),
+            (hl2_ui::config::Filtering::Anisotropic8, 8, true),
+            (hl2_ui::config::Filtering::Anisotropic16, 16, true),
+        ] {
+            let desc = crate::rendering::sampler_descriptor(true, filtering);
+            assert_eq!(desc.anisotropy_clamp, expected_aniso);
+            assert_eq!(
+                desc.mipmap_filter == bevy::image::ImageFilterMode::Linear,
+                expected_linear_mipmap
+            );
+        }
+
+        for (aa, expected_samples, expected_msaa) in [
+            (hl2_ui::config::Antialiasing::None, 1, Msaa::Off),
+            (hl2_ui::config::Antialiasing::X2, 2, Msaa::Sample2),
+            (hl2_ui::config::Antialiasing::X4, 4, Msaa::Sample4),
+            (hl2_ui::config::Antialiasing::X8, 8, Msaa::Sample8),
+        ] {
+            assert_eq!(aa.samples(), expected_samples);
+            assert_eq!(crate::video::msaa_for(aa), expected_msaa);
+        }
+    }
     #[test]
     #[ignore = "requires an owned installed Half-Life 2 copy"]
     fn owned_frag_throws_follow_native_samples() {

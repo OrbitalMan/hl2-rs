@@ -14,7 +14,7 @@
 
 use bevy::camera::{RenderTarget, Viewport, visibility::RenderLayers};
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
-use bevy::image::{ImageSampler, ImageSamplerDescriptor};
+use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::window::{
@@ -528,6 +528,75 @@ pub(crate) fn sync_present_mode(
     {
         window.present_mode = mode;
     }
+}
+
+/// Converts the UI antialiasing choice into Bevy's multisampling setting.
+#[inline]
+pub fn msaa_for(aa: hl2_ui::config::Antialiasing) -> Msaa {
+    match aa {
+        hl2_ui::config::Antialiasing::None => Msaa::Off,
+        hl2_ui::config::Antialiasing::X2 => Msaa::Sample2,
+        hl2_ui::config::Antialiasing::X4 => Msaa::Sample4,
+        hl2_ui::config::Antialiasing::X8 => Msaa::Sample8,
+    }
+}
+
+/// Keeps every scene camera's `Msaa` in sync with the configured antialiasing mode.
+/// The 2D presentation camera remains `Msaa::Off` because it displays the resolved frame quad.
+pub(crate) fn sync_antialiasing(
+    ui: Option<Res<crate::ui_host::Console>>,
+    mut cameras: Query<&mut Msaa, (With<Camera>, Without<PresentCamera>)>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let want = msaa_for(ui.source.config.video.advanced.antialiasing);
+    for mut msaa in &mut cameras {
+        if *msaa != want {
+            *msaa = want;
+        }
+    }
+}
+
+/// Updates texture sampler descriptors on active scene images to reflect the configured filtering mode.
+pub fn apply_filtering_to_images(images: &mut Assets<Image>, filtering: hl2_ui::config::Filtering) {
+    let mipmap_filter = if filtering.is_trilinear() {
+        ImageFilterMode::Linear
+    } else {
+        ImageFilterMode::Nearest
+    };
+    let aniso = filtering.aniso();
+
+    for (_id, image) in images.iter_mut() {
+        if let ImageSampler::Descriptor(ref mut desc) = image.sampler {
+            // Apply filtering mode to 3D scene textures (repeat mode, linear mag filter).
+            // Preserve nearest-filter glyph caches and 1x presentation quad samplers.
+            if desc.mag_filter == ImageFilterMode::Linear
+                && desc.anisotropy_clamp > 0
+                && (desc.mipmap_filter != mipmap_filter || desc.anisotropy_clamp != aniso)
+            {
+                desc.mipmap_filter = mipmap_filter;
+                desc.anisotropy_clamp = aniso;
+            }
+        }
+    }
+}
+
+/// Keeps active material texture samplers in step with `mat_trilinear` / `mat_forceaniso`.
+pub(crate) fn sync_filtering(
+    ui: Option<Res<crate::ui_host::Console>>,
+    mut images: ResMut<Assets<Image>>,
+    mut last_filtering: Local<Option<hl2_ui::config::Filtering>>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let current = ui.source.config.video.advanced.filtering;
+    if *last_filtering == Some(current) {
+        return;
+    }
+    *last_filtering = Some(current);
+    apply_filtering_to_images(&mut images, current);
 }
 
 pub(crate) fn apply_video_settings(
@@ -1646,5 +1715,138 @@ mod tests {
             app.world().get::<Visibility>(quad),
             Some(&Visibility::Inherited)
         );
+    }
+
+    #[test]
+    fn test_msaa_for_antialiasing() {
+        assert_eq!(msaa_for(hl2_ui::config::Antialiasing::None), Msaa::Off);
+        assert_eq!(msaa_for(hl2_ui::config::Antialiasing::X2), Msaa::Sample2);
+        assert_eq!(msaa_for(hl2_ui::config::Antialiasing::X4), Msaa::Sample4);
+        assert_eq!(msaa_for(hl2_ui::config::Antialiasing::X8), Msaa::Sample8);
+    }
+
+    #[test]
+    fn test_sync_antialiasing_updates_scene_cameras_and_leaves_present_camera_off() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = App::new();
+        let mut console = hl2_ui::console::Console::default();
+        console.config.video.advanced.antialiasing = hl2_ui::config::Antialiasing::X4;
+        let ui = crate::ui_host::Console::new(console);
+        app.insert_resource(ui);
+
+        let scene_cam = app.world_mut().spawn((Camera3d::default(), Msaa::Off)).id();
+        let viewmodel_cam = app.world_mut().spawn((Camera3d::default(), Msaa::Off)).id();
+        let present_cam = app
+            .world_mut()
+            .spawn((PresentCamera, Camera2d, Msaa::Off))
+            .id();
+
+        app.world_mut().run_system_once(sync_antialiasing).unwrap();
+
+        assert_eq!(*app.world().get::<Msaa>(scene_cam).unwrap(), Msaa::Sample4);
+        assert_eq!(
+            *app.world().get::<Msaa>(viewmodel_cam).unwrap(),
+            Msaa::Sample4
+        );
+        assert_eq!(*app.world().get::<Msaa>(present_cam).unwrap(), Msaa::Off);
+
+        // Update config to 8X
+        app.world_mut()
+            .resource_mut::<crate::ui_host::Console>()
+            .source
+            .config
+            .video
+            .advanced
+            .antialiasing = hl2_ui::config::Antialiasing::X8;
+
+        app.world_mut().run_system_once(sync_antialiasing).unwrap();
+
+        assert_eq!(*app.world().get::<Msaa>(scene_cam).unwrap(), Msaa::Sample8);
+        assert_eq!(
+            *app.world().get::<Msaa>(viewmodel_cam).unwrap(),
+            Msaa::Sample8
+        );
+        assert_eq!(*app.world().get::<Msaa>(present_cam).unwrap(), Msaa::Off);
+    }
+
+    #[test]
+    fn test_sync_filtering_updates_active_images() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>();
+
+        let mut console = hl2_ui::console::Console::default();
+        console.config.video.advanced.filtering = hl2_ui::config::Filtering::Anisotropic16;
+        let ui = crate::ui_host::Console::new(console);
+        app.insert_resource(ui);
+
+        let scene_img = Image {
+            sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                mag_filter: ImageFilterMode::Linear,
+                min_filter: ImageFilterMode::Linear,
+                mipmap_filter: ImageFilterMode::Linear,
+                anisotropy_clamp: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let glyph_img = Image {
+            sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                mag_filter: ImageFilterMode::Nearest,
+                min_filter: ImageFilterMode::Nearest,
+                mipmap_filter: ImageFilterMode::Nearest,
+                anisotropy_clamp: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let scene_handle = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(scene_img);
+        let glyph_handle = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(glyph_img);
+
+        app.world_mut().run_system_once(sync_filtering).unwrap();
+
+        let images = app.world().resource::<Assets<Image>>();
+        let scene_desc = match &images.get(&scene_handle).unwrap().sampler {
+            ImageSampler::Descriptor(d) => d,
+            _ => panic!("expected descriptor"),
+        };
+        assert_eq!(scene_desc.anisotropy_clamp, 16);
+        assert_eq!(scene_desc.mipmap_filter, ImageFilterMode::Linear);
+
+        let glyph_desc = match &images.get(&glyph_handle).unwrap().sampler {
+            ImageSampler::Descriptor(d) => d,
+            _ => panic!("expected descriptor"),
+        };
+        assert_eq!(glyph_desc.anisotropy_clamp, 1);
+        assert_eq!(glyph_desc.mag_filter, ImageFilterMode::Nearest);
+
+        // Switch to Bilinear
+        app.world_mut()
+            .resource_mut::<crate::ui_host::Console>()
+            .source
+            .config
+            .video
+            .advanced
+            .filtering = hl2_ui::config::Filtering::Bilinear;
+
+        app.world_mut().run_system_once(sync_filtering).unwrap();
+
+        let images = app.world().resource::<Assets<Image>>();
+        let scene_desc = match &images.get(&scene_handle).unwrap().sampler {
+            ImageSampler::Descriptor(d) => d,
+            _ => panic!("expected descriptor"),
+        };
+        assert_eq!(scene_desc.anisotropy_clamp, 1);
+        assert_eq!(scene_desc.mipmap_filter, ImageFilterMode::Nearest);
     }
 }

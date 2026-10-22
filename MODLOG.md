@@ -1,5 +1,53 @@
 # MODLOG
 
+## 2026-10-22 Antialiasing mode and Filtering mode runtime rendering fidelity and performance impact
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/config.rs`:
+  - Added `Antialiasing::samples(self) -> u32` mapping None -> 1, X2 -> 2, X4 -> 4, X8 -> 8.
+  - Added `Filtering::aniso(self) -> u16` mapping Bilinear/Trilinear -> 1, Anisotropic2..16 -> 2, 4, 8, 16.
+  - Added `Filtering::is_trilinear(self) -> bool` distinguish linear mip cross-blending (Trilinear, Anisotropic) from discrete nearest mip jumping (Bilinear).
+  - Updated documentation on `AdvancedVideoSettings`.
+  - Added unit test `antialiasing_and_filtering_mappings`.
+- `crates/hl2-bevy/src/video.rs`:
+  - Added `msaa_for(Antialiasing) -> Msaa` mapping UI antialiasing settings directly to Bevy's multisampling modes (`Msaa::Off`, `Msaa::Sample2`, `Msaa::Sample4`, `Msaa::Sample8`).
+  - Added `sync_antialiasing` system keeping all scene cameras (`FlyCamera`, `ViewmodelCamera`, `SkyCamera`, UI camera) synchronized with the active antialiasing setting, while leaving `PresentCamera` at `Msaa::Off`.
+  - Added `apply_filtering_to_images` mutating 3D scene texture sampler descriptors in `Assets<Image>` to match the active filtering mode's `mipmap_filter` and `anisotropy_clamp`.
+  - Added `sync_filtering` system automatically applying filtering updates whenever the configuration changes at runtime.
+  - Added unit tests: `test_msaa_for_antialiasing`, `test_sync_antialiasing_updates_scene_cameras_and_leaves_present_camera_off`, and `test_sync_filtering_updates_active_images`.
+- `crates/hl2-bevy/src/rendering.rs`:
+  - Added `sampler_descriptor(repeat, filtering)` configuring `ImageSamplerDescriptor` with `mipmap_filter` (`Linear` or `Nearest`) and `anisotropy_clamp` (`1`, `2`, `4`, `8`, `16`).
+  - Added `image_filtered`, `mip_image_filtered`, `cube_image_filtered`, and `spawn_map_filtered` to author textures with the configured filtering mode on map and entity load.
+  - Added `ModelCache::add_materials_filtered` for late-loaded props and models.
+- `crates/hl2-bevy/src/main.rs`:
+  - Added `config: hl2_ui::config::Config` to `struct Options`.
+  - Initialized cameras with `msaa_for(options.config.video.advanced.antialiasing)`.
+  - Registered `sync_antialiasing` and `sync_filtering` systems in `PostUpdate`.
+  - Passed `filtering` to `install_map`.
+- `crates/hl2-bevy/src/campaign.rs`:
+  - Passed active `filtering` to `crate::install_map`.
+- `crates/hl2-bevy/src/assets.rs`:
+  - Added owned-install benchmark test `antialiasing_and_filtering_affect_fidelity_settings_and_samplers` verifying descriptor and MSAA conversions against `d1_trainstation_02`.
+- `STATUS.md`:
+  - Documented Antialiasing and Filtering mode implementations and verification.
+
+**Why:** User request:
+"Antialiasing mode and Filtering mode options should actually impact the picture fidelity and performance"
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 385 `hl2-ui` tests, 101 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `cargo test -p hl2-bevy -- --ignored antialiasing_and_filtering_affect_fidelity_settings_and_samplers`: passed exit 0.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Antialiasing mode (`mat_antialias`) now drives hardware subpixel multisampling across all scene rendering passes (1x, 2x, 4x, 8x), and Filtering mode (`mat_trilinear`, `mat_forceaniso`) controls texture mipmap interpolation and anisotropic sampling footprint (1x, 2x, 4x, 8x, 16x) with immediate runtime synchronization and map loading support.
+
+**Still broken or not tested:** None.
+
+**Next:** Await user instruction.
+
 ## 2026-10-22 Real model LOD decimation and VTF picmip texture detail scaling
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

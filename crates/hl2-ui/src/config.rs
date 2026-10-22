@@ -186,6 +186,20 @@ choice_enum! {
         None => "#GameUI_None", X2 => "#GameUI_2X", X4 => "#GameUI_4X", X8 => "#GameUI_8X",
     }
 }
+
+impl Antialiasing {
+    /// The multisample sample count (`1` for None/off, `2` for 2X, `4` for 4X, `8` for 8X).
+    #[inline]
+    pub const fn samples(self) -> u32 {
+        match self {
+            Self::None => 1,
+            Self::X2 => 2,
+            Self::X4 => 4,
+            Self::X8 => 8,
+        }
+    }
+}
+
 choice_enum! {
     /// Filtering mode (`mat_trilinear` / `mat_forceaniso`).
     Filtering {
@@ -195,7 +209,27 @@ choice_enum! {
     }
 }
 
-/// Video > Advanced. Detail levels (`model_detail`, `texture_detail`) and `vsync` affect rendering.
+impl Filtering {
+    /// The anisotropic filtering level (`1` for bilinear and trilinear, `2`, `4`, `8`, `16` for anisotropic).
+    #[inline]
+    pub const fn aniso(self) -> u16 {
+        match self {
+            Self::Bilinear | Self::Trilinear => 1,
+            Self::Anisotropic2 => 2,
+            Self::Anisotropic4 => 4,
+            Self::Anisotropic8 => 8,
+            Self::Anisotropic16 => 16,
+        }
+    }
+
+    /// Whether mip levels are blended linearly (`true` for trilinear and anisotropic, `false` for bilinear nearest mip).
+    #[inline]
+    pub const fn is_trilinear(self) -> bool {
+        !matches!(self, Self::Bilinear)
+    }
+}
+
+/// Video > Advanced. Detail levels (`model_detail`, `texture_detail`), `antialiasing`, `filtering`, and `vsync` affect rendering.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AdvancedVideoSettings {
@@ -946,5 +980,31 @@ mod tests {
                 String::from_utf8_lossy(json)
             );
         }
+    }
+
+    #[test]
+    fn antialiasing_and_filtering_mappings() {
+        assert_eq!(Antialiasing::None.samples(), 1);
+        assert_eq!(Antialiasing::X2.samples(), 2);
+        assert_eq!(Antialiasing::X4.samples(), 4);
+        assert_eq!(Antialiasing::X8.samples(), 8);
+
+        assert_eq!(Filtering::Bilinear.aniso(), 1);
+        assert!(!Filtering::Bilinear.is_trilinear());
+
+        assert_eq!(Filtering::Trilinear.aniso(), 1);
+        assert!(Filtering::Trilinear.is_trilinear());
+
+        assert_eq!(Filtering::Anisotropic2.aniso(), 2);
+        assert!(Filtering::Anisotropic2.is_trilinear());
+
+        assert_eq!(Filtering::Anisotropic4.aniso(), 4);
+        assert!(Filtering::Anisotropic4.is_trilinear());
+
+        assert_eq!(Filtering::Anisotropic8.aniso(), 8);
+        assert!(Filtering::Anisotropic8.is_trilinear());
+
+        assert_eq!(Filtering::Anisotropic16.aniso(), 16);
+        assert!(Filtering::Anisotropic16.is_trilinear());
     }
 }

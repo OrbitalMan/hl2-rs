@@ -4,6 +4,18 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Antialiasing mode and Filtering mode runtime rendering fidelity & performance impact (`crates/hl2-ui`, `crates/hl2-bevy`):**
+  - Connected Options > Video > Advanced Antialiasing mode and Filtering mode to Bevy multisampling and wgpu texture sampler descriptors:
+    - `Antialiasing` (`mat_antialias`): None maps to `Msaa::Off`, X2 maps to `Msaa::Sample2`, X4 maps to `Msaa::Sample4`, and X8 maps to `Msaa::Sample8`.
+    - `sync_antialiasing` system dynamically updates all 3D scene cameras (`FlyCamera`, `ViewmodelCamera`, `SkyCamera`, UI camera) to the active sample count while keeping `PresentCamera` at `Msaa::Off`.
+    - `Filtering` (`mat_trilinear` / `mat_forceaniso`): Bilinear sets `mipmap_filter = Nearest, aniso = 1`; Trilinear sets `mipmap_filter = Linear, aniso = 1`; Anisotropic 2X, 4X, 8X, 16X set `mipmap_filter = Linear, aniso = 2, 4, 8, 16`.
+    - `apply_filtering_to_images` and `sync_filtering` dynamically update material texture sampler descriptors in `Assets<Image>`, keeping nearest glyph caches and 1x presentation quad samplers intact.
+    - Updated `install_map`, `spawn_map_filtered`, `image_filtered`, `mip_image_filtered`, and `cube_image_filtered` so newly spawned maps and late-loaded props take the active filtering mode.
+  - Verified tests:
+    - Unit tests: `antialiasing_and_filtering_mappings`, `test_msaa_for_antialiasing`, `test_sync_antialiasing_updates_scene_cameras_and_leaves_present_camera_off`, `test_sync_filtering_updates_active_images`.
+    - Owned-install benchmark test: `antialiasing_and_filtering_affect_fidelity_settings_and_samplers` on `d1_trainstation_02`.
+
+
 - **Model LOD decimation (`r_rootlod`) and VTF texture picmip (`mat_picmip`) rendering impact (`crates/source-assets`, `crates/hl2-ui`, `crates/hl2-bevy`):**
   - Researched retail Source Engine geometry LOD and texture mip reduction architecture:
     - Model detail (`r_rootlod`: 0 = High, 1 = Medium, 2 = Low) selects the root LOD level in `.dx90.vtx` files authored with decimated mesh resolutions for props, characters, weapons, and gibs. `switch_point < 0.0` denotes shadow LODs and is filtered out.
