@@ -630,6 +630,10 @@ pub struct Physics {
     /// Props launched by the gravity gun whose first collision has not happened yet
     /// (CPhysicsProp m_bFirstCollisionAfterLaunch).
     pub launched: std::collections::HashSet<usize>,
+    /// Props the player threw from a +USE carry (CPhysicsProp m_bThrownByPlayer): the
+    /// next NPC they hit gets g_interactionHitByPlayerThrownPhysObj; cleared then or
+    /// when the body sleeps.
+    pub thrown_by_player: std::collections::HashSet<usize>,
     /// Props with SF_PHYSPROP_PREVENT_PICKUP (0x200): FVPHYSICS_NO_PLAYER_PICKUP and
     /// CPhysicsProp::CanBePickedUpByPhyscannon false.
     pub no_pickup: std::collections::HashSet<usize>,

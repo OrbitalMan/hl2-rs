@@ -1481,8 +1481,30 @@ impl Gameplay {
             &self.world,
             &mut self.scene,
             &mut physics.launched,
+            &mut physics.thrown_by_player,
             &held,
         );
+        // VPhysicsUpdate: a sleeping prop forgets that the player threw it.
+        let sleeping: Vec<usize> = physics
+            .thrown_by_player
+            .iter()
+            .copied()
+            .filter(|id| {
+                physics
+                    .dynamic
+                    .get(id)
+                    .and_then(|h| physics.bodies.get(*h))
+                    .is_none_or(|b| b.is_sleeping())
+            })
+            .collect();
+        for id in sleeping {
+            physics.thrown_by_player.remove(&id);
+        }
+        for (prop, npc) in std::mem::take(&mut self.scene.thrown_hits) {
+            let world = self.world.clone();
+            self.ai
+                .hit_by_player_thrown_object(npc, prop, &world, &mut self.scene);
+        }
         // Gib poses and SUB_FadeOut (not while seen or held).
         self.gibs
             .tick(physics, self.scene.time, TICK, eye, direction, held);

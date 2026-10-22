@@ -438,6 +438,8 @@ pub struct Diagnostics {
     pub criteria_refused: BTreeMap<String, u32>,
     /// Squad events: joins, deaths, SquadNewEnemy enemies given, memories shared.
     pub squad_events: BTreeMap<String, u32>,
+    /// g_interactionHitByPlayerThrownPhysObj dispatches.
+    pub thrown_object_hits: u64,
 }
 #[derive(Serialize)]
 pub struct AiRuntime {
@@ -3797,7 +3799,27 @@ impl AiRuntime {
     }
     /// g_interactionHitByPlayerThrownPhysObj for an NPC struck by a prop the player
     /// launched or threw (the host's physics-collision hook).
-    pub fn hit_by_player_thrown_object(&mut self, id: usize, scene: &Scene) {
+    /// g_interactionHitByPlayerThrownPhysObj from `prop`. CNPC_MetroPolice also fires
+    /// OnCupCopped when the prop is named cupcop_can.
+    pub fn hit_by_player_thrown_object(
+        &mut self,
+        id: usize,
+        prop: usize,
+        world: &World,
+        scene: &mut Scene,
+    ) {
+        let cop = self
+            .actors
+            .get(&id)
+            .is_some_and(|a| a.class.cop().is_some());
+        let can = world
+            .entities
+            .get(prop)
+            .and_then(|e| e.get("targetname"))
+            .is_some_and(|n| n.eq_ignore_ascii_case("cupcop_can"));
+        if cop && can {
+            scene.fire(id, "OnCupCopped", usize::MAX);
+        }
         let now = scene.time;
         let random = self.random();
         let Some(actor) = self.actors.get_mut(&id) else {
@@ -3814,6 +3836,7 @@ impl AiRuntime {
         if let AiClass::Metropolice(cop) = &mut actor.class {
             cop.hit_by_player_thrown_object(&mut actor.npc, &ctx);
         }
+        self.diagnostics.thrown_object_hits += 1;
     }
     /// +USE on an AI NPC (npc_metropolice's SetUse(PrecriminalUse)). False when the AI
     /// is off or `id` is not an AI cop, so the host falls back to the ordinary use (the

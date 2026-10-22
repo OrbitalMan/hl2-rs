@@ -54,8 +54,8 @@ pub fn prepare_actor_animations(
 }
 /// NPC classes registered with the shared human ground-movement controller.
 pub const GROUND_HUMANS: [&str; 2] = ["npc_barney", "npc_kleiner"];
-/// Human-hull NPC classes registered for AI goals only (step 14): scripted scene moves
-/// for them stay unsupported as before. SetHullType(HULL_HUMAN) in CNPC_MetroPolice,
+/// Human-hull NPC classes registered for AI goals (step 14); scenes and scripted_sequences
+/// move them too while they own the actor. SetHullType(HULL_HUMAN) in CNPC_MetroPolice,
 /// CNPC_Combine and CNPC_PlayerCompanion (npc_citizen, npc_alyx) Spawn.
 pub const AI_GROUND_HUMANS: [&str; 4] = [
     "npc_metropolice",

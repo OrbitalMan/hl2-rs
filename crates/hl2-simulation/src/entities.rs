@@ -304,6 +304,9 @@ pub struct Scene {
     pub globals: crate::globals::Globals,
     /// Damage dealt to entities by scene logic (trigger_hurt) this tick.
     pub entity_damage: Vec<crate::projectiles::Damage>,
+    /// Player-thrown or launched props that hit an NPC this tick (prop, NPC):
+    /// g_interactionHitByPlayerThrownPhysObj for the AI.
+    pub thrown_hits: Vec<(usize, usize)>,
     /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
     pub prop_breaks: Vec<crate::gibs::PropBreak>,
     /// Explosive props broken this tick (CBreakableProp::Break -> ExplosionCreate):
@@ -548,6 +551,7 @@ impl Scene {
             prop_explosions: Vec::new(),
             phys_explosions: Vec::new(),
             phys_impacts: Vec::new(),
+            thrown_hits: Vec::new(),
             keyvalue_overrides: BTreeMap::new(),
             player_dead: false,
             screen_fades: Vec::new(),
@@ -3005,7 +3009,8 @@ impl Scene {
                             crate::npc::MoveStyle::Run
                         },
                         event_distance: 0.,
-                        force_short: false,
+                        // StartScriptMoveToTargetTask walks unless within 1 unit.
+                        force_short: true,
                     },
                 });
                 return;

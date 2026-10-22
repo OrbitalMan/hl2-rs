@@ -235,6 +235,8 @@ impl Inventory {
         }
         if primary {
             self.carry_shutdown(weapons, physics, scene.time, true);
+            // OnPhysGunDrop(THROWN_BY_PLAYER): m_bThrownByPlayer.
+            physics.thrown_by_player.insert(id);
             let Some(mass) = grab::body_mass(physics, id) else {
                 return;
             };

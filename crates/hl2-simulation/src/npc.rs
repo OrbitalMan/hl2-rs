@@ -561,9 +561,6 @@ pub struct Controller {
     pending: Vec<MoveUpdate>,
     /// Door entities NPC routes may pass through by opening them.
     doors: BTreeSet<usize>,
-    /// Actors registered only for AI goals: scene requests for them stay blocked as
-    /// before (MissingActor), so scripted behavior does not change.
-    ai_only: BTreeSet<usize>,
 }
 impl Controller {
     /// Doors that block a graph link do not invalidate it; NPCs open them on contact.
@@ -593,7 +590,6 @@ impl Controller {
             goals: BTreeMap::new(),
             pending: Vec::new(),
             doors: BTreeSet::new(),
-            ai_only: BTreeSet::new(),
         }
     }
     /// register_actor for an actor that only AI goals (GoalKey::scene == AI_SCENE) move.
@@ -604,9 +600,9 @@ impl Controller {
         ground: GroundConfig,
         locomotion: Locomotion,
     ) -> Result<(), GoalBlockReason> {
-        self.register_actor(entity, model_scale, ground, locomotion)?;
-        self.ai_only.insert(entity);
-        Ok(())
+        // Scenes and scripted_sequences move AI actors too (the AI yields while they
+        // own the actor); an active goal of the other kind answers ActorBusy.
+        self.register_actor(entity, model_scale, ground, locomotion)
     }
     /// The locomotion variants of an AI actor by weapon class (Weapon_TranslateActivity
     /// of ACT_WALK/ACT_RUN on its model), preloaded at map load.
@@ -642,9 +638,6 @@ impl Controller {
         };
         actor.aiming = false;
         self.actors.insert(entity, actor);
-        if self.ai_only.contains(&template) {
-            self.ai_only.insert(entity);
-        }
         true
     }
     pub fn set_locomotion(&mut self, entity: usize, weapon: &str) -> bool {
@@ -893,9 +886,6 @@ impl Controller {
             }
             if pose.scripted_by.is_some() {
                 return Err(GoalBlockReason::ScriptOwned);
-            }
-            if key.scene != AI_SCENE && self.ai_only.contains(&key.actor) {
-                return Err(GoalBlockReason::MissingActor);
             }
             if self.goals.iter().any(|(other, g)| {
                 other.actor == key.actor
