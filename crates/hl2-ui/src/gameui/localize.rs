@@ -4,6 +4,14 @@
 //! a token wins (the search path order). Lookups are case-insensitive and accept an optional
 //! leading `#`, matching how `.res` files and code reference tokens.
 //!
+//! ### Resource Priority & In-Repo Text Rule
+//! **Always prioritize game resources/assets over in-repo assets or constants.**
+//! Do NOT add values or tokens into `localize.rs` if they can be retrieved straight from game
+//! resources/assets (`resource/gameui_english.txt`, `resource/valve_english.txt`, `resource/vgui_english.txt`,
+//! `hl2_complete/resource/merged_loc_all.txt`, etc.). In-repo localization mechanisms (such as
+//! [`placeholders`]) serve primarily as a source for text that has NO in-game resources, such as
+//! modded, reconstructed, or expanded features (e.g. ultra-wide display modes, mod menus).
+//!
 //! Fallback policy (owner requirement): an unresolved token renders as its **key name** (without
 //! the `#`), never as empty text, so missing translations stay visible and diagnosable.
 //!
@@ -146,8 +154,14 @@ pub fn unescape(s: &str) -> String {
     out
 }
 
-/// Central English fallback table for installed-game tokens, used when game resources are missing
-/// or unresolved. HL2RS-only text belongs in [`placeholders`] instead.
+/// Central English fallback table for pre-resource bootstrapping when launching without game resources.
+///
+/// **Rule**: Fallbacks in this table may ONLY be added for use cases when the game is launched
+/// and cannot find or load the in-game resources (such as showing a dialog to browse the game
+/// directory in setup, or essential abort/quit confirmation dialogs before game resources are mounted).
+/// Never add fallbacks here for text that exists in retail game assets (`resource/gameui_english.txt`, etc.).
+/// Always prioritize game resources. Text for modded, reconstructed, or expanded features that have NO
+/// in-game resources belongs in [`placeholders`].
 pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     ("GameUI_Console", "Console"),
     ("Console_Title", "Console"),
@@ -198,48 +212,11 @@ pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     ("GameUI_Worskhop_MenuName", "Workshop"),
     ("GameUI_Workshop_MenuName", "Workshop"),
     ("GameUI_Gameplay", "Gameplay"),
-    ("GameUI_SkillEasy", "Easy"),
-    ("GameUI_SkillNormal", "Normal"),
-    ("GameUI_SkillHard", "Hard"),
-    ("GameUI_SelectDifficulty", "Combat difficulty:"),
-    (
-        "GameUI_EasyDescription",
-        "Enemies are easy to defeat, and the computer helps you aim.",
-    ),
-    (
-        "GameUI_NormalDescription",
-        "Challenging enemies; your weapons do normal damage.",
-    ),
-    (
-        "GameUI_HardDescription",
-        "Enemies are very tough; your weapons are less effective.",
-    ),
-    (
-        "GameUI_MigrateEpisodicData",
-        "Migrate Data From Standalone Episodes",
-    ),
     ("GameUI_Keyboard", "Keyboard"),
     ("GameUI_Mouse", "Mouse"),
     ("GameUI_Gamepad", "Gamepad"),
     ("GameUI_Audio", "Audio"),
     ("GameUI_Video", "Video"),
-    ("GameUI_HDR", "High Dynamic Range"),
-    ("GameUI_hdr_level0", "None"),
-    ("GameUI_hdr_level1", "Bloom (if available)"),
-    ("GameUI_hdr_level2", "Full (if available)"),
-    (
-        "GameUI_hdr_Hint",
-        "High Dynamic Range will adjust camera exposure based on lighting. \"Release Setting\" will use what each level originally shipped.",
-    ),
-    (
-        "GameUI_HDContent",
-        "Load HD content if available",
-    ),
-    ("GameUI_ClassicEffects", "Classic Effects"),
-    ("GameUI_ClassicEffects_Off", "Disabled"),
-    ("GameUI_ClassicEffects_On", "Enabled"),
-    ("gameui_disabled", "Disabled"),
-    ("gameui_enabled", "Enabled"),
     ("GameUI_Action", "Action"),
     ("GameUI_KeyButton", "Key / Button"),
     ("GameUI_AdjustGamma_Title", "BRIGHTNESS"),
@@ -334,10 +311,6 @@ mod tests {
         assert_eq!(loc.text("#GameUI_Console"), "Console");
         assert_eq!(loc.text("#GameUI_Loading"), "LOADING...");
         assert_eq!(loc.text("#LoadingProgress_LoadMap"), "Loading world...");
-        assert_eq!(loc.text("#GameUI_HDR"), "High Dynamic Range");
-        assert_eq!(loc.text("#GameUI_hdr_level0"), "None");
-        assert_eq!(loc.text("#GameUI_hdr_level1"), "Bloom (if available)");
-        assert_eq!(loc.text("#GameUI_hdr_level2"), "Full (if available)");
         assert_eq!(loc.text("#Valve_Hud_HEALTH"), "HEALTH");
         assert_eq!(loc.text("#Valve_Hud_SUIT"), "SUIT");
         assert_eq!(loc.text("#Valve_Hud_AMMO"), "AMMO");

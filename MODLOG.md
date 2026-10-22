@@ -1,5 +1,38 @@
 # MODLOG
 
+## 2026-10-22 Localization resource priority and pre-resource fallback constraint
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/gameui/localize.rs`:
+  - Documented that game resources/assets are always prioritized over in-repo constants.
+  - Documented that `gameui/localize` serves primarily as a source for text that has no in-game resources (such as modded or expanded features via `placeholders`).
+  - Constrained `FALLBACK_STRINGS` strictly to use cases when launching without game resources (such as setup directory browsing or essential abort/quit dialogs).
+  - Removed in-game option tokens (`GameUI_HDR*`, `GameUI_ClassicEffects*`, `GameUI_HDContent`, `gameui_disabled`, `gameui_enabled`) from `FALLBACK_STRINGS`.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Inserted synthetic test translations in `video_options_hdr_control_layout_and_selection`.
+- `AGENTS.md`:
+  - Updated Rule 8 and UI Strings & Localization Fallback section to codify the game resource priority rule and the pre-resource constraint on `FALLBACK_STRINGS`.
+- `STATUS.md`:
+  - Documented localization resource priority rule and pre-resource fallback constraint.
+
+**Why:** User request:
+"don't add values into crates/hl2-ui/src/gameui/localize.rs, if you can get them straight from game resources/assets. Always (remember!) prioritize game resources over in-repo assets/constants. Make sure you document the gameui/localize as a source primarily for text that has no in-game resources, like modded/expanded features."
+"you can only add fallbacks for the use cases when you launch the game and it doesn't find the in-game resources. like to show a dialog to browse the game directory or something"
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 378 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui -- --ignored`: 10 owned install tests passed.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Cleaned in-game option strings from fallback table, verified game resource priority, and updated documentation across codebase and agent guidance.
+
+**Still broken or not tested:** None.
+
+**Next:** Await user instruction.
+
 ## 2026-10-22 Options > Gameplay difficulty options, skill cvar parity, and simulation damage scaling
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

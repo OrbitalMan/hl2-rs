@@ -4,6 +4,12 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Localization resource priority and pre-resource fallback constraint (`crates/hl2-ui`):**
+  - Clarified architectural rule: always prioritize game resources/assets over in-repo constants. Never add fallback constants to `crates/hl2-ui/src/gameui/localize.rs` if they can be retrieved directly from game resources (`resource/gameui_english.txt`, `resource/valve_english.txt`, `resource/vgui_english.txt`, `hl2_complete/resource/merged_loc_all.txt`, etc.).
+  - Documented `gameui/localize` as a source primarily for text that has NO in-game resources (such as modded, reconstructed, or expanded features, mapped via `placeholders`).
+  - Constrained `FALLBACK_STRINGS` strictly to use cases when the game is launched and cannot find in-game resources (e.g. displaying a setup / browse game directory dialog, or essential error/abort confirmation dialogs before assets are mounted).
+  - Cleaned up in-game option strings (`GameUI_HDR*`, `GameUI_ClassicEffects*`, `GameUI_HDContent`, `gameui_disabled`, `gameui_enabled`) from `FALLBACK_STRINGS`.
+
 - **Options > Gameplay difficulty options, `skill` cvar parity, and simulation damage scaling (`crates/hl2-ui`, `crates/hl2-bevy`):**
   - Audited all controls in Options > Gameplay (`Resource/OptionsSubDifficulty.res`):
     - `Skill1Radio` ("#GameUI_SkillEasy", Easy difficulty, skill 1)
