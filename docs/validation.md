@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## List/damage/use static acceptance (2026-10-22)
+
+Run each private verify_seal.py under scene-crate-physics-list-20261022k, scene-window-damage-dispatch-20261022l and scene-player-use-dispatch-20261022m with C:/Python310/python.exe -B. Expected retained-file/binding counts:18/21,43/41,32/18. Their independent checks retain full DB identities/body hashes, exact PE instructions/slots/call edges and pinned source/external hashes; M separately reconstructs six historical raw descriptors and distinguishes two selected methods from two navigation-only bodies.
+
+Instruction counts25/1428/264 include bounded padding/neighbors and do not establish whole CFG/ABI coverage. Worker pre-seal reports remain historical; only closed-set seals attest current integrity. M's first verifier stopped on an invalid codec spelling and passed after correction without relaxed checks. No native launch/inspection/input/Frida or Rust tests/builds occurred. Actual list stability, damage/break/output execution, physical key/tick behavior, exit and Rust parity are **not tested**.
+
 ## Saved-state capture acceptance (2026-10-22)
 
 Run C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-crate-attach-20261022j/verify_seal.py. Expected passed:true,17 retained files/13 bindings,two exact bodies/646 bounded records. The verifier checks immutable complete identities/bodies, caller flags and callback-before-attach order, exact mass/damping accesses/setters, count-factor constants, pinned SDK excerpts and matching detach offsets; the seal checks closed files and receipt. Windows can include padding/neighbors and do not establish full ABI/CFG coverage.

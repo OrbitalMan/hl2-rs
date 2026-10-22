@@ -1,5 +1,13 @@
 # Design
 
+## Prop singleton list and deferred damage boundaries (2026-10-22)
+
+For the bound CPhysicsProp primary vtable, physics-list enumeration returns at most its current canonical physics pointer in slot0; other classes may override this contract. Saved-state restoration therefore uses index0 for this class, but a new pointer at detach still requires separate identity checks. A valid entity generation alone does not prove the physics object stayed the same.
+
+The collision queue copies damage info and stores a raw victim pointer. Drain calls the forwarding damage method, which still checks damage filters/rules and simulation/callback state; that state can cause requeue before the window damage virtual. Cleanup orders damage, deferred functors and removals; the recovery20-pass cap does not bound the drain's dynamically reread inner count. No fixed next-frame timing, victim lifetime safety, successful damage or output follows from these static call sites.
+
+Selected player-use clearing is keyed to the logical pressed field, not directly to the released field. Generic found-target Use input is separate from the held-controller direct Use0 callback. Preserve those routes and historical-versus-current field provenance; do not infer physical E timing, all clear callers or the untraced held USE_SET frame path. No implementation change.
+
 ## Pickup saved arrays and current-list identity (2026-10-22)
 
 The selected retail Attach path captures each enumerated mass and rotational damping before requesting reduced carry mass and damping10. Its load accumulator sums getter values; the selected physics object later receives a separate mass1/drag-off request. Preserve the retail single-precision count-factor arithmetic; SDK n/7.5 is a reference expression rather than a proven bit-exact replacement. The later Detach path applies saved slots by current enumeration index, without a pointer remap in these selected bodies. Bind list/pointer identity and actual values before treating restoration as equivalent to authored physics.

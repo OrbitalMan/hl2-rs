@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Sealed prop list, damage dispatch and logical use research (2026-10-22)
+
+Private K/L/M supplements independently bind the prop's singleton physics-list target, queue-to-damage forwarding/phase guards and logical-use-press clearing. K checks one exact body/25 bounded records/21 externals; L16 bodies/1428 records/41 externals, including six fresh and ten reused frozen bodies; M four retained exact bodies/264 records/18 externals, with two navigation-only bodies excluded from semantic claims. Historical six-button descriptor reconstruction labels pressed/released offsets without observing current input.
+
+The two unrelated handle-only candidates in M remain retained and that approach stopped; exact diagnostic/vtable/call evidence binds the selected methods. A verifier codec typo and worker construction failures remain explicit. Earlier roots and the five-root navigator stay frozen. Actual dynamic physics, native damage/output execution, key/tick timing, window break/exit and Rust parity remain untested; original authored gaps preserved.
+
 ## Sealed AttachEntity saved-state supplement (2026-10-22)
 
 The private scene-crate-attach-20261022j supplement checks two full-identity baseline/original bodies,646 byte-matched records and13 external identities. It resolves selected saved-mass/damping capture and temporary setter order, ordinary caller false flags, and numeric index correspondence with the earlier sealed detach lane. Actual values/dynamic physics/list stability remain unobserved. One retained body repeats earlier Init evidence; the Attach body is newly reviewed. Earlier frozen roots and their five-root navigator are unchanged.

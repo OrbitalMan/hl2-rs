@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline list, queued damage and logical use milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material static workers physics_list (K) and queued_damage (L), inherited model family/exact identifier unavailable. Primary agent reviewed/sealed their work and completed M.
+
+**Changed / Why:** Bound the prop's singleton physics list, selected deferred-damage forwarding gates and logical use-press clearing while preserving the owner's running game. Kept historical input descriptors distinct from new observations.
+
+**Tested how / Result:** Three seals pass18/21,43/41,32/18 retained-file/binding counts; one/16/four retained exact bodies and25/1428/264 bounded records. M has two semantic methods and two navigation-only bodies; L reuses ten frozen bodies. Raw/identity/source checks passed and rejected construction/navigation work retained. No Rust/native execution.
+
+**Still broken or not tested / Next:** Physical object stability, actual damage/output/break/exit, key/tick dispatch and Rust parity untested. Keep first-map/original-gap boundaries and game-preservation constraint; complete the bounded generic Use input bridge if needed, then leave a committed/pushed handoff.
+
 ## 2026-10-22 offline pickup saved-state milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Primary agent completed Attach research. Independent static workers physics_list and queued_damage are researching separate follow-ups; their unfinished findings are not promoted here.

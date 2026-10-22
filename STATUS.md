@@ -1,5 +1,11 @@
 # STATUS
 
+## Offline list, queued-damage and use-dispatch checkpoint (2026-10-22)
+
+Three additional private supplements are sealed. The prop physics-list method returns only its current single physics pointer (or zero entries), narrowing saved-state restoration to index0 without proving pointer stability. Collision damage can be queued/requeued; the window damage virtual is reached only after filter/rules and simulation/callback gates. A selected player-use routine clears a latched use entity on a new logical use press; its release-flag branch is different. Physical key mapping/timing and per-frame held USE_SET dispatch remain untested.
+
+Seals: scene-crate-physics-list-20261022k18 retained files/21 bindings/one exact body/25 bounded records; scene-window-damage-dispatch-20261022l43/41/16/1428 (six new,ten reused bodies); scene-player-use-dispatch-20261022m32/18/four retained bodies/264 records (two methods,two navigation-only bodies). M reuses six named descriptors from a historical closed capture; it observes no new button state. Owner's game undisturbed; all work offline, no Rust edits/builds. First map unfinished, actual carry/damage/break/exit and Rust parity **not tested**. Original gaps remain.
+
 ## Offline pickup saved-state checkpoint (2026-10-22)
 
 Private scene-crate-attach-20261022j is sealed:17 retained files/13 external bindings,two exact bodies/646 bounded instruction records. Selected pickup code captures mass and rotational damping before temporary carry setters; the selected physics object then receives a separate mass1 request. Detach uses the same numeric array indices in a newly enumerated list, so membership/order and actual dynamic restoration still need verification. Ordinary +use passes false for alternate-child search and caches its physics pointer before pickup notification. No native launch, input or game interference; no Rust edits/builds. Live carry/throw/window/exit and Rust parity remain **not tested**. Original authored gaps remain unchanged.
