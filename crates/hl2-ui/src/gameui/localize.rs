@@ -198,6 +198,26 @@ pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     ("GameUI_Worskhop_MenuName", "Workshop"),
     ("GameUI_Workshop_MenuName", "Workshop"),
     ("GameUI_Gameplay", "Gameplay"),
+    ("GameUI_SkillEasy", "Easy"),
+    ("GameUI_SkillNormal", "Normal"),
+    ("GameUI_SkillHard", "Hard"),
+    ("GameUI_SelectDifficulty", "Combat difficulty:"),
+    (
+        "GameUI_EasyDescription",
+        "Enemies are easy to defeat, and the computer helps you aim.",
+    ),
+    (
+        "GameUI_NormalDescription",
+        "Challenging enemies; your weapons do normal damage.",
+    ),
+    (
+        "GameUI_HardDescription",
+        "Enemies are very tough; your weapons are less effective.",
+    ),
+    (
+        "GameUI_MigrateEpisodicData",
+        "Migrate Data From Standalone Episodes",
+    ),
     ("GameUI_Keyboard", "Keyboard"),
     ("GameUI_Mouse", "Mouse"),
     ("GameUI_Gamepad", "Gamepad"),

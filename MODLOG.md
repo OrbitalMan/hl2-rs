@@ -1,5 +1,45 @@
 # MODLOG
 
+## 2026-10-22 Options > Gameplay difficulty options, skill cvar parity, and simulation damage scaling
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added `skill` cvar (`skill [1|2|3]`) and `migrate_episodic_data` command to `COMMANDS`.
+- `crates/hl2-ui/src/console.rs`:
+  - Added command execution handlers in `interpret()` for `skill` and `migrate_episodic_data`.
+  - Added reporting in `cvar_value()` for `skill`.
+  - Added unit test `gameplay_skill_cvar_and_migrate_command`.
+- `crates/hl2-ui/src/gameui/settings.rs`:
+  - Added `Command::MigrateData` with `placeholder() == true`.
+  - Bound `(Panel::Gameplay, "migratebutton") => Command(self::Command::MigrateData)`.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Handled `Command::MigrateData` in `command()`.
+  - Added `MigrateButton` to expected controls for `Panel::Gameplay` in `owned_install_pages_bind_every_expected_control`.
+  - Added unit test `gameplay_difficulty_options_and_migrate_placeholder`.
+- `crates/hl2-ui/src/gameui/localize.rs`:
+  - Added authentic English fallbacks for `#GameUI_SkillEasy`, `#GameUI_SkillNormal`, `#GameUI_SkillHard`, `#GameUI_SelectDifficulty`, `#GameUI_EasyDescription`, `#GameUI_NormalDescription`, `#GameUI_HardDescription`, and `#GameUI_MigrateEpisodicData`.
+- `crates/hl2-bevy/src/gameplay.rs`:
+  - In `Gameplay::set_skill`, synchronized `self.scene.skill.level = skill;` so player inflicted damage scaling (`player_inflict_scale()`) immediately updates alongside player damage intake (`player_damage.take_scale`).
+  - Updated unit test `skill_setting_rescales_damage_taken_and_inflicted_immediately`.
+- `STATUS.md`:
+  - Documented audit findings, control bindings, and damage scaling simulation synchronization for Options > Gameplay.
+
+**Why:** User request: "Check the Opptions > Gameplay options implementation".
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 378 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui -- --ignored`: 10 owned install tests passed.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Verified 100% control coverage, cvar parity, localization fallbacks, and simulation damage synchronization for Options > Gameplay.
+
+**Still broken or not tested:** Autoaim aim assist algorithms for Easy difficulty (handled separately under mouse aim assist cvar `sk_autoaim_mode`); standalone episodic save data migration (`migrate_episodic_data` is a placeholder).
+
+**Next:** Report findings and implementation status to user.
+
 ## 2026-10-22 Video Advanced classic effects, D3D9Ex, and HDContent placeholder
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

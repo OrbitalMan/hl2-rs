@@ -381,6 +381,16 @@ pub const COMMANDS: &[Spec] = &[
         "con_timestamp [0|1]: prefix console output with the time it was printed",
         BOOLEAN,
     ),
+    cvar(
+        "skill",
+        "skill [1|2|3]: query or set game skill level (1=easy, 2=normal, 3=hard)",
+        &[Arg::Values(&["1", "2", "3"])],
+    ),
+    command(
+        "migrate_episodic_data",
+        "migrate_episodic_data: migrate save data from standalone episodes (placeholder)",
+        &[],
+    ),
 ];
 
 /// The implemented command or cvar named `name` (case-insensitive).

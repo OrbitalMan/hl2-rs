@@ -559,6 +559,8 @@ pub enum Command {
     TestSpeakers,
     /// "HD Content" check button on the Video Advanced page (placeholder in Source: visible 0 in retail layout).
     HDContent,
+    /// "Migrate Data From Standalone Episodes" button on the Gameplay page (placeholder in Source: visible 0 in retail layout).
+    MigrateData,
     /// OK of a sub-dialog.
     SubOk,
     /// Cancel / Close of a sub-dialog.
@@ -570,7 +572,7 @@ impl Command {
     pub fn placeholder(self) -> bool {
         matches!(
             self,
-            Self::SteamInput | Self::TestSpeakers | Self::HDContent
+            Self::SteamInput | Self::TestSpeakers | Self::HDContent | Self::MigrateData
         )
     }
 }
@@ -635,6 +637,7 @@ pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
         (Panel::Gameplay, "skill1radio") => Skill(1),
         (Panel::Gameplay, "skill2radio") => Skill(2),
         (Panel::Gameplay, "skill3radio") => Skill(3),
+        (Panel::Gameplay, "migratebutton") => Command(self::Command::MigrateData),
         (Panel::Mouse, "reversemouse") => Toggle(self::Toggle::ReverseMouse),
         (Panel::Mouse, "mousefilter") => Toggle(self::Toggle::MouseFilter),
         (Panel::Mouse, "mouseraw") => Toggle(self::Toggle::RawInput),

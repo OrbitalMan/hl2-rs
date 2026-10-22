@@ -2763,6 +2763,31 @@ impl Console {
                 self.start_background_loading(&background.game, &background.map);
                 return Ok(Some(Effect::MainMenuMap(background)));
             }
+            "skill" => {
+                if args.is_empty() {
+                    self.log(format!("\"skill\" = \"{}\"", self.config.gameplay.skill));
+                } else if args.len() == 1 {
+                    let skill: u8 = args[0].parse().map_err(|_| usage())?;
+                    if !(1..=3).contains(&skill) {
+                        return Err(usage());
+                    }
+                    self.config.gameplay.skill = skill;
+                    let _ = self.config.save();
+                    self.log(format!("skill {skill}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "migrate_episodic_data" => {
+                if !args.is_empty() {
+                    return Err(usage());
+                }
+                self.log(
+                    "migrate_episodic_data: save data migration is not implemented in this build",
+                );
+                return Ok(None);
+            }
             _ => return Err(usage()),
         }
         Ok(None)
@@ -2885,6 +2910,7 @@ impl Console {
             "con_filter_enable" => self.con_filter.to_string(),
             "con_filter_text" => self.con_filter_text.clone(),
             "con_timestamp" => u8::from(self.con_timestamp).to_string(),
+            "skill" => self.config.gameplay.skill.to_string(),
             _ => return None,
         })
     }
@@ -9383,6 +9409,43 @@ mod tests {
         assert_eq!(
             console.cvar_value("mat_disable_d3d9ex").as_deref(),
             Some("0")
+        );
+    }
+
+    #[test]
+    fn gameplay_skill_cvar_and_migrate_command() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // Default skill is 2 (Normal)
+        assert_eq!(console.cvar_value("skill").as_deref(), Some("2"));
+        assert_eq!(console.config.gameplay.skill, 2);
+
+        // Query skill
+        console.submit("skill");
+        assert_eq!(console.output.back().unwrap().text, "\"skill\" = \"2\"");
+
+        // Set skill 1 (Easy)
+        console.submit("skill 1");
+        assert_eq!(console.config.gameplay.skill, 1);
+        assert_eq!(console.cvar_value("skill").as_deref(), Some("1"));
+
+        // Set skill 3 (Hard)
+        console.submit("skill 3");
+        assert_eq!(console.config.gameplay.skill, 3);
+        assert_eq!(console.cvar_value("skill").as_deref(), Some("3"));
+
+        // Invalid skill values rejected
+        console.submit("skill 0");
+        assert_eq!(console.config.gameplay.skill, 3);
+        console.submit("skill 4");
+        assert_eq!(console.config.gameplay.skill, 3);
+
+        // Placeholder migrate_episodic_data command
+        console.submit("migrate_episodic_data");
+        assert_eq!(
+            console.output.back().unwrap().text,
+            "migrate_episodic_data: save data migration is not implemented in this build"
         );
     }
 }

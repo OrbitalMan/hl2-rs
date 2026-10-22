@@ -4,6 +4,27 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Options > Gameplay difficulty options, `skill` cvar parity, and simulation damage scaling (`crates/hl2-ui`, `crates/hl2-bevy`):**
+  - Audited all controls in Options > Gameplay (`Resource/OptionsSubDifficulty.res`):
+    - `Skill1Radio` ("#GameUI_SkillEasy", Easy difficulty, skill 1)
+    - `Skill2Radio` ("#GameUI_SkillNormal", Normal difficulty, skill 2)
+    - `Skill3Radio` ("#GameUI_SkillHard", Hard difficulty, skill 3)
+    - `Label1` ("#GameUI_SelectDifficulty" = "Combat difficulty:")
+    - `Label2` ("#GameUI_EasyDescription" = "Enemies are easy to defeat, and the computer helps you aim.")
+    - `Label3` ("#GameUI_NormalDescription" = "Challenging enemies; your weapons do normal damage.")
+    - `Label4` ("#GameUI_HardDescription" = "Enemies are very tough; your weapons are less effective.")
+    - `MigrateButton` ("#GameUI_MigrateEpisodicData" = "Migrate Data From Standalone Episodes", `visible 0`, command `MigrateData` / `migrate_episodic_data`).
+  - Added cvar specification and execution for `skill`:
+    - `skill`: query or set game skill level (`1`, `2`, `3`). In `cvar_value()`, returns `config.gameplay.skill`. Clamped to `1..=3`.
+  - Added placeholder command `migrate_episodic_data`:
+    - Logs that save data migration from standalone episodes is not implemented in this build.
+  - Bound `MigrateButton` in `crates/hl2-ui/src/gameui/settings.rs` to `Command::MigrateData`, marked as placeholder (`placeholder() == true`).
+  - Added authentic English fallback strings in `crates/hl2-ui/src/gameui/localize.rs` (`FALLBACK_STRINGS`) for difficulty labels, descriptions, and migration button.
+  - Synchronized `self.scene.skill.level = skill;` inside `Gameplay::set_skill` in `crates/hl2-bevy/src/gameplay.rs` so that player-inflicted weapon damage (`player_inflict_scale()`) is rescaled immediately upon difficulty changes alongside incoming damage intake (`take_scale`).
+  - Added unit test `gameplay_skill_cvar_and_migrate_command` in `crates/hl2-ui/src/console.rs`.
+  - Added unit test `gameplay_difficulty_options_and_migrate_placeholder` in `crates/hl2-ui/src/gameui/options.rs`.
+  - Updated `skill_setting_rescales_damage_taken_and_inflicted_immediately` test in `crates/hl2-bevy/src/gameplay.rs`.
+
 - **Video Advanced classic effects, D3D9Ex, and HD content placeholder (`crates/hl2-ui`):**
   - Implemented console cvars for classic effects and D3D9Ex:
     - `r_classic_fire`: queries and toggles classic fire particles (`0` | `1`). Maps to `classic_effects`.

@@ -1724,7 +1724,10 @@ impl OptionsDialog {
             }
             Command::VideoAdvanced => self.open_sub(Sub::VideoAdvanced),
             // Placeholder: disabled, so activation only logs its label (see `activate`).
-            Command::SteamInput | Command::TestSpeakers | Command::HDContent => {}
+            Command::SteamInput
+            | Command::TestSpeakers
+            | Command::HDContent
+            | Command::MigrateData => {}
             Command::SubOk => return self.ok_sub(),
             Command::SubCancel => self.cancel_sub(),
         }
@@ -4312,7 +4315,7 @@ pub(crate) mod tests {
         let expected: &[(Panel, &[&str])] = &[
             (
                 Panel::Gameplay,
-                &["Skill1Radio", "Skill2Radio", "Skill3Radio"],
+                &["Skill1Radio", "Skill2Radio", "Skill3Radio", "MigrateButton"],
             ),
             (
                 Panel::Mouse,
@@ -5588,5 +5591,76 @@ pub(crate) mod tests {
             Command::HDContent.placeholder(),
             "HDContent must be a placeholder"
         );
+    }
+
+    #[test]
+    fn gameplay_difficulty_options_and_migrate_placeholder() {
+        use crate::gameui::settings::{binding, Command, Panel};
+
+        assert_eq!(
+            binding(Panel::Gameplay, "Skill1Radio"),
+            Some(Binding::Skill(1))
+        );
+        assert_eq!(
+            binding(Panel::Gameplay, "Skill2Radio"),
+            Some(Binding::Skill(2))
+        );
+        assert_eq!(
+            binding(Panel::Gameplay, "Skill3Radio"),
+            Some(Binding::Skill(3))
+        );
+        assert_eq!(
+            binding(Panel::Gameplay, "MigrateButton"),
+            Some(Binding::Command(Command::MigrateData))
+        );
+        assert!(
+            Command::MigrateData.placeholder(),
+            "MigrateData must be a placeholder"
+        );
+
+        let layout = Layout::parse(
+            br##""Resource/OptionsSubDifficulty.res" {
+                "Skill1Radio" { "ControlName" "RadioButton" "fieldName" "Skill1Radio" "xpos" "34" "ypos" "58" "wide" "140" "tall" "24" "labelText" "#GameUI_SkillEasy" "visible" "1" "enabled" "1" }
+                "Skill2Radio" { "ControlName" "RadioButton" "fieldName" "Skill2Radio" "xpos" "34" "ypos" "116" "wide" "140" "tall" "24" "labelText" "#GameUI_SkillNormal" "visible" "1" "enabled" "1" }
+                "Skill3Radio" { "ControlName" "RadioButton" "fieldName" "Skill3Radio" "xpos" "34" "ypos" "176" "wide" "140" "tall" "24" "labelText" "#GameUI_SkillHard" "visible" "1" "enabled" "1" }
+                "MigrateButton" { "ControlName" "Button" "fieldName" "MigrateButton" "xpos" "38" "ypos" "246" "wide" "240" "tall" "24" "labelText" "#GameUI_MigrateEpisodicData" "visible" "0" "enabled" "1" }
+            }"##,
+        )
+        .unwrap();
+
+        let mut res = (*resources()).clone();
+        res.layouts.insert("optionssubdifficulty".into(), layout);
+        let res = Arc::new(res);
+
+        let config = Config::default();
+        let draft = Draft::new(config.clone());
+        let widgets = layout_widgets(&res, Panel::Gameplay, page_rect(), &draft, &config);
+
+        // MigrateButton has visible "0" so it should not be in drawn_controls
+        assert!(widgets.iter().all(|w| w.control.name != "MigrateButton"));
+
+        // All 3 skill radio buttons are present and enabled
+        let find_widget = |name: &str| widgets.iter().find(|w| w.control.name == name).unwrap();
+        assert!(find_widget("Skill1Radio").enabled);
+        assert!(find_widget("Skill2Radio").enabled);
+        assert!(find_widget("Skill3Radio").enabled);
+
+        // Test interaction via Harness
+        let mut h = Harness::new();
+        h.dialog.set_resources(res.clone());
+        h.tab(Tab::Gameplay);
+
+        // Default difficulty is 2
+        assert_eq!(h.dialog.draft().gameplay.skill, 2);
+
+        // Click Skill 1 (Easy)
+        let skill1_rect = find_widget("Skill1Radio").rect;
+        h.click(DIALOG + skill1_rect.center());
+        assert_eq!(h.dialog.draft().gameplay.skill, 1);
+
+        // Click Skill 3 (Hard)
+        let skill3_rect = find_widget("Skill3Radio").rect;
+        h.click(DIALOG + skill3_rect.center());
+        assert_eq!(h.dialog.draft().gameplay.skill, 3);
     }
 }

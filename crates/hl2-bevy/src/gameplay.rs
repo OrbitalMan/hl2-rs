@@ -235,6 +235,7 @@ impl Gameplay {
         };
         if skill != self.skill {
             self.skill = skill;
+            self.scene.skill.level = skill;
             self.player_damage.take_scale =
                 hl2_simulation::player_damage::PlayerDamage::take_scale_for(
                     skill,
@@ -1709,15 +1710,43 @@ mod tests {
         assert_eq!(game.inventory.shots, 1);
     }
     #[test]
-    fn skill_setting_rescales_damage_taken_immediately() {
+    fn skill_setting_rescales_damage_taken_and_inflicted_immediately() {
         let mut game = Gameplay::synthetic(World::default());
         game.skill_config = Some("sk_dmg_take_scale3 \"2.0\"\n".into());
         assert_eq!((game.skill, game.player_damage.take_scale), (2, 1.));
+        assert_eq!(
+            (
+                game.scene.skill.level,
+                game.scene.skill.player_inflict_scale()
+            ),
+            (2, 1.0)
+        );
         game.set_skill(1);
         assert_eq!((game.skill, game.player_damage.take_scale), (1, 0.5));
+        assert_eq!(
+            (
+                game.scene.skill.level,
+                game.scene.skill.player_inflict_scale()
+            ),
+            (1, 1.5)
+        );
         game.set_skill(3);
         assert_eq!(game.player_damage.take_scale, 2., "skill.cfg override");
+        assert_eq!(
+            (
+                game.scene.skill.level,
+                game.scene.skill.player_inflict_scale()
+            ),
+            (3, 0.75)
+        );
         game.set_skill(9);
         assert_eq!((game.skill, game.player_damage.take_scale), (2, 1.));
+        assert_eq!(
+            (
+                game.scene.skill.level,
+                game.scene.skill.player_inflict_scale()
+            ),
+            (2, 1.0)
+        );
     }
 }
