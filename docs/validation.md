@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Input/frame/resource/spawn acceptance (2026-10-22)
+
+Run private verify_seal.py under scene-use-input-20261022n, scene-held-use-frame-20261022o, scene-crate-authored-physics-20261022p and scene-crate-physics-spawn-20261022q with C:/Python310/python.exe -B. Expected retained-file/binding counts22/13,33/22,20/16,22/15. Native raw checks retain selected slots, calls, arguments, constants, full DB identities and pinned references. Resource acceptance independently compares exact selected VPK/member/header ranges, CRC/SHA, ordered prefix/full-tail data and14 property witnesses. Whole carrier identity and full damaged-tail grammar agreement are explicitly unavailable.
+
+Current native mass/settings/units, successful physics creation, input/frame cadence, actual attachment/motion/damage/break/exit and Rust parity are **not tested**. Zero authored drag-named fields does not mean zero drag. No gameplay rebuild or Rust tests for these offline/documentation changes; source-only scope and publication checks apply.
+
 ## List/damage/use static acceptance (2026-10-22)
 
 Run each private verify_seal.py under scene-crate-physics-list-20261022k, scene-window-damage-dispatch-20261022l and scene-player-use-dispatch-20261022m with C:/Python310/python.exe -B. Expected retained-file/binding counts:18/21,43/41,32/18. Their independent checks retain full DB identities/body hashes, exact PE instructions/slots/call edges and pinned source/external hashes; M separately reconstructs six historical raw descriptors and distinguishes two selected methods from two navigation-only bodies.

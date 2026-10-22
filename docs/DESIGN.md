@@ -1,5 +1,11 @@
 # Design
 
+## Held-frame dispatch, input acceptance and authored mass boundary (2026-10-22)
+
+The selected class frame entry calls the base held-use branch, which resolves the latched entity, applies control/weapon guards and dispatches Use(player,player,2,2.0), or clears it. That branch needs no new use-key edge; complete scheduling/cadence is untested. Generic AcceptInput Use instead constructs inputdata and forwards its final output-ID as the numeric useType. Its true return reports handler invocation, not successful pickup or attachment. Keep these routes separate from logical-use-press clearing.
+
+Owned intact/damaged crate solids author different mass strings30/25 with damping0/rotdamping0/inertia1. Preserve the damaged suffix parser difference without repairing it or labeling the retail asset invalid. Native prop creation parses settings, applies positive-only raw scale fields, then allows textual override before initialization. A zero authoring scale is not proof of zero physical mass; final values require field/resource/override/runtime binding. No implementation change or physical-unit/solver-parity claim follows.
+
 ## Prop singleton list and deferred damage boundaries (2026-10-22)
 
 For the bound CPhysicsProp primary vtable, physics-list enumeration returns at most its current canonical physics pointer in slot0; other classes may override this contract. Saved-state restoration therefore uses index0 for this class, but a new pointer at detach still requires separate identity checks. A valid entity generation alone does not prove the physics object stayed the same.

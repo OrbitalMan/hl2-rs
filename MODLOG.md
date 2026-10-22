@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline frame/input and crate-resource milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material static workers physics_list completed O and queued_damage completed P, inherited model family/exact identifiers unavailable. Primary agent reviewed/sealed O/P and completed N/Q.
+
+**Changed / Why:** Connected selected held-frame and generic input routes; retained exact two-crate resource data/parser disagreement and bound class spawn/create to existing scale/override evidence. Kept owner game undisturbed and native material private.
+
+**Tested how / Result:** N/O/P/Q seals pass22/13,33/22,20/16,22/15 retained-file/binding counts; native528/208/414 bounded records plus resource14 witnesses. Exact identities, selected bytes/CRCs/hashes/source ranges and preserved parser disagreement checked. No Rust/native execution.
+
+**Still broken or not tested / Next:** Native key/frame cadence, final mass/physics/units, actual carry/throw/window/exit and Rust parity untested. Finish bounded scale-key and grab-update follow-ups offline; retain original gaps and commit/push reviewed docs at checkpoints.
+
 ## 2026-10-22 offline list, queued damage and logical use milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material static workers physics_list (K) and queued_damage (L), inherited model family/exact identifier unavailable. Primary agent reviewed/sealed their work and completed M.

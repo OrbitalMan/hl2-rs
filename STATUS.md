@@ -1,5 +1,13 @@
 # STATUS
 
+## Offline held-frame and authored crate physics checkpoint (2026-10-22)
+
+The selected retail player-frame path now statically reaches the latched controller with useType2/value2 under control/weapon guards, without requiring a fresh use-key edge. The separate generic Use input path forwards its output-ID field as useType; input acceptance is not gameplay success. Actual scheduling, key timing, carry/throw and outputs remain untested.
+
+Two owned crate PHY members author mass30/25, damping0/rotdamping0/inertia1. These are file values, not current native measurements or validated units/pickupability. The damaged debris suffix has a preserved grammar disagreement: the strict helper rejects it, while SourcePP accepts a node with value and children; no retail-invalid-content claim. The selected prop spawn/create path applies positive-only scale operations before later solid override. Map-key/field binding is a separate ongoing static question.
+
+New seals N/O/P/Q pass22/13,33/22,20/16,22/15 retained-file/external-binding counts. Native content remains private. Interim continuation: work/publishing/research-pickup-dispatch-progress-20261022j.md. Owner's game undisturbed; no Rust edits/builds. First-map break/exit and Rust parity **not tested**; original authored gaps retained.
+
 ## Offline list, queued-damage and use-dispatch checkpoint (2026-10-22)
 
 Three additional private supplements are sealed. The prop physics-list method returns only its current single physics pointer (or zero entries), narrowing saved-state restoration to index0 without proving pointer stability. Collision damage can be queued/requeued; the window damage virtual is reached only after filter/rules and simulation/callback gates. A selected player-use routine clears a latched use entity on a new logical use press; its release-flag branch is different. Physical key mapping/timing and per-frame held USE_SET dispatch remain untested.

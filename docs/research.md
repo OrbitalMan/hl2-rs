@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Sealed input bridge, frame caller and owned PHY supplement (2026-10-22)
+
+Private N scene-use-input-20261022n checks two local bodies plus a reused initializer,528 records/four metadata stores/13 externals. O scene-held-use-frame-20261022o checks four exact bodies/208 records/22 externals and binds the guarded natural held-use caller. P scene-crate-authored-physics-20261022p checks two selected PHY CRC/SHA members,two MDL header ranges,14 property byte spans,one full-tail and one prefix ordered comparison; whole carrier hash unavailable. Its damaged suffix differs between the strict helper and SourcePP, with all raw bytes/failure retained.
+
+Q scene-crate-physics-spawn-20261022q checks three exact identities(two local/one externally reused),414 records/15 externals, tying the class spawn/create dispatch to existing SI-07 scale/override evidence. Key-field mapping remains separately investigated. Each source/body/member has bounded provenance; no current native physics/input/damage/exit or Rust parity is established. Earlier frozen artifacts/navigators and original scene gaps remain unchanged.
+
 ## Sealed prop list, damage dispatch and logical use research (2026-10-22)
 
 Private K/L/M supplements independently bind the prop's singleton physics-list target, queue-to-damage forwarding/phase guards and logical-use-press clearing. K checks one exact body/25 bounded records/21 externals; L16 bodies/1428 records/41 externals, including six fresh and ten reused frozen bodies; M four retained exact bodies/264 records/18 externals, with two navigation-only bodies excluded from semantic claims. Historical six-button descriptor reconstruction labels pressed/released offsets without observing current input.
