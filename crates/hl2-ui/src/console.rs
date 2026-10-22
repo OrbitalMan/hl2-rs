@@ -1950,6 +1950,130 @@ impl Console {
                     return Err(usage());
                 }
             }
+            "snd_musicvolume" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"snd_musicvolume\" = \"{:.2}\"",
+                        self.config.audio.music_volume
+                    ));
+                } else if args.len() == 1 {
+                    let vol: f32 = args[0].parse().map_err(|_| usage())?;
+                    let vol = vol.clamp(0.0, 1.0);
+                    self.config.audio.music_volume = vol;
+                    let _ = self.config.save();
+                    self.log(format!("snd_musicvolume {:.2}", vol));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "snd_mute_losefocus" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"snd_mute_losefocus\" = \"{}\"",
+                        u8::from(self.config.audio.mute_losefocus)
+                    ));
+                } else if args.len() == 1 {
+                    let val = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.audio.mute_losefocus = val;
+                    let _ = self.config.save();
+                    self.log(format!("snd_mute_losefocus {}", u8::from(val)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "closecaption" => {
+                let is_on = self.config.audio.captions != crate::config::Captions::None;
+                if args.is_empty() {
+                    self.log(format!("\"closecaption\" = \"{}\"", u8::from(is_on)));
+                } else if args.len() == 1 {
+                    let val = boolean(&args[0]).ok_or_else(usage)?;
+                    if !val {
+                        self.config.audio.captions = crate::config::Captions::None;
+                    } else if self.config.audio.captions == crate::config::Captions::None {
+                        self.config.audio.captions = crate::config::Captions::ClosedCaptions;
+                    }
+                    let _ = self.config.save();
+                    let new_on = self.config.audio.captions != crate::config::Captions::None;
+                    self.log(format!("closecaption {}", u8::from(new_on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "cc_subtitles" => {
+                let is_subs = self.config.audio.captions == crate::config::Captions::Subtitles;
+                if args.is_empty() {
+                    self.log(format!("\"cc_subtitles\" = \"{}\"", u8::from(is_subs)));
+                } else if args.len() == 1 {
+                    let val = boolean(&args[0]).ok_or_else(usage)?;
+                    if val {
+                        self.config.audio.captions = crate::config::Captions::Subtitles;
+                    } else if self.config.audio.captions == crate::config::Captions::Subtitles {
+                        self.config.audio.captions = crate::config::Captions::ClosedCaptions;
+                    }
+                    let _ = self.config.save();
+                    let new_subs = self.config.audio.captions == crate::config::Captions::Subtitles;
+                    self.log(format!("cc_subtitles {}", u8::from(new_subs)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "snd_surround_speakers" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"snd_surround_speakers\" = \"{}\"",
+                        self.config.audio.speakers.channels()
+                    ));
+                } else if args.len() == 1 {
+                    let val: u8 = args[0].parse().map_err(|_| usage())?;
+                    let speakers = crate::config::Speakers::from_channels(val).ok_or_else(usage)?;
+                    self.config.audio.speakers = speakers;
+                    let _ = self.config.save();
+                    self.log(format!("snd_surround_speakers {}", val));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "snd_pitchquality" => {
+                let is_high = self.config.audio.quality == crate::config::SoundQuality::High;
+                if args.is_empty() {
+                    self.log(format!("\"snd_pitchquality\" = \"{}\"", u8::from(is_high)));
+                } else if args.len() == 1 {
+                    let val = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.audio.quality = if val {
+                        crate::config::SoundQuality::High
+                    } else {
+                        crate::config::SoundQuality::Medium
+                    };
+                    let _ = self.config.save();
+                    self.log(format!("snd_pitchquality {}", u8::from(val)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "dsp_slow_cpu" => {
+                let is_low = self.config.audio.quality == crate::config::SoundQuality::Low;
+                if args.is_empty() {
+                    self.log(format!("\"dsp_slow_cpu\" = \"{}\"", u8::from(is_low)));
+                } else if args.len() == 1 {
+                    let val = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.audio.quality = if val {
+                        crate::config::SoundQuality::Low
+                    } else {
+                        crate::config::SoundQuality::High
+                    };
+                    let _ = self.config.save();
+                    self.log(format!("dsp_slow_cpu {}", u8::from(val)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
             "sensitivity" => {
                 if args.is_empty() {
                     self.log(format!(
@@ -2219,6 +2343,21 @@ impl Console {
         Some(match name.to_ascii_lowercase().as_str() {
             "sv_cheats" => u8::from(self.cheats).to_string(),
             "volume" => format!("{:.2}", c.audio.volume),
+            "snd_musicvolume" => format!("{:.2}", c.audio.music_volume),
+            "snd_mute_losefocus" => u8::from(c.audio.mute_losefocus).to_string(),
+            "closecaption" => {
+                u8::from(c.audio.captions != crate::config::Captions::None).to_string()
+            }
+            "cc_subtitles" => {
+                u8::from(c.audio.captions == crate::config::Captions::Subtitles).to_string()
+            }
+            "snd_surround_speakers" => c.audio.speakers.channels().to_string(),
+            "snd_pitchquality" => {
+                u8::from(c.audio.quality == crate::config::SoundQuality::High).to_string()
+            }
+            "dsp_slow_cpu" => {
+                u8::from(c.audio.quality == crate::config::SoundQuality::Low).to_string()
+            }
             "sensitivity" => format!("{:.2}", c.mouse.sensitivity),
             "m_pitch" => format!(
                 "{:.3}",
@@ -8269,5 +8408,112 @@ mod tests {
 
         console.submit("sk_autoaim_scale1 0.1");
         assert_eq!(console.config.mouse.aim_assist_scale, 0.5);
+    }
+
+    #[test]
+    fn audio_cvars_query_set_clamp_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // snd_musicvolume
+        console.submit("snd_musicvolume 0.75");
+        assert_eq!(console.config.audio.music_volume, 0.75);
+        assert_eq!(
+            console.cvar_value("snd_musicvolume").as_deref(),
+            Some("0.75")
+        );
+        console.submit("snd_musicvolume 1.5");
+        assert_eq!(console.config.audio.music_volume, 1.0);
+        console.submit("snd_musicvolume -0.5");
+        assert_eq!(console.config.audio.music_volume, 0.0);
+
+        // snd_mute_losefocus
+        console.submit("snd_mute_losefocus 0");
+        assert!(!console.config.audio.mute_losefocus);
+        assert_eq!(
+            console.cvar_value("snd_mute_losefocus").as_deref(),
+            Some("0")
+        );
+        console.submit("snd_mute_losefocus 1");
+        assert!(console.config.audio.mute_losefocus);
+        assert_eq!(
+            console.cvar_value("snd_mute_losefocus").as_deref(),
+            Some("1")
+        );
+
+        // closecaption & cc_subtitles
+        console.submit("closecaption 0");
+        assert_eq!(console.config.audio.captions, crate::config::Captions::None);
+        assert_eq!(console.cvar_value("closecaption").as_deref(), Some("0"));
+        assert_eq!(console.cvar_value("cc_subtitles").as_deref(), Some("0"));
+
+        console.submit("closecaption 1");
+        assert_eq!(
+            console.config.audio.captions,
+            crate::config::Captions::ClosedCaptions
+        );
+        assert_eq!(console.cvar_value("closecaption").as_deref(), Some("1"));
+        assert_eq!(console.cvar_value("cc_subtitles").as_deref(), Some("0"));
+
+        console.submit("cc_subtitles 1");
+        assert_eq!(
+            console.config.audio.captions,
+            crate::config::Captions::Subtitles
+        );
+        assert_eq!(console.cvar_value("closecaption").as_deref(), Some("1"));
+        assert_eq!(console.cvar_value("cc_subtitles").as_deref(), Some("1"));
+
+        console.submit("cc_subtitles 0");
+        assert_eq!(
+            console.config.audio.captions,
+            crate::config::Captions::ClosedCaptions
+        );
+        assert_eq!(console.cvar_value("cc_subtitles").as_deref(), Some("0"));
+
+        // snd_surround_speakers
+        console.submit("snd_surround_speakers 0");
+        assert_eq!(
+            console.config.audio.speakers,
+            crate::config::Speakers::Headphones
+        );
+        assert_eq!(
+            console.cvar_value("snd_surround_speakers").as_deref(),
+            Some("0")
+        );
+
+        console.submit("snd_surround_speakers 5");
+        assert_eq!(
+            console.config.audio.speakers,
+            crate::config::Speakers::FiveOne
+        );
+        assert_eq!(
+            console.cvar_value("snd_surround_speakers").as_deref(),
+            Some("5")
+        );
+
+        console.submit("snd_surround_speakers 2");
+        assert_eq!(console.config.audio.speakers, crate::config::Speakers::Two);
+
+        // snd_pitchquality & dsp_slow_cpu
+        console.submit("snd_pitchquality 1");
+        assert_eq!(
+            console.config.audio.quality,
+            crate::config::SoundQuality::High
+        );
+        assert_eq!(console.cvar_value("snd_pitchquality").as_deref(), Some("1"));
+
+        console.submit("dsp_slow_cpu 1");
+        assert_eq!(
+            console.config.audio.quality,
+            crate::config::SoundQuality::Low
+        );
+        assert_eq!(console.cvar_value("dsp_slow_cpu").as_deref(), Some("1"));
+
+        console.submit("dsp_slow_cpu 0");
+        assert_eq!(
+            console.config.audio.quality,
+            crate::config::SoundQuality::High
+        );
+        assert_eq!(console.cvar_value("dsp_slow_cpu").as_deref(), Some("0"));
     }
 }

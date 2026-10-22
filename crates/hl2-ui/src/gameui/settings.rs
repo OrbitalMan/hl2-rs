@@ -555,6 +555,8 @@ pub enum Command {
     VideoAdvanced,
     /// "Open Steam Input Configuration" on the Gamepad page (placeholder: no Steam overlay).
     SteamInput,
+    /// "Test speaker settings" on the Audio page (placeholder in Source: visible 0 in retail layout).
+    TestSpeakers,
     /// OK of a sub-dialog.
     SubOk,
     /// Cancel / Close of a sub-dialog.
@@ -564,7 +566,7 @@ pub enum Command {
 impl Command {
     /// Placeholders are drawn disabled; activating one only logs its label.
     pub fn placeholder(self) -> bool {
-        matches!(self, Self::SteamInput)
+        matches!(self, Self::SteamInput | Self::TestSpeakers)
     }
 }
 
@@ -651,6 +653,7 @@ pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
         (Panel::Audio, "closecaptioncheck") => Choice(self::Choice::Captions),
         (Panel::Audio, "snd_mute_losefocus") => Toggle(self::Toggle::MuteLoseFocus),
         (Panel::Audio, "thirdpartysoundcredits") => Command(self::Command::AudioCredits),
+        (Panel::Audio, "testspeakers") => Command(self::Command::TestSpeakers),
         (Panel::Video, "resolution") => Choice(self::Choice::Resolution),
         (Panel::Video, "aspectratio") => Choice(self::Choice::Aspect),
         (Panel::Video, "displaymodecombo") => Choice(self::Choice::DisplayMode),

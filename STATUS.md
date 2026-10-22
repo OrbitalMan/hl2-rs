@@ -4,6 +4,22 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Audio options audit, console cvar parity & runtime status (`crates/hl2-ui`, `crates/hl2-bevy`):**
+  - Audited every audio control from retail Source `OptionsSubAudio.res` across `hl2-ui`, `hl2-simulation`, and `hl2-bevy`:
+    1. `SFXSlider` (`volume`): UI slider and master volume scaling in `hl2-bevy/src/audio.rs` working.
+    2. `MusicSlider` (`snd_musicvolume`): UI slider and runtime music channel attenuation in `hl2-bevy/src/audio.rs` working. Added `snd_musicvolume` console cvar (`commands.rs`, `console.rs`) supporting query, 0.0..1.0 float assignment, and `cvar_value`.
+    3. `snd_mute_losefocus` (`snd_mute_losefocus`): UI checkbox and runtime mute on focus loss in `hl2-bevy/src/audio.rs` working. Added `snd_mute_losefocus` console cvar supporting query, boolean toggle, and `cvar_value`.
+    4. `CloseCaptionCheck` (`closecaption` & `cc_subtitles`): UI ComboBox working (`None`, `ClosedCaptions`, `Subtitles`) and driving `canvas_renderer.rs` closed caption HUD rendering. Added `closecaption` and `cc_subtitles` console cvars supporting query, boolean toggle, and `cvar_value`.
+    5. `SpeakerSetup` (`snd_surround_speakers`): UI ComboBox working (`Headphones` = 0, `2 Speakers` = 2, `4 Speakers` = 4, `5.1` = 5, `7.1` = 7) and persisted in config. Added `snd_surround_speakers` console cvar. In runtime, `bevy_audio` (rodio) outputs a stereo stream; multi-channel discrete surround rematrixing (4/5.1/7.1) is not implemented and acceptance criteria under Bevy/rodio are unclear. Documented as unfinished.
+    6. `SoundQuality` (`dsp_slow_cpu` & `snd_pitchquality`): UI ComboBox working (`High`, `Medium`, `Low`) and persisted in config. Added `dsp_slow_cpu` and `snd_pitchquality` console cvars. In simulation and runtime, DSP reverberation/room simulation is not modeled (`soundscapes.rs:570`), and rodio handles resampling transparently; software DSP filter passes are not implemented. Documented as unfinished.
+    7. `AudioSpokenLanguage`: UI ComboBox populated from `env.languages` and persisted in `config.audio.language`. In retail Source, voice language change requires a game restart. Dynamic voice VPK mount switching on restart is not fully integrated. Documented as unfinished.
+    8. `ThirdPartySoundCredits` (`ShowThirdPartyAudioCredits`): UI URLButton working, opens `Sub::AudioCredits` dialog displaying Miles Sound System and Bink Video credits with flexible layout framing.
+    9. `TestSpeakers` (`TestSpeakers`): Retail layout sets `visible 0`. Added `Command::TestSpeakers` with `placeholder() == true` in `hl2-ui::gameui::settings`, ensuring that if visible in legacy/mod layouts it is drawn disabled and handled safely without errors.
+  - In `crates/hl2-ui/src/console/editor.rs`, enhanced completion tab logic so that when a unique prefix match exists among candidates (even when low-relevance scattered-letter fuzzy candidates match as well), Tab takes the unique prefix match with a trailing space.
+  - Added unit test `audio_cvars_query_set_clamp_and_cvar_value` in `crates/hl2-ui/src/console.rs`.
+  - Added unit test `audio_options_controls_and_placeholder_handling` in `crates/hl2-ui/src/gameui/options.rs`.
+  - Verified with `scripts/checks/validate.sh` (358 hl2-ui unit tests, 97 hl2-bevy tests, strict Clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
 - **Mouse options audit, console cvar parity & unfinished simulation features status (`crates/hl2-ui/src/console`, `crates/hl2-ui/src/gameui/options`):**
   - Audited every mouse option from retail Source `OptionsSubMouse.res` across `hl2-ui`, `hl2-simulation`, and `hl2-bevy`:
     1. `ReverseMouse` (`m_pitch`): UI checkbox and runtime inverted pitch working (`pitch_sign` in `input.rs`). Added `m_pitch` console cvar (`commands.rs`, `console.rs`) supporting query, positive/negative float assignment, and `cvar_value`.

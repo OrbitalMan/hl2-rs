@@ -291,6 +291,27 @@ impl Speakers {
             Self::SevenOne => "#GameUI_7Speakers",
         }
     }
+
+    pub fn channels(self) -> u8 {
+        match self {
+            Self::Headphones => 0,
+            Self::Two => 2,
+            Self::Four => 4,
+            Self::FiveOne => 5,
+            Self::SevenOne => 7,
+        }
+    }
+
+    pub fn from_channels(channels: u8) -> Option<Self> {
+        match channels {
+            0 => Some(Self::Headphones),
+            2 => Some(Self::Two),
+            4 => Some(Self::Four),
+            5 => Some(Self::FiveOne),
+            7 => Some(Self::SevenOne),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

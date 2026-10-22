@@ -294,7 +294,24 @@ impl LineEditor {
         let Some(list) = self.list.as_mut().filter(|l| !l.items.is_empty()) else {
             return;
         };
-        if tab && list.items.len() == 1 && list.index.is_none() {
+        let token = &self.text[list.head.len()..];
+        let single_prefix = !token.is_empty()
+            && list.items.first().is_some_and(|c| {
+                c.text
+                    .to_ascii_lowercase()
+                    .starts_with(&token.to_ascii_lowercase())
+            })
+            && list
+                .items
+                .iter()
+                .filter(|c| {
+                    c.text
+                        .to_ascii_lowercase()
+                        .starts_with(&token.to_ascii_lowercase())
+                })
+                .count()
+                == 1;
+        if tab && (list.items.len() == 1 || single_prefix) && list.index.is_none() {
             let text = format!("{}{} ", list.head, list.items[0].text);
             self.list = None;
             let cursor = text.chars().count();

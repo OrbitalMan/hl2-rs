@@ -1724,7 +1724,7 @@ impl OptionsDialog {
             }
             Command::VideoAdvanced => self.open_sub(Sub::VideoAdvanced),
             // Placeholder: disabled, so activation only logs its label (see `activate`).
-            Command::SteamInput => {}
+            Command::SteamInput | Command::TestSpeakers => {}
             Command::SubOk => return self.ok_sub(),
             Command::SubCancel => self.cancel_sub(),
         }
@@ -5485,5 +5485,44 @@ pub(crate) mod tests {
         assert!(is_enabled("MouseAccelerationLabel"));
         assert!(is_enabled("AutoaimScale"));
         assert!(is_enabled("AutoaimScaleLabel"));
+    }
+
+    #[test]
+    fn audio_options_controls_and_placeholder_handling() {
+        let layout = Layout::parse(
+            br##""Resource/OptionsSubAudio.res" {
+                "SFXSlider" { "ControlName" "CCvarSlider" "fieldName" "SFXSlider" "xpos" "36" "ypos" "43" "wide" "175" "tall" "50" }
+                "MusicSlider" { "ControlName" "CCvarSlider" "fieldName" "MusicSlider" "xpos" "254" "ypos" "43" "wide" "175" "tall" "50" }
+                "SpeakerSetup" { "ControlName" "ComboBox" "fieldName" "SpeakerSetup" "xpos" "36" "ypos" "116" "wide" "175" "tall" "24" }
+                "SoundQuality" { "ControlName" "ComboBox" "fieldName" "SoundQuality" "xpos" "254" "ypos" "116" "wide" "175" "tall" "24" }
+                "CloseCaptionCheck" { "ControlName" "ComboBox" "fieldName" "CloseCaptionCheck" "xpos" "254" "ypos" "179" "wide" "175" "tall" "24" }
+                "snd_mute_losefocus" { "ControlName" "CCvarToggleCheckButton" "fieldName" "snd_mute_losefocus" "xpos" "33" "ypos" "230" "wide" "430" "tall" "28" }
+                "ThirdPartySoundCredits" { "ControlName" "URLButton" "fieldName" "ThirdPartySoundCredits" "xpos" "254" "ypos" "270" "wide" "200" "tall" "24" "command" "ShowThirdPartyAudioCredits" }
+                "TestSpeakers" { "ControlName" "Button" "fieldName" "TestSpeakers" "xpos" "36" "ypos" "194" "wide" "160" "tall" "24" "command" "TestSpeakers" "visible" "1" }
+            }"##,
+        )
+        .unwrap();
+
+        let mut res = (*resources()).clone();
+        res.layouts.insert("optionssubaudio".into(), layout);
+
+        let draft = Draft::new(Config::default());
+        let widgets = layout_widgets(&res, Panel::Audio, page_rect(), &draft, &draft.config);
+
+        let find_widget = |name: &str| widgets.iter().find(|w| w.control.name == name).unwrap();
+
+        assert!(find_widget("SFXSlider").enabled);
+        assert!(find_widget("MusicSlider").enabled);
+        assert!(find_widget("SpeakerSetup").enabled);
+        assert!(find_widget("SoundQuality").enabled);
+        assert!(find_widget("CloseCaptionCheck").enabled);
+        assert!(find_widget("snd_mute_losefocus").enabled);
+        assert!(find_widget("ThirdPartySoundCredits").enabled);
+
+        // TestSpeakers is a placeholder: even when visible is 1, its enabled state must be false
+        assert!(
+            !find_widget("TestSpeakers").enabled,
+            "TestSpeakers is a placeholder and must be disabled"
+        );
     }
 }

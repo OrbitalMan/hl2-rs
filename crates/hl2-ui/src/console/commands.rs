@@ -151,6 +151,41 @@ pub const COMMANDS: &[Spec] = &[
         &[Arg::Free],
     ),
     cvar(
+        "snd_musicvolume",
+        "snd_musicvolume [0..1]: query or set music volume",
+        &[Arg::Free],
+    ),
+    cvar(
+        "snd_mute_losefocus",
+        "snd_mute_losefocus [0|1]: query or toggle muting audio when window loses focus",
+        BOOLEAN,
+    ),
+    cvar(
+        "closecaption",
+        "closecaption [0|1]: query or toggle closed captioning",
+        BOOLEAN,
+    ),
+    cvar(
+        "cc_subtitles",
+        "cc_subtitles [0|1]: query or toggle subtitles only (dialogue only, no sound effects)",
+        BOOLEAN,
+    ),
+    cvar(
+        "snd_surround_speakers",
+        "snd_surround_speakers [0|2|4|5|7]: query or set speaker configuration (0=headphones, 2=stereo, 4=surround, 5=5.1, 7=7.1)",
+        &[Arg::Values(&["0", "2", "4", "5", "7"])],
+    ),
+    cvar(
+        "snd_pitchquality",
+        "snd_pitchquality [0|1]: query or toggle sound pitch quality (0=low, 1=high)",
+        BOOLEAN,
+    ),
+    cvar(
+        "dsp_slow_cpu",
+        "dsp_slow_cpu [0|1]: query or toggle reduced DSP CPU quality (1=slow CPU/low, 0=normal/high)",
+        BOOLEAN,
+    ),
+    cvar(
         "sensitivity",
         "sensitivity [value]: query or set mouse sensitivity",
         &[Arg::Free],

@@ -1,5 +1,48 @@
 # MODLOG
 
+## 2026-10-22 Audio options audit, console cvar parity & runtime status
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/config.rs`:
+  - Added `Speakers::channels()` and `Speakers::from_channels(u8)` mapping between `Speakers` enum variants and Source speaker configuration channel counts (0, 2, 4, 5, 7).
+- `crates/hl2-ui/src/gameui/settings.rs`:
+  - Added `Command::TestSpeakers` with `placeholder() == true` and bound `(Panel::Audio, "testspeakers")` to `Command::TestSpeakers`, ensuring retail layout's hidden button (or mod layouts) are safely drawn disabled and handled without errors.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Handled `Command::TestSpeakers` in `command()`.
+  - Added unit test `audio_options_controls_and_placeholder_handling` verifying enabled states of all audio controls and checking that `TestSpeakers` is treated as a disabled placeholder.
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added audio cvar specifications to `COMMANDS`: `snd_musicvolume`, `snd_mute_losefocus`, `closecaption`, `cc_subtitles`, `snd_surround_speakers`, `snd_pitchquality`, and `dsp_slow_cpu`.
+- `crates/hl2-ui/src/console.rs`:
+  - Implemented command execution handlers in `interpret()` and query reporting in `cvar_value()` for all audio cvars:
+    - `snd_musicvolume`: queries and sets music volume clamped to 0.0..1.0 (`audio.music_volume`).
+    - `snd_mute_losefocus`: queries and toggles muting audio on focus loss (`audio.mute_losefocus`).
+    - `closecaption`: queries and toggles closed captions (`audio.captions != None`).
+    - `cc_subtitles`: queries and toggles dialogue-only subtitles (`audio.captions == Subtitles`).
+    - `snd_surround_speakers`: queries and sets speaker configuration (`audio.speakers`).
+    - `snd_pitchquality`: queries and sets sound pitch quality (`audio.quality`).
+    - `dsp_slow_cpu`: queries and toggles reduced DSP quality (`audio.quality`).
+  - Added unit test `audio_cvars_query_set_clamp_and_cvar_value` verifying query, setting, clamping, and `cvar_value` lookups across all audio cvars.
+- `crates/hl2-ui/src/console/editor.rs`:
+  - Enhanced command completion logic: when Tab is pressed and a unique prefix match exists among candidates (even when low-relevance scattered-letter fuzzy candidates match as well), Tab takes the unique prefix match with a trailing space.
+- `STATUS.md`:
+  - Documented audit of all audio controls from `OptionsSubAudio.res`. Documented `SpeakerSetup` (Bevy/rodio stereo output vs discrete surround matrixing), `SoundQuality` (software DSP room reverberation and pitch resampling), and `AudioSpokenLanguage` (voice VPK mount switching on restart) as unfinished features with unclear acceptance criteria under the current Bevy runtime.
+
+**Why:** User request:
+"Check every option in Options > Audio tab, Implement the placeholders/unfinished ones. Report if some feature implementation acceptance criteria is unclear, document it as unfinished."
+
+**Tested how:**
+- `bash scripts/checks/validate.sh`: full workspace test suite passed (358 hl2-ui tests, 97 hl2-bevy tests, all simulation & asset tests), strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings, `cargo fmt --check` exit 0.
+- `bash scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Complete audit of audio options, full parity between console cvars and Options dialog draft/applied state, dynamic UI control and placeholder handling verified by tests, completion tab behavior hardened for prefix matches, and clear documentation of Bevy runtime audio limitations.
+
+**Still broken or not tested:** Multi-channel surround audio rematrixing in `bevy_audio`; DSP room reverberation in `hl2-simulation`; dynamic voice VPK pack switching on restart.
+
+**Next:** Await next task from user.
+
 ## 2026-10-22 Mouse options audit, console cvar parity & unfinished simulation features status
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
