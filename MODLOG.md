@@ -1,5 +1,32 @@
 # MODLOG
 
+## 2026-10-22 Build/Docs: Automatic clean before build in launch-bevy.sh and expanded macOS instructions in README.md
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `launch-bevy.sh`:
+  - Removed unused `--clean` command-line argument parsing (and variants `--clean=workspace`, `--clean=dry-run`).
+  - Integrated automatic target cleaning prior to each build: whenever `NEEDS_BUILD` is triggered (missing binary/metadata, newer sources/shaders, profile switch, or branch/commit switch), `launch-bevy.sh` automatically runs `scripts/clean-target.sh --stale` before compiling via `scripts/build-bevy.sh`.
+  - Stale incremental sessions and superseded object files are pruned automatically before every build to prevent target bloat, while preserving cached 3rd-party dependencies.
+- `README.md`:
+  - Updated the macOS setup section with comprehensive `launch-bevy.sh` instructions, including its automatic freshness check, automatic clean-before-build behavior, convenience scripts (`launch-bevy-1080p.sh`, `launch-bevy-borderless.sh`), and common launcher flags (`--rebuild`, `--debug`, `--no-build`, `--map`, `--setup`).
+
+**Why:** user request: make `launch-bevy.sh` always clean before build, remove the `--clean` argument as unused, and update `README.md` with `launch-bevy.sh` instructions in the Mac-related section.
+
+**Tested how:**
+- Bash syntax validation (`bash -n launch-bevy.sh`).
+- Verified `scripts/clean-target.sh --stale` successfully prunes workspace remnants and preserves 3rd-party dependencies.
+- Tested `./launch-bevy.sh --no-build` validation.
+- Ran `scripts/checks/validate.sh` and `scripts/checks/check_windows.sh`.
+
+**Result:** `launch-bevy.sh` consistently cleans stale build remnants prior to building without requiring manual `--clean` flags. macOS instructions in `README.md` document all launcher workflows clearly.
+
+**Still broken or not tested:** none.
+
+**Next:** continue UI polish / plugin modularization.
+
+
 ## 2026-10-22 UI: Text input with blinking cursor and parent-child focus hierarchy
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

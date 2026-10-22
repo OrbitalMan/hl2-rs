@@ -8,8 +8,6 @@ cd "$PROJECT_ROOT"
 FORCE_REBUILD=0
 DEBUG_BUILD=0
 NO_BUILD=0
-CLEAN_TARGET=0
-CLEAN_MODE="stale"
 GAME_ARGS=()
 
 for arg in "$@"; do
@@ -22,18 +20,6 @@ for arg in "$@"; do
             ;;
         --no-build)
             NO_BUILD=1
-            ;;
-        --clean)
-            CLEAN_TARGET=1
-            CLEAN_MODE="stale"
-            ;;
-        --clean=workspace|--clean-workspace)
-            CLEAN_TARGET=1
-            CLEAN_MODE="workspace"
-            ;;
-        --clean=dry-run|--clean-dry-run)
-            CLEAN_TARGET=1
-            CLEAN_MODE="dry-run"
             ;;
         *)
             GAME_ARGS+=("$arg")
@@ -56,29 +42,8 @@ fi
 rm -f "$PROJECT_ROOT/bin/".*.tmp "$PROJECT_ROOT/bin/"*.tmp "$PROJECT_ROOT/bin/"*.old "$PROJECT_ROOT/bin/"*.bak 2>/dev/null || true
 find "$PROJECT_ROOT/bin" -name ".DS_Store" -delete 2>/dev/null || true
 
-# Explicit --clean requested
-if [[ "$CLEAN_TARGET" -eq 1 ]]; then
-    if [[ -x "$CLEANER_SCRIPT" ]]; then
-        echo "==> Cleaning target directory remnants (mode: $CLEAN_MODE)..."
-        if [[ "$CLEAN_MODE" == "workspace" ]]; then
-            "$CLEANER_SCRIPT" --workspace
-        elif [[ "$CLEAN_MODE" == "dry-run" ]]; then
-            "$CLEANER_SCRIPT" --dry-run
-        else
-            "$CLEANER_SCRIPT" --stale
-        fi
-    else
-        echo "Warning: Cleaner script not found at $CLEANER_SCRIPT" >&2
-    fi
-    # If only --clean was provided with no other args, exit cleanly
-    if [[ ${#GAME_ARGS[@]} -eq 0 && "$FORCE_REBUILD" -eq 0 && "$DEBUG_BUILD" -eq 0 && "$NO_BUILD" -eq 0 ]]; then
-        exit 0
-    fi
-fi
-
 NEEDS_BUILD=0
 BUILD_REASON=""
-BRANCH_CHANGED=0
 
 CURRENT_BRANCH="$(git symbolic-ref --short -q HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
 CURRENT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
@@ -116,7 +81,6 @@ else
             BUILD_REASON="metadata missing git branch information"
         elif [[ "$CURRENT_BRANCH" != "$RECORDED_BRANCH" ]]; then
             NEEDS_BUILD=1
-            BRANCH_CHANGED=1
             BUILD_REASON="git branch changed ('$RECORDED_BRANCH' -> '$CURRENT_BRANCH')"
         fi
     fi
@@ -152,14 +116,12 @@ else
     fi
 fi
 
-# Auto-prune stale remnants from earlier branches before rebuilding
-if [[ "$BRANCH_CHANGED" -eq 1 && -x "$CLEANER_SCRIPT" ]]; then
-    echo "==> Git branch changed ('$RECORDED_BRANCH' -> '$CURRENT_BRANCH'): auto-pruning stale hashes..."
-    "$CLEANER_SCRIPT" --stale || true
-fi
-
 if [[ "$NEEDS_BUILD" -eq 1 ]]; then
     echo "==> Build is out of date: $BUILD_REASON"
+    if [[ -x "$CLEANER_SCRIPT" ]]; then
+        echo "==> Cleaning stale target directory remnants before build..."
+        "$CLEANER_SCRIPT" --stale || true
+    fi
     echo "==> Running scripts/build-bevy.sh..."
     BUILD_ARGS=()
     if [[ "$DEBUG_BUILD" -eq 1 ]]; then

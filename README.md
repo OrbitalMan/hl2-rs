@@ -73,16 +73,31 @@ The repository contains source, not a prebuilt executable. Building creates `bin
 
 ### macOS
 
-On macOS (Apple Silicon / POSIX) with the Rust toolchain installed, use the provided shell scripts to build and launch the game. Steam installations in `~/Library/Application Support/Steam` are automatically discovered.
+On macOS (Apple Silicon / POSIX) with the Rust toolchain installed, use `./launch-bevy.sh` to build and launch the game. Steam installations in `~/Library/Application Support/Steam` are automatically discovered.
 
 ```bash
 git clone https://github.com/kvalls/hl2-rs.git
 cd hl2-rs
-./scripts/build-bevy.sh
 ./launch-bevy.sh
 ```
 
-Building creates `bin/hl2-bevy` and the `bin/bevy-assets` shader folder. The executable and shader folder must remain together.
+`launch-bevy.sh` is an all-in-one launcher that manages builds automatically:
+- **Automatic build & freshness check**: It checks whether `bin/hl2-bevy` exists and is up to date with respect to source files (`crates/`), `Cargo.toml`, shader assets (`crates/hl2-bevy/assets`), git branch switches, and git commits.
+- **Automatic target cleanup**: Whenever a build or rebuild is required, it automatically cleans stale target remnants from `target/` before building to prevent dead cache bloat while keeping cached third-party dependencies intact.
+- **Direct launch**: If the build is already up to date, it launches immediately without rebuilding.
+
+Convenience launcher scripts:
+- `./launch-bevy.sh` — launches the game with stored resolution/display settings or opens the main menu.
+- `./launch-bevy-1080p.sh` — launches in a 1920x1080 window (`--windowed --width 1920 --height 1080`).
+- `./launch-bevy-borderless.sh` — launches in borderless window mode (`--borderless`).
+
+Common `launch-bevy.sh` arguments:
+- `--rebuild` (or `--force-build`) — force a clean and rebuild before launching, even if build artifacts appear current.
+- `--debug` (or `-d`) — build and run the debug profile instead of release.
+- `--no-build` — launch the existing executable directly without checking for updates or compiling.
+- Any game arguments (such as `--map d1_trainstation_01`, `--setup`, `--game <path>`, `--fullscreen`, `--windowed`) are forwarded directly to the game binary.
+
+To compile and package `bin/hl2-bevy` and the `bin/bevy-assets` shader folder without immediately launching the game, run `./scripts/build-bevy.sh`. The executable and shader folder must remain together.
 
 ## Play the current build
 

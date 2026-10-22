@@ -4,6 +4,12 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Automatic clean before build in launch-bevy.sh & expanded macOS instructions in README.md (`launch-bevy.sh`, `README.md`):**
+  - Removed unused `--clean` argument parsing from `launch-bevy.sh`.
+  - Configured `launch-bevy.sh` to automatically clean stale build remnants from `target/` (`scripts/clean-target.sh --stale`) prior to every build (whenever `NEEDS_BUILD` triggers), preventing disk bloat without wiping 3rd-party dependencies.
+  - Updated `README.md` macOS section with detailed `launch-bevy.sh` documentation, freshness checks, auto-clean behavior, convenience scripts, and common launcher arguments.
+  - Verified with bash syntax checks (`bash -n launch-bevy.sh`), `./launch-bevy.sh --no-build`, `scripts/checks/validate.sh`, and `scripts/checks/check_windows.sh`.
+
 - **Text input blinking cursor and parent-child focus hierarchy (`hl2-ui::gameui::widgets`, `hl2-ui::gameui::options`, `hl2-ui::console`):**
   - Implemented `InputFocus` in `crates/hl2-ui/src/gameui/widgets.rs` modeling parent-child focus relations (`parent_focused: bool` and `child_focused: bool`). `is_active(&self) -> bool` returns `true` only when both parent dialog and child input element hold focus.
   - Implemented `BlinkingCaret` providing Source SDK `TextEntry` 2.0 Hz caret blinking cycle (500ms visible, 500ms hidden). Gated via `is_visible(focus: InputFocus, time: f64)`.
