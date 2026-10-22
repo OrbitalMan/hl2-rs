@@ -258,6 +258,123 @@ pub fn solids(entries: &[keyvalues::Entry]) -> Vec<modkit_core::PhysicsSolid> {
         .collect()
 }
 
+/// One ragdoll solid (a bone's physics body) from a multi-solid PHY.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RagdollSolid {
+    pub index: i32,
+    /// The bone this solid simulates and its parent bone (names as authored).
+    pub name: String,
+    pub parent: String,
+    pub mass: f32,
+    /// "massbias" (studiomdl's mass distribution weight; 1 when absent).
+    pub mass_bias: f32,
+    pub surfaceprop: String,
+    pub damping: f32,
+    pub rotdamping: f32,
+    pub inertia: f32,
+    pub volume: f32,
+}
+/// constraint_ragdollparams_t from a "ragdollconstraint" block: solid indices and per
+/// axis (x, y, z) the rotation limits in degrees and the friction torque.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RagdollConstraint {
+    pub parent: i32,
+    pub child: i32,
+    /// (min, max, friction) per axis.
+    pub axes: [(f32, f32, f32); 3],
+}
+/// The ragdoll section of a PHY's KeyValues (ragdoll_shared.cpp RagdollCreateObjects:
+/// solid, ragdollconstraint, collisionrules, animatedfriction; editparams skipped).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ragdoll {
+    pub solids: Vec<RagdollSolid>,
+    pub constraints: Vec<RagdollConstraint>,
+    /// CRagdollCollisionRules: "selfcollisions" "0" turns self collisions off; then
+    /// only the listed "collisionpair" solid pairs collide with each other.
+    pub self_collisions: bool,
+    pub collision_pairs: Vec<(i32, i32)>,
+    /// CRagdollAnimatedFriction: min, max, time in, time out, time hold.
+    pub animated_friction: Option<[f32; 5]>,
+}
+/// The ragdoll description of PHY KeyValues; None for a single-solid (prop) PHY. Key
+/// names follow the shipped .phy text (the key parser is in the closed vphysics.dll).
+pub fn ragdoll(entries: &[keyvalues::Entry]) -> Option<Ragdoll> {
+    let mut ragdoll = Ragdoll {
+        self_collisions: true,
+        ..Default::default()
+    };
+    let number = |v: &str| v.trim().parse::<f32>().ok().filter(|v| v.is_finite());
+    for block in entries {
+        let get = |k: &str| {
+            block
+                .children()
+                .iter()
+                .rev()
+                .find(|e| e.key.eq_ignore_ascii_case(k))
+                .and_then(|e| e.text())
+        };
+        match block.key.to_ascii_lowercase().as_str() {
+            "solid" => ragdoll.solids.push(RagdollSolid {
+                index: get("index")
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(-1),
+                name: get("name").unwrap_or("").to_owned(),
+                parent: get("parent").unwrap_or("").to_owned(),
+                mass: get("mass").and_then(number).unwrap_or(0.),
+                mass_bias: get("massbias").and_then(number).unwrap_or(1.),
+                surfaceprop: get("surfaceprop").unwrap_or("default").to_lowercase(),
+                damping: get("damping").and_then(number).unwrap_or(0.),
+                rotdamping: get("rotdamping").and_then(number).unwrap_or(0.),
+                inertia: get("inertia").and_then(number).unwrap_or(1.),
+                volume: get("volume").and_then(number).unwrap_or(0.),
+            }),
+            "ragdollconstraint" => {
+                let axis = |a: &str| {
+                    (
+                        get(&format!("{a}min")).and_then(number).unwrap_or(0.),
+                        get(&format!("{a}max")).and_then(number).unwrap_or(0.),
+                        get(&format!("{a}friction")).and_then(number).unwrap_or(0.),
+                    )
+                };
+                ragdoll.constraints.push(RagdollConstraint {
+                    parent: get("parent")
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(-1),
+                    child: get("child")
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(-1),
+                    axes: [axis("x"), axis("y"), axis("z")],
+                });
+            }
+            "collisionrules" => {
+                for e in block.children() {
+                    let Some(v) = e.text() else { continue };
+                    if e.key.eq_ignore_ascii_case("selfcollisions") {
+                        ragdoll.self_collisions = false;
+                    } else if e.key.eq_ignore_ascii_case("collisionpair") {
+                        let mut parts = v.split(',').map(|p| p.trim().parse::<i32>());
+                        if let (Some(Ok(a)), Some(Ok(b))) = (parts.next(), parts.next()) {
+                            ragdoll.collision_pairs.push((a, b));
+                        }
+                    }
+                }
+            }
+            "animatedfriction" => {
+                let f = |k: &str| get(k).and_then(number).unwrap_or(0.);
+                ragdoll.animated_friction = Some([
+                    f("animfrictionmin"),
+                    f("animfrictionmax"),
+                    f("animfrictiontimein"),
+                    f("animfrictiontimeout"),
+                    f("animfrictiontimehold"),
+                ]);
+            }
+            _ => {}
+        }
+    }
+    (ragdoll.solids.len() > 1 || !ragdoll.constraints.is_empty()).then_some(ragdoll)
+}
+
 /// CBreakParser (props_shared.cpp): the `break` blocks of the PHY KeyValues, in file
 /// order. Unknown keys (placement, multiplayer_break, velocity) are ignored.
 pub fn break_models(entries: &[keyvalues::Entry]) -> Vec<modkit_core::BreakModel> {
@@ -362,6 +479,64 @@ pub fn identity_root_checksum(mdl: &[u8]) -> Result<u32> {
         }
     }
     u32le(mdl, 8)
+}
+
+#[cfg(test)]
+mod ragdoll_tests {
+    use super::*;
+    #[test]
+    #[ignore = "reads the installed game (HL2_ROOT)"]
+    fn installed_npc_ragdolls_parse() {
+        let game = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&game).unwrap();
+        for (path, root) in [
+            ("models/police.phy", "ValveBiped.Bip01_Pelvis"),
+            ("models/combine_soldier.phy", "ValveBiped.Bip01_Pelvis"),
+            (
+                "models/humans/group01/male_07.phy",
+                "ValveBiped.Bip01_Pelvis",
+            ),
+            (
+                "models/humans/group01/female_01.phy",
+                "ValveBiped.Bip01_Pelvis",
+            ),
+            ("models/zombie/classic.phy", "ValveBiped.Bip01_Pelvis"),
+        ] {
+            let data = vfs.read(path).unwrap().unwrap();
+            let count = u32le(&data, 8).unwrap() as usize;
+            let r = ragdoll(&read_keyvalues(&data).unwrap()).unwrap();
+            // One solid block per collision solid, indexed 0..n; every constraint joins
+            // two of them; collision pairs name solids too.
+            assert_eq!(r.solids.len(), count, "{path}");
+            assert!(
+                r.solids
+                    .iter()
+                    .enumerate()
+                    .all(|(i, s)| s.index == i as i32),
+                "{path}"
+            );
+            assert_eq!(r.solids[0].name, root, "{path}");
+            assert_eq!(r.constraints.len(), count - 1, "{path}");
+            let valid = |i: i32| (0..count as i32).contains(&i);
+            assert!(
+                r.constraints.iter().all(|c| valid(c.parent)
+                    && valid(c.child)
+                    && c.axes.iter().all(|a| a.0 <= a.1)),
+                "{path}"
+            );
+            assert!(
+                r.collision_pairs.iter().all(|&(a, b)| valid(a) && valid(b)),
+                "{path}"
+            );
+            assert!(r.solids.iter().all(|s| s.mass > 0.), "{path}");
+        }
+        // A prop's single solid is not a ragdoll.
+        let barrel = vfs
+            .read("models/props_c17/oildrum001.phy")
+            .unwrap()
+            .unwrap();
+        assert!(ragdoll(&read_keyvalues(&barrel).unwrap()).is_none());
+    }
 }
 
 #[cfg(test)]
