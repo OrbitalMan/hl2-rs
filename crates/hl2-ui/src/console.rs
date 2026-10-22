@@ -1298,6 +1298,7 @@ impl Console {
         } else {
             None
         };
+        self.options.parent_focused = self.windows.focus() == Layer::Window(Window::Options);
 
         self.sync_mode();
     }
@@ -3335,12 +3336,15 @@ impl Console {
                     let theme = self.window_theme(window, time);
                     let alpha = self.windows.window_composite_alpha(Window::Options, time);
                     let old_alpha = self.canvas.set_alpha_multiplier(alpha);
+                    let options_focused = self.windows.focus() == Layer::Window(Window::Options);
                     self.options.draw_with_occluders(
                         &Painter {
                             theme: &theme,
                             ..self.painter(Vec2::ZERO, 1.)
                         },
                         &occluders,
+                        Some(time),
+                        Some(options_focused),
                     );
                     self.canvas.set_alpha_multiplier(old_alpha);
                 }
@@ -3563,6 +3567,22 @@ impl Console {
         // The entry (`TextEntry`), or the reverse history search in its place.
         painter.fill(layout.entry, painter.theme.entry_bg);
         painter.sunken(layout.entry);
+        let console_focused = self.windows.focus() == Layer::Window(Window::Console);
+        let entry_focused = !self.console_placement.active();
+        let model = crate::gameui::widgets::TextInputModel::new(console_focused, entry_focused);
+        if model.should_draw_focus_edge() {
+            let edge = painter.theme.entry_focus_edge;
+            painter.border(
+                Rect::new(
+                    layout.entry.x + 1.,
+                    layout.entry.y + 1.,
+                    layout.entry.w - 2.,
+                    layout.entry.h - 2.,
+                ),
+                edge,
+                edge,
+            );
+        }
         let (line, cursor) = match self.editor.search() {
             Some((query, found)) => {
                 let label = localization
@@ -3594,7 +3614,7 @@ impl Console {
         }
         let shown: String = chars[start..end].iter().collect();
         painter.text_in(&shown, inner, Align::Left, painter.theme.text, false);
-        if ((time * 2.) as u64).is_multiple_of(2) {
+        if model.should_draw_caret(time) {
             let x = inner.x + width(start, cursor) + 1.;
             painter.fill(
                 Rect::new(x, inner.y + 4., 1., inner.h - 8.),
@@ -7830,6 +7850,88 @@ mod tests {
         assert!(
             !console.console_open(),
             "console invocation is blocked when quit confirmation is open"
+        );
+    }
+
+    #[test]
+    fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
+        let mut console = Console::default();
+        console.windows.set_time(-1.0);
+        console.windows.open(Window::Console);
+        console.windows.set_time(0.0);
+        console.sync_dialog_windows();
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+
+        let layout = console.dialog_layout();
+        let entry_canvas = layout.canvas(layout.entry);
+        let caret_h = (layout.entry.h - 8.) * layout.scale;
+
+        let has_console_caret = |quads: &[crate::canvas::Quad]| {
+            quads.iter().any(|q| {
+                (q.destination.w - layout.scale).abs() < 1e-3
+                    && (q.destination.h - caret_h).abs() < 1e-3
+                    && q.destination.y >= entry_canvas.y
+                    && q.destination.y <= entry_canvas.y + entry_canvas.h
+            })
+        };
+
+        // 1. Console is in focus: caret blinks at 2.0 Hz (on at 0.0s, off at 0.5s, on at 1.0s)
+        console.draw(0.0);
+        let quads_0 = console.canvas.drain();
+        assert!(
+            has_console_caret(&quads_0),
+            "focused console entry draws blinking caret at t=0.0"
+        );
+
+        console.draw(0.5);
+        let quads_half = console.canvas.drain();
+        assert!(
+            !has_console_caret(&quads_half),
+            "focused console entry hides caret at t=0.5 (blink off)"
+        );
+
+        console.draw(1.0);
+        let quads_1 = console.canvas.drain();
+        assert!(
+            has_console_caret(&quads_1),
+            "focused console entry draws caret at t=1.0 (blink on)"
+        );
+
+        // 2. Options window is opened and raised over Console:
+        console.open_options();
+        console.sync_dialog_windows();
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Options));
+
+        // When Console is out of focus, its entry caret must be strictly hidden at all times!
+        console.draw(0.0);
+        let quads_unfocused_0 = console.canvas.drain();
+        assert!(
+            !has_console_caret(&quads_unfocused_0),
+            "unfocused console entry must not draw caret at t=0.0"
+        );
+
+        console.draw(1.0);
+        let quads_unfocused_1 = console.canvas.drain();
+        assert!(
+            !has_console_caret(&quads_unfocused_1),
+            "unfocused console entry must not draw caret at t=1.0"
+        );
+
+        // 3. When Quit confirmation box appears over console:
+        console.close_window(Window::Options);
+        console.sync_dialog_windows();
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+
+        let loc = console.gameui.localization.clone();
+        console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+        console.sync_dialog_windows();
+        assert_eq!(console.windows.focus(), Layer::Window(Window::Confirmation));
+
+        console.draw(0.0);
+        let quads_confirm = console.canvas.drain();
+        assert!(
+            !has_console_caret(&quads_confirm),
+            "console entry must not draw caret when confirmation dialog is in focus"
         );
     }
 }

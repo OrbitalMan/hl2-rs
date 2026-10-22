@@ -1,5 +1,50 @@
 # MODLOG
 
+## 2026-10-22 UI: Text input with blinking cursor and parent-child focus hierarchy
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- Text input parent-child focus hierarchy and caret blinking models (`hl2-ui::gameui::widgets`):
+  - In `crates/hl2-ui/src/gameui/widgets.rs`, implemented `InputFocus` representing hierarchical focus state (`parent_focused: bool` and `child_focused: bool`). `is_active(&self) -> bool` returns `true` only when both parent dialog and child input element hold focus.
+  - Implemented `BlinkingCaret` providing authentic Source SDK `TextEntry` 2.0 Hz caret blinking cycle (500ms visible, 500ms hidden). Evaluates phase toggling via `.is_multiple_of(2)` and gating via `is_visible(focus: InputFocus, time: f64)`.
+  - Implemented `TextInputModel` combining `InputFocus`, `BlinkingCaret`, and optional interaction timestamp for resetting caret blink phase on typing/interaction (`record_interaction`). Separated continuous `should_draw_focus_edge()` (focus ring) from periodic `should_draw_caret(time)` (1px insertion cursor).
+  - Updated `Painter::text_entry` to accept separate `focused: bool` and `caret_visible: bool` parameters, and added `Painter::text_entry_model(rect, text, enabled, model: &TextInputModel, time: f64)`.
+- Options slider text entry caret blinking and focus gating (`hl2-ui::gameui::options`):
+  - In `crates/hl2-ui/src/gameui/options.rs`, added `pub parent_focused: bool` and `pub now: Option<f64>` to `OptionsDialog`, initialized to `true` and reset in `open()`.
+  - In `OptionsDialog::draw_with_occluders`, resolved effective parent focus (`parent_focused && !modal`, false when SubDialog or Confirmation is active) and passed `time: Option<f64>` and `parent_focused: Option<bool>` down to controls.
+  - In `ControlKind::TextEntry`, constructed `TextInputModel::new(parent_focused, child_focused)` where `child_focused` is true when the entry is actively being edited, rendering the blinking caret via `p.text_entry_model`. The caret blinks at 2.0 Hz when focused and hides immediately when unfocused, when Options loses focus to another window, or when an overlying subdialog or confirmation box is open.
+- Developer console text entry focus and caret blinking (`hl2-ui::console`):
+  - In `crates/hl2-ui/src/console.rs`, synchronized `options.parent_focused = self.windows.focus() == Layer::Window(Window::Options)` in `sync_dialog_windows` and `draw`.
+  - In `Console::draw_console_with_occluders`, evaluated `console_focused = self.windows.focus() == Layer::Window(Window::Console)` and `entry_focused = !self.console_placement.active()`, rendering `entry_focus_edge` and blinking caret via `TextInputModel`. Caret and focus edge hide when console is out of focus (e.g. Options or Quit confirmation is on top).
+- Documentation:
+  - Documented Section 22 ("Text input with blinking cursor and parent-child focus hierarchy") in `docs/gameui.md`.
+
+**Why:** user defect reports:
+1. Slider text entry fields (such as Options > Mouse > Mouse sensitivity) did not blink at all when focused.
+2. Developer console text entry blinked constantly even when the console was out of focus.
+3. Input elements are child elements of dialogs; an input field's caret must blink only when both the parent dialog and the child input element are in focus and listening for keyboard input, and must hide whenever the child is unfocused or its parent dialog loses focus.
+
+**Tested how:**
+- Added unit tests:
+  - `crates/hl2-ui/src/gameui/widgets.rs`:
+    - `input_focus_parent_child_relations`: tests all permutations of `parent_focused` and `child_focused` with constructors and setters.
+    - `blinking_caret_phase_timing_and_focus_gating`: tests authentic 2.0 Hz phase alternation (500ms on, 500ms off) and confirms caret remains hidden when focus is inactive regardless of phase.
+    - `text_input_model_and_interaction_restart`: tests interaction restart timestamp resetting the blink cycle on typing, and verifies focus edge vs. caret visibility conditions.
+    - `painter_text_entry_focus_edge_and_caret_drawing`: tests that `Painter::text_entry` draws `entry_focus_edge` independently of periodic caret drawing.
+  - `crates/hl2-ui/src/gameui/options.rs`:
+    - `options_slider_text_entry_cursor_blinks_when_focused_and_hides_when_unfocused`: tests that a slider text entry (Mouse sensitivity) in Options blinks at 2.0 Hz when focused/editing, hides when unfocused or at off-phase, and hides when Options loses focus to an overlying subdialog.
+  - `crates/hl2-ui/src/console.rs`:
+    - `console_entry_cursor_blinks_when_focused_and_hides_when_unfocused`: tests that the developer console text entry draws its focus edge and blinks its caret at 2.0 Hz only when `Window::Console` holds window focus, and strictly hides both when Options or another window holds focus.
+- Ran `scripts/checks/validate.sh` (351 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
+**Result:** slider text entry fields in Options blink their insertion caret at authentic 2.0 Hz when actively focused/editing, and hide immediately when unfocused or when Options loses focus. Developer console entry focus edge and caret blink only when the console holds window focus, and hide when out of focus.
+
+**Still broken or not tested:** visual appearance in packaged release runs is unverified, needs manual check.
+
+**Next:** continue UI polish / plugin modularization.
+
+
 ## 2026-10-22 UI: Focused subdialog and confirmation appearance with reversible theme focus transitions
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

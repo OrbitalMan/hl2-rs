@@ -341,8 +341,10 @@ pub struct OptionsDialog {
     bink_texture: Option<Texture2D>,
     log: Vec<String>,
     pub(crate) active_tooltip: Option<ActiveTooltip>,
-    /// Time of the current input frame, for double clicks.
-    now: Option<f64>,
+    /// Time of the current input frame, for double clicks and caret blinking.
+    pub now: Option<f64>,
+    /// Whether the parent Options dialog currently holds active window focus.
+    pub parent_focused: bool,
     key_clicks: widgets::DoubleClick<usize>,
     /// Wheel handling for lists: notched on Windows/Linux, accumulated on macOS.
     scroll_mode: widgets::ScrollMode,
@@ -397,6 +399,7 @@ impl Default for OptionsDialog {
             log: Vec::new(),
             active_tooltip: None,
             now: None,
+            parent_focused: true,
             key_clicks: widgets::DoubleClick::default(),
             scroll_mode: widgets::ScrollMode::platform(),
             key_wheel: widgets::ScrollAccumulator::default(),
@@ -741,6 +744,7 @@ impl OptionsDialog {
         self.focus = None;
         self.sub_return_focus = None;
         self.key_press.reset();
+        self.parent_focused = true;
     }
 
     /// The settings were changed outside the dialog (an unconfirmed video change reverted): the
@@ -2094,13 +2098,21 @@ impl OptionsDialog {
     // ---- drawing -------------------------------------------------------------------------
 
     pub fn draw(&self, base: &Painter) {
-        self.draw_with_occluders(base, &[]);
+        self.draw_with_occluders(base, &[], self.now, None);
     }
 
-    pub fn draw_with_occluders(&self, base: &Painter, external_occluders: &[Rect]) {
+    pub fn draw_with_occluders(
+        &self,
+        base: &Painter,
+        external_occluders: &[Rect],
+        time: Option<f64>,
+        parent_focused: Option<bool>,
+    ) {
+        let time_val = time.or(self.now).unwrap_or(0.0);
         let canvas = vec2(base.canvas.width(), base.canvas.height());
         let scale = Painter::scale_for_canvas(canvas);
         let modal = self.sub.is_some() || self.confirm.is_some();
+        let parent_focused = parent_focused.unwrap_or(self.parent_focused) && !modal;
         let options_theme = if self.sub_theme.is_some() || self.confirm_theme.is_some() {
             base.theme.clone()
         } else if modal {
@@ -2228,7 +2240,13 @@ impl OptionsDialog {
                 let (armed, pressed) = state(Target::Control(i));
                 let focus = focused(Target::Control(i));
                 let logical = !modal && self.focus == Some(Target::Control(i));
-                self.draw_widget(&p, widget, &env, (armed, pressed), (focus, logical));
+                self.draw_widget(
+                    &p,
+                    widget,
+                    &env,
+                    ((armed, pressed), (focus, logical)),
+                    (parent_focused, time_val),
+                );
             }
         }
         let labels = ["#GameUI_OK", "#GameUI_Cancel", "#GameUI_Apply"];
@@ -2310,6 +2328,7 @@ impl OptionsDialog {
             } else {
                 let area = Rect::new(0., 0., size.x, size.y);
                 let list = layout_widgets(&self.res, sub.panel(), area, &self.draft, &self.applied);
+                let sub_parent_focused = self.confirm.is_none();
                 for (i, widget) in list.iter().enumerate() {
                     let target = Some(Target::Control(i));
                     let armed = !sub_modal && !is_closing && self.armed == target;
@@ -2318,7 +2337,13 @@ impl OptionsDialog {
                         && (self.pressed == target || self.key_press.pressed() == target);
                     let logical = !sub_modal && !is_closing && self.focus == target;
                     let focus = logical && self.focus_visible;
-                    self.draw_widget(&sp, widget, &env, (armed, pressed), (focus, logical));
+                    self.draw_widget(
+                        &sp,
+                        widget,
+                        &env,
+                        ((armed, pressed), (focus, logical)),
+                        (sub_parent_focused, time_val),
+                    );
                 }
                 self.draw_combo(&sp);
             }
@@ -2381,10 +2406,16 @@ impl OptionsDialog {
         p: &Painter,
         w: &Widget,
         env: &Env,
-        (armed, pressed): (bool, bool),
-        (focused, logical): (bool, bool),
+        ((armed, pressed), (focused, logical)): ((bool, bool), (bool, bool)),
+        (parent_focused, time): (bool, f64),
     ) {
-        self.draw_control(p, w, env, (armed, pressed), (focused, logical));
+        self.draw_control(
+            p,
+            w,
+            env,
+            ((armed, pressed), (focused, logical)),
+            (parent_focused, time),
+        );
         if !focused || !w.enabled {
             return;
         }
@@ -2407,8 +2438,8 @@ impl OptionsDialog {
         p: &Painter,
         w: &Widget,
         env: &Env,
-        (armed, pressed): (bool, bool),
-        (focused, logical): (bool, bool),
+        ((armed, pressed), (focused, logical)): ((bool, bool), (bool, bool)),
+        (parent_focused, time): (bool, f64),
     ) {
         let loc = &self.res.localization;
         let c = w.control;
@@ -2490,7 +2521,7 @@ impl OptionsDialog {
                 )
             }
             (ControlKind::TextEntry, binding) => {
-                let (text, caret) = match (&self.editing, binding) {
+                let (text, child_focused) = match (&self.editing, binding) {
                     (Some(editing), Some(Binding::Entry(value))) if editing.value == value => {
                         (editing.text.clone(), true)
                     }
@@ -2499,7 +2530,8 @@ impl OptionsDialog {
                     }
                     _ => (label.clone(), false),
                 };
-                p.text_entry(w.rect, &text, w.enabled, caret)
+                let model = widgets::TextInputModel::new(parent_focused, child_focused);
+                p.text_entry_model(w.rect, &text, w.enabled, &model, time);
             }
             (ControlKind::Button, _) => p.button(
                 w.rect,
@@ -3543,6 +3575,97 @@ pub(crate) mod tests {
         };
         h.dialog.draw(&painter);
         h.canvas.drain()
+    }
+
+    /// Quads of the dialog drawn at a specific timestamp.
+    fn drawn_at(h: &Harness, time: f64) -> Vec<crate::canvas::Quad> {
+        let painter = Painter {
+            canvas: &h.canvas,
+            fonts: &h.fonts,
+            theme: &h.theme,
+            origin: Vec2::ZERO,
+            scale: 1.,
+        };
+        h.dialog
+            .draw_with_occluders(&painter, &[], Some(time), None);
+        h.canvas.drain()
+    }
+
+    #[test]
+    fn options_slider_text_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
+        let mut h = Harness::new();
+        h.tab(Tab::Mouse);
+
+        let has_caret = |quads: &[crate::canvas::Quad]| {
+            quads.iter().any(|q| {
+                q.destination.x >= 793.0
+                    && q.destination.x <= 841.0
+                    && q.destination.y == 259.0
+                    && q.destination.w == 1.0
+                    && q.destination.h == 16.0
+            })
+        };
+
+        // Before clicking the text entry, it is not focused and shows no caret.
+        let quads_init = drawn_at(&h, 0.0);
+        assert!(
+            !has_caret(&quads_init),
+            "unfocused slider entry must not draw caret"
+        );
+
+        // Click the mouse sensitivity text entry field at (410, 50).
+        h.click(page(410., 50.));
+        assert!(
+            h.dialog.editing.is_some(),
+            "clicking entry activates editing"
+        );
+
+        // In focus: caret blinks at 2.0 Hz (visible at 0.0s, invisible at 0.5s, visible at 1.0s).
+        let quads_0 = drawn_at(&h, 0.0);
+        assert!(
+            has_caret(&quads_0),
+            "caret must be visible at phase on (t=0.0)"
+        );
+
+        let quads_half = drawn_at(&h, 0.5);
+        assert!(!has_caret(&quads_half), "caret must blink off at t=0.5");
+
+        let quads_1 = drawn_at(&h, 1.0);
+        assert!(has_caret(&quads_1), "caret must blink back on at t=1.0");
+
+        // Parent dialog losing focus (e.g. dev console opened on top of Options):
+        // Caret must be strictly hidden even during the phase-on times!
+        h.dialog.parent_focused = false;
+        let quads_unfocused_0 = drawn_at(&h, 0.0);
+        assert!(
+            !has_caret(&quads_unfocused_0),
+            "caret must be hidden when parent dialog is out of focus (t=0.0)"
+        );
+        let quads_unfocused_1 = drawn_at(&h, 1.0);
+        assert!(
+            !has_caret(&quads_unfocused_1),
+            "caret must be hidden when parent dialog is out of focus (t=1.0)"
+        );
+        h.dialog.parent_focused = true;
+
+        // When a modal subdialog (e.g. Video Advanced) is open over Options, parent Options
+        // is in the background and its child inputs must not show carets.
+        h.dialog.sub = Some(Sub::Gamma);
+        let quads_sub = drawn_at(&h, 0.0);
+        assert!(
+            !has_caret(&quads_sub),
+            "caret must be hidden when subdialog is open over Options"
+        );
+        h.dialog.sub = None;
+
+        // When editing is committed / finished, caret must disappear.
+        h.dialog.commit_entry();
+        assert!(h.dialog.editing.is_none());
+        let quads_committed = drawn_at(&h, 0.0);
+        assert!(
+            !has_caret(&quads_committed),
+            "caret must be hidden when entry is committed"
+        );
     }
 
     #[test]

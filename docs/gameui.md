@@ -1433,5 +1433,29 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
     - `console::tests::subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused`
   - Ran `scripts/checks/validate.sh` (345 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
 
+## 22. Text input with blinking cursor and parent-child focus hierarchy (2026-10-22)
+
+- **Focus hierarchy and blinking caret models (`hl2-ui::gameui::widgets`):**
+  - Added `InputFocus` (`crates/hl2-ui/src/gameui/widgets.rs`): models child-of-dialog focus relationships via `parent_focused: bool` and `child_focused: bool`. Under VGUI hierarchy rules, `is_active()` returns `true` if and only if both parent dialog and child control are focused. When a parent dialog loses focus (or has an overlying modal dialog), child inputs immediately become inactive.
+  - Added `BlinkingCaret`: models the authentic Source SDK (`vgui_controls/TextEntry.cpp`) caret blink cycle (`rate: f64`, default 2.0 Hz -> 500 ms visible, 500 ms hidden). Evaluates phase toggling via `.is_multiple_of(2)`. Carets are only visible when `focus.is_active()` is `true` and the current periodic phase is on; when out of focus, carets are unconditionally hidden.
+  - Added `TextInputModel`: unites `InputFocus`, `BlinkingCaret`, and optional interaction timestamp (`record_interaction` / SDK `ResetCursorBlink`). Distinguishes between `should_draw_focus_edge()` (which stays visible continuously while focused) and `should_draw_caret(time)` (which blinks over time).
+  - Updated `Painter::text_entry` to accept `(focused: bool, caret_visible: bool)` and added `Painter::text_entry_model(rect, text, enabled, model, time)`.
+- **Options dialog slider entry caret blinking and focus gating (`hl2-ui::gameui::options`):**
+  - Added `pub parent_focused: bool` to `OptionsDialog`, synchronized by `Console::sync_dialog_windows` and `Console::draw`.
+  - In `OptionsDialog::draw_with_occluders`, evaluated parent focus (`parent_focused && !modal`, false when SubDialog or Confirmation is open) and child focus (`editing.value == value`).
+  - Slider text entries (e.g. Options > Mouse > Mouse sensitivity) now blink their insertion caret at 2.0 Hz when focused and editing, and completely hide their carets when the input loses focus, when Options loses focus to another window, or when an overlying subdialog or confirmation box is open.
+- **Developer console text entry caret gating (`hl2-ui::console`):**
+  - In `Console::draw_console_with_occluders`, determined `console_focused` (`self.windows.focus() == Layer::Window(Window::Console)`) and `entry_focused` (`!self.console_placement.active()`).
+  - Gated console entry caret drawing and inner `entry_focus_edge` border with `TextInputModel`. The console caret now blinks when the developer console holds focus, and is strictly hidden whenever the console is out of focus (e.g. Options or Confirmation box is raised over it).
+- **Verification:**
+  - Unit tests added:
+    - `widgets::tests::input_focus_parent_child_relations`: tests all focus permutations and active states.
+    - `widgets::tests::blinking_caret_phase_timing_and_focus_gating`: tests 2.0 Hz 500 ms phase math and focus gating.
+    - `widgets::tests::text_input_model_and_interaction_restart`: tests focus edge vs caret visibility and typing restart.
+    - `widgets::tests::painter_text_entry_focus_edge_and_caret_drawing`: tests quad generation for focus edge and 1px caret.
+    - `gameui::options::tests::options_slider_text_entry_cursor_blinks_when_focused_and_hides_when_unfocused`: tests mouse sensitivity slider entry blinking at 0.0s/0.5s/1.0s and hiding when unfocused, subdialog opened, or committed.
+    - `console::tests::console_entry_cursor_blinks_when_focused_and_hides_when_unfocused`: tests console entry caret blinking when focused and hiding when Options or Quit confirmation is on top.
+  - Ran `scripts/checks/validate.sh` (351 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
 
 
