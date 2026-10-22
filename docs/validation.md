@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Session 29 owner playtest fixes, zombies, fire (2026-10-22)
+
+- Packaged runs (artifacts/s29, `run.sh <fixture> <frames>`): cancop-throw (pickup -> NPC_MetroPolice.Cupcop.PutItInTheTrash; thrown can: thrown_object_hits 1, logic_achievement.FireEvent 1, throwcan_trigger -> Cupcop.Failure), zombie-look (classic/fast/poison zombies with headcrab bodygroups, capture), zombie-hall (`ent_create npc_zombie` 190 units ahead of the walking player: chase, 9 claw hits in 19 s, zombie cues started after the preload), idle-plaza (60 s at (-2600,-2900,90): 6 METROPOLICE lines, 10 before), barrel-burn (`prop_physics_create props_c17/oildrum001_explosive.mdl`, two pistol shots: General.BurningObject at 2.85 s, explosion at 5.89 s).
+- Native: oracle plaza dwell with `developer 1; snd_showstart 1` (snd_showstart prints nothing without developer 1): one !METROPOLICE_IDLE0 in 60 s.
+- Regression artifacts/s29-regression: weapons 17/17, attention 26/26, movement 25/26 (doll01); owned suite 55 pass; hl2-simulation 347; workspace release tests fail only the two known release-only should_panic image tests.
+
 ## First-map player-triggered scene checks (2026-10-21)
 
 From checkout run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-player-route-20261021/verify.py` and `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-player-route-20261021/verify_seal.py`. Expected passed:true,512 events/253 paired calls,six exact baseline/original bodies/six relocated hook entries,and fresh_never_attached_playing_snapshot:true. Independent retained-byte checks reconstruct29 player snapshots plus fresh named scene/actor state,source clocks and entity generations,request input pointers and output self/self/0 identity. Instrumented actual player movement triggers the genuine policy0 passenger scene at114.180;fresh control observes it playing at114.420. Console positions corroborate settled raw feet+64 eye positions;in-motion timestamps are asynchronous.
