@@ -1,5 +1,11 @@
 # Design
 
+## Native doorway and SECTION validation plan (2026-10-22, research only)
+
+Continue the verified input-led first-map route in a new private mount, then observe `security_intro_02` and its authored transition to `security_01`. Before launch, bind the required pause/resume/readiness functions to exact pass14 path/hash/address/baseline/original bodies and PE entry bytes. Replace cached output labels with a matching active `StartPlayback` call and a fresh controller generation; reject mismatches. Record scene time, pause reasons, readiness results, actor movement, incoming arguments and scoped outputs with raw source reads. Keep blocked inputs and rejected captures.
+
+Separate authored SECTION records from executed pause/recovery behavior. Reproduce the route without direct scene inputs, teleport, seeded actors or actor replacement, and compare a fresh process without instrumentation where practical. Keep game/rewrite process and cursor guards. Research scripts and native evidence remain outside Git; this plan changes no Rust behavior. Completion requires bounded evidence checks, committed reviewed documentation and a precise next handoff; first-map completion and Rust parity stay unclaimed until validated.
+
 ## Native customs/pen route: input and output context (2026-10-22)
 
 The new instrumented route observes25 authored choreography controller names and genuine customs/pen/Barney introduction requests. Current controller and accepted actor slot/serial/table identities are checked.164 caller-name/output relationships independently join the original BSP. Start acceptance remains separate from complete scene playback;the first pen actor generation was rejected and a later fresh lookup supplies only a later-phase Barney binding.
