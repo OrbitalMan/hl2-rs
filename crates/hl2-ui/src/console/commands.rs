@@ -256,9 +256,29 @@ pub const COMMANDS: &[Spec] = &[
         &[Arg::Free],
     ),
     cvar(
+        "mat_colorcorrection",
+        "mat_colorcorrection [0|1]: query or toggle color correction",
+        BOOLEAN,
+    ),
+    cvar(
         "mat_hdr_level",
         "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)",
         &[Arg::Values(&["0", "1", "2"])],
+    ),
+    cvar(
+        "mat_motion_blur_enabled",
+        "mat_motion_blur_enabled [0|1]: query or toggle motion blur",
+        BOOLEAN,
+    ),
+    cvar(
+        "mat_queue_mode",
+        "mat_queue_mode [-1|0|1|2]: query or set multicore rendering (-1=multicore, 0=single threaded)",
+        &[Arg::Values(&["-1", "0", "1", "2"])],
+    ),
+    cvar(
+        "mat_vsync",
+        "mat_vsync [0|1]: query or toggle vertical sync",
+        BOOLEAN,
     ),
     command(
         "mat_setvideomode",

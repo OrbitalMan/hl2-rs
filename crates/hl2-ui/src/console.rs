@@ -2275,6 +2275,20 @@ impl Console {
                     return Err(usage());
                 }
             }
+            "mat_colorcorrection" => {
+                if args.is_empty() {
+                    let val = u8::from(self.config.video.advanced.color_correction);
+                    self.log(format!("\"mat_colorcorrection\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = parse_bool(args[0]).map_err(|_| usage())?;
+                    self.config.video.advanced.color_correction = on;
+                    let _ = self.config.save();
+                    self.log(format!("mat_colorcorrection {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
             "mat_hdr_level" => {
                 if args.is_empty() {
                     let lvl = self.config.video.hdr.level();
@@ -2287,6 +2301,56 @@ impl Console {
                         })?;
                     let _ = self.config.save();
                     self.log(format!("mat_hdr_level {lvl}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_motion_blur_enabled" => {
+                if args.is_empty() {
+                    let val = u8::from(self.config.video.advanced.motion_blur);
+                    self.log(format!("\"mat_motion_blur_enabled\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = parse_bool(args[0]).map_err(|_| usage())?;
+                    self.config.video.advanced.motion_blur = on;
+                    let _ = self.config.save();
+                    self.log(format!("mat_motion_blur_enabled {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_queue_mode" => {
+                if args.is_empty() {
+                    let val = if self.config.video.advanced.multicore {
+                        "-1"
+                    } else {
+                        "0"
+                    };
+                    self.log(format!("\"mat_queue_mode\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let mode: i32 = args[0].parse().map_err(|_| usage())?;
+                    let multicore = mode != 0;
+                    self.config.video.advanced.multicore = multicore;
+                    let _ = self.config.save();
+                    self.log(format!(
+                        "mat_queue_mode {}",
+                        if multicore { "-1" } else { "0" }
+                    ));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_vsync" => {
+                if args.is_empty() {
+                    let val = u8::from(self.config.video.advanced.vsync);
+                    self.log(format!("\"mat_vsync\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = parse_bool(args[0]).map_err(|_| usage())?;
+                    self.config.video.advanced.vsync = on;
+                    let _ = self.config.save();
+                    self.log(format!("mat_vsync {}", u8::from(on)));
                     return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
                 } else {
                     return Err(usage());
@@ -2421,7 +2485,17 @@ impl Console {
             "fov" | "fov_desired" => format!("{:.0}", c.video.fov),
             "vertical_fov" => format!("{:.0}", c.video.vertical_fov),
             "viewmodel_fov" => format!("{:.0}", c.video.viewmodel_fov),
+            "mat_colorcorrection" => u8::from(c.video.advanced.color_correction).to_string(),
             "mat_hdr_level" => c.video.hdr.level().to_string(),
+            "mat_motion_blur_enabled" => u8::from(c.video.advanced.motion_blur).to_string(),
+            "mat_queue_mode" => {
+                if c.video.advanced.multicore {
+                    "-1".to_owned()
+                } else {
+                    "0".to_owned()
+                }
+            }
+            "mat_vsync" => u8::from(c.video.advanced.vsync).to_string(),
             "background_map" => self.background_map()?.to_owned(),
             "con_filter_enable" => self.con_filter.to_string(),
             "con_filter_text" => self.con_filter_text.clone(),
@@ -8622,5 +8696,43 @@ mod tests {
         assert_eq!(console.config.video.viewmodel_fov, 40.0); // clamped to 40
         console.submit("viewmodel_fov 120");
         assert_eq!(console.config.video.viewmodel_fov, 80.0); // clamped to 80
+    }
+
+    #[test]
+    fn video_advanced_presentation_cvars_query_set_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // mat_vsync
+        assert_eq!(console.cvar_value("mat_vsync").as_deref(), Some("1"));
+        console.submit("mat_vsync 0");
+        assert!(!console.config.video.advanced.vsync);
+        assert_eq!(console.cvar_value("mat_vsync").as_deref(), Some("0"));
+        console.submit("mat_vsync 1");
+        assert!(console.config.video.advanced.vsync);
+        assert_eq!(console.cvar_value("mat_vsync").as_deref(), Some("1"));
+
+        // mat_colorcorrection
+        assert_eq!(console.cvar_value("mat_colorcorrection").as_deref(), Some("1"));
+        console.submit("mat_colorcorrection 0");
+        assert!(!console.config.video.advanced.color_correction);
+        assert_eq!(console.cvar_value("mat_colorcorrection").as_deref(), Some("0"));
+
+        // mat_motion_blur_enabled
+        assert_eq!(console.cvar_value("mat_motion_blur_enabled").as_deref(), Some("1"));
+        console.submit("mat_motion_blur_enabled 0");
+        assert!(!console.config.video.advanced.motion_blur);
+        assert_eq!(console.cvar_value("mat_motion_blur_enabled").as_deref(), Some("0"));
+
+        // mat_queue_mode
+        assert_eq!(console.cvar_value("mat_queue_mode").as_deref(), Some("-1"));
+        console.submit("mat_queue_mode 0");
+        assert!(!console.config.video.advanced.multicore);
+        assert_eq!(console.cvar_value("mat_queue_mode").as_deref(), Some("0"));
+        console.submit("mat_queue_mode -1");
+        assert!(console.config.video.advanced.multicore);
+        assert_eq!(console.cvar_value("mat_queue_mode").as_deref(), Some("-1"));
+        console.submit("mat_queue_mode 2");
+        assert!(console.config.video.advanced.multicore);
     }
 }
