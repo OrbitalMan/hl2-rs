@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Throw/impact and continuation-index acceptance (2026-10-22)
+
+Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-crate-throw-20261022g/verify_seal.py`, the sibling `scene-window-impact-20261022h/verify_seal.py`, and `C:/Python310/python.exe -B ../../work/publishing/verify-window-exit-index-20261022d.py`. Expected seals:54 files/13 bindings/13 bodies/914 records;25 files/nine bindings/five bodies/463 records. The index checks five pinned manifests/receipts, exact source identities and all66 distinct pass14 body hashes/69 occurrences, plus five absent exact startup procedures and paged queries. It is metadata/identity acceptance, not a native execution or full semantic test.
+
+Raw checks retain branch precedence, Shutdown/drop-before-application ordering, canonical/interface identity, file-backed scalar/default sources, collision-wrapper floating-result use and original glass table order. The first index/verifier draft's five-body undercount was rejected; normalization now handles both manifest schemas and root-relative nested paths, with independent expected per-root counts. Effective live throw settings, physics implementations/units, actual release/throw/collision/window break, exit and Rust parity are **not tested**. No game launch or Rust build/tests occurred for these offline/documentation changes.
+
 ## Window/crate offline acceptance (2026-10-22)
 
 Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-window-route-20261022e/verify_seal.py` and the sibling `scene-crate-use-20261022f/verify_seal.py`. Expected passed:true: window116 retained files/26 bindings,23 bodies/2,569 instruction records/13 selected dynamic metadata stores; crate76 files/14 bindings,18 bodies/1,093 records/five authored crates/five pickup edges. These independently verify exact immutable identities, PE bytes, owned BSP/propdata and closed file sets. The window query supports health/fields/bodies with bounded paging.

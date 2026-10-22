@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Sealed held-throw and window-impact bridge (2026-10-22)
+
+Private `scene-crate-throw-20261022g` passes54 retained files/13 external identities,13 exact bodies/914 instruction records; `scene-window-impact-20261022h` passes25 files/nine identities,five bodies/463 records. The first binds Use/Shutdown/drop/application ordering and scalar/default sources without observing live settings or motion. The second binds the window collision virtual, default wrapper, callback forwarding and selected glass table bytes/lookup without executing collision damage or breaking glass. The owner's game remained undisturbed.
+
+Private `work/publishing/research-window-exit-index-20261022d.json` and `window_exit_query.py` provide paged metadata over five sealed roots:66 distinct exact bodies,69 retained occurrences and five missing exact startup procedures retained raw-only. Missing stubs and navigation-only bodies do not close the original authored gaps or establish complete semantic coverage. An initial navigator undercounted mixed manifest formats/nested paths; that result is rejected and retained, and the corrected audit independently requires each root's10/23/18/13/5 body occurrences. First-map completion and Rust parity remain false/untested.
+
 ## Offline breakable and crate-use supplements (2026-10-22)
 
 `scene-window-route-20261022e` is sealed at116 retained files/26 bindings:23 exact bodies,2,569 checked instruction records,13 selected metadata stores and fresh ordered owned-propdata parsing/source identities. It binds CBreakable's damage/health/output paths and the retail propdata24 -> Glass.Window mapping. Authored health17 and profile health15 remain separate evidence; the reviewed successful parser path predicts15 conditionally, without measuring live health or breaking a window. The rejected CRLF-normalizing verifier draft and missing exact startup stub0x10008400 remain retained.

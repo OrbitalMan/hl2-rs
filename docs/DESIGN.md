@@ -1,5 +1,11 @@
 # Design
 
+## Held-throw and glass-impact static boundaries (2026-10-22)
+
+Retail held-object Use checks owner/handle, release/secondary/error/movable guards before primary throw. Shutdown/drop notification precedes two later physics vector-application calls; a thrown flag or drop output therefore cannot prove those calls or actual motion. The mass scalar is clamped/remapped separately from pickup eligibility. Read the effective throw setting rather than substituting its raw startup default, and preserve indirect physics calls as unresolved until their target/units/behavior are verified. No initial-velocity or flight-trajectory contract follows from these static call sites.
+
+The selected CBreakable collision callback distinguishes immediate-break and no-physics-damage flags from the normal branch. The authored window flags select normal handling, subject to live-state verification. That branch reads the damage-table field through its propdata interface, captures a floating return despite the wrapper's inferred void signature, and forwards a positive result through the damage callback path. The raw glass lookup walks rows as stored and returns a preceding damage entry; retain its out-of-order final linear row rather than sorting/interpolating. Full collision-damage arithmetic, callback timing, effective state and actual break remain untested. No Rust change; future runtime research waits until the owner-game/cursor prerequisites permit it.
+
 ## Breakable health precedence and crate-use evidence (2026-10-22)
 
 Retail CBreakable metadata binds integer current/max health, the damage-mode byte, canonical/secondary interfaces and distinct OnHealthChanged/OnBreak outputs. The reviewed health helper compares/stores an integer; it converts to floats only for the clamped health/max ratio. Changed-health output precedes the nonpositive-health break branch, and a filter's successful method return is not proof of applied damage. Preserve output identity, raw argument representation, breaker handle generation and entity state separately. Exact signatures inferred by the decompiler are not typed ABI evidence.

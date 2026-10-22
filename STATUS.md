@@ -1,5 +1,11 @@
 # STATUS
 
+## Offline throw/collision ordering checkpoint (2026-10-22)
+
+The held-object throw supplement `scene-crate-throw-20261022g` is sealed at54 retained files/13 bindings,13 exact bodies/914 instruction records. Primary throw calls Shutdown(true), including detachment/drop notification, before the physics application calls. The selected branch constructs a mass-scaled vector from the effective throw setting; the raw default1000 is not an observed live value, and the indirect physics methods/units/actual motion remain untested.
+
+The separate `scene-window-impact-20261022h` seal passes25 files/nine bindings,five bodies/463 instruction records. It connects the breakable collision callback to the selected damage wrapper and callback enqueue path, preserving the glass table's nonmonotonic row order. Neither a pickup/drop output nor a collision/queue entry proves actual carry, flight, window break or exit. All current work remained offline under the owner's instruction. A private metadata navigator now checks66 distinct exact bodies/69 retained body occurrences across five sealed roots, with five separate raw-only missing startup procedures. This is an evidence index, not semantic/campaign completion; original16 authored gaps/four missing procedures remain unchanged.
+
 ## Offline window health and crate-use checkpoint (2026-10-22)
 
 Private `scene-window-route-20261022e` is sealed: 116 retained files/26 external bindings; its breakable audit checks 23 exact bodies, 2,569 instruction records and 13 selected metadata stores. BSP window185 authors health17/propdata24; retail index24 selects Glass.Window. The owned profile authors health15/bullet modifier0.5, and the reviewed successful parser path can replace authored health before maximum-health initialization. **Live window health is not observed**:15 is a conditional static prediction, not a measured replacement for17. Integer-health and normalized-float-output paths are distinguished from a misleading inferred signature.

@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline throw/impact and private navigator checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Material static worker exit_registration researched the throw branch with inherited model family; exact identifier unavailable.
+
+**Changed / Why:** Sealed held-throw ordering and the window collision-to-damage bridge; added a paged private evidence navigator to support the next bounded runtime observation while preserving the owner's running game.
+
+**Tested how / Result:** Throw seal passes54 retained files/13 bindings,13 bodies/914 records. Impact seal passes25/nine,five bodies/463 records. Corrected navigator verifies five roots/66 distinct exact bodies/69 occurrences/five raw-only missing startup procedures; the undercounted initial draft is rejected and retained. No native execution or Rust implementation change.
+
+**Still broken or not tested / Next:** Actual live state/settings, release/throw/contact/damage/window break/exit, native units and Rust parity untested. Keep original authored gaps. Finish the precise continuation receipt and clean/synced publication; later idle-session runtime must bind fresh identities and observe resulting state/motion, not just outputs.
+
 ## 2026-10-22 offline window-health and crate-use milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Material static worker exit_registration researched crate use with inherited model family; exact identifier unavailable.
