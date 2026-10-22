@@ -68,6 +68,8 @@ struct Particle {
     initial_alpha: f32,
     sequence: usize,
     flip: bool,
+    /// The particle's random-table index (per-particle randoms of operators).
+    seed: u32,
 }
 
 /// One running system and its children.
@@ -117,12 +119,22 @@ pub struct Runtime {
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
-/// Source's Bias(x, amount): x^(log(amount)/log(0.5)).
+/// The particle library's bias (retail C_OP_InterpolateRadius / C_OP_FadeOut: InitParams
+/// stores 1/bias - 2, Operate divides x by (1 - x) * that + 1; bias 0 means 0.5).
 fn bias(x: f32, amount: f32) -> f32 {
-    if amount <= 0. || amount >= 1. || (amount - 0.5).abs() < 1e-6 {
-        return x;
-    }
-    x.powf(amount.ln() / 0.5f32.ln())
+    let amount = if amount == 0. { 0.5 } else { amount };
+    x / ((1. / amount - 2.) * (1. - x) + 1.)
+}
+/// A per-particle random in [0, 1) for one operator (the library's random table indexed
+/// by the particle's seed plus the operator's offset).
+fn particle_random(seed: u32, operator: usize) -> f32 {
+    let mut x = seed ^ (operator as u32).wrapping_mul(0x9e37_79b9);
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb_352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846c_a68b);
+    x ^= x >> 16;
+    (x >> 8) as f32 / (1u32 << 24) as f32
 }
 fn smooth(t: f32) -> f32 {
     t * t * (3. - 2. * t)
@@ -249,14 +261,18 @@ impl Runtime {
             })
             .collect();
         let mut particles = std::mem::take(&mut instance.particles);
-        for op in &def.operators {
+        for (op_index, op) in def.operators.iter().enumerate() {
             match op.function.as_str() {
                 "Movement Basic" => {
                     let gravity = op.vector("gravity").unwrap_or_default()
                         + forces.iter().copied().sum::<Vec3>();
+                    // Retail C_OP_BasicMovement: drag normalized to 30 steps a second,
+                    // exp(log(1 - drag) x 30 x dt), times dt / previous dt (1 here: fixed
+                    // ticks).
                     let drag = op.float("drag").unwrap_or(0.).clamp(0., 1.);
+                    let keep = (1. - drag).powf(30. * dt);
                     for p in &mut particles {
-                        let velocity = (p.position - p.previous) * (1. - drag);
+                        let velocity = (p.position - p.previous) * keep;
                         p.previous = p.position;
                         p.position += velocity + gravity * dt * dt;
                     }
@@ -273,14 +289,18 @@ impl Runtime {
                     );
                     let b = op.float("scale_bias").unwrap_or(0.5);
                     let ease = op.int("ease_in_and_out").unwrap_or(0) != 0;
-                    for p in &mut particles {
-                        let f =
-                            ((t - p.created) / p.life.max(1e-3) - start) / (end - start).max(1e-3);
-                        let mut f = bias(f.clamp(0., 1.), b);
-                        if ease {
-                            f = smooth(f);
+                    // Retail C_OP_InterpolateRadius: only particles whose life fraction is
+                    // in [start, end) change; easing replaces the bias.
+                    if start < end {
+                        for p in &mut particles {
+                            let life = (t - p.created) / p.life.max(1e-3);
+                            if p.life <= 0. || life < start || life >= end {
+                                continue;
+                            }
+                            let f = (life - start) / (end - start);
+                            let f = if ease { smooth(f) } else { bias(f, b) };
+                            p.radius = p.initial_radius * lerp(from, to, f);
                         }
-                        p.radius = p.initial_radius * lerp(from, to, f);
                     }
                 }
                 "Color Fade" => {
@@ -291,37 +311,72 @@ impl Runtime {
                         op.float("fade_end_time").unwrap_or(1.),
                     );
                     let ease = op.int("ease_in_and_out").unwrap_or(0) != 0;
-                    for p in &mut particles {
-                        let f =
-                            ((t - p.created) / p.life.max(1e-3) - start) / (end - start).max(1e-3);
-                        let mut f = f.clamp(0., 1.);
-                        if ease {
-                            f = smooth(f);
+                    // Retail C_OP_ColorInterpolate: skipped when start == end.
+                    if start != end {
+                        for p in &mut particles {
+                            if p.life <= 0. {
+                                continue;
+                            }
+                            let f = ((t - p.created) / p.life - start) / (end - start);
+                            let mut f = f.clamp(0., 1.);
+                            if ease {
+                                f = smooth(f);
+                            }
+                            p.color = p.initial_color.lerp(target, f);
                         }
-                        p.color = p.initial_color.lerp(target, f);
                     }
                 }
                 "Alpha Fade In Random" | "Alpha Fade Out Random" => {
+                    // Retail C_OP_FadeIn / C_OP_FadeOut: each particle's fade time is
+                    // r^exponent x (max - min) + min (r from its random table); ages are
+                    // life fractions when proportional (default 1). Fade in: spline, or
+                    // f^"fade in curve exponent" when that is set. Fade out: spline with
+                    // "ease in and out" (default 1), else 1 - Bias(f, "fade bias").
                     let fade_in = op.function == "Alpha Fade In Random";
-                    let (min, max) = if fade_in {
-                        (op.float("fade in time min"), op.float("fade in time max"))
-                    } else {
-                        (op.float("fade out time min"), op.float("fade out time max"))
+                    let key = |name: &str| {
+                        if fade_in {
+                            format!("fade in {name}")
+                        } else {
+                            format!("fade out {name}")
+                        }
                     };
-                    let time = lerp(min.unwrap_or(0.), max.unwrap_or(0.), 0.5);
-                    let proportional = op.int("proportional 0/1").unwrap_or(0) != 0;
+                    let min = op.float(&key("time min")).unwrap_or(0.25);
+                    let max = op.float(&key("time max")).unwrap_or(0.25);
+                    let exponent = op.float(&key("time exponent")).unwrap_or(1.);
+                    let proportional = op.int("proportional 0/1").unwrap_or(1) != 0;
+                    let curve = op.float("fade in curve exponent").unwrap_or(0.);
+                    let ease = op.int("ease in and out").unwrap_or(1) != 0;
+                    let fade_bias = op.float("fade bias").unwrap_or(0.5);
                     for p in &mut particles {
-                        let span = if proportional { time * p.life } else { time };
+                        let r = particle_random(p.seed, op_index);
+                        let span = r.powf(exponent) * (max - min) + min;
                         if span <= 0. {
                             continue;
                         }
-                        let age = t - p.created;
-                        let f = if fade_in {
-                            age / span
+                        let (age, life) = if proportional {
+                            ((t - p.created) / p.life.max(1e-3), 1.)
                         } else {
-                            (p.life - age) / span
+                            (t - p.created, p.life)
                         };
-                        p.alpha = p.initial_alpha * f.clamp(0., 1.);
+                        if fade_in {
+                            let age = if proportional { age.clamp(0., 1.) } else { age };
+                            if age < span {
+                                let f = (age / span).clamp(0., 1.);
+                                let f = if curve == 0. {
+                                    smooth(f)
+                                } else {
+                                    f.powf(curve)
+                                };
+                                p.alpha = p.initial_alpha * f;
+                            }
+                        } else {
+                            let start = life - span;
+                            if start < age {
+                                let f = ((age - start) / span).clamp(0., 1.);
+                                let f = if ease { smooth(f) } else { bias(f, fade_bias) };
+                                p.alpha = (p.initial_alpha * (1. - f)).max(0.);
+                            }
+                        }
                     }
                 }
                 "Movement Lock to Bone" => {
@@ -426,7 +481,9 @@ impl Runtime {
             initial_alpha: 0.,
             sequence: 0,
             flip: false,
+            seed: 0,
         };
+        p.seed = (self.random() * u32::MAX as f32) as u32;
         let mut velocity = Vec3::ZERO;
         // Initializers run in order; `remap initial scalar` reads fields set before it.
         for op in &def.initializers {
@@ -749,6 +806,26 @@ pub fn load(vfs: &source_assets::vpk::Vfs) -> (Library, Vec<String>) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn retail_bias_and_per_particle_fade_randoms() {
+        // Schlick bias as the retail operators compute it: 0.5 is linear, 0 means 0.5,
+        // the curve passes through (0.5, bias).
+        for x in [0., 0.25, 0.5, 1.] {
+            assert!((bias(x, 0.5) - x).abs() < 1e-6);
+            assert!((bias(x, 0.) - x).abs() < 1e-6);
+        }
+        assert!((bias(0.5, 0.4) - 0.4).abs() < 1e-6);
+        assert!((bias(1., 0.4) - 1.).abs() < 1e-6);
+        // Per-particle randoms differ between particles and operators, stay in [0, 1)
+        // and repeat for the same pair.
+        let values: Vec<f32> = (0..64)
+            .map(|seed| particle_random(seed * 7919, 3))
+            .collect();
+        assert!(values.iter().all(|v| (0. ..1.).contains(v)));
+        assert!(values.iter().any(|v| *v < 0.3) && values.iter().any(|v| *v > 0.7));
+        assert_ne!(particle_random(5, 1), particle_random(5, 2));
+        assert_eq!(particle_random(5, 1), particle_random(5, 1));
+    }
     #[test]
     #[ignore = "reads the installed game (HL2_ROOT)"]
     fn burning_character_runs_and_draws() {

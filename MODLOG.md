@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 session 31: particle operators from the SDK particle library
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** The session 30 particle operators followed parameter names only. Decompiled Valve's compiled particle library from the SDK (particles.lib, linked into a private analysis DLL) and ported Radius Scale, Alpha Fade In/Out Random, Color Fade and Movement Basic drag exactly as decoded, with the unpack-table defaults.
+
+**Tested how / Result:** Unit test (retail bias form, per-particle randoms), owned burning_character test, packaged burning barrel (narrower and taller than before, closer to native). hl2-simulation 359 tests, strict Clippy/fmt.
+
+**Still broken or not tested / Next:** Movement Basic's exp/log is inferred from the call shape. The library is the SDK build, not byte-compared with retail client.dll. Remaining: Position on Model Random, Lock to Bone, the noise initializers, dual sequences. No frame-by-frame native comparison.
+
 ## 2026-10-22 session 31: NPC death ragdolls
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
