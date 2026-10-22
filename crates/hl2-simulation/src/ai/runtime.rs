@@ -3339,9 +3339,12 @@ impl AiRuntime {
         let origin = state.origin;
         scene.sounds.push(crate::sounds::SoundRequest {
             origin: Some(origin + Vec3::Z * 64.),
+            // GenderExpandString needs the speaker's model: without it a `$gender`
+            // wave picks from both genders (owner report: female citizens said male
+            // pain lines and the reverse).
             actor: Some(crate::sounds::SoundActor {
                 name: e.get("targetname").unwrap_or("").into(),
-                model: String::new(),
+                model: model.to_owned(),
                 entity: Some(id),
             }),
             ..sound.into()

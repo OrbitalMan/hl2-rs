@@ -27,6 +27,168 @@ pub fn read_hull(vfs: &Vfs, model: &str) -> Result<(Vec3, Vec3)> {
     }
     Ok((mins, maxs))
 }
+/// One mstudiobodyparts_t (studiohdr_t numbodyparts/bodypartindex at 232/236): its
+/// name, model count and `base` (the body value stride of this group).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BodyPart {
+    pub name: String,
+    pub models: usize,
+    pub base: i32,
+}
+pub fn body_parts(data: &[u8]) -> Result<Vec<BodyPart>> {
+    let count = usize::try_from(i32le(data, 232)?)?;
+    let index = usize::try_from(i32le(data, 236)?)?;
+    if count > 64 {
+        bail!("implausible body part count {count}");
+    }
+    (0..count)
+        .map(|i| {
+            let at = index + i * 16;
+            let name_at = at
+                .checked_add_signed(isize::try_from(i32le(data, at)?)?)
+                .context("body part name offset")?;
+            let name = data
+                .get(name_at..)
+                .context("body part name outside the file")?
+                .split(|b| *b == 0)
+                .next()
+                .unwrap_or_default();
+            Ok(BodyPart {
+                name: String::from_utf8_lossy(name).into_owned(),
+                models: usize::try_from(i32le(data, at + 4)?)?,
+                base: i32le(data, at + 8)?,
+            })
+        })
+        .collect()
+}
+/// One mstudiomodel_t's meshes as (material, vertex offset within the model) and its
+/// first vertex (vertexindex / sizeof(mstudiovertex_t)). Read here because vmdl 0.2
+/// steps submodels after the first with a wrong stride (a zombie's headcrab came out
+/// empty); mstudiomodel_t is 148 bytes and mstudiomesh_t 116.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StudioSubmodel {
+    pub vertex_offset: usize,
+    pub meshes: Vec<(i32, usize)>,
+}
+pub fn studio_submodels(data: &[u8]) -> Result<Vec<Vec<StudioSubmodel>>> {
+    let count = usize::try_from(i32le(data, 232)?)?;
+    let index = usize::try_from(i32le(data, 236)?)?;
+    if count > 64 {
+        bail!("implausible body part count {count}");
+    }
+    let offset = |base: usize, relative: i32| {
+        base.checked_add_signed(relative as isize)
+            .context("studio offset out of range")
+    };
+    (0..count)
+        .map(|i| {
+            let part = index + i * 16;
+            let models = usize::try_from(i32le(data, part + 4)?)?;
+            if models > 256 {
+                bail!("implausible submodel count {models}");
+            }
+            let first = offset(part, i32le(data, part + 12)?)?;
+            (0..models)
+                .map(|j| {
+                    let model = first + j * 148;
+                    let mesh_count = usize::try_from(i32le(data, model + 72)?)?;
+                    if mesh_count > 4096 {
+                        bail!("implausible mesh count {mesh_count}");
+                    }
+                    let mesh_first = offset(model, i32le(data, model + 76)?)?;
+                    let vertex_index = usize::try_from(i32le(data, model + 84)?)?;
+                    let meshes = (0..mesh_count)
+                        .map(|k| {
+                            let mesh = mesh_first + k * 116;
+                            Ok((
+                                i32le(data, mesh)?,
+                                usize::try_from(i32le(data, mesh + 12)?)?,
+                            ))
+                        })
+                        .collect::<Result<_>>()?;
+                    Ok(StudioSubmodel {
+                        vertex_offset: vertex_index / 48,
+                        meshes,
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+/// An entity's starting body value: the `body` keyvalue (m_nBody), then the class's
+/// Spawn bodygroups. Zombies wear their headcrab (CZombie/CFastZombie/CNPC_PoisonZombie
+/// SetBodygroup(ZOMBIE_BODYGROUP_HEADCRAB = 1, !m_fIsHeadless)); the poison zombie also
+/// enables its back crabs (ZOMBIE_BODYGROUP_NEST_BASE 2 + i) from `crabcount` (0 = all
+/// three; one or two pick a mask, here by entity index instead of RandomInt).
+pub fn entity_body(vfs: &Vfs, entity: &modkit_core::Entity, entity_id: usize, model: &str) -> i32 {
+    let mut body = entity
+        .get("body")
+        .and_then(|b| b.trim().parse().ok())
+        .unwrap_or(0);
+    let class = entity.class();
+    if !matches!(
+        class,
+        "npc_zombie"
+            | "npc_zombie_torso"
+            | "npc_fastzombie"
+            | "npc_fastzombie_torso"
+            | "npc_poisonzombie"
+    ) {
+        return body;
+    }
+    let Some(parts) = vfs
+        .read(&model.replace('\\', "/"))
+        .ok()
+        .flatten()
+        .and_then(|data| body_parts(&data).ok())
+    else {
+        return body;
+    };
+    body = set_bodygroup(&parts, body, 1, 1);
+    if class == "npc_poisonzombie" {
+        let crabs = entity
+            .get("crabcount")
+            .and_then(|c| c.trim().parse::<i32>().ok())
+            .filter(|c| *c > 0)
+            .unwrap_or(3)
+            .min(3);
+        let mask = match crabs {
+            1 => [0x01, 0x02, 0x04][entity_id % 3],
+            2 => [0x03, 0x05, 0x06][entity_id % 3],
+            _ => 7,
+        };
+        for i in 0..3 {
+            body = set_bodygroup(&parts, body, 2 + i, i32::from(mask & (1 << i) != 0));
+        }
+    }
+    body
+}
+/// CBaseAnimating::SetBodygroup -> ::SetBodygroup: the body value with `group` set to
+/// `value` (unknown groups or values leave `body` unchanged).
+pub fn set_bodygroup(parts: &[BodyPart], body: i32, group: usize, value: i32) -> i32 {
+    let Some(part) = parts.get(group) else {
+        return body;
+    };
+    let models = part.models as i32;
+    if value < 0 || value >= models || part.base <= 0 {
+        return body;
+    }
+    let current = (body / part.base) % models;
+    body - current * part.base + value * part.base
+}
+/// The submodel a body value selects in each body part (::GetBodygroup).
+pub fn body_selection(parts: &[BodyPart], body: i32) -> Vec<usize> {
+    parts
+        .iter()
+        .map(|p| {
+            if p.models <= 1 || p.base <= 0 {
+                0
+            } else {
+                ((body / p.base) % p.models as i32).max(0) as usize
+            }
+        })
+        .collect()
+}
 fn eye_position(data: &[u8]) -> Result<Vec3> {
     if data.len() > 64 * 1024 * 1024
         || bytes(data, 0, 4)? != b"IDST"
@@ -340,6 +502,7 @@ fn parse_static(data: &[u8], version: u16) -> Result<Vec<ModelInstance>> {
             origin: vec3(record, 0)?,
             angles: vec3(record, 12)?,
             skin: usize::try_from(i32le(record, 32)?)?,
+            body: 0,
             scale: 1.,
             kind: "static_prop".into(),
             solid: record[30] != 0,
@@ -350,6 +513,11 @@ fn parse_static(data: &[u8], version: u16) -> Result<Vec<ModelInstance>> {
     Ok(props)
 }
 pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
+    read_model_body(vfs, path, skin, 0)
+}
+/// The model's meshes for a skin and a body value (each body part draws the submodel
+/// the body selects; body 0 is every part's first submodel).
+pub fn read_model_body(vfs: &Vfs, path: &str, skin: usize, body: i32) -> Result<Vec<Surface>> {
     let stem = path.trim_end_matches(".mdl");
     let mdl_bytes = vfs.read(path)?.context("MDL missing")?;
     let vvd_bytes = vfs.read(&format!("{stem}.vvd"))?.context("VVD missing")?;
@@ -377,18 +545,27 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
     let skin_reference_count = usize::try_from(i32le(&mdl_bytes, 220)?)?;
     let vvd = vmdl::Vvd::read(&vvd_bytes)?;
     let vtx = vmdl::Vtx::read(&vtx_bytes)?;
+    let selection = if body == 0 {
+        Vec::new()
+    } else {
+        body_selection(&body_parts(&mdl_bytes)?, body)
+    };
+    let submodels = studio_submodels(&mdl_bytes)?;
     let mut surfaces = Vec::new();
-    for (body_index, (body, topology)) in mdl.body_parts.iter().zip(&vtx.body_parts).enumerate() {
-        let Some(model) = body.models.first() else {
+    for (body_index, (part, topology)) in submodels.iter().zip(&vtx.body_parts).enumerate() {
+        let model_index = selection.get(body_index).copied().unwrap_or(0);
+        let Some(model) = part.get(model_index) else {
             continue;
         };
         let lod = topology
             .models
-            .first()
+            .get(model_index)
             .and_then(|m| m.lods.first())
             .context("missing model LOD")?;
-        for (mesh_index, (mesh, topology)) in model.meshes.iter().zip(&lod.meshes).enumerate() {
-            let material = usize::try_from(mesh.material)?;
+        for (mesh_index, (&(mesh_material, mesh_vertex_offset), topology)) in
+            model.meshes.iter().zip(&lod.meshes).enumerate()
+        {
+            let material = usize::try_from(mesh_material)?;
             let texture_index = if skin_reference_count > 0 {
                 let index = skin
                     .checked_mul(skin_reference_count)
@@ -429,8 +606,9 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
                 flex_source: None,
             };
             let mut vertex_ids = Vec::new();
-            let base = usize::try_from(model.vertex_offset)?
-                .checked_add(usize::try_from(mesh.vertex_offset)?)
+            let base = model
+                .vertex_offset
+                .checked_add(mesh_vertex_offset)
                 .context("model vertex overflow")?;
             for group in &topology.strip_groups {
                 for strip in &group.strips {
@@ -491,7 +669,7 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
             if !surface.indices.is_empty() {
                 surface.flex_source = Some(modkit_core::FlexSource {
                     bodypart: body_index,
-                    model: 0,
+                    model: model_index,
                     mesh: mesh_index,
                     vertex_ids,
                 });
@@ -613,6 +791,7 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                 origin: entity.origin(),
                 angles: parse_vec3(entity.get("angles").unwrap_or("0 0 0")).unwrap_or(Vec3::ZERO),
                 skin: entity.get("skin").and_then(|s| s.parse().ok()).unwrap_or(0),
+                body: entity_body(vfs, entity, entity_id, model),
                 scale: entity
                     .get("modelscale")
                     .and_then(|s| s.parse::<f32>().ok())
@@ -627,7 +806,7 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
             });
         }
     }
-    let mut cache: BTreeMap<(String, usize), Option<Vec<Surface>>> = BTreeMap::new();
+    let mut cache: BTreeMap<(String, usize, i32), Option<Vec<Surface>>> = BTreeMap::new();
     let mut report = ModelReport::default();
     let mut collision_attempted = BTreeSet::new();
     let mut collision_modes_reported = BTreeSet::new();
@@ -637,10 +816,10 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         .map(|s| ((s.material.clone(), s.lightmap, s.background), s))
         .collect();
     for instance in &world.model_instances {
-        let key = (instance.model.to_lowercase(), instance.skin);
+        let key = (instance.model.to_lowercase(), instance.skin, instance.body);
         let model = cache.entry(key.clone()).or_insert_with(|| {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                read_model(vfs, &key.0, key.1)
+                read_model_body(vfs, &key.0, key.1, key.2)
             })) {
                 Ok(Ok(s)) => {
                     report.unique_models += 1;
@@ -1799,5 +1978,76 @@ mod owned_prop_data {
         );
         assert_eq!(chunks[0].1[0], "models/gibs/wood_gib01e.mdl");
         assert_eq!(chunks[0].1.len(), 5);
+    }
+}
+
+#[cfg(test)]
+mod body_tests {
+    use super::*;
+    fn parts() -> Vec<BodyPart> {
+        // models/zombie/poison.mdl's layout (studio, headcrab1..headcrab5).
+        let mut parts = vec![BodyPart {
+            name: "studio".into(),
+            models: 1,
+            base: 1,
+        }];
+        for i in 0..5 {
+            parts.push(BodyPart {
+                name: format!("headcrab{}", i + 1),
+                models: 2,
+                base: 1 << i,
+            });
+        }
+        parts
+    }
+    #[test]
+    fn bodygroups_set_and_select_submodels() {
+        let p = parts();
+        let body = set_bodygroup(&p, 0, 1, 1);
+        assert_eq!(body, 1);
+        let body = (2..5).fold(body, |b, g| set_bodygroup(&p, b, g, 1));
+        assert_eq!(body, 15);
+        assert_eq!(body_selection(&p, body), vec![0, 1, 1, 1, 1, 0]);
+        assert_eq!(set_bodygroup(&p, body, 3, 0), 11);
+        // Out-of-range groups and values leave the body alone.
+        assert_eq!(set_bodygroup(&p, body, 9, 1), 15);
+        assert_eq!(set_bodygroup(&p, body, 1, 2), 15);
+    }
+    #[test]
+    #[ignore = "requires owned HL2 installation"]
+    fn owned_zombie_headcrab_bodygroup_adds_the_crab_mesh() {
+        let vfs = crate::vpk::Vfs::mount(std::path::Path::new(
+            &std::env::var("HL2_ROOT").expect("set HL2_ROOT"),
+        ))
+        .unwrap();
+        let triangles = |path: &str, body| {
+            read_model_body(&vfs, path, 0, body)
+                .unwrap()
+                .iter()
+                .map(|s| s.indices.len() / 3)
+                .sum::<usize>()
+        };
+        for path in [
+            "models/zombie/classic.mdl",
+            "models/zombie/classic_torso.mdl",
+            "models/zombie/fast.mdl",
+            "models/zombie/poison.mdl",
+        ] {
+            let data = vfs.read(path).unwrap().unwrap();
+            let parts = body_parts(&data).unwrap();
+            assert_eq!(parts[1].name, "headcrab1", "{path}");
+            // vmdl agrees on the first submodel; later ones come from the raw records.
+            let mut geometry = data.clone();
+            geometry[180..184].copy_from_slice(&0i32.to_le_bytes());
+            let mdl = vmdl::Mdl::read(&geometry).unwrap();
+            let raw = studio_submodels(&data).unwrap();
+            let first = &mdl.body_parts[0].models[0];
+            assert_eq!(raw[0][0].vertex_offset, first.vertex_offset as usize);
+            assert!(
+                raw[1][0].meshes.is_empty() && raw[1][1].meshes.len() == 1,
+                "{path}"
+            );
+            assert!(triangles(path, 1) > triangles(path, 0), "{path}");
+        }
     }
 }

@@ -333,6 +333,9 @@ pub struct ModelInstance {
     /// Pitch, yaw, roll, in degrees, applied in Source's Z-up convention.
     pub angles: Vec3,
     pub skin: usize,
+    /// The studio body value (m_nBody: each body part's submodel, SetBodygroup).
+    #[serde(default)]
+    pub body: i32,
     pub scale: f32,
     pub kind: String,
     #[serde(default)]
@@ -346,7 +349,11 @@ pub struct ModelInstance {
 }
 impl ModelInstance {
     pub fn asset_key(&self) -> String {
-        format!("{}#{}", self.model.to_lowercase(), self.skin)
+        if self.body == 0 {
+            format!("{}#{}", self.model.to_lowercase(), self.skin)
+        } else {
+            format!("{}#{}@{}", self.model.to_lowercase(), self.skin, self.body)
+        }
     }
 }
 impl World {

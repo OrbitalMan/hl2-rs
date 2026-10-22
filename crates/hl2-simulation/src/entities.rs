@@ -253,6 +253,16 @@ pub struct ChoreographyState {
     pub completed_early: bool,
     pub active: bool,
 }
+/// PhysGunPickup_t reasons that fire prop outputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhysGunPickup {
+    /// PICKED_UP_BY_PLAYER (+USE).
+    Player,
+    /// PICKED_UP_BY_CANNON.
+    Cannon,
+    /// PUNTED_BY_CANNON.
+    Punt,
+}
 #[derive(Serialize)]
 pub struct SceneAnimationState {
     pub entity: usize,
@@ -2439,6 +2449,30 @@ impl Scene {
             self.fire(id, "OnPlayerUse", usize::MAX);
         }
     }
+    /// CPhysicsProp / CPhysBox::OnPhysGunPickup outputs for a player pickup (+USE),
+    /// a gravity gun pickup or a punt (activator: the player).
+    pub fn prop_physgun_pickup(&mut self, world: &World, id: usize, reason: PhysGunPickup) {
+        let class = world.entities.get(id).map_or("", |e| e.class());
+        if !class.starts_with("prop_physics") && class != "func_physbox" {
+            return;
+        }
+        self.fire(id, "OnPhysGunPickup", usize::MAX);
+        match reason {
+            PhysGunPickup::Cannon => self.fire(id, "OnPhysGunOnlyPickup", usize::MAX),
+            PhysGunPickup::Punt => self.fire(id, "OnPhysGunPunt", usize::MAX),
+            PhysGunPickup::Player => {}
+        }
+        if class != "func_physbox" && reason != PhysGunPickup::Punt {
+            self.fire(id, "OnPlayerPickup", usize::MAX);
+        }
+    }
+    /// OnPhysGunDrop (+USE drop or throw, gravity gun drop or launch).
+    pub fn prop_physgun_drop(&mut self, world: &World, id: usize) {
+        let class = world.entities.get(id).map_or("", |e| e.class());
+        if class.starts_with("prop_physics") || class == "func_physbox" {
+            self.fire(id, "OnPhysGunDrop", usize::MAX);
+        }
+    }
     fn deliver(&mut self, world: &World, id: usize, p: &Pending, player_feet: Vec3) {
         if id >= self.states.len() {
             self.unsupported_input("player", &p.input);
@@ -4184,6 +4218,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 2,
+                body: 0,
                 scale: 1.,
                 kind: "npc_citizen".into(),
                 solid: false,
@@ -4393,6 +4428,7 @@ mod tests {
                 origin: world.entities[id].origin(),
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: world.entities[id].class().into(),
                 solid: true,
@@ -4864,6 +4900,7 @@ mod tests {
                     origin: Vec3::ZERO,
                     angles: Vec3::ZERO,
                     skin: 0,
+                    body: 0,
                     scale: 1.,
                     kind: "npc_metropolice".into(),
                     solid: false,
@@ -4929,6 +4966,7 @@ mod tests {
                     origin: Vec3::ZERO,
                     angles: Vec3::ZERO,
                     skin: 0,
+                    body: 0,
                     scale: 1.,
                     kind: "npc_combine_camera".into(),
                     solid: false,
@@ -5062,6 +5100,7 @@ mod tests {
                 origin: Vec3::new(100., 0., 0.),
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "npc_barney".into(),
                 solid: false,
@@ -5161,6 +5200,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "prop_dynamic".into(),
                 solid: false,
@@ -5270,6 +5310,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "npc_citizen".into(),
                 solid: true,
@@ -5363,6 +5404,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "npc_kleiner".into(),
                 background: false,

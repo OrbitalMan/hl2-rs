@@ -222,6 +222,7 @@ fn create(
         origin,
         angles: glam::Vec3::ZERO,
         skin: 0,
+        body: 0,
         scale: 1.,
         kind: "prop_physics".into(),
         solid: true,

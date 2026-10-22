@@ -159,7 +159,7 @@ impl Inventory {
         crouched: bool,
     ) -> bool {
         if self.carry.is_some() {
-            self.carry_shutdown(weapons, physics, scene.time, false);
+            self.carry_shutdown(weapons, physics, scene, world, false);
             return true;
         }
         let right = forward.cross(Vec3::Z).normalize_or(Vec3::Y);
@@ -207,6 +207,7 @@ impl Inventory {
             });
         }
         self.carry = Some(grab);
+        scene.prop_physgun_pickup(world, id, crate::entities::PhysGunPickup::Player);
         true
     }
     /// CBasePlayer::PostThink -> CPlayerPickupController::Use(USE_SET) every tick:
@@ -216,6 +217,7 @@ impl Inventory {
     pub fn carry_tick(
         &mut self,
         weapons: &BTreeMap<String, Weapon>,
+        world: &World,
         scene: &mut Scene,
         physics: &mut Physics,
         eye: Vec3,
@@ -230,11 +232,11 @@ impl Inventory {
         };
         let id = grab.entity;
         if secondary || grab.error > HOLD_MAX_ERROR || !physics.dynamic.contains_key(&id) {
-            self.carry_shutdown(weapons, physics, scene.time, false);
+            self.carry_shutdown(weapons, physics, scene, world, false);
             return;
         }
         if primary {
-            self.carry_shutdown(weapons, physics, scene.time, true);
+            self.carry_shutdown(weapons, physics, scene, world, true);
             // OnPhysGunDrop(THROWN_BY_PLAYER): m_bThrownByPlayer.
             physics.thrown_by_player.insert(id);
             let Some(mass) = grab::body_mass(physics, id) else {
@@ -264,7 +266,7 @@ impl Inventory {
             .as_mut()
             .is_some_and(|grab| grab.update(physics, eye, forward, feet, crouched, HOLD_MAX_ERROR));
         if !keep {
-            self.carry_shutdown(weapons, physics, scene.time, false);
+            self.carry_shutdown(weapons, physics, scene, world, false);
         }
     }
     /// Shutdown: DetachEntity (clear the velocity when a dropped object touches
@@ -273,7 +275,8 @@ impl Inventory {
         &mut self,
         weapons: &BTreeMap<String, Weapon>,
         physics: &mut Physics,
-        time: f64,
+        scene: &mut Scene,
+        world: &World,
         thrown: bool,
     ) {
         let Some(grab) = self.carry.take() else {
@@ -281,7 +284,8 @@ impl Inventory {
         };
         let touching = !thrown && physics.entity_in_contact(grab.entity);
         grab.detach(physics, touching);
-        self.redeploy(weapons, time);
+        scene.prop_physgun_drop(world, grab.entity);
+        self.redeploy(weapons, scene.time);
     }
 }
 
@@ -358,6 +362,7 @@ mod tests {
             scene.time = f64::from(t) * 0.015;
             inv.carry_tick(
                 &weapons,
+                &world,
                 &mut scene,
                 &mut physics,
                 eye,
@@ -375,6 +380,7 @@ mod tests {
         // Attack throws: 1000 x RemapVal(5, 0.5, 15, 0.5, 4) / 5 kg along the aim.
         inv.carry_tick(
             &weapons,
+            &world,
             &mut scene,
             &mut physics,
             eye,
@@ -529,6 +535,7 @@ mod tests {
         for t in 40..120 {
             inv.carry_tick(
                 &weapons,
+                &world,
                 &mut scene,
                 &mut physics,
                 eye,
@@ -548,6 +555,7 @@ mod tests {
         for t in 120..230 {
             inv.carry_tick(
                 &weapons,
+                &world,
                 &mut scene,
                 &mut physics,
                 eye,
@@ -562,6 +570,7 @@ mod tests {
         assert!(projectiles.active.is_empty());
         inv.carry_tick(
             &weapons,
+            &world,
             &mut scene,
             &mut physics,
             eye,

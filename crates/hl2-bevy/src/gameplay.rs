@@ -667,6 +667,7 @@ impl Gameplay {
                 origin,
                 angles,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 // A VPhysics object like a physics prop (its .phy and propdata).
                 kind: "prop_physics".into(),
@@ -1010,6 +1011,7 @@ impl Gameplay {
         if carrying {
             self.inventory.carry_tick(
                 &self.weapons,
+                &self.world,
                 &mut self.scene,
                 physics,
                 eye,
