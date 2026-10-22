@@ -2807,6 +2807,10 @@ impl AiRuntime {
                 let c = actor.npc.conditions;
                 let sees_hostile = c.has(COND_SEE_HATE) || c.has(COND_SEE_FEAR);
                 let mut chosen = if went_null { None } else { initial };
+                // ForceChooseNewEnemy (RememberUnreachable of the enemy).
+                if std::mem::take(&mut actor.npc.force_choose_enemy) {
+                    actor.choose.serial = -1;
+                }
                 if super::enemy_choice::should_choose_new_enemy(
                     chosen,
                     &actor.npc.enemies,
@@ -2823,10 +2827,12 @@ impl AiRuntime {
                             scene.states.get(e).map(|s| s.origin)
                         }
                     };
+                    let npc = &actor.npc;
                     chosen = super::enemy_choice::best_enemy(
-                        &actor.npc.enemies,
+                        &npc.enemies,
                         now,
                         relation,
+                        |e| position(e).is_some_and(|p| npc.unreachable_now(e, p, now)),
                         |e| position(e).map_or(f32::MAX, |p| p.distance_squared(origin)),
                         |e| {
                             if e == PLAYER {
@@ -3056,9 +3062,24 @@ impl AiRuntime {
             // GatherEnemyConditions: not seen for 8 s and standing at its last known
             // position (2D within 48 units) without seeing it: the enemy eluded me
             // (MarkEnemyAsEluded; the next ChooseEnemy drops it with COND_LOST_ENEMY).
+            // An unreachable enemy (on the node network) raises COND_ENEMY_UNREACHABLE.
+            let enemy_position = if enemy == PLAYER {
+                player.feet
+            } else {
+                scene.states[enemy].origin
+            };
+            let on_network = controller.graph().is_some_and(|g| !g.nodes.is_empty());
+            let unreachable = on_network && actor.npc.is_unreachable(enemy, enemy_position, now);
+            if unreachable {
+                actor.npc.conditions.set(COND_ENEMY_UNREACHABLE);
+            }
             if now - actor.npc.enemies.last_time_seen(Some(enemy)) > 8. && !seen {
                 if let Some(lkp) = actor.npc.enemies.find(Some(enemy)).map(|m| m.last_known) {
                     if (lkp - origin).truncate().length() < 48. {
+                        actor.npc.enemies.mark_eluded(Some(enemy));
+                    }
+                    // Unreachable, unseen and its last known position out of sight: eluded.
+                    if unreachable && !sight.visible(eye, lkp, &[id]) {
                         actor.npc.enemies.mark_eluded(Some(enemy));
                     }
                 }

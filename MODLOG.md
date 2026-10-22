@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 session 31: merge, NPC route cost and unreachable enemies
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Merged wip/squads-20261022 into main (owner approved after playtesting; d9295d5). Fixed the reported FPS collapse while a cop chases an unreachable player: route search now trusts graph link data like CAI_Pathfinder::IsLinkUsable (stale links rechecked like IsLinkStillStale) instead of sweeping a hull along every expanded link, and the SDK unreachable-entity memory (RememberUnreachable, COND_ENEMY_UNREACHABLE, BestEnemy reachability, elusion) stops repeated failing chase searches.
+
+**Tested how / Result:** Owned route-cost measurement on d1_trainstation_02: worst failed route 1.9 s / 1002 link probes before, 10.5 ms / 0 after. Packaged can-cop catwalk chase: about 10 plan requests per second before, one per ~3 s after; chase fixtures keep session 30 outcomes, mean step time down ~25%. hl2-simulation 357 unit tests, strict Clippy/fmt, regression s31-regression (17/17, 26/26, 25/26 known doll01; image diffs within variance).
+
+**Still broken or not tested / Next:** The 4 FPS frame itself was not reproduced on the reporter's machine (owner/@OrbitalMan retest wanted). Player blocks do not mark links stale (SDK does). Next: ragdolls (DESIGN 14n session 30 (11) steps (b)-(c)).
+
 ## 2026-10-22 Codex offline research handoff
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list and queued_damage are credited in their milestone entries; all worker tasks completed.
