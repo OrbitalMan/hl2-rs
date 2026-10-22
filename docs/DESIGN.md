@@ -1,5 +1,11 @@
 # Design
 
+## Grab callback dataflow and evidence accounting (2026-10-22)
+
+The selected grab callback copies stored target parameters, passes that copy/arrival/callback float into a physics interface, stores its returned scalar as arrival, then adds the callback argument to errorTime. Arrival and errorTime remain distinct fields. This closes the bounded static producer/consumer link with the error query, while actual callback interleaving and physics law stay untested. Zero output vectors do not imply zero motion: earlier physics calls remain explicit boundaries.
+
+The private continuation navigator counts one exact identity per root separately from source paths, preserves externally reused bodies and marks navigation-only bodies. Raw-only class/constructor spans and resource-only dossiers do not become exact procedures; inventory counts do not establish complete semantic coverage. Existing frozen navigators remain separate. No implementation change follows automatically from this static dataflow.
+
 ## Selected target search and stateful error query (2026-10-22)
 
 Use-target eligibility requires a nonnull candidate, at least one use capability in maskf0 and every requested bit. Direct/ancestor, ground and radius paths request0/100/200 respectively. The search includes a long initial ray, angular hull attempts and a strict adjusted reach<80; radial candidates need cone>=0.8, a strictly improved ranking and fraction1 or the same returned entity. Keep these static numerical predicates separate from measured units, crate identity and successful interaction. The ranking helper's raw caller passes a fourthNULL omitted from the decompiler preview; do not infer an ABI from that preview.

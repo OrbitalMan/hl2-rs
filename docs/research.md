@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Sealed callback writer and finite private navigator (2026-10-22)
+
+V scene-grab-error-writer-20261022v uses the known pickup factory, raw constructor vptr and RTTI/slot0 to bind one new exact callback, plus four reused exact bodies. Its117 byte records include106 callback-window and11 rejected-preview records; only complete cited sites support claims. Two finite navigation operations/six pointer spans/21 externals and the retained RTTI-length verifier failure are checked; no solver helper or exact constructor body was added.
+
+Private research-pickup-dispatch-index-20261022j.json and pickup_dispatch_query.py cover J..V:13 roots/57 distinct bodies/63 per-root identity occurrences/64 source paths/five navigation-only occurrences. Independent verification checks immutable DB identities, closed manifest sets, reused-source binding and paged/filter queries. Older D..H66/69/five missing startup identities and separate I evidence remain unchanged. No new missing exact lookup was resolved by nearby substitution.
+
 ## Sealed use-target and accumulated-error supplement (2026-10-22)
 
 T scene-player-use-target-20261022t binds retail player slots658/65c to10121b90/102024f0, four local plus three reused exact bodies,1123 bounded records,21 externals and exactly two helper bodies. The rejected float32 cone decode is retained; its raw qword load establishes binary64 threshold0.8. Selected reach/caps/trace/ranking/occlusion are checked; trace backend and actual map selection are not expanded/tested.

@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Callback writer and navigator acceptance (2026-10-22)
+
+Run private python -B scene-grab-error-writer-20261022v/verify_seal.py for24 retained files/21 externals, one new/four reused exact bodies,117 byte records and selected class/registration/field spans. Run publishing/verify-pickup-dispatch-index-20261022j.py for13 roots/57 distinct bodies/63 per-root identity occurrences/64 source paths/five navigation-only occurrences. Builder gated every selected root's seal; independent navigator acceptance rechecks closed sets, exact DB BLOBs, source hashes, full pagination, reused/resource-only filters and rejected arguments. Do not rerun producers into frozen roots.
+
+These static/publication checks do not establish actual callback/input ordering, trace results, physics law/units, carry/throw, window break/exit, ordinary campaign completion or Rust parity. No game/process/Frida/UI/input actions or Rust builds/tests occurred. The owner's running game remained undisturbed.
+
 ## Target search and error-consumer static acceptance (2026-10-22)
 
 Run private python -B verify_seal.py under scene-player-use-target-20261022t and scene-grab-error-20261022u. Expected32/21 and21/18 retained-file/external-binding counts. T rechecks selected slots/caps,1123 byte records, seven constants plus inline geometry, qword cone threshold, argument/occlusion sites, exact bodies and predecessor seals. U rechecks94 records, six constants, formula/reset/sentinel/null-path opcodes, both caller spans, exact bodies and source/provenance. All failures/rejected interpretations remain private with the successes.

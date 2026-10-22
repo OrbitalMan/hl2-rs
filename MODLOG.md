@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline callback-writer and navigator milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material worker queued_damage completed V, inherited model family/exact identifier unavailable; primary reviewed/sealed V and built/independently checked the navigator.
+
+**Changed / Why:** Bound the exact motion callback's error-time writer and target/arrival dataflow; provided finite paged evidence navigation preserving source reuse, raw-only boundaries and navigation-only roles.
+
+**Tested how / Result:** V seal24/21 files/bindings passes; all13 J..V seals gated. Navigator independent checks pass57 distinct bodies/63 per-root identity occurrences/64 source paths/five navigation-only occurrences, with no body output or corpus discovery. Failures retained; older frozen counts unchanged.
+
+**Still broken or not tested / Next:** Actual callback/input/physics order, motion/units, carry/throw/window/exit and Rust parity untested. Finish quota checkpoint with scoped docs committed/pushed, clean/remote verification and precise private continuation; preserve current offline constraint.
+
 ## 2026-10-22 offline target-search and error-consumer milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list(T) and queued_damage(U), inherited model family/exact identifiers unavailable; primary reviewed/sealed both.

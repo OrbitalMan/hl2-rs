@@ -1,5 +1,11 @@
 # STATUS
 
+## Offline grab callback and evidence navigator checkpoint (2026-10-22)
+
+The class/slot-bound grab callback now connects stored target/arrival parameters to the selected physics virtual and adds its float argument to errorTime. This supplies a static replenishment writer for the separately verified error consumer/reset. Actual callback ordering, cadence, solver behavior, units and motion remain untested. V is sealed24 retained files/21 external bindings; one new exact body/four reused, with raw constructor/RTTI spans excluded from body counts.
+
+The new private J..V navigator passes13 sealed roots,57 distinct exact bodies,63 per-root identity occurrences and64 source paths, including five navigation-only occurrences. These are inventory counts, not semantic/runtime completion. Its paged query preserves reused exports and resource-only roots; the separate older navigator remains66/69 with five missing startup procedures. Interim continuation: work/publishing/research-pickup-dispatch-progress-20261022j.md. Owner game undisturbed; no Rust/native execution; first_map_finished:false.
+
 ## Offline use-target and carry-error checkpoint (2026-10-22)
 
 Selected player target search now binds capability guards, direct/hull/radius searches and occlusion predicates. The initial1024 ray is not a1024 use reach: selected trace acceptance has an adjusted distance strictly below80; radius candidates additionally require capability200, cone>=0.8 and the selected occlusion result. Actual current target/reach/LOS/caps and pickup remain unobserved.
