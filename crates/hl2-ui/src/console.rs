@@ -2383,6 +2383,20 @@ impl Console {
                     return Err(usage());
                 }
             }
+            "mat_disable_d3d9ex" => {
+                if args.is_empty() {
+                    let val = u8::from(!self.config.video.advanced.d3d9ex);
+                    self.log(format!("\"mat_disable_d3d9ex\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let disabled = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.d3d9ex = !disabled;
+                    let _ = self.config.save();
+                    self.log(format!("mat_disable_d3d9ex {}", u8::from(disabled)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
             "mat_forceaniso" => {
                 if args.is_empty() {
                     let val = match self.config.video.advanced.filtering {
@@ -2512,6 +2526,34 @@ impl Console {
                     };
                     let _ = self.config.save();
                     self.log(format!("mat_reducefillrate {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "r_classic_blood" => {
+                if args.is_empty() {
+                    let val = u8::from(self.config.video.advanced.classic_effects);
+                    self.log(format!("\"r_classic_blood\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.classic_effects = on;
+                    let _ = self.config.save();
+                    self.log(format!("r_classic_blood {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "r_classic_fire" => {
+                if args.is_empty() {
+                    let val = u8::from(self.config.video.advanced.classic_effects);
+                    self.log(format!("\"r_classic_fire\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.classic_effects = on;
+                    let _ = self.config.save();
+                    self.log(format!("r_classic_fire {}", u8::from(on)));
                     return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
                 } else {
                     return Err(usage());
@@ -2780,6 +2822,7 @@ impl Console {
             .to_string(),
             "mat_aaquality" => "0".to_owned(),
             "mat_colorcorrection" => u8::from(c.video.advanced.color_correction).to_string(),
+            "mat_disable_d3d9ex" => u8::from(!c.video.advanced.d3d9ex).to_string(),
             "mat_forceaniso" => match c.video.advanced.filtering {
                 crate::config::Filtering::Bilinear | crate::config::Filtering::Trilinear => "1",
                 crate::config::Filtering::Anisotropic2 => "2",
@@ -2802,6 +2845,9 @@ impl Console {
                     .to_string()
             }
             "mat_vsync" => u8::from(c.video.advanced.vsync).to_string(),
+            "r_classic_blood" | "r_classic_fire" => {
+                u8::from(c.video.advanced.classic_effects).to_string()
+            }
             "r_rootlod" => match c.video.advanced.model_detail {
                 crate::config::ModelDetail::High => "0",
                 crate::config::ModelDetail::Medium => "1",
@@ -9296,5 +9342,47 @@ mod tests {
             crate::config::Antialiasing::None
         );
         assert_eq!(console.cvar_value("mat_antialias").as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn video_advanced_effects_and_d3d9ex_cvars_query_set_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // r_classic_fire & r_classic_blood
+        assert_eq!(console.cvar_value("r_classic_fire").as_deref(), Some("0"));
+        assert_eq!(console.cvar_value("r_classic_blood").as_deref(), Some("0"));
+        assert!(!console.config.video.advanced.classic_effects);
+
+        console.submit("r_classic_fire 1");
+        assert!(console.config.video.advanced.classic_effects);
+        assert_eq!(console.cvar_value("r_classic_fire").as_deref(), Some("1"));
+        assert_eq!(console.cvar_value("r_classic_blood").as_deref(), Some("1"));
+
+        console.submit("r_classic_blood 0");
+        assert!(!console.config.video.advanced.classic_effects);
+        assert_eq!(console.cvar_value("r_classic_fire").as_deref(), Some("0"));
+        assert_eq!(console.cvar_value("r_classic_blood").as_deref(), Some("0"));
+
+        // mat_disable_d3d9ex (0=enabled, 1=disabled)
+        assert_eq!(
+            console.cvar_value("mat_disable_d3d9ex").as_deref(),
+            Some("0")
+        );
+        assert!(console.config.video.advanced.d3d9ex);
+
+        console.submit("mat_disable_d3d9ex 1");
+        assert!(!console.config.video.advanced.d3d9ex);
+        assert_eq!(
+            console.cvar_value("mat_disable_d3d9ex").as_deref(),
+            Some("1")
+        );
+
+        console.submit("mat_disable_d3d9ex 0");
+        assert!(console.config.video.advanced.d3d9ex);
+        assert_eq!(
+            console.cvar_value("mat_disable_d3d9ex").as_deref(),
+            Some("0")
+        );
     }
 }

@@ -1,5 +1,40 @@
 # MODLOG
 
+## 2026-10-22 Video Advanced classic effects, D3D9Ex, and HDContent placeholder
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added cvar specifications to `COMMANDS`: `r_classic_fire`, `r_classic_blood`, and `mat_disable_d3d9ex`.
+- `crates/hl2-ui/src/console.rs`:
+  - Added execution handlers in `interpret()` and query reporting in `cvar_value()` for `r_classic_fire`, `r_classic_blood`, and `mat_disable_d3d9ex`.
+  - Added unit test `video_advanced_effects_and_d3d9ex_cvars_query_set_and_cvar_value`.
+- `crates/hl2-ui/src/gameui/settings.rs`:
+  - Added `Command::HDContent` with `placeholder() == true`.
+  - Bound `(Panel::VideoAdvanced, "hdcontentbutton") => Command(Command::HDContent)`.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Added `Command::HDContent` to placeholder handler in `apply_command`.
+  - Added unit test `video_advanced_hdcontent_placeholder_and_effects_layout`.
+- `crates/hl2-ui/src/gameui/localize.rs`:
+  - Added authentic English fallbacks for `#GameUI_HDContent`, `#GameUI_ClassicEffects`, `#GameUI_ClassicEffects_Off`, `#GameUI_ClassicEffects_On`, `#gameui_disabled`, and `#gameui_enabled`.
+- `STATUS.md`:
+  - Documented cvar parity and runtime status for classic particles, Direct3D 9Ex extensions, and HD content pack mounts.
+
+**Why:** User request:
+"Check every option in Options > Video > Advanced, Implement the placeholders/unfinished ones. Report if some feature implementation acceptance criteria is unclear, document it as unfinished. Conclude each new option implementation with a commit."
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 376 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Complete audit and cvar parity for all options in Options > Video > Advanced, with verified placeholder bindings, fallbacks, and comprehensive runtime feature documentation.
+
+**Still broken or not tested:** D3D9Ex (Wgpu/Metal target has no D3D9 backend), classic 2004 particle manifests, HD content packs.
+
+**Next:** Conclude the Video Advanced audit and report results.
+
 ## 2026-10-22 Video Advanced filtering and antialiasing options cvar parity & runtime status
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

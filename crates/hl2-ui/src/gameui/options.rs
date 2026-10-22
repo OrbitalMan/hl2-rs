@@ -1724,7 +1724,7 @@ impl OptionsDialog {
             }
             Command::VideoAdvanced => self.open_sub(Sub::VideoAdvanced),
             // Placeholder: disabled, so activation only logs its label (see `activate`).
-            Command::SteamInput | Command::TestSpeakers => {}
+            Command::SteamInput | Command::TestSpeakers | Command::HDContent => {}
             Command::SubOk => return self.ok_sub(),
             Command::SubCancel => self.cancel_sub(),
         }
@@ -5574,5 +5574,19 @@ pub(crate) mod tests {
         Choice::Hdr.select(&env, &mut draft, 0);
         assert_eq!(draft.config.video.hdr, HdrMode::None);
         assert_eq!(Choice::Hdr.selected(&env, &draft), Some(0));
+    }
+
+    #[test]
+    fn video_advanced_hdcontent_placeholder_and_effects_layout() {
+        use crate::gameui::settings::{binding, Command, Panel};
+
+        assert_eq!(
+            binding(Panel::VideoAdvanced, "HDContentButton"),
+            Some(Binding::Command(Command::HDContent))
+        );
+        assert!(
+            Command::HDContent.placeholder(),
+            "HDContent must be a placeholder"
+        );
     }
 }

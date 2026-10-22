@@ -557,6 +557,8 @@ pub enum Command {
     SteamInput,
     /// "Test speaker settings" on the Audio page (placeholder in Source: visible 0 in retail layout).
     TestSpeakers,
+    /// "HD Content" check button on the Video Advanced page (placeholder in Source: visible 0 in retail layout).
+    HDContent,
     /// OK of a sub-dialog.
     SubOk,
     /// Cancel / Close of a sub-dialog.
@@ -566,7 +568,10 @@ pub enum Command {
 impl Command {
     /// Placeholders are drawn disabled; activating one only logs its label.
     pub fn placeholder(self) -> bool {
-        matches!(self, Self::SteamInput | Self::TestSpeakers)
+        matches!(
+            self,
+            Self::SteamInput | Self::TestSpeakers | Self::HDContent
+        )
     }
 }
 
@@ -677,6 +682,7 @@ pub fn binding(panel: Panel, name: &str) -> Option<Binding> {
         (Panel::VideoAdvanced, "verticalfovvaluelabel") => ValueLabel(Value::VerticalFov),
         (Panel::VideoAdvanced, "viewmodelfovslider") => Slider(Value::ViewmodelFov),
         (Panel::VideoAdvanced, "viewmodelfovvaluelabel") => ValueLabel(Value::ViewmodelFov),
+        (Panel::VideoAdvanced, "hdcontentbutton") => Command(self::Command::HDContent),
         (Panel::VideoAdvanced, name) => Choice(self::Choice::Advanced(advanced_choice(name)?)),
         (Panel::Gamma, "okbutton") => Command(self::Command::SubOk),
         (Panel::Gamma, "button1") => Command(self::Command::SubCancel),

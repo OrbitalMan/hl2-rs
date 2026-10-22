@@ -271,6 +271,11 @@ pub const COMMANDS: &[Spec] = &[
         BOOLEAN,
     ),
     cvar(
+        "mat_disable_d3d9ex",
+        "mat_disable_d3d9ex [0|1]: query or toggle disabling Direct3D 9Ex extensions (0=enabled, 1=disabled)",
+        BOOLEAN,
+    ),
+    cvar(
         "mat_forceaniso",
         "mat_forceaniso [1|2|4|8|16]: query or set anisotropic texture filtering mode",
         &[Arg::Values(&["1", "2", "4", "8", "16"])],
@@ -308,6 +313,16 @@ pub const COMMANDS: &[Spec] = &[
     cvar(
         "mat_vsync",
         "mat_vsync [0|1]: query or toggle vertical sync",
+        BOOLEAN,
+    ),
+    cvar(
+        "r_classic_blood",
+        "r_classic_blood [0|1]: query or toggle classic blood effects",
+        BOOLEAN,
+    ),
+    cvar(
+        "r_classic_fire",
+        "r_classic_fire [0|1]: query or toggle classic fire effects",
         BOOLEAN,
     ),
     cvar(

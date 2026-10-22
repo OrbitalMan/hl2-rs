@@ -4,6 +4,20 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Video Advanced classic effects, D3D9Ex, and HD content placeholder (`crates/hl2-ui`):**
+  - Implemented console cvars for classic effects and D3D9Ex:
+    - `r_classic_fire`: queries and toggles classic fire particles (`0` | `1`). Maps to `classic_effects`.
+    - `r_classic_blood`: queries and toggles classic blood particles (`0` | `1`). Maps to `classic_effects`.
+    - `mat_disable_d3d9ex`: queries and toggles disabling Direct3D 9Ex extensions (`0` = enabled, `1` = disabled). Maps to `d3d9ex`.
+  - Added `Command::HDContent` placeholder for `HDContentButton` CheckButton in retail `OptionsSubVideoAdvancedDlg.res` (`visible 0`).
+  - Added authentic English fallback strings to `FALLBACK_STRINGS` for `#GameUI_HDContent`, `#GameUI_ClassicEffects`, `#GameUI_ClassicEffects_Off`, `#GameUI_ClassicEffects_On`, `#gameui_disabled`, and `#gameui_enabled`.
+  - Added unit test `video_advanced_effects_and_d3d9ex_cvars_query_set_and_cvar_value` in `crates/hl2-ui/src/console.rs`.
+  - Added unit test `video_advanced_hdcontent_placeholder_and_effects_layout` in `crates/hl2-ui/src/gameui/options.rs`.
+  - **Documented as Unfinished in Runtime (Particle Assets & Platform Extensions)**:
+    - Classic effects in Source replace orange fire and blood impact particle systems with retail 2004 sprite animations. In `hl2-bevy`, particle simulation is not yet differentiated by legacy vs modern particle manifests.
+    - Direct3D 9Ex extensions are Windows D3D9 specific (Aero window composition and fast alt-tab). On macOS (Metal) and cross-platform Wgpu, D3D9Ex has no direct API representation.
+    - HD Content button in retail toggles `game_hd.txt` pack mount, requiring game restart (`#GameUI_HDRestartRequired_Info`). In HL2RS, high definition content packaging is not implemented.
+
 - **Video Advanced filtering and antialiasing options cvar parity & runtime status (`crates/hl2-ui`):**
   - Implemented console cvars for texture filtering and multisample antialiasing:
     - `mat_forceaniso`: queries and sets anisotropic filtering level (`1`, `2`, `4`, `8`, `16`). Maps to `Filtering`.
