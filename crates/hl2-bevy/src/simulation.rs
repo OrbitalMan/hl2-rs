@@ -141,6 +141,8 @@ pub struct Simulation {
     /// Window settings last given to the window: startup values (after command-line overrides)
     /// or the last queued apply. `None` applies the next configuration unconditionally.
     pub applied_window: Option<WindowSettings>,
+    /// Detail settings last applied: model and texture quality.
+    pub applied_detail: Option<(hl2_ui::config::ModelDetail, hl2_ui::config::TextureDetail)>,
     /// Size of the game frame image being rendered, kept by `video::record_frame_size` (reports
     /// show whether a resolution change was carried out).
     pub frame_size: Option<[u32; 2]>,
@@ -189,6 +191,7 @@ impl Simulation {
             dev_overlay: false,
             pending_video_config: None,
             applied_window: None,
+            applied_detail: None,
             frame_size: None,
             camera_fov: None,
             vertical_fov: 0.,
@@ -400,7 +403,21 @@ impl Simulation {
                         self.applied_window = Some(target);
                         self.pending_video_config = Some(cfg.video.clone());
                     }
+                    let detail = (
+                        cfg.video.advanced.model_detail,
+                        cfg.video.advanced.texture_detail,
+                    );
+                    let detail_changed = self.applied_detail.is_some_and(|prev| prev != detail);
+                    self.applied_detail = Some(detail);
                     ui.source.config = *cfg;
+                    if detail_changed && !self.loading {
+                        let map = game.world.name.clone();
+                        if !map.is_empty() {
+                            ui.map_request = Some(map);
+                            ui.background_request = ui.source.background_level();
+                            self.loading = true;
+                        }
+                    }
                 }
                 Effect::PlaySound(sound) => {
                     game.sound_requests
@@ -1302,6 +1319,55 @@ mod tests {
         assert_eq!(sim.fov, 90.0);
         assert_eq!(ui.source.config.video.fov, 90.0);
         assert_eq!(ui.source.config.audio.volume, 0.42);
+    }
+
+    #[test]
+    fn config_effect_detail_change_reloads_active_map() {
+        let mut sim = Simulation::new(&World::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
+        let world = World {
+            name: "d1_trainstation_01".into(),
+            ..Default::default()
+        };
+        let mut game = crate::gameplay::Gameplay::synthetic(world);
+        let mut ui = crate::ui_host::Console::new(Default::default());
+
+        // First apply initializes applied_detail without reload
+        let mut cfg = ui.source.config.clone();
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::ApplyConfig(Box::new(cfg.clone()))],
+        );
+        assert_eq!(ui.map_request, None);
+        assert_eq!(
+            sim.applied_detail,
+            Some((
+                cfg.video.advanced.model_detail,
+                cfg.video.advanced.texture_detail
+            ))
+        );
+
+        // Change model detail -> triggers map reload
+        cfg.video.advanced.model_detail = hl2_ui::config::ModelDetail::Low;
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::ApplyConfig(Box::new(cfg.clone()))],
+        );
+        assert_eq!(ui.map_request.as_deref(), Some("d1_trainstation_01"));
+        assert!(sim.loading);
+        ui.map_request = None;
+        sim.loading = false;
+
+        // Change texture detail -> triggers map reload
+        cfg.video.advanced.texture_detail = hl2_ui::config::TextureDetail::Low;
+        sim.console_effects(
+            &mut ui,
+            &mut game,
+            vec![hl2_ui::console::Effect::ApplyConfig(Box::new(cfg.clone()))],
+        );
+        assert_eq!(ui.map_request.as_deref(), Some("d1_trainstation_01"));
+        assert!(sim.loading);
     }
 
     #[test]

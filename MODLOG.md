@@ -1,5 +1,59 @@
 # MODLOG
 
+## 2026-10-22 Real model LOD decimation and VTF picmip texture detail scaling
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/source-assets/src/vtf.rs`:
+  - Added `TEXTUREFLAGS_IGNORE_PICMIP = 0x0020_0000` matching retail Source Engine texture flag definition.
+  - Implemented `layout_picmip` and `layout_level_picmip` to calculate mip dimensions and offsets skipped by `picmip` while respecting `TEXTUREFLAGS_IGNORE_PICMIP`.
+  - Added `decode_picmip`, `decode_frames_picmip`, `decode_frame_mips_picmip`, and `decode_cube_picmip` accepting `picmip: i32` (-1 Very High, 0 High, 1 Medium, 2 Low).
+  - Maintained backward-compatible wrappers `decode`, `decode_frames`, `decode_frame_mips`, and `decode_cube` defaulting to `picmip = 0`.
+  - Added unit test `picmip_skips_mips_unless_ignore_picmip_is_set`.
+- `crates/source-assets/src/models.rs`:
+  - Added `read_model_lod(vfs, path, skin, root_lod)` and `append_models_lod(world, vfs, root_lod)`.
+  - Selected model LOD based on `root_lod.min(valid_count - 1)` while filtering negative `switch_point` shadow LODs per Source SDK conventions.
+  - Added owned-install benchmark test `owned_barney_lod_details` verifying index decimation: LOD0 = 17,766 indices, LOD1 = 12,009 indices, LOD2 = 8,763 indices (50.7% decimation on character models).
+- `crates/hl2-ui/src/config.rs`:
+  - Implemented `ModelDetail::root_lod(self) -> usize` mapping High -> 0, Medium -> 1, Low -> 2 (`r_rootlod`).
+  - Implemented `TextureDetail::picmip(self) -> i32` mapping Very High -> -1, High -> 0, Medium -> 1, Low -> 2 (`mat_picmip`).
+  - Updated documentation on `AdvancedVideoSettings`.
+- `crates/hl2-bevy/src/effects.rs`:
+  - Implemented `read_effect_model_lod` and `PreparedEffects::load_with_lod(&vfs, &world, root_lod)`.
+- `crates/hl2-bevy/src/assets.rs`:
+  - Implemented `load_with_config` wiring `root_lod` into world/effect model loading and `picmip` into material VTF decoding.
+  - Added `picmip` support to `cached_texture`, `load_material`, and `load_envmap`.
+  - Added `prepare_model_with_config` for dynamically spawned entities and props.
+  - Added owned-install benchmark test `detail_settings_affect_loaded_map_geometry_and_texture_budgets` on `d1_trainstation_02`.
+- `crates/hl2-bevy/src/campaign.rs`, `crates/hl2-bevy/src/main.rs`:
+  - Wired active `config` into map loading paths.
+- `crates/hl2-bevy/src/simulation.rs`:
+  - Added `applied_detail: Option<(ModelDetail, TextureDetail)>` to `Simulation`.
+  - On `Effect::ApplyConfig`, if `model_detail` or `texture_detail` changed, reloads the active map with the new geometry and texture budgets.
+  - Added unit test `config_effect_detail_change_reloads_active_map`.
+- `STATUS.md`:
+  - Documented Model and Texture Detail implementation, Source engine LOD/picmip architecture, and verified benchmark results.
+
+**Why:** User request:
+"does model and texture quality options actually affect the rendering in game?
+Implement. I would like it to actually impact rendering and performance"
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 384 `hl2-ui` tests, 138 `source-assets` tests, 126 `hl2-simulation` tests, 98 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `cargo test -p source-assets -- --ignored owned_barney_lod_details`: passed exit 0.
+- `cargo test -p hl2-bevy -- --ignored detail_settings_affect_loaded_map_geometry_and_texture_budgets`: passed exit 0 on `d1_trainstation_02`:
+  - Index count: High = 1,524,027 indices vs Low = 891,249 indices (41.5% reduction in triangle/vertex processing load).
+  - Base texture memory: High = 855,979,008 bytes (~816 MiB) vs Low = 53,494,592 bytes (~51 MiB) (93.7% reduction in texture VRAM).
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Model Detail (`r_rootlod`) and Texture Detail (`mat_picmip`) now directly drive runtime mesh LOD decimation and VTF texture mip skipping across all world props, character models, weapon views, dynamic entities, and materials, delivering substantial vertex and VRAM performance scaling.
+
+**Still broken or not tested:** None.
+
+**Next:** Await user instruction.
+
 ## 2026-10-22 System recommended settings detection and video performance benchmark suite
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

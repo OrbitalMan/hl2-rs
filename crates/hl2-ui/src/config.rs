@@ -132,11 +132,37 @@ choice_enum! {
     /// Model detail (`r_rootlod`).
     ModelDetail { Low => "#gameui_low", Medium => "#gameui_medium", High => "#gameui_high" }
 }
+
+impl ModelDetail {
+    /// The root LOD level for model geometry (`0` for High, `1` for Medium, `2` for Low).
+    #[inline]
+    pub const fn root_lod(self) -> usize {
+        match self {
+            Self::High => 0,
+            Self::Medium => 1,
+            Self::Low => 2,
+        }
+    }
+}
+
 choice_enum! {
     /// Texture detail (`mat_picmip`).
     TextureDetail {
         Low => "#gameui_low", Medium => "#gameui_medium", High => "#gameui_high",
         VeryHigh => "#gameui_ultra",
+    }
+}
+
+impl TextureDetail {
+    /// The mip level offset for VTF textures (`-1` for Very High, `0` for High, `1` for Medium, `2` for Low).
+    #[inline]
+    pub const fn picmip(self) -> i32 {
+        match self {
+            Self::VeryHigh => -1,
+            Self::High => 0,
+            Self::Medium => 1,
+            Self::Low => 2,
+        }
     }
 }
 choice_enum! {
@@ -169,7 +195,7 @@ choice_enum! {
     }
 }
 
-/// Video > Advanced. Only `vsync` changes rendering today; the detail levels are stored.
+/// Video > Advanced. Detail levels (`model_detail`, `texture_detail`) and `vsync` affect rendering.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AdvancedVideoSettings {

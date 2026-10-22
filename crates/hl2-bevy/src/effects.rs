@@ -53,13 +53,28 @@ pub fn gib_models(world: &modkit_core::World) -> std::collections::BTreeSet<(Str
     gibs
 }
 /// One projectile/gib model posed at sequence 0 frame 0 (setup or worker threads).
+#[allow(dead_code)]
 pub fn read_effect_model(vfs: &Vfs, path: &str, skin: i32) -> anyhow::Result<Vec<Surface>> {
-    let mut surfaces = models::read_model(vfs, path, skin.max(0) as usize)?;
+    read_effect_model_lod(vfs, path, skin, 0)
+}
+/// One projectile/gib model posed at sequence 0 frame 0 with specified root LOD.
+pub fn read_effect_model_lod(
+    vfs: &Vfs,
+    path: &str,
+    skin: i32,
+    root_lod: usize,
+) -> anyhow::Result<Vec<Surface>> {
+    let mut surfaces = models::read_model_lod(vfs, path, skin.max(0) as usize, root_lod)?;
     pose_sequence_zero(vfs, path, &mut surfaces)?;
     Ok(surfaces)
 }
 impl PreparedEffects {
+    #[allow(dead_code)]
     pub fn load(vfs: &Vfs, world: &modkit_core::World) -> Self {
+        Self::load_with_lod(vfs, world, 0)
+    }
+
+    pub fn load_with_lod(vfs: &Vfs, world: &modkit_core::World, root_lod: usize) -> Self {
         let mut model_errors = Vec::new();
         let mut loaded = BTreeMap::new();
         let gibs = gib_models(world);
@@ -78,7 +93,7 @@ impl PreparedEffects {
             if loaded.contains_key(&key) {
                 continue;
             }
-            match read_effect_model(vfs, &path, skin) {
+            match read_effect_model_lod(vfs, &path, skin, root_lod) {
                 Ok(surfaces) => {
                     loaded.insert(key, surfaces);
                 }

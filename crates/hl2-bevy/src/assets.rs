@@ -161,11 +161,13 @@ impl Default for MaterialData {
 /// keeps the legacy fitted swept box for comparisons.
 pub static FRAG_RIGID_BODY: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
+#[allow(dead_code)]
 pub fn load(root: &Path, game: &str, map: &str) -> Result<LoadedMap> {
     load_with_canvas(root, game, map, hl2_ui::canvas::Canvas::default(), true)
 }
 /// Loads `maps/<map>.bsp` through the search path of `game`, the installation folder of the
 /// game the map belongs to (`hl2`, `episodic`, `ep2`, `lostcoast`).
+#[allow(dead_code)]
 pub fn load_with_canvas(
     root: &Path,
     game: &str,
@@ -173,6 +175,20 @@ pub fn load_with_canvas(
     canvas: hl2_ui::canvas::Canvas,
     new_game: bool,
 ) -> Result<LoadedMap> {
+    let config = hl2_ui::config::Config::load_or_default();
+    load_with_config(root, game, map, canvas, new_game, &config)
+}
+/// Loads `maps/<map>.bsp` with the specified configuration (honoring model and texture detail).
+pub fn load_with_config(
+    root: &Path,
+    game: &str,
+    map: &str,
+    canvas: hl2_ui::canvas::Canvas,
+    new_game: bool,
+    config: &hl2_ui::config::Config,
+) -> Result<LoadedMap> {
+    let root_lod = config.video.advanced.model_detail.root_lod();
+    let picmip = config.video.advanced.texture_detail.picmip();
     let map = map.trim_end_matches(".bsp");
     if map.is_empty()
         || map.len() > 128
@@ -211,7 +227,7 @@ pub fn load_with_canvas(
     hl2_simulation::ai::spawn::append_pool(&mut world);
     // CNPC_Citizen::SelectModel (citizen types, random heads), before models load.
     hl2_simulation::citizens::select_models(&mut world, hl2_simulation::ai::spawn::POOL_KEY);
-    let model_report = models::append_models(&mut world, &vfs);
+    let model_report = models::append_models_lod(&mut world, &vfs, root_lod);
     let _gibs_without_physics = models::append_break_physics(&mut world, &vfs);
     // NPC weapon world models: their sequence events fire NPC weapons (DESIGN 14w).
     let weapon_models: Vec<String> = hl2_simulation::npc_weapons::definitions(&vfs)
@@ -239,7 +255,7 @@ pub fn load_with_canvas(
         if world.model_assets.contains_key(&key) {
             continue;
         }
-        match models::read_model(&vfs, model, 0) {
+        match models::read_model_lod(&vfs, model, 0, root_lod) {
             Ok(surfaces) => {
                 world.model_assets.insert(key, surfaces);
             }
@@ -268,7 +284,7 @@ pub fn load_with_canvas(
     let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
-    let effects = crate::effects::PreparedEffects::load(&vfs, &world);
+    let effects = crate::effects::PreparedEffects::load_with_lod(&vfs, &world, root_lod);
     let mut names = rendered_material_names(&world);
     names.extend(
         effects
@@ -316,6 +332,7 @@ pub fn load_with_canvas(
             &mut frame_cache,
             &mut decoded_bytes,
             &mut texture_errors,
+            picmip,
         );
         materials.insert(name, material);
     }
@@ -427,6 +444,19 @@ pub fn prepare_model(
     class: &str,
     known: &std::collections::BTreeSet<String>,
 ) -> Result<PreparedModel> {
+    let config = hl2_ui::config::Config::load_or_default();
+    prepare_model_with_config(vfs, model, class, known, &config)
+}
+/// Load a model on a worker thread with explicit video configuration.
+pub fn prepare_model_with_config(
+    vfs: &Vfs,
+    model: &str,
+    class: &str,
+    known: &std::collections::BTreeSet<String>,
+    config: &hl2_ui::config::Config,
+) -> Result<PreparedModel> {
+    let root_lod = config.video.advanced.model_detail.root_lod();
+    let picmip = config.video.advanced.texture_detail.picmip();
     let mut world = World {
         entities: vec![modkit_core::Entity {
             properties: vec![
@@ -436,7 +466,7 @@ pub fn prepare_model(
         }],
         ..Default::default()
     };
-    let report = models::append_models(&mut world, vfs);
+    let report = models::append_models_lod(&mut world, vfs, root_lod);
     if world.model_assets.is_empty() {
         bail!("{model}: {}", report.errors.join("; "));
     }
@@ -446,7 +476,7 @@ pub fn prepare_model(
     let hull = models::read_hull(vfs, model)?;
     let mut gibs = BTreeMap::new();
     for (path, skin) in crate::effects::gib_models(&world) {
-        match crate::effects::read_effect_model(vfs, &path, skin) {
+        match crate::effects::read_effect_model_lod(vfs, &path, skin, root_lod) {
             Ok(surfaces) => {
                 gibs.insert(hl2_simulation::gibs::render_key(&path, skin), surfaces);
             }
@@ -472,6 +502,7 @@ pub fn prepare_model(
             &mut frames,
             &mut decoded,
             &mut errors,
+            picmip,
         );
         materials.insert(name, material);
     }
@@ -896,6 +927,7 @@ fn load_envmap(
     vfs: &Vfs,
     definition: &Definition,
     decoded_bytes: &mut usize,
+    picmip: i32,
 ) -> Result<Option<(String, source_assets::vtf::Cube)>> {
     if !definition.shader.eq_ignore_ascii_case("lightmappedgeneric") {
         return Ok(None);
@@ -920,7 +952,7 @@ fn load_envmap(
     if data.len() > MAX_TEXTURE_BYTES {
         bail!("encoded envmap exceeds 64 MiB limit: {path}");
     }
-    let cube = source_assets::vtf::decode_cube(&data, MAX_TEXTURE_DIMENSION)
+    let cube = source_assets::vtf::decode_cube_picmip(&data, MAX_TEXTURE_DIMENSION, picmip)
         .with_context(|| format!("decode {path}"))?;
     let total = decoded_bytes
         .checked_add(cube.faces.iter().map(Vec::len).sum())
@@ -939,6 +971,7 @@ fn load_material(
     frame_cache: &mut BTreeMap<String, TextureFrames>,
     decoded_bytes: &mut usize,
     errors: &mut Vec<String>,
+    picmip: i32,
 ) -> MaterialData {
     let definition = match definition(vfs, name, 0) {
         Ok(definition) => definition,
@@ -986,7 +1019,7 @@ fn load_material(
         if let Some(second) = definition.properties.get("$texture2") {
             let texture = (|| -> Result<_> {
                 let path = asset_path(second, ".vtf")?;
-                let image = cached_texture(cache, decoded_bytes, &path, || {
+                let image = cached_texture(cache, decoded_bytes, &path, picmip, || {
                     vfs.read(&path)?.context("owned monitor overlay absent")
                 })?;
                 Ok((path, image))
@@ -1028,9 +1061,10 @@ fn load_material(
                 }
                 // Source samples the authored mips with distance; the shield frames'
                 // smaller mips are part of their far look.
-                let mut images = vtf::decode_frame_mips(
+                let mut images = vtf::decode_frame_mips_picmip(
                     &data,
                     MAX_TEXTURE_DIMENSION,
+                    picmip,
                     MAX_DECODED_BYTES.saturating_sub(*decoded_bytes),
                 )?;
                 if !frames.active() {
@@ -1081,7 +1115,7 @@ fn load_material(
             .or_else(|| definition.properties.get("$refracttinttexture"))
             .context("VMT has no supported base texture")?;
         let path = asset_path(base, ".vtf")?;
-        let image = cached_texture(cache, decoded_bytes, &path, || {
+        let image = cached_texture(cache, decoded_bytes, &path, picmip, || {
             vfs.read(&path)?
                 .with_context(|| format!("VTF absent: {path}"))
         })?;
@@ -1099,7 +1133,7 @@ fn load_material(
         Err(error) => errors.push(format!("{name}: selfillum: {error:#}")),
     }
     let envmap = envmap_parameters(&definition, &mut material)
-        .and_then(|()| load_envmap(vfs, &definition, decoded_bytes));
+        .and_then(|()| load_envmap(vfs, &definition, decoded_bytes, picmip));
     let envmap = envmap.and_then(|cube| {
         let Some(cube) = cube else {
             return Ok(None);
@@ -1107,7 +1141,7 @@ fn load_material(
         let mask = envmap_mask(&definition)
             .map(|(texture, kind)| -> Result<_> {
                 let path = asset_path(texture, ".vtf")?;
-                let image = cached_texture(cache, decoded_bytes, &path, || {
+                let image = cached_texture(cache, decoded_bytes, &path, picmip, || {
                     vfs.read(&path)?
                         .with_context(|| format!("envmap mask absent: {path}"))
                 })?;
@@ -1144,7 +1178,7 @@ fn load_material(
                     .context("Eyes VMT missing $iris")?,
                 ".vtf",
             )?;
-            let image = cached_texture(cache, decoded_bytes, &path, || {
+            let image = cached_texture(cache, decoded_bytes, &path, picmip, || {
                 vfs.read(&path)?.context("owned iris VTF absent")
             })?;
             Ok((path, image))
@@ -1164,6 +1198,7 @@ fn cached_texture(
     cache: &mut BTreeMap<String, Arc<Image>>,
     decoded_bytes: &mut usize,
     path: &str,
+    picmip: i32,
     read: impl FnOnce() -> Result<Vec<u8>>,
 ) -> Result<Arc<Image>> {
     if let Some(image) = cache.get(path) {
@@ -1192,8 +1227,8 @@ fn cached_texture(
     if (width.max(height) >> (mips - 1)) > MAX_TEXTURE_DIMENSION {
         bail!("VTF has no mip within the 2048 dimension limit: {path}");
     }
-    let image =
-        vtf::decode(&data, MAX_TEXTURE_DIMENSION).with_context(|| format!("decode {path}"))?;
+    let image = vtf::decode_picmip(&data, MAX_TEXTURE_DIMENSION, picmip)
+        .with_context(|| format!("decode {path}"))?;
     let total = decoded_bytes
         .checked_add(image.rgba.len())
         .context("decoded VTF byte count overflow")?;
@@ -1375,17 +1410,18 @@ mod tests {
         let first_key = asset_path("Materials\\Shared.VTF", ".vtf").unwrap();
         let alias_key = asset_path("shared", ".vtf").unwrap();
         assert_eq!(first_key, alias_key);
-        let first = cached_texture(&mut cache, &mut used, &first_key, || Ok(tiny_vtf())).unwrap();
+        let first =
+            cached_texture(&mut cache, &mut used, &first_key, 0, || Ok(tiny_vtf())).unwrap();
         assert_eq!(first.rgba, [2, 4, 8, 16]);
         assert_eq!(used, MAX_DECODED_BYTES);
-        let alias = cached_texture(&mut cache, &mut used, &alias_key, || {
+        let alias = cached_texture(&mut cache, &mut used, &alias_key, 0, || {
             panic!("an alias must not read or decode its existing texture again")
         })
         .unwrap();
         assert!(Arc::ptr_eq(&first, &alias));
         assert_eq!(used, MAX_DECODED_BYTES);
         assert!(
-            cached_texture(&mut cache, &mut used, "materials/new.vtf", || {
+            cached_texture(&mut cache, &mut used, "materials/new.vtf", 0, || {
                 Ok(tiny_vtf())
             })
             .is_err()
@@ -1544,6 +1580,94 @@ mod owned_frag_replay {
     fn forward(pitch: f32, yaw: f32) -> Vec3 {
         let (p, y) = (pitch.to_radians(), yaw.to_radians());
         Vec3::new(p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
+    }
+    #[test]
+    #[ignore = "requires an owned installed Half-Life 2 copy"]
+    fn detail_settings_affect_loaded_map_geometry_and_texture_budgets() {
+        let root = source_assets::install::discover().unwrap();
+        let mut cfg_high = hl2_ui::config::Config::default();
+        cfg_high.video.advanced.model_detail = hl2_ui::config::ModelDetail::High;
+        cfg_high.video.advanced.texture_detail = hl2_ui::config::TextureDetail::High;
+
+        let mut cfg_low = hl2_ui::config::Config::default();
+        cfg_low.video.advanced.model_detail = hl2_ui::config::ModelDetail::Low;
+        cfg_low.video.advanced.texture_detail = hl2_ui::config::TextureDetail::Low;
+
+        let loaded_high = super::load_with_config(
+            &root,
+            "hl2",
+            "d1_trainstation_02",
+            hl2_ui::canvas::Canvas::default(),
+            true,
+            &cfg_high,
+        )
+        .unwrap();
+
+        let loaded_low = super::load_with_config(
+            &root,
+            "hl2",
+            "d1_trainstation_02",
+            hl2_ui::canvas::Canvas::default(),
+            true,
+            &cfg_low,
+        )
+        .unwrap();
+
+        let high_indices: usize = loaded_high
+            .world
+            .surfaces
+            .iter()
+            .map(|s| s.indices.len())
+            .sum::<usize>()
+            + loaded_high
+                .world
+                .model_assets
+                .values()
+                .flatten()
+                .map(|s| s.indices.len())
+                .sum::<usize>();
+
+        let low_indices: usize = loaded_low
+            .world
+            .surfaces
+            .iter()
+            .map(|s| s.indices.len())
+            .sum::<usize>()
+            + loaded_low
+                .world
+                .model_assets
+                .values()
+                .flatten()
+                .map(|s| s.indices.len())
+                .sum::<usize>();
+
+        eprintln!("d1_trainstation_02 indices: high={high_indices}, low={low_indices}");
+        assert!(
+            high_indices > low_indices,
+            "low model detail should have fewer indices: high={high_indices}, low={low_indices}"
+        );
+
+        let high_tex_bytes: usize = loaded_high
+            .materials
+            .values()
+            .filter_map(|m| m.base.as_ref())
+            .map(|img| img.rgba.len())
+            .sum();
+
+        let low_tex_bytes: usize = loaded_low
+            .materials
+            .values()
+            .filter_map(|m| m.base.as_ref())
+            .map(|img| img.rgba.len())
+            .sum();
+
+        eprintln!(
+            "d1_trainstation_02 base texture bytes: high={high_tex_bytes}, low={low_tex_bytes}"
+        );
+        assert!(
+            high_tex_bytes > low_tex_bytes,
+            "low texture detail should have fewer bytes: high={high_tex_bytes}, low={low_tex_bytes}"
+        );
     }
     #[test]
     #[ignore = "requires an owned installed Half-Life 2 copy"]

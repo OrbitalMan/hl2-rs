@@ -350,6 +350,10 @@ fn parse_static(data: &[u8], version: u16) -> Result<Vec<ModelInstance>> {
     Ok(props)
 }
 pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
+    read_model_lod(vfs, path, skin, 0)
+}
+
+pub fn read_model_lod(vfs: &Vfs, path: &str, skin: usize, root_lod: usize) -> Result<Vec<Surface>> {
     let stem = path.trim_end_matches(".mdl");
     let mdl_bytes = vfs.read(path)?.context("MDL missing")?;
     let vvd_bytes = vfs.read(&format!("{stem}.vvd"))?.context("VVD missing")?;
@@ -385,7 +389,15 @@ pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
         let lod = topology
             .models
             .first()
-            .and_then(|m| m.lods.first())
+            .and_then(|m| {
+                let valid_count = if m.lods.last().is_some_and(|l| l.switch_point < 0.0) {
+                    m.lods.len().saturating_sub(1)
+                } else {
+                    m.lods.len()
+                };
+                let chosen = root_lod.min(valid_count.saturating_sub(1));
+                m.lods.get(chosen).or_else(|| m.lods.first())
+            })
             .context("missing model LOD")?;
         for (mesh_index, (mesh, topology)) in model.meshes.iter().zip(&lod.meshes).enumerate() {
             let material = usize::try_from(mesh.material)?;
@@ -526,6 +538,10 @@ pub struct ModelReport {
     pub surface_materials_loaded: usize,
 }
 pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
+    append_models_lod(world, vfs, 0)
+}
+
+pub fn append_models_lod(world: &mut World, vfs: &Vfs, root_lod: usize) -> ModelReport {
     let mut physics_report = (0usize, Vec::new());
     let prop_data = vfs
         .read("scripts/propdata.txt")
@@ -640,7 +656,7 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
         let key = (instance.model.to_lowercase(), instance.skin);
         let model = cache.entry(key.clone()).or_insert_with(|| {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                read_model(vfs, &key.0, key.1)
+                read_model_lod(vfs, &key.0, key.1, root_lod)
             })) {
                 Ok(Ok(s)) => {
                     report.unique_models += 1;
@@ -1604,6 +1620,21 @@ mod tests {
     #[test]
     fn source_yaw_rotates_x_toward_y() {
         assert!((rotation(Vec3::new(0., 90., 0.)) * Vec3::X - Vec3::Y).length() < 0.0001);
+    }
+    #[test]
+    #[ignore]
+    fn owned_barney_lod_details() {
+        let game = crate::install::discover().unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let lod0 = read_model_lod(&vfs, "models/barney.mdl", 0, 0).unwrap();
+        let lod1 = read_model_lod(&vfs, "models/barney.mdl", 0, 1).unwrap();
+        let lod2 = read_model_lod(&vfs, "models/barney.mdl", 0, 2).unwrap();
+        let indices0: usize = lod0.iter().map(|s| s.indices.len()).sum();
+        let indices1: usize = lod1.iter().map(|s| s.indices.len()).sum();
+        let indices2: usize = lod2.iter().map(|s| s.indices.len()).sum();
+        println!("Barney indices: lod0={indices0}, lod1={indices1}, lod2={indices2}");
+        assert!(indices0 > indices1);
+        assert!(indices1 > indices2);
     }
     #[test]
     #[ignore = "requires an installed owned HL2 copy; normal Barney factory model only"]

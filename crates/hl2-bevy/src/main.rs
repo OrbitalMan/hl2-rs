@@ -534,7 +534,7 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
     let default_background = hl2_ui::gameui::resources::startup_background_map(&vfs);
     // `--background-map` loads in the game that ships the map; the persisted background
     // remembers its game (one saved without it belongs to the game that ships it).
-    let (game, background) = match (&options.background_map, config.gameplay.background_map) {
+    let (game, background) = match (&options.background_map, &config.gameplay.background_map) {
         (Some(map), _) => (
             source_assets::install::game_for_map(&options.game, map, None)
                 .unwrap_or_else(|| base_game.to_owned()),
@@ -544,9 +544,10 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
             config
                 .gameplay
                 .background_game
-                .or_else(|| source_assets::install::game_for_map(&options.game, &map, None))
+                .clone()
+                .or_else(|| source_assets::install::game_for_map(&options.game, map, None))
                 .unwrap_or_else(|| base_game.to_owned()),
-            map,
+            map.clone(),
         ),
         (None, None) => (
             base_game.to_owned(),
@@ -556,15 +557,29 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
         ),
     };
     println!("Loading owned main-menu background {game}/{background}...");
-    let loaded = match assets::load(&options.game, &game, &background) {
+    let loaded = match assets::load_with_config(
+        &options.game,
+        &game,
+        &background,
+        hl2_ui::canvas::Canvas::default(),
+        true,
+        &config,
+    ) {
         Ok(loaded) => loaded,
         Err(err) => {
             eprintln!(
                 "Warning: background map {game}/{background} failed to load: {err:#}; falling back to default background"
             );
             let default_bg = default_background.unwrap_or_else(|| "background01".to_owned());
-            assets::load(&options.game, base_game, &default_bg)
-                .with_context(|| format!("load fallback main-menu background map {default_bg}"))?
+            assets::load_with_config(
+                &options.game,
+                base_game,
+                &default_bg,
+                hl2_ui::canvas::Canvas::default(),
+                true,
+                &config,
+            )
+            .with_context(|| format!("load fallback main-menu background map {default_bg}"))?
         }
     };
     Ok((loaded, true))

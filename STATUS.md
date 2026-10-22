@@ -4,6 +4,25 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Model LOD decimation (`r_rootlod`) and VTF texture picmip (`mat_picmip`) rendering impact (`crates/source-assets`, `crates/hl2-ui`, `crates/hl2-bevy`):**
+  - Researched retail Source Engine geometry LOD and texture mip reduction architecture:
+    - Model detail (`r_rootlod`: 0 = High, 1 = Medium, 2 = Low) selects the root LOD level in `.dx90.vtx` files authored with decimated mesh resolutions for props, characters, weapons, and gibs. `switch_point < 0.0` denotes shadow LODs and is filtered out.
+    - Texture detail (`mat_picmip`: -1 = Very High, 0 = High, 1 = Medium, 2 = Low) shifts the base mip index down by `picmip` levels during VTF decoding. Textures with `TEXTUREFLAGS_IGNORE_PICMIP (0x0020_0000)` (UI, HUD, fonts, tool textures) bypass mip skipping.
+  - Implemented in `crates/source-assets`:
+    - `vtf`: `TEXTUREFLAGS_IGNORE_PICMIP`, `layout_picmip`, `decode_picmip`, `decode_frames_picmip`, `decode_frame_mips_picmip`, `decode_cube_picmip`.
+    - `models`: `read_model_lod`, `append_models_lod`.
+  - Implemented in `crates/hl2-ui`:
+    - `ModelDetail::root_lod` (`0`, `1`, `2`) and `TextureDetail::picmip` (`-1`, `0`, `1`, `2`).
+  - Implemented in `crates/hl2-bevy`:
+    - `assets::load_with_config`, `effects::PreparedEffects::load_with_lod`, `prepare_model_with_config`.
+    - `simulation::Simulation`: tracks `applied_detail: Option<(ModelDetail, TextureDetail)>`; on detail change during `Effect::ApplyConfig`, reloads the active map so new geometry and texture levels are applied immediately.
+  - Verified benchmarks on owned retail installation:
+    - Character mesh test (`owned_barney_lod_details`): Barney indices decimate from 17,766 (LOD0) to 12,009 (LOD1) and 8,763 (LOD2) (50.7% decimation).
+    - Map integration benchmark (`detail_settings_affect_loaded_map_geometry_and_texture_budgets` on `d1_trainstation_02`):
+      - Indices: High = 1,524,027 vs Low = 891,249 (41.5% reduction in triangle workload).
+      - Texture memory: High = 855,979,008 bytes (~816 MiB) vs Low = 53,494,592 bytes (~51 MiB) (93.7% reduction in VRAM).
+
+
 - **System recommended settings detection & performance benchmark suite (`crates/hl2-ui`):**
   - Researched retail Source Engine hardware detection and recommendation logic (`dxsupport.cfg`, `COptionsSubVideoAdvancedDlg`):
     - Retail Source queries host CPU core count, GPU device type/vendor, and DirectX/shader capability levels.
