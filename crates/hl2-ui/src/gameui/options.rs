@@ -5420,4 +5420,70 @@ pub(crate) mod tests {
             log
         );
     }
+
+    #[test]
+    fn mouse_options_dynamic_enabling_and_draft_update() {
+        let layout = Layout::parse(
+            br##""Resource/OptionsSubMouse.res" {
+                "ReverseMouse" { "ControlName" "CCvarNegateCheckButton" "fieldName" "ReverseMouse"
+                    "xpos" "28" "ypos" "9" "wide" "150" "tall" "28" }
+                "MouseAccelerationCheckbox" { "ControlName" "CheckButton" "fieldName" "MouseAccelerationCheckbox"
+                    "xpos" "30" "ypos" "100" "wide" "150" "tall" "24" }
+                "MouseAccelerationSlider" { "ControlName" "CCvarSlider" "fieldName" "MouseAccelerationSlider"
+                    "xpos" "200" "ypos" "100" "wide" "200" "tall" "40" }
+                "MouseAccelerationLabel" { "ControlName" "TextEntry" "fieldName" "MouseAccelerationLabel"
+                    "xpos" "400" "ypos" "100" "wide" "50" "tall" "24" }
+                "Autoaim" { "ControlName" "ComboBox" "fieldName" "Autoaim"
+                    "xpos" "28" "ypos" "172" "wide" "175" "tall" "24" }
+                "AutoaimScaleLabel" { "ControlName" "Label" "fieldName" "AutoaimScaleLabel"
+                    "xpos" "28" "ypos" "221" "wide" "179" "tall" "24" "associate" "AutoaimScale" }
+                "AutoaimScale" { "ControlName" "CCvarSlider" "fieldName" "AutoaimScale"
+                    "xpos" "28" "ypos" "245" "wide" "200" "tall" "40" }
+            }"##,
+        )
+        .unwrap();
+
+        let mut res = (*resources()).clone();
+        res.layouts.insert("optionssubmouse".into(), layout);
+
+        // 1. Default config: acceleration is false, aim_assist is Off
+        let mut draft = Draft::new(Config::default());
+        assert!(!draft.config.mouse.acceleration);
+        assert_eq!(draft.config.mouse.aim_assist, AimAssist::Off);
+
+        let widgets = layout_widgets(&res, Panel::Mouse, page_rect(), &draft, &draft.config);
+        let is_enabled = |name: &str| {
+            widgets
+                .iter()
+                .find(|w| w.control.name == name)
+                .unwrap()
+                .enabled
+        };
+
+        assert!(is_enabled("ReverseMouse"));
+        assert!(is_enabled("MouseAccelerationCheckbox"));
+        assert!(!is_enabled("MouseAccelerationSlider"));
+        assert!(!is_enabled("MouseAccelerationLabel"));
+        assert!(is_enabled("Autoaim"));
+        assert!(!is_enabled("AutoaimScale"));
+        assert!(!is_enabled("AutoaimScaleLabel"));
+
+        // 2. Enable acceleration and aim assist
+        draft.config.mouse.acceleration = true;
+        draft.config.mouse.aim_assist = AimAssist::Basic;
+
+        let widgets = layout_widgets(&res, Panel::Mouse, page_rect(), &draft, &draft.config);
+        let is_enabled = |name: &str| {
+            widgets
+                .iter()
+                .find(|w| w.control.name == name)
+                .unwrap()
+                .enabled
+        };
+
+        assert!(is_enabled("MouseAccelerationSlider"));
+        assert!(is_enabled("MouseAccelerationLabel"));
+        assert!(is_enabled("AutoaimScale"));
+        assert!(is_enabled("AutoaimScaleLabel"));
+    }
 }

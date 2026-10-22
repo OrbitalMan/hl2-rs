@@ -1967,6 +1967,138 @@ impl Console {
                     return Err(usage());
                 }
             }
+            "m_pitch" => {
+                let current_pitch = if self.config.mouse.invert {
+                    -crate::input::MOUSE_DEGREES_PER_COUNT
+                } else {
+                    crate::input::MOUSE_DEGREES_PER_COUNT
+                };
+                if args.is_empty() {
+                    self.log(format!("\"m_pitch\" = \"{:.3}\"", current_pitch));
+                } else if args.len() == 1 {
+                    let pitch: f32 = args[0].parse().map_err(|_| usage())?;
+                    self.config.mouse.invert = pitch < 0.0;
+                    let _ = self.config.save();
+                    let new_pitch = if self.config.mouse.invert {
+                        -crate::input::MOUSE_DEGREES_PER_COUNT
+                    } else {
+                        crate::input::MOUSE_DEGREES_PER_COUNT
+                    };
+                    self.log(format!("m_pitch {:.3}", new_pitch));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "m_filter" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"m_filter\" = \"{}\"",
+                        u8::from(self.config.mouse.filter)
+                    ));
+                } else if args.len() == 1 {
+                    let val = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.mouse.filter = val;
+                    let _ = self.config.save();
+                    self.log(format!("m_filter {}", u8::from(val)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "m_rawinput" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"m_rawinput\" = \"{}\"",
+                        u8::from(self.config.mouse.raw_input)
+                    ));
+                } else if args.len() == 1 {
+                    let val = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.mouse.raw_input = val;
+                    let _ = self.config.save();
+                    self.log(format!("m_rawinput {}", u8::from(val)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "m_customaccel" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"m_customaccel\" = \"{}\"",
+                        u8::from(self.config.mouse.acceleration)
+                    ));
+                } else if args.len() == 1 {
+                    let val = match args[0].as_str() {
+                        "0" => false,
+                        "1" | "3" => true,
+                        _ => return Err(usage()),
+                    };
+                    self.config.mouse.acceleration = val;
+                    let _ = self.config.save();
+                    self.log(format!("m_customaccel {}", u8::from(val)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "m_customaccel_exponent" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"m_customaccel_exponent\" = \"{:.2}\"",
+                        self.config.mouse.accel_exponent
+                    ));
+                } else if args.len() == 1 {
+                    let exp: f32 = args[0].parse().map_err(|_| usage())?;
+                    let exp = exp.clamp(1.0, 1.4);
+                    self.config.mouse.accel_exponent = exp;
+                    let _ = self.config.save();
+                    self.log(format!("m_customaccel_exponent {:.2}", exp));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "sk_autoaim_mode" | "m_autoaim_mode" => {
+                let current_mode = match self.config.mouse.aim_assist {
+                    crate::config::AimAssist::Off => 0,
+                    crate::config::AimAssist::Basic => 1,
+                    crate::config::AimAssist::Enhanced => 2,
+                };
+                if args.is_empty() {
+                    self.log(format!("\"{name}\" = \"{}\"", current_mode));
+                } else if args.len() == 1 {
+                    let mode: u8 = args[0].parse().map_err(|_| usage())?;
+                    self.config.mouse.aim_assist = match mode {
+                        0 => crate::config::AimAssist::Off,
+                        1 => crate::config::AimAssist::Basic,
+                        2 => crate::config::AimAssist::Enhanced,
+                        _ => return Err(usage()),
+                    };
+                    let _ = self.config.save();
+                    self.log(format!("{name} {mode}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "sk_autoaim_scale1" | "m_autoaim_scale" => {
+                if args.is_empty() {
+                    self.log(format!(
+                        "\"{name}\" = \"{:.2}\"",
+                        self.config.mouse.aim_assist_scale
+                    ));
+                } else if args.len() == 1 {
+                    let scale: f32 = args[0].parse().map_err(|_| usage())?;
+                    let scale = scale.clamp(0.5, 2.0);
+                    self.config.mouse.aim_assist_scale = scale;
+                    let _ = self.config.save();
+                    self.log(format!("{name} {:.2}", scale));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
             "fov" => {
                 if args.is_empty() {
                     self.log(format!("\"fov\" = \"{:.0}\"", self.config.video.fov));
@@ -2088,6 +2220,27 @@ impl Console {
             "sv_cheats" => u8::from(self.cheats).to_string(),
             "volume" => format!("{:.2}", c.audio.volume),
             "sensitivity" => format!("{:.2}", c.mouse.sensitivity),
+            "m_pitch" => format!(
+                "{:.3}",
+                if c.mouse.invert {
+                    -crate::input::MOUSE_DEGREES_PER_COUNT
+                } else {
+                    crate::input::MOUSE_DEGREES_PER_COUNT
+                }
+            ),
+            "m_filter" => u8::from(c.mouse.filter).to_string(),
+            "m_rawinput" => u8::from(c.mouse.raw_input).to_string(),
+            "m_customaccel" => u8::from(c.mouse.acceleration).to_string(),
+            "m_customaccel_exponent" => format!("{:.2}", c.mouse.accel_exponent),
+            "sk_autoaim_mode" | "m_autoaim_mode" => match c.mouse.aim_assist {
+                crate::config::AimAssist::Off => "0",
+                crate::config::AimAssist::Basic => "1",
+                crate::config::AimAssist::Enhanced => "2",
+            }
+            .to_string(),
+            "sk_autoaim_scale1" | "m_autoaim_scale" => {
+                format!("{:.2}", c.mouse.aim_assist_scale)
+            }
             "fov" => format!("{:.0}", c.video.fov),
             "mat_hdr_level" => c.video.hdr.level().to_string(),
             "background_map" => self.background_map()?.to_owned(),
@@ -8024,5 +8177,97 @@ mod tests {
             !has_console_caret(&quads_confirm),
             "console entry must not draw caret when confirmation dialog is in focus"
         );
+    }
+
+    #[test]
+    fn mouse_cvars_query_set_clamp_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // m_pitch (invert)
+        console.submit("m_pitch -0.022");
+        assert!(console.config.mouse.invert);
+        assert_eq!(console.cvar_value("m_pitch").as_deref(), Some("-0.022"));
+        console.submit("m_pitch 0.022");
+        assert!(!console.config.mouse.invert);
+        assert_eq!(console.cvar_value("m_pitch").as_deref(), Some("0.022"));
+
+        // m_filter
+        console.submit("m_filter 1");
+        assert!(console.config.mouse.filter);
+        assert_eq!(console.cvar_value("m_filter").as_deref(), Some("1"));
+        console.submit("m_filter 0");
+        assert!(!console.config.mouse.filter);
+        assert_eq!(console.cvar_value("m_filter").as_deref(), Some("0"));
+
+        // m_rawinput
+        console.submit("m_rawinput 1");
+        assert!(console.config.mouse.raw_input);
+        assert_eq!(console.cvar_value("m_rawinput").as_deref(), Some("1"));
+        console.submit("m_rawinput 0");
+        assert!(!console.config.mouse.raw_input);
+        assert_eq!(console.cvar_value("m_rawinput").as_deref(), Some("0"));
+
+        // m_customaccel
+        console.submit("m_customaccel 3");
+        assert!(console.config.mouse.acceleration);
+        assert_eq!(console.cvar_value("m_customaccel").as_deref(), Some("1"));
+        console.submit("m_customaccel 0");
+        assert!(!console.config.mouse.acceleration);
+        assert_eq!(console.cvar_value("m_customaccel").as_deref(), Some("0"));
+
+        // m_customaccel_exponent
+        console.submit("m_customaccel_exponent 1.25");
+        assert_eq!(console.config.mouse.accel_exponent, 1.25);
+        assert_eq!(
+            console.cvar_value("m_customaccel_exponent").as_deref(),
+            Some("1.25")
+        );
+        console.submit("m_customaccel_exponent 5.0");
+        assert_eq!(console.config.mouse.accel_exponent, 1.4);
+
+        // sk_autoaim_mode and alias m_autoaim_mode
+        console.submit("sk_autoaim_mode 1");
+        assert_eq!(
+            console.config.mouse.aim_assist,
+            crate::config::AimAssist::Basic
+        );
+        assert_eq!(console.cvar_value("sk_autoaim_mode").as_deref(), Some("1"));
+        assert_eq!(console.cvar_value("m_autoaim_mode").as_deref(), Some("1"));
+
+        console.submit("m_autoaim_mode 2");
+        assert_eq!(
+            console.config.mouse.aim_assist,
+            crate::config::AimAssist::Enhanced
+        );
+        assert_eq!(console.cvar_value("sk_autoaim_mode").as_deref(), Some("2"));
+
+        console.submit("sk_autoaim_mode 0");
+        assert_eq!(
+            console.config.mouse.aim_assist,
+            crate::config::AimAssist::Off
+        );
+        assert_eq!(console.cvar_value("sk_autoaim_mode").as_deref(), Some("0"));
+
+        // sk_autoaim_scale1 and alias m_autoaim_scale
+        console.submit("sk_autoaim_scale1 1.5");
+        assert_eq!(console.config.mouse.aim_assist_scale, 1.5);
+        assert_eq!(
+            console.cvar_value("sk_autoaim_scale1").as_deref(),
+            Some("1.50")
+        );
+        assert_eq!(
+            console.cvar_value("m_autoaim_scale").as_deref(),
+            Some("1.50")
+        );
+
+        console.submit("m_autoaim_scale 1.8");
+        assert_eq!(console.config.mouse.aim_assist_scale, 1.8);
+
+        console.submit("sk_autoaim_scale1 10.0");
+        assert_eq!(console.config.mouse.aim_assist_scale, 2.0);
+
+        console.submit("sk_autoaim_scale1 0.1");
+        assert_eq!(console.config.mouse.aim_assist_scale, 0.5);
     }
 }

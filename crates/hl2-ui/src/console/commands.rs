@@ -156,6 +156,51 @@ pub const COMMANDS: &[Spec] = &[
         &[Arg::Free],
     ),
     cvar(
+        "m_pitch",
+        "m_pitch [value]: query or set mouse pitch factor (negative inverts pitch)",
+        &[Arg::Free],
+    ),
+    cvar(
+        "m_filter",
+        "m_filter [0|1]: query or toggle two-frame mouse movement averaging",
+        BOOLEAN,
+    ),
+    cvar(
+        "m_rawinput",
+        "m_rawinput [0|1]: query or toggle raw mouse input",
+        BOOLEAN,
+    ),
+    cvar(
+        "m_customaccel",
+        "m_customaccel [0|1|3]: query or toggle custom mouse acceleration",
+        &[Arg::Values(&["0", "1", "3"])],
+    ),
+    cvar(
+        "m_customaccel_exponent",
+        "m_customaccel_exponent [value]: query or set mouse acceleration exponent",
+        &[Arg::Free],
+    ),
+    cvar(
+        "sk_autoaim_mode",
+        "sk_autoaim_mode [0|1|2]: query or set autoaim mode (0=off, 1=basic, 2=enhanced)",
+        &[Arg::Values(&["0", "1", "2"])],
+    ),
+    cvar(
+        "m_autoaim_mode",
+        "m_autoaim_mode [0|1|2]: query or set autoaim mode (alias for sk_autoaim_mode)",
+        &[Arg::Values(&["0", "1", "2"])],
+    ),
+    cvar(
+        "sk_autoaim_scale1",
+        "sk_autoaim_scale1 [scale]: query or set autoaim deflection scale",
+        &[Arg::Free],
+    ),
+    cvar(
+        "m_autoaim_scale",
+        "m_autoaim_scale [scale]: query or set autoaim deflection scale (alias for sk_autoaim_scale1)",
+        &[Arg::Free],
+    ),
+    cvar(
         "fov",
         "fov [degrees]: query or set camera field of view",
         &[Arg::Free],

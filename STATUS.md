@@ -4,6 +4,21 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Mouse options audit, console cvar parity & unfinished simulation features status (`crates/hl2-ui/src/console`, `crates/hl2-ui/src/gameui/options`):**
+  - Audited every mouse option from retail Source `OptionsSubMouse.res` across `hl2-ui`, `hl2-simulation`, and `hl2-bevy`:
+    1. `ReverseMouse` (`m_pitch`): UI checkbox and runtime inverted pitch working (`pitch_sign` in `input.rs`). Added `m_pitch` console cvar (`commands.rs`, `console.rs`) supporting query, positive/negative float assignment, and `cvar_value`.
+    2. `MouseFilter` (`m_filter`): UI checkbox and runtime 2-frame average in `MouseFilter::apply` working. Added `m_filter` console cvar supporting query, boolean toggle, and `cvar_value`.
+    3. `MouseRaw` (`m_rawinput`): UI checkbox present in `OptionsSubMouse.res` (`enabled 0 [$OSX]`, `enabled 1 [!$OSX]`) and persisted in config. Added `m_rawinput` console cvar. Under Bevy/Winit, cursor lock exclusively feeds `AccumulatedMouseMotion` from `DeviceEvent::MouseMotion` (raw hardware events). Winit does not expose OS pointer ballistics in locked mode; cross-platform emulation of non-raw input is unspecified/unclear and documented as unfinished.
+    4. `MouseAccelerationCheckbox` (`m_customaccel`): UI checkbox and runtime mode 3 curve in `MouseFilter::apply` working. Dynamically enables acceleration slider and label. Added `m_customaccel` console cvar supporting query, 0/1/3 modes, and `cvar_value`.
+    5. `Slider` / `SensitivityLabel` (`sensitivity`): UI slider and numeric text entry working with 2.0 Hz blinking caret on focus. Cvar already wired in console.
+    6. `MouseAccelerationSlider` / `MouseAccelerationLabel` (`m_customaccel_exponent`): UI slider and numeric text entry working (range 1.0..1.4, default 1.05). Dynamically enabled when acceleration is checked. Added `m_customaccel_exponent` console cvar supporting query, clamping, and `cvar_value`.
+    7. `HUDQuickInfo` (`hud_quickinfo`): Retail layout sets `visible 0` and `enabled 0` on Mouse tab. QuickInfo reticle logic is implemented in `hud.rs`.
+    8. `Autoaim` (`sk_autoaim_mode` / `m_autoaim_mode`): UI ComboBox working (`Off`, `Basic`, `Enhanced`) and persisted in config. Added `sk_autoaim_mode` (and alias `m_autoaim_mode`) console cvar supporting query, 0/1/2 mode assignment, and `cvar_value`. In `hl2-simulation`, bullet firing traces straight forward without target hitbox detection or deflection angle math; acceptance criteria for PC mouse play (deflection cone, magnetism, friend filtering) are unspecified and documented as unfinished.
+    9. `AutoaimScale` (`sk_autoaim_scale1` / `m_autoaim_scale`): UI slider working (range 0.5..2.0). Dynamically enabled when `Autoaim != Off`. Added `sk_autoaim_scale1` (and alias `m_autoaim_scale`) console cvar supporting query, clamping, and `cvar_value`. Unused in simulation bullet tracing until autoaim deflection is implemented.
+  - Added unit tests in `crates/hl2-ui/src/console.rs` (`mouse_cvars_query_set_clamp_and_cvar_value`) verifying query, setting, clamping, and `cvar_value` for all mouse cvars.
+  - Added unit tests in `crates/hl2-ui/src/gameui/options.rs` (`mouse_options_dynamic_enabling_and_draft_update`) verifying dynamic enabling of acceleration slider/label and autoaim scale slider/label based on draft settings.
+  - Verified with `scripts/checks/validate.sh` (356 hl2-ui unit tests, 97 hl2-bevy tests, strict Clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
+
 - **Alphabetical line-by-line CLI help and early help dispatch in launch-bevy.sh & hl2-bevy (`launch-bevy.sh`, `crates/hl2-bevy`):**
   - Added early `--help` / `-h` check in `launch-bevy.sh` before running build or freshness checks. Ignores all other arguments, skips all build checks/clean steps, and outputs help immediately with exit status 0.
   - Implemented comprehensive `show_help` listing all launcher and engine options in alphabetical order (A to Z), one per line with aligned, helpful descriptions.

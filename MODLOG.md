@@ -1,5 +1,41 @@
 # MODLOG
 
+## 2026-10-22 Mouse options audit, console cvar parity & unfinished simulation features status
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added console command and cvar specifications to `COMMANDS`: `m_pitch`, `m_filter`, `m_rawinput`, `m_customaccel`, `m_customaccel_exponent`, `sk_autoaim_mode`, `m_autoaim_mode`, `sk_autoaim_scale1`, and `m_autoaim_scale`.
+- `crates/hl2-ui/src/console.rs`:
+  - Implemented command execution handlers in `interpret()` and query reporting in `cvar_value()` for all mouse cvars:
+    - `m_pitch`: queries and toggles pitch inversion (`mouse.invert`), scaling with `MOUSE_DEGREES_PER_COUNT` (0.022 / -0.022).
+    - `m_filter`: queries and toggles two-frame mouse delta averaging (`mouse.filter`).
+    - `m_rawinput`: queries and toggles raw mouse input setting (`mouse.raw_input`).
+    - `m_customaccel`: queries and toggles custom mouse acceleration (`mouse.acceleration`, supporting modes 0, 1, 3).
+    - `m_customaccel_exponent`: queries and sets acceleration exponent clamped to retail range 1.0..1.4 (`mouse.accel_exponent`).
+    - `sk_autoaim_mode` and alias `m_autoaim_mode`: queries and sets autoaim mode (0=Off, 1=Basic, 2=Enhanced) mapping to `AimAssist`.
+    - `sk_autoaim_scale1` and alias `m_autoaim_scale`: queries and sets autoaim deflection scale clamped to 0.5..2.0 (`mouse.aim_assist_scale`).
+  - Added unit test `mouse_cvars_query_set_clamp_and_cvar_value` verifying query, setting, clamping, and `cvar_value` lookups across all mouse cvars.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Added unit test `mouse_options_dynamic_enabling_and_draft_update` verifying dynamic enabling/disabling of acceleration slider and label (enabled when `acceleration` is true) and autoaim scale slider and label (enabled when `aim_assist != Off`).
+- `STATUS.md`:
+  - Documented audit of all 9 mouse controls from `OptionsSubMouse.res`. Documented `MouseRaw` (Bevy hardware delta vs raw input ballistics) and `Autoaim`/`AutoaimScale` (simulation bullet deflection without target autoaim cone calculation) as unfinished features with unclear acceptance criteria for PC mouse play.
+
+**Why:** User request:
+"Check every Mouse option, Implement the placeholders/unfinished ones. Report if some feature implementation acceptance criteria is unclear, document it as unfinished."
+
+**Tested how:**
+- `bash scripts/checks/validate.sh`: full workspace test suite passed (356 hl2-ui tests, 97 hl2-bevy tests, all simulation & asset tests), strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings, `cargo fmt --check` exit 0.
+- `bash scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Complete audit of mouse options, full parity between console cvars and Options dialog draft/applied state, dynamic UI control enabling verified by tests, and clear documentation of simulation autoaim deflection and Bevy raw input limitations.
+
+**Still broken or not tested:** Autoaim target hitbox detection / deflection in `hl2-simulation`; Bevy non-raw mouse ballistics under locked cursor (acceptance criteria unclear).
+
+**Next:** Await next task from user.
+
 ## 2026-10-22 Merge: main into orbitalman/hl2-ui (NPC AI, runtime entities, spawn overlay, sound/effects integration)
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
