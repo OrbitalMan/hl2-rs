@@ -544,24 +544,48 @@ impl Runtime {
                     p.sequence = (lo + ((r * span) as i32).min(hi - lo)) as usize;
                 }
                 "Position on Model Random" => {
-                    // Hitboxes are approximated by the model's world bounds ("force to be
-                    // inside model": kept inside, else scaled by "hitbox scale"); an
-                    // upward direction bias of n picks the highest of n + 1 heights
-                    // (native flames gather above a burning barrel's top).
-                    let inside = op.int("force to be inside model").unwrap_or(0) != 0;
-                    let scale = if inside {
-                        1.
-                    } else {
-                        op.float("hitbox scale").unwrap_or(1.)
-                    };
-                    let center = (points.model_min + points.model_max) * 0.5;
-                    let half = (points.model_max - points.model_min) * 0.5 * scale;
+                    // C_INIT_CreateOnModel -> CParticleSystemQuery::
+                    // GetRandomPointsOnControllingObjectHitBox (SDK particlesystemquery.cpp):
+                    // the best of tries + 1 candidates (at least 6 with a direction bias),
+                    // each a random hitbox point with u, v, w in [1 - scale, scale]; goodness
+                    // = U(0, 72) + dot(point - CP, bias), + 1000 inside the model ("force to
+                    // be inside model" is the try count). The model's world bounds stand in
+                    // for its hitboxes (one box; point-in-model = inside the bounds).
+                    let tries = op.int("force to be inside model").unwrap_or(0).max(0) as usize;
+                    let scale = op.float("hitbox scale").unwrap_or(1.);
                     let bias = op.vector("direction bias").unwrap_or_default();
-                    let mut u = Vec3::new(r, self.random(), self.random()) * 2. - Vec3::ONE;
-                    for _ in 0..bias.z.max(0.).round() as usize {
-                        u.z = u.z.max(self.random() * 2. - 1.);
+                    let tries = if bias.length_squared() > 1e-8 {
+                        tries.max(5)
+                    } else {
+                        tries
+                    };
+                    let (lo, hi) = (points.model_min, points.model_max);
+                    let mut best = (f32::MIN, (lo + hi) * 0.5);
+                    for attempt in 0..=tries {
+                        let mut uvw = [0f32; 3];
+                        for (i, value) in uvw.iter_mut().enumerate() {
+                            let draw = if attempt == 0 && i == 0 {
+                                r
+                            } else {
+                                self.random()
+                            };
+                            *value = lerp(1. - scale, scale, draw);
+                        }
+                        let point = Vec3::new(
+                            lerp(lo.x, hi.x, uvw[0]),
+                            lerp(lo.y, hi.y, uvw[1]),
+                            lerp(lo.z, hi.z, uvw[2]),
+                        );
+                        let mut goodness = self.random() * 72. + (point - points.origin).dot(bias);
+                        let inside = uvw.iter().all(|u| (0. ..=1.).contains(u));
+                        if tries > 0 && inside {
+                            goodness += 1000.;
+                        }
+                        if goodness > best.0 {
+                            best = (goodness, point);
+                        }
                     }
-                    p.position = center + u * half.min(Vec3::splat(256.));
+                    p.position = best.1;
                 }
                 "Position Within Sphere Random" => {
                     let (dmin, dmax) = (
