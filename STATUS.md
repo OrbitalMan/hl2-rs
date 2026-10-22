@@ -4,6 +4,10 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Clean mock string insertions from options unit tests (`crates/hl2-ui`):**
+  - Removed mock string insertions (`res.localization.insert("GameUI_hdr_level0", "None")`, etc.) in `crates/hl2-ui/src/gameui/options.rs` test `video_options_hdr_control_layout_and_selection`.
+  - Asserted authentic unlocalized token key fallback behavior (`["GameUI_hdr_level0", "GameUI_hdr_level1", "GameUI_hdr_level2"]`) when running unit tests without mounted game resources, matching engine design and `settings.rs` tests.
+
 - **Localization resource priority and pre-resource fallback constraint (`crates/hl2-ui`):**
   - Clarified architectural rule: always prioritize game resources/assets over in-repo constants. Never add fallback constants to `crates/hl2-ui/src/gameui/localize.rs` if they can be retrieved directly from game resources (`resource/gameui_english.txt`, `resource/valve_english.txt`, `resource/vgui_english.txt`, `hl2_complete/resource/merged_loc_all.txt`, etc.).
   - Documented `gameui/localize` as a source primarily for text that has NO in-game resources (such as modded, reconstructed, or expanded features, mapped via `placeholders`).

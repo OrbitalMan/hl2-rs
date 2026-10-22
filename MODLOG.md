@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-22 Clean mock string insertions from options unit tests and assert authentic token key fallback
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Removed mock string insertions (`res.localization.insert("GameUI_hdr_level0", "None")`, etc.) in `video_options_hdr_control_layout_and_selection`.
+  - Asserted authentic unlocalized token key fallback behavior (`["GameUI_hdr_level0", "GameUI_hdr_level1", "GameUI_hdr_level2"]`) when running tests without mounted game resources, matching engine design and `settings.rs` tests.
+
+**Why:** User inquiry: "but why you just added strigs to the options.rs in the latest commit?"
+The mock strings were temporarily inserted in commit 77743f2 after removing `GameUI_hdr_*` from `FALLBACK_STRINGS` to satisfy a legacy test assertion. Synthetic unit tests should test the authentic fallback to token key names rather than hardcoding in-repo mock strings.
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 378 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui -- --ignored`: 10 owned install tests passed.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Completely removed mock strings from `options.rs`; test asserts pure token key name fallback behavior.
+
+**Still broken or not tested:** None.
+
+**Next:** Await user instruction.
+
 ## 2026-10-22 Localization resource priority and pre-resource fallback constraint
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

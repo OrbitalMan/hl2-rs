@@ -5541,11 +5541,6 @@ pub(crate) mod tests {
 
         let mut res = (*resources()).clone();
         res.layouts.insert("optionssubvideo".into(), layout);
-        res.localization.insert("GameUI_hdr_level0", "None");
-        res.localization
-            .insert("GameUI_hdr_level1", "Bloom (if available)");
-        res.localization
-            .insert("GameUI_hdr_level2", "Full (if available)");
 
         let mut draft = Draft::new(Config::default());
         // force_visible ensures HDR and HDR Label are laid out even if layout sets visible 0 (like retail [$OSX])
@@ -5565,9 +5560,9 @@ pub(crate) mod tests {
 
         let items = Choice::Hdr.items(&env, &draft);
         assert_eq!(items.len(), 3);
-        assert_eq!(items[0], "None");
-        assert_eq!(items[1], "Bloom (if available)");
-        assert_eq!(items[2], "Full (if available)");
+        assert_eq!(items[0], "GameUI_hdr_level0");
+        assert_eq!(items[1], "GameUI_hdr_level1");
+        assert_eq!(items[2], "GameUI_hdr_level2");
 
         assert_eq!(Choice::Hdr.selected(&env, &draft), Some(0));
 
