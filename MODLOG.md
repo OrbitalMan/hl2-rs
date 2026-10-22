@@ -1,5 +1,35 @@
 # MODLOG
 
+## 2026-10-22 Video HDR option audit, central localization fallbacks & render pipeline status
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/gameui/localize.rs`:
+  - Added authentic English fallback entries to `FALLBACK_STRINGS` for `#GameUI_HDR`, `#GameUI_hdr_level0`, `#GameUI_hdr_level1`, `#GameUI_hdr_level2`, and `#GameUI_hdr_Hint`.
+  - Added test assertions in `central_fallback_table_resolves_standard_tokens_when_resources_absent` verifying resolution of HDR tokens without loaded game resources.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Added unit test `video_options_hdr_control_layout_and_selection` asserting that `HDR Label` and `HDR` ComboBox are laid out via `force_visible`, verify item tokens (`None`, `Bloom (if available)`, `Full (if available)`), and verify draft updates when selecting levels 0, 1, and 2.
+- `crates/hl2-ui/src/console.rs`:
+  - Added unit test `video_hdr_cvar_query_set_and_cvar_value` verifying query reporting, level assignment (0, 1, 2), error rejection on out-of-range inputs, and `cvar_value` retrieval for `mat_hdr_level`.
+- `STATUS.md`:
+  - Documented audit of Options > Video HDR controls, `force_visible` macOS override, config persistence in `bin/hl2-config.json`, and console cvar parity with `mat_hdr_level`.
+  - Documented runtime render pipeline switching (between LDR and HDR) as unfinished: in retail Source this requires a game restart (`#GameUI_HDRestartRequired_Info`) to reload BSP lightmap lumps (lumps 53/58 vs 8/7), ambient/world lights, material VMT `$ldr` conditional blocks, and cubemaps. In `hl2-bevy`, the renderer is built around the native reference HDR path (`mat_hdr_level 2`), and switching dynamically at runtime remains an open architectural item.
+
+**Why:** User request:
+"Check Options > Video > HDR option, Implement if it’s unfinished. Report if implementation acceptance criteria is unclear, document it as unfinished."
+
+**Tested how:**
+- `bash scripts/checks/validate.sh`: 370 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `bash scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Complete audit of Options > Video HDR controls, authentic fallback localization tokens defined in `FALLBACK_STRINGS`, unit test coverage for UI layout selection and console cvar execution, and clear documentation of runtime render pipeline limitations.
+
+**Still broken or not tested:** Runtime or restart-based render pipeline switching between LDR (lump 8/7, VMT `$ldr`, fixed exposure 1.0, no bloom) and HDR (lump 53/58, VMT `$hdr`, auto exposure, bloom).
+
+**Next:** Await next task from user.
+
 ## 2026-10-22 Audio options audit, console cvar parity & runtime status
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

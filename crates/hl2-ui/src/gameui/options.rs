@@ -5525,4 +5525,54 @@ pub(crate) mod tests {
             "TestSpeakers is a placeholder and must be disabled"
         );
     }
+
+    #[test]
+    fn video_options_hdr_control_layout_and_selection() {
+        let layout = Layout::parse(
+            br##""Resource/OptionsSubVideo.res" {
+                "HDR Label" { "ControlName" "Label" "fieldName" "HDR Label" "xpos" "36" "ypos" "239" "wide" "160" "tall" "24" "visible" "0" }
+                "HDR" { "ControlName" "ComboBox" "fieldName" "HDR" "xpos" "36" "ypos" "264" "wide" "160" "tall" "24" "visible" "0" }
+            }"##,
+        )
+        .unwrap();
+
+        let mut res = (*resources()).clone();
+        res.layouts.insert("optionssubvideo".into(), layout);
+
+        let mut draft = Draft::new(Config::default());
+        // force_visible ensures HDR and HDR Label are laid out even if layout sets visible 0 (like retail [$OSX])
+        let widgets = layout_widgets(&res, Panel::Video, page_rect(), &draft, &draft.config);
+
+        let find_widget = |name: &str| widgets.iter().find(|w| w.control.name == name).unwrap();
+        // The widgets are included in layout_widgets because force_visible forces visible 1
+        assert_eq!(find_widget("HDR Label").control.name, "HDR Label");
+        assert_eq!(find_widget("HDR").control.name, "HDR");
+        assert!(find_widget("HDR").enabled);
+
+        let env = Env {
+            localization: &res.localization,
+            languages: &[],
+            modes: &DisplayModes::default(),
+        };
+
+        let items = Choice::Hdr.items(&env, &draft);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], "None");
+        assert_eq!(items[1], "Bloom (if available)");
+        assert_eq!(items[2], "Full (if available)");
+
+        assert_eq!(Choice::Hdr.selected(&env, &draft), Some(0));
+
+        Choice::Hdr.select(&env, &mut draft, 1);
+        assert_eq!(draft.config.video.hdr, HdrMode::Bloom);
+        assert_eq!(Choice::Hdr.selected(&env, &draft), Some(1));
+
+        Choice::Hdr.select(&env, &mut draft, 2);
+        assert_eq!(draft.config.video.hdr, HdrMode::Full);
+        assert_eq!(Choice::Hdr.selected(&env, &draft), Some(2));
+
+        Choice::Hdr.select(&env, &mut draft, 0);
+        assert_eq!(draft.config.video.hdr, HdrMode::None);
+        assert_eq!(Choice::Hdr.selected(&env, &draft), Some(0));
+    }
 }

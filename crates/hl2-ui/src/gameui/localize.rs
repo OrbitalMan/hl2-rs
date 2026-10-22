@@ -203,6 +203,14 @@ pub const FALLBACK_STRINGS: &[(&str, &str)] = &[
     ("GameUI_Gamepad", "Gamepad"),
     ("GameUI_Audio", "Audio"),
     ("GameUI_Video", "Video"),
+    ("GameUI_HDR", "High Dynamic Range"),
+    ("GameUI_hdr_level0", "None"),
+    ("GameUI_hdr_level1", "Bloom (if available)"),
+    ("GameUI_hdr_level2", "Full (if available)"),
+    (
+        "GameUI_hdr_Hint",
+        "High Dynamic Range will adjust camera exposure based on lighting. \"Release Setting\" will use what each level originally shipped.",
+    ),
     ("GameUI_Action", "Action"),
     ("GameUI_KeyButton", "Key / Button"),
     ("GameUI_AdjustGamma_Title", "BRIGHTNESS"),
@@ -297,6 +305,10 @@ mod tests {
         assert_eq!(loc.text("#GameUI_Console"), "Console");
         assert_eq!(loc.text("#GameUI_Loading"), "LOADING...");
         assert_eq!(loc.text("#LoadingProgress_LoadMap"), "Loading world...");
+        assert_eq!(loc.text("#GameUI_HDR"), "High Dynamic Range");
+        assert_eq!(loc.text("#GameUI_hdr_level0"), "None");
+        assert_eq!(loc.text("#GameUI_hdr_level1"), "Bloom (if available)");
+        assert_eq!(loc.text("#GameUI_hdr_level2"), "Full (if available)");
         assert_eq!(loc.text("#Valve_Hud_HEALTH"), "HEALTH");
         assert_eq!(loc.text("#Valve_Hud_SUIT"), "SUIT");
         assert_eq!(loc.text("#Valve_Hud_AMMO"), "AMMO");

@@ -8516,4 +8516,30 @@ mod tests {
         );
         assert_eq!(console.cvar_value("dsp_slow_cpu").as_deref(), Some("0"));
     }
+
+    #[test]
+    fn video_hdr_cvar_query_set_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
+        assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("0"));
+
+        console.submit("mat_hdr_level 1");
+        assert_eq!(console.config.video.hdr, crate::config::HdrMode::Bloom);
+        assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("1"));
+
+        console.submit("mat_hdr_level 2");
+        assert_eq!(console.config.video.hdr, crate::config::HdrMode::Full);
+        assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("2"));
+
+        console.submit("mat_hdr_level 0");
+        assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
+        assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("0"));
+
+        // Invalid level reports error and does not mutate config
+        console.submit("mat_hdr_level 3");
+        assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
+        assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("0"));
+    }
 }

@@ -4,6 +4,22 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Video HDR option audit, central localization fallbacks & render pipeline status (`crates/hl2-ui`, `crates/hl2-bevy`):**
+  - Audited retail `OptionsSubVideo.res` controls for High Dynamic Range (`HDR Label` and `HDR` ComboBox):
+    1. UI Layout & Visibility: Retail layout specifies `visible 1 [!$OSX]` and `visible 0 [$OSX]`. `hl2-ui::gameui::settings::force_visible(Panel::Video, "HDR" | "HDR Label")` ensures the controls remain visible and enabled on macOS and Windows/Linux.
+    2. Settings Model & Config Persistence: Bound to `Choice::Hdr` which maps to `HdrMode::ALL` (`[None, Bloom, Full]`) corresponding to Source `mat_hdr_level` (0, 1, 2) and tokens `#GameUI_hdr_level0` ("None"), `#GameUI_hdr_level1` ("Bloom (if available)"), `#GameUI_hdr_level2` ("Full (if available)"). Value persists to `bin/hl2-config.json` under `"video": { "hdr": "none" | "bloom" | "full" }`.
+    3. Console Parity: `mat_hdr_level [0|1|2]` queries current level, assigns valid levels (clamped to 0..2), updates config, emits `Effect::ApplyConfig`, and returns string representation via `cvar_value("mat_hdr_level")`.
+    4. Localization Fallbacks: Added authentic English fallback values in `hl2-ui::gameui::localize::FALLBACK_STRINGS` for `#GameUI_HDR`, `#GameUI_hdr_level0`, `#GameUI_hdr_level1`, `#GameUI_hdr_level2`, and `#GameUI_hdr_Hint`, satisfying project localization rules when installed resource files are absent in headless/test environments.
+    5. Unit Testing: Added `video_options_hdr_control_layout_and_selection` in `crates/hl2-ui/src/gameui/options.rs` verifying layout presence under `force_visible`, item tokens, and draft selection; added `video_hdr_cvar_query_set_and_cvar_value` in `crates/hl2-ui/src/console.rs` verifying query, assignment, error rejection, and `cvar_value`.
+  - **Documented as Unfinished in Runtime (Render Pipeline Switching)**:
+    - In retail Source, changing `mat_hdr_level` requires a game restart (`#GameUI_HDRestartRequired_Info`: "The changes you have made require the game to be restarted to take effect.") because HDR vs LDR switches fundamental asset lumps and shaders:
+      - BSP Lightmaps: HDR uses Lump 53 (`LUMP_LIGHTING_HDR`) and Lump 58 (`LUMP_FACES_HDR`); LDR uses Lump 8 (`LUMP_LIGHTING`) and Lump 7 (`LUMP_FACES`). In `source-assets::lighting`, `use_hdr` unconditionally loads HDR lumps whenever present in the map.
+      - Ambient and World Lights: HDR uses Lumps 54/55; LDR uses Lumps 15/56.
+      - Material VMT Conditionals: VMT properties evaluate `$hdr` vs `$ldr` branches at load time. In `hl2-bevy::assets::evaluate_test`, `hdr` evaluates hardcoded to `true`.
+      - Cubemap Textures: HDR loads `.hdr.vtf` (linear float), while LDR loads `.vtf` (sRGB 8-bit).
+      - Tone Mapping & Shaders: Shaders multiply by `TONEMAP_SCALE_LINEAR`, and camera exposure adapts dynamically from scene histogram readbacks. LDR mode in Source clamps to 1.0 without auto-exposure adaptation and disables bloom.
+    - In the current Bevy architecture, switching to LDR (`mat_hdr_level 0`) or Bloom-only (`mat_hdr_level 1`) at runtime without a level reload or asset remount would require rebuilding GPU texture atlases, reloading VMT materials with `$ldr` branches, switching cubemap handles, and swapping the shader pipeline between linear float tonemapping and gamma LDR clamping. Furthermore, all automated replay tests (`test-inputs/`) run under `Config::default()` where `hdr` defaults to `None` while the renderer runs the HDR pipeline; dynamically cutting tone mapping without LDR lightmaps would darken scenes by ~2x and regress replay baselines. This remains an open architectural item (STATUS line 427: "HDR None/Bloom/Full switching the render pipeline (large; design note first)").
+
 - **Audio options audit, console cvar parity & runtime status (`crates/hl2-ui`, `crates/hl2-bevy`):**
   - Audited every audio control from retail Source `OptionsSubAudio.res` across `hl2-ui`, `hl2-simulation`, and `hl2-bevy`:
     1. `SFXSlider` (`volume`): UI slider and master volume scaling in `hl2-bevy/src/audio.rs` working.
