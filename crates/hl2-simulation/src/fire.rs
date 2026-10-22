@@ -308,7 +308,10 @@ mod tests {
         // Burning: only its own flame's DMG_BURN | DMG_DIRECT hurts.
         f.ignite(1, BARREL, 100., 16., Vec3::ZERO, 7.);
         assert_eq!(f.zombie_damage(1, 4., DMG_BURN, 50., 8.), None);
-        assert_eq!(f.zombie_damage(1, 1., DMG_BURN | DMG_DIRECT, 50., 8.), Some(false));
+        assert_eq!(
+            f.zombie_damage(1, 1., DMG_BURN | DMG_DIRECT, 50., 8.),
+            Some(false)
+        );
     }
     const BARREL: Interactions = Interactions {
         flammable: true,

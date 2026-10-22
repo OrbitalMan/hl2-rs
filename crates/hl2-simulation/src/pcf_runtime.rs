@@ -4,8 +4,9 @@
 //! particles.lib), so each supported operator follows its PCF parameters' documented
 //! meaning and the SDK's particle attributes (public/particles/particles.h: 3 radius,
 //! 4 rotation, 7 alpha, 8 creation time, ...); retail behavior was not decompiled and
-//! nothing here is native-verified. Unsupported operators are counted, not guessed:
-//! Movement Lock to Bone / to Control Point, Position Modify Warp Random, Lifetime
+//! nothing here is native-verified. Movement Lock to Bone follows the model's center
+//! (no bones yet). Unsupported operators are counted, not guessed: Movement Lock to
+//! Control Point, Position Modify Warp Random, Lifetime
 //! Pre-Age Noise, Sequence Two Random's second sequence, and the SpriteCard dual
 //! sequence / frame blending. Noise operators draw uniform randoms (no Perlin field).
 use crate::projectile_visuals::Quad;
@@ -94,6 +95,8 @@ struct Effect {
     instance: Instance,
     points: ControlPoints,
     stopped: bool,
+    /// How far the model moved since the last simulation step.
+    moved: Vec3,
 }
 
 #[derive(Default, Serialize)]
@@ -136,6 +139,8 @@ impl Runtime {
     /// Start (or keep) the effect `system` on `owner`; control points follow `points`.
     pub fn start(&mut self, owner: usize, system: &str, points: ControlPoints, library: &Library) {
         if let Some(effect) = self.effects.get_mut(&owner) {
+            let center = |p: &ControlPoints| (p.model_min + p.model_max) * 0.5;
+            effect.moved += center(&points) - center(&effect.points);
             effect.points = points;
             effect.stopped = false;
             return;
@@ -147,6 +152,7 @@ impl Runtime {
                     instance,
                     points,
                     stopped: false,
+                    moved: Vec3::ZERO,
                 },
             );
         }
@@ -184,7 +190,8 @@ impl Runtime {
         for effect in effects.values_mut() {
             let points = effect.points;
             let stopped = effect.stopped;
-            self.simulate_instance(&mut effect.instance, &points, stopped, dt, library);
+            let moved = std::mem::take(&mut effect.moved);
+            self.simulate_instance(&mut effect.instance, &points, moved, stopped, dt, library);
         }
         effects.retain(|_, e| !(e.stopped && Self::empty(&e.instance)));
         self.diagnostics.effects = effects.len();
@@ -208,12 +215,13 @@ impl Runtime {
         &mut self,
         instance: &mut Instance,
         points: &ControlPoints,
+        moved: Vec3,
         stopped: bool,
         dt: f32,
         library: &Library,
     ) {
         for child in &mut instance.children {
-            self.simulate_instance(child, points, stopped, dt, library);
+            self.simulate_instance(child, points, moved, stopped, dt, library);
         }
         let Some(def) = library.systems.get(&instance.system) else {
             return;
@@ -314,6 +322,26 @@ impl Runtime {
                             (p.life - age) / span
                         };
                         p.alpha = p.initial_alpha * f.clamp(0., 1.);
+                    }
+                }
+                "Movement Lock to Bone" => {
+                    // Young particles ride with the model; the lock fades out between
+                    // the lifetime fractions "lifetime fade start" and "... end".
+                    let (start, end) = (
+                        op.float("lifetime fade start").unwrap_or(0.),
+                        op.float("lifetime fade end").unwrap_or(0.),
+                    );
+                    if moved != Vec3::ZERO {
+                        for p in &mut particles {
+                            let f = (t - p.created) / p.life.max(1e-3);
+                            let lock = if end > start {
+                                1. - ((f - start) / (end - start)).clamp(0., 1.)
+                            } else {
+                                f32::from(u8::from(f < end))
+                            };
+                            p.position += moved * lock;
+                            p.previous += moved * lock;
+                        }
                     }
                 }
                 "Remap Distance to Control Point to Scalar" => {
