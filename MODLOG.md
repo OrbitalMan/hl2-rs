@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-21 session 28 (cont.): NPC squads and sentence criteria; the can cop scene (`wip/squads-20261022`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 ai_squad.cpp, ai_basenpc.cpp (InitSquad, SelectIdealState SquadNewEnemy, UpdateEnemyMemory, FOkToMakeSound/JustMadeSound), ai_sentence.cpp/h (Speak criteria defaults), npc_combine.cpp/npc_metropolice.cpp (NotifyDeadFriend, IdleSound chatter, every Speak call's criteria), ai_behavior_police.cpp/ai_goal_police.cpp (GatherConditions, knock-out), weapon_stunstick.cpp, scripted.h/ai_default.cpp (CINE_MOVETO), physobj.cpp (CPhysImpact), logicentities.cpp (CTimerEntity), logicrelay.cpp; d1_trainstation_02 entity lump (can cop chain, squads, gag flags); installed npc_sounds_metropolice/soldier.txt.
+
+**Changed:** `ai::squad` (GetLeader rule, NumMembers, sound gate), `ai::runtime` squads (join on entering the world, AddToSquad memory copy, shared sightings, SquadNewEnemy, NotifyDeadFriend lines, per-group sentence criteria, squad sound gate, CNPC_MetroPolice idle chatter exchange and harassment memory), spawn requests carry targetname/squadname; scripted_sequence walk/run/wait-facing moves, env_physimpact, trigger physics-object touches and filter entities, host VPhysics pose sync into the scene, random logic_timer intervals, logic_relay CancelPending, policing disabled when its goal dies.
+
+**Why:** owner step 14 speech list (squad speech) and owner reports (station cops chatter across the map; the can cop never knocks the can over and beats an ignoring player forever).
+
+**Tested how / Result:** unit tests (squad leader/gate, runtime squads: membership, criteria, gate, SquadNewEnemy, memory sharing, MAN_DOWN/LAST_OF_SQUAD; cop chatter exchange and harassment; random timers, filters, CancelPending), workspace release tests (two known release-only failures), strict Clippy/fmt; packaged artifacts/s28: idle-plaza (main 18 idle lines/min vs 10 with squads), squad-battle (MAN_DOWN, LAST_OF_SQUAD), cancop-walk/-pass/-fail (can knocked over, trash pass with "Cupcop.Success", escape fail with one knock-out and no endless beating); artifacts/s28-regression-b (built at 0856a32): weapons 17/17, attention 26/26, movement 25/26 (known doll01); vs s28-regression only the plaza cop's glance/pose, foliage timing and a few speckles differ (expected); owned suite 54 pass; dense walk samples (no stall after the fix).
+
+**Also changed (860ab03):** scene/script moves for AI actors (the controller's ai_only refusal removed), script walks with the short tolerance, thrown-prop interaction dispatch.
+
+**Still broken or not tested:** a scripted +USE throw left the can frozen in mid-air (gravity 0; open bug, OnCupCopped unverified); squad strategy slots, AnnounceEnemyType/FLANK/GREN, BestEnemy from shared memory; ai_goal_actbusy (the can cop's walk-off), the can-throw branch, native A/B of the can scene and of chatter rates; real-input playtest.
+
+**Next:** owner playtest; ai_goal_actbusy; squad slots; native A/B.
+
 ## 2026-10-21 session 28: F4 overlay mouse, filter and common props; ent_create placement; sessions 18-28 merged into main
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 baseentity.cpp CC_Ent_Create.
