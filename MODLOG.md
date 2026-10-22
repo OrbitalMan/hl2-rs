@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline target-search and error-consumer milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list(T) and queued_damage(U), inherited model family/exact identifiers unavailable; primary reviewed/sealed both.
+
+**Changed / Why:** Bound use-target search predicates and stateful carry-error consumption, preventing long-ray reach and zero-error return values from being mistaken for successful interaction or physical convergence.
+
+**Tested how / Result:** T/U sealed32/21 and21/18 files/bindings; independent1123/94 bounded byte-record checks, exact immutable DB identities, constants/call sites and pinned references pass. Rejected wrong-width decode retained.
+
+**Still broken or not tested / Next:** Live targets/caps/LOS, accumulator replenishment/order, carry/motion/timing/units, window break/exit and Rust parity untested. One tightly bounded offline writer follow-up and metadata navigator remain; no owner game disturbance or Rust changes.
+
 ## 2026-10-22 offline scale-key and grab-target milestone
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list(R) and queued_damage(S), inherited model family/exact identifiers unavailable; primary reviewed and sealed both.

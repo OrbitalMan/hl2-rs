@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Target search and error-consumer static acceptance (2026-10-22)
+
+Run private python -B verify_seal.py under scene-player-use-target-20261022t and scene-grab-error-20261022u. Expected32/21 and21/18 retained-file/external-binding counts. T rechecks selected slots/caps,1123 byte records, seven constants plus inline geometry, qword cone threshold, argument/occlusion sites, exact bodies and predecessor seals. U rechecks94 records, six constants, formula/reset/sentinel/null-path opcodes, both caller spans, exact bodies and source/provenance. All failures/rejected interpretations remain private with the successes.
+
+These checks establish static paths and state mutation, not runtime call ordering, actual target/LOS/pickup, measured error/motion, validated units/ABI, ordinary play, break/exit or Rust parity. No gameplay build/tests/captures were run. Source-only documentation publication checks apply.
+
 ## Scale-key and grab-target static acceptance (2026-10-22)
 
 Run private python -B verify_seal.py under scene-crate-scale-fields-20261022r and scene-grab-update-20261022s. Expected53/17 and24/16 retained-file/external-binding counts. R independently checks descriptor bytes, key flag/type dispatch/name comparison/float destination, exact immutable DB bodies, owned BSP spellings and source references. S checks806 records, result handling, target-field stores, branch/call edges, constants and full exact-body identities. Historical unsealed acceptance labels describe pre-parent review; the enclosing closed-set seal is authoritative for freeze status.

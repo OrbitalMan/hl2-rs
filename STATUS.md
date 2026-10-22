@@ -1,5 +1,11 @@
 # STATUS
 
+## Offline use-target and carry-error checkpoint (2026-10-22)
+
+Selected player target search now binds capability guards, direct/hull/radius searches and occlusion predicates. The initial1024 ray is not a1024 use reach: selected trace acceptance has an adjusted distance strictly below80; radius candidates additionally require capability200, cone>=0.8 and the selected occlusion result. Actual current target/reach/LOS/caps and pickup remain unobserved.
+
+The carry-error query consumes/reset its normal positive-time accumulator. A subsequent call without replenishment returns0 while stored error remains, so the outer and inner checks can differ without motion. Its exceptional missing-physics branch delegates detach and returns9999; invalid positive-time handles have no proved safe fallback. T/U are sealed32/21 and21/18 retained files/bindings; native timing/units/carry/break/exit and Rust parity **not tested**.
+
 ## Offline crate key and held-target checkpoint (2026-10-22)
 
 The selected retail class descriptors now bind the authored massScale/inertiaScale spellings through the parser's ASCII case-insensitive path to float fields+680/+684. This closes the earlier named-key static gap; live locale, conversion/assignment and resulting native physics remain untested. Q's exact-case negative search stays retained; R supplies the separate lowercase-descriptor evidence.

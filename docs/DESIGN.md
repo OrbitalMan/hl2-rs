@@ -1,5 +1,11 @@
 # Design
 
+## Selected target search and stateful error query (2026-10-22)
+
+Use-target eligibility requires a nonnull candidate, at least one use capability in maskf0 and every requested bit. Direct/ancestor, ground and radius paths request0/100/200 respectively. The search includes a long initial ray, angular hull attempts and a strict adjusted reach<80; radial candidates need cone>=0.8, a strictly improved ranking and fraction1 or the same returned entity. Keep these static numerical predicates separate from measured units, crate identity and successful interaction. The ranking helper's raw caller passes a fourthNULL omitted from the decompiler preview; do not infer an ABI from that preview.
+
+The selected error routine is stateful: for normal finite positive t, clamp t<=1, derive distance d, halve d when d/t exceeds the stored speed scalar, blend accumulated E=(1-t)*Eold+t*effectiveDistance, conditionally multiply by3, then reset errorTime to0. A following nonpositive-time query returns0 without clearing E. Arrival+34 is distinct from errorTime+38. Actual replenishment/solver scheduling remains a separate question; result0 does not prove distance convergence.
+
 ## Scale-key assignment and grab update result boundaries (2026-10-22)
 
 The selected CPhysicsProp descriptor array uses external massscale/inertiascale keys, float type1, KEY flag4 and canonical offsets+680/+684. The retained generic parser checks the KEY flag and external name, dispatches type1 conversion, then stores at object+descriptor.offset. Its exact ASCII comparison folds the authored mixed-case names; live locale and numeric conversion remain separate untested boundaries. Combined with Q's positive-only operations, authored zero massScale does not itself mean zero physical mass.

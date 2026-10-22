@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Sealed use-target and accumulated-error supplement (2026-10-22)
+
+T scene-player-use-target-20261022t binds retail player slots658/65c to10121b90/102024f0, four local plus three reused exact bodies,1123 bounded records,21 externals and exactly two helper bodies. The rejected float32 cone decode is retained; its raw qword load establishes binary64 threshold0.8. Selected reach/caps/trace/ranking/occlusion are checked; trace backend and actual map selection are not expanded/tested.
+
+U scene-grab-error-20261022u retains one new exact10416d80/two reused callers,94 bounded records/six constants/four edges/18 externals, with no extra helper expansion. Normal evaluation resets the accumulator, permitting a later zero result without motion. Missing physics returns sentinel9999 after delegated detach; a positive-time invalid handle reaches an unguarded low-address flags read, so no safe fallback is claimed. T/U closed-set counts32/21 and21/18; actual interleaving, units, carry and Rust parity untested.
+
 ## Sealed scale descriptors and grab update supplement (2026-10-22)
 
 R scene-crate-scale-fields-20261022r binds24 class descriptors/two scale KEY fields/five authored crate spellings with ten retained exact bodies(seven selected/three navigation-only),two reused bodies,1004 bounded byte records and17 external hashes. Selected ASCII folding supports the spelling bridge; alternate locale internals and numeric grammar are not expanded. Earlier Q negative output remains unchanged.
