@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline window-health and crate-use milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Material static worker exit_registration researched crate use with inherited model family; exact identifier unavailable.
+
+**Changed / Why:** Sealed private CBreakable health/propdata and CPhysicsProp +use evidence while keeping the owner's running game undisturbed. Distinguished authored window health17 from conditional profile15, and pickup outputs from attachment/carry.
+
+**Tested how / Result:** Window seal passes116 retained files/26 bindings,23 exact bodies/2,569 instruction records/13 metadata stores plus fresh owned-file parsing/provenance. Crate seal passes76 files/14 bindings,18 bodies/1,093 records/five authored crates and edges. Misleading decompiler signature/output branches and rejected drafts remain explicit. Shared docs reviewed and committed separately.
+
+**Still broken or not tested / Next:** Live health, actual pickup/throw, window break, exit and Rust parity remain untested. Finish the bounded held-object throw ordering supplement, then leave a precise offline/runtime handoff; do not disturb the owner's game or alter original authored gaps.
+
 ## 2026-10-22 offline exit-registration checkpoint
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Materially involved static worker: exit_registration, inherited model family; exact identifier unavailable.

@@ -1,5 +1,13 @@
 # Design
 
+## Breakable health precedence and crate-use evidence (2026-10-22)
+
+Retail CBreakable metadata binds integer current/max health, the damage-mode byte, canonical/secondary interfaces and distinct OnHealthChanged/OnBreak outputs. The reviewed health helper compares/stores an integer; it converts to floats only for the clamped health/max ratio. Changed-health output precedes the nonpositive-health break branch, and a filter's successful method return is not proof of applied damage. Preserve output identity, raw argument representation, breaker handle generation and entity state separately. Exact signatures inferred by the decompiler are not typed ABI evidence.
+
+The authored first-map window has health17 and propdata24. Retail KeyValue maps24 to Glass.Window; the owned profile authors health15 and bullet modifier0.5, with base/child parser handling before Spawn's maximum-health initialization. Treat15 as a conditional successful-load prediction and probe live health/max/modifiers before selecting rewrite values. Native loaded values, damage delivery, throw physics and parity remain untested. The sealed offline window supplement passes23 bodies/2,569 instruction records and owned-file provenance checks.
+
+Retail CPhysicsProp +use reaches pickup reason2; its callback ECX addresses a secondary interface, not the canonical entity. OnPlayerUse can precede a later pickup rejection, and OnPhysGunPickup precedes attachment. The five authored storage crates disable the pickup hint through OnPhysGunPickup; they do not require a gravity-gun pickup. Follow actual owner/handle/attachment state and later motion rather than treating the output as carry/throw completion. Crate-use static seal passes18 bodies/1,093 records. No Rust change; runtime remains deferred to keep the owner's game undisturbed.
+
 ## Offline continuation and retail exit binding (2026-10-22)
 
 Keep the owner's running game undisturbed. Continue the window damage and crate-use questions statically while native cursor/input prerequisites are unavailable; do not relax those guards. Before a later runtime experiment, bind fresh process/module/map and trigger generation, canonical object base, primary vtable/callback and raw map/landmark arrays. CChangeLevel retail metadata now names TouchChangeLevel; Spawn assigns it when the relevant spawnflag is clear, and ordinary Activate resets the latch. Preserve the early chapter/new-game branch separately. The distinct OnChangeLevel output still needs owner/generation-scoped observation; static registration is not proof of a live authored exit.

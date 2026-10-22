@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Window/crate offline acceptance (2026-10-22)
+
+Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-window-route-20261022e/verify_seal.py` and the sibling `scene-crate-use-20261022f/verify_seal.py`. Expected passed:true: window116 retained files/26 bindings,23 bodies/2,569 instruction records/13 selected dynamic metadata stores; crate76 files/14 bindings,18 bodies/1,093 records/five authored crates/five pickup edges. These independently verify exact immutable identities, PE bytes, owned BSP/propdata and closed file sets. The window query supports health/fields/bodies with bounded paging.
+
+The owned propdata parser agrees with pinned SourcePP on ordered content and preserves stable source/read-lock identities. The three declared packs lack that member; the loose file is bound, without asserting all possible live mounts. Window health17 is authored and profile health15 is conditional successful-parser evidence; live health/max/modifiers remain unobserved. The crate route's outputs precede attachment and cannot prove actual carry/throw. No native game started in this continuation, no input/focus/cursor action followed the owner's deferral, and no Rust build/tests were required for the shared documentation. First-map exit and Rust parity remain false/untested.
+
 ## Exit-registration static acceptance (2026-10-22)
 
 Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-exit-registration-20261022d/verify_seal.py`. It checks53 retained files (55 including manifest/receipt), seven external identities, exact immutable pass14 bodies and503 PE instruction records, RTTI/datamap/callback/factory bindings and preserved missing registration stub. A draft assertion at the conditional branch was rejected and corrected to the actual callback-store instruction; the rejected draft remains retained. Expected live_trigger_instance_bound/native_execution_tested/runtime_exit_tested/first_map_finished/rust_parity_tested:false. One separate guarded native launch was deferred before Popen because of existing cursor confinement; no runtime result is claimed and the owner's game remains undisturbed. No Rust build/test required for these documentation-only changes.

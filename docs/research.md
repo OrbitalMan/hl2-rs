@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Offline breakable and crate-use supplements (2026-10-22)
+
+`scene-window-route-20261022e` is sealed at116 retained files/26 bindings:23 exact bodies,2,569 checked instruction records,13 selected metadata stores and fresh ordered owned-propdata parsing/source identities. It binds CBreakable's damage/health/output paths and the retail propdata24 -> Glass.Window mapping. Authored health17 and profile health15 remain separate evidence; the reviewed successful parser path predicts15 conditionally, without measuring live health or breaking a window. The rejected CRLF-normalizing verifier draft and missing exact startup stub0x10008400 remain retained.
+
+`scene-crate-use-20261022f` is sealed at76 files/14 bindings:18 exact bodies/1,093 instruction records, five authored crate records and pickup edges. Raw reason/output branches match SDK after resolving omitted implicit output pointers; the suspected discrepancy is rejected. The +use reason2 route reaches OnPhysGunPickup/OnPlayerPickup, before full attachment. Secondary callback identity, eligibility branches and authored flags remain bounded static findings; actual pickup/carry/throw, native units and exit are untested. Missing startup stub0x1000d4f0 remains raw-only. Current continuation is offline under the owner's instruction to leave their running game undisturbed.
+
 ## Retail exit metadata binding (2026-10-22)
 
 Private `scene-exit-registration-20261022d` closes the prior static class/callback naming gap with CChangeLevel RTTI, datamap, factory chain and named TouchChangeLevel registration. Ten exact baseline/original bodies and503 machine instruction records pass independent checks;53 retained files/seven external bindings are sealed. Spawn callback assignment, map/landmark array metadata, OnChangeLevel member and one ordinary Activate latch-reset path are retained. Registration stub0x1000f4d0 has no exact pass14 procedure and stays raw-only, without a neighboring substitute. No live trigger or exit execution is established. The owner requested an existing running game remain undisturbed; current window/crate continuation is offline only.

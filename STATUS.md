@@ -1,5 +1,11 @@
 # STATUS
 
+## Offline window health and crate-use checkpoint (2026-10-22)
+
+Private `scene-window-route-20261022e` is sealed: 116 retained files/26 external bindings; its breakable audit checks 23 exact bodies, 2,569 instruction records and 13 selected metadata stores. BSP window185 authors health17/propdata24; retail index24 selects Glass.Window. The owned profile authors health15/bullet modifier0.5, and the reviewed successful parser path can replace authored health before maximum-health initialization. **Live window health is not observed**:15 is a conditional static prediction, not a measured replacement for17. Integer-health and normalized-float-output paths are distinguished from a misleading inferred signature.
+
+Separately sealed `scene-crate-use-20261022f` has76 retained files/14 bindings,18 exact bodies/1,093 instruction records and five authored crate/output joins. Ordinary +use reaches the general pickup notification, with a required secondary-interface adjustment. Use/pickup outputs can precede rejection or attachment and do not prove sustained carry/throw. All new work stayed offline after the owner requested their running game remain undisturbed. Actual window break, exit and Rust parity remain **not tested**; original authored gaps remain unchanged.
+
 ## Offline exit-registration research checkpoint (2026-10-22)
 
 The owner requested that a running game/fullscreen app remain undisturbed. One native launch was deferred before process creation by the existing cursor-confinement guard; no input, focus or cursor changes followed. Research continues offline. Private `scene-exit-registration-20261022d` is sealed: 53 retained files/seven external bindings, ten exact retail bodies/503 checked instruction records. RTTI/datamap/Spawn now bind CChangeLevel and the named TouchChangeLevel callback to the prior touch/gate candidates; ordinary Activate resets the latch. The exact registration stub remains unavailable as a pass14 procedure and is retained raw-only. A live authored trigger, actual exit and Rust parity remain **not tested**. Original16 gaps/four missing procedures remain separate and unchanged.
