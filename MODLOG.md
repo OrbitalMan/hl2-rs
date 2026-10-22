@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 session 31: NPC death ragdolls
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Owner request: dead NPCs vanished. Added the PHY ragdoll model (per-bone solids in bone space, constraint frames from the reference pose; modkit-core `RagdollModel`), Rapier ragdoll bodies and joints with the authored limits and client-ragdoll collision rules, the death force nudge, and the skinned mesh/eyes driven from the bodies (`hl2_simulation::ragdolls`).
+
+**Tested how / Result:** Owned test: solids sit on their bones in the reference pose (4 models) and joint frames reproduce the child bones. Unit test: a two-body ragdoll falls jointed and traces ignore it. Packaged hall fixtures (citizen, cop, zombie shot with the pistol): bodies crumple to the floor; the cop's pistol drops. A first version placed bodies from skinning matrices (rejected; fixed). Regression batch run (see STATUS).
+
+**Still broken or not tested / Next:** Native comparison of falls/limits not done; no animation velocity at death; force on the nearest solid rather than the hit bone; no fade, prop_ragdoll, headcrab release or burning ragdolls.
+
 ## 2026-10-22 session 31: merge, NPC route cost and unreachable enemies
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

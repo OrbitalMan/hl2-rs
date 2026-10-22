@@ -104,7 +104,7 @@ pub fn present(
         .into_iter()
         .filter_map(|(id, key)| {
             let state = &game.scene.states[id];
-            if state.killed || !state.visible {
+            if (state.killed || !state.visible) && !game.scene.ragdoll_matrices.contains_key(&id) {
                 return None;
             }
             let rig = game.world.rigs.get(key)?;
@@ -120,7 +120,7 @@ pub fn present(
     let mut attachment_actors = 0;
     for (&id, actor) in &eyes.actors {
         let state = &game.scene.states[id];
-        if !state.visible || state.killed {
+        if (!state.visible || state.killed) && !game.scene.ragdoll_matrices.contains_key(&id) {
             continue;
         }
         let attached = actor.gaze.attachment.as_ref().and_then(|attachment| {
@@ -169,7 +169,7 @@ pub fn present(
     let mut actor_targets = BTreeMap::<usize, Option<Selected>>::new();
     for (owner, mesh_eye, handle, skinned) in &draws {
         let state = &game.scene.states[owner.0];
-        if !state.visible || state.killed {
+        if (!state.visible || state.killed) && !game.scene.ragdoll_matrices.contains_key(&owner.0) {
             continue;
         }
         let Some(bone) = bone_pose(&game, &mesh_eye.key, owner.0, mesh_eye.eye.bone, &poses) else {

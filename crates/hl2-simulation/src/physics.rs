@@ -91,12 +91,28 @@ const INTERACTIVE_DEBRIS_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(INTERACTIVE_DEBRIS_GROUP)
         .difference(SHADOW_GROUP),
 );
+/// Client-side ragdolls (C_BaseAnimating::BecomeRagdollOnClient): the world and props
+/// block them but props are not pushed (dominance), and the player, NPCs, debris and
+/// every server trace ignore them. Self collisions follow the model's collision rules
+/// (contact pair filter).
+const RAGDOLL_GROUP: Group = Group::GROUP_8;
+const RAGDOLL_GROUPS: InteractionGroups = InteractionGroups::new(
+    RAGDOLL_GROUP,
+    Group::ALL
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP)
+        .difference(NPC_GROUP)
+        .difference(PROJECTILE_GROUP)
+        .difference(DEBRIS_GROUP)
+        .difference(INTERACTIVE_DEBRIS_GROUP),
+);
 const QUERY_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
     Group::ALL
         .difference(PROJECTILE_GROUP)
         .difference(SHADOW_GROUP)
-        .difference(HULL_GROUP),
+        .difference(HULL_GROUP)
+        .difference(RAGDOLL_GROUP),
 );
 /// Player movement: everything solid to the player, NPC hull boxes included (not
 /// debris props).
@@ -106,7 +122,8 @@ const PLAYER_GROUPS: InteractionGroups = InteractionGroups::new(
         .difference(PROJECTILE_GROUP)
         .difference(SHADOW_GROUP)
         .difference(DEBRIS_GROUP)
-        .difference(INTERACTIVE_DEBRIS_GROUP),
+        .difference(INTERACTIVE_DEBRIS_GROUP)
+        .difference(RAGDOLL_GROUP),
 );
 /// The SDK hull (mins, maxs) of npc_* classes (SetHullType), for those done so far.
 pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
@@ -139,7 +156,10 @@ pub fn npc_hull(class: &str) -> Option<(Vec3, Vec3)> {
 /// punt): they also hit COLLISION_GROUP_WEAPON bodies such as a thrown frag.
 const PICK_GROUPS: InteractionGroups = InteractionGroups::new(
     Group::ALL,
-    Group::ALL.difference(SHADOW_GROUP).difference(HULL_GROUP),
+    Group::ALL
+        .difference(SHADOW_GROUP)
+        .difference(HULL_GROUP)
+        .difference(RAGDOLL_GROUP),
 );
 /// Entity ids of VPhysics projectile bodies (thrown frags), above every map entity
 /// index, so the entity-keyed +USE and gravity gun holds can take them.
@@ -476,6 +496,10 @@ pub struct WorldSideMaterials {
     /// (PhysDisableEntityCollisions on g_PhysWorldObject), which also owns the static
     /// props, so these bodies ignore every static collider without an entity.
     pub world_disabled_bodies: std::collections::HashSet<RigidBodyHandle>,
+    /// Ragdoll bodies (ragdoll serial) and the body pairs of one ragdoll that collide
+    /// (CRagdollCollisionRules), both orders.
+    pub ragdoll_bodies: HashMap<RigidBodyHandle, u64>,
+    pub ragdoll_pairs: std::collections::HashSet<(RigidBodyHandle, RigidBodyHandle)>,
 }
 impl WorldSideMaterials {
     /// The side whose outward normal best matches `outward` (from the brush toward
@@ -496,6 +520,14 @@ impl PhysicsHooks for WorldSideMaterials {
         if self.hitboxes.contains(&context.collider1) || self.hitboxes.contains(&context.collider2)
         {
             return None;
+        }
+        if let (Some(a), Some(b)) = (context.rigid_body1, context.rigid_body2) {
+            if let (Some(ra), Some(rb)) = (self.ragdoll_bodies.get(&a), self.ragdoll_bodies.get(&b))
+            {
+                if ra == rb && !self.ragdoll_pairs.contains(&(a, b)) {
+                    return None;
+                }
+            }
         }
         if self.clip_brushes.contains(&context.collider1)
             || self.clip_brushes.contains(&context.collider2)
@@ -1950,6 +1982,187 @@ impl Physics {
         // (physics-research-20261013b/drag-axes) remains open.
         body
     }
+    /// RagdollCreate: one body per ragdoll solid at its bone's world pose (`poses`, one
+    /// per body: RagdollAddSolid's SetPositionMatrix(pCurrentBones)), the authored mass,
+    /// damping and IVP inertia, joined by ragdoll constraints (child limits about the
+    /// child bone's axes relative to the reference pose, Studio_CalcBoneToBoneTransform
+    /// frames; joined pairs never collide). Every body starts with `velocity`.
+    pub fn spawn_ragdoll(
+        &mut self,
+        world: &World,
+        model: &modkit_core::RagdollModel,
+        poses: &[(Vec3, Quat)],
+        velocity: Vec3,
+        serial: u64,
+    ) -> Vec<RigidBodyHandle> {
+        let mut handles = Vec::with_capacity(model.bodies.len());
+        for (body, &(position, rotation)) in model.bodies.iter().zip(poses) {
+            let shapes: Vec<SharedShape> = body
+                .pieces
+                .iter()
+                .filter_map(|piece| {
+                    SharedShape::convex_hull(
+                        &piece
+                            .vertices
+                            .iter()
+                            .map(|p| Point::from(vector(*p)))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect();
+            let mass = body.mass.max(0.001);
+            let masses = match body.compact_inertia {
+                Some((center, inertia)) if inertia.is_finite() && inertia.min_element() > 0. => {
+                    let inertia = inertia * mass * body.inertia;
+                    MassProperties::new(
+                        Point::from(vector(center)),
+                        mass,
+                        vector![inertia.x, inertia.y, inertia.z],
+                    )
+                }
+                _ => authored_mass_properties(&shapes, mass, body.inertia),
+            };
+            let handle = self.bodies.insert(
+                RigidBodyBuilder::dynamic()
+                    .additional_mass_properties(masses)
+                    .position(pose(position, rotation))
+                    .linvel(vector(velocity))
+                    .linear_damping(body.damping)
+                    .angular_damping(body.rotdamping)
+                    // Client ragdolls never push server props.
+                    .dominance_group(-1),
+            );
+            let material = surface_material(world, &body.surfaceprop);
+            for shape in shapes {
+                let builder = ColliderBuilder::new(shape)
+                    .density(0.)
+                    .collision_groups(RAGDOLL_GROUPS)
+                    .contact_skin(VPHYSICS_CONTACT_MARGIN * SCALE)
+                    .active_hooks(
+                        ActiveHooks::FILTER_CONTACT_PAIRS | ActiveHooks::MODIFY_SOLVER_CONTACTS,
+                    );
+                let builder = match material {
+                    Some(m) => builder
+                        .friction(m.friction)
+                        .restitution(restitution(m))
+                        .friction_combine_rule(CoefficientCombineRule::Multiply)
+                        .restitution_combine_rule(CoefficientCombineRule::Multiply),
+                    None => builder,
+                };
+                let collider = self
+                    .colliders
+                    .insert_with_parent(builder, handle, &mut self.bodies);
+                self.collider_materials
+                    .insert(collider, body.surfaceprop.clone());
+            }
+            if let Some(b) = self.bodies.get_mut(handle) {
+                b.recompute_mass_properties_from_colliders(&self.colliders);
+            }
+            self.world_sides.ragdoll_bodies.insert(handle, serial);
+            handles.push(handle);
+        }
+        if handles.len() != model.bodies.len() {
+            return handles;
+        }
+        // CRagdollCollisionRules: every pair, or only the listed pairs without self
+        // collisions; joined pairs are excluded by their joints.
+        for i in 0..handles.len() {
+            for j in i + 1..handles.len() {
+                let listed = model
+                    .collision_pairs
+                    .iter()
+                    .any(|&(a, b)| (a, b) == (i, j) || (a, b) == (j, i));
+                if model.self_collisions || listed {
+                    self.world_sides
+                        .ragdoll_pairs
+                        .insert((handles[i], handles[j]));
+                    self.world_sides
+                        .ragdoll_pairs
+                        .insert((handles[j], handles[i]));
+                }
+            }
+        }
+        for joint in &model.joints {
+            let (translation, rotation) = joint.child_in_parent;
+            let limit = |axis: usize| {
+                let (min, max) = joint.limits[axis];
+                [min.to_radians(), max.to_radians()]
+            };
+            let mut builder = GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
+                .local_frame1(pose(translation, rotation))
+                .local_frame2(Isometry::identity())
+                .contacts_enabled(false)
+                .limits(JointAxis::AngX, limit(0))
+                .limits(JointAxis::AngY, limit(1))
+                .limits(JointAxis::AngZ, limit(2));
+            // constraint_axislimit_t torque: joint friction (kg in^2/s^2 -> N m, as
+            // phys_hinge).
+            for (axis, friction) in [JointAxis::AngX, JointAxis::AngY, JointAxis::AngZ]
+                .into_iter()
+                .zip(joint.friction)
+            {
+                let friction = friction * 1000. * SCALE * SCALE;
+                if friction > 0. {
+                    builder = builder
+                        .motor_velocity(axis, 0., 1e3)
+                        .motor_max_force(axis, friction);
+                }
+            }
+            self.impulses.insert(
+                handles[joint.parent],
+                handles[joint.child],
+                builder.build(),
+                true,
+            );
+        }
+        handles
+    }
+    /// RagdollCreate's nudge: the full force at the force body's center, a mass share of
+    /// it at that body's position on every other body (impulses, kg in/s).
+    pub fn ragdoll_nudge(&mut self, handles: &[RigidBodyHandle], force_body: usize, force: Vec3) {
+        let total: f32 = handles
+            .iter()
+            .filter_map(|h| self.bodies.get(*h))
+            .map(|b| b.mass())
+            .sum::<f32>()
+            .max(1.);
+        let Some(at) = handles
+            .get(force_body)
+            .and_then(|h| self.bodies.get(*h))
+            .map(|b| *b.center_of_mass())
+        else {
+            return;
+        };
+        for (i, handle) in handles.iter().enumerate() {
+            let Some(body) = self.bodies.get_mut(*handle) else {
+                continue;
+            };
+            let share = if i == force_body {
+                1.
+            } else {
+                body.mass() / total
+            };
+            // kg in/s -> kg m/s.
+            let f = force * share / 39.37;
+            body.apply_impulse_at_point(vector![f.x, f.y, f.z], at, true);
+        }
+    }
+    /// The ragdoll bodies' world poses (Source units).
+    pub fn ragdoll_poses(&self, handles: &[RigidBodyHandle]) -> Option<Vec<(Vec3, Quat)>> {
+        handles
+            .iter()
+            .map(|h| self.body_state(*h).map(|s| (s.position, s.rotation)))
+            .collect()
+    }
+    pub fn remove_ragdoll(&mut self, handles: &[RigidBodyHandle]) {
+        for handle in handles {
+            self.world_sides.ragdoll_bodies.remove(handle);
+            self.world_sides
+                .ragdoll_pairs
+                .retain(|(a, b)| a != handle && b != handle);
+            self.remove_body(*handle);
+        }
+    }
     /// IPhysicsObject::GetContactPoint != 0: the entity's body touches something.
     pub fn entity_in_contact(&self, id: usize) -> bool {
         let Some(body) = self.dynamic.get(&id).and_then(|h| self.bodies.get(*h)) else {
@@ -2396,7 +2609,8 @@ impl Physics {
                     Group::ALL
                         .difference(PROJECTILE_GROUP)
                         .difference(NPC_GROUP)
-                        .difference(SHADOW_GROUP),
+                        .difference(SHADOW_GROUP)
+                        .difference(RAGDOLL_GROUP),
                 ))
                 .exclude_sensors()
                 .predicate(&skip);
@@ -3814,7 +4028,8 @@ mod tests {
             HULL_GROUP,
             Group::ALL
                 .difference(PROJECTILE_GROUP)
-                .difference(SHADOW_GROUP),
+                .difference(SHADOW_GROUP)
+                .difference(RAGDOLL_GROUP),
         );
         let groups = |physics: &Physics| {
             let body = &physics.bodies[physics.dynamic[&0]];
@@ -4506,6 +4721,77 @@ mod tests {
             step_height: 18.,
             step_down_multiplier: 1.,
         }
+    }
+    #[test]
+    fn a_two_body_ragdoll_falls_jointed_and_stays_out_of_traces() {
+        // Two 8-unit cubes: the child bone 16 units above its parent in the reference
+        // pose, joined by a ragdoll constraint (+-30 degrees about every axis).
+        let cube = |half: f32| modkit_core::ConvexPiece {
+            vertices: (0..8)
+                .map(|i| {
+                    Vec3::new(
+                        if i & 1 == 0 { -half } else { half },
+                        if i & 2 == 0 { -half } else { half },
+                        if i & 4 == 0 { -half } else { half },
+                    )
+                })
+                .collect(),
+            indices: Vec::new(),
+        };
+        let body = |bone| modkit_core::RagdollBody {
+            bone,
+            pieces: vec![cube(4.)],
+            mass: 5.,
+            inertia: 1.,
+            damping: 0.,
+            rotdamping: 0.,
+            surfaceprop: "default".into(),
+            compact_inertia: None,
+        };
+        let model = modkit_core::RagdollModel {
+            bodies: vec![body(0), body(1)],
+            joints: vec![modkit_core::RagdollJoint {
+                parent: 0,
+                child: 1,
+                limits: [(-30., 30.); 3],
+                friction: [0.; 3],
+                child_in_parent: (Vec3::Z * 16., Quat::IDENTITY),
+            }],
+            self_collisions: false,
+            collision_pairs: Vec::new(),
+        };
+        let world = npc_floor_world();
+        let mut physics = Physics::new(&world);
+        let poses = [
+            (Vec3::new(0., 0., 60.), Quat::IDENTITY),
+            (Vec3::new(0., 0., 76.), Quat::IDENTITY),
+        ];
+        let handles = physics.spawn_ragdoll(&world, &model, &poses, Vec3::ZERO, 1);
+        assert_eq!(handles.len(), 2);
+        // Server traces ignore client ragdolls.
+        physics.tick(0.015);
+        let (_, hit) = physics
+            .ray(Vec3::new(0., 0., 120.), -Vec3::Z, 200.)
+            .unwrap();
+        assert!(hit.z.abs() < 1., "the ray stopped at {hit}, not the floor");
+        // Push the top body sideways: it swings on the joint and both land on the floor.
+        physics.ragdoll_nudge(&handles, 1, Vec3::X * 2000.);
+        for _ in 0..400 {
+            physics.tick(0.015);
+        }
+        let poses = physics.ragdoll_poses(&handles).unwrap();
+        for (position, _) in &poses {
+            assert!(position.z > 2. && position.z < 20., "{position}");
+        }
+        // The joint keeps the child bone 16 units from the parent's origin.
+        let (p, r) = poses[0];
+        let anchor = p + r * (Vec3::Z * 16.);
+        assert!(anchor.distance(poses[1].0) < 1.5, "{anchor} {}", poses[1].0);
+        // The relative rotation stays within the 30 degree limits (some solver slack).
+        let relative = r.inverse() * poses[1].1;
+        assert!(relative.angle_between(Quat::IDENTITY).to_degrees() < 60.);
+        physics.remove_ragdoll(&handles);
+        assert!(physics.world_sides.ragdoll_bodies.is_empty());
     }
     fn npc_floor_world() -> World {
         World {

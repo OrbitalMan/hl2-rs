@@ -1018,6 +1018,20 @@ pub fn append_models(world: &mut World, vfs: &Vfs) -> ModelReport {
                     report
                         .animation_warnings
                         .extend(rig.warnings.iter().cloned());
+                    // NPC deaths become ragdolls (C_BaseAnimating::BecomeRagdollOnClient).
+                    if instance.kind.starts_with("npc_") {
+                        match read_ragdoll(vfs, &instance.model, &rig) {
+                            Ok(Some(ragdoll)) => {
+                                world
+                                    .model_ragdolls
+                                    .insert(instance.asset_key(), std::sync::Arc::new(ragdoll));
+                            }
+                            Ok(None) => {}
+                            Err(e) => report
+                                .animation_warnings
+                                .push(format!("{} ragdoll: {e:#}", instance.model)),
+                        }
+                    }
                     world.rigs.insert(instance.asset_key(), rig);
                 }
                 Err(e) => report
@@ -1587,6 +1601,26 @@ pub fn read_physics(
         Ok(read.pieces)
     })();
     Ok(Some((solid, pieces)))
+}
+/// The model's ragdoll (`phy::ragdoll_model`) against its loaded rig's bones.
+pub fn read_ragdoll(
+    vfs: &Vfs,
+    model: &str,
+    rig: &modkit_core::animation::Rig,
+) -> Result<Option<modkit_core::RagdollModel>> {
+    let stem = model.trim_end_matches(".mdl");
+    let Some(phy) = vfs.read(&format!("{stem}.phy"))? else {
+        return Ok(None);
+    };
+    let mdl = vfs.read(model)?.context("PHY companion MDL missing")?;
+    // studiohdr_t checksum (the PHY header repeats it); ragdolls have many root bones.
+    let checksum = crate::u32le(&mdl, 8)?;
+    let bones: Vec<_> = rig
+        .bones
+        .iter()
+        .map(|b| (b.name.clone(), b.inverse_bind.inverse()))
+        .collect();
+    crate::phy::ragdoll_model(&phy, checksum, &bones)
 }
 pub fn read_collision(vfs: &Vfs, model: &str) -> Result<Option<Vec<modkit_core::ConvexPiece>>> {
     let stem = model.trim_end_matches(".mdl");

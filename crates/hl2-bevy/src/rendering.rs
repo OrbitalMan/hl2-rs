@@ -467,8 +467,10 @@ pub(crate) fn draw_hidden(
     weapon: Option<&NpcWeaponDraw>,
 ) -> bool {
     let s = &game.scene.states[id];
-    !s.visible
-        || s.killed
+    // A ragdolled NPC stays drawn (its bone-merged weapon does not).
+    let ragdoll = game.scene.ragdoll_matrices.contains_key(&id);
+    (!s.visible || s.killed) && !(ragdoll && weapon.is_none())
+        || ragdoll && weapon.is_some()
         || weapon.is_some_and(|w| {
             game.ai
                 .weapon_world_model(id)
@@ -580,7 +582,7 @@ pub fn present_entities(
         }
         let (clip, time) = if let Some(id) = animation.entity {
             let state = &game.scene.states[id];
-            if !state.visible || state.killed {
+            if (!state.visible || state.killed) && !game.scene.ragdoll_matrices.contains_key(&id) {
                 continue;
             }
             (state.animation.as_str(), game.scene.animation_time(id))
@@ -1524,6 +1526,7 @@ pub fn despawn_killed_runtime_draws(
         .copied()
         .filter(|id| {
             game.scene.states.get(*id).is_some_and(|s| s.killed)
+                && !game.scene.ragdoll_matrices.contains_key(id)
                 && !game.despawned_draws.contains(id)
         })
         .collect();

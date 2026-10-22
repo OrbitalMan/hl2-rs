@@ -372,6 +372,13 @@ pub struct Scene {
     /// NPCs killed by damage this tick (CBaseCombatCharacter::Event_Killed, not removal
     /// by Kill inputs): the host drops their active weapons (DESIGN 14r part B).
     pub npc_deaths: Vec<usize>,
+    /// The killing hit's damage force (kg in/s) and position per NPC killed this tick
+    /// (CTakeDamageInfo damage force; the ragdoll's nudge).
+    pub npc_death_forces: BTreeMap<usize, (Vec3, Vec3)>,
+    /// Ragdolled NPCs' bone matrices (model space), replacing their animation pose.
+    pub ragdoll_matrices: BTreeMap<usize, Vec<glam::Mat4>>,
+    /// Advances every ragdoll update (render pose cache key).
+    pub ragdoll_frame: u64,
     /// NPCs whose AI has the player as enemy or in enemy memory (CAI_BaseHumanoid
     /// sneak attacks exclude them); refreshed by the host after each AI tick.
     pub npc_knows_player: std::collections::BTreeSet<usize>,
@@ -580,6 +587,9 @@ impl Scene {
             last_npc_hit: None,
             npc_damage: Vec::new(),
             npc_deaths: Vec::new(),
+            npc_death_forces: BTreeMap::new(),
+            ragdoll_matrices: BTreeMap::new(),
+            ragdoll_frame: 0,
             npc_knows_player: Default::default(),
             ai_sequence_end: BTreeMap::new(),
             look_targets: Default::default(),
@@ -1168,6 +1178,9 @@ impl Scene {
         values
     }
     pub fn actor_matrices(&self, rig: &modkit_core::animation::Rig, id: usize) -> Vec<glam::Mat4> {
+        if let Some(ragdoll) = self.ragdoll_matrices.get(&id) {
+            return ragdoll.clone();
+        }
         let params = self.actor_pose_values(rig, id);
         self.gestures
             .compose(
@@ -1219,6 +1232,9 @@ impl Scene {
     }
     /// Changes whenever an actor's composed pose inputs change; zero for plain base clips.
     pub fn pose_signature(&self, id: usize) -> u64 {
+        if self.ragdoll_matrices.contains_key(&id) {
+            return self.ragdoll_frame | 1 << 63;
+        }
         let mut hash = self.gestures.signature(id);
         let mix = |hash: u64, v: f32| {
             (hash ^ v.to_bits() as u64)

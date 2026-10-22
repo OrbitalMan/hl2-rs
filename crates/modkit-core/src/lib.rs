@@ -124,6 +124,9 @@ pub struct World {
     /// Authored VPhysics solid parameters (.phy "solid" block) per model asset key.
     #[serde(default)]
     pub model_physics: std::collections::BTreeMap<String, PhysicsSolid>,
+    /// Ragdolls (.phy ragdoll section) per NPC model asset key, prepared at load.
+    #[serde(default)]
+    pub model_ragdolls: std::collections::BTreeMap<String, std::sync::Arc<RagdollModel>>,
     /// Studio header mass (Studio_GetMass, the NPC physics shadow's mass) per NPC model
     /// asset key.
     #[serde(default)]
@@ -319,6 +322,44 @@ impl Default for SurfaceMaterial {
 pub struct ConvexPiece {
     pub vertices: Vec<Vec3>,
     pub indices: Vec<[u32; 3]>,
+}
+/// A model's ragdoll (ragdoll_shared.cpp RagdollCreateObjects): one body per .phy solid,
+/// its convex pieces in its bone's space, joined by ragdoll constraints.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RagdollModel {
+    pub bodies: Vec<RagdollBody>,
+    pub joints: Vec<RagdollJoint>,
+    /// CRagdollCollisionRules: false ("selfcollisions" "0") lets only `collision_pairs`
+    /// (body indices) collide with each other.
+    pub self_collisions: bool,
+    pub collision_pairs: Vec<(usize, usize)>,
+}
+/// One ragdoll solid: the studio bone it simulates and its authored parameters.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RagdollBody {
+    pub bone: usize,
+    /// Convex pieces in bone space (Source units and axes).
+    pub pieces: Vec<ConvexPiece>,
+    /// Kilograms.
+    pub mass: f32,
+    pub inertia: f32,
+    pub damping: f32,
+    pub rotdamping: f32,
+    pub surfaceprop: String,
+    /// The solid's IVP mass center (bone space) and rotation inertia per kilogram.
+    pub compact_inertia: Option<(Vec3, Vec3)>,
+}
+/// constraint_ragdollparams_t: the child body's rotation limits about its own x, y and
+/// z axes (degrees) relative to the parent, with the friction torque per axis.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RagdollJoint {
+    pub parent: usize,
+    pub child: usize,
+    pub limits: [(f32, f32); 3],
+    pub friction: [f32; 3],
+    /// Studio_CalcBoneToBoneTransform at the reference pose: the child bone's frame in
+    /// the parent bone's space (translation, rotation).
+    pub child_in_parent: (Vec3, glam::Quat),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BackgroundCamera {

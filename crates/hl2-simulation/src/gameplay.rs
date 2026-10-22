@@ -1596,6 +1596,15 @@ impl Inventory {
                         scene.fire(id, if npc { "OnDeath" } else { "OnBreak" }, usize::MAX);
                         if npc {
                             scene.npc_deaths.push(id);
+                            // CalculateExplosiveDamageForce: damage x ImpulseScale(75, 4),
+                            // clamped to ImpulseScale(75, 400) (random 0.85-1.15 scale
+                            // omitted), the ragdoll's nudge.
+                            if damage.kind & crate::player_damage::DMG_BLAST != 0 {
+                                let force = (damage.amount * 300.).min(30000.);
+                                scene
+                                    .npc_death_forces
+                                    .insert(id, (damage.direction * force, damage.origin));
+                            }
                         }
                         // CBreakableProp::Break -> PhysBreakSound: the surfaceprop's break
                         // cue from the world at the prop (it is about to be removed).
@@ -2060,6 +2069,9 @@ pub fn apply_hit(
     if scene.states[id].value <= 0. {
         scene.fire(id, "OnDeath", usize::MAX);
         scene.npc_deaths.push(id);
+        scene
+            .npc_death_forces
+            .insert(id, (direction * force, hit.position));
         scene.states[id].killed = true;
         scene.states[id].visible = false;
         physics.set_entity(
