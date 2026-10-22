@@ -492,7 +492,21 @@ pub(crate) fn apply_video_config_to_window(
         window.mode = target_mode;
     }
     if let Some(frame) = frame {
-        frame.configured = UVec2::new(cfg.width, cfg.height).max(UVec2::ONE);
+        let mut configured = UVec2::new(cfg.width, cfg.height).max(UVec2::ONE);
+        if cfg.flexible_aspect {
+            let physical = UVec2::new(
+                window.resolution.physical_width(),
+                window.resolution.physical_height(),
+            );
+            if physical.x > 0 && physical.y > 0 {
+                let size = hl2_ui::viewport::flexible_presented_resolution(glam::UVec2::new(
+                    physical.x, physical.y,
+                ));
+                let native = UVec2::new(size.x, size.y);
+                configured = UVec2::new(configured.x.max(native.x), configured.y.max(native.y));
+            }
+        }
+        frame.configured = configured;
         frame.flexible = cfg.flexible_aspect;
         frame.resolution = frame.size_for(window);
         frame.pending_window =
@@ -1302,6 +1316,30 @@ mod tests {
         );
         // The OS window frame is not resized for full-screen modes.
         assert_eq!(window.resolution.physical_width(), 1920);
+    }
+
+    #[test]
+    fn fit_display_replaces_a_low_fixed_frame_with_current_physical_resolution() {
+        // Switching from 640x480 to Fit Display must not retain 480 lines just because that was
+        // the previously selected fixed mode. On high-DPI panels `Window` reports physical
+        // pixels, which are also the game frame's resolution.
+        let mut window = window(
+            3024,
+            1964,
+            2.0,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+        );
+        let cfg = hl2_ui::config::VideoSettings {
+            width: 640,
+            height: 480,
+            flexible_aspect: true,
+            display_mode: hl2_ui::config::DisplayMode::NoBorder,
+            ..Default::default()
+        };
+        let mut frame = frame(UVec2::new(640, 480));
+        apply_video_config_to_window(&mut window, &cfg, Some(&mut frame));
+        assert_eq!(frame.configured, UVec2::new(3024, 1964));
+        assert_eq!(frame.resolution, UVec2::new(3024, 1964));
     }
 
     #[test]

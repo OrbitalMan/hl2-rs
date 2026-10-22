@@ -1,5 +1,150 @@
 # MODLOG
 
+## 2026-10-22 Restore portrait viewmodel tuning to 97fac81
+
+**Agent/model:** Codex, GPT-5. No subagents.
+
+**Changed:** Restored portrait `fov_offset` and `offset` values in `crates/hl2-ui/assets/ui/tuning.json` to the `97fac81` baseline for default, crowbar, physcannon, and RPG. Updated the tuning comments, camera projection assertion, tuning documentation, and status to match. Kept the unit-scale camera change; no raster/postprocess or mesh stretching was reintroduced.
+
+**Why:** Owner requested reverting all viewmodel FOV/offset adjustments to the specified commit.
+
+**Tested how:** Focused locked UI tuning and Bevy camera projection tests; `git diff --check`.
+
+**Result:** Portrait profile values now exactly match `97fac81`; ultrawide values are unchanged.
+
+**Still broken or not tested:** Packaged portrait appearance and RPG rear cropping in portrait are not tested. The projection test only checks the launcher reaches into the portrait frame.
+
+**Next:** Owner visual review if further portrait retuning is desired.
+
+## 2026-10-22 Keep the RPG rear cropped in portrait
+
+**Agent/model:** Codex, GPT-6. No subagents.
+
+**Changed:** Set the RPG portrait tuning to `fov_offset: +4°`, `offset: [0, 4, -16]`. Expanded the
+camera projection test to separately assert that a forward/front tube sample projects within the
+central half of 9:16 while the unfinished rear sample remains outside the right edge. Updated the
+asset notes and GameUI guide to describe the intended visible-front/cropped-rear balance.
+
+**Why:** Owner clarified that the launcher should enter the narrow view with its front while its
+unfinished rear stays hidden behind the frame edge. Bringing the full launcher into frame exposes
+that incomplete rear geometry.
+
+**Tested how:** `cargo fmt --all`; focused locked UI portrait tuning and Bevy camera projection
+tests passed.
+
+**Result:** The projection assertions enforce the intended asymmetry: visible front, cropped rear.
+
+**Still broken or not tested:** The geometry samples are projection checks, not a packaged visual
+capture; owner should review the rendered result.
+
+**Next:** Inspect the RPG on a 9:16 packaged capture.
+
+## 2026-10-22 Reverse portrait FOV increase after owner visual feedback
+
+**Agent/model:** Codex, GPT-6. No subagents.
+
+**Changed:** Reduced portrait FOV offsets to default/crowbar +4°, physcannon 0°, and RPG +12°.
+Moved the RPG left offset from 7 to 8 Source units. Updated the in-asset notes and GameUI guide;
+the RPG projection test still enforces its tube midpoint inside the 9:16 frame.
+
+**Why:** Owner reported the previous increase made common weapons, including the pistol, look more
+distorted. Lower FOV offsets keep them larger; the RPG gets extra left translation to maintain
+frame clearance.
+
+**Tested how:** `cargo fmt --all`; focused locked UI tuning and Bevy portrait projection tests
+passed.
+
+**Result:** FOV adjustments are lower than the prior trial while RPG alignment retains a larger
+left shift. Packaged appearance is not yet verified.
+
+**Still broken or not tested:** Owner visual confirmation of a packaged portrait run.
+
+**Next:** Review a portrait capture and adjust from that result.
+
+## 2026-10-22 Portrait FOV and camera offset tuning follow-up
+
+**Agent/model:** Codex, GPT-6. No subagents.
+
+**Changed:** Adjusted the direct portrait profiles in `crates/hl2-ui/assets/ui/tuning.json`: default
+and crowbar FOV offsets +8° -> +12°, physcannon 0° -> +4°, and RPG +16° -> +20° with its left
+offset 4 -> 7 Source units (`offset: [0, 7, -16]`). Expanded the tuning comments and updated the
+GameUI guide. The RPG projection assertion now requires its tube midpoint to stay clear of the right
+edge in 9:16.
+
+**Why:** Owner reports portrait models still read as too narrow and the RPG sits too close to or
+behind the frame edge. Horizontal FOV reveals more of the view without changing model proportions;
+the RPG's left translation keeps the launcher on screen.
+
+**Tested how:** `cargo fmt --all`; focused locked tests
+`cargo test -p hl2-ui --locked tuning::tests::viewmodel_framing_leaves_retail_aspects_untouched_and_adapts_portrait_and_ultrawide`
+and `cargo test -p hl2-bevy --locked camera::tests::viewmodel_framing_keeps_physcannon_and_rpg_in_frame_across_portrait_and_ultrawide` passed.
+
+**Result:** Portrait framing uses modestly wider horizontal FOV and a stronger RPG left shift while
+preserving unit model scale.
+
+**Still broken or not tested:** Visual appearance in a packaged portrait run has not been checked.
+
+**Next:** Owner review of portrait captures when available.
+
+## 2026-10-22 Remove portrait viewmodel camera scaling
+
+**Agent/model:** Codex, GPT-6. No subagents.
+
+**Changed:** Removed `horizontal_stretch` from the tuning data and deleted the nonuniform
+`ViewmodelCamera` scale. Portrait presentation uses the existing horizontal FOV offset and camera
+translation only; the camera transform stays at unit scale. Updated tuning comments and the design,
+status, and GameUI documentation to explain `fov_offset` (horizontal FOV degrees at the 4:3
+reference aspect) and `offset` (forward/left/up Source units). Kept the Fit Display changes.
+
+**Why:** Owner reported that camera scaling made viewmodels look more distorted and requested FOV
+and position adjustments instead.
+
+**Tested how:** Focused tuning and portrait camera tests passed. `scripts/checks/validate.sh`
+passed (376 `hl2-ui`, 103 `hl2-bevy`, strict Clippy and formatting; 20 owned/install tests
+ignored), and `scripts/checks/check_windows.sh` passed.
+
+**Result:** Viewmodel mesh proportions are no longer altered by portrait tuning.
+
+**Still broken or not tested:** Portrait visibility after FOV-only framing has not been visually
+checked in a packaged run.
+
+**Next:** Inspect portrait viewmodels in a packaged run.
+
+## 2026-10-22 Portrait viewmodel widening and Fit Display resolution handoff
+
+**Agent/model:** Codex, GPT-5. No subagents.
+
+**Changed:** Continued and completed the interrupted working-tree implementation. Portrait
+viewmodel profiles in `crates/hl2-ui/assets/ui/tuning.json` now use direct, editable
+`horizontal_stretch` end values: default `1.22`, crowbar/physcannon `1.20`, and RPG `1.15`.
+`ViewmodelCamera` applies that scale horizontally only; vertical geometry remains unchanged. The
+JSON metadata and Rust API documentation explain each control and call out the RPG's deliberately
+lower value, which keeps its tube in a 9:16 frame. Fit Display is now the first Options > Video >
+Aspect Ratio choice. Selecting it copies the active physical content resolution into the draft,
+and applying flexible mode promotes a stale low fixed frame to the current physical area.
+
+**Why:** Owner report: portrait viewmodels were vertically stretched and could expose incomplete
+edges; the rocket launcher must remain visible. The requested Fit Display selection should not
+retain a 640x480 4:3 render target and disrupt subtitle/closed-caption layout on a high-DPI panel.
+
+**Tested how:** Focused locked tests passed:
+`cargo test -p hl2-ui --locked tuning::tests::viewmodel_framing_leaves_retail_aspects_untouched_and_adapts_portrait_and_ultrawide`,
+`cargo test -p hl2-ui --locked gameui::settings::tests::flexible_aspect_disables_resolution_and_shows_fit_display`,
+`cargo test -p hl2-bevy --locked video::tests::fit_display_replaces_a_low_fixed_frame_with_current_physical_resolution`,
+and `cargo test -p hl2-bevy --locked camera::tests::viewmodel_framing_keeps_physcannon_and_rpg_in_frame_across_portrait_and_ultrawide`.
+`scripts/checks/validate.sh` then passed: 376 `hl2-ui` and 104 `hl2-bevy` tests, strict
+workspace Clippy, and formatting (20 owned/install tests ignored). `scripts/checks/check_windows.sh`
+also passed.
+
+**Result:** 4:3 through 16:9 remains unscaled; portrait profiles widen horizontally by their
+explicit values, and Fit Display uses physical resolution instead of stale fixed detail.
+
+**Still broken or not tested:** packaged portrait/high-DPI visual checks and subtitle/caption
+captures are not tested; the existing interpolation between standard and portrait aspects remains
+the prior design.
+
+**Next:** inspect a packaged 9:16/high-DPI capture.
+
 ## 2026-10-22 Hardware-aware Antialiasing capability detection and unsupported mode gating
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

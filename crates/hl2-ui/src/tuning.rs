@@ -73,8 +73,9 @@ struct ViewmodelWeaponTuning {
     ultrawide: ViewmodelFraming,
 }
 
-/// Additive viewmodel field-of-view offset (degrees) and local camera-space translation offset
-/// (`[forward, left, up]` in Source units) for frames narrower than `5:4` or wider than `16:9`.
+/// Additive viewmodel horizontal field-of-view offset (degrees, measured at the 4:3 reference
+/// aspect) and local camera-space translation offset (`[forward, left, up]` in Source units) for
+/// frames narrower than `5:4` or wider than `16:9`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
 pub struct ViewmodelFraming {
     pub fov_offset: f32,
@@ -322,7 +323,8 @@ mod tests {
         // forearms above the bottom edge) and shifts right (-Y) so the unmodeled rear cutoff
         // stays outside the right edge.
         let rpg_portrait = viewmodel_framing("weapon_rpg", 9. / 16.);
-        assert!(rpg_portrait.fov_offset > 15.0 && rpg_portrait.offset[1] > 0.0);
+        assert_eq!(rpg_portrait.fov_offset, 16.0);
+        assert_eq!(rpg_portrait.offset[1], 4.0);
         let rpg_21_9 = viewmodel_framing("weapon_rpg", 64. / 27.);
         let rpg_32_9 = viewmodel_framing("weapon_rpg", 32. / 9.);
         assert!(rpg_21_9.fov_offset > 0.0 && rpg_32_9.fov_offset > rpg_21_9.fov_offset);

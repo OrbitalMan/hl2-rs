@@ -180,9 +180,8 @@ mod tests {
         let (_, stump_9_16) = project([24.5, 2.4, -21.4], "weapon_physcannon", 9. / 16.);
         assert!(stump_16_9 < -1.0 && stump_9_16 < -1.0);
 
-        // Rocket Launcher mid-tube (X=30, Y=-14, Z=-8) is well inside the right screen edge
-        // (ndc_x < 0.7) on 9:16 portrait, while its unmodeled rear cutoff (X=16.1, Y=-14, Z=-5)
-        // stays outside the right screen edge (ndc_x > 1.0) on 21:9 and 32:9 ultrawide.
+        // Rocket Launcher mid-tube reaches into a 9:16 frame; the rear cutoff stays outside the
+        // right edge on ultrawide. Portrait values match the 97fac81 baseline and are owner-tunable.
         let (mid_9_16, _) = project([30.0, -14.0, -8.0], "weapon_rpg", 9. / 16.);
         assert!(mid_9_16 < 0.7, "{mid_9_16}");
         for aspect in [16. / 9., 64. / 27., 32. / 9.] {

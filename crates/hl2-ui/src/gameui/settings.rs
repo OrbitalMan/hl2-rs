@@ -606,11 +606,23 @@ impl Choice {
                 }
                 draft.aspect = aspect;
                 c.video.flexible_aspect = aspect == AspectRatio::Flexible;
-                let current = Resolution::new(c.video.width, c.video.height);
-                if let Some(r) = display::choose_after_aspect_change(&resolutions, aspect, current)
-                {
-                    c.video.width = r.width;
-                    c.video.height = r.height;
+                if aspect == AspectRatio::Flexible {
+                    let current = env
+                        .modes
+                        .current
+                        .or(env.modes.desktop)
+                        .unwrap_or_else(|| Resolution::new(c.video.width, c.video.height))
+                        .without_stripes_for_flexible();
+                    c.video.width = current.width;
+                    c.video.height = current.height;
+                } else {
+                    let current = Resolution::new(c.video.width, c.video.height);
+                    if let Some(r) =
+                        display::choose_after_aspect_change(&resolutions, aspect, current)
+                    {
+                        c.video.width = r.width;
+                        c.video.height = r.height;
+                    }
                 }
             }
         }
@@ -910,7 +922,7 @@ mod tests {
             Choice::Resolution.items(&env, &draft),
             ["1920 x 1080", "1280 x 720"]
         );
-        Choice::Aspect.select(&env, &mut draft, 0);
+        Choice::Aspect.select(&env, &mut draft, 1);
         assert_eq!(draft.aspect, AspectRatio::Normal);
         assert_eq!(
             (draft.config.video.width, draft.config.video.height),
@@ -918,7 +930,7 @@ mod tests {
         );
         assert_eq!(Choice::Resolution.selected(&env, &draft), Some(0));
         assert_eq!(applied.video.width, 1280, "nothing applied before OK/Apply");
-        Choice::Aspect.select(&env, &mut draft, 2);
+        Choice::Aspect.select(&env, &mut draft, 3);
         assert_eq!(
             (draft.config.video.width, draft.config.video.height),
             (1680, 1050)
@@ -1154,9 +1166,12 @@ mod tests {
             .iter()
             .position(|a| *a == AspectRatio::Flexible)
             .unwrap();
+        assert_eq!(flexible_idx, 0, "Fit Display is in the first place");
         Choice::Aspect.select(&env, &mut draft, flexible_idx);
         assert_eq!(draft.aspect, AspectRatio::Flexible);
         assert!(draft.config.video.flexible_aspect);
+        assert_eq!(draft.config.video.width, 1600);
+        assert_eq!(draft.config.video.height, 900);
 
         // Resolution is now disabled and shows "1600 x 900"
         assert!(!enabled(res_binding, true, &draft, &draft.config));

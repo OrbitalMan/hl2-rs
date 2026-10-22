@@ -1,6 +1,20 @@
 # STATUS
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
+
+## Current session: portrait viewmodel framing and Fit Display continuation (2026-10-22)
+
+- Restored all portrait viewmodel FOV/offset profiles to the `97fac81` values: default `(+8°, [0, 0, -9])`, crowbar `(+8°, [0, 0, -11])`, physcannon `(0°, [0, 0, -11.5])`, and RPG `(+16°, [0, 4, -16])`. Removed the portrait-only front/rear projection assertion that described the later experimental profile. The camera remains unit scale; packaged portrait appearance is not tested.
+- Continued the interrupted UI/runtime change already in the working tree. **Portrait viewmodels:**
+  removed the horizontal camera scale after owner feedback that it distorted the models. The camera
+  remains unit scale; narrow-frame visibility uses the existing horizontal FOV and position values
+  (`fov_offset`, `offset`) in `tuning.json`, including the RPG's +16° FOV adjustment and 4-unit
+  left shift.
+- **Video > Aspect Ratio:** Fit Display is now the first combo item. Selecting it uses the current
+  physical display/window size rather than retaining a prior fixed low resolution. The Bevy host
+  likewise promotes a stale configured low fixed size to the physical content area for a flexible
+  frame, fixing the 640x480-to-Retina transition that broke subtitle/caption layout.
+- Focused portrait tuning and camera tests passed. After removing scale, `scripts/checks/validate.sh` passed: 376 `hl2-ui` and 103 `hl2-bevy` tests (20 owned/install tests ignored), strict workspace Clippy, and formatting; `scripts/checks/check_windows.sh` passed. Packaged high-DPI/portrait visual verification is not tested.
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 

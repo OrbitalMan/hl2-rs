@@ -134,9 +134,10 @@ pub enum AspectRatio {
 }
 
 impl AspectRatio {
-    /// Combo order: the retail choices, then the wider ones, then the narrower ones, then the
-    /// flexible frame (appended so the fixed choices keep their positions).
+    /// Combo order: the flexible frame first (Fit Display), then the retail choices, then the
+    /// wider ones, then the narrower ones.
     pub const ALL: [Self; 10] = [
+        Self::Flexible,
         Self::Normal,
         Self::Wide16x9,
         Self::Wide16x10,
@@ -146,7 +147,6 @@ impl AspectRatio {
         Self::Portrait3x4,
         Self::Portrait10x16,
         Self::Portrait9x16,
-        Self::Flexible,
     ];
 
     /// The fixed-ratio buckets of the mode data (every choice but [`Self::Flexible`]).
@@ -712,9 +712,9 @@ mod tests {
             choose_after_aspect_change(&modes, AspectRatio::Flexible, r(1024, 768)),
             Some(r(1024, 768))
         );
-        assert_eq!(AspectRatio::ALL.last(), Some(&AspectRatio::Flexible));
+        assert_eq!(AspectRatio::ALL.first(), Some(&AspectRatio::Flexible));
         assert_eq!(
-            AspectRatio::ALL[..AspectRatio::FIXED.len()],
+            AspectRatio::ALL[1..],
             AspectRatio::FIXED,
             "the fixed choices keep their combo positions"
         );

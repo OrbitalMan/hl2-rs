@@ -701,6 +701,17 @@ impl OptionsDialog {
     /// Resolutions offered on the Video page (from the host's monitor query).
     pub fn set_display_modes(&mut self, modes: DisplayModes) {
         self.modes = modes;
+        if self.draft.aspect == crate::gameui::display::AspectRatio::Flexible {
+            if let Some(current) = self.modes.current.or(self.modes.desktop) {
+                let res = current.without_stripes_for_flexible();
+                self.draft.config.video.width = res.width;
+                self.draft.config.video.height = res.height;
+                if self.applied.video.flexible_aspect {
+                    self.applied.video.width = res.width;
+                    self.applied.video.height = res.height;
+                }
+            }
+        }
     }
 
     /// Sets system hardware recommendation profile for video settings.
@@ -3569,7 +3580,13 @@ pub(crate) mod tests {
         assert_eq!(h.dialog.draft().mouse.aim_assist, AimAssist::Basic);
         h.tab(Tab::Video);
         h.click(page(40., 125.));
+        // Row 0 is now Fit Display (Flexible)
         h.click(page(40., 141. + MENU_ROW * 0.5));
+        assert_eq!(h.dialog.draft.aspect, AspectRatio::Flexible);
+        assert!(h.dialog.draft().video.flexible_aspect);
+        // Open aspect combo again and pick row 1 (Normal 4:3)
+        h.click(page(40., 125.));
+        h.click(page(40., 141. + MENU_ROW * 1.5));
         assert_eq!(h.dialog.draft.aspect, AspectRatio::Normal);
         assert_eq!(
             (h.dialog.draft().video.width, h.dialog.draft().video.height),

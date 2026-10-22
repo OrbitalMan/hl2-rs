@@ -1,5 +1,23 @@
 # Design
 
+## Portrait viewmodels and Fit Display handoff (2026-10-22)
+
+Portrait framing remains data-driven in `assets/ui/tuning.json`: `fov_offset` adjusts horizontal
+viewmodel FOV in degrees (at the 4:3 reference aspect), while `offset` moves the camera in Source
+units (`[forward, left, up]`). The viewmodel transform keeps unit scale, so the model's proportions
+remain intact. Aspect interpolation blends these explicit FOV and position values from the
+unmodified 5:4 boundary to the portrait profile. Portrait values have been restored to the `97fac81`
+baseline: default/crowbar `+8°`, physcannon `0°`, and RPG `+16°` with a 4-unit left shift. These
+remain direct tuning values; packaged portrait appearance has not been visually verified.
+
+Fit Display is first in the Aspect Ratio combo. Selecting it adopts the active physical
+window/display content area (with out-of-range letter/pillarbox stripes removed) as its configured
+detail resolution; the host also raises a stale fixed configured size to the active physical area
+when applying Fit Display. This prevents a previous 640x480 4:3 choice from silently continuing as
+a low-resolution flexible frame on a high-DPI panel. Validation is unit-level: aspect selection,
+portrait/launcher bounds, and the 640x480-to-Fit-Display host transition.
+Packaged visual comparison on an actual portrait display remains not tested.
+
 ## Closed captions (2026-10-17)
 
 Retail model (SDK `hud_closecaption.cpp`, `SoundEmitterSystem.cpp`, `sceneentity.cpp`; installed files): every `resource/closecaption_<language>.dat` (`VCCD` v1: header, directory of `{crc32(lower(token)), block, offset, length}`, UCS-2 text blocks) on the game search path is a dictionary, the first one holding a token wins. Ordinary `EmitSound` of a sound script captions the script name for the chosen wave's length unless every sound origin is beyond 1200 units of the player; raw `.wav`/`!sentence` emits and client soundscapes do not caption; `ambient_generic` plays caption at any distance. Choreographed SPEAK events caption only their master event's token (cc token, else the sound name), for the longer of the event length and the last slave's end, never "from player", after a 1200-unit `scene_maxcaptionradius` check against the player and view entity unless the event suppresses attenuation; their sound itself emits no caption. The panel (`HudLayout.res` `HudCloseCaption`, `ClientScheme.res` `CloseCaption_*` fonts and `Panel.BgColor` with `BgAlpha`) runs the SDK item queue: `<delay>` splitting, `<len>`, `<sfx>` (instant; dropped by `cc_subtitles`), `<norepeat>`, `<clr>`/`<playerclr>` stacks, `<B>`/`<I>`/`<cr>`, word wrap, linger/predisplay times, box growth and item fades. Options > Audio "Closed captions": none = `closecaption 0`, subtitles and sound effects = `closecaption 1, cc_subtitles 0`, subtitles = `closecaption 1, cc_subtitles 1`.

@@ -980,11 +980,17 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
     profile or a per-weapon override (`weapons`):
     - **Portrait (`< 5:4` down to `9:16`)**: `weapon_physcannon` shifts down (`offset: [0, 0, -11.5]`)
       so its severed left arm stump stays below the bottom bezel without narrowing horizontal FOV;
-      `weapon_crowbar` widens FOV (`+8°`) and shifts down (`offset: [0, 0, -11.0]`) so its arm stump
-      stays below the bottom bezel throughout swing animations; `weapon_rpg` widens FOV (`+16°`) and
-      shifts left/down (`offset: [0, 4.0, -16.0]`) so its right-mounted tube fits inside the narrow
-      frame while its left arm stump stays below the bottom bezel during idle, fire, and reload
-      animations; other weapons use `default.portrait` (`+8°`, `[0, 0, -9.0]`).
+      `weapon_crowbar` uses `+8°` FOV and shifts down (`offset: [0, 0, -11.0]`) so its arm stump
+      stays below the bottom bezel throughout swing animations; `weapon_rpg` uses `+16°` FOV and
+      shifts left/down (`offset: [0, 4.0, -16.0]`); other weapons use `default.portrait` (`+8°`,
+      `[0, 0, -9.0]`). The physcannon keeps zero FOV adjustment and its existing downward shift.
+      Larger FOV values show more horizontal scene but make the weapon smaller. These portrait values
+      match the `97fac81` baseline and are directly adjustable in the tuning asset.
+      `fov_offset` changes the horizontal viewmodel FOV at the 4:3 reference aspect; `offset` moves
+      the viewmodel camera in `[forward, left, up]` Source units. These settings preserve model
+      proportions. The RPG's 9:16 projection test checks that its tube reaches into the frame; it
+      does not assert that its unfinished rear is cropped in portrait. The JSON metadata documents
+      both controls for future tuning.
     - **Ultrawide (`> 16:9` up to `32:9`)**: `default.ultrawide` (`+30°`, `[0, 0, -3.5]`) and
       `weapon_physcannon` (`+30°`, `[0, 0, -7.5]`) widen the viewmodel FOV to `84°` so the hands and
       forearms sit comfortably above the bottom edge while keeping arm stumps grounded at the bottom
@@ -1071,6 +1077,13 @@ Options > Video > Aspect Ratio adds **Fit Display** (`AspectRatio::Flexible`, pe
   - In windowed mode, `viewport::flexible_windowed_size(resolution, bounds)` limits each dimension independently to workspace bounds (`DesktopArea::client_room` on macOS, available screen on Windows/Linux) without forcing uniform aspect scaling, only narrowing/shortening if exceeding 9:16..=32:9. Live window resizes adapt `GameFrame::resolution` dynamically on presented frames.
   - While Fit Display is selected, the **Resolution** dropdown is disabled (`settings::enabled` returns false when `draft.aspect == AspectRatio::Flexible`, which also automatically disables its associated label `ResolutionLabel`). The combo displays the active content resolution in physical pixels without letterbox or pillarbox black stripes (`"{w} x {h}"`, e.g. `"1920 x 1080"`, via `current.without_stripes_for_flexible()` clamped to 9:16..=32:9). Selecting from it is a no-op; switching back to any fixed aspect ratio re-enables the control and restores the selectable resolution choices for that aspect ratio.
   - Applying Fit Display in Options prompts with `VideoConfirm` to keep or revert the mode.
+  - **Ordering and resolution handoff (2026-10-22):** Fit Display is the first Aspect Ratio
+    choice. Selecting it uses the active physical content area rather than the last fixed choice
+    as the resolution/detail source. The host additionally raises a stale fixed configured size
+    to the current physical content area while applying flexible mode, preventing a 640x480 4:3
+    setting from producing a low-resolution frame on a Retina/high-DPI display. Unit coverage
+    exercises the 640x480-to-Fit-Display transition; packaged high-DPI and portrait interaction is
+    not tested.
 
 ## 11. Developer console (2026-10-17)
 
