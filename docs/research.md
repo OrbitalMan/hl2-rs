@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Retail exit metadata binding (2026-10-22)
+
+Private `scene-exit-registration-20261022d` closes the prior static class/callback naming gap with CChangeLevel RTTI, datamap, factory chain and named TouchChangeLevel registration. Ten exact baseline/original bodies and503 machine instruction records pass independent checks;53 retained files/seven external bindings are sealed. Spawn callback assignment, map/landmark array metadata, OnChangeLevel member and one ordinary Activate latch-reset path are retained. Registration stub0x1000f4d0 has no exact pass14 procedure and stays raw-only, without a neighboring substitute. No live trigger or exit execution is established. The owner requested an existing running game remain undisturbed; current window/crate continuation is offline only.
+
 ## Bounded exit-function preparation (2026-10-22)
 
 Separately sealed private `scene-exit-plan-20261022c` retains two additional exact path/hash/address/baseline/original bodies and 280 checked PE instruction records. A specific diagnostic selects a touch candidate and its direct change-level gate callee; SDK-correlated names are separate from the still-unbound retail class/live trigger. The selected gate latches before later rejection branches and uses a different output member from scene OnStart. The supplement also binds 27 original-BSP entities, 47 ordered output edges preserving duplicates and five submodels. Thirteen files/eight external identities pass verify_seal.py. This prepares the next input-led crate/window/exit experiment; no game was launched and first-map exit/Rust parity remain untested.

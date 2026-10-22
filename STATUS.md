@@ -1,5 +1,9 @@
 # STATUS
 
+## Offline exit-registration research checkpoint (2026-10-22)
+
+The owner requested that a running game/fullscreen app remain undisturbed. One native launch was deferred before process creation by the existing cursor-confinement guard; no input, focus or cursor changes followed. Research continues offline. Private `scene-exit-registration-20261022d` is sealed: 53 retained files/seven external bindings, ten exact retail bodies/503 checked instruction records. RTTI/datamap/Spawn now bind CChangeLevel and the named TouchChangeLevel callback to the prior touch/gate candidates; ordinary Activate resets the latch. The exact registration stub remains unavailable as a pass14 procedure and is retained raw-only. A live authored trigger, actual exit and Rust parity remain **not tested**. Original16 gaps/four missing procedures remain separate and unchanged.
+
 ## Static exit preparation addendum (2026-10-22)
 
 Private `scene-exit-plan-20261022c` is separately sealed (13 files/eight bindings): two additional exact retail bodies, 280 checked PE instruction records, 27 authored entities/47 duplicate-preserving output edges and five submodels. SDK-correlated touch/gate candidates show a latch set before later rejection branches and an output member distinct from scene OnStart. Retail class/live-trigger binding is still required before runtime use. No new game was launched; crate/window escape and map exit remain **not tested**. Continue from the sealed storage handoff, preserving first_map_finished:false and the original authored gaps.

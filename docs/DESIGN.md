@@ -1,5 +1,11 @@
 # Design
 
+## Offline continuation and retail exit binding (2026-10-22)
+
+Keep the owner's running game undisturbed. Continue the window damage and crate-use questions statically while native cursor/input prerequisites are unavailable; do not relax those guards. Before a later runtime experiment, bind fresh process/module/map and trigger generation, canonical object base, primary vtable/callback and raw map/landmark arrays. CChangeLevel retail metadata now names TouchChangeLevel; Spawn assigns it when the relevant spawnflag is clear, and ordinary Activate resets the latch. Preserve the early chapter/new-game branch separately. The distinct OnChangeLevel output still needs owner/generation-scoped observation; static registration is not proof of a live authored exit.
+
+Bounded next work: retrieve only exact CBreakable damage/health/output functions and CPhysicsProp use/pickup functions needed by the authored storage crate/window. Record byte witnesses and SDK correlations separately, preserve failed exact lookups, and prepare an observation plan without launching or sending input. No Rust implementation work. The sealed registration supplement retains53 files/seven bindings,10 exact bodies/503 instruction records; the raw registration stub has no exact pass14 body.
+
 ## Next exit observer plan, static preparation (2026-10-22)
 
 The two exact retail touch/gate candidates in private `scene-exit-plan-20261022c` are SDK-correlated; bind retail registration/dispatch and live trigger generation before hooking them. The reviewed gate writes a latch before subsequent rejection checks, so method entry alone cannot establish a completed transition. Its output member differs from scene OnStart. Retain input-led crossing, raw trigger/latch state, actual map identity and captures together; use a fresh process after a rejected transition when needed, without editing the latch. Authored output edges must preserve duplicate keys: storage trigger746 has four OnTrigger rows. Static bounds and authored targets are guidance, not runtime crossing evidence. No Rust change or completed native exit is claimed.

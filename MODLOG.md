@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 offline exit-registration checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Materially involved static worker: exit_registration, inherited model family; exact identifier unavailable.
+
+**Changed / Why:** Bound retail CChangeLevel metadata/callback/reset path and prepared offline window/crate follow-up while preserving the owner's running game. All native material remains private.
+
+**Tested how / Result:** Registration seal passes53 retained files/seven external bindings,10 exact bodies/503 instruction records. Named touch/Spawn assignment and ordinary Activate latch reset are byte checked. Exact registration-stub absence and a rejected verifier draft remain retained. A guarded launch deferred before process creation; no game/input/focus/cursor control followed.
+
+**Still broken or not tested / Next:** Live trigger instance, ordinary exit and Rust parity untested. Keep the original16 gaps/four missing procedures. Continue bounded offline CBreakable damage and CPhysicsProp use/pickup; runtime waits for the owner's existing game to be left undisturbed.
+
 ## 2026-10-22 static exit preparation checkpoint
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.

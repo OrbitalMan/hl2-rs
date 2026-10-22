@@ -1,5 +1,9 @@
 # Local validation — 2026-10-05
 
+## Exit-registration static acceptance (2026-10-22)
+
+Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-exit-registration-20261022d/verify_seal.py`. It checks53 retained files (55 including manifest/receipt), seven external identities, exact immutable pass14 bodies and503 PE instruction records, RTTI/datamap/callback/factory bindings and preserved missing registration stub. A draft assertion at the conditional branch was rejected and corrected to the actual callback-store instruction; the rejected draft remains retained. Expected live_trigger_instance_bound/native_execution_tested/runtime_exit_tested/first_map_finished/rust_parity_tested:false. One separate guarded native launch was deferred before Popen because of existing cursor confinement; no runtime result is claimed and the owner's game remains undisturbed. No Rust build/test required for these documentation-only changes.
+
 ## Static exit-plan acceptance (2026-10-22)
 
 Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-exit-plan-20261022c/verify_seal.py`. Expected passed:true, sealed_files:13, external_bindings:8; acceptance exact_bodies:2, instruction_records:280, authored_entities:27, duplicate_preserving_edges:47, models:5. It verifies immutable exact body identities, PE instruction bytes, original-BSP entity/brush/model bytes and repeated output rows. Retail class registration/live trigger binding, runtime exit and Rust parity remain false/untested. No native game was launched for this static addendum; no gameplay build or Rust tests were required.
