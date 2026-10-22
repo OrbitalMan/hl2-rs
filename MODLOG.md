@@ -1,5 +1,69 @@
 # MODLOG
 
+## 2026-10-22 Replace live viewmodel tuning snapshots in console history
+
+**Agent/model:** Codex, GPT-5. No subagents.
+
+**Changed:** Added a distinct console output level for viewmodel tuning snapshots and `Console::log_viewmodel_tuning`, which updates the latest snapshot in place and invalidates its cached wrapping. Unrelated output and submitted-command history remain untouched. Routed F5 snapshot output through the new method and documented the non-flooding behavior.
+
+**Why:** The owner requested updating/deleting prior tuning output rather than flooding console history on each adjustment.
+
+**Tested how:** Added a console regression test for replacement, unrelated output retention and behavior after clear. `scripts/checks/validate.sh` passed (388 `hl2-ui` and 106 `hl2-bevy` tests, 10 ignored per crate, strict Clippy and formatting); `scripts/checks/check_windows.sh` passed; `git diff --check` passed.
+
+**Result:** Repeated viewmodel adjustments should leave one current JSON snapshot in console history.
+
+**Still broken or not tested:** No packaged UI inspection; the fallback engine-log path is used only when the UI console resource is absent.
+
+**Next:** Owner can verify the updated snapshot remains the only tuner entry during live adjustment.
+
+## 2026-10-22 Keep normal gameplay active during F5 viewmodel tuning
+
+**Agent/model:** Codex, GPT-5. No subagents.
+
+**Changed:** Removed the F5 input branch that zeroed movement, suppressed attacks, and returned before gameplay controls. Tuning edits and snapshots now run before ordinary input sampling; normal mouse look, movement, attacks, reload, and configured weapon-slot selection remain enabled. Removed the separate 1-6 slot shortcut so selection uses the existing gameplay path. Clarified the design and GameUI notes.
+
+**Why:** The owner reported that F5 prevented playtesting adjusted viewmodels in motion and during weapon use.
+
+**Tested how:** `scripts/checks/validate.sh` passed (387 `hl2-ui` and 106 `hl2-bevy` tests, 10 ignored per crate, strict Clippy and formatting); `scripts/checks/check_windows.sh` passed; `git diff --check` passed. Packaged firing/reload animation inspection remains needed.
+
+**Result:** F5 adds live tuning without switching gameplay into a no-input mode.
+
+**Still broken or not tested:** Packaged interactive movement, firing, reloading and weapon selection with F5 enabled.
+
+**Next:** Let the owner inspect gameplay and animations with F5 enabled in a packaged run.
+
+## 2026-10-22 Retain viewmodel tuning edits for an F5 session
+
+**Agent/model:** Codex, GPT-5. No subagents.
+
+**Changed:** F5 tuning now retains edited framing by weapon classname and aspect profile, restores a prior edit when returning to that key, and accepts 1-6 slot selection plus confirmation while active. Each adjustment serializes a full `tuning.json` snapshot with all session edits merged. Turning F5 off resets the session map. Added multi-profile snapshot and session switching/reset tests; updated tuner docs.
+
+**Why:** The owner wants to tune several weapons and aspect profiles in one debug session, then copy the accumulated result from the console.
+
+**Tested how:** Session restore/reset and accumulated multi-profile JSON unit tests passed. `scripts/checks/validate.sh` passed (387 `hl2-ui` and 106 `hl2-bevy` tests, 10 ignored per crate, strict Clippy and formatting); `scripts/checks/check_windows.sh` passed; `git diff --check` passed.
+
+**Result:** Weapon/profile edits persist across switching within the F5 session; slot keys 1-6 select weapons, and profile changes after resolution/aspect changes restore prior session edits. Each adjusted snapshot includes all current session edits. F5-off clears them.
+
+**Still broken or not tested:** Packaged interactive weapon/resolution switching and visual verification.
+
+**Next:** Packaged interactive verification of slot switching and Pause/Options resolution changes.
+
+## 2026-10-22 Add F5 viewmodel tuning utility
+
+**Agent/model:** Codex, GPT-5. No subagents.
+
+**Changed:** Added F5 runtime-only viewmodel tuning mode and a live overlay for the selected weapon and active standard/portrait/ultrawide profile. `[`/`]` adjust FOV, `,`/`.` lower/raise Z, arrows edit forward X/lateral Y, and Shift changes the step from 0.1 to 0.01. The mode captures edit keys from gameplay, applies changes to the viewmodel camera and attached effects, and logs a complete pretty-printed `tuning.json` snapshot without writing the asset. Added zero-default standard profiles so the same utility produces reusable JSON on any aspect without changing standard rendering by default.
+
+**Why:** Owner requested an interactive way to tune viewmodels and copy resulting values into the tuning asset.
+
+**Tested how:** Focused profile/snapshot and adjustment/toggle tests; `scripts/checks/validate.sh` passed (377 `hl2-ui`, 105 `hl2-bevy`, 10 ignored per crate, strict Clippy and formatting); `scripts/checks/check_windows.sh` passed.
+
+**Result:** F5 edits the currently selected weapon profile live and records the resulting complete JSON in the developer console log.
+
+**Still broken or not tested:** Packaged interactive visual inspection and copying from the in-game console were not tested.
+
+**Next:** Review overlay placement and log readability in a packaged run.
+
 ## 2026-10-22 Restore portrait viewmodel tuning to 97fac81
 
 **Agent/model:** Codex, GPT-5. No subagents.

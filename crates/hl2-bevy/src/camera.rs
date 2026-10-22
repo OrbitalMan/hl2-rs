@@ -70,7 +70,7 @@ pub(crate) fn present_player_view(
     // The player's own FOV, including SetFOV ramps (crossbow zoom).
     let player_fov = game.map_or(sim.fov, |game| game.inventory.view_fov(game.scene.time));
     if let (Some(game), Ok((mut transform, mut projection))) = (game, viewmodel.single_mut()) {
-        let framing = hl2_ui::tuning::viewmodel_framing(&game.inventory.active, aspect);
+        let framing = sim.viewmodel_framing(&game.inventory.active, aspect);
         let degrees = hl2_simulation::viewmodel_effects::viewmodel_fov(
             sim.viewmodel_fov,
             game.inventory.fov.default_fov,

@@ -18,6 +18,44 @@ a low-resolution flexible frame on a high-DPI panel. Validation is unit-level: a
 portrait/launcher bounds, and the 640x480-to-Fit-Display host transition.
 Packaged visual comparison on an actual portrait display remains not tested.
 
+## Viewmodel tuning overlay (2026-10-22)
+
+F5 toggles a runtime-only viewmodel tuning mode. Its debug overlay reports the current aspect
+profile, active weapon classname, and direct profile `fov_offset` / `[forward, left, up]` offsets.
+`[`/`]` adjust FOV, `,`/`.` adjust Z, Up/Down adjust forward X, and Left/Right adjust lateral Y;
+Shift changes each step from 0.1 to 0.01. F5 only adds the editor adjustments; normal mouse look,
+movement, firing, reloading, and weapon selection continue through the ordinary gameplay input path.
+F1 and F5 overlays may be shown together.
+
+The tuning asset gains zero-valued standard profiles so the same workflow works at ordinary aspect
+ratios as well as portrait/ultrawide; their defaults preserve existing standard-aspect rendering.
+Each adjustment updates the live camera and viewmodel-attached effects, and emits a complete,
+pretty-printed `tuning.json` snapshot to the developer console log with the selected profile value
+replaced. It never writes the file. Unit validation covers profile selection/blending, snapshot JSON,
+toggle state, and adjustment steps/signs. Packaged input capture and visual presentation remain
+runtime checks.
+
+Session editing extension: keep direct edits in memory by `(weapon classname, aspect profile)` for
+the lifetime of one F5 session. Before switching to another weapon/profile, retain the current
+framing; when revisiting a key, restore its pending edit, otherwise load the asset baseline. Number
+keys 1-6 run the normal slot selection/confirmation path while the tuner is active. The session
+survives Pause/Options so the owner can change resolution/aspect; while paused, input belongs to the
+UI and tuning resumes after returning to gameplay. Each adjustment prints a full tuning snapshot
+with every session edit merged, so the accumulated result can be copied once. F5-off resets the
+entire session. Validation covers switching/restoring independent keys, accumulated serialization,
+and session reset; packaged interaction remains a separate check.
+
+Gameplay-input correction: F5 remains a tuning display, not a gameplay input mode. Keep the existing
+target-sync/edit/snapshot path, then continue through normal input sampling so mouse look, movement,
+attacks, reload, and configured weapon selection continue unchanged. Remove the separate slot
+shortcut to avoid duplicating the normal action path. Validate with the host input and gameplay tests
+plus the full strict check suite; packaged firing/reload animation observation remains needed.
+
+Console output correction: mark live `tuning.json` snapshots as replaceable console output. On each
+adjustment, update the most recent tuning snapshot line in place (including its timestamp and cached
+wrapping), or append the first one if none remains. Preserve unrelated console output and submitted
+command history. Validate that repeated snapshots occupy one line entry while other output remains.
+
 ## Closed captions (2026-10-17)
 
 Retail model (SDK `hud_closecaption.cpp`, `SoundEmitterSystem.cpp`, `sceneentity.cpp`; installed files): every `resource/closecaption_<language>.dat` (`VCCD` v1: header, directory of `{crc32(lower(token)), block, offset, length}`, UCS-2 text blocks) on the game search path is a dictionary, the first one holding a token wins. Ordinary `EmitSound` of a sound script captions the script name for the chosen wave's length unless every sound origin is beyond 1200 units of the player; raw `.wav`/`!sentence` emits and client soundscapes do not caption; `ambient_generic` plays caption at any distance. Choreographed SPEAK events caption only their master event's token (cc token, else the sound name), for the longer of the event length and the last slave's end, never "from player", after a 1200-unit `scene_maxcaptionradius` check against the player and view entity unless the event suppresses attenuation; their sound itself emits no caption. The panel (`HudLayout.res` `HudCloseCaption`, `ClientScheme.res` `CloseCaption_*` fonts and `Panel.BgColor` with `BgAlpha`) runs the SDK item queue: `<delay>` splitting, `<len>`, `<sfx>` (instant; dropped by `cc_subtitles`), `<norepeat>`, `<clr>`/`<playerclr>` stacks, `<B>`/`<I>`/`<cr>`, word wrap, linger/predisplay times, box growth and item fades. Options > Audio "Closed captions": none = `closecaption 0`, subtitles and sound effects = `closecaption 1, cc_subtitles 0`, subtitles = `closecaption 1, cc_subtitles 1`.

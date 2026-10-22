@@ -973,11 +973,12 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
     `viewmodel_fov_range` 30..110) replaces the retail 54 in `viewmodel_fov(base, default, fov)`
     for the viewmodel camera and its attached effects; zoom still subtracts the FOV offset, so a
     base above 54 + (default - zoom FOV) keeps the viewmodel visible when zoomed (retail hides it).
-  - Outside `5:4..=16:9` (`tuning::narrowest_design_aspect()..=tuning::widest_design_aspect()`),
-    `tuning::viewmodel_framing(weapon, aspect)` (`assets/ui/tuning.json` `viewmodel`) applies a
-    smoothly interpolated additive `fov_offset` (degrees) and camera-space `offset` (`[forward, left, up]`
-    in Source units, applied to `ViewmodelCamera` and viewmodel attachment effects) from a `default`
-    profile or a per-weapon override (`weapons`):
+  - `tuning::viewmodel_framing(weapon, aspect)` (`assets/ui/tuning.json` `viewmodel`) applies an
+    additive `fov_offset` (degrees) and camera-space `offset` (`[forward, left, up]` in Source units,
+    applied to `ViewmodelCamera` and viewmodel attachment effects) from a `standard`, `portrait`, or
+    `ultrawide` profile in `default` or a per-weapon override (`weapons`). Standard values default
+    to zero; below `5:4` and above `16:9` those values smoothly blend toward the portrait and
+    ultrawide profiles respectively:
     - **Portrait (`< 5:4` down to `9:16`)**: `weapon_physcannon` shifts down (`offset: [0, 0, -11.5]`)
       so its severed left arm stump stays below the bottom bezel without narrowing horizontal FOV;
       `weapon_crowbar` uses `+8°` FOV and shifts down (`offset: [0, 0, -11.0]`) so its arm stump
@@ -997,9 +998,22 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
       bezel; `weapon_rpg` widens FOV (`+28°` -> `82°`) and shifts back/right/down
       (`offset: [-2.0, -21.5, -1.5]`) so the hand and forearm remain visible above the bottom edge
       while the unmodeled rear cutoff of the launcher tube stays outside the right edge.
-    - Standard `5:4`, `4:3`, `16:10`, and `16:9` frames receive `ViewmodelFraming::ZERO` and are
-      untouched. Because framing is looked up from `game.inventory.active`, switching weapons
-      applies the new weapon's framing immediately as its draw animation begins.
+    - Standard `5:4`, `4:3`, `16:10`, and `16:9` frames use the zero-valued `standard` profile and
+      are untouched unless a developer edits those values. Because framing is looked up from
+      `game.inventory.active`, switching weapons applies the new weapon's framing immediately as its
+      draw animation begins.
+  - F5 toggles the runtime-only viewmodel tuning overlay during unpaused gameplay. It shows the
+    active aspect profile, weapon classname, `fov_offset`, and `[x, y, z]` offset. `[`/`]` adjust FOV,
+    `,`/`.` lower/raise Z, Up/Down adjust forward X, and Left/Right adjust lateral Y. Steps are
+    `0.1`, or `0.01` while Shift is held. Adjustments apply immediately without disabling normal
+    mouse look, movement, firing, reloading, or weapon selection. The tuner retains
+    edits in memory by weapon and aspect profile for the current F5 session; number keys 1-6 use
+    normal weapon selection/confirmation, and revisiting a weapon/profile restores its prior edit. The
+    session survives Pause/Options so display resolution and aspect can be changed; while paused,
+    keys go to the UI and tuning resumes on return to gameplay. Every adjustment updates one
+    replaceable developer-console snapshot containing the complete `tuning.json` with all session
+    edits merged. Turning F5 off ends the session and discards these in-memory edits. The utility
+    does not write the asset file; copy the accumulated logged JSON into it to keep changes.
   - Both sliders are applied by the sub-dialog's OK (`Sub::apply_on_ok`) and saved in `hl2-config.json`
     (out-of-range values are clamped on load). Ranges and the other numbers are in
     `assets/ui/tuning.json`.

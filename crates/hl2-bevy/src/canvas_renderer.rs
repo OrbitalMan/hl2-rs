@@ -376,6 +376,22 @@ pub fn present(
     if !hud.debug_lines.is_empty() {
         ui.source.draw_debug(&hud.debug_lines);
     }
+    if sim.viewmodel_debug.enabled
+        && let Some(profile) = sim.viewmodel_debug.profile
+    {
+        let value = sim.viewmodel_debug.framing;
+        let lines = vec![
+            format!("aspect_ratio: {}", profile.as_str()),
+            format!("weapon: {}", sim.viewmodel_debug.weapon),
+            format!("fov_offset: {:.2}    [ ]", value.fov_offset),
+            format!(
+                "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:X  ,/.:Z",
+                value.offset[0], value.offset[1], value.offset[2]
+            ),
+            "Shift = 0.01    F5".to_owned(),
+        ];
+        ui.source.draw_viewmodel_debug(&lines);
+    }
     // F4 NPC spawn panel (ours, outside the hl2-ui menus).
     hud.spawn_panel = game.spawn_overlay.open.then(|| {
         game.spawn_overlay

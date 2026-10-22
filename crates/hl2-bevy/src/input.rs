@@ -22,6 +22,7 @@ type InputDevices<'w> = (
     Res<'w, ButtonInput<MouseButton>>,
     Res<'w, AccumulatedMouseMotion>,
     Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>,
+    Option<Res<'w, crate::video::GameFrame>>,
 );
 
 /// A physical input a binding name refers to.
@@ -257,11 +258,11 @@ pub(crate) fn action_pressed(
 }
 
 pub(crate) fn controls(
-    (keys, buttons, mouse, scroll): InputDevices,
+    (keys, buttons, mouse, scroll, frame): InputDevices,
     windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut sim: ResMut<crate::simulation::Simulation>,
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
-    ui: Option<Res<crate::ui_host::Console>>,
+    mut ui: Option<ResMut<crate::ui_host::Console>>,
     mut mouse_filter: Local<hl2_ui::input::MouseFilter>,
 ) {
     // CGameRules::Think reads `skill` every frame, and weapon selection reads
@@ -275,6 +276,40 @@ pub(crate) fn controls(
     };
     if keys.just_pressed(KeyCode::F1) && window.focused {
         sim.dev_overlay = !sim.dev_overlay;
+    }
+    let aspect = crate::video::frame_aspect(frame.as_deref());
+    if keys.just_pressed(KeyCode::F5)
+        && window.focused
+        && sim.commands.is_empty()
+        && let Some(game) = game.as_deref()
+        && (sim.viewmodel_debug.enabled || !sim.paused())
+    {
+        toggle_viewmodel_debug(&mut sim.viewmodel_debug, &game.inventory.active, aspect);
+    }
+    if sim.viewmodel_debug.enabled && !sim.paused() && !sim.transition {
+        let Some(weapon) = game.as_deref().map(|game| game.inventory.active.clone()) else {
+            sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
+            return;
+        };
+        let profile = hl2_ui::tuning::viewmodel_profile(aspect);
+        select_viewmodel_debug_target(&mut sim.viewmodel_debug, &weapon, profile);
+        if adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &keys) {
+            let framing = sim.viewmodel_debug.framing;
+            sim.viewmodel_debug.edits.insert((weapon, profile), framing);
+            match hl2_ui::tuning::tuning_json_with_viewmodel_profiles(&sim.viewmodel_debug.edits) {
+                Ok(json) => {
+                    if let Some(ui) = ui.as_deref_mut() {
+                        ui.source.log_viewmodel_tuning(json);
+                    } else {
+                        bevy::log::info!(target: "hl2_bevy::viewmodel_debug", "{json}");
+                    }
+                }
+                Err(error) => bevy::log::error!(
+                    target: "hl2_bevy::viewmodel_debug",
+                    "Could not serialize tuning.json snapshot: {error}"
+                ),
+            }
+        }
     }
     if !sim.commands.is_empty() {
         return;
@@ -360,10 +395,163 @@ pub(crate) fn controls(
     };
 }
 
+fn toggle_viewmodel_debug(
+    debug: &mut crate::simulation::ViewmodelDebug,
+    weapon: &str,
+    aspect: f32,
+) {
+    if debug.enabled {
+        *debug = crate::simulation::ViewmodelDebug::default();
+        return;
+    }
+    let profile = hl2_ui::tuning::viewmodel_profile(aspect);
+    debug.enabled = true;
+    debug.weapon = weapon.to_owned();
+    debug.profile = Some(profile);
+    debug.framing = hl2_ui::tuning::viewmodel_profile_framing(weapon, profile);
+}
+
+fn select_viewmodel_debug_target(
+    debug: &mut crate::simulation::ViewmodelDebug,
+    weapon: &str,
+    profile: hl2_ui::tuning::ViewmodelProfile,
+) {
+    if debug.weapon == weapon && debug.profile == Some(profile) {
+        return;
+    }
+    if let Some(previous_profile) = debug.profile {
+        debug
+            .edits
+            .insert((debug.weapon.clone(), previous_profile), debug.framing);
+    }
+    debug.weapon = weapon.to_owned();
+    debug.profile = Some(profile);
+    debug.framing = debug
+        .edits
+        .get(&(weapon.to_owned(), profile))
+        .copied()
+        .unwrap_or_else(|| hl2_ui::tuning::viewmodel_profile_framing(weapon, profile));
+}
+
+/// Applies one-frame viewmodel debug key presses. Returns whether the profile changed.
+fn adjust_viewmodel_framing(
+    framing: &mut hl2_ui::tuning::ViewmodelFraming,
+    keys: &ButtonInput<KeyCode>,
+) -> bool {
+    let step = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        0.01
+    } else {
+        0.1
+    };
+    let mut changed = false;
+    let mut apply = |value: &mut f32, delta: f32| {
+        *value = ((*value + delta) * 100.0).round() / 100.0;
+        changed = true;
+    };
+    if keys.just_pressed(KeyCode::BracketLeft) {
+        apply(&mut framing.fov_offset, -step);
+    }
+    if keys.just_pressed(KeyCode::BracketRight) {
+        apply(&mut framing.fov_offset, step);
+    }
+    if keys.just_pressed(KeyCode::Comma) {
+        apply(&mut framing.offset[2], -step);
+    }
+    if keys.just_pressed(KeyCode::Period) {
+        apply(&mut framing.offset[2], step);
+    }
+    if keys.just_pressed(KeyCode::ArrowUp) {
+        apply(&mut framing.offset[0], step);
+    }
+    if keys.just_pressed(KeyCode::ArrowDown) {
+        apply(&mut framing.offset[0], -step);
+    }
+    if keys.just_pressed(KeyCode::ArrowLeft) {
+        apply(&mut framing.offset[1], step);
+    }
+    if keys.just_pressed(KeyCode::ArrowRight) {
+        apply(&mut framing.offset[1], -step);
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use hl2_ui::gameui::keys::NAMED_KEYS;
+
+    #[test]
+    fn f5_viewmodel_debug_toggle_loads_the_selected_direct_profile() {
+        let mut debug = crate::simulation::ViewmodelDebug::default();
+        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        assert!(debug.enabled);
+        assert_eq!(debug.weapon, "weapon_physcannon");
+        assert_eq!(
+            debug.profile,
+            Some(hl2_ui::tuning::ViewmodelProfile::Portrait)
+        );
+        assert_eq!(debug.framing.fov_offset, 0.0);
+        assert_eq!(debug.framing.offset, [0.0, 0.0, -11.5]);
+
+        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        assert!(!debug.enabled);
+        assert!(debug.edits.is_empty());
+    }
+
+    #[test]
+    fn viewmodel_debug_keeps_separate_weapon_and_aspect_edits_until_reset() {
+        use hl2_ui::tuning::{ViewmodelFraming, ViewmodelProfile};
+
+        let mut debug = crate::simulation::ViewmodelDebug::default();
+        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        debug.framing.fov_offset = 1.25;
+        select_viewmodel_debug_target(&mut debug, "weapon_pistol", ViewmodelProfile::Portrait);
+        assert_eq!(
+            debug.framing,
+            hl2_ui::tuning::viewmodel_profile_framing("weapon_pistol", ViewmodelProfile::Portrait)
+        );
+        debug.framing.offset[2] = -2.75;
+        select_viewmodel_debug_target(&mut debug, "weapon_physcannon", ViewmodelProfile::Portrait);
+        assert_eq!(debug.framing.fov_offset, 1.25);
+        select_viewmodel_debug_target(&mut debug, "weapon_physcannon", ViewmodelProfile::Standard);
+        assert_eq!(debug.framing, ViewmodelFraming::default());
+        select_viewmodel_debug_target(&mut debug, "weapon_pistol", ViewmodelProfile::Portrait);
+        assert_eq!(debug.framing.offset[2], -2.75);
+
+        toggle_viewmodel_debug(&mut debug, "weapon_pistol", 9. / 16.);
+        assert!(!debug.enabled);
+        assert!(debug.edits.is_empty());
+    }
+
+    #[test]
+    fn viewmodel_debug_adjustment_keys_use_expected_axes_and_precision() {
+        let mut framing = hl2_ui::tuning::ViewmodelFraming {
+            fov_offset: 0.0,
+            offset: [0.0, 0.0, -11.5],
+        };
+        let mut keys = ButtonInput::default();
+        for key in [
+            KeyCode::BracketRight,
+            KeyCode::Period,
+            KeyCode::ArrowUp,
+            KeyCode::ArrowLeft,
+        ] {
+            keys.press(key);
+        }
+        assert!(adjust_viewmodel_framing(&mut framing, &keys));
+        assert_eq!(framing.fov_offset, 0.1);
+        assert_eq!(framing.offset, [0.1, 0.1, -11.4]);
+
+        let mut fine_keys = ButtonInput::default();
+        fine_keys.press(KeyCode::ShiftRight);
+        fine_keys.press(KeyCode::BracketLeft);
+        fine_keys.press(KeyCode::Comma);
+        fine_keys.press(KeyCode::ArrowDown);
+        fine_keys.press(KeyCode::ArrowRight);
+        assert!(adjust_viewmodel_framing(&mut framing, &fine_keys));
+        assert_eq!(framing.fov_offset, 0.09);
+        assert_eq!(framing.offset, [0.09, 0.09, -11.41]);
+    }
 
     #[test]
     fn every_name_the_options_page_can_store_parses() {

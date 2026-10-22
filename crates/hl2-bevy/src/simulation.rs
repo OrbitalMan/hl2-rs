@@ -8,7 +8,18 @@ use modkit_core::{
     movement::{Input, Player, TICK},
 };
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
+
+#[derive(Debug, Clone, Default)]
+pub struct ViewmodelDebug {
+    pub enabled: bool,
+    pub weapon: String,
+    pub profile: Option<hl2_ui::tuning::ViewmodelProfile>,
+    pub framing: hl2_ui::tuning::ViewmodelFraming,
+    /// Edits retained for the current F5 session, keyed by weapon classname and direct profile.
+    pub edits:
+        BTreeMap<(String, hl2_ui::tuning::ViewmodelProfile), hl2_ui::tuning::ViewmodelFraming>,
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,6 +148,8 @@ pub struct Simulation {
     /// Keep simulating with idle input after the script ends (`--capture-live` bursts).
     pub run_after_script: bool,
     pub dev_overlay: bool,
+    /// F5 runtime-only viewmodel tuning overlay and active direct-profile edit.
+    pub viewmodel_debug: ViewmodelDebug,
     pub pending_video_config: Option<hl2_ui::config::VideoSettings>,
     /// Window settings last given to the window: startup values (after command-line overrides)
     /// or the last queued apply. `None` applies the next configuration unconditionally.
@@ -189,6 +202,7 @@ impl Simulation {
             finished: false,
             run_after_script: false,
             dev_overlay: false,
+            viewmodel_debug: ViewmodelDebug::default(),
             pending_video_config: None,
             applied_window: None,
             applied_detail: None,
@@ -221,6 +235,29 @@ impl Simulation {
     /// own, including weapon zoom).
     pub fn view_fov(&self, player_fov: f32) -> f32 {
         self.zoom_fov.unwrap_or(player_fov)
+    }
+    /// The current viewmodel framing, including the selected direct profile while F5 tuning is on.
+    pub fn viewmodel_framing(&self, weapon: &str, aspect: f32) -> hl2_ui::tuning::ViewmodelFraming {
+        let profile = hl2_ui::tuning::viewmodel_profile(aspect);
+        if self.viewmodel_debug.enabled
+            && let Some(framing) = self
+                .viewmodel_debug
+                .edits
+                .iter()
+                .find(|((edited_weapon, edited_profile), _)| {
+                    edited_weapon == weapon && *edited_profile == profile
+                })
+                .map(|(_, framing)| *framing)
+                .or_else(|| {
+                    (self.viewmodel_debug.weapon == weapon
+                        && self.viewmodel_debug.profile == Some(profile))
+                    .then_some(self.viewmodel_debug.framing)
+                })
+        {
+            hl2_ui::tuning::viewmodel_framing_with_profile(weapon, aspect, profile, framing)
+        } else {
+            hl2_ui::tuning::viewmodel_framing(weapon, aspect)
+        }
     }
     /// Whether the view is the player's own (no point_viewcontrol camera).
     pub fn player_view(&self) -> bool {
@@ -268,7 +305,11 @@ impl Simulation {
     }
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"player": self.player, "eye": self.eye.to_array(), "fly": self.fly,
-            "paused": self.paused(), "background_level": self.background_level, "world_running": self.world_running(), "dev_overlay":self.dev_overlay, "dead": self.player.dead, "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
+            "paused": self.paused(), "background_level": self.background_level, "world_running": self.world_running(), "dev_overlay":self.dev_overlay,
+            "viewmodel_debug": {"visible": self.viewmodel_debug.enabled, "weapon": self.viewmodel_debug.weapon,
+                "profile": self.viewmodel_debug.profile.map(|profile| profile.as_str()),
+                "fov_offset": self.viewmodel_debug.framing.fov_offset, "offset": self.viewmodel_debug.framing.offset},
+            "dead": self.player.dead, "loading":self.loading,"host_tick": self.host_tick, "script_finished": self.finished,
             "samples": self.samples, "colliders": self.physics.colliders.len(),
             "native_convex_shapes": self.physics.native_shape_count, "native_shape_fallbacks": self.physics.native_shape_fallbacks,
             "skipped_colliders": self.physics.skipped, "dynamic_props": self.physics.dynamic.len()})

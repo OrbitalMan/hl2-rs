@@ -69,8 +69,27 @@ struct ViewmodelTuning {
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 struct ViewmodelWeaponTuning {
+    standard: ViewmodelFraming,
     portrait: ViewmodelFraming,
     ultrawide: ViewmodelFraming,
+}
+
+/// Direct tuning profile selected by the active frame aspect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ViewmodelProfile {
+    Standard,
+    Portrait,
+    Ultrawide,
+}
+
+impl ViewmodelProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Portrait => "portrait",
+            Self::Ultrawide => "ultrawide",
+        }
+    }
 }
 
 /// Additive viewmodel horizontal field-of-view offset (degrees, measured at the 4:3 reference
@@ -87,17 +106,6 @@ impl ViewmodelFraming {
         fov_offset: 0.0,
         offset: [0.0; 3],
     };
-
-    fn scale(self, t: f32) -> Self {
-        if t <= 0.0 {
-            Self::ZERO
-        } else {
-            Self {
-                fov_offset: self.fov_offset * t,
-                offset: self.offset.map(|c| c * t),
-            }
-        }
-    }
 }
 
 fn data() -> &'static Tuning {
@@ -256,19 +264,129 @@ pub fn world_fov_offset(aspect: f32) -> f32 {
 /// Aspect-adaptive viewmodel framing (`fov_offset` and Source `[forward, left, up]` offset) for
 /// `weapon` at `aspect` (`width / height`).
 ///
-/// Inside `narrowest_design_aspect()..=widest_design_aspect()` (`5:4..=16:9`) this is
-/// [`ViewmodelFraming::ZERO`] so standard retail aspects are untouched. Below `5:4` it blends
-/// toward the weapon's (or default) `portrait` framing at `portrait_aspect` (`9:16`); above
-/// `16:9` toward the `ultrawide` framing at `ultrawide_aspect` (`32:9`), with the strengths of
-/// [`aspect_factors`].
+/// Inside `narrowest_design_aspect()..=widest_design_aspect()` (`5:4..=16:9`) it uses the direct
+/// `standard` profile (zero by default, so retail aspects remain untouched). Below `5:4` it blends
+/// from that profile toward `portrait` at `portrait_aspect` (`9:16`); above `16:9` it blends toward
+/// `ultrawide` at `ultrawide_aspect` (`32:9`), with the strengths of [`aspect_factors`].
 pub fn viewmodel_framing(weapon: &str, aspect: f32) -> ViewmodelFraming {
     let vm = &data().viewmodel;
     let profile = vm.weapons.get(weapon).copied().unwrap_or(vm.default);
-    match aspect_factors(aspect) {
-        (portrait, _) if portrait > 0.0 => profile.portrait.scale(portrait),
-        (_, ultrawide) if ultrawide > 0.0 => profile.ultrawide.scale(ultrawide),
-        _ => ViewmodelFraming::ZERO,
+    let (portrait, ultrawide) = aspect_factors(aspect);
+    if portrait > 0.0 {
+        blend(profile.standard, profile.portrait, portrait)
+    } else if ultrawide > 0.0 {
+        blend(profile.standard, profile.ultrawide, ultrawide)
+    } else {
+        profile.standard
     }
+}
+
+/// Direct profile selected at `aspect`, independent of its interpolation strength.
+pub fn viewmodel_profile(aspect: f32) -> ViewmodelProfile {
+    if !aspect.is_finite() || aspect <= 0.0 {
+        return ViewmodelProfile::Standard;
+    }
+    if aspect < narrowest_design_aspect() {
+        ViewmodelProfile::Portrait
+    } else if aspect > widest_design_aspect() {
+        ViewmodelProfile::Ultrawide
+    } else {
+        ViewmodelProfile::Standard
+    }
+}
+
+/// The direct endpoint tuning for a weapon and named aspect profile.
+pub fn viewmodel_profile_framing(weapon: &str, profile: ViewmodelProfile) -> ViewmodelFraming {
+    let vm = &data().viewmodel;
+    let tuning = vm.weapons.get(weapon).copied().unwrap_or(vm.default);
+    match profile {
+        ViewmodelProfile::Standard => tuning.standard,
+        ViewmodelProfile::Portrait => tuning.portrait,
+        ViewmodelProfile::Ultrawide => tuning.ultrawide,
+    }
+}
+
+/// Live framing with one direct profile replaced by the debug editor's current value.
+pub fn viewmodel_framing_with_profile(
+    weapon: &str,
+    aspect: f32,
+    edited_profile: ViewmodelProfile,
+    edited_value: ViewmodelFraming,
+) -> ViewmodelFraming {
+    let vm = &data().viewmodel;
+    let tuning = vm.weapons.get(weapon).copied().unwrap_or(vm.default);
+    let standard = if edited_profile == ViewmodelProfile::Standard {
+        edited_value
+    } else {
+        tuning.standard
+    };
+    let portrait = if edited_profile == ViewmodelProfile::Portrait {
+        edited_value
+    } else {
+        tuning.portrait
+    };
+    let ultrawide = if edited_profile == ViewmodelProfile::Ultrawide {
+        edited_value
+    } else {
+        tuning.ultrawide
+    };
+    let (portrait_strength, ultrawide_strength) = aspect_factors(aspect);
+    if portrait_strength > 0.0 {
+        blend(standard, portrait, portrait_strength)
+    } else if ultrawide_strength > 0.0 {
+        blend(standard, ultrawide, ultrawide_strength)
+    } else {
+        standard
+    }
+}
+
+fn blend(from: ViewmodelFraming, to: ViewmodelFraming, amount: f32) -> ViewmodelFraming {
+    let amount = amount.clamp(0.0, 1.0);
+    ViewmodelFraming {
+        fov_offset: from.fov_offset + (to.fov_offset - from.fov_offset) * amount,
+        offset: std::array::from_fn(|i| from.offset[i] + (to.offset[i] - from.offset[i]) * amount),
+    }
+}
+
+/// Pretty-printed complete tuning asset with one weapon/profile replaced by the live debug value.
+pub fn tuning_json_with_viewmodel_profile(
+    weapon: &str,
+    profile: ViewmodelProfile,
+    framing: ViewmodelFraming,
+) -> Result<String, serde_json::Error> {
+    let mut edits = std::collections::BTreeMap::new();
+    edits.insert((weapon.to_owned(), profile), framing);
+    tuning_json_with_viewmodel_profiles(&edits)
+}
+
+/// Pretty-printed tuning asset with every direct weapon/profile edit from one debug session merged.
+pub fn tuning_json_with_viewmodel_profiles(
+    edits: &std::collections::BTreeMap<(String, ViewmodelProfile), ViewmodelFraming>,
+) -> Result<String, serde_json::Error> {
+    let mut root: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/ui/tuning.json"
+    )))?;
+    let viewmodel = &mut root["viewmodel"];
+
+    for ((weapon, profile), framing) in edits {
+        let target = if weapon.starts_with("weapon_") {
+            let defaults = viewmodel["default"].clone();
+            let target = &mut viewmodel["weapons"][weapon];
+            if target.is_null() {
+                *target = defaults;
+            }
+            target
+        } else {
+            &mut viewmodel["default"]
+        };
+        let two_decimals = |value: f32| (f64::from(value) * 100.0).round() / 100.0;
+        target[profile.as_str()] = serde_json::json!({
+            "fov_offset": two_decimals(framing.fov_offset),
+            "offset": framing.offset.map(two_decimals),
+        });
+    }
+    serde_json::to_string_pretty(&root)
 }
 
 #[cfg(test)]
@@ -329,6 +447,106 @@ mod tests {
         let rpg_32_9 = viewmodel_framing("weapon_rpg", 32. / 9.);
         assert!(rpg_21_9.fov_offset > 0.0 && rpg_32_9.fov_offset > rpg_21_9.fov_offset);
         assert!(rpg_21_9.offset[1] < 0.0 && rpg_32_9.offset[1] < rpg_21_9.offset[1]);
+    }
+
+    #[test]
+    fn viewmodel_debug_profiles_and_snapshot_round_trip() {
+        let normal = viewmodel_profile(4. / 3.);
+        let portrait = viewmodel_profile(9. / 16.);
+        let ultrawide = viewmodel_profile(32. / 9.);
+        assert_eq!(normal, ViewmodelProfile::Standard);
+        assert_eq!(portrait, ViewmodelProfile::Portrait);
+        assert_eq!(ultrawide, ViewmodelProfile::Ultrawide);
+
+        let adjusted = ViewmodelFraming {
+            fov_offset: 0.12,
+            offset: [0.01, -0.02, -11.49],
+        };
+        let snapshot = tuning_json_with_viewmodel_profile(
+            "weapon_physcannon",
+            ViewmodelProfile::Portrait,
+            adjusted,
+        )
+        .expect("valid tuning snapshot");
+        let json: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+        assert_eq!(
+            json["viewmodel"]["weapons"]["weapon_physcannon"]["portrait"]["fov_offset"],
+            0.12
+        );
+        assert_eq!(
+            json["viewmodel"]["weapons"]["weapon_physcannon"]["portrait"]["offset"],
+            serde_json::json!([0.01, -0.02, -11.49])
+        );
+        assert_eq!(
+            json["viewmodel"]["weapons"]["weapon_physcannon"]["ultrawide"]["fov_offset"],
+            30.0
+        );
+        assert!(snapshot.contains("\n  \"viewmodel\": {"));
+
+        let accumulated = std::collections::BTreeMap::from([
+            (
+                ("weapon_physcannon".to_owned(), ViewmodelProfile::Portrait),
+                adjusted,
+            ),
+            (
+                ("weapon_pistol".to_owned(), ViewmodelProfile::Ultrawide),
+                ViewmodelFraming {
+                    fov_offset: 2.5,
+                    offset: [1.0, 2.0, 3.0],
+                },
+            ),
+        ]);
+        let accumulated_json = tuning_json_with_viewmodel_profiles(&accumulated)
+            .expect("valid accumulated tuning snapshot");
+        let accumulated_value: serde_json::Value = serde_json::from_str(&accumulated_json).unwrap();
+        assert_eq!(
+            accumulated_value["viewmodel"]["weapons"]["weapon_physcannon"]["portrait"]
+                ["fov_offset"],
+            0.12
+        );
+        assert_eq!(
+            accumulated_value["viewmodel"]["weapons"]["weapon_pistol"]["ultrawide"]["offset"],
+            serde_json::json!([1.0, 2.0, 3.0])
+        );
+
+        let standard_edit = ViewmodelFraming {
+            fov_offset: 3.0,
+            offset: [1.0, 2.0, 3.0],
+        };
+        assert_eq!(
+            viewmodel_framing_with_profile(
+                "weapon_physcannon",
+                4. / 3.,
+                ViewmodelProfile::Standard,
+                standard_edit,
+            ),
+            standard_edit
+        );
+        assert_eq!(
+            viewmodel_framing_with_profile(
+                "weapon_physcannon",
+                9. / 16.,
+                ViewmodelProfile::Portrait,
+                adjusted,
+            ),
+            adjusted
+        );
+
+        let unknown_weapon_snapshot = tuning_json_with_viewmodel_profile(
+            "weapon_pistol",
+            ViewmodelProfile::Standard,
+            standard_edit,
+        )
+        .expect("valid per-weapon tuning snapshot");
+        let unknown: serde_json::Value = serde_json::from_str(&unknown_weapon_snapshot).unwrap();
+        assert_eq!(
+            unknown["viewmodel"]["weapons"]["weapon_pistol"]["standard"]["fov_offset"],
+            3.0
+        );
+        assert_eq!(
+            unknown["viewmodel"]["weapons"]["weapon_pistol"]["portrait"]["fov_offset"], 8.0,
+            "new weapon overrides retain default values for untouched profiles"
+        );
     }
 
     #[test]

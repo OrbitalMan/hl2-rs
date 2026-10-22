@@ -662,7 +662,7 @@ fn viewmodel_quads(
     };
     let matrices = game.inventory.viewmodel_matrices(rig, game.scene.time);
     let fov = game.inventory.view_fov(game.scene.time);
-    let framing = hl2_ui::tuning::viewmodel_framing(&game.inventory.active, aspect);
+    let framing = sim.viewmodel_framing(&game.inventory.active, aspect);
     let raw_viewmodel_fov =
         vm::viewmodel_fov(sim.viewmodel_fov, game.inventory.fov.default_fov, fov);
     let viewmodel_fov =

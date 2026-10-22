@@ -41,6 +41,8 @@ pub enum Level {
     Normal,
     /// Developer output (`DevMsg`, mirrored engine log): scheme `Console.DevTextColor`.
     Developer,
+    /// Replaceable snapshot emitted by the live viewmodel tuning utility.
+    ViewmodelTuning,
     Warning,
     Error,
 }
@@ -1694,6 +1696,28 @@ impl Console {
     }
     pub fn log(&mut self, text: impl Into<String>) {
         self.print(Level::Normal, text);
+    }
+    /// Updates the most recent live viewmodel tuning snapshot instead of growing scrollback.
+    pub fn log_viewmodel_tuning(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        if let Some((index, _)) = self
+            .output
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, line)| line.level == Level::ViewmodelTuning)
+        {
+            let number = self.output_start + index as u64;
+            if let Some(line) = self.output.get_mut(index) {
+                line.text = text;
+                line.time = self.clock;
+            }
+            if let Ok(mut wrapped) = self.wrapped.lock() {
+                wrapped.remove(&number);
+            }
+        } else {
+            self.print(Level::ViewmodelTuning, text);
+        }
     }
     /// Prints a line at `level`, stamped with the current time.
     pub fn print(&mut self, level: Level, text: impl Into<String>) {
@@ -3886,6 +3910,45 @@ impl Console {
         }
     }
 
+    /// Draws the live viewmodel tuning values below the F1 developer overlay.
+    pub fn draw_viewmodel_debug(&self, lines: &[String]) {
+        let top = 110.;
+        self.canvas.rectangle(
+            0.,
+            top,
+            self.canvas.width(),
+            130.,
+            Color::new(0.025, 0.045, 0.07, 0.9),
+        );
+        let draw = |line: &str, origin: Vec2, color| {
+            if let Some(font) = &self.developer_font {
+                font.draw_baseline(line, origin, 16., 1., color);
+            } else {
+                text(
+                    &self.canvas,
+                    line,
+                    origin,
+                    16.,
+                    1.,
+                    self.mono.as_ref().or(self.font.as_ref()),
+                    color,
+                );
+            }
+        };
+        let normal = Color::new(0.784, 0.784, 0.784, 1.);
+        for (i, line) in lines.iter().take(5).enumerate() {
+            let y = top + 20. + i as f32 * 22.;
+            let color = if i == 4 {
+                Color::from_rgba(240, 180, 90, 255)
+            } else if i == 0 {
+                WHITE
+            } else {
+                normal
+            };
+            draw(line, vec2(22., y), color);
+        }
+    }
+
     pub fn draw(&self, time: f64) {
         if self.mode == Mode::Gameplay && self.loading_dialog.is_none() {
             return;
@@ -4358,6 +4421,7 @@ impl Console {
         match line.level {
             Level::Input | Level::Normal => self.style.text,
             Level::Developer => self.style.dev_text,
+            Level::ViewmodelTuning => self.style.text,
             Level::Warning => WARNING_TEXT,
             Level::Error => ERROR_TEXT,
         }
@@ -5335,6 +5399,27 @@ mod tests {
         console.submit("clear");
         console.log("after clear");
         assert_eq!(copy(&mut console), None, "clear drops the selection too");
+    }
+
+    #[test]
+    fn live_viewmodel_tuning_log_replaces_its_snapshot_and_keeps_other_output() {
+        let mut console = Console::default();
+        console.clear_output();
+        console.log("before snapshot");
+        console.log_viewmodel_tuning("{\"fov_offset\": 0.1}");
+        console.log("unrelated output");
+        console.log_viewmodel_tuning("{\"fov_offset\": 0.2}");
+
+        assert_eq!(console.output.len(), 3);
+        assert_eq!(console.output[0].text, "before snapshot");
+        assert_eq!(console.output[1].level, Level::ViewmodelTuning);
+        assert_eq!(console.output[1].text, "{\"fov_offset\": 0.2}");
+        assert_eq!(console.output[2].text, "unrelated output");
+
+        console.clear_output();
+        console.log_viewmodel_tuning("{\"fov_offset\": 0.3}");
+        assert_eq!(console.output.len(), 1);
+        assert_eq!(console.output[0].text, "{\"fov_offset\": 0.3}");
     }
 
     #[test]
