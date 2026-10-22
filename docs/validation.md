@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Bounded doorway/SECTION acceptance (2026-10-22)
+
+Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-section-route-20261022b/verify_static.py` and `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-section-route-20261022b/verify_v3_windows.py`. Both pass:23 exact bodies,19 entry signatures,15 instruction windows/988 records;1,183 closed call pairs,12 scoped OnStart outputs,43 raw player snapshots and39 motion captures/4,252 samples. Closed native call trees verify PauseThink -> successful CheckEventCompletion -> ResumePlayback at intro scene7.605485 and security03 scene6.883860. The dense windows retain seq1..1375 and1674..3852; the gap and orphan boundary records remain explicit. This is not a continuous native trace or timing-fidelity proof.
+
+The sampled replacement passes13 offline API/memory checks, including suppressed unchanged pause groups and forced complete transition groups. Native sampling/control comparison is pending. Copied named snapshots' frida_attached:false metadata is not instrumentation attestation; actual attach/detach records define the process context. The serialized control route stopped after two blocked pulses; brush1019 is an authored overlap candidate, not a native contact trace. Settings/module cleanup checks pass for the closed research runs. Full scene audio/animation, map exit and Rust parity remain untested. No Rust build/tests were run for these documentation-only changes.
+
 ## Natural customs/pen/Barney route acceptance (2026-10-22)
 
 Run `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-customs-route-20261022/verify.py` and `C:/Python310/python.exe -B ../../work/hl2-decompiled/scene-customs-route-20261022/verify_seal.py`. Expected passed:true,25 controller names,2183 selected events/1005 pairs,168 requests/166 accepted nested starts,164 authored caller joins,54 player snapshots and46 motion captures/4416 samples. Ten exact path/hash/address/baseline/original bodies and six relocated hook entries per script pass. Seal461 files/33 external bindings and the preceding doorway seal pass. Five paged-query cases passed;the query marks unpromoted output identity.

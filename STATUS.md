@@ -1,5 +1,11 @@
 # STATUS
 
+## Doorway/SECTION research milestone (2026-10-22, research only)
+
+A genuine first-map native route now enters Barney's room and reaches security_01/02/03. Retained-byte checks pass 23 exact retail bodies, 19 entry signatures, 988 instruction records, 1,183 closed call pairs and 12 scoped OnStart outputs. Native automatic resume is observed for security_intro_02 at scene time7.605485 and security_03 at6.883860; the first intro SECTION pause is also retained. The dense trace has an explicit missing seq1376..1673 interval, so continuous recovery/timing is not certified. A capture shows Barney's uncovered face after the reveal; the complete reveal animation/audio is not validated.
+
+The serialized fresh control replay stopped after two no-progress east pulses near(-4352.028,-931.987,-31.969). A bounded original-BSP probe finds world player-clip brush1019 at that overlap; the next attempt uses the previously measured clear y≈-918 lane. This is a brush/position correspondence, not a native contact trace. Earlier storage continuation also stopped on an ambiguous-PID guard after a sequencing error; those unfinished steps remain rejected. Both owned runs closed with checked installed cfg/module identities unchanged. Private unsealed lane: ../../work/hl2-decompiled/scene-section-route-20261022b; verify_static.py and verify_v3_windows.py pass. The sampled replacement observer passes13 offline checks; native repeat/control validation remains pending. First-map completion and Rust parity remain **not tested**. No Rust implementation changes by Codex.
+
 ## Natural customs, pen and Barney introduction (2026-10-22, research only)
 
 A controlled ordinary native route now reaches the train crossing,turnstile,customs queue,security pen and Barney corridor. Two selected instrumented windows retain25 requested choreography controllers,168 requests/166 accepted nested starts,2183 events/1005 paired calls and164 original-BSP caller/output joins. Actual controller generations and accepted actor/model generations reconstruct from raw bytes. Genuine directing/takeaway,pen and security_intro_01/01b requests are observed. security_intro_01b remains flagged playing about89.220 game seconds after acceptance;individual loop rewinds/audio replay are not validated.

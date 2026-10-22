@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Doorway SECTION and callback supplement (2026-10-22)
+
+Private ../../work/hl2-decompiled/scene-section-route-20261022b retains23 exact path/hash/address/baseline/original bodies, PE/RTTI callback bindings and a genuine room route through security_01/02/03. Independent byte checks pass1,183 closed call pairs and12 fresh-generation scoped outputs across two declared windows. Native automatic resume is retained for the later intro SECTION and security03; seq1376..1673 is missing between windows and remains unpromoted. A post-reveal capture shows Barney's face, not complete audiovisual validation. The fresh control replay stopped at a measured queue brush candidate and is being corrected from authored geometry. The lane is unsealed and ongoing; first-map completion, fresh uninstrumented room comparison and Rust parity are not certified. Canonical16 gaps and missing exact procedures remain intact.
+
 ## Natural customs, pen and introduction supplement (2026-10-22)
 
 Private ../../work/hl2-decompiled/scene-customs-route-20261022/CLAUDE-START-HERE.md joins25 observed choreography controllers to the sealed authored base.168 requests/166 accepted nested starts,2183 events/1005 pairs,164 original-BSP caller joins and raw controller/actor generations pass acceptance. A genuine route spawned Barney and reached security_intro_01/01b. Three stale-slot actor reads and three unscoped output records remain explicitly unpromoted;later binding never repairs an earlier timestamp. Selected pen inputs show a valid player activator with a null caller after the initial*49 trigger request. Full event-queue mechanics,scene playback and Rust parity remain untested. Raw/seal acceptance passes461 files/33 bindings;game closed and checked installed identities unchanged. Latest handoff: ../../work/publishing/research-customs-pen-continuation-20261022.md. Stay on the first map and preserve16 gaps.

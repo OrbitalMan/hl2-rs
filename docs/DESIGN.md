@@ -1,5 +1,11 @@
 # Design
 
+## Retail SECTION callback and bounded runtime supplement (2026-10-22)
+
+Exact PE tables and RTTI bind the scene callback interface at object offset0x338 and its CheckEvent target. The reviewed retail path resolves an event's authored actor, delegates to registered actor readiness when found, and warns/returns ready when resolution fails. Preserve that bounded fallback rather than inventing a permanent missing-actor barrier. A non-automated pause still depends on the actual registered conditions; scene and global game clocks remain separate.
+
+The input-led room route observes SECTION pauses and native automatic ResumePlayback nested under PauseThink after CheckEventCompletion returns true. Two retained resumes are security_intro_02 at scene7.605485 and security_03 at6.883860. A gap in the dense observer excludes continuous first-SECTION recovery/timing claims. The next observer retains complete sampled pause call groups and forces a group on transitions; its13 deterministic offline checks do not establish native execution. Keep scoped OnStart identity tied to an active playback call and a fresh live generation. Private exact bodies/raw checks: ../../work/hl2-decompiled/scene-section-route-20261022b. No Rust behavior was changed or compared.
+
 ## Native doorway and SECTION validation plan (2026-10-22, research only)
 
 Continue the verified input-led first-map route in a new private mount, then observe `security_intro_02` and its authored transition to `security_01`. Before launch, bind the required pause/resume/readiness functions to exact pass14 path/hash/address/baseline/original bodies and PE entry bytes. Replace cached output labels with a matching active `StartPlayback` call and a fresh controller generation; reject mismatches. Record scene time, pause reasons, readiness results, actor movement, incoming arguments and scoped outputs with raw source reads. Keep blocked inputs and rejected captures.

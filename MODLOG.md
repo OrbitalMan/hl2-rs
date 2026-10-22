@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 doorway SECTION callback and native room milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Recovered exact retail callback/SECTION targets, added fresh output-generation checks and followed the genuine room route. Added bounded shared research findings; all native material and observer tools remain private.
+
+**Tested how / Result:** Static and raw-window verifiers pass23 exact bodies,988 instruction records,1,183 closed call pairs,12 scoped outputs and4,252 motion samples. Native automatic resume is retained for intro02/security03; a capture shows Barney's face after reveal. The sampled observer passes13 offline checks. Reviewed docs committed separately.
+
+**Still broken or not tested / Next:** Dense trace gap1376..1673, unfinished storage continuation and a stopped control replay remain rejected/partial. Follow the measured clear queue lane and repeat SECTION observation with bounded sampled groups and a fresh uninstrumented control. Full playback, exit and Rust parity remain untested; canonical16 gaps remain.
+
 ## 2026-10-22 session 30: NPC retargeting (ChooseEnemy), can cop reaction/walk-off (actbusy), speech-only scenes keep AI, citizen die voice gender, F4 citizen heads (`wip/squads-20261022`)
 
 - Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.
