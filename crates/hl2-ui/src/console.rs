@@ -2342,6 +2342,115 @@ impl Console {
                     return Err(usage());
                 }
             }
+            "mat_antialias" => {
+                if args.is_empty() {
+                    let val = match self.config.video.advanced.antialiasing {
+                        crate::config::Antialiasing::None => 0,
+                        crate::config::Antialiasing::X2 => 2,
+                        crate::config::Antialiasing::X4 => 4,
+                        crate::config::Antialiasing::X8 => 8,
+                    };
+                    self.log(format!("\"mat_antialias\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let aa = match args[0].as_str() {
+                        "0" | "1" => crate::config::Antialiasing::None,
+                        "2" => crate::config::Antialiasing::X2,
+                        "4" => crate::config::Antialiasing::X4,
+                        "8" => crate::config::Antialiasing::X8,
+                        _ => return Err(usage()),
+                    };
+                    self.config.video.advanced.antialiasing = aa;
+                    let _ = self.config.save();
+                    let val = match aa {
+                        crate::config::Antialiasing::None => 0,
+                        crate::config::Antialiasing::X2 => 2,
+                        crate::config::Antialiasing::X4 => 4,
+                        crate::config::Antialiasing::X8 => 8,
+                    };
+                    self.log(format!("mat_antialias {val}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_aaquality" => {
+                if args.is_empty() {
+                    self.log("\"mat_aaquality\" = \"0\"");
+                } else if args.len() == 1 {
+                    let q: u32 = args[0].parse().map_err(|_| usage())?;
+                    self.log(format!("mat_aaquality {q}"));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_forceaniso" => {
+                if args.is_empty() {
+                    let val = match self.config.video.advanced.filtering {
+                        crate::config::Filtering::Bilinear
+                        | crate::config::Filtering::Trilinear => 1,
+                        crate::config::Filtering::Anisotropic2 => 2,
+                        crate::config::Filtering::Anisotropic4 => 4,
+                        crate::config::Filtering::Anisotropic8 => 8,
+                        crate::config::Filtering::Anisotropic16 => 16,
+                    };
+                    self.log(format!("\"mat_forceaniso\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let aniso = match args[0].as_str() {
+                        "0" | "1" => {
+                            if matches!(
+                                self.config.video.advanced.filtering,
+                                crate::config::Filtering::Bilinear
+                            ) {
+                                crate::config::Filtering::Bilinear
+                            } else {
+                                crate::config::Filtering::Trilinear
+                            }
+                        }
+                        "2" => crate::config::Filtering::Anisotropic2,
+                        "4" => crate::config::Filtering::Anisotropic4,
+                        "8" => crate::config::Filtering::Anisotropic8,
+                        "16" => crate::config::Filtering::Anisotropic16,
+                        _ => return Err(usage()),
+                    };
+                    self.config.video.advanced.filtering = aniso;
+                    let _ = self.config.save();
+                    let val = match aniso {
+                        crate::config::Filtering::Bilinear
+                        | crate::config::Filtering::Trilinear => 1,
+                        crate::config::Filtering::Anisotropic2 => 2,
+                        crate::config::Filtering::Anisotropic4 => 4,
+                        crate::config::Filtering::Anisotropic8 => 8,
+                        crate::config::Filtering::Anisotropic16 => 16,
+                    };
+                    self.log(format!("mat_forceaniso {val}"));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
+            "mat_trilinear" => {
+                if args.is_empty() {
+                    let val = u8::from(
+                        self.config.video.advanced.filtering != crate::config::Filtering::Bilinear,
+                    );
+                    self.log(format!("\"mat_trilinear\" = \"{val}\""));
+                } else if args.len() == 1 {
+                    let on = boolean(&args[0]).ok_or_else(usage)?;
+                    self.config.video.advanced.filtering =
+                        match (on, self.config.video.advanced.filtering) {
+                            (false, _) => crate::config::Filtering::Bilinear,
+                            (true, crate::config::Filtering::Bilinear) => {
+                                crate::config::Filtering::Trilinear
+                            }
+                            (true, other) => other,
+                        };
+                    let _ = self.config.save();
+                    self.log(format!("mat_trilinear {}", u8::from(on)));
+                    return Ok(Some(Effect::ApplyConfig(Box::new(self.config.clone()))));
+                } else {
+                    return Err(usage());
+                }
+            }
             "mat_vsync" => {
                 if args.is_empty() {
                     let val = u8::from(self.config.video.advanced.vsync);
@@ -2662,7 +2771,23 @@ impl Console {
             "fov" | "fov_desired" => format!("{:.0}", c.video.fov),
             "vertical_fov" => format!("{:.0}", c.video.vertical_fov),
             "viewmodel_fov" => format!("{:.0}", c.video.viewmodel_fov),
+            "mat_antialias" => match c.video.advanced.antialiasing {
+                crate::config::Antialiasing::None => "0",
+                crate::config::Antialiasing::X2 => "2",
+                crate::config::Antialiasing::X4 => "4",
+                crate::config::Antialiasing::X8 => "8",
+            }
+            .to_string(),
+            "mat_aaquality" => "0".to_owned(),
             "mat_colorcorrection" => u8::from(c.video.advanced.color_correction).to_string(),
+            "mat_forceaniso" => match c.video.advanced.filtering {
+                crate::config::Filtering::Bilinear | crate::config::Filtering::Trilinear => "1",
+                crate::config::Filtering::Anisotropic2 => "2",
+                crate::config::Filtering::Anisotropic4 => "4",
+                crate::config::Filtering::Anisotropic8 => "8",
+                crate::config::Filtering::Anisotropic16 => "16",
+            }
+            .to_string(),
             "mat_hdr_level" => c.video.hdr.level().to_string(),
             "mat_motion_blur_enabled" => u8::from(c.video.advanced.motion_blur).to_string(),
             "mat_queue_mode" => {
@@ -2671,6 +2796,10 @@ impl Console {
                 } else {
                     "0".to_owned()
                 }
+            }
+            "mat_trilinear" => {
+                u8::from(c.video.advanced.filtering != crate::config::Filtering::Bilinear)
+                    .to_string()
             }
             "mat_vsync" => u8::from(c.video.advanced.vsync).to_string(),
             "r_rootlod" => match c.video.advanced.model_detail {
@@ -9093,5 +9222,79 @@ mod tests {
             console.cvar_value("r_flashlightdepthtexture").as_deref(),
             Some("0")
         );
+    }
+
+    #[test]
+    fn video_advanced_filtering_and_antialiasing_cvars_query_set_and_cvar_value() {
+        let mut console = installed_console();
+        console.set_mode(Mode::Console);
+
+        // mat_forceaniso: 1=Bilinear/Trilinear, 2=Anisotropic2X, 4=Anisotropic4X, 8=Anisotropic8X, 16=Anisotropic16X
+        // mat_trilinear: 0=Bilinear, 1=Trilinear/Anisotropic
+        assert_eq!(console.cvar_value("mat_forceaniso").as_deref(), Some("1"));
+        assert_eq!(console.cvar_value("mat_trilinear").as_deref(), Some("1"));
+        assert_eq!(
+            console.config.video.advanced.filtering,
+            crate::config::Filtering::Trilinear
+        );
+
+        console.submit("mat_forceaniso 4");
+        assert_eq!(
+            console.config.video.advanced.filtering,
+            crate::config::Filtering::Anisotropic4
+        );
+        assert_eq!(console.cvar_value("mat_forceaniso").as_deref(), Some("4"));
+        assert_eq!(console.cvar_value("mat_trilinear").as_deref(), Some("1"));
+
+        console.submit("mat_forceaniso 16");
+        assert_eq!(
+            console.config.video.advanced.filtering,
+            crate::config::Filtering::Anisotropic16
+        );
+        assert_eq!(console.cvar_value("mat_forceaniso").as_deref(), Some("16"));
+
+        console.submit("mat_trilinear 0");
+        assert_eq!(
+            console.config.video.advanced.filtering,
+            crate::config::Filtering::Bilinear
+        );
+        assert_eq!(console.cvar_value("mat_forceaniso").as_deref(), Some("1"));
+        assert_eq!(console.cvar_value("mat_trilinear").as_deref(), Some("0"));
+
+        console.submit("mat_trilinear 1");
+        assert_eq!(
+            console.config.video.advanced.filtering,
+            crate::config::Filtering::Trilinear
+        );
+        assert_eq!(console.cvar_value("mat_trilinear").as_deref(), Some("1"));
+
+        // mat_antialias: 0/1=None, 2=X2, 4=X4, 8=X8
+        assert_eq!(console.cvar_value("mat_antialias").as_deref(), Some("0"));
+        assert_eq!(console.cvar_value("mat_aaquality").as_deref(), Some("0"));
+        assert_eq!(
+            console.config.video.advanced.antialiasing,
+            crate::config::Antialiasing::None
+        );
+
+        console.submit("mat_antialias 4");
+        assert_eq!(
+            console.config.video.advanced.antialiasing,
+            crate::config::Antialiasing::X4
+        );
+        assert_eq!(console.cvar_value("mat_antialias").as_deref(), Some("4"));
+
+        console.submit("mat_antialias 8");
+        assert_eq!(
+            console.config.video.advanced.antialiasing,
+            crate::config::Antialiasing::X8
+        );
+        assert_eq!(console.cvar_value("mat_antialias").as_deref(), Some("8"));
+
+        console.submit("mat_antialias 0");
+        assert_eq!(
+            console.config.video.advanced.antialiasing,
+            crate::config::Antialiasing::None
+        );
+        assert_eq!(console.cvar_value("mat_antialias").as_deref(), Some("0"));
     }
 }

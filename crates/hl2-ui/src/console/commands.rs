@@ -256,9 +256,24 @@ pub const COMMANDS: &[Spec] = &[
         &[Arg::Free],
     ),
     cvar(
+        "mat_aaquality",
+        "mat_aaquality [quality]: query or set antialiasing quality",
+        &[Arg::Values(&["0"])],
+    ),
+    cvar(
+        "mat_antialias",
+        "mat_antialias [0|1|2|4|8]: query or set multisample antialiasing mode",
+        &[Arg::Values(&["0", "1", "2", "4", "8"])],
+    ),
+    cvar(
         "mat_colorcorrection",
         "mat_colorcorrection [0|1]: query or toggle color correction",
         BOOLEAN,
+    ),
+    cvar(
+        "mat_forceaniso",
+        "mat_forceaniso [1|2|4|8|16]: query or set anisotropic texture filtering mode",
+        &[Arg::Values(&["1", "2", "4", "8", "16"])],
     ),
     cvar(
         "mat_hdr_level",
@@ -283,6 +298,11 @@ pub const COMMANDS: &[Spec] = &[
     cvar(
         "mat_reducefillrate",
         "mat_reducefillrate [0|1]: query or toggle reduced shader fillrate (0=high, 1=low)",
+        BOOLEAN,
+    ),
+    cvar(
+        "mat_trilinear",
+        "mat_trilinear [0|1]: query or toggle trilinear texture filtering",
         BOOLEAN,
     ),
     cvar(

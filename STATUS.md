@@ -4,6 +4,18 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **Video Advanced filtering and antialiasing options cvar parity & runtime status (`crates/hl2-ui`):**
+  - Implemented console cvars for texture filtering and multisample antialiasing:
+    - `mat_forceaniso`: queries and sets anisotropic filtering level (`1`, `2`, `4`, `8`, `16`). Maps to `Filtering`.
+    - `mat_trilinear`: queries and toggles trilinear texture filtering (`0` = Bilinear, `1` = Trilinear). Maps to `Filtering`.
+    - `mat_antialias`: queries and sets multisample antialiasing mode (`0`/`1` = None, `2` = 2X, `4` = 4X, `8` = 8X). Maps to `Antialiasing`.
+    - `mat_aaquality`: queries and accepts CSAA quality level (`0`).
+  - Updated candidate completion test in `crates/hl2-ui/src/console/complete.rs` for alphabetical `"ma"` prefix ordering.
+  - Added unit test `video_advanced_filtering_and_antialiasing_cvars_query_set_and_cvar_value` in `crates/hl2-ui/src/console.rs`.
+  - **Documented as Unfinished in Runtime (MSAA & Sampler Anisotropy)**:
+    - In `hl2-bevy`, `Msaa` is configured at startup but not dynamically re-bound when `config.video.advanced.antialiasing` changes at runtime.
+    - Texture samplers created during VTF/VMT material loading currently use static trilinear filtering without dynamic max anisotropy reconfiguration from `config.video.advanced.filtering`.
+
 - **Video Advanced detail options cvar parity & runtime status (`crates/hl2-ui`):**
   - Implemented console cvars for all detail options in Options > Video > Advanced:
     - `r_rootlod`: queries and sets model detail (`0` = High, `1` = Medium, `2` = Low). Maps to `ModelDetail`.

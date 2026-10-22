@@ -1,5 +1,34 @@
 # MODLOG
 
+## 2026-10-22 Video Advanced filtering and antialiasing options cvar parity & runtime status
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/console/commands.rs`:
+  - Added cvar specifications to `COMMANDS`: `mat_antialias`, `mat_aaquality`, `mat_forceaniso`, and `mat_trilinear`.
+- `crates/hl2-ui/src/console.rs`:
+  - Added execution handlers in `interpret()` and query reporting in `cvar_value()` for `mat_antialias`, `mat_aaquality`, `mat_forceaniso`, and `mat_trilinear`.
+  - Added unit test `video_advanced_filtering_and_antialiasing_cvars_query_set_and_cvar_value`.
+- `crates/hl2-ui/src/console/complete.rs`:
+  - Updated completion test to reflect `mat_aaquality` preceding other `"ma"` matches alphabetically.
+- `STATUS.md`:
+  - Documented cvar parity and runtime status of MSAA sample count reconfiguration and texture sampler max anisotropy.
+
+**Why:** User request:
+"Check every option in Options > Video > Advanced, Implement the placeholders/unfinished ones. Report if some feature implementation acceptance criteria is unclear, document it as unfinished. Conclude each new option implementation with a commit."
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 374 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** Parity between Options > Video > Advanced filtering and antialiasing controls and console cvars, with clear documentation of runtime MSAA and sampler limits.
+
+**Still broken or not tested:** Dynamic runtime MSAA pipeline swapping and GPU sampler max anisotropy clamp.
+
+**Next:** Implement classic effects, D3D9Ex, and HDContent placeholder.
+
 ## 2026-10-22 Video Advanced detail options cvar parity & runtime status
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
