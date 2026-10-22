@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-22 session 30: NPC retargeting (ChooseEnemy), can cop reaction/walk-off (actbusy), speech-only scenes keep AI, citizen die voice gender, F4 citizen heads (`wip/squads-20261022`)
+
+- Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.
+- Changed: `ai::enemy_choice` (ChooseEnemy/ShouldChooseNewEnemy/BestEnemy) with the CAI_Enemies serial and the SDK elusion rule; metrocop PHYSOBJECT_ASSAULT raised in its gather; `ai::actbusy` (ai_goal_actbusy inputs, hint search/locks, START_BUSYING/BUSY/STOP_BUSYING) hosted by metrocops; ACT_BUSY_STAND in NPC_BASE_AI_ACTIVITIES; speech-only scenes no longer suspend NPC AI; NPC_Citizen.Die carries the actor model; F4 npc_citizen pool = 15 head templates chosen by the least-used rule at spawn; audio trace request lines record actor_model/entity.
+- Why: owner playtest notes 2026-10-22 (NPCs never change targets; can cop ignores a thrown can and blocks the way after "carry on"; nag escalation; citizen voices in the wrong gender; F4 citizens only female).
+- Tested how: hl2-simulation 353 unit tests, strict Clippy/fmt, packaged fixtures artifacts/s30 (retarget-zombie before/after, retarget-soldier, cancop-pass, cancop-throw(-dense), cancop-ignore, f4-citizens, squad-battle), native oracle dwell at the can scene (nags), owned suite (HL2_ROOT, --ignored) 56 pass; regression artifacts/s30-regression: weapons 17/17, attention 26/26, movement 25/26 (known doll01); finals vs s29-regression-b within known variance except Breen's monitor mouth (721 px, max 114; lip/flex timing like Kleiner's known 17 px); next batches diff against s30-regression.
+- Result: see STATUS "Current session 30".
+- Still broken or not tested: native A/B of the can throw (the owner remembers one hit; ours swings up to three times in the policing window, SDK-consistent), native npc_create head choice, male speaker voice in the battle run, actbusy beyond the can cop, unreachable/fear paths in BestEnemy, ragdolls (not started).
+- Next: owner playtest; can-throw native A/B; ragdoll steps (DESIGN 14n session 30 (11)) or the session 29 Open list per the owner.
+
 ## 2026-10-22 natural customs, security pen and Barney introduction research
 
 **Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. No subagents.
