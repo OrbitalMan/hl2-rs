@@ -2,7 +2,9 @@
 //! the classic zombie's schedules (chase, claw melee, wander after losing the enemy),
 //! its claw animation events and its sounds. Not modeled yet: headcrab release, torso
 //! split, physics-object swats, door bashing, burning, the moan envelope (idle moans
-//! play the plain Zombie.Idle script), slumped zombies and the fast/poison classes.
+//! play the plain Zombie.Idle script), slumped zombies, the fast zombie and the poison
+//! zombie's headcrab throws, breathing loops and idle cadence (its idles use the classic
+//! moan clock outside combat).
 use super::assault::Assault;
 use super::conditions::*;
 use super::metropolice::CopRequest;
@@ -16,6 +18,44 @@ use serde::Serialize;
 
 /// ZOMBIE_MELEE_REACH (GetClawAttackRange).
 pub const CLAW_REACH: f32 = 55.;
+/// The zombie classes under this AI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum Kind {
+    /// npc_zombie (CZombie).
+    Classic,
+    /// npc_poisonzombie (CNPC_PoisonZombie): melee only here.
+    Poison,
+}
+impl Kind {
+    pub fn for_class(class: &str) -> Option<Self> {
+        match class {
+            "npc_zombie" => Some(Self::Classic),
+            "npc_poisonzombie" => Some(Self::Poison),
+            _ => None,
+        }
+    }
+    /// GetClawAttackRange (CNPC_PoisonZombie: 70).
+    pub fn claw_reach(self) -> f32 {
+        match self {
+            Self::Classic => CLAW_REACH,
+            Self::Poison => 70.,
+        }
+    }
+    /// The class's own cue for a CZombie cue name (CNPC_PoisonZombie's overrides).
+    pub fn cue(self, classic: &'static str) -> &'static str {
+        match (self, classic) {
+            (Self::Classic, c) => c,
+            (Self::Poison, "Zombie.FootstepLeft") => "NPC_PoisonZombie.FootstepLeft",
+            (Self::Poison, "Zombie.FootstepRight") => "NPC_PoisonZombie.FootstepRight",
+            (Self::Poison, "Zombie.Attack") => "NPC_PoisonZombie.Attack",
+            (Self::Poison, "Zombie.Alert") => "NPC_PoisonZombie.Alert",
+            (Self::Poison, "Zombie.Idle") => "NPC_PoisonZombie.Idle",
+            (Self::Poison, "Zombie.Pain") => "NPC_PoisonZombie.Pain",
+            (Self::Poison, "Zombie.Die") => "NPC_PoisonZombie.Die",
+            (Self::Poison, c) => c,
+        }
+    }
+}
 /// m_flFieldOfView (CZombie::Spawn).
 pub const FIELD_OF_VIEW: f32 = 0.2;
 
@@ -34,6 +74,13 @@ pub const SOUNDS: &[&str] = &[
     "Zombie.Pain",
     "Zombie.Die",
     "NPC_BaseZombie.PoundDoor",
+    "NPC_PoisonZombie.FootstepLeft",
+    "NPC_PoisonZombie.FootstepRight",
+    "NPC_PoisonZombie.Attack",
+    "NPC_PoisonZombie.Alert",
+    "NPC_PoisonZombie.Idle",
+    "NPC_PoisonZombie.Pain",
+    "NPC_PoisonZombie.Die",
 ];
 /// CNPC_BaseZombie's schedules (SDK text, the non-episodic SCHED_ZOMBIE_CHASE_ENEMY;
 /// COND_ZOMBIE_CAN_SWAT_ATTACK, COND_ZOMBIE_RELEASECRAB and the obstruction condition
@@ -130,8 +177,9 @@ pub fn claw_punch(event: &str, yaw: f32, rolls: (f32, f32)) -> Option<(Vec3, Vec
         "AE_ZOMBIE_ATTACK_LEFT" => {
             Some((Vec3::new(-15., 20., -10.), right * -100. + forward * 200.))
         }
-        // QAngle(45, RandomInt(-5, 5), RandomInt(-5, 5)).
-        "AE_ZOMBIE_ATTACK_BOTH" => Some((
+        // QAngle(45, RandomInt(-5, 5), RandomInt(-5, 5)); the poison zombie's bite
+        // (AE_ZOMBIE_POISON_SPIT) swings the same way.
+        "AE_ZOMBIE_ATTACK_BOTH" | "AE_ZOMBIE_POISON_SPIT" => Some((
             Vec3::new(
                 45.,
                 (rolls.0 * 11.).floor() - 5.,
@@ -160,6 +208,7 @@ pub fn event_sound(event: &str) -> Option<&'static str> {
 /// An npc_zombie under the AI.
 #[derive(Clone, Debug, Serialize)]
 pub struct Zombie {
+    pub kind: Kind,
     #[serde(skip)]
     pub requests: Vec<CopRequest>,
     /// Hosted behaviors the shared code expects on every class (never set here yet).
@@ -171,8 +220,9 @@ pub struct Zombie {
     seed: u64,
 }
 impl Zombie {
-    pub fn new(gagged: bool, seed: u64) -> Self {
+    pub fn new(kind: Kind, gagged: bool, seed: u64) -> Self {
         Self {
+            kind,
             requests: Vec::new(),
             assault: None,
             script_goal: None,
@@ -189,17 +239,19 @@ impl Zombie {
     }
     /// CZombie::PrescheduleThink's moan clock: IdleSound (Zombie.Idle; CanPlayMoanSound
     /// is true for small groups unless gagged), then U(2, 5) s until the next.
-    pub fn moan(&mut self, now: f64) {
+    /// CNPC_PoisonZombie::IdleSound plays only outside combat.
+    pub fn moan(&mut self, now: f64, combat: bool) {
         let first = now + 1. + 3. * f64::from(self.random());
         let next = *self.next_moan.get_or_insert(first);
         if now <= next {
             return;
         }
-        if self.gagged {
+        if self.gagged || (combat && self.kind == Kind::Poison) {
             self.next_moan = Some(now + 1. + f64::from(self.random()));
             return;
         }
-        self.requests.push(CopRequest::Sound("Zombie.Idle"));
+        self.requests
+            .push(CopRequest::Sound(self.kind.cue("Zombie.Idle")));
         self.next_moan = Some(now + 2. + 3. * f64::from(self.random()));
     }
 }
@@ -253,7 +305,8 @@ impl Behavior for Zombie {
             "TASK_ZOMBIE_WAIT_POST_MELEE" => TaskStatus::Complete,
             // CAI_BaseNPC TASK_SOUND_WAKE -> CZombie::AlertSound.
             "TASK_SOUND_WAKE" => {
-                self.requests.push(CopRequest::Sound("Zombie.Alert"));
+                self.requests
+                    .push(CopRequest::Sound(self.kind.cue("Zombie.Alert")));
                 TaskStatus::Complete
             }
             // TASK_WANDER min * 10000 + max: a walk to a random point that far away.
@@ -303,7 +356,7 @@ mod tests {
         for (name, _) in ZOMBIE_SCHEDULES {
             assert!(schedules.0.contains_key(*name));
         }
-        let mut z = Zombie::new(false, 7);
+        let mut z = Zombie::new(Kind::Classic, false, 7);
         let npc = AiNpc::new(1);
         let ctx = Context::default();
         assert_eq!(
@@ -321,11 +374,11 @@ mod tests {
     }
     #[test]
     fn idle_moans_come_every_two_to_five_seconds_unless_gagged() {
-        let mut z = Zombie::new(false, 3);
+        let mut z = Zombie::new(Kind::Classic, false, 3);
         let mut moans = Vec::new();
         for t in 0..300 {
             let now = f64::from(t) * 0.1;
-            z.moan(now);
+            z.moan(now, false);
             if !z.requests.is_empty() {
                 moans.push(now);
                 z.requests.clear();
@@ -336,10 +389,25 @@ mod tests {
             let gap = pair[1] - pair[0];
             assert!((1.99..=5.11).contains(&gap), "{moans:?}");
         }
-        let mut gagged = Zombie::new(true, 3);
+        let mut gagged = Zombie::new(Kind::Classic, true, 3);
         for t in 0..300 {
-            gagged.moan(f64::from(t) * 0.1);
+            gagged.moan(f64::from(t) * 0.1, false);
         }
         assert!(gagged.requests.is_empty());
+        // The poison zombie idles with its own cue, never in combat.
+        let mut poison = Zombie::new(Kind::Poison, false, 3);
+        for t in 0..300 {
+            poison.moan(f64::from(t) * 0.1, true);
+        }
+        assert!(poison.requests.is_empty());
+        for t in 300..400 {
+            poison.moan(f64::from(t) * 0.1, false);
+        }
+        assert!(poison
+            .requests
+            .iter()
+            .all(|r| matches!(r, CopRequest::Sound("NPC_PoisonZombie.Idle"))));
+        assert!(!poison.requests.is_empty());
+        assert_eq!(Kind::Poison.claw_reach(), 70.);
     }
 }

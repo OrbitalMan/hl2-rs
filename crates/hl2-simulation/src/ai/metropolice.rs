@@ -145,6 +145,10 @@ pub enum CopRequest {
         forward: Vec3,
         punch: Vec3,
         impulse: Vec3,
+        /// The claw reach (GetClawAttackRange).
+        reach: f32,
+        /// The poison zombie's bite (sk_zombie_poison_dmg_spit).
+        bite: bool,
     },
     /// CNPC_Combine COMBINE_AE_ALTFIRE (elites): a combine ball toward this point.
     AltFire(Vec3),

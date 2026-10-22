@@ -483,6 +483,8 @@ pub struct AiRuntime {
     combine_guard_kick_damage: f32,
     /// sk_zombie_dmg_one_slash (every claw event; the ConVar default is 0).
     zombie_slash_damage: f32,
+    /// sk_zombie_poison_dmg_spit (the poison zombie's bite).
+    zombie_poison_spit_damage: f32,
     /// NPC weapon definitions (installed scripts and skill.cfg).
     #[serde(skip)]
     weapon_defs: BTreeMap<String, NpcWeaponDef>,
@@ -748,6 +750,7 @@ impl AiRuntime {
         let mut combine_kick_damage = 0.;
         let mut combine_guard_kick_damage = 0.;
         let mut zombie_slash_damage = 0.;
+        let mut zombie_poison_spit_damage = 0.;
         if let Some(vfs) = vfs {
             if let Ok(Some(skill)) = vfs.read("cfg/skill.cfg") {
                 if let Ok(tokens) = keyvalues::tokens(&String::from_utf8_lossy(&skill)) {
@@ -779,6 +782,13 @@ impl AiRuntime {
                         .and_then(|p| p[1].parse::<f32>().ok())
                     {
                         zombie_slash_damage = value;
+                    }
+                    if let Some(value) = tokens
+                        .windows(2)
+                        .find(|p| p[0].eq_ignore_ascii_case("sk_zombie_poison_dmg_spit"))
+                        .and_then(|p| p[1].parse::<f32>().ok())
+                    {
+                        zombie_poison_spit_damage = value;
                     }
                 }
             }
@@ -872,6 +882,7 @@ impl AiRuntime {
             combine_kick_damage,
             combine_guard_kick_damage,
             zombie_slash_damage,
+            zombie_poison_spit_damage,
             weapon_defs,
             shots: Vec::new(),
             muzzle_flashes: Vec::new(),
@@ -1488,8 +1499,8 @@ impl AiRuntime {
         defs: &BTreeMap<String, NpcWeaponDef>,
     ) -> Option<AiActor> {
         let kind = humanoid::Kind::for_class(e.class());
-        let zombie = e.class() == "npc_zombie";
-        if e.class() != "npc_metropolice" && kind.is_none() && !zombie {
+        let zombie = zombie::Kind::for_class(e.class());
+        if e.class() != "npc_metropolice" && kind.is_none() && zombie.is_none() {
             return None;
         }
         let flags: u32 = e
@@ -1503,7 +1514,8 @@ impl AiRuntime {
         let mut npc = AiNpc::new(id);
         npc.shot_regulator = Self::regulator(e.class(), weapon.as_ref(), defs, id);
         let class = match kind {
-            _ if zombie => AiClass::Zombie(Box::new(Zombie::new(
+            _ if zombie.is_some() => AiClass::Zombie(Box::new(Zombie::new(
+                zombie.unwrap_or(zombie::Kind::Classic),
                 flags & SF_NPC_GAG != 0,
                 0x3c6e_f372_fe94_f82b ^ id as u64,
             ))),
@@ -1815,9 +1827,12 @@ impl AiRuntime {
                                     forward: Vec3::new(yaw.cos(), yaw.sin(), 0.),
                                     punch,
                                     impulse,
+                                    reach: z.kind.claw_reach(),
+                                    bite: name.eq_ignore_ascii_case("AE_ZOMBIE_POISON_SPIT"),
                                 });
                             } else if let Some(sound) = zombie::event_sound(&name) {
-                                z.requests.push(CopRequest::Sound(sound));
+                                let cue = z.kind.cue(sound);
+                                z.requests.push(CopRequest::Sound(cue));
                             }
                         } else if let AiClass::Humanoid(h) = class {
                             // CNPC_Combine::HandleAnimEvent COMBINE_AE_KICK (3); the other
@@ -2607,7 +2622,10 @@ impl AiRuntime {
             .humanoid()
             .is_some_and(|h| h.kind == humanoid::Kind::Combine);
         // bits_CAP_INNATE_MELEE_ATTACK1: zombie claws.
-        let claws = matches!(actor.class, AiClass::Zombie(_));
+        let claws = match &actor.class {
+            AiClass::Zombie(z) => Some(z.kind.claw_reach()),
+            _ => None,
+        };
         if let Some(enemy) = actor.npc.enemy {
             if previous_enemy != Some(enemy) {
                 actor.npc.conditions.set(COND_NEW_ENEMY);
@@ -2743,12 +2761,12 @@ impl AiRuntime {
                 // CNPC_BaseZombie::MeleeAttack1Conditions: within the claw reach (origin
                 // to origin), facing within 0.7, and the cube hull swept along the facing
                 // meets the enemy (an NPC or breakable in the way is not modeled).
-                if claws {
+                if let Some(reach) = claws {
                     let to = t_feet - origin;
                     let forward = facing.truncate().normalize_or_zero().extend(0.);
                     let dot = to.truncate().normalize_or_zero().dot(forward.truncate());
                     let start = origin + Vec3::Z * 36.;
-                    let end = start + forward * zombie::CLAW_REACH;
+                    let end = start + forward * reach;
                     let half = if enemy == PLAYER { 16. } else { 13. };
                     let cube = Vec3::splat(13.);
                     let reaches = super::metropolice::segment_hits_box(
@@ -2757,10 +2775,11 @@ impl AiRuntime {
                         t_feet + Vec3::new(-half, -half, 0.) - cube,
                         t_feet + Vec3::new(half, half, 72.) + cube,
                     );
+                    let distance = to.length() * zombie::CLAW_REACH / reach;
                     actor
                         .npc
                         .conditions
-                        .set(zombie::melee_condition(to.length(), dot, reaches));
+                        .set(zombie::melee_condition(distance, dot, reaches));
                 }
             } else {
                 actor.npc.conditions.set(COND_ENEMY_OCCLUDED);
@@ -3129,7 +3148,7 @@ impl AiRuntime {
         actor.next_think = now + THINK_INTERVAL;
         // CZombie::PrescheduleThink's idle moans.
         if let AiClass::Zombie(z) = &mut actor.class {
-            z.moan(now);
+            z.moan(now, actor.npc.state == NpcState::Combat);
         }
         // MaxYawSpeed and NPC_TranslateActivity's ACT_IDLE_ANGRY by class.
         let weapon_drawn = actor.weapon.is_some();
@@ -3546,19 +3565,20 @@ impl AiRuntime {
             return;
         };
         let state = &scene.states[id];
-        // CZombie::PainSound / DeathSound.
-        if matches!(&actor.class, AiClass::Zombie(_)) {
+        // CZombie / CNPC_PoisonZombie PainSound and DeathSound.
+        if let AiClass::Zombie(z) = &actor.class {
+            let kind = z.kind;
             let cue = if state.killed {
                 if std::mem::replace(&mut actor.death_spoken, true) {
                     return;
                 }
-                "Zombie.Die"
+                kind.cue("Zombie.Die")
             } else {
                 if now < actor.next_pain_sound || state.value <= 0. {
                     return;
                 }
                 actor.next_pain_sound = now + 1.;
-                "Zombie.Pain"
+                kind.cue("Zombie.Pain")
             };
             let origin = state.origin;
             scene.sounds.push(crate::sounds::SoundRequest {
@@ -3750,6 +3770,8 @@ impl AiRuntime {
                     forward,
                     punch,
                     impulse,
+                    reach,
+                    bite,
                 } => {
                     let enemy = self.actors[&id].npc.enemy;
                     let enemy_center = enemy.map(|e| {
@@ -3766,9 +3788,13 @@ impl AiRuntime {
                     if enemy_center.is_some_and(|c| !sight.visible(start, c, &ignore)) {
                         continue;
                     }
-                    let end = start + forward * zombie::CLAW_REACH;
+                    let end = start + forward * reach;
                     let (mins, maxs) = (-Vec3::splat(13.), Vec3::splat(13.));
-                    let damage = self.zombie_slash_damage;
+                    let damage = if bite {
+                        self.zombie_poison_spit_damage
+                    } else {
+                        self.zombie_slash_damage
+                    };
                     let player_hit = enemy == Some(PLAYER)
                         && super::metropolice::segment_hits_box(
                             start,
