@@ -934,6 +934,19 @@ impl Console {
         self.options.set_display_modes(modes);
     }
 
+    /// Sets system hardware recommendation profile for video settings.
+    pub fn set_system_recommendation(
+        &mut self,
+        recommendation: crate::gameui::recommendation::SystemRecommendation,
+    ) {
+        self.options.set_system_recommendation(recommendation);
+    }
+
+    /// The detected or configured system hardware recommendation.
+    pub fn system_recommendation(&self) -> &crate::gameui::recommendation::SystemRecommendation {
+        self.options.system_recommendation()
+    }
+
     pub fn resources(&self) -> &GameUiResources {
         &self.gameui
     }

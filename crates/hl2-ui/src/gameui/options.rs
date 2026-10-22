@@ -309,6 +309,7 @@ enum CreditItem {
 pub struct OptionsDialog {
     res: Arc<GameUiResources>,
     modes: DisplayModes,
+    pub recommendation: crate::gameui::recommendation::SystemRecommendation,
     tab: Tab,
     applied: Config,
     pub(crate) draft: Draft,
@@ -373,6 +374,7 @@ impl Default for OptionsDialog {
         Self {
             res: Arc::default(),
             modes: DisplayModes::default(),
+            recommendation: crate::gameui::recommendation::SystemRecommendation::detect(),
             tab: Tab::Gameplay,
             draft: Draft::new(config.clone()),
             applied: config,
@@ -699,6 +701,46 @@ impl OptionsDialog {
     /// Resolutions offered on the Video page (from the host's monitor query).
     pub fn set_display_modes(&mut self, modes: DisplayModes) {
         self.modes = modes;
+    }
+
+    /// Sets system hardware recommendation profile for video settings.
+    pub fn set_system_recommendation(
+        &mut self,
+        recommendation: crate::gameui::recommendation::SystemRecommendation,
+    ) {
+        self.recommendation = recommendation;
+    }
+
+    /// The detected or configured system hardware recommendation.
+    pub fn system_recommendation(&self) -> &crate::gameui::recommendation::SystemRecommendation {
+        &self.recommendation
+    }
+
+    /// Resets draft video advanced settings and HDR to system recommendations.
+    pub fn apply_recommended_video(&mut self) {
+        self.draft.config.video.advanced = self.recommendation.video.clone();
+        self.draft.config.video.hdr = self.recommendation.hdr;
+    }
+
+    /// Constructs an evaluation environment from individual resource references without borrowing
+    /// the full OptionsDialog, allowing disjoint mutable access to the draft.
+    pub fn make_env<'a>(
+        res: &'a GameUiResources,
+        modes: &'a DisplayModes,
+        rec: &'a crate::gameui::recommendation::SystemRecommendation,
+    ) -> Env<'a> {
+        Env {
+            localization: &res.localization,
+            languages: &res.spoken_languages,
+            modes,
+            recommendation: Some(rec),
+        }
+    }
+
+    /// Constructs the current evaluation environment with localization, languages, display modes,
+    /// and active hardware recommendations.
+    pub fn env(&self) -> Env<'_> {
+        Self::make_env(&self.res, &self.modes, &self.recommendation)
     }
 
     /// Restores a placement saved in the settings.
@@ -1069,12 +1111,7 @@ impl OptionsDialog {
 
     /// The Resolution combo's choices as shown (for the report).
     fn resolution_labels(&self) -> Vec<String> {
-        let env = settings::Env {
-            localization: &self.res.localization,
-            languages: &self.res.spoken_languages,
-            modes: &self.modes,
-        };
-        settings::Choice::Resolution.items(&env, &self.draft)
+        settings::Choice::Resolution.items(&self.env(), &self.draft)
     }
 
     /// The Keyboard page's key list as a focus target.
@@ -1201,11 +1238,7 @@ impl OptionsDialog {
         match pick {
             Some(Some(index)) => {
                 self.sounds.push("ui/buttonclickrelease.wav".to_string());
-                let env = Env {
-                    localization: &self.res.localization,
-                    languages: &self.res.spoken_languages,
-                    modes: &self.modes,
-                };
+                let env = Self::make_env(&self.res, &self.modes, &self.recommendation);
                 combo.choice.select(&env, &mut self.draft, index);
             }
             Some(None) => {}
@@ -1453,11 +1486,7 @@ impl OptionsDialog {
     }
 
     fn open_combo(&mut self, choice: Choice, rect: Rect) {
-        let env = Env {
-            localization: &self.res.localization,
-            languages: &self.res.spoken_languages,
-            modes: &self.modes,
-        };
+        let env = self.env();
         let items = choice.items(&env, &self.draft);
         let selected = choice.selected(&env, &self.draft);
         let popup = widgets::PopupList::below(rect, items.len(), selected);
@@ -1618,11 +1647,7 @@ impl OptionsDialog {
                     self.open_combo(choice, widget?.rect);
                     return Some(OptionsOutcome::None);
                 }
-                let env = Env {
-                    localization: &self.res.localization,
-                    languages: &self.res.spoken_languages,
-                    modes: &self.modes,
-                };
+                let env = Self::make_env(&self.res, &self.modes, &self.recommendation);
                 let count = choice.items(&env, &self.draft).len();
                 let selected = choice.selected(&env, &self.draft);
                 let last = count.checked_sub(1)?;
@@ -2143,11 +2168,7 @@ impl OptionsDialog {
             .clone()
             .unwrap_or_else(|| base.theme.focus_faded(1.0, true));
         let loc = &self.res.localization;
-        let env = Env {
-            localization: loc,
-            languages: &self.res.spoken_languages,
-            modes: &self.modes,
-        };
+        let env = self.env();
         let modal = self.sub.is_some() || self.confirm.is_some();
         let state = |target: Target| {
             (
@@ -2800,6 +2821,8 @@ pub(crate) mod tests {
             "ypos" "252" "wide" "140" "tall" "50" "minvalue" "75" "maxvalue" "110" }
         "FOVValueLabel" { "ControlName" "Label" "fieldName" "FOVValueLabel" "xpos" "276"
             "ypos" "232" "wide" "32" "tall" "24" "labelText" "75" "textAlignment" "east" }
+        "Label11" { "ControlName" "Label" "fieldName" "Label11" "xpos" "18" "ypos" "310"
+            "wide" "280" "tall" "24" "labelText" "#GameUI_RecommendedSettings" }
         "Button1" { "ControlName" "Button" "fieldName" "Button1" "xpos" "290" "ypos" "316"
             "wide" "80" "tall" "24" "labelText" "#GameUI_OK" "Command" "OK" }
         "Button2" { "ControlName" "Button" "fieldName" "Button2" "xpos" "382" "ypos" "316"
@@ -5556,6 +5579,7 @@ pub(crate) mod tests {
             localization: &res.localization,
             languages: &[],
             modes: &DisplayModes::default(),
+            recommendation: None,
         };
 
         let items = Choice::Hdr.items(&env, &draft);
@@ -5662,5 +5686,217 @@ pub(crate) mod tests {
         let skill3_rect = find_widget("Skill3Radio").rect;
         h.click(DIALOG + skill3_rect.center());
         assert_eq!(h.dialog.draft().gameplay.skill, 3);
+    }
+
+    #[test]
+    fn video_advanced_recommended_settings_displayed_with_asterisks_in_dialog_and_combos() {
+        use crate::gameui::recommendation::{
+            CpuSpecs, GpuDeviceType, GpuSpecs, HardwareTier, SystemRecommendation,
+        };
+        use crate::gameui::settings::AdvancedChoice;
+
+        let mut h = Harness::new();
+        let cpu = CpuSpecs::new(8);
+        let gpu = GpuSpecs::new("Apple M1 Pro", GpuDeviceType::Integrated);
+        let rec = SystemRecommendation::from_specs(cpu, gpu);
+        assert_eq!(rec.tier, HardwareTier::High);
+
+        h.dialog.set_system_recommendation(rec.clone());
+        h.tab(Tab::Video);
+
+        // Open Video Advanced sub-dialog
+        h.click(page(300., 200.));
+        assert_eq!(h.dialog.sub, Some(Sub::VideoAdvanced));
+
+        let res = h.dialog.res.clone();
+        let area = Rect::new(0., 0., 482., 358.);
+        let widgets = layout_widgets(
+            &res,
+            Panel::VideoAdvanced,
+            area,
+            &h.dialog.draft,
+            &Config::default(),
+        );
+
+        // Label11 displaying #GameUI_RecommendedSettings ("* Setting recommended for your system") is present
+        let label11 = widgets
+            .iter()
+            .find(|w| w.control.name == "Label11")
+            .unwrap();
+        assert_eq!(label11.control.label, "#GameUI_RecommendedSettings");
+
+        let modes = h.dialog.modes.clone();
+        let env = OptionsDialog::make_env(&res, &modes, &rec);
+
+        // ModelDetail: recommended is High (index 2) -> "gameui_high *"
+        let model_items =
+            Choice::Advanced(AdvancedChoice::ModelDetail).items(&env, &h.dialog.draft);
+        assert_eq!(model_items.len(), 3);
+        assert_eq!(model_items[0], "gameui_low");
+        assert_eq!(model_items[1], "gameui_medium");
+        assert_eq!(model_items[2], "gameui_high *");
+
+        // Multicore: recommended is Enabled (index 1) -> "gameui_enabled *"
+        let multicore_items =
+            Choice::Advanced(AdvancedChoice::Multicore).items(&env, &h.dialog.draft);
+        assert_eq!(multicore_items[0], "gameui_disabled");
+        assert_eq!(multicore_items[1], "gameui_enabled *");
+
+        // Filtering: recommended is Anisotropic 8X (index 4) -> "GameUI_Anisotropic8X *"
+        let filtering_items =
+            Choice::Advanced(AdvancedChoice::Filtering).items(&env, &h.dialog.draft);
+        assert_eq!(filtering_items[4], "GameUI_Anisotropic8X *");
+        assert_eq!(filtering_items[0], "GameUI_Bilinear");
+
+        // Antialiasing: recommended is 4X (index 2) -> "GameUI_4X *"
+        let aa_items = Choice::Advanced(AdvancedChoice::Antialiasing).items(&env, &h.dialog.draft);
+        assert_eq!(aa_items[2], "GameUI_4X *");
+        assert_eq!(aa_items[0], "GameUI_None");
+
+        // HDR: recommended is Full (index 2) -> "GameUI_hdr_level2 *"
+        let hdr_items = Choice::Hdr.items(&env, &h.dialog.draft);
+        assert_eq!(hdr_items[2], "GameUI_hdr_level2 *");
+        assert_eq!(hdr_items[0], "GameUI_hdr_level0");
+
+        // When recommended option is selected, Choice::text returns the label with asterisk
+        h.dialog.apply_recommended_video();
+        assert_eq!(
+            Choice::Advanced(AdvancedChoice::ModelDetail).text(&env, &h.dialog.draft),
+            "gameui_high *"
+        );
+        assert_eq!(
+            Choice::Advanced(AdvancedChoice::Multicore).text(&env, &h.dialog.draft),
+            "gameui_enabled *"
+        );
+        assert_eq!(
+            Choice::Hdr.text(&env, &h.dialog.draft),
+            "GameUI_hdr_level2 *"
+        );
+
+        // When user switches away to a non-recommended setting, Choice::text does NOT have asterisk
+        Choice::Advanced(AdvancedChoice::ModelDetail).select(&env, &mut h.dialog.draft, 0);
+        assert_eq!(
+            Choice::Advanced(AdvancedChoice::ModelDetail).text(&env, &h.dialog.draft),
+            "gameui_low"
+        );
+    }
+
+    #[test]
+    fn video_advanced_system_recommendation_scales_with_hardware_tiers() {
+        use crate::gameui::recommendation::{
+            CpuSpecs, GpuDeviceType, GpuSpecs, HardwareTier, SystemRecommendation,
+        };
+        use crate::gameui::settings::AdvancedChoice;
+
+        let mut h = Harness::new();
+
+        // 1. Low Tier Hardware (1 CPU core, software renderer)
+        let low_rec = SystemRecommendation::from_specs(
+            CpuSpecs::new(1),
+            GpuSpecs::new("llvmpipe", GpuDeviceType::Cpu),
+        );
+        assert_eq!(low_rec.tier, HardwareTier::Low);
+        h.dialog.set_system_recommendation(low_rec);
+        let low_env = h.dialog.env();
+
+        // On Low tier, Low settings get the asterisk
+        let model_items =
+            Choice::Advanced(AdvancedChoice::ModelDetail).items(&low_env, &h.dialog.draft);
+        assert_eq!(model_items[0], "gameui_low *");
+        assert_eq!(model_items[2], "gameui_high");
+
+        let multicore_items =
+            Choice::Advanced(AdvancedChoice::Multicore).items(&low_env, &h.dialog.draft);
+        assert_eq!(multicore_items[0], "gameui_disabled *");
+        assert_eq!(multicore_items[1], "gameui_enabled");
+
+        let aa_items =
+            Choice::Advanced(AdvancedChoice::Antialiasing).items(&low_env, &h.dialog.draft);
+        assert_eq!(aa_items[0], "GameUI_None *");
+
+        let hdr_items = Choice::Hdr.items(&low_env, &h.dialog.draft);
+        assert_eq!(hdr_items[0], "GameUI_hdr_level0 *");
+
+        // 2. Ultra Tier Hardware (16 CPU cores, RTX 4090)
+        let ultra_rec = SystemRecommendation::from_specs(
+            CpuSpecs::new(16),
+            GpuSpecs::new("GeForce RTX 4090", GpuDeviceType::Discrete),
+        );
+        assert_eq!(ultra_rec.tier, HardwareTier::Ultra);
+        h.dialog.set_system_recommendation(ultra_rec);
+        let ultra_env = h.dialog.env();
+
+        let model_ultra =
+            Choice::Advanced(AdvancedChoice::ModelDetail).items(&ultra_env, &h.dialog.draft);
+        assert_eq!(model_ultra[2], "gameui_high *");
+
+        let tex_ultra =
+            Choice::Advanced(AdvancedChoice::TextureDetail).items(&ultra_env, &h.dialog.draft);
+        assert_eq!(tex_ultra[3], "gameui_ultra *");
+
+        let filtering_ultra =
+            Choice::Advanced(AdvancedChoice::Filtering).items(&ultra_env, &h.dialog.draft);
+        assert_eq!(filtering_ultra[5], "GameUI_Anisotropic16X *");
+
+        let aa_ultra =
+            Choice::Advanced(AdvancedChoice::Antialiasing).items(&ultra_env, &h.dialog.draft);
+        assert_eq!(aa_ultra[3], "GameUI_8X *");
+
+        let hdr_ultra = Choice::Hdr.items(&ultra_env, &h.dialog.draft);
+        assert_eq!(hdr_ultra[2], "GameUI_hdr_level2 *");
+
+        let multicore_ultra =
+            Choice::Advanced(AdvancedChoice::Multicore).items(&ultra_env, &h.dialog.draft);
+        assert_eq!(multicore_ultra[1], "gameui_enabled *");
+    }
+
+    #[test]
+    fn video_advanced_performance_benchmark_tracking_and_accordance() {
+        use crate::gameui::recommendation::{
+            CpuSpecs, GpuDeviceType, GpuSpecs, HardwareTier, SystemRecommendation,
+            VideoBenchmarkSuite,
+        };
+
+        // Low tier hardware: Low profile maintains 60 FPS target, Ultra profile degrades
+        let low_rec = SystemRecommendation::from_specs(
+            CpuSpecs::new(1),
+            GpuSpecs::new("llvmpipe", GpuDeviceType::Cpu),
+        );
+        let low_report = VideoBenchmarkSuite::run_preset_benchmarks(&low_rec);
+        assert_eq!(low_report.tier, HardwareTier::Low);
+        assert!(
+            low_report.recommended_profile.target_fps_achieved,
+            "Low-tier recommended profile must achieve target 60 FPS: got {:.1}",
+            low_report.recommended_profile.estimated_fps
+        );
+        assert!(low_report.recommended_profile.in_accordance);
+        assert!(
+            low_report.ultra_profile.estimated_fps < 40.0,
+            "Ultra profile on Low hardware should drop significantly below budget: got {:.1}",
+            low_report.ultra_profile.estimated_fps
+        );
+
+        // Ultra tier hardware: Recommended profile achieves high FPS with ultra fidelity
+        let ultra_rec = SystemRecommendation::from_specs(
+            CpuSpecs::new(16),
+            GpuSpecs::new("GeForce RTX 4090", GpuDeviceType::Discrete),
+        );
+        let ultra_report = VideoBenchmarkSuite::run_preset_benchmarks(&ultra_rec);
+        assert_eq!(ultra_report.tier, HardwareTier::Ultra);
+        assert!(ultra_report.recommended_profile.target_fps_achieved);
+        assert!(ultra_report.recommended_profile.in_accordance);
+        assert!(
+            ultra_report.recommended_profile.estimated_fps >= 100.0,
+            "Ultra profile on Ultra hardware should exceed 100 FPS: got {:.1}",
+            ultra_report.recommended_profile.estimated_fps
+        );
+
+        // Track isolated video setting impact metrics
+        let impacts = &ultra_report.settings_impact;
+        assert!(impacts["msaa_8x_vs_none_ms"] > 0.0);
+        assert!(impacts["aniso_16x_vs_bilinear_ms"] > 0.0);
+        assert!(impacts["shadow_high_vs_low_ms"] > 0.0);
+        assert!(impacts["water_all_vs_simple_ms"] > 0.0);
+        assert!(impacts["multicore_cpu_gain_ms"] > 0.0);
     }
 }

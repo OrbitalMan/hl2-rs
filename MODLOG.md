@@ -1,5 +1,50 @@
 # MODLOG
 
+## 2026-10-22 System recommended settings detection and video performance benchmark suite
+
+**Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).
+
+**Changed:**
+- `crates/hl2-ui/src/gameui/recommendation.rs`:
+  - Created `recommendation` module with hardware profiling (`HardwareTier`, `CpuSpecs`, `GpuSpecs`, `GpuDeviceType`).
+  - Implemented `SystemRecommendation` with host hardware auto-detection (`detect()`), deterministic profile mapping (`from_specs`), and recommendation lookup for `AdvancedChoice` options and `Choice::Hdr`.
+  - Implemented `VideoBenchmarkSuite` evaluating simulated CPU and GPU render/simulation frame times, estimated FPS, and throughput across Low, Recommended, and Ultra profiles.
+  - Implemented isolated video setting cost tracking (`msaa_8x_vs_none_ms`, `aniso_16x_vs_bilinear_ms`, `shadow_high_vs_low_ms`, `water_all_vs_simple_ms`, `multicore_cpu_gain_ms`, `hdr_full_vs_none_ms`, `shader_high_vs_low_ms`).
+  - Added unit tests: `system_recommendation_tier_inference_across_hardware_specs`, `recommended_combo_indices_match_expected_settings`, `performance_benchmark_suite_evaluates_profiles_and_tracks_accordance`.
+- `crates/hl2-ui/src/gameui/mod.rs`:
+  - Registered and exported `recommendation` module.
+- `crates/hl2-ui/src/gameui/settings.rs`:
+  - Updated `Env` struct with `recommendation: Option<&'a SystemRecommendation>`.
+  - Updated `Choice::items` for `AdvancedChoice` and `Choice::Hdr` to append authentic asterisk (` *`) to the recommended choice when active.
+- `crates/hl2-ui/src/gameui/options.rs`:
+  - Added `recommendation` field to `OptionsDialog`, initialized via `SystemRecommendation::detect()`.
+  - Added `set_system_recommendation`, `system_recommendation`, `apply_recommended_video`, and disjoint environment builder `make_env`.
+  - Added `Label11` (`#GameUI_RecommendedSettings`) to `VIDEO_ADVANCED` test layout.
+  - Added UI tests:
+    - `video_advanced_recommended_settings_displayed_with_asterisks_in_dialog_and_combos`
+    - `video_advanced_system_recommendation_scales_with_hardware_tiers`
+    - `video_advanced_performance_benchmark_tracking_and_accordance`
+- `crates/hl2-ui/src/console.rs`:
+  - Added `set_system_recommendation` and `system_recommendation` to `Console`.
+- `STATUS.md`:
+  - Documented system recommended settings detection, retail Source research findings, and video benchmark suite.
+
+**Why:** User request:
+"- Implement the system recommended settings detection for Options > Video > Advanced dialog. Research the original game implementation for inspiration. Also make ui test for performance benchmarks to test and track video settings impact on performance and its accordance with system recommendations."
+
+**Tested how:**
+- `bash HL2RS/scripts/checks/validate.sh`: 384 `hl2-ui` tests, 97 `hl2-bevy` tests passed; strict Clippy (`--workspace --all-targets --locked -D warnings`) exit 0 with 0 warnings; `cargo fmt --check` exit 0.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui -- --ignored`: 10 owned install tests passed.
+- `cargo test --manifest-path HL2RS/Cargo.toml -p hl2-ui audit_no_hardcoded_user_visible_strings_in_ui_code_outside_fallback_constants`: passed exit 0.
+- `bash HL2RS/scripts/checks/check_windows.sh`: strict Clippy for `x86_64-pc-windows-msvc` exit 0 with 0 warnings.
+- Repository self-containment check exit 0.
+
+**Result:** System recommended settings are dynamically detected and indicated with authentic ` *` asterisks matching retail Source behavior (`Label11`), and the performance benchmark suite tracks isolated video setting impacts and validates accordance with target performance budgets.
+
+**Still broken or not tested:** None.
+
+**Next:** Await user instruction.
+
 ## 2026-10-22 Clean mock string insertions from options unit tests and assert authentic token key fallback
 
 **Agent/model:** Antigravity; model family only known (exact model identifier not exposed in environment).

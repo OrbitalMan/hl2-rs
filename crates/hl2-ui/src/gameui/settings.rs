@@ -41,9 +41,31 @@ pub struct Env<'a> {
     pub localization: &'a Localization,
     pub languages: &'a [String],
     pub modes: &'a DisplayModes,
+    pub recommendation: Option<&'a crate::gameui::recommendation::SystemRecommendation>,
 }
 
-impl Env<'_> {
+impl<'a> Env<'a> {
+    pub fn new(
+        localization: &'a Localization,
+        languages: &'a [String],
+        modes: &'a DisplayModes,
+    ) -> Self {
+        Self {
+            localization,
+            languages,
+            modes,
+            recommendation: None,
+        }
+    }
+
+    pub fn with_recommendation(
+        mut self,
+        recommendation: Option<&'a crate::gameui::recommendation::SystemRecommendation>,
+    ) -> Self {
+        self.recommendation = recommendation;
+        self
+    }
+
     /// Resolutions offered for the draft's display mode (windowed ones must fit the desktop).
     pub fn resolutions(&self, draft: &Draft) -> Vec<Resolution> {
         offered_resolutions(self.modes, draft)
@@ -338,7 +360,24 @@ impl Choice {
             tokens.map(|t| loc.text(t)).collect()
         };
         match self {
-            Self::Advanced(advanced) => tokens(&mut advanced.tokens().into_iter()),
+            Self::Advanced(advanced) => {
+                let rec_idx = env
+                    .recommendation
+                    .map(|r| r.recommended_advanced_index(advanced));
+                advanced
+                    .tokens()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let text = loc.text(t);
+                        if rec_idx == Some(i) {
+                            format!("{text} *")
+                        } else {
+                            text
+                        }
+                    })
+                    .collect()
+            }
             Self::GamepadAimAssist => tokens(&mut AimAssist::ALL.iter().map(|v| v.token())),
             Self::WeaponSelection => {
                 tokens(&mut listed_tokens::<WeaponSelectionStyle>().into_iter())
@@ -350,7 +389,21 @@ impl Choice {
             Self::Aspect => tokens(&mut AspectRatio::ALL.iter().map(|v| v.token())),
             Self::DisplayMode => tokens(&mut DisplayMode::choices().iter().map(|v| v.token())),
             Self::HudAspect => tokens(&mut HudAspect::ALL.iter().map(|v| v.token())),
-            Self::Hdr => tokens(&mut HdrMode::ALL.iter().map(|v| v.token())),
+            Self::Hdr => {
+                let rec_idx = env.recommendation.map(|r| r.recommended_hdr_index());
+                HdrMode::ALL
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| {
+                        let text = loc.text(v.token());
+                        if rec_idx == Some(i) {
+                            format!("{text} *")
+                        } else {
+                            text
+                        }
+                    })
+                    .collect()
+            }
             Self::Language => env
                 .languages
                 .iter()
@@ -775,6 +828,7 @@ mod tests {
             localization: loc,
             languages,
             modes,
+            recommendation: None,
         }
     }
 
@@ -1081,6 +1135,7 @@ mod tests {
             localization: &loc,
             languages: &langs,
             modes: &pillarbox_modes,
+            recommendation: None,
         };
         assert_eq!(
             Choice::Resolution.items(&env_pillarbox, &draft),
@@ -1101,6 +1156,7 @@ mod tests {
             localization: &loc,
             languages: &langs,
             modes: &letterbox_modes,
+            recommendation: None,
         };
         assert_eq!(
             Choice::Resolution.items(&env_letterbox, &draft),

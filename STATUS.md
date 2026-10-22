@@ -4,6 +4,31 @@
  
 ## Current session: target cleaner & UI focus/animation pass (2026-10-21, branch `orbitalman/hl2-ui`)
 
+- **System recommended settings detection & performance benchmark suite (`crates/hl2-ui`):**
+  - Researched retail Source Engine hardware detection and recommendation logic (`dxsupport.cfg`, `COptionsSubVideoAdvancedDlg`):
+    - Retail Source queries host CPU core count, GPU device type/vendor, and DirectX/shader capability levels.
+    - `OptionsSubVideoAdvancedDlg.res` features `Label11` ("#GameUI_RecommendedSettings" = "* Setting recommended for your system").
+    - Each combo box item matching the recommended setting is appended with an asterisk (` *`), e.g. `High *`, `Reflect all *`, `Enabled *`.
+  - Implemented `crate::gameui::recommendation`:
+    - `HardwareTier`: Low, Medium, High, Ultra.
+    - `CpuSpecs`: logical core detection via `std::thread::available_parallelism()`, `is_multicore()`.
+    - `GpuSpecs`: device type (`Discrete`, `Integrated`, `Virtual`, `Cpu`, `Other`, `Unknown`), name, vendor ID.
+    - `SystemRecommendation`: automatic host detection via `detect()`, deterministic mapping from hardware profiles (`from_specs`), recommended index resolution for all `AdvancedChoice` variants and `Choice::Hdr`.
+    - `VideoBenchmarkSuite`: evaluates simulated CPU and GPU render/simulation frame times across setting profiles (Low, Recommended, Ultra), computes estimated FPS and throughput, measures isolated setting cost deltas (MSAA, anisotropic filtering, shadows, water reflections, multicore speedup, HDR), and verifies performance budget accordance (>= 60 FPS target).
+  - Integrated into GameUI settings and options dialog:
+    - Updated `Env` with optional `recommendation: Option<&'a SystemRecommendation>`.
+    - Updated `Choice::items` for `AdvancedChoice` and `Choice::Hdr` to append ` *` to recommended choices when recommendations are active.
+    - Added `OptionsDialog::set_system_recommendation`, `system_recommendation`, `apply_recommended_video`, and disjoint environment builder `make_env`.
+    - Added `Console::set_system_recommendation` and `system_recommendation`.
+    - Added `Label11` (`#GameUI_RecommendedSettings`) to `VIDEO_ADVANCED` dialog layout.
+  - Added comprehensive test coverage:
+    - `system_recommendation_tier_inference_across_hardware_specs`
+    - `recommended_combo_indices_match_expected_settings`
+    - `performance_benchmark_suite_evaluates_profiles_and_tracks_accordance`
+    - `video_advanced_recommended_settings_displayed_with_asterisks_in_dialog_and_combos`
+    - `video_advanced_system_recommendation_scales_with_hardware_tiers`
+    - `video_advanced_performance_benchmark_tracking_and_accordance`
+
 - **Clean mock string insertions from options unit tests (`crates/hl2-ui`):**
   - Removed mock string insertions (`res.localization.insert("GameUI_hdr_level0", "None")`, etc.) in `crates/hl2-ui/src/gameui/options.rs` test `video_options_hdr_control_layout_and_selection`.
   - Asserted authentic unlocalized token key fallback behavior (`["GameUI_hdr_level0", "GameUI_hdr_level1", "GameUI_hdr_level2"]`) when running unit tests without mounted game resources, matching engine design and `settings.rs` tests.

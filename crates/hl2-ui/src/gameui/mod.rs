@@ -12,6 +12,7 @@ pub mod localize;
 pub mod menu;
 pub mod options;
 pub mod placement;
+pub mod recommendation;
 pub mod resources;
 pub mod scheme_fonts;
 pub mod settings;
