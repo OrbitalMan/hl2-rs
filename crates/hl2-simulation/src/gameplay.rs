@@ -1551,6 +1551,40 @@ impl Inventory {
                                 None => continue,
                             }
                         }
+                        // CNPC_BaseZombie::OnTakeDamage_Alive: burning zombies take only
+                        // their own flame's damage; enough burn damage ignites them for
+                        // 100 s with health capped to about ten seconds of burning
+                        // (FLAME_DIRECT_DAMAGE_PER_SEC x (ZOMBIE_BURN_TIME +- noise)).
+                        if npc && crate::ai::zombie::is_zombie_class(entity.class()) {
+                            let max = class_health.or(health).unwrap_or(50.);
+                            match scene.fires.zombie_damage(
+                                id,
+                                amount,
+                                damage.kind,
+                                max,
+                                scene.time,
+                            ) {
+                                None => continue,
+                                Some(true) => {
+                                    let center = state.origin + Vec3::Z * 36.;
+                                    let roll = crate::fire::roll_public(id, scene.time);
+                                    if scene.fires.ignite(
+                                        id,
+                                        crate::fire::Interactions {
+                                            flammable: true,
+                                            ..Default::default()
+                                        },
+                                        100.,
+                                        16.,
+                                        center,
+                                        scene.time,
+                                    ) {
+                                        state.value = state.value.min(5. * (10. + 4. * roll - 2.));
+                                    }
+                                }
+                                Some(false) => {}
+                            }
+                        }
                         state.value -= amount;
                     }
                     let dead = state.value <= 0.;

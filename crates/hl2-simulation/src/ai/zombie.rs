@@ -206,6 +206,18 @@ pub fn event_sound(event: &str) -> Option<&'static str> {
 }
 
 /// An npc_zombie under the AI.
+/// The CNPC_BaseZombie classes.
+pub fn is_zombie_class(class: &str) -> bool {
+    matches!(
+        class,
+        "npc_zombie"
+            | "npc_zombie_torso"
+            | "npc_fastzombie"
+            | "npc_fastzombie_torso"
+            | "npc_poisonzombie"
+            | "npc_zombine"
+    )
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct Zombie {
     pub kind: Kind,

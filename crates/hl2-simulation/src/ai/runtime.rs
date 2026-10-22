@@ -3474,6 +3474,7 @@ impl AiRuntime {
             ),
             AiClass::Zombie(_) => (zombie::max_yaw_speed(&actor.npc.activity), false),
         };
+        let on_fire = matches!(&actor.class, AiClass::Zombie(_)) && scene.fires.burning(id);
         let mut motor = SceneMotor {
             entity: id,
             world,
@@ -3489,6 +3490,7 @@ impl AiRuntime {
             weapon: actor.weapon.as_ref().map(|w| w.class.clone()),
             combine: matches!(&actor.class, AiClass::Humanoid(h) if h.kind == humanoid::Kind::Combine),
             walk_only: matches!(&actor.class, AiClass::Zombie(_)),
+            on_fire,
             weapon_activity: None,
             blocked_moves: &mut self.diagnostics.blocked_moves,
         };

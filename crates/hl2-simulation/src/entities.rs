@@ -2545,6 +2545,42 @@ impl Scene {
                 .push((id, input, p.parameter.clone(), p.activator));
             return;
         }
+        // CBaseAnimating::InputIgnite (Ignite(30)) / InputIgniteLifetime(seconds) on
+        // NPCs and physics props; a zombie's Ignite caps its health to about ten
+        // seconds of burning (CNPC_BaseZombie::Ignite).
+        if matches!(input.as_str(), "ignite" | "ignitelifetime")
+            && (class.starts_with("npc_") || class.starts_with("prop_physics"))
+        {
+            let lifetime = if input == "ignitelifetime" {
+                p.parameter.trim().parse::<f32>().unwrap_or(30.)
+            } else {
+                30.
+            };
+            let origin = self.states.get(id).map_or(Vec3::ZERO, |s| s.origin);
+            let now = self.time;
+            if self.fires.ignite(
+                id,
+                crate::fire::Interactions {
+                    flammable: true,
+                    ..Default::default()
+                },
+                lifetime,
+                16.,
+                origin + Vec3::Z * 36.,
+                now,
+            ) && crate::ai::zombie::is_zombie_class(class)
+            {
+                let health = self.skill.npc_entity_health(e).unwrap_or(50.);
+                let roll = crate::fire::roll_public(id, now);
+                if let Some(state) = self.states.get_mut(id) {
+                    if state.value <= 0. {
+                        state.value = health;
+                    }
+                    state.value = state.value.min(5. * (10. + 4. * roll - 2.));
+                }
+            }
+            return;
+        }
         match input.as_str() {
             // CBaseEntity::InputAddOutput, keyvalue form ("key value"): KeyValue on the
             // entity. Stored as an override that keyvalue readers consult first (only

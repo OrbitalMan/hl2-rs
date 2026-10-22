@@ -55,6 +55,8 @@ pub struct EntityFlame {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Fires {
     pub flames: BTreeMap<usize, EntityFlame>,
+    /// CNPC_BaseZombie m_flBurnDamage and m_flBurnDamageResetTime.
+    pub burn_damage: BTreeMap<usize, (f32, f64)>,
     /// Ignitions and burn-outs (report only).
     pub ignited: u32,
     pub extinguished: u32,
@@ -75,9 +77,42 @@ fn roll(entity: usize, now: f64, salt: u64) -> f32 {
     x ^= x >> 29;
     (x >> 40) as f32 / (1u64 << 24) as f32
 }
+/// A uniform [0, 1) draw for callers outside the flame (zombie burn time noise).
+pub fn roll_public(entity: usize, now: f64) -> f32 {
+    roll(entity, now, 7)
+}
 impl Fires {
     pub fn burning(&self, entity: usize) -> bool {
         self.flames.contains_key(&entity)
+    }
+    /// CNPC_BaseZombie::OnTakeDamage_Alive's fire rules for `amount` of `kind` damage:
+    /// None when a burning zombie ignores burn damage that is not its own flame's
+    /// (DMG_DIRECT); else whether it ignites now (ShouldIgnite: burn damage within 5 s
+    /// adding up to 10% of its max health). The caller ignites it (Ignite(100)) and
+    /// caps its health (CNPC_BaseZombie::Ignite).
+    pub fn zombie_damage(
+        &mut self,
+        entity: usize,
+        amount: f32,
+        kind: u32,
+        max_health: f32,
+        now: f64,
+    ) -> Option<bool> {
+        use crate::player_damage::DMG_BURN;
+        if kind & DMG_BURN == 0 {
+            return Some(false);
+        }
+        if self.burning(entity) {
+            return (kind & DMG_DIRECT != 0).then_some(false);
+        }
+        let entry = self.burn_damage.entry(entity).or_insert((0., 0.));
+        // m_flBurnDamage resets in PrescheduleThink once the reset time passes.
+        if entry.1 != 0. && now > entry.1 {
+            entry.0 = 0.;
+        }
+        entry.0 += amount;
+        entry.1 = now + 5.;
+        Some(entry.0 >= max_health * 0.1)
     }
     /// CBreakableProp::Ignite -> CBaseAnimating::Ignite -> CEntityFlame::Create: only
     /// flammable props, once; the flame first thinks 0.1 s later; "General.BurningObject"
@@ -260,6 +295,21 @@ impl Fires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn zombies_ignite_after_ten_percent_burn_damage_in_five_seconds() {
+        use crate::player_damage::DMG_BURN;
+        let mut f = Fires::default();
+        // Non-burn damage never counts; 4 + 4 burn HP of a 50 HP zombie stays under 5.
+        assert_eq!(f.zombie_damage(1, 20., 0, 50., 0.), Some(false));
+        assert_eq!(f.zombie_damage(1, 4., DMG_BURN, 50., 0.), Some(false));
+        // The 5 s window resets the sum.
+        assert_eq!(f.zombie_damage(1, 4., DMG_BURN, 50., 6.), Some(false));
+        assert_eq!(f.zombie_damage(1, 1., DMG_BURN, 50., 7.), Some(true));
+        // Burning: only its own flame's DMG_BURN | DMG_DIRECT hurts.
+        f.ignite(1, BARREL, 100., 16., Vec3::ZERO, 7.);
+        assert_eq!(f.zombie_damage(1, 4., DMG_BURN, 50., 8.), None);
+        assert_eq!(f.zombie_damage(1, 1., DMG_BURN | DMG_DIRECT, 50., 8.), Some(false));
+    }
     const BARREL: Interactions = Interactions {
         flammable: true,
         explosive_resist: true,
