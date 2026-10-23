@@ -25,19 +25,33 @@
       "ultrawide": {"fov_offset": 0.0, "offset": [0.0, 0.0, 0.0]}
     },
     "weapons": {
+      "weapon_bugbait": {
+        "portrait": {"offset": [-5.1, 0.0, -3.2]}
+      },
+      "weapon_crossbow": {
+        "portrait": {"offset": [-1.1, 0.6, -1.3]}
+      },
       "weapon_crowbar": {
-        "portrait": {"fov_offset": 8.0, "offset": [0.0, 0.0, -11.0]},
-        "ultrawide": {"fov_offset": 30.0, "offset": [0.0, 0.0, -3.5]}
+        "portrait": {"offset": [-6.8, 1.2, -4.5]}
+      },
+      "weapon_frag": {
+        "portrait": {"offset": [-2.1, 0.0, 0.5]}
       },
       "weapon_physcannon": {
-        "standard": {"fov_offset": 0.0, "offset": [0.0, 0.0, 0.0]},
-        "portrait": {"fov_offset": 0.0, "offset": [0.0, 0.0, -11.5]},
-        "ultrawide": {"fov_offset": 30.0, "offset": [0.0, 0.0, -7.5]}
+        "portrait": {"offset": [-5.8, 0.0, -9.7]}
+      },
+      "weapon_pistol": {
+        "portrait": {"offset": [-3.0, 0.0, 0.0]}
       },
       "weapon_rpg": {
-        "standard": {"fov_offset": 0.0, "offset": [0.0, 0.0, 0.0]},
-        "portrait": {"fov_offset": 16.0, "offset": [0.0, 4.0, -16.0]},
-        "ultrawide": {"fov_offset": 28.0, "offset": [-2.0, -21.5, -1.5]}
+        "portrait": {"offset": [-0.5, 7.9, -9.5]},
+        "ultrawide": {"offset": [-5.5, 0.0, 0.0]}
+      },
+      "weapon_shotgun": {
+        "portrait": {"offset": [-1.1, 1.3, -3.3]}
+      },
+      "weapon_smg1": {
+        "portrait": {"offset": [-3.3, 1.8, -0.5]}
       }
     }
   }

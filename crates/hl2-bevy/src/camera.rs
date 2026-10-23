@@ -181,13 +181,19 @@ mod tests {
         assert!(stump_16_9 < -1.0 && stump_9_16 < -1.0);
 
         // Rocket Launcher mid-tube reaches into a 9:16 frame; the rear cutoff stays outside the
-        // right edge on ultrawide. Portrait values match the 97fac81 baseline and are owner-tunable.
+        // right edge up to 64:27. At 32:9 the owner-tuned offset pulls the cutoff to the edge, so
+        // it only has to stay near it.
         let (mid_9_16, _) = project([30.0, -14.0, -8.0], "weapon_rpg", 9. / 16.);
         assert!(mid_9_16 < 0.7, "{mid_9_16}");
-        for aspect in [16. / 9., 64. / 27., 32. / 9.] {
+        for aspect in [16. / 9., 64. / 27.] {
             let (rear_x, _) = project([16.1, -14.0, -5.0], "weapon_rpg", aspect);
             assert!(rear_x > 1.0, "RPG rear cutoff hidden at {aspect}: {rear_x}");
         }
+        let (rear_32_9, _) = project([16.1, -14.0, -5.0], "weapon_rpg", 32. / 9.);
+        assert!(
+            rear_32_9 > 0.9,
+            "RPG rear cutoff far inside at 32:9: {rear_32_9}"
+        );
     }
 
     #[test]

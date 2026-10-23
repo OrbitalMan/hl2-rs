@@ -480,25 +480,18 @@ mod tests {
             }
         }
         // Gravity Gun in portrait shifts down (negative Z) to hide the severed left arm stump
-        // without narrowing horizontal FOV; in ultrawide it widens FOV so the hands and forearms
-        // remain well above the bottom edge.
+        // without narrowing horizontal FOV.
         let phys_portrait = viewmodel_framing("weapon_physcannon", 9. / 16.);
         assert_eq!(phys_portrait.fov_offset, 0.0);
         assert!(phys_portrait.offset[2] < -5.0, "{phys_portrait:?}");
-        let phys_ultrawide = viewmodel_framing("weapon_physcannon", 32. / 9.);
-        assert!(phys_ultrawide.fov_offset >= 25.0, "{phys_ultrawide:?}");
 
-        // Rocket Launcher in portrait widens FOV and shifts left (+Y) so the right-mounted tube
-        // stays inside the narrow frame; in ultrawide it widens FOV (showing the hands and
-        // forearms above the bottom edge) and shifts right (-Y) so the unmodeled rear cutoff
-        // stays outside the right edge.
+        // Rocket Launcher in portrait shifts left (+Y) and down so the right-mounted tube stays
+        // inside the narrow frame; in ultrawide it moves back (-X), more so the wider the frame.
         let rpg_portrait = viewmodel_framing("weapon_rpg", 9. / 16.);
-        assert_eq!(rpg_portrait.fov_offset, 16.0);
-        assert_eq!(rpg_portrait.offset[1], 4.0);
+        assert_eq!(rpg_portrait.offset[1], 7.9);
         let rpg_21_9 = viewmodel_framing("weapon_rpg", 64. / 27.);
         let rpg_32_9 = viewmodel_framing("weapon_rpg", 32. / 9.);
-        assert!(rpg_21_9.fov_offset > 0.0 && rpg_32_9.fov_offset > rpg_21_9.fov_offset);
-        assert!(rpg_21_9.offset[1] < 0.0 && rpg_32_9.offset[1] < rpg_21_9.offset[1]);
+        assert!(rpg_21_9.offset[0] < 0.0 && rpg_32_9.offset[0] < rpg_21_9.offset[0]);
     }
 
     #[test]
@@ -529,9 +522,9 @@ mod tests {
             json["viewmodel"]["weapons"]["weapon_physcannon"]["portrait"]["offset"],
             serde_json::json!([0.01, -0.02, -11.49])
         );
-        assert_eq!(
-            json["viewmodel"]["weapons"]["weapon_physcannon"]["ultrawide"]["fov_offset"],
-            30.0
+        assert!(
+            json["viewmodel"]["weapons"]["weapon_physcannon"]["ultrawide"].is_null(),
+            "zero profiles are omitted"
         );
         assert!(snapshot.contains("\n  \"viewmodel\": {"));
 
@@ -596,12 +589,12 @@ mod tests {
             3.0
         );
         assert!(
-            unknown["viewmodel"]["weapons"]["weapon_pistol"]["portrait"].is_null(),
+            unknown["viewmodel"]["weapons"]["weapon_pistol"]["ultrawide"].is_null(),
             "untouched zero profiles are omitted"
         );
         assert!(unknown["viewmodel"]["default"]["standard"].is_null());
         assert!(unknown_weapon_snapshot.contains(
-            "\"weapon_crowbar\": {\n        \"portrait\": {\"fov_offset\": 8.0, \"offset\": [0.0, 0.0, -11.0]},\n        \"ultrawide\": {\"fov_offset\": 30.0, \"offset\": [0.0, 0.0, -3.5]}\n      },"
+            "\"weapon_rpg\": {\n        \"portrait\": {\"fov_offset\": 0.0, \"offset\": [-0.5, 7.9, -9.5]},\n        \"ultrawide\": {\"fov_offset\": 0.0, \"offset\": [-5.5, 0.0, 0.0]}\n      },"
         ));
     }
 

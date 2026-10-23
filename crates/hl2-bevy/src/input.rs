@@ -552,7 +552,7 @@ mod tests {
             Some(hl2_ui::tuning::ViewmodelProfile::Portrait)
         );
         assert_eq!(debug.framing.fov_offset, 0.0);
-        assert_eq!(debug.framing.offset, [0.0, 0.0, -11.5]);
+        assert_eq!(debug.framing.offset, [-5.8, 0.0, -9.7]);
 
         toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
         assert!(!debug.enabled);
