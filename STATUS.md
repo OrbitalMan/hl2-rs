@@ -1,10 +1,32 @@
 # STATUS
 
+## Aligned-release rejection and exact-entry byte supplements (2026-10-23)
+
+AL seals618 files: a measured platform bypass, confirmed support/held pose, two aligned throws that leave health15, and517 passive release-trajectory samples. Its65 motion files contain6431 samples; verification checks90804 reads/28246816 bytes. Owned game closed/settings unchanged. The south-input summary was initially misread because it masked to jump/duck bits; raw button1024 is present with zero movement. The correction and rejected verifier drafts are preserved, including a separate contextual AM erratum. No crossing was attempted.
+
+AN seals18 files with two unsuccessful exact StopSchedule retrievals:330s import timeout, then a longer CLI run that reaches the address query but finds no Ghidra procedure entry. AO seals12 files with a separate196-byte/67-instruction rooted raw branch graph and three native field descriptors. AP seals15 files with rooted camera-disable forwarding, intro blend-completion stores and speaker deadline/owner/dispatch flow,597 bytes/186 instructions. These corroborate bounded static routing previously SDK-only; they do not recover indexed/Ghidra bodies or close the original16 gaps/four missing-index requests.
+
+AS seals31 files: three exact on-demand physics accessor bodies and four preserved missing requests, supplemented by seven rooted byte graphs173 bytes/60 instructions. This binds selected flags/mass-scalar/inertia fields for passive reads; no getters were called. AR seals606 files: one aligned diagnostic release observes force/torque application (force length about4000), four complete window collision pairs and four computed damage0 results, with health15 unchanged. Its25 trace events,6928 motion samples and518 trajectory samples are retained; exact impact cause/full equation remain unverified. Hooks unloaded/detached, owned game closed/settings unchanged. Two early model scans observe no literal candidates, without absence claims. No Rust changes/builds; first_map_finished:false and Rust parity untested. Current private checkpoint: research-followup-continuation-20261023ar.md.
+
+## Storage/model witnesses and command-node dataflow (2026-10-23)
+
+AI is now sealed at 538 files. Its 65 motion files/6310 samples preserve two confirmed attached-crate throws that leave window health15; actual ground support resolves by handle/serial. No crossing was attempted. AJ seals nine files: two late first-map live candidates match their static model choices, with runtime slot/serial and retail RTTI byte corroboration. Seven literal candidate names were not observed at that time; G08 and scene actor bindings remain open. Both depend on the already-closed AI process and checked unchanged settings.
+
+AM seals 15 files: one new exact pass14 command-insertion body, 215 bytes/72 instruction starts, binds passed scalar storage in a three-word node and the byte+2048/current+2034 conditional dispatch. The two ordering helpers remain unexpanded and units are not established. An extra dumpbin padding byte was rejected and excluded. AL and AN subsequently finished as bounded negative results above. No Rust changes/builds; first_map_finished:false and parity remain open.
+
+## Early platform obstruction retained (2026-10-23)
+
+AK's fresh route stopped before storage: the copied platform-east pulse advanced about43 units and failed its expected-position guard. The selected static world-brush query found no entering candidate; dynamic/static-prop collision or another cause remains unresolved. The run closed/settings unchanged, with no test of the new held-pose approach. Stop repeating that fixed pulse. Next park after the grate exit, retain nearby live entity/collision state, and choose a measured bypass before resuming the route. Earlier AI's two failed frontal throws remain separate evidence.
+
+## Fresh storage route stopped at impact limit (2026-10-23)
+
+AI reached the storage platform, confirmed normal carry and resolved the player's actual ground handle to crate456 with matching serial/pointer. Two frontal throws left window health15; the approach stopped and the owned process closed with checked settings unchanged. No crossing was attempted. Held-crate poses remained low and the player was near the lateral edge; these observations motivate alignment and held-pose checks before throwing, not another blind throw. Original failed motions/attachments remain retained. Next private approach must park before throws and use actual support and aperture clearance; no Rust changes or first-map/parity completion claim.
+
 ## Active buffer diagnosis and fresh input controls (2026-10-23)
 
 Sealed AF/AG (99/93 files) resolve the earlier batching question. The actual engine buffer is bound through one newly retrieved exact caller and raw ECX/call bytes. Its wait flag/default increment are both 1. In the instrumented fixture, newline configuration lines arrive as separate parser calls; their local wait additions do not carry into the following line. One semicolon line preserves cumulative additions and actual server button phases. Fresh no-Frida-by-this-task controls corroborate jump/duck/release ordering, but identical wait counts give different sampled server-tick delays. Do not equate command-buffer scalars with server ticks or promise fixed timing.
 
-AF checks 19 call pairs/eight wait-site events/662 passive samples; AG checks 400 samples/three positive ordering controls. Both owned runs closed/settings unchanged; AF instrumentation unloaded/detached. AE's EOF setup failure and AG's LF/CRLF binding rejection are retained. AH was preempted before storage after a missing driver import was found; corrected AI passes startup checks and its fresh route is currently in progress, with no new crossing/exit claim. Precise prior milestone: private research-command-buffer-progress-20261023af.md. No Rust edits/builds; original first-map gaps and Rust parity remain open.
+AF checks 19 call pairs/eight wait-site events/662 passive samples; AG checks 400 samples/three positive ordering controls. Both owned runs closed/settings unchanged; AF instrumentation unloaded/detached. AE's EOF setup failure and AG's LF/CRLF binding rejection are retained. AH was preempted before storage after a missing driver import was found; corrected AI later stopped at its two-impact limit and is sealed as a negative result above. Precise milestone: private research-command-buffer-progress-20261023af.md. No Rust edits/builds; original first-map gaps and Rust parity remain open.
 
 ## Native input latency and conditional wait research (2026-10-23)
 

@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-23: aligned release trace and missing-entry byte supplements
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust changes.
+
+**Changed / Why:** Continued the owner's authorized research. Retained two ineffective aligned throws with actual support/held-pose and release trajectory evidence. After two unsuccessful exact procedure retrievals, used independently matched entry-rooted bytes to corroborate StopSchedule, camera-disable, blend-completion and speaker routing. Bound selected physics accessor fields for a final collision diagnostic.
+
+**Tested how / Result:** AL seal618 checks65 motion files/6431 samples plus517 trajectory samples,90804 reads/28246816 bytes, native image identities and owned closure/settings. AN seal18 preserves both failed retrievals/worker closure. AO/AP seals12/15 check793 rooted bytes/253 instruction starts, exact target/descriptor bindings and eight reused body occurrences. AS seal31 checks three exact bodies/four missing identities and173 rooted accessor bytes. Raw graphs remain distinct from indexed exports and runtime coverage. The masked input-summary and verifier read-selection mistakes are retained/corrected without changing raw captures.
+
+**Still broken or not tested / Next:** AR subsequently seals606 files: one force/torque pair each, four collision pairs/four computed damage0 results and health15 unchanged, with25 trace events/6928 motion samples/518 trajectory samples. Hooks unloaded/detached; owned game closed/settings unchanged. The full damage equation/cause, fresh passage/exit, original first-map semantic gaps/missing-index bodies and Rust parity remain open. No Rust builds/tests. Private checkpoint: research-followup-continuation-20261023ar.md.
+
+## 2026-10-23: bounded storage failures, live models and scalar-node insertion
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Preserved the unsuccessful fresh frontal approach, corroborated two conditional actor/model candidates in the live first map, and expanded one necessary exact command-buffer insertion callee. Prepared a different alignment/held-pose approach and measured a bypass around the earlier platform stop.
+
+**Tested how / Result:** AI seal538 checks 65 motion files/6310 samples/71804 reads/22688712 bytes, matching held/support handles, two unchanged-health impacts and owned closure/settings. AJ seal9 checks 1721 reads/136020 bytes, two live model/RTTI witnesses and seven literal names not observed. AM seal15 checks one exact baseline/original body, 215 bytes/72 instruction starts, scalar/offset/length node stores and conditional dispatch. Rejected setup, padding and movement observations remain retained. Documentation-only validation applies; no Rust tests/builds.
+
+**Still broken or not tested / Next:** No new window crossing or exit; G08, original semantic gaps and Rust parity remain open. AL/AN later finished as bounded negative results; AO/AP/AS/AR followups are recorded above. Continue from the private checkpoint's exact remaining measurement gaps.
+
 ## 2026-10-23: observed per-line reset and fresh single-line controls
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.

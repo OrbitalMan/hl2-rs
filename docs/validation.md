@@ -1,5 +1,17 @@
 # Local validation — 2026-10-05
 
+## Aligned release and raw-entry acceptance (2026-10-23)
+
+Read-only verify_seal.py passes private AL618, AN18, AO12, AP15 and AS31 retained-file sets. AL checks65 motion files/6431 samples plus517 trajectory samples,90804 reads/28246816 bytes, observed held/support identities, two unchanged-health throws, images and owned closure/settings. Rejected masked-summary/read-selection drafts remain retained; raw capture bytes are unchanged. AN verifies two retrieval failures, exact target prefix and owned worker closure. AO/AP independently traverse793 exact bytes/253 instruction starts rooted at the four missing entry targets, recheck descriptor/string/pointer stores and eight reused exact body occurrences; no indexed/Ghidra body recovery is asserted. AS compares three exact BLOBs, four missing identities, selected slots and seven rooted accessor graphs173 bytes/60 instructions.
+
+AR verify_seal.py passes606 retained files:25 trace events/four collision pairs/four computed damage0 results/two application pairs,65 motion files/6928 samples and518 trajectory samples. Selected verification scope checks96258 raw-read occurrences/28424876 bytes, including repeated observations in receipts;1769 legacy named-snapshot reads lack per-read hashes and remain file/seal-hash protected. Actual preflight prefix reads, event/core fields, force vector, native images, script unload/detach and owned closure/settings are checked. No fresh crossing/exit, full damage equation, ordinary first-map completion, typed ABI or Rust parity is established. No Rust tests/builds apply. Private checkpoint: research-followup-continuation-20261023ar.md.
+
+## Storage negative result, live models and queue-node acceptance (2026-10-23)
+
+Read-only `python -B ../../work/hl2-decompiled/scene-storage-control-20261023ai/verify_seal.py`, `python -B ../../work/hl2-decompiled/scene-firstmap-live-models-20261023aj/verify_seal.py` and `python -B ../../work/hl2-decompiled/scene-command-queue-20261023am/verify_seal.py` pass closed file sets538/9/15. AI checks 6310 motion samples/71804 reads/22688712 bytes, ground and attached-handle generations, two preserved health15 impacts, native image identities and owned closure/settings. It accepts intact evidence of failure, not a successful crossing.
+
+AJ checks 1721 raw reads/136020 bytes and independently maps two live RTTI/model witnesses to retail PE bytes; seven literal names are not observed and full scene/model gap closure is false. AM compares one exact pass14 BLOB, complete215-byte body and72 instruction starts against private PE bytes, retaining the rejected padding overrun. No runtime queue execution or fixed timing guarantee. AL/AN subsequently completed as bounded negative results above; no Rust build/tests or parity validation.
+
 ## Per-line reset and fresh ordering controls (2026-10-23)
 
 Read-only python -B ../../work/hl2-decompiled/scene-command-buffer-20261023af/verify_seal.py and python -B ../../work/hl2-decompiled/scene-command-buffer-control-20261023ag/verify_seal.py pass closed file sets 99/93. AF independently checks 48 events/19 complete call pairs/eight wait sites, raw buffer/frame/clock/source fields, one exact 106-byte caller and its static global-buffer binding. Its 662 passive samples/6409 reads exclude 15 clock races. Prefix equality is attested by hashed observer source plus successful ready, with the missing separate prefix-read transcript explicitly limited.

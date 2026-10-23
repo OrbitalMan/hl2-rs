@@ -1,5 +1,19 @@
 # Design
 
+## Research plan: bounded aligned-impact diagnostic (2026-10-23)
+
+AL's two aligned throws retained attached/support/settled-pose checks but left health15. A single diagnostic replay will observe the native collision callback and computed-damage store around the aligned release, with exact raw prefix/identity checks and separately recorded Frida effects. Capture the actual event, selected physics state and ordinary input; stop after the observation, preserving zero/no-event outcomes. An early passive model snapshot may corroborate the remaining literal candidates before actors are renamed/removed. Do not repeat crossing attempts, invoke native methods or turn this diagnostic into campaign advancement. Keep static byte-flow supplements distinct from recovered indexed bodies and runtime completion.
+
+## Supplemental static-body and model scope (2026-10-23)
+
+The sealed AI/AJ evidence retains two failed frontal throws, resolved crate support and two late live actor/model witnesses. Runtime instance identity does not prove active scene actor bindings or class-wide defaults. AM expands only the exact parser callee that stores the passed scalar, command offset and length+1 in a node; its conditional dispatch does not establish list ordering or timing units. Fresh StopSchedule analysis must preserve the original missing pass14 request and keep any new Ghidra body supplemental until datamap identity, complete body ranges and independent PE bytes agree. Do not update the frozen catalogue or infer runtime stop behavior.
+
+Outcome: AN recovered no Ghidra body; separate AO/AP entry-rooted byte graphs corroborate bounded local routing for all four missing addresses, preserving the missing-index requests. AS binds selected physics accessors without invoking them. AR's one aligned diagnostic release records four computed zero-damage collision results and unchanged health15, with instrumentation unloaded/detached and owned closure/settings checked. The next bounded impact study must explain the actual captured computation inputs/branches, not infer damage from aperture fit or repeat throws. No further game run is active. Current private checkpoint: research-followup-continuation-20261023ar.md.
+
+## Research plan: early alignment and held-pose validation (2026-10-23)
+
+AI's two non-damaging frontal throws stop that copied approach. A different fresh approach will park after the crate step, before frontal pickup/throws. First resolve actual crate support and align the player to the measured centre lane using short, sampled same-line movement. Then compare actual held crate position/orientation with the aperture and requested target before one throw. Reject an obstructed/low held pose rather than treating an attached handle as readiness. Retain input/state/geometry/visual evidence and cap failed approaches at two attempts. Native ground/rotation descriptors must remain source-bound; no getter or physics edit substitutes for observation.
+
 ## Command delivery scope and native clock separation (2026-10-23)
 
 Observed parser calls bind the concrete buffer to engine base +0x6379c8, through exact caller bytes. Its enabled wait path can update a local accumulator without carrying that update across separate input lines. Keep same-line scheduling distinct from a sequence of newline configuration entries. The semicolon control preserves cumulative additions and produces actual button phases; fresh controls corroborate ordering while exposing variable relations among buffer scalars, server ticks, render frames and wall time. Use observed button/pose/support brackets for the next route, not a fixed wait conversion. Current sealed milestone is private research-command-buffer-progress-20261023af.md; no Rust change follows automatically.
