@@ -299,12 +299,12 @@ pub(crate) fn controls(
         select_viewmodel_debug_target(&mut sim.viewmodel_debug, &weapon, profile);
         let time = real_time.as_deref().map(Time::elapsed_secs_f64);
         let fired = viewmodel_repeat.update(&keys, time);
-        let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let step = viewmodel_adjust_step(&keys);
         let reset = window.focused && keys.just_pressed(KeyCode::F6);
         let changed = if reset {
             reset_viewmodel_debug_weapon(&mut sim.viewmodel_debug)
         } else {
-            adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &fired, fine)
+            adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &fired, step)
         };
         if changed {
             commit_viewmodel_debug_edit(
@@ -512,9 +512,20 @@ fn reset_viewmodel_debug_weapon(debug: &mut crate::simulation::ViewmodelDebug) -
     true
 }
 
+/// Step per viewmodel adjust key press: 1.0 with Shift, 0.01 with Alt/Option (which wins over
+/// Shift), else 0.1.
+fn viewmodel_adjust_step(keys: &ButtonInput<KeyCode>) -> f32 {
+    if keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
+        0.01
+    } else if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        1.0
+    } else {
+        0.1
+    }
+}
+
 /// Applies one-frame viewmodel debug key presses. Returns whether the profile changed.
-fn adjust_viewmodel_framing(framing: &mut ViewmodelFraming, fired: &[KeyCode], fine: bool) -> bool {
-    let step = if fine { 0.01 } else { 0.1 };
+fn adjust_viewmodel_framing(framing: &mut ViewmodelFraming, fired: &[KeyCode], step: f32) -> bool {
     let mut changed = false;
     let mut apply = |value: &mut f32, delta: f32| {
         *value = ((*value + delta) * 100.0).round() / 100.0;
@@ -551,8 +562,13 @@ mod tests {
             debug.profile,
             Some(hl2_ui::tuning::ViewmodelProfile::Portrait)
         );
-        assert_eq!(debug.framing.fov_offset, 0.0);
-        assert_eq!(debug.framing.offset, [-5.8, 0.0, -9.7]);
+        assert_eq!(
+            debug.framing,
+            hl2_ui::tuning::viewmodel_profile_framing(
+                "weapon_physcannon",
+                hl2_ui::tuning::ViewmodelProfile::Portrait
+            )
+        );
 
         toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
         assert!(!debug.enabled);
@@ -598,7 +614,7 @@ mod tests {
                 KeyCode::ArrowUp,
                 KeyCode::ArrowLeft,
             ],
-            false
+            0.1
         ));
         assert_eq!(framing.fov_offset, 0.1);
         assert_eq!(framing.offset, [0.1, 0.1, -11.4]);
@@ -611,10 +627,24 @@ mod tests {
                 KeyCode::ArrowDown,
                 KeyCode::ArrowRight,
             ],
-            true
+            0.01
         ));
         assert_eq!(framing.fov_offset, 0.09);
         assert_eq!(framing.offset, [0.09, 0.09, -11.41]);
+    }
+
+    #[test]
+    fn viewmodel_adjust_step_follows_shift_and_alt() {
+        assert_eq!(viewmodel_adjust_step(&held_keys(&[])), 0.1);
+        assert_eq!(
+            viewmodel_adjust_step(&held_keys(&[KeyCode::ShiftRight])),
+            1.0
+        );
+        assert_eq!(viewmodel_adjust_step(&held_keys(&[KeyCode::AltLeft])), 0.01);
+        assert_eq!(
+            viewmodel_adjust_step(&held_keys(&[KeyCode::ShiftLeft, KeyCode::AltRight])),
+            0.01
+        );
     }
 
     fn held_keys(codes: &[KeyCode]) -> ButtonInput<KeyCode> {

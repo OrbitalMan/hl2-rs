@@ -394,9 +394,9 @@ pub fn tuning_json_with_viewmodel_profiles(
     Ok(compact_viewmodel_json(root))
 }
 
-/// Pretty-prints the tuning asset with each viewmodel profile on one line and all-zero profiles
-/// (and the weapons or default block left empty by that) omitted, since missing profiles load as
-/// zero.
+/// Pretty-prints the tuning asset with each viewmodel profile on one line, omitting zero
+/// `fov_offset`/`offset` fields and all-zero profiles (and the weapons or default block left empty
+/// by that), since missing fields and profiles load as zero.
 fn compact_viewmodel_json(mut root: serde_json::Value) -> String {
     let is_zero = |profile: &serde_json::Value| {
         profile["fov_offset"].as_f64() == Some(0.0)
@@ -415,13 +415,20 @@ fn compact_viewmodel_json(mut root: serde_json::Value) -> String {
             } else if let Some(profile) = map.get_mut(name) {
                 let number =
                     |value: &serde_json::Value| format!("{:?}", value.as_f64().unwrap_or(0.0));
-                let offset = profile["offset"].as_array().map_or_else(String::new, |v| {
-                    v.iter().map(number).collect::<Vec<_>>().join(", ")
-                });
-                inline.push(format!(
-                    "{{\"fov_offset\": {}, \"offset\": [{offset}]}}",
-                    number(&profile["fov_offset"])
-                ));
+                let mut fields = Vec::new();
+                if profile["fov_offset"].as_f64() != Some(0.0) {
+                    fields.push(format!(
+                        "\"fov_offset\": {}",
+                        number(&profile["fov_offset"])
+                    ));
+                }
+                let offset: Vec<String> = profile["offset"]
+                    .as_array()
+                    .map_or_else(Vec::new, |v| v.iter().map(number).collect());
+                if offset.iter().any(|x| x != "0.0") {
+                    fields.push(format!("\"offset\": [{}]", offset.join(", ")));
+                }
+                inline.push(format!("{{{}}}", fields.join(", ")));
                 *profile = serde_json::Value::String(format!("@@{}@@", inline.len() - 1));
             }
         }
@@ -479,19 +486,7 @@ mod tests {
                 );
             }
         }
-        // Gravity Gun in portrait shifts down (negative Z) to hide the severed left arm stump
-        // without narrowing horizontal FOV.
-        let phys_portrait = viewmodel_framing("weapon_physcannon", 9. / 16.);
-        assert_eq!(phys_portrait.fov_offset, 0.0);
-        assert!(phys_portrait.offset[2] < -5.0, "{phys_portrait:?}");
-
-        // Rocket Launcher in portrait shifts left (+Y) and down so the right-mounted tube stays
-        // inside the narrow frame; in ultrawide it moves back (-X), more so the wider the frame.
-        let rpg_portrait = viewmodel_framing("weapon_rpg", 9. / 16.);
-        assert_eq!(rpg_portrait.offset[1], 7.9);
-        let rpg_21_9 = viewmodel_framing("weapon_rpg", 64. / 27.);
-        let rpg_32_9 = viewmodel_framing("weapon_rpg", 32. / 9.);
-        assert!(rpg_21_9.offset[0] < 0.0 && rpg_32_9.offset[0] < rpg_21_9.offset[0]);
+        // Portrait and ultrawide values are owner-tuned data and not pinned here.
     }
 
     #[test]
@@ -593,9 +588,28 @@ mod tests {
             "untouched zero profiles are omitted"
         );
         assert!(unknown["viewmodel"]["default"]["standard"].is_null());
-        assert!(unknown_weapon_snapshot.contains(
-            "\"weapon_rpg\": {\n        \"portrait\": {\"fov_offset\": 0.0, \"offset\": [-0.5, 7.9, -9.5]},\n        \"ultrawide\": {\"fov_offset\": 0.0, \"offset\": [-5.5, 0.0, 0.0]}\n      },"
-        ));
+        let root = serde_json::json!({"viewmodel": {
+            "default": {"standard": {"fov_offset": 0.0, "offset": [0.0, 0.0, 0.0]}},
+            "weapons": {
+                "weapon_a": {
+                    "portrait": {"fov_offset": 0.0, "offset": [-5.1, 0.0, -3.2]},
+                    "ultrawide": {"fov_offset": 8.0, "offset": [0.0, 0.0, 0.0]},
+                    "standard": {"fov_offset": 0.0, "offset": [0.0, 0.0, 0.0]}
+                },
+                "weapon_b": {"portrait": {"fov_offset": 0.0, "offset": [0.0, 0.0, 0.0]}}
+            }
+        }});
+        let text = compact_viewmodel_json(root);
+        assert!(
+            text.contains(
+                "\"weapon_a\": {\n        \"portrait\": {\"offset\": [-5.1, 0.0, -3.2]},\n        \"ultrawide\": {\"fov_offset\": 8.0}\n      }"
+            ),
+            "{text}"
+        );
+        assert!(
+            !text.contains("weapon_b") && !text.contains("standard"),
+            "{text}"
+        );
     }
 
     #[test]
