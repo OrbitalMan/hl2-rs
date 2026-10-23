@@ -1,5 +1,27 @@
 # MODLOG
 
+## 2026-10-23 Entity inputs dispatch through a class table
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New `hl2-simulation::entities::inputs`: a `HANDLERS` table from class name to `Handler` (`fn(&mut Scene, &Delivery) -> bool`, `false` when the class does not take that input). `Delivery` carries the world, entity id, pending input, player feet, entity, class, lowercased input and numeric parameter.
+- Every exact-class arm of `Scene::deliver`'s match moved verbatim into handlers grouped by family: `doors` (`func_door`, `func_door_rotating`, `prop_door_rotating`; `func_movelinear` adds SetPosition), `logic` (`logic_relay`, `logic_branch`, `logic_case`, `math_counter`), `triggers` (`trigger_changelevel`), `scenes` (`logic_choreographed_scene`, `scripted_sequence`, `point_template`) and `env` (`point_viewcontrol`, `env_zoom`, `env_fade`, `env_tonemap_controller`, `env_physexplosion`, `env_physimpact`, `ambient_generic`, `npc_combine_camera`).
+- `deliver` keeps its special cases first and in order (player/killed checks, monitors, `env_global`, `npc_template_maker`, AI inputs, Ignite), then asks the class's handler, then falls back to the inputs every entity takes (AddOutput, Kill, Enable/Disable/Toggle, TurnOn/Off, parenting, Lock/Unlock, FireTimer and the `npc_`/`prop_dynamic` prefix inputs), then reports the input as unsupported.
+- The generic Toggle lost its `!door` guard: the door handler always takes Toggle, so the guard could no longer be reached.
+
+**Why:** Code review: inputs were dispatched by comparing class names inside one 502-line function.
+
+**Ordering check:** in the old match, wherever an exact-class arm and a generic arm took the same input, the class arm came first (or the generic arm's guard excluded the class), so asking the class handler before the generic arms is the same order.
+
+**Tested how:** `scripts/checks/validate.sh` (1,021 tests, strict Clippy, fmt), the Windows-target check and the 23 owned-install hl2-simulation tests pass; new `every_class_has_one_handler`. Full packaged replay suite, one game at a time, before (b52bca6) and after: 94 of 94 both times. Report-by-report comparison of the two runs (1,439 labelled samples): only `occluded_blast_targets` (two frag fixtures) and `ray` (two pallet fixtures) differ, fields the replay checks already mark as varying between runs of the same build. Sizes: `deliver` 502 -> 188 lines; entities.rs production lines 3,740 -> 3,428; hl2-simulation production lines 44,366 -> 44,600.
+
+**Result:** `deliver` is a dispatcher plus fallbacks; gameplay outcomes are unchanged.
+
+**Still broken or not tested:** Prefix-based inputs (`npc_*` SetHealth/SetAnimation, `prop_dynamic*`, `env_soundscape*` ToggleEnabled) stay in the fallback match; the table compares exact class names.
+
+**Next:** Step 3: `hl2-ui` without `hl2-simulation`.
+
 ## 2026-10-23 Console commands described once: each spec carries its handler
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

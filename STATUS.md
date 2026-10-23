@@ -6,6 +6,7 @@
 
 - Plan in docs/DESIGN.md (same title). Every step keeps output, errors, effects and gameplay outcomes unchanged and is verified by `scripts/checks/validate.sh`, the Windows-target check and packaged replays.
 - Step 1 done: console commands are described once. Each `console::commands::Spec` carries its handler and, for a cvar, its value function; the handlers live in `console/commands/{cheats,video,audio,mouse,map,developer}.rs`, `Console::interpret` is a 6-line dispatcher (was 1,066 lines) and `cvar_value` reads the spec. Verified: validate.sh (1,020 tests), Windows-target check, packaged `console`, `console_map`, `campaign`, `options`, `menu_options`, `save_config`; existing console tests unchanged.
+- Step 2 done: entity inputs dispatch through `entities::inputs::HANDLERS` (class name -> handler; doors, logic, triggers, scenes, env); `Scene::deliver` keeps its special cases in order, then the class handler, then the inputs every entity takes (502 -> 188 lines). Verified: validate.sh (1,021 tests), Windows-target check, owned-install simulation tests, full replay suite 94/94 before and after with identical outcomes apart from the fields the checks already mark unstable (`occluded_blast_targets`, pallet `ray`).
 - Fixed: a flaky hl2-bevy setup test. Parallel `setup` tests could share one temporary folder (the macOS clock moves in microseconds), so one test's cleanup deleted another's `response.json`; the folder name now carries a counter.
 
 ## Startup memory: a gameplay `--map` loads directly (2026-10-23)

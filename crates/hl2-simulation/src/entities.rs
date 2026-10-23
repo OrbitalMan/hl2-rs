@@ -10,6 +10,8 @@ use source_assets::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+mod inputs;
+
 /// Entity classes that move with VPhysics (MOVETYPE_VPHYSICS) for trigger touches.
 fn is_vphysics_class(class: &str) -> bool {
     class.starts_with("prop_physics")
@@ -2587,10 +2589,6 @@ impl Scene {
         let class = e.class();
         let input = p.input.to_lowercase();
         let value = p.parameter.parse::<f32>().unwrap_or(0.);
-        let door = matches!(
-            class,
-            "func_door" | "func_door_rotating" | "prop_door_rotating" | "func_movelinear"
-        );
         if self
             .monitors
             .input(world, &self.states, id, &input, &p.parameter, self.time)
@@ -2670,30 +2668,21 @@ impl Scene {
             }
             return;
         }
+        let delivery = inputs::Delivery {
+            world,
+            id,
+            pending: p,
+            player_feet,
+            entity: e,
+            class,
+            input: &input,
+            value,
+        };
+        if inputs::handler(class).is_some_and(|handle| handle(self, &delivery)) {
+            return;
+        }
+        // Inputs every entity takes.
         match input.as_str() {
-            // CTriggerCamera: the view follows this camera until Disable (or its wait ends).
-            "enable" if class == "point_viewcontrol" => {
-                for key in crate::view_control::ViewControl::unsupported(world, id) {
-                    self.unsupported_input(class, key);
-                }
-                if let Some(previous) = self.view_control.enable(id, self.time) {
-                    self.fire(previous, "OnEndFollow", p.activator);
-                }
-            }
-            "disable" if class == "point_viewcontrol" => {
-                if self.view_control.disable(id) {
-                    self.fire(id, "OnEndFollow", p.activator);
-                }
-            }
-            // CEnvZoom: the player's field of view moves to FOV over Rate seconds.
-            "zoom" if class == "env_zoom" => {
-                self.view_control.zoom = Some(crate::view_control::Zoom {
-                    fov: number(e, "FOV", 0.),
-                    rate: number(e, "Rate", 0.),
-                    started: self.time,
-                });
-            }
-            "unzoom" if class == "env_zoom" => self.view_control.zoom = None,
             // CBaseEntity::InputAddOutput, keyvalue form ("key value"): KeyValue on the
             // entity. Stored as an override that keyvalue readers consult first (only
             // impact damage's physdamagescale reads it so far); the output-connection
@@ -2708,104 +2697,10 @@ impl Scene {
                     _ => self.unsupported_input(class, "AddOutput:malformed"),
                 }
             }
-            "explode" if class == "env_physexplosion" => self.phys_explosions.push(id),
-            "impact" if class == "env_physimpact" => self.phys_impacts.push(id),
-            // CEnvTonemapController: custom auto-exposure limits and the manual tonemap rate.
-            "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
-            "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,
-            "settonemaprate" if class == "env_tonemap_controller" => self.tonemap.rate = value,
-            "setbloomscale" if class == "env_tonemap_controller" => self.tonemap.bloom = value,
-            "usedefaultautoexposure" if class == "env_tonemap_controller" => {
-                self.tonemap = crate::tonemap::Control {
-                    rate: self.tonemap.rate,
-                    bloom: self.tonemap.bloom,
-                    ..Default::default()
-                };
-            }
-            "start" if class == "logic_choreographed_scene" => {
-                self.start_choreography(world, id, p.activator)
-            }
-            "pause" if class == "logic_choreographed_scene" => {
-                if let Some(play) = self
-                    .choreography
-                    .get_mut(&id)
-                    .and_then(|s| s.playback.as_mut())
-                {
-                    play.pause = Some(ScenePause::Input);
-                }
-            }
-            "resume" if class == "logic_choreographed_scene" => {
-                if let Some(play) = self
-                    .choreography
-                    .get_mut(&id)
-                    .and_then(|s| s.playback.as_mut())
-                {
-                    if !matches!(play.pause, Some(ScenePause::UnsupportedControl)) {
-                        play.pause = None;
-                    }
-                }
-            }
-            "cancel" if class == "logic_choreographed_scene" => self.cancel_choreography(id),
-            "forcespawn" if class == "point_template" => {
-                // Templates spawn copies; each authored child is created once here. Repeat
-                // spawns would need new entity instances, which are not implemented.
-                if let Some(children) = self.templates.remove(&id) {
-                    for (child, visible, enabled) in children {
-                        let state = &mut self.states[child];
-                        state.killed = false;
-                        state.visible = visible;
-                        state.enabled = enabled;
-                    }
-                    self.fire(id, "OnEntitySpawned", p.activator);
-                } else {
-                    self.unsupported_input("point_template", "ForceSpawn:repeat");
-                }
-            }
-            "fade" if class == "env_fade" => {
-                // CEnvFade::InputFade: SF_FADE_IN 1, MODULATE 2, ONLYONE 4 (the activating
-                // player only), STAYOUT 8; everyone else gets FFADE_PURGE.
-                use crate::player_damage::*;
-                let flags = number(e, "spawnflags", 0.) as u32;
-                let mut fade = if flags & 1 != 0 { FFADE_IN } else { FFADE_OUT };
-                if flags & 2 != 0 {
-                    fade |= FFADE_MODULATE;
-                }
-                if flags & 8 != 0 {
-                    fade |= FFADE_STAYOUT;
-                }
-                if flags & 4 == 0 {
-                    fade |= FFADE_PURGE;
-                }
-                if flags & 4 == 0 || p.activator == usize::MAX {
-                    let rgb = parse_vec3(e.get("rendercolor").unwrap_or("255 255 255"))
-                        .unwrap_or(Vec3::splat(255.));
-                    let alpha = number(e, "renderamt", 255.);
-                    let byte = |v: f32| v.clamp(0., 255.) as u8;
-                    self.screen_fades.push(ScreenFade::new(
-                        [byte(rgb.x), byte(rgb.y), byte(rgb.z), byte(alpha)],
-                        number(e, "duration", 0.),
-                        number(e, "holdtime", 0.),
-                        fade,
-                    ));
-                }
-                self.fire(id, "OnBeginFade", p.activator);
-            }
             "kill" => {
                 self.states[id].killed = true;
                 self.states[id].visible = false;
                 self.states[id].enabled = false;
-            }
-            "enable" | "disable" | "toggle" if class == "npc_combine_camera" => {
-                // CNPC_CombineCamera Enable/Disable/Toggle drive its open/closed activity.
-                let enabled = match input.as_str() {
-                    "enable" => true,
-                    "disable" => false,
-                    _ => !self.states[id].enabled,
-                };
-                if enabled != self.states[id].enabled {
-                    self.states[id].enabled = enabled;
-                    self.camera_activity(world, id, true);
-                }
             }
             "enable" => {
                 self.states[id].enabled = true;
@@ -2828,7 +2723,7 @@ impl Scene {
             "toggleenabled" if class.starts_with("env_soundscape") => {
                 self.states[id].enabled = !self.states[id].enabled;
             }
-            "toggle" if !door => {
+            "toggle" => {
                 self.states[id].enabled = !self.states[id].enabled;
                 if matches!(class, "func_brush" | "func_monitor") {
                     self.states[id].visible = self.states[id].enabled;
@@ -2857,168 +2752,7 @@ impl Scene {
             "clearparent" => self.states[id].parent = None,
             "lock" => self.states[id].locked = true,
             "unlock" => self.states[id].locked = false,
-            "open" | "close" | "toggle" | "openawayfrom"
-                if door && (input != "openawayfrom" || class == "prop_door_rotating") =>
-            {
-                if self.states[id].locked && input != "close" {
-                    self.fire(id, "OnLockedUse", p.activator);
-                    return;
-                }
-                if class == "prop_door_rotating"
-                    && matches!(input.as_str(), "open" | "openawayfrom")
-                    && self.states[id].target > 0.
-                {
-                    return;
-                }
-                let target = if input == "open" || input == "openawayfrom" {
-                    1.
-                } else if input == "close" {
-                    0.
-                } else {
-                    1. - self.states[id].target
-                };
-                if class == "prop_door_rotating"
-                    && target > 0.
-                    && self.states[id].fraction.abs() < 0.00001
-                {
-                    // Resolve the named opener when the deferred input is delivered,
-                    // using its current origin and the original caller/activator.
-                    let opener = if input == "openawayfrom" {
-                        let name = p.parameter.to_lowercase();
-                        if name == "!player" || name == "!activator" && p.activator == usize::MAX {
-                            Some(player_feet)
-                        } else {
-                            let mut lookup = p.clone();
-                            lookup.target = p.parameter.clone();
-                            self.targets(world, &lookup).into_iter().find_map(|other| {
-                                self.states
-                                    .get(other)
-                                    .filter(|s| !s.killed)
-                                    .map(|s| s.origin)
-                            })
-                        }
-                    } else {
-                        p.opener
-                    };
-                    let state = &mut self.states[id];
-                    let back = match number(e, "opendir", 0.) as i32 {
-                        1 => false,
-                        2 => true,
-                        _ => opener.is_some_and(|origin| {
-                            (state.rotation * Vec3::X).dot(origin - state.origin) > 0.
-                        }),
-                    };
-                    state.angle = state.angle.abs() * if back { 1. } else { -1. };
-                }
-                self.states[id].target = target;
-                self.states[id].return_at = None;
-                self.fire(
-                    id,
-                    if target > 0. { "OnOpen" } else { "OnClose" },
-                    p.activator,
-                );
-            }
-            "setposition" if class == "func_movelinear" => {
-                self.states[id].target = value.clamp(0., 1.)
-            }
-            "trigger" if class == "logic_relay" => {
-                if self.states[id].enabled {
-                    self.fire(id, "OnTrigger", p.activator);
-                    if number(e, "spawnflags", 0.) as u32 & 1 != 0 {
-                        self.states[id].enabled = false;
-                    }
-                }
-            }
-            // CLogicRelay::InputCancelPending: g_EventQueue.CancelEvents(this).
-            "cancelpending" if class == "logic_relay" => self.queue.retain(|q| q.caller != id),
             "firetimer" => self.fire(id, "OnTimer", p.activator),
-            "add" | "subtract" | "setvalue" | "setvaluenofire" if class == "math_counter" => {
-                let min = number(e, "min", 0.);
-                let max = number(e, "max", 0.);
-                let old = self.states[id].value;
-                let mut next = match input.as_str() {
-                    "add" => old + value,
-                    "subtract" => old - value,
-                    _ => value,
-                };
-                if max > min {
-                    next = next.clamp(min, max);
-                }
-                self.states[id].value = next;
-                if input != "setvaluenofire" {
-                    self.fire_value(id, "OutValue", next, p.activator);
-                    if max > min && next >= max && old < max {
-                        self.fire(id, "OnHitMax", p.activator);
-                    }
-                    if max > min && next <= min && old > min {
-                        self.fire(id, "OnHitMin", p.activator);
-                    }
-                }
-            }
-            "setvalue" | "setvaluetest" | "test" if class == "logic_branch" => {
-                if input != "test" {
-                    self.states[id].value = value;
-                }
-                if input != "setvalue" {
-                    self.fire(
-                        id,
-                        if self.states[id].value != 0. {
-                            "OnTrue"
-                        } else {
-                            "OnFalse"
-                        },
-                        p.activator,
-                    );
-                }
-            }
-            "invalue" if class == "logic_case" => {
-                let matched =
-                    (1..=16).find(|i| e.get(&format!("Case{i:02}")) == Some(p.parameter.as_str()));
-                self.fire(
-                    id,
-                    &matched.map_or("OnDefault".into(), |i| format!("OnCase{i:02}")),
-                    p.activator,
-                );
-            }
-            "playsound" | "stopsound" | "togglesound" if class == "ambient_generic" => {
-                // SDK CAmbientGeneric: looping sounds are active from spawn unless they start
-                // silent; PlaySound restarts an inactive sound, StopSound stops an active one,
-                // and only looping sounds stay active.
-                let flags = e
-                    .get("spawnflags")
-                    .and_then(|v| v.trim().parse::<u32>().ok())
-                    .unwrap_or(0);
-                let looping = flags & 32 == 0;
-                let active = *self
-                    .ambient_active
-                    .get(&id)
-                    .unwrap_or(&(looping && flags & 16 == 0));
-                let play = match input.as_str() {
-                    "playsound" => !active,
-                    "stopsound" => false,
-                    _ => !active,
-                };
-                if let Some(sound) = e.get("message").filter(|m| !m.is_empty()) {
-                    if play {
-                        self.ambient_active.insert(id, looping);
-                        self.sounds.push(crate::sounds::SoundRequest {
-                            ambient: Some(crate::sounds::AmbientControl::Play(id)),
-                            ..sound.into()
-                        });
-                    } else if active && input != "playsound" {
-                        self.ambient_active.insert(id, false);
-                        self.sounds.push(crate::sounds::SoundRequest {
-                            ambient: Some(crate::sounds::AmbientControl::Stop(id)),
-                            ..sound.into()
-                        });
-                    }
-                }
-            }
-            "changelevel" if class == "trigger_changelevel" => {
-                if let Some(map) = e.get("map") {
-                    self.transition = Some((map.into(), e.get("landmark").unwrap_or("").into()));
-                }
-            }
             "sethealth" if class.starts_with("npc_") => self.states[id].value = value,
             "setdefaultanimation" if class.starts_with("prop_dynamic") => {
                 // CDynamicProp stores the name without restarting or validating the active clip.
@@ -3026,52 +2760,6 @@ impl Scene {
             }
             "setanimation" if class.starts_with("prop_dynamic") || class.starts_with("npc_") => {
                 self.animate(world, id, &p.parameter, true);
-            }
-            "beginsequence" if class == "scripted_sequence" => self.begin_sequence(world, id),
-            "cancelsequence" if class == "scripted_sequence" => self.end_sequence(world, id, true),
-            "pickrandom" | "pickrandomshuffle" if class == "logic_case" => {
-                let cases = self.states[id]
-                    .outputs
-                    .iter()
-                    .filter_map(|o| {
-                        o.name
-                            .strip_prefix("OnCase")
-                            .and_then(|n| n.parse::<usize>().ok())
-                    })
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                if !cases.is_empty() {
-                    self.random = self
-                        .random
-                        .wrapping_mul(6364136223846793005)
-                        .wrapping_add(1);
-                    let chosen = if input == "pickrandomshuffle" {
-                        let state = &mut self.states[id];
-                        let new_batch = state.shuffle.is_empty();
-                        if new_batch {
-                            state.shuffle = cases;
-                        }
-                        let candidates: Vec<_> = state
-                            .shuffle
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, case)| {
-                                !new_batch
-                                    || state.shuffle.len() == 1
-                                    || Some(**case) != state.last_shuffle
-                            })
-                            .map(|(index, _)| index)
-                            .collect();
-                        let index = candidates[(self.random >> 32) as usize % candidates.len()];
-                        let case = state.shuffle.swap_remove(index);
-                        state.last_shuffle = Some(case);
-                        case
-                    } else {
-                        cases[(self.random >> 32) as usize % cases.len()]
-                    };
-                    self.fire(id, &format!("OnCase{chosen:02}"), p.activator);
-                }
             }
             _ => self.unsupported_input(class, &p.input),
         }
