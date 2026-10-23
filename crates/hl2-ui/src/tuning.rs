@@ -62,15 +62,19 @@ struct ViewmodelTuning {
     /// Width:height where the ultrawide framing reaches full strength (e.g. `32:9`).
     ultrawide_aspect: (u32, u32),
     /// Framing applied to weapons without a per-weapon entry.
+    #[serde(default)]
     default: ViewmodelWeaponTuning,
     /// Per-weapon framing keyed by weapon classname (e.g. `"weapon_physcannon"`, `"weapon_rpg"`).
     weapons: std::collections::BTreeMap<String, ViewmodelWeaponTuning>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
 struct ViewmodelWeaponTuning {
+    #[serde(default)]
     standard: ViewmodelFraming,
+    #[serde(default)]
     portrait: ViewmodelFraming,
+    #[serde(default)]
     ultrawide: ViewmodelFraming,
 }
 
@@ -386,7 +390,54 @@ pub fn tuning_json_with_viewmodel_profiles(
             "offset": framing.offset.map(two_decimals),
         });
     }
-    serde_json::to_string_pretty(&root)
+    Ok(compact_viewmodel_json(root))
+}
+
+/// Pretty-prints the tuning asset with each viewmodel profile on one line and all-zero profiles
+/// (and the weapons or default block left empty by that) omitted, since missing profiles load as
+/// zero.
+fn compact_viewmodel_json(mut root: serde_json::Value) -> String {
+    let is_zero = |profile: &serde_json::Value| {
+        profile["fov_offset"].as_f64() == Some(0.0)
+            && profile["offset"]
+                .as_array()
+                .is_some_and(|v| v.iter().all(|x| x.as_f64() == Some(0.0)))
+    };
+    let mut inline = Vec::new();
+    let mut compact = |block: &mut serde_json::Value| {
+        let Some(map) = block.as_object_mut() else {
+            return;
+        };
+        for name in ["standard", "portrait", "ultrawide"] {
+            if map.get(name).is_some_and(is_zero) {
+                map.remove(name);
+            } else if let Some(profile) = map.get_mut(name) {
+                let number =
+                    |value: &serde_json::Value| format!("{:?}", value.as_f64().unwrap_or(0.0));
+                let offset = profile["offset"].as_array().map_or_else(String::new, |v| {
+                    v.iter().map(number).collect::<Vec<_>>().join(", ")
+                });
+                inline.push(format!(
+                    "{{\"fov_offset\": {}, \"offset\": [{offset}]}}",
+                    number(&profile["fov_offset"])
+                ));
+                *profile = serde_json::Value::String(format!("@@{}@@", inline.len() - 1));
+            }
+        }
+    };
+    let viewmodel = &mut root["viewmodel"];
+    compact(&mut viewmodel["default"]);
+    if let Some(weapons) = viewmodel["weapons"].as_object_mut() {
+        for weapon in weapons.values_mut() {
+            compact(weapon);
+        }
+        weapons.retain(|_, weapon| weapon.as_object().is_none_or(|m| !m.is_empty()));
+    }
+    let mut text = serde_json::to_string_pretty(&root).unwrap_or_default();
+    for (index, line) in inline.iter().enumerate() {
+        text = text.replace(&format!("\"@@{index}@@\""), line);
+    }
+    text
 }
 
 #[cfg(test)]
@@ -543,10 +594,14 @@ mod tests {
             unknown["viewmodel"]["weapons"]["weapon_pistol"]["standard"]["fov_offset"],
             3.0
         );
-        assert_eq!(
-            unknown["viewmodel"]["weapons"]["weapon_pistol"]["portrait"]["fov_offset"], 8.0,
-            "new weapon overrides retain default values for untouched profiles"
+        assert!(
+            unknown["viewmodel"]["weapons"]["weapon_pistol"]["portrait"].is_null(),
+            "untouched zero profiles are omitted"
         );
+        assert!(unknown["viewmodel"]["default"]["standard"].is_null());
+        assert!(unknown_weapon_snapshot.contains(
+            "\"weapon_crowbar\": {\n        \"portrait\": {\"fov_offset\": 8.0, \"offset\": [0.0, 0.0, -11.0]},\n        \"ultrawide\": {\"fov_offset\": 30.0, \"offset\": [0.0, 0.0, -3.5]}\n      },"
+        ));
     }
 
     #[test]
