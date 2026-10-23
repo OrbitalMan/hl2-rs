@@ -1,0 +1,11 @@
+[package]
+name = "hl2-shared"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+anyhow.workspace = true
+glam.workspace = true
+serde.workspace = true
+source-assets.workspace = true

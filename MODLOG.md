@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-10-23 hl2-ui no longer depends on hl2-simulation: new hl2-shared crate
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New workspace crate `hl2-shared` (glam, serde, anyhow, source-assets), with code moved verbatim from hl2-simulation: `weapons` (`Weapon`, `definitions`, the weapon list and the `hl2_english.txt` name lookup), `damage` (the `DMG_*` and `FFADE_*` bits, `TIME_BASED`, `SHOW_ON_HUD`, `ScreenFade`, `DamageMessage`), `selection` (the whole bucket selection module) and `VIEWMODEL_FOV`.
+- New `hl2_shared::inventory::InventoryView`: a read-only, `dyn`-usable trait (active, previous, health, armor, suit, owned, ammo; `reserve_for` / `secondary_for` provided). `selection` and the HUD read the inventory through `&dyn InventoryView`. hl2-simulation's `Inventory` implements it and keeps its fields; its `reserve_for` / `secondary_for` call the trait's single copy of that logic.
+- hl2-simulation re-exports everything at the old paths (`gameplay::{definitions, Weapon}`, `player_damage::*`, `selection::*`, `viewmodel_effects::VIEWMODEL_FOV`), so its code and hl2-bevy are unchanged. The selection tests stay in hl2-simulation, unchanged, against the real `Inventory`.
+- hl2-ui depends on hl2-shared instead of hl2-simulation. Its HUD tests get a test-only `Inventory` (the fields the HUD reads, plus the simulation inventory's `give` granting rules, `give_ammo` and `refill_ammo` copied for test setup); the test bodies and assertions are unchanged apart from two `definitions` import paths.
+- AGENTS.md, README, CONTRIBUTING and DESIGN describe the new crate.
+
+**Why:** Code review: the UI crate pulled in Rapier and Symphonia through hl2-simulation. The review listed `ScreenFade`, `DamageMessage`, `definitions` and `VIEWMODEL_FOV`; the HUD also takes `Inventory`, `Weapon` and the selection module in its public drawing functions. `Inventory` holds physics and projectile types and its fields are used about 200 times, so a read-only trait replaces moving it. A new crate rather than modkit-core: modkit-core stays at glam/serde and mod-neutral, and weapon script parsing needs source-assets and anyhow.
+
+**Tested how:** `cargo tree -p hl2-ui` (normal, build and dev dependencies) lists no rapier3d, symphonia or hl2-simulation. `scripts/checks/validate.sh` (1,021 tests, strict Clippy, fmt), the Windows-target check and the owned-install tests (23 hl2-simulation, 10 hl2-ui) pass. Cargo.lock changes only by the new package and the edited dependency lists. Full packaged replay suite, one game at a time: 94 of 94; comparing its reports with the baseline run (1,439 labelled samples), only fields the replay checks already mark as varying between runs differ (`occluded_blast_targets`; pallet `hits` and `ray`).
+
+**Result:** hl2-ui builds without the simulation, physics and audio decoders.
+
+**Still broken or not tested:** hl2-shared has no tests of its own (its selection logic is tested from hl2-simulation; `definitions` by the owned-install tests). The Windows-only owned crosshair pixel test was not run (macOS).
+
+**Next:** Step 4: split the oversized files.
+
 ## 2026-10-23 Entity inputs dispatch through a class table
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

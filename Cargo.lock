@@ -3124,11 +3124,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hl2-shared"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam 0.27.0",
+ "serde",
+ "source-assets",
+]
+
+[[package]]
 name = "hl2-simulation"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "glam 0.27.0",
+ "hl2-shared",
  "hound",
  "modkit-core",
  "rapier3d",
@@ -3145,7 +3156,7 @@ dependencies = [
  "anyhow",
  "fontdue",
  "glam 0.27.0",
- "hl2-simulation",
+ "hl2-shared",
  "modkit-core",
  "serde",
  "serde_json",

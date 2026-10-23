@@ -12,9 +12,15 @@ output, errors, effects, UI behaviour or gameplay outcomes.
    `hl2-simulation::entities::Scene::deliver`, starting with the door family, triggers and
    `logic_*`; the order of the special cases (monitors, `env_global`, `npc_template_maker`, AI
    inputs) is kept.
-3. `hl2-ui` stops depending on `hl2-simulation` (only `player_damage::{ScreenFade,
-   DamageMessage}`, `gameplay::definitions` and `viewmodel_effects::VIEWMODEL_FOV` are used), so
-   the UI crate no longer pulls in Rapier and Symphonia.
+3. `hl2-ui` stops depending on `hl2-simulation`, so the UI crate no longer pulls in Rapier and
+   Symphonia. Besides `player_damage::{ScreenFade, DamageMessage}` (and the damage/fade bits),
+   `gameplay::definitions` and `viewmodel_effects::VIEWMODEL_FOV`, the HUD reads
+   `gameplay::{Inventory, Weapon}` and the `selection` module. These move verbatim into a new
+   `hl2-shared` crate (a new crate rather than modkit-core, which stays at glam/serde and
+   mod-neutral; weapon script parsing needs source-assets and anyhow). The HUD and selection read
+   the inventory through `hl2_shared::inventory::InventoryView` (`&dyn`), which the simulation's
+   `Inventory` implements; `Inventory` keeps its fields (about 200 accesses), and hl2-simulation
+   re-exports everything at the old paths.
 4. Oversized files are split: test modules first, then `console.rs` by concern (windows/focus,
    menu flow, the Options lifecycle), and `entities.rs` / `ai/runtime.rs` if step 2 leaves them
    large.
@@ -222,7 +228,7 @@ The bootstrap window runs in a short-lived helper process so the gameplay proces
 
 Reconstruct HL2 in Rust using owned content. No host-game transport or Valve DLL dependency. Native analysis/databases stay private; public source contains original implementation and permitted third-party resources.
 
-Owned VPK/loose/map content -> source-assets bounded decoders -> modkit-core contracts/player/pose math -> hl2-simulation gameplay/choreography/Rapier -> Bevy or retained presentation. hl2-ui records CPU draw commands for both hosts. Setup or asynchronous transitions load resources; frame systems consume prepared data.
+Owned VPK/loose/map content -> source-assets bounded decoders -> modkit-core contracts/player/pose math -> hl2-simulation gameplay/choreography/Rapier -> Bevy or retained presentation. hl2-ui records CPU draw commands for both hosts; it shares player data with the simulation through hl2-shared (weapons, selection, damage/fade messages, `InventoryView`) and does not depend on hl2-simulation. Setup or asynchronous transitions load resources; frame systems consume prepared data.
 
 AGENTS.md records fixed-step order and renderer invariants. Bevy uses custom materials/lightmaps, separate sky/world/viewmodel/HUD cameras, GPU skinning/current bounds and player/monitor PVS/frustum rejection. Identical material/lightmap pairs share handles. Spatial splitting remains off by default. Replacing Rapier is a separate behavior migration.
 

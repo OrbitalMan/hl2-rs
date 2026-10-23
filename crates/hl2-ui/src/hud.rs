@@ -4,9 +4,10 @@ use crate::canvas::*;
 use crate::gameui::localize::Localization;
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
-use hl2_simulation::{
-    gameplay::{Inventory, Weapon},
+use hl2_shared::{
+    inventory::InventoryView,
     selection::{self, Selection, WEAPON_SLOTS},
+    weapons::Weapon,
 };
 use source_assets::{
     keyvalues::{self, Entry},
@@ -1086,7 +1087,7 @@ impl NumericHudEffects {
     }
     fn observe(
         &mut self,
-        inv: &Inventory,
+        inv: &dyn InventoryView,
         weapons: &BTreeMap<String, Weapon>,
         time: f64,
         rules: &[Animate],
@@ -1109,7 +1110,7 @@ impl NumericHudEffects {
             }
         }
         self.advance(time);
-        let health = (inv.health as i32).max(0);
+        let health = (inv.health() as i32).max(0);
         if health != self.health {
             if health >= 20 {
                 self.start("HealthIncreasedAbove20", time, rules, events, settings);
@@ -1121,7 +1122,7 @@ impl NumericHudEffects {
             // damage indicator's message handler.
             self.health = health;
         }
-        let armor = inv.armor as i32;
+        let armor = inv.armor() as i32;
         if armor != self.armor {
             if armor == 0 {
                 self.start("SuitPowerZero", time, rules, events, settings);
@@ -1141,11 +1142,11 @@ impl NumericHudEffects {
             self.armor = armor;
         }
         if let Some(weapon) = weapons
-            .get(&inv.active)
+            .get(inv.active())
             .filter(|w| !w.ammo_type.is_empty() && !w.ammo_type.eq_ignore_ascii_case("none"))
         {
-            let clip = inv.owned.get(&inv.active).copied().unwrap_or(-1);
-            let reserve = inv.reserve_for(&inv.active, weapons);
+            let clip = inv.owned().get(inv.active()).copied().unwrap_or(-1);
+            let reserve = inv.reserve_for(inv.active(), weapons);
             let ammo = if clip < 0 { reserve } else { clip };
             let ammo2 = if clip < 0 { 0 } else { reserve };
             if ammo != self.ammo {
@@ -1170,7 +1171,7 @@ impl NumericHudEffects {
                 self.start(event, time, rules, events, settings);
                 self.reserve = ammo2;
             }
-            if self.active != inv.active {
+            if self.active != inv.active() {
                 // Retail/SDK SetAmmo's playAnimation argument is unused; WeaponChanged follows.
                 self.start(
                     if clip < 0 {
@@ -1184,14 +1185,14 @@ impl NumericHudEffects {
                     settings,
                 );
                 self.start("WeaponChanged", time, rules, events, settings);
-                self.active.clone_from(&inv.active);
+                self.active = inv.active().to_owned();
             }
             let _ = weapon;
         }
-        if let Some(weapon) = weapons.get(&inv.active) {
+        if let Some(weapon) = weapons.get(inv.active()) {
             let uses_secondary = uses_secondary_ammo(weapon);
             if uses_secondary {
-                let ammo = inv.secondary_for(&inv.active, weapons);
+                let ammo = inv.secondary_for(inv.active(), weapons);
                 if ammo != self.secondary_ammo {
                     let event = if ammo == 0 {
                         "AmmoSecondaryEmpty"
@@ -1204,7 +1205,7 @@ impl NumericHudEffects {
                     self.secondary_ammo = ammo;
                 }
             }
-            if self.secondary_active != inv.active {
+            if self.secondary_active != inv.active() {
                 self.start(
                     if uses_secondary {
                         "WeaponUsesSecondaryAmmo"
@@ -1216,7 +1217,7 @@ impl NumericHudEffects {
                     events,
                     settings,
                 );
-                self.secondary_active.clone_from(&inv.active);
+                self.secondary_active = inv.active().to_owned();
             }
         } else {
             self.secondary_active.clear();
@@ -1412,16 +1413,16 @@ impl QuickInfoHud {
         self.font
             .draw_cropped(full, origin, vec2(offset, height), color);
     }
-    fn draw(&self, inv: &Inventory, weapons: &BTreeMap<String, Weapon>, time: f64) {
-        let Some(weapon) = weapons.get(&inv.active) else {
+    fn draw(&self, inv: &dyn InventoryView, weapons: &BTreeMap<String, Weapon>, time: f64) {
+        let Some(weapon) = weapons.get(inv.active()) else {
             return;
         };
-        if inv.health <= 0. || !time.is_finite() {
+        if inv.health() <= 0. || !time.is_finite() {
             return;
         }
-        let ammo = inv.owned.get(&inv.active).copied().unwrap_or(-1);
+        let ammo = inv.owned().get(inv.active()).copied().unwrap_or(-1);
         let mut state = self.state.borrow_mut();
-        let dt = state.observe(inv.health as i32, ammo, weapon.magazine, time);
+        let dt = state.observe(inv.health() as i32, ammo, weapon.magazine, time);
         let opacity = state.alpha.clamp(0., 255.) / 255.;
         let x = (self.canvas.width() * 0.5).trunc();
         let y = (self.canvas.height() * 0.5).trunc() - self.font.size().round() * 0.5;
@@ -1461,7 +1462,7 @@ impl QuickInfoHud {
                     &self.left,
                     &self.left_empty,
                     origin,
-                    1. - inv.health / 100.,
+                    1. - inv.health() / 100.,
                     color,
                 );
             }
@@ -1889,7 +1890,7 @@ impl WeaponHud {
     }
 
     /// A ScreenFade message (DamageEffect or env_fade) on the game clock.
-    pub fn screen_fade(&self, fade: hl2_simulation::player_damage::ScreenFade, time: f64) {
+    pub fn screen_fade(&self, fade: hl2_shared::damage::ScreenFade, time: f64) {
         self.fades.borrow_mut().add(fade, time);
     }
     pub fn clear_fades(&self) {
@@ -1924,16 +1925,14 @@ impl WeaponHud {
     #[allow(clippy::too_many_arguments)]
     pub fn damage_message(
         &self,
-        message: hl2_simulation::player_damage::DamageMessage,
+        message: hl2_shared::damage::DamageMessage,
         view_origin: glam::Vec3,
         view_yaw: f32,
         suit: bool,
         health: f32,
         time: f64,
     ) {
-        use hl2_simulation::player_damage::{
-            DMG_ACID, DMG_BURN, DMG_DROWN, DMG_POISON, DMG_RADIATION,
-        };
+        use hl2_shared::damage::{DMG_ACID, DMG_BURN, DMG_DROWN, DMG_POISON, DMG_RADIATION};
         let start = |event: &str| {
             self.numeric_effects.borrow_mut().start(
                 event,
@@ -2120,7 +2119,7 @@ impl WeaponHud {
     pub fn draw_selection(
         &self,
         selection: &Selection,
-        inv: &Inventory,
+        inv: &dyn InventoryView,
         weapons: &BTreeMap<String, Weapon>,
         time: f64,
     ) {
@@ -2131,7 +2130,7 @@ impl WeaponHud {
         let Some(selected_weapon) = weapons.get(pending) else {
             return;
         };
-        if !inv.suit || inv.health <= 0. || selection.fast_switch || time > selection.until {
+        if !inv.suit() || inv.health() <= 0. || selection.fast_switch || time > selection.until {
             return;
         }
         let scale = crate::proportional::scale(self.canvas_size());
@@ -2319,7 +2318,7 @@ impl WeaponHud {
 
     pub fn draw_status(
         &self,
-        inv: &Inventory,
+        inv: &dyn InventoryView,
         weapons: &BTreeMap<String, Weapon>,
         _selection: &Selection,
         time: f64,
@@ -2345,31 +2344,31 @@ impl WeaponHud {
         );
         self.draw_damage_indicator(effects.panels[NumericPanel::DamageIndicator as usize]);
         self.quick_info.draw(inv, weapons, time);
-        if !inv.suit || inv.health <= 0. {
+        if !inv.suit() || inv.health() <= 0. {
             return;
         }
         self.numeric_panel(
             &self.health_panel,
             &self.health_label,
-            inv.health as i32,
+            inv.health() as i32,
             None,
             effects.panels[NumericPanel::Health as usize],
         );
         self.numeric_panel(
             &self.suit_panel,
             &self.suit_label,
-            inv.armor as i32,
+            inv.armor() as i32,
             None,
             effects.panels[NumericPanel::Suit as usize],
         );
         // HIDEHUD_WEAPONSELECTION is a player hide-bit. Opening the bucket selector
         // does not set it; the active weapon's ammunition remains visible.
-        let Some(weapon) = weapons.get(&inv.active) else {
+        let Some(weapon) = weapons.get(inv.active()) else {
             return;
         };
         if !weapon.ammo_type.is_empty() && !weapon.ammo_type.eq_ignore_ascii_case("none") {
-            let clip = inv.owned.get(&inv.active).copied().unwrap_or(-1);
-            let reserve = inv.reserve_for(&inv.active, weapons);
+            let clip = inv.owned().get(inv.active()).copied().unwrap_or(-1);
+            let reserve = inv.reserve_for(inv.active(), weapons);
             self.numeric_panel(
                 &self.ammo_panel,
                 &self.ammo_label,
@@ -2380,7 +2379,7 @@ impl WeaponHud {
             self.ammo_icon(
                 &self.ammo_panel,
                 &self.ammo_label,
-                self.ammo_icons.get(&inv.active),
+                self.ammo_icons.get(inv.active()),
                 effects.panels[NumericPanel::Ammo as usize],
             );
         }
@@ -2395,7 +2394,7 @@ impl WeaponHud {
         self.ammo_icon(
             &self.secondary_ammo_panel,
             &self.alt_label,
-            self.secondary_ammo_icons.get(&inv.active),
+            self.secondary_ammo_icons.get(inv.active()),
             secondary_effects,
         );
     }
@@ -2425,11 +2424,11 @@ impl WeaponHud {
         }
     }
 
-    pub fn draw_crosshair(&self, inv: &Inventory) {
-        if inv.health <= 0. {
+    pub fn draw_crosshair(&self, inv: &dyn InventoryView) {
+        if inv.health() <= 0. {
             return;
         }
-        let Some(character) = self.weapon_crosshairs.get(&inv.active) else {
+        let Some(character) = self.weapon_crosshairs.get(inv.active()) else {
             // CHudCrosshair::ResetCrosshair uses the installed default sprite and opaque white.
             let (destination, source) = default_crosshair_rects(
                 vec2(self.canvas.width(), self.canvas.height()),
@@ -2501,6 +2500,132 @@ impl WeaponHud {
 mod tests {
     use super::*;
 
+    /// The inventory fields the HUD reads, with the simulation inventory's ammunition and
+    /// pickup rules the tests set up state with (`give` only grants: no deploy, holster or
+    /// animation state), so the UI tests need no simulation crate.
+    struct Inventory {
+        previous: String,
+        health: f32,
+        armor: f32,
+        suit: bool,
+        active: String,
+        owned: BTreeMap<String, i32>,
+        pistol_ammo: i32,
+        reserve_ammo: BTreeMap<String, i32>,
+    }
+
+    impl Inventory {
+        /// The simulation inventory's defaults: full health, no suit, nothing owned.
+        fn default() -> Self {
+            Self {
+                previous: String::new(),
+                health: 100.,
+                armor: 0.,
+                suit: false,
+                active: String::new(),
+                owned: BTreeMap::new(),
+                pistol_ammo: 0,
+                reserve_ammo: BTreeMap::new(),
+            }
+        }
+    }
+
+    impl InventoryView for Inventory {
+        fn active(&self) -> &str {
+            &self.active
+        }
+        fn previous(&self) -> &str {
+            &self.previous
+        }
+        fn health(&self) -> f32 {
+            self.health
+        }
+        fn armor(&self) -> f32 {
+            self.armor
+        }
+        fn suit(&self) -> bool {
+            self.suit
+        }
+        fn owned(&self) -> &BTreeMap<String, i32> {
+            &self.owned
+        }
+        fn ammo(&self, ammo_type: &str) -> i32 {
+            if ammo_type.eq_ignore_ascii_case("Pistol") {
+                self.pistol_ammo.max(0)
+            } else {
+                self.reserve_ammo
+                    .get(ammo_type)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(0)
+            }
+        }
+    }
+
+    impl Inventory {
+        fn set_ammo(&mut self, ammo_type: &str, value: i32) {
+            if ammo_type.eq_ignore_ascii_case("Pistol") {
+                self.pistol_ammo = value.max(0);
+            } else if !ammo_type.eq_ignore_ascii_case("None") && !ammo_type.is_empty() {
+                self.reserve_ammo.insert(ammo_type.into(), value.max(0));
+            }
+        }
+        fn give_ammo(
+            &mut self,
+            ammo_type: &str,
+            amount: i32,
+            weapons: &BTreeMap<String, Weapon>,
+        ) -> i32 {
+            let Some((canonical, maximum)) = weapons.values().find_map(|w| {
+                if w.ammo_type.eq_ignore_ascii_case(ammo_type) && w.ammo_max > 0 {
+                    Some((&w.ammo_type, w.ammo_max))
+                } else if w.secondary_ammo_type.eq_ignore_ascii_case(ammo_type)
+                    && w.secondary_ammo_max > 0
+                {
+                    Some((&w.secondary_ammo_type, w.secondary_ammo_max))
+                } else {
+                    None
+                }
+            }) else {
+                return 0;
+            };
+            let old = self.ammo(canonical);
+            let added = amount.max(0).min((maximum - old).max(0));
+            self.set_ammo(canonical, old + added);
+            added
+        }
+        fn refill_ammo(&mut self, weapons: &BTreeMap<String, Weapon>) {
+            for w in weapons.values().filter(|w| w.ammo_max > 0) {
+                self.set_ammo(&w.ammo_type, w.ammo_max);
+            }
+            self.give_ammo("SMG1_Grenade", 3, weapons);
+            self.give_ammo("AR2AltFire", 5, weapons);
+        }
+        fn give(&mut self, class: &str, weapons: &BTreeMap<String, Weapon>, _time: f64) {
+            let Some(w) = weapons.get(class) else {
+                return;
+            };
+            if w.magazine < 0 && !self.owned.contains_key(class) && w.ammo_max > 0 {
+                self.owned.insert(class.into(), -1);
+                let ammo = w.ammo_type.clone();
+                self.give_ammo(&ammo, w.default_clip.max(0), weapons);
+            }
+            if !self.owned.contains_key(class) {
+                let clip = if w.magazine > 0 && w.default_clip > w.magazine {
+                    let ammo = w.ammo_type.clone();
+                    self.give_ammo(&ammo, w.default_clip - w.magazine, weapons);
+                    w.magazine
+                } else {
+                    w.default_clip
+                };
+                self.owned.insert(class.into(), clip);
+            }
+            if self.active != class {
+                self.previous = std::mem::replace(&mut self.active, class.into());
+            }
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     #[ignore = "requires an owned Half-Life 2 installation"]
@@ -2550,7 +2675,7 @@ mod tests {
         let vfs = Vfs::mount(&root).unwrap();
         let canvas = Canvas::default();
         let mut hud = WeaponHud::load(&vfs, canvas.clone()).unwrap();
-        let weapons = hl2_simulation::gameplay::definitions(&vfs).unwrap();
+        let weapons = hl2_shared::weapons::definitions(&vfs).unwrap();
         let mut inventory = Inventory::default();
         inventory.health = 100.;
         inventory.suit = true;
@@ -2618,7 +2743,7 @@ mod tests {
         assert!(canvas.drain().is_empty());
         inventory.health = 100.;
         inventory.suit = true;
-        let weapons = hl2_simulation::gameplay::definitions(&vfs).unwrap();
+        let weapons = hl2_shared::weapons::definitions(&vfs).unwrap();
         inventory.give("weapon_smg1", &weapons, 0.);
         inventory.give("weapon_shotgun", &weapons, 0.);
         inventory.active = "weapon_smg1".into();

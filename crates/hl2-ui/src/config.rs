@@ -311,7 +311,7 @@ impl Default for VideoSettings {
             flexible_aspect: false,
             fov: 75.0,
             vertical_fov: 0.0,
-            viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,
+            viewmodel_fov: hl2_shared::VIEWMODEL_FOV,
             hdr: HdrMode::None,
             hud_aspect: HudAspect::Fit,
             gamma: 2.2,

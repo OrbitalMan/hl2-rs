@@ -426,8 +426,7 @@ pub fn anchor_position(rig: &Rig, matrices: &[Mat4], anchor: &Anchor) -> Option<
 /// with the world FOV, keeping its depth, and the world pass draws them at their world
 /// size. Drawn in the viewmodel camera instead, sizes and widths scale by
 /// tan(viewmodel FOV / 2) / tan(world FOV / 2) (Source 4:3 horizontal degrees).
-/// The retail `viewmodel_fov` (the host's viewmodel camera, Source 4:3 horizontal degrees).
-pub const VIEWMODEL_FOV: f32 = 54.;
+pub use hl2_shared::VIEWMODEL_FOV;
 /// CViewRender::SetUpView: the viewmodel FOV follows any FOV offset of the view
 /// (`viewmodel_fov - (default_fov - fov)`, `base` being the `viewmodel_fov` setting), so the
 /// retail crossbow zoom (FOV 20) drives it to -1 and the view moves past the viewmodel; at or

@@ -1,7 +1,7 @@
 //! Client screen fades: SDK CViewEffects::Fade / FadeCalculate (view_effects.cpp).
 //! Each fade keeps its own timing; the frame uses the highest alpha, the average color
 //! and a modulate blend when any fade modulates. Times are the paused game clock.
-use hl2_simulation::player_damage::{
+use hl2_shared::damage::{
     ScreenFade, FFADE_IN, FFADE_MODULATE, FFADE_OUT, FFADE_PURGE, FFADE_STAYOUT,
 };
 
