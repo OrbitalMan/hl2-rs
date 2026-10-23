@@ -548,12 +548,18 @@ mod tests {
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
+            // Parallel tests can read the same clock value (microseconds on macOS): the counter
+            // keeps their folders apart, so one test's cleanup never deletes another's.
+            static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let count = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let root =
-                std::env::temp_dir().join(format!("hl2-setup-test-{}-{nonce}", std::process::id()));
+            let root = std::env::temp_dir().join(format!(
+                "hl2-setup-test-{}-{nonce}-{count}",
+                std::process::id()
+            ));
             for file in [
                 "hl2/gameinfo.txt",
                 "hl2/scripts/game_sounds_manifest.txt",

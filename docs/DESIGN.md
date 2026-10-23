@@ -1,5 +1,28 @@
 # Design
 
+## Architecture review: structure without behaviour change (2026-10-23)
+
+Code review findings, worked through in order, one reviewable commit each. None changes console
+output, errors, effects, UI behaviour or gameplay outcomes.
+
+1. Console commands are described once: each `console::commands::Spec` carries its handler (and a
+   cvar its value), the handlers live in `console/commands/` by area, `Console::interpret` only
+   dispatches.
+2. Entity inputs dispatch through a class-to-handler table instead of class-name comparisons in
+   `hl2-simulation::entities::Scene::deliver`, starting with the door family, triggers and
+   `logic_*`; the order of the special cases (monitors, `env_global`, `npc_template_maker`, AI
+   inputs) is kept.
+3. `hl2-ui` stops depending on `hl2-simulation` (only `player_damage::{ScreenFade,
+   DamageMessage}`, `gameplay::definitions` and `viewmodel_effects::VIEWMODEL_FOV` are used), so
+   the UI crate no longer pulls in Rapier and Symphonia.
+4. Oversized files are split: test modules first, then `console.rs` by concern (windows/focus,
+   menu flow, the Options lifecycle), and `entities.rs` / `ai/runtime.rs` if step 2 leaves them
+   large.
+
+Validation per step: `scripts/checks/validate.sh`, the Windows-target check, the packaged console
+and UI replays (steps 1 and 4) or the full replay suite with every gameplay outcome unchanged
+(steps 2-4).
+
 ## Portrait viewmodels and Fit Display handoff (2026-10-22)
 
 Portrait framing remains data-driven in `assets/ui/tuning.json`: `fov_offset` adjusts horizontal

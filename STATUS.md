@@ -2,6 +2,11 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
+## Architecture review: structure without behaviour change (2026-10-23)
+
+- Plan in docs/DESIGN.md (same title). Every step keeps output, errors, effects and gameplay outcomes unchanged and is verified by `scripts/checks/validate.sh`, the Windows-target check and packaged replays.
+- Fixed: a flaky hl2-bevy setup test. Parallel `setup` tests could share one temporary folder (the macOS clock moves in microseconds), so one test's cleanup deleted another's `response.json`; the folder name now carries a counter.
+
 ## Startup memory: a gameplay `--map` loads directly (2026-10-23)
 
 - A heap profile of one packaged fixture (`bevy-frag-lob`, d1_trainstation_02, 1280x720, `footprint` plus `malloc_history` with stack logging) against a headless build of main: startup always loaded the menu background (`hl2/background01`) on the main thread before the campaign loader loaded `--map`, so both maps were live during the load, and after the switch ~0.8 GB of the freed background stayed resident (resident heap above live heap; main: none). `malloc_zone_pressure_relief` after the switch released 0 bytes (tried and dropped).

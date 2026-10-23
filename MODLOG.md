@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-23 Setup tests no longer share a temporary folder
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `hl2-bevy::setup` test `Fixture::new` adds a per-process counter to its temporary folder name (`hl2-setup-test-<pid>-<clock>-<count>`). Test-only; no runtime change.
+
+**Why:** `setup::tests::failed_validation_stays_in_setup_and_success_hands_off_selected_path` failed once in a full `scripts/checks/validate.sh` run (`response.json` missing at setup.rs:654). The folder name was the process id plus the clock in nanoseconds, but the macOS clock moves in microseconds, so two fixtures created in parallel tests can get the same folder and one test's cleanup deletes the other's files.
+
+**Tested how:** `cargo test -p hl2-bevy setup::` five times in a row (5 tests each, all pass); `scripts/checks/validate.sh` (1,020 tests, strict Clippy, fmt) and the Windows-target check pass.
+
+**Result:** Each fixture has its own folder.
+
+**Still broken or not tested:** The old failure rate was not measured (one failure seen).
+
+**Next:** none.
+
 ## 2026-10-23 Per-console load progress; validate.sh runs the whole workspace
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
