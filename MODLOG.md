@@ -14,7 +14,7 @@
 
 **Still broken or not tested:** The fallback for a map that passes installation validation but fails to load is not exercised: installation validation rejects missing and invalid BSPs before startup. Full suite not rerun after the log line (only the five console/campaign checks). Remaining ~1 GB gap to main not fixed (fontdue caption faces ~166 MB, `Console::load` ~99 MB, Metal command-buffer storage, ~0.5 GB resident but not live heap, more graphics memory). `loading_dialog_state_transitions_and_dismissal` is flaky under parallel tests (shared loading progress).
 
-**Next:** Share one parsed font between caption styles that use the same file; make the loading-progress test independent of other tests.
+**Next:** Make the loading-progress test independent of other tests. (Sharing parsed caption fonts saves nothing: the four styles use four different DejaVu Sans files.)
 
 ## 2026-10-23 Cap parallel replays by physical memory
 
