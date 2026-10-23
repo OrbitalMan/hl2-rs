@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-23: fresh-control limits, core-state audit and handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents; no Rust implementation changes.
+
+**Changed / Why:** Preserved two partial fresh non-Frida comparisons without promoting their failed crossing/placement to exit success. Audited actual frozen-X carry-state fields beyond setter requests and added a finite first-map completion audit/navigator. The instrumented X exit remains valid; original 16 authored gaps/full semantics remain open.
+
+**Tested how / Result:** W/X/Y/Z/AA seals pass 28/694/498/631/17 retained files. AA checks six reused identities, 126 byte records, 12 mass-set pairs and five damping phases. Independent navigator checks 1868 files, 27 exact dependencies/33 per-root occurrences and 22 CLI cases. All three owned games closed/settings unchanged. Two bounded engine text queries return no candidate; no new body or native execution for that preparation. Documentation-only checks; Rust tests/builds not run.
+
+**Still broken or not tested / Next:** Fresh window passage/exit remains unconfirmed. Isolated phase timing, full audiovisual/solver/transfer semantics, ordinary unassisted campaign and Rust parity remain untested. Validate actual native input acknowledgement in a separate bounded harness before another campaign attempt. Precise private continuation/closeout receipt supersede earlier pointers.
+
 ## 2026-10-23: native storage interaction and first-map exit research
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents. Claude's Rust implementation unchanged by Codex.
