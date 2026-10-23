@@ -254,6 +254,16 @@ pub fn pool_count(class: &str) -> usize {
         _ => POOL_PER_CLASS,
     }
 }
+/// Pooled slots per overlay entry: plain npc_citizen keeps one template per random head
+/// (each spawn picks the least-used head like CNPC_Citizen::SelectModel), the rest
+/// `pool_count` of their class.
+pub fn pool_slots(label: &str) -> usize {
+    if label == "npc_citizen" {
+        crate::citizens::RANDOM_HEADS.len()
+    } else {
+        pool_count(spawn_class(label).0)
+    }
+}
 /// Append the hidden spawn pool to a freshly loaded map's entities (before models
 /// load). Existing entity ids are unchanged; the pool goes at the end.
 pub fn append_pool(world: &mut modkit_core::World) {
@@ -262,7 +272,11 @@ pub fn append_pool(world: &mut modkit_core::World) {
         let Some(model) = default_model(class) else {
             continue;
         };
-        for _ in 0..pool_count(class) {
+        // Plain npc_citizen keeps one template per random head: each spawn picks the
+        // least-used head like CNPC_Citizen::SelectModel (citizens::least_used_template);
+        // the variants keep POOL_PER_CLASS heads chosen at load.
+        let heads = *label == "npc_citizen";
+        for slot in 0..pool_slots(label) {
             let mut properties: Vec<(String, String)> = vec![
                 ("classname".into(), class.into()),
                 (
@@ -271,6 +285,12 @@ pub fn append_pool(world: &mut modkit_core::World) {
                 ),
                 (POOL_KEY.into(), (*label).into()),
             ];
+            if heads {
+                // A fixed head: SelectModel's non-random branch adds the group folder.
+                properties.push(("model".into(), crate::citizens::RANDOM_HEADS[slot].into()));
+                world.entities.push(modkit_core::Entity { properties });
+                continue;
+            }
             // Citizens get their head from SelectModel (citizens::select_models).
             if class != "npc_citizen" && !keyvalues.iter().any(|(k, _)| *k == "model") {
                 properties.push(("model".into(), model.into()));
@@ -378,8 +398,21 @@ pub struct SpawnRequest {
     pub ent_create: bool,
     /// The yaw of an ent_create `angles` keyvalue (degrees).
     pub yaw: Option<f32>,
+    /// ent_create's `squadname` keyvalue (CAI_BaseNPC m_SquadName).
+    pub squad: Option<String>,
 }
 impl SpawnRequest {
+    /// Keyvalues the new entity gets before it spawns (targetname, squadname).
+    pub fn keyvalues(&self) -> Vec<(&'static str, String)> {
+        let mut keyvalues = Vec::new();
+        if let Some(name) = &self.name {
+            keyvalues.push(("targetname", name.clone()));
+        }
+        if let Some(squad) = &self.squad {
+            keyvalues.push(("squadname", squad.clone()));
+        }
+        keyvalues
+    }
     /// The pool entry this request draws from.
     pub fn pool_label(&self) -> &str {
         if self.variant.is_empty() {
@@ -450,7 +483,8 @@ impl Console {
     /// [name]`, `npc_create_equipment <weapon>`, `prop_physics_create <model>` (SDK
     /// CC_Prop_Physics_Create: exactly one argument, else nothing happens) and
     /// `ent_create <class> [key value ...]` (CC_Ent_Create; here only NPC classes, with
-    /// targetname / additionalequipment / NumGrenades, and physics props with a model).
+    /// targetname / squadname / additionalequipment / NumGrenades / angles, and physics
+    /// props with a model).
     /// Ok(None) for other commands.
     pub fn parse(&mut self, line: &str) -> Result<Option<Command>, String> {
         let args = tokens(line);
@@ -540,6 +574,7 @@ impl Console {
                             .filter(|_| reads_num_grenades(&class))
                             .and_then(|n| n.parse().ok()),
                         ent_create: true,
+                        squad: value("squadname").map(str::to_owned),
                         // "pitch yaw roll" (CBaseEntity::KeyValue angles).
                         yaw: value("angles")
                             .and_then(|a| a.split_whitespace().nth(1)?.parse().ok()),
@@ -1553,8 +1588,14 @@ mod tests {
         append_pool(&mut world);
         assert_eq!(
             world.entities.len(),
-            SPAWN_CLASSES.iter().map(|c| pool_count(c)).sum::<usize>()
+            SPAWN_CLASSES.iter().map(|c| pool_slots(c)).sum::<usize>()
         );
+        // Plain citizens: one template per random head, each with its fixed head.
+        let heads: Vec<&str> = templates(&world, "npc_citizen")
+            .into_iter()
+            .map(|id| world.entities[id].get("model").unwrap())
+            .collect();
+        assert_eq!(heads, crate::citizens::RANDOM_HEADS);
         assert!(SPAWN_CLASSES
             .iter()
             .all(|c| default_model(spawn_class(c).0).is_some()));
@@ -1639,6 +1680,14 @@ mod tests {
             ("npc_combine_s", Some("s1"), "weapon_ar2", Some(3), false)
         );
         assert!(r.ent_create && r.yaw.is_none());
+        assert_eq!(r.keyvalues(), [("targetname", "s1".to_string())]);
+        let Some(Command::Spawn(r)) = console
+            .parse("ent_create npc_metropolice squadname cops")
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(r.keyvalues(), [("squadname", "cops".to_string())]);
         // Quoted values keep their spaces: angles "pitch yaw roll".
         let Some(Command::Spawn(r)) = console
             .parse("ent_create npc_citizen \"angles\" \"0 135 0\"")

@@ -66,6 +66,10 @@ pub struct PhyscannonState {
     change_state: ElementChange,
     attack2_debounce: bool,
     deny_played: bool,
+    /// m_EffectState == EFFECT_HOLDING without a held object: SecondaryAttack's
+    /// DoEffect(EFFECT_HOLDING) while attack2 is held, until ItemPostFrame's
+    /// DoEffect(EFFECT_READY) on release.
+    pub holding_effect: bool,
     /// IN_ATTACK2 last frame (m_afButtonPressed).
     secondary_held: bool,
     /// The tick's buttons from Inventory::tick.
@@ -199,6 +203,9 @@ impl Inventory {
             self.cannon_secondary(weapons, world, scene, physics, eye, forward, pressed2);
         } else {
             self.physcannon.deny_played = false;
+            if self.physcannon.held.is_none() {
+                self.physcannon.holding_effect = false;
+            }
         }
         if !secondary {
             self.physcannon.attack2_debounce = false;
@@ -324,6 +331,8 @@ impl Inventory {
         if self.physcannon.held.is_some() {
             return;
         }
+        // Every pickup attempt ends in DoEffect(EFFECT_HOLDING), found or not.
+        self.physcannon.holding_effect = true;
         let trace = Self::find_trace(physics, eye, forward);
         let (mut entity, mut attach, mut pull) = (None, false, false);
         if let Some((id, fraction, _)) = trace.filter(|(id, _, _)| *id != usize::MAX) {
@@ -339,12 +348,11 @@ impl Inventory {
             }
         }
         let Some(id) = entity.filter(|id| can_pickup(physics, *id)) else {
-            if entity.is_some() || attach || pull {
-                // OBJECT_NOT_FOUND with the deny sound once per press.
-                if !self.physcannon.deny_played {
-                    self.physcannon.deny_played = true;
-                    play_sound(scene, &weapon, "special3", world, "");
-                }
+            // CanPickupObject fails for no entity too (NULL): OBJECT_NOT_FOUND with the
+            // deny sound once per press wherever the player aims.
+            if !self.physcannon.deny_played {
+                self.physcannon.deny_played = true;
+                play_sound(scene, &weapon, "special3", world, "");
             }
             self.physcannon.next_secondary = time + 0.1;
             self.close_elements(scene, &weapon, world, time);
@@ -391,6 +399,7 @@ impl Inventory {
         };
         self.physcannon.held = Some(id);
         self.physcannon.grab = Some(grab);
+        scene.prop_physgun_pickup(world, id, crate::entities::PhysGunPickup::Cannon);
         // AttachObject: Play(motor, 0, 50), pitch to 100 and volume to 0.8 over 0.5 s.
         {
             use crate::sounds::PatchOp;
@@ -421,12 +430,13 @@ impl Inventory {
         sound: bool,
         launched: bool,
     ) {
-        if self.physcannon.held.take().is_none() {
+        let Some(id) = self.physcannon.held.take() else {
             return;
-        }
+        };
         if let Some(grab) = self.physcannon.grab.take() {
             grab.detach(physics, launched);
         }
+        scene.prop_physgun_drop(world, id);
         motor_wind_down(scene);
         if sound {
             play_sound(scene, weapon, "melee_miss", world, "");
@@ -518,6 +528,9 @@ impl Inventory {
             // PuntVPhysics (single-object props: ratio 1).
             let mass = body_mass(physics, id).unwrap_or(1.);
             let (dv, offset) = punt_impulse(forward, mass);
+            // Physgun_OnPhysGunPickup(PUNTED_BY_CANNON).
+            physics.make_interactive_debris(id);
+            scene.prop_physgun_pickup(world, id, crate::entities::PhysGunPickup::Punt);
             if let Some(body) = physics.bodies.get_mut(handle) {
                 let j = dv * mass * SCALE;
                 body.apply_impulse(vector![j.x, j.y, j.z], true);

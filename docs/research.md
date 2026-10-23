@@ -1,5 +1,93 @@
 # Sources and native research
 
+## Pickup/dispatch handoff receipt (2026-10-22)
+
+Private research-pickup-dispatch-continuation-20261022j.md and next-research-prompt-20261022j.txt retain all13 sealed roots, provenance, failures, original native state/gaps, query commands and bounded next work. research-pickup-dispatch-closeout-20261022j.json records final publication/remote/tree/index/quota and artifact hashes after push. Historical D..H66/69/startup gaps and I remain separate from J..V57/63 inventory. No new native or Rust parity evidence was produced.
+
+## Sealed callback writer and finite private navigator (2026-10-22)
+
+V scene-grab-error-writer-20261022v uses the known pickup factory, raw constructor vptr and RTTI/slot0 to bind one new exact callback, plus four reused exact bodies. Its117 byte records include106 callback-window and11 rejected-preview records; only complete cited sites support claims. Two finite navigation operations/six pointer spans/21 externals and the retained RTTI-length verifier failure are checked; no solver helper or exact constructor body was added.
+
+Private research-pickup-dispatch-index-20261022j.json and pickup_dispatch_query.py cover J..V:13 roots/57 distinct bodies/63 per-root identity occurrences/64 source paths/five navigation-only occurrences. Independent verification checks immutable DB identities, closed manifest sets, reused-source binding and paged/filter queries. Older D..H66/69/five missing startup identities and separate I evidence remain unchanged. No new missing exact lookup was resolved by nearby substitution.
+
+## Sealed use-target and accumulated-error supplement (2026-10-22)
+
+T scene-player-use-target-20261022t binds retail player slots658/65c to10121b90/102024f0, four local plus three reused exact bodies,1123 bounded records,21 externals and exactly two helper bodies. The rejected float32 cone decode is retained; its raw qword load establishes binary64 threshold0.8. Selected reach/caps/trace/ranking/occlusion are checked; trace backend and actual map selection are not expanded/tested.
+
+U scene-grab-error-20261022u retains one new exact10416d80/two reused callers,94 bounded records/six constants/four edges/18 externals, with no extra helper expansion. Normal evaluation resets the accumulator, permitting a later zero result without motion. Missing physics returns sentinel9999 after delegated detach; a positive-time invalid handle reaches an unguarded low-address flags read, so no safe fallback is claimed. T/U closed-set counts32/21 and21/18; actual interleaving, units, carry and Rust parity untested.
+
+## Sealed scale descriptors and grab update supplement (2026-10-22)
+
+R scene-crate-scale-fields-20261022r binds24 class descriptors/two scale KEY fields/five authored crate spellings with ten retained exact bodies(seven selected/three navigation-only),two reused bodies,1004 bounded byte records and17 external hashes. Selected ASCII folding supports the spelling bridge; alternate locale internals and numeric grammar are not expanded. Earlier Q negative output remains unchanged.
+
+S scene-grab-update-20261022s retains two new exact bodies/one reused caller,806 records/nine constants/eight false-result branches/five direct edges/16 externals. Pickup Use ignores UpdateObject's result. Target helper stores requests, re-resolves attachment and wakes physics or conditionally delegates detach; UpdateObject returns true after it. This is static control/data evidence, not actual carry/release/motion. Private roots are sealed53/17 and24/16; no native/Rust parity claim.
+
+## Sealed input bridge, frame caller and owned PHY supplement (2026-10-22)
+
+Private N scene-use-input-20261022n checks two local bodies plus a reused initializer,528 records/four metadata stores/13 externals. O scene-held-use-frame-20261022o checks four exact bodies/208 records/22 externals and binds the guarded natural held-use caller. P scene-crate-authored-physics-20261022p checks two selected PHY CRC/SHA members,two MDL header ranges,14 property byte spans,one full-tail and one prefix ordered comparison; whole carrier hash unavailable. Its damaged suffix differs between the strict helper and SourcePP, with all raw bytes/failure retained.
+
+Q scene-crate-physics-spawn-20261022q checks three exact identities(two local/one externally reused),414 records/15 externals, tying the class spawn/create dispatch to existing SI-07 scale/override evidence. Key-field mapping remains separately investigated. Each source/body/member has bounded provenance; no current native physics/input/damage/exit or Rust parity is established. Earlier frozen artifacts/navigators and original scene gaps remain unchanged.
+
+## Sealed prop list, damage dispatch and logical use research (2026-10-22)
+
+Private K/L/M supplements independently bind the prop's singleton physics-list target, queue-to-damage forwarding/phase guards and logical-use-press clearing. K checks one exact body/25 bounded records/21 externals; L16 bodies/1428 records/41 externals, including six fresh and ten reused frozen bodies; M four retained exact bodies/264 records/18 externals, with two navigation-only bodies excluded from semantic claims. Historical six-button descriptor reconstruction labels pressed/released offsets without observing current input.
+
+The two unrelated handle-only candidates in M remain retained and that approach stopped; exact diagnostic/vtable/call evidence binds the selected methods. A verifier codec typo and worker construction failures remain explicit. Earlier roots and the five-root navigator stay frozen. Actual dynamic physics, native damage/output execution, key/tick timing, window break/exit and Rust parity remain untested; original authored gaps preserved.
+
+## Sealed AttachEntity saved-state supplement (2026-10-22)
+
+The private scene-crate-attach-20261022j supplement checks two full-identity baseline/original bodies,646 byte-matched records and13 external identities. It resolves selected saved-mass/damping capture and temporary setter order, ordinary caller false flags, and numeric index correspondence with the earlier sealed detach lane. Actual values/dynamic physics/list stability remain unobserved. One retained body repeats earlier Init evidence; the Attach body is newly reviewed. Earlier frozen roots and their five-root navigator are unchanged.
+
+The owner requested their running game remain undisturbed. This continuation is offline; no native execution, Rust implementation, first-map completion or parity claim follows. The existing private window-exit handoff remains the predecessor, with a newer continuation to be left at this run's closeout.
+
+## Final offline storage-window continuation (2026-10-22)
+
+Private `scene-crate-detach-20261022i` adds three exact identities outside the earlier five-root navigator: the detach helper and its two selected velocity helpers. Its seal passes20 retained files/12 external bindings/370 byte-matched records, including duplicate/padding/truncated-window records explicitly bounded in the guide. Saved-mass/damping setter requests precede the velocity branch and the parent's later mass query; false-clear can request a clamp. No actual restored state, physical units or native result is observed. The original five roots remain frozen and their66-body/69-occurrence navigator unchanged.
+
+Newest private handoff `work/publishing/research-window-exit-offline-continuation-20261022d.md` contains provenance, six-root inventory, exact read-only commands, rejected drafts and a later idle-session observation plan. `next-research-prompt-20261022d.txt` and the companion closeout receipt provide the lean entry/publication state. The owner requested the running game remain undisturbed; zero native games were started this run. Retain the original16 authored gaps/four missing scene procedures/16h correction. First-map completion, live window interaction/exit and Rust parity remain untested.
+
+## Sealed held-throw and window-impact bridge (2026-10-22)
+
+Private `scene-crate-throw-20261022g` passes54 retained files/13 external identities,13 exact bodies/914 instruction records; `scene-window-impact-20261022h` passes25 files/nine identities,five bodies/463 records. The first binds Use/Shutdown/drop/application ordering and scalar/default sources without observing live settings or motion. The second binds the window collision virtual, default wrapper, callback forwarding and selected glass table bytes/lookup without executing collision damage or breaking glass. The owner's game remained undisturbed.
+
+Private `work/publishing/research-window-exit-index-20261022d.json` and `window_exit_query.py` provide paged metadata over five sealed roots:66 distinct exact bodies,69 retained occurrences and five missing exact startup procedures retained raw-only. Missing stubs and navigation-only bodies do not close the original authored gaps or establish complete semantic coverage. An initial navigator undercounted mixed manifest formats/nested paths; that result is rejected and retained, and the corrected audit independently requires each root's10/23/18/13/5 body occurrences. First-map completion and Rust parity remain false/untested.
+
+## Offline breakable and crate-use supplements (2026-10-22)
+
+`scene-window-route-20261022e` is sealed at116 retained files/26 bindings:23 exact bodies,2,569 checked instruction records,13 selected metadata stores and fresh ordered owned-propdata parsing/source identities. It binds CBreakable's damage/health/output paths and the retail propdata24 -> Glass.Window mapping. Authored health17 and profile health15 remain separate evidence; the reviewed successful parser path predicts15 conditionally, without measuring live health or breaking a window. The rejected CRLF-normalizing verifier draft and missing exact startup stub0x10008400 remain retained.
+
+`scene-crate-use-20261022f` is sealed at76 files/14 bindings:18 exact bodies/1,093 instruction records, five authored crate records and pickup edges. Raw reason/output branches match SDK after resolving omitted implicit output pointers; the suspected discrepancy is rejected. The +use reason2 route reaches OnPhysGunPickup/OnPlayerPickup, before full attachment. Secondary callback identity, eligibility branches and authored flags remain bounded static findings; actual pickup/carry/throw, native units and exit are untested. Missing startup stub0x1000d4f0 remains raw-only. Current continuation is offline under the owner's instruction to leave their running game undisturbed.
+
+## Retail exit metadata binding (2026-10-22)
+
+Private `scene-exit-registration-20261022d` closes the prior static class/callback naming gap with CChangeLevel RTTI, datamap, factory chain and named TouchChangeLevel registration. Ten exact baseline/original bodies and503 machine instruction records pass independent checks;53 retained files/seven external bindings are sealed. Spawn callback assignment, map/landmark array metadata, OnChangeLevel member and one ordinary Activate latch-reset path are retained. Registration stub0x1000f4d0 has no exact pass14 procedure and stays raw-only, without a neighboring substitute. No live trigger or exit execution is established. The owner requested an existing running game remain undisturbed; current window/crate continuation is offline only.
+
+## Bounded exit-function preparation (2026-10-22)
+
+Separately sealed private `scene-exit-plan-20261022c` retains two additional exact path/hash/address/baseline/original bodies and 280 checked PE instruction records. A specific diagnostic selects a touch candidate and its direct change-level gate callee; SDK-correlated names are separate from the still-unbound retail class/live trigger. The selected gate latches before later rejection branches and uses a different output member from scene OnStart. The supplement also binds 27 original-BSP entities, 47 ordered output edges preserving duplicates and five submodels. Thirteen files/eight external identities pass verify_seal.py. This prepares the next input-led crate/window/exit experiment; no game was launched and first-map exit/Rust parity remain untested.
+
+## Sealed SECTION, loop and storage supplement (2026-10-22)
+
+Private `../../work/hl2-decompiled/scene-section-route-20261022b` is sealed at 1,504 files/52 bindings. README.md and CLAUDE-START-HERE.md explain the evidence; query.py provides paged summary/resumes/starts/eta views. Acceptance checks 23 core plus eight distinct ETA baseline/original bodies and 1,310 instruction records. Selected V5 observation has 677 contiguous emitted events, 157 complete call pairs and five fresh-generation scoped OnStart outputs. Three automatic SECTION resumes are verified under PauseThink after successful completion checks. A separate fresh native VM_READ control retains 14,003 samples and all three pause/recovery windows. Its first watch also retains seven intro01b clock rewinds with unchanged controller generation/choreography pointer and playing state.
+
+Normal input reaches storage, climbs and dismounts the authored ladder; security04 starts naturally. This is controlled native research with developer aiming/input settings, not a complete unassisted campaign playthrough. Dense V3 seq1376..1673 remains missing; copied frida_attached:false snapshot metadata is not attestation. The Barney ETA supplement is static only: runtime values/full ABI untested. Window escape, map exit, audiovisual/event replay fidelity, timing fidelity and Rust parity remain untested; first_map_finished:false. The original16 gaps/four missing procedures/16h closure correction remain authoritative. Next private checkpoint: `../../work/publishing/research-section-storage-continuation-20261022b.md`.
+
+## Doorway SECTION and callback supplement (2026-10-22)
+
+Private ../../work/hl2-decompiled/scene-section-route-20261022b retains23 exact path/hash/address/baseline/original bodies, PE/RTTI callback bindings and a genuine room route through security_01/02/03. Independent byte checks pass1,183 closed call pairs and12 fresh-generation scoped outputs across two declared windows. Native automatic resume is retained for the later intro SECTION and security03; seq1376..1673 is missing between windows and remains unpromoted. A post-reveal capture shows Barney's face, not complete audiovisual validation. The fresh control replay stopped at a measured queue brush candidate and is being corrected from authored geometry. The lane is unsealed and ongoing; first-map completion, fresh uninstrumented room comparison and Rust parity are not certified. Canonical16 gaps and missing exact procedures remain intact.
+
+## Natural customs, pen and introduction supplement (2026-10-22)
+
+Private ../../work/hl2-decompiled/scene-customs-route-20261022/CLAUDE-START-HERE.md joins25 observed choreography controllers to the sealed authored base.168 requests/166 accepted nested starts,2183 events/1005 pairs,164 original-BSP caller joins and raw controller/actor generations pass acceptance. A genuine route spawned Barney and reached security_intro_01/01b. Three stale-slot actor reads and three unscoped output records remain explicitly unpromoted;later binding never repairs an earlier timestamp. Selected pen inputs show a valid player activator with a null caller after the initial*49 trigger request. Full event-queue mechanics,scene playback and Rust parity remain untested. Raw/seal acceptance passes461 files/33 bindings;game closed and checked installed identities unchanged. Latest handoff: ../../work/publishing/research-customs-pen-continuation-20261022.md. Stay on the first map and preserve16 gaps.
+
+## Measured first-map grate crossing (2026-10-22)
+
+Private ../../work/hl2-decompiled/scene-doorway-route-20261022/README.md resolves the retained side boundary to world brush2040 and records a fresh no-Frida moveright/jump crossing. One exact server.dll baseline/original metadata initializer and six live/PE input-field bindings support617 raw motion samples across eight captures, preserving the rejected direct-button path. Both native collision bounds and brush planes independently decode from retained bytes. Verification/seal pass99 private files/seven external bindings. Full train-exit route, scene playback, first-map completion and Rust parity remain untested; customs/security research continues separately. Reviewed shared documentation is committed; raw research remains private.
+
+## Player walking and genuine passenger trigger (2026-10-21)
+
+Private ../../work/hl2-decompiled/scene-player-route-20261021/README.md establishes timed-console walking and a new native first-map start: trigger_lcs_trainride_sit -> lcs_trainride_sit_respond at114.180,policy0,actual player activator,genuine citizen_train_2/male_07,CheckActors1 and accepted playing state. Exact six-body baseline/original provenance,relocated entry checks,raw actor/player generations and512 events/253 call pairs remain retained. A fresh never-Frida-attached process corroborates walking and the same scene playing. Incoming player activator differs from scene OnStart's self/self/0 output identity. Trigger dispatch itself,full playback and Rust parity remain untested. Both games closed;checked installed identities unchanged. Train exit remains blocked/uncompleted. Latest handoff ../../work/publishing/research-player-route-continuation-20261021.md;stay on the first map and preserve16 gaps.
+
 ## First-map completion check and natural starts (2026-10-20)
 
 Private research records eleven passing retained first-map checks plus genuine intro and arrival scene-start observations. Original relay callers request the G-Man policy0 scene and citizen_train_1 policy1 endline;actual actor/model lookups,acceptance,OnStart and playing state are retained with exact six-body provenance. A fresh process without Frida corroborates G-Man playback and subsequent cleared state. Controller serials,relay queue dispatch,ordinary full traversal and Rust parity are not established. The first map is not finished beyond its bounded authored-data handoff;owner requires remaining first-map work before second-map promotion. The original16 gaps and closure erratum remain intact. Latest handoff retained.

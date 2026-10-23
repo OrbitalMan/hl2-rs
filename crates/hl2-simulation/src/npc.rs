@@ -483,11 +483,16 @@ fn validate_forward_track(track: &RootMotion) -> Result<(), GoalBlockReason> {
     let mut previous = 0.;
     for record in &track.records {
         let amount = (record.v0 + record.v1) * 0.5;
-        if record.direction.distance(Vec3::X) > 0.0001
+        // The classic zombie's walks drift sideways by ~1e-4 of their direction (0.01
+        // units a cycle); such drift is ignored, the track moves along +X.
+        let drift = record.cumulative_position - Vec3::X * (previous + amount);
+        if record.direction.distance(Vec3::X) > 0.001
             || record.end_yaw_degrees.abs() > 0.0001
             || record.v0 <= 0.
             || record.v1 <= 0.
-            || (record.cumulative_position - Vec3::X * (previous + amount)).length() > 0.001
+            || drift.x.abs() > 0.001
+            || drift.truncate().length() > 0.05
+            || drift.z.abs() > 0.001
         {
             return Err(error());
         }
@@ -561,9 +566,6 @@ pub struct Controller {
     pending: Vec<MoveUpdate>,
     /// Door entities NPC routes may pass through by opening them.
     doors: BTreeSet<usize>,
-    /// Actors registered only for AI goals: scene requests for them stay blocked as
-    /// before (MissingActor), so scripted behavior does not change.
-    ai_only: BTreeSet<usize>,
 }
 impl Controller {
     /// Doors that block a graph link do not invalidate it; NPCs open them on contact.
@@ -593,7 +595,6 @@ impl Controller {
             goals: BTreeMap::new(),
             pending: Vec::new(),
             doors: BTreeSet::new(),
-            ai_only: BTreeSet::new(),
         }
     }
     /// register_actor for an actor that only AI goals (GoalKey::scene == AI_SCENE) move.
@@ -604,9 +605,9 @@ impl Controller {
         ground: GroundConfig,
         locomotion: Locomotion,
     ) -> Result<(), GoalBlockReason> {
-        self.register_actor(entity, model_scale, ground, locomotion)?;
-        self.ai_only.insert(entity);
-        Ok(())
+        // Scenes and scripted_sequences move AI actors too (the AI yields while they
+        // own the actor); an active goal of the other kind answers ActorBusy.
+        self.register_actor(entity, model_scale, ground, locomotion)
     }
     /// The locomotion variants of an AI actor by weapon class (Weapon_TranslateActivity
     /// of ACT_WALK/ACT_RUN on its model), preloaded at map load.
@@ -642,9 +643,6 @@ impl Controller {
         };
         actor.aiming = false;
         self.actors.insert(entity, actor);
-        if self.ai_only.contains(&template) {
-            self.ai_only.insert(entity);
-        }
         true
     }
     pub fn set_locomotion(&mut self, entity: usize, weapon: &str) -> bool {
@@ -893,9 +891,6 @@ impl Controller {
             }
             if pose.scripted_by.is_some() {
                 return Err(GoalBlockReason::ScriptOwned);
-            }
-            if key.scene != AI_SCENE && self.ai_only.contains(&key.actor) {
-                return Err(GoalBlockReason::MissingActor);
             }
             if self.goals.iter().any(|(other, g)| {
                 other.actor == key.actor

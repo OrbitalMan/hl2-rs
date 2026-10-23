@@ -411,8 +411,12 @@ impl PreparedAudio {
                 "NPC_Combine.WeaponBash",
                 // npc_combine.cpp COMBINE_AE_BEGIN_ALTFIRE (elites).
                 "Weapon_CombineGuard.Special1",
+                // props.cpp CBreakableProp::Break with PROPINTER_PHYSGUN_BREAK_EXPLODE.
+                "PropaneTank.Burst",
             ]
             .into_iter()
+            .chain(hl2_simulation::ai::zombie::SOUNDS.iter().copied())
+            .chain(hl2_simulation::fire::SOUNDS.iter().copied())
             .map(str::to_owned),
         );
         let mut paths = BTreeSet::new();
@@ -987,7 +991,8 @@ pub fn queue(
     for request in &game.sound_requests {
         if let Some(trace) = trace.as_deref_mut() {
             trace.write(serde_json::json!({"event":"request","cue":request.name,"frame":audio.frame,"scene_time":game.scene.time,"paused":paused,
-                "ambient":request.ambient.map(|c| format!("{c:?}")),"stop":request.stop}));
+                "ambient":request.ambient.map(|c| format!("{c:?}")),"stop":request.stop,
+                "actor_model":request.actor.as_ref().map(|a| a.model.as_str()),"entity":request.actor.as_ref().and_then(|a| a.entity)}));
         }
     }
     // CloseCaption messages: spawn-time ambient sounds, then scene speech.

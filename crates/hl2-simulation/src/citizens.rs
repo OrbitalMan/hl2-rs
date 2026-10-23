@@ -172,6 +172,46 @@ pub fn select_models(world: &mut World, late_key: &str) -> usize {
     }
     chosen
 }
+/// CNPC_Citizen::SelectModel for a runtime spawn: the template (pooled citizen) whose
+/// head is worn by the fewest living citizens (`alive`; pooled and SF_NPC_TEMPLATE
+/// entities are not citizens in the world), a random one (`random` in [0, 1)) among the
+/// ties. None without templates.
+pub fn least_used_template(
+    world: &World,
+    templates: &[usize],
+    pool_key: &str,
+    alive: impl Fn(usize) -> bool,
+    random: f32,
+) -> Option<usize> {
+    let head = |id: usize| {
+        world
+            .entities
+            .get(id)
+            .and_then(|e| head_of(e.get("model")?))
+    };
+    let mut counts = [0usize; RANDOM_HEADS.len()];
+    for (id, e) in world.entities.iter().enumerate() {
+        let flags = e.get("spawnflags").map_or(0, |v| atoi(v) as u32);
+        if e.class().eq_ignore_ascii_case("npc_citizen")
+            && e.get(pool_key).is_none()
+            && flags & SF_NPC_TEMPLATE == 0
+            && alive(id)
+        {
+            if let Some(h) = head(id) {
+                counts[h] += 1;
+            }
+        }
+    }
+    let count = |id: usize| head(id).map_or(usize::MAX, |h| counts[h]);
+    let least = templates.iter().map(|&t| count(t)).min()?;
+    let ties: Vec<usize> = templates
+        .iter()
+        .copied()
+        .filter(|&t| count(t) == least)
+        .collect();
+    ties.get(((random * ties.len() as f32) as usize).min(ties.len() - 1))
+        .copied()
+}
 fn set_model(world: &mut World, id: usize, model: &str) {
     let properties = &mut world.entities[id].properties;
     match properties
@@ -240,6 +280,54 @@ mod tests {
         assert!(models
             .iter()
             .all(|m| m.starts_with("models/humans/group01/")));
+    }
+    #[test]
+    fn runtime_spawns_take_the_least_used_head() {
+        // Map citizens wear male_01 twice and female_01 once; templates male_01,
+        // female_01, female_02: female_02 (unworn) first, then male/female ties.
+        let mut world = World {
+            name: "d1_trainstation_02".into(),
+            entities: vec![
+                citizen(&[("model", "models/humans/group01/male_01.mdl")]),
+                citizen(&[("model", "models/humans/group01/male_01.mdl")]),
+                citizen(&[("model", "models/humans/group01/female_01.mdl")]),
+                citizen(&[
+                    ("model", "models/humans/group01/male_01.mdl"),
+                    ("pool", "npc_citizen"),
+                ]),
+                citizen(&[
+                    ("model", "models/humans/group01/female_01.mdl"),
+                    ("pool", "npc_citizen"),
+                ]),
+                citizen(&[
+                    ("model", "models/humans/group01/female_02.mdl"),
+                    ("pool", "npc_citizen"),
+                ]),
+            ],
+            ..Default::default()
+        };
+        let templates = [3, 4, 5];
+        assert_eq!(
+            least_used_template(&world, &templates, "pool", |_| true, 0.9),
+            Some(5)
+        );
+        // A spawned female_02 citizen: now female_01 and female_02 tie at one.
+        world
+            .entities
+            .push(citizen(&[("model", "models/humans/group01/female_02.mdl")]));
+        assert_eq!(
+            least_used_template(&world, &templates, "pool", |_| true, 0.),
+            Some(4)
+        );
+        assert_eq!(
+            least_used_template(&world, &templates, "pool", |_| true, 0.9),
+            Some(5)
+        );
+        // Dead citizens do not count: with the map's female_01 dead it is least used.
+        assert_eq!(
+            least_used_template(&world, &templates, "pool", |id| id != 2, 0.9),
+            Some(4)
+        );
     }
     #[test]
     fn types_genders_medics_and_unique_follow_select_model() {

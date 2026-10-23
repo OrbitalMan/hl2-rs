@@ -10,6 +10,16 @@ use source_assets::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+/// Entity classes that move with VPhysics (MOVETYPE_VPHYSICS) for trigger touches.
+fn is_vphysics_class(class: &str) -> bool {
+    class.starts_with("prop_physics")
+        || class.starts_with("weapon_")
+        || class.starts_with("item_")
+        || matches!(
+            class,
+            "physics_prop" | "func_physbox" | "func_physbox_multiplayer" | "prop_ragdoll"
+        )
+}
 pub enum SceneMoveCommand {
     Start {
         key: crate::npc::GoalKey,
@@ -153,6 +163,8 @@ pub struct State {
     /// with `scripted_by`.
     pub script_post_idle: Option<usize>,
     script_finish: Option<f64>,
+    /// A scripted_sequence's walk/run to its mark (SCHED_SCRIPTED_WALK/RUN) in progress.
+    script_move: Option<crate::npc::GoalKey>,
     post_idle_done: Option<(f64, usize)>,
     shuffle: Vec<usize>,
     last_shuffle: Option<usize>,
@@ -243,6 +255,16 @@ pub struct ChoreographyState {
     pub completed_early: bool,
     pub active: bool,
 }
+/// PhysGunPickup_t reasons that fire prop outputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhysGunPickup {
+    /// PICKED_UP_BY_PLAYER (+USE).
+    Player,
+    /// PICKED_UP_BY_CANNON.
+    Cannon,
+    /// PUNTED_BY_CANNON.
+    Punt,
+}
 #[derive(Serialize)]
 pub struct SceneAnimationState {
     pub entity: usize,
@@ -296,13 +318,20 @@ pub struct Scene {
     pub globals: crate::globals::Globals,
     /// Damage dealt to entities by scene logic (trigger_hurt) this tick.
     pub entity_damage: Vec<crate::projectiles::Damage>,
+    /// Burning props (CEntityFlame).
+    pub fires: crate::fire::Fires,
+    /// Player-thrown or launched props that hit an NPC this tick (prop, NPC):
+    /// g_interactionHitByPlayerThrownPhysObj for the AI.
+    pub thrown_hits: Vec<(usize, usize)>,
     /// Props broken this tick (CBreakableProp::Break), for the gib spawner.
     pub prop_breaks: Vec<crate::gibs::PropBreak>,
     /// Explosive props broken this tick (CBreakableProp::Break -> ExplosionCreate):
     /// world-space center, integer magnitude and radius.
-    pub prop_explosions: Vec<(Vec3, f32, f32)>,
+    pub prop_explosions: Vec<(Vec3, f32, f32, bool)>,
     /// env_physexplosion entities whose Explode input arrived (phys_explosion).
     pub phys_explosions: Vec<usize>,
+    /// env_physimpact entities whose Impact input arrived (phys_explosion).
+    pub phys_impacts: Vec<usize>,
     /// Set by the host: a dead player no longer takes damage (m_takedamage).
     pub player_dead: bool,
     /// ScreenFade messages for the local player (env_fade).
@@ -455,6 +484,7 @@ impl Scene {
             scripted_by: None,
             script_post_idle: None,
             script_finish: None,
+            script_move: None,
             post_idle_done: None,
             shuffle: Vec::new(),
             last_shuffle: None,
@@ -536,9 +566,12 @@ impl Scene {
             player_damage: Vec::new(),
             globals: crate::globals::Globals::spawn(world),
             entity_damage: Vec::new(),
+            fires: Default::default(),
             prop_breaks: Vec::new(),
             prop_explosions: Vec::new(),
             phys_explosions: Vec::new(),
+            phys_impacts: Vec::new(),
+            thrown_hits: Vec::new(),
             keyvalue_overrides: BTreeMap::new(),
             player_dead: false,
             screen_fades: Vec::new(),
@@ -639,6 +672,12 @@ impl Scene {
             };
             if parent != id && !scene.template_pending(parent) && !scene.makers.held(parent) {
                 scene.set_parent(world, id, parent, attachment, true);
+            }
+        }
+        // CTimerEntity::Spawn -> Enable -> ResetTimer: random timers draw their first delay.
+        for (id, e) in world.entities.iter().enumerate() {
+            if e.class() == "logic_timer" && number(e, "UseRandomTime", 0.) != 0. {
+                scene.states[id].timer_at = scene.time + scene.timer_interval(e);
             }
         }
         for id in 0..world.entities.len() {
@@ -1391,10 +1430,19 @@ impl Scene {
                 .movement_animation
                 .as_ref()
                 .is_some_and(|m| m.key.scene != crate::npc::AI_SCENE)
+            // A scene holds an NPC's AI only when it has events that enter
+            // SCHED_SCENE_GENERIC for it; speech-only scenes (the can cop's nags and
+            // "carry on" lines) leave the AI running, like native.
             || self.choreography.values().any(|c| {
-                c.playback
-                    .as_ref()
-                    .is_some_and(|p| p.actors.contains(&Some(id)))
+                c.playback.as_ref().is_some_and(|p| {
+                    p.actors.iter().enumerate().any(|(slot, a)| {
+                        *a == Some(id)
+                            && c.data
+                                .events
+                                .iter()
+                                .any(|e| e.actor == Some(slot) && e.active() && e.takes_npc_ai())
+                    })
+                })
             })
             || self
                 .movement_ready
@@ -2502,6 +2550,30 @@ impl Scene {
             self.fire(id, "OnPlayerUse", usize::MAX);
         }
     }
+    /// CPhysicsProp / CPhysBox::OnPhysGunPickup outputs for a player pickup (+USE),
+    /// a gravity gun pickup or a punt (activator: the player).
+    pub fn prop_physgun_pickup(&mut self, world: &World, id: usize, reason: PhysGunPickup) {
+        let class = world.entities.get(id).map_or("", |e| e.class());
+        if !class.starts_with("prop_physics") && class != "func_physbox" {
+            return;
+        }
+        self.fire(id, "OnPhysGunPickup", usize::MAX);
+        match reason {
+            PhysGunPickup::Cannon => self.fire(id, "OnPhysGunOnlyPickup", usize::MAX),
+            PhysGunPickup::Punt => self.fire(id, "OnPhysGunPunt", usize::MAX),
+            PhysGunPickup::Player => {}
+        }
+        if class != "func_physbox" && reason != PhysGunPickup::Punt {
+            self.fire(id, "OnPlayerPickup", usize::MAX);
+        }
+    }
+    /// OnPhysGunDrop (+USE drop or throw, gravity gun drop or launch).
+    pub fn prop_physgun_drop(&mut self, world: &World, id: usize) {
+        let class = world.entities.get(id).map_or("", |e| e.class());
+        if class.starts_with("prop_physics") || class == "func_physbox" {
+            self.fire(id, "OnPhysGunDrop", usize::MAX);
+        }
+    }
     fn deliver(&mut self, world: &World, id: usize, p: &Pending, player_feet: Vec3) {
         if id >= self.states.len() {
             self.unsupported_input("player", &p.input);
@@ -2548,6 +2620,11 @@ impl Scene {
                 ))
             || (class == "aiscripted_schedule"
                 && matches!(input.as_str(), "startschedule" | "stopschedule"))
+            || (class == "ai_goal_actbusy"
+                && matches!(
+                    input.as_str(),
+                    "activate" | "deactivate" | "forcenpctoactbusy" | "setbusysearchrange"
+                ))
             || (matches!(class, "info_node_link" | "info_node_link_controller")
                 && matches!(input.as_str(), "turnon" | "turnoff"))
             || (class == "ai_relationship"
@@ -2555,6 +2632,42 @@ impl Scene {
         {
             self.ai_inputs
                 .push((id, input, p.parameter.clone(), p.activator));
+            return;
+        }
+        // CBaseAnimating::InputIgnite (Ignite(30)) / InputIgniteLifetime(seconds) on
+        // NPCs and physics props; a zombie's Ignite caps its health to about ten
+        // seconds of burning (CNPC_BaseZombie::Ignite).
+        if matches!(input.as_str(), "ignite" | "ignitelifetime")
+            && (class.starts_with("npc_") || class.starts_with("prop_physics"))
+        {
+            let lifetime = if input == "ignitelifetime" {
+                p.parameter.trim().parse::<f32>().unwrap_or(30.)
+            } else {
+                30.
+            };
+            let origin = self.states.get(id).map_or(Vec3::ZERO, |s| s.origin);
+            let now = self.time;
+            if self.fires.ignite(
+                id,
+                crate::fire::Interactions {
+                    flammable: true,
+                    ..Default::default()
+                },
+                lifetime,
+                16.,
+                origin + Vec3::Z * 36.,
+                now,
+            ) && crate::ai::zombie::is_zombie_class(class)
+            {
+                let health = self.skill.npc_entity_health(e).unwrap_or(50.);
+                let roll = crate::fire::roll_public(id, now);
+                if let Some(state) = self.states.get_mut(id) {
+                    if state.value <= 0. {
+                        state.value = health;
+                    }
+                    state.value = state.value.min(5. * (10. + 4. * roll - 2.));
+                }
+            }
             return;
         }
         match input.as_str() {
@@ -2596,6 +2709,7 @@ impl Scene {
                 }
             }
             "explode" if class == "env_physexplosion" => self.phys_explosions.push(id),
+            "impact" if class == "env_physimpact" => self.phys_impacts.push(id),
             // CEnvTonemapController: custom auto-exposure limits and the manual tonemap rate.
             "setautoexposuremin" if class == "env_tonemap_controller" => self.tonemap.min = value,
             "setautoexposuremax" if class == "env_tonemap_controller" => self.tonemap.max = value,
@@ -2698,8 +2812,12 @@ impl Scene {
                 if matches!(class, "func_brush" | "func_monitor") {
                     self.states[id].visible = true;
                 }
-                self.states[id].timer_at =
-                    self.time + number(e, "RefireTime", 1.).max(0.015) as f64;
+                if class == "logic_timer" {
+                    self.states[id].timer_at = self.time + self.timer_interval(e);
+                } else {
+                    self.states[id].timer_at =
+                        self.time + number(e, "RefireTime", 1.).max(0.015) as f64;
+                }
             }
             "disable" => {
                 self.states[id].enabled = false;
@@ -2811,6 +2929,8 @@ impl Scene {
                     }
                 }
             }
+            // CLogicRelay::InputCancelPending: g_EventQueue.CancelEvents(this).
+            "cancelpending" if class == "logic_relay" => self.queue.retain(|q| q.caller != id),
             "firetimer" => self.fire(id, "OnTimer", p.activator),
             "add" | "subtract" | "setvalue" | "setvaluenofire" if class == "math_counter" => {
                 let min = number(e, "min", 0.);
@@ -3055,13 +3175,72 @@ impl Scene {
             return;
         }
         let movement = number(script, "m_fMoveTo", 0.) as i32;
-        if movement == 4 {
-            self.states[actor].origin = script.origin();
-            self.states[actor].rotation = self.states[id].rotation;
-        } else if movement != 0 {
-            self.unsupported_input("scripted_sequence", &format!("movement:{movement}"));
+        match movement {
+            // CINE_MOVETO_TELEPORT.
+            4 => {
+                self.states[actor].origin = script.origin();
+                self.states[actor].rotation = self.states[id].rotation;
+            }
+            // CINE_MOVETO_WAIT_FACING: face the script's angles, then play (the turn is
+            // instant here).
+            5 => self.states[actor].rotation = self.states[id].rotation,
+            // CINE_MOVETO_WALK / RUN (SCHED_SCRIPTED_WALK/RUN): the actor goes to the mark
+            // through the NPC movement controller; arrival (tick) plants him on the script
+            // origin, faces its angles and plays.
+            1 | 2 => {
+                let key = crate::npc::GoalKey {
+                    scene: id,
+                    event: 0,
+                    actor,
+                };
+                self.states[actor].script_post_idle = None;
+                self.states[id].script_actor = Some(actor);
+                self.states[id].script_move = Some(key);
+                self.movement_ready.insert(key, false);
+                self.movement_commands.push(SceneMoveCommand::Start {
+                    key,
+                    request: crate::npc::MoveRequest {
+                        target_entity: id,
+                        target_feet: script.origin(),
+                        style: if movement == 1 {
+                            crate::npc::MoveStyle::Walk
+                        } else {
+                            crate::npc::MoveStyle::Run
+                        },
+                        event_distance: 0.,
+                        // StartScriptMoveToTargetTask walks unless within 1 unit.
+                        force_short: true,
+                    },
+                });
+                return;
+            }
+            0 => {}
+            _ => {
+                self.unsupported_input("scripted_sequence", &format!("movement:{movement}"));
+                return;
+            }
+        }
+        self.start_script_play(world, id, actor);
+    }
+    /// The script's arrival (CINE_MOVETO_WALK/RUN): TASK_PLANT_ON_SCRIPT and
+    /// TASK_FACE_SCRIPT, then the sequence.
+    fn finish_script_move(&mut self, world: &World, id: usize) {
+        let Some(key) = self.states[id].script_move else {
+            return;
+        };
+        if !self.movement_ready.get(&key).copied().unwrap_or(false) {
             return;
         }
+        self.states[id].script_move = None;
+        self.movement_ready.remove(&key);
+        self.restore_movement_animation(key.actor);
+        self.states[key.actor].origin = self.states[id].origin;
+        self.states[key.actor].rotation = self.states[id].rotation;
+        self.start_script_play(world, id, key.actor);
+    }
+    /// StartSequence: the actor plays m_iszPlay (or ends at once without one).
+    fn start_script_play(&mut self, world: &World, id: usize, actor: usize) {
+        let script = self.ent(world, id);
         // Another script takes the actor: the old post idle ends (m_hNextCine).
         self.states[actor].script_post_idle = None;
         let play = script.get("m_iszPlay").unwrap_or("");
@@ -3130,6 +3309,12 @@ impl Scene {
         let actor = self.states[id].script_actor.take();
         self.states[id].script_finish = None;
         self.states[id].post_idle_done = None;
+        if let Some(key) = self.states[id].script_move.take() {
+            self.movement_ready.remove(&key);
+            self.movement_commands
+                .push(SceneMoveCommand::CancelScene(id));
+            self.restore_movement_animation(key.actor);
+        }
         if let Some(actor) = actor {
             self.states[actor].scripted_by = None;
             let name = self
@@ -3206,6 +3391,24 @@ impl Scene {
             p.parameter = value.to_string();
         }
     }
+    /// CTimerEntity::ResetTimer: RandomFloat(LowerRandomBound, UpperRandomBound) with
+    /// UseRandomTime, else RefireTime (at least LOGIC_TIMER_MIN_INTERVAL 0.01).
+    fn timer_interval(&mut self, e: &modkit_core::Entity) -> f64 {
+        if number(e, "UseRandomTime", 0.) != 0. {
+            self.random = self
+                .random
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1);
+            let unit = (self.random >> 40) as f32 / (1u64 << 24) as f32;
+            let (low, high) = (
+                number(e, "LowerRandomBound", 0.),
+                number(e, "UpperRandomBound", 0.),
+            );
+            f64::from(low + (high - low) * unit).max(0.015)
+        } else {
+            number(e, "RefireTime", 1.).max(0.01).max(0.015) as f64
+        }
+    }
     pub fn unsupported_input(&mut self, class: &str, input: &str) {
         let key = format!("{class}.{input}");
         *self.diagnostics.unsupported.entry(key.clone()).or_default() += 1;
@@ -3259,6 +3462,7 @@ impl Scene {
                 }
             }
             if e.class() == "scripted_sequence" {
+                self.finish_script_move(world, id);
                 self.script_events(world, id);
             }
             if self.states[id]
@@ -3309,30 +3513,56 @@ impl Scene {
                 && self.states[id].enabled
                 && self.states[id].timer_at <= self.time
             {
-                self.states[id].timer_at =
-                    self.time + number(e, "RefireTime", 1.).max(0.015) as f64;
+                self.states[id].timer_at = self.time + self.timer_interval(e);
                 self.fire(id, "OnTimer", usize::MAX);
             }
             if e.class().starts_with("trigger_") && self.states[id].enabled {
-                // CBaseTrigger PassesTriggerFilters: clients (1), NPCs (2), everything (0x40).
-                // Other trigger classes keep the earlier player-only touch.
+                // CBaseTrigger PassesTriggerFilters: clients (1), NPCs (2), physics objects
+                // (8, MOVETYPE_VPHYSICS), everything (0x40), then the trigger's filter
+                // entity (filtername). Other trigger classes keep the earlier player-only
+                // touch.
                 let gated = matches!(e.class(), "trigger_once" | "trigger_multiple");
                 let flags = number(e, "spawnflags", 1.) as u32;
                 let clients = !gated || flags & (1 | 0x40) != 0;
                 let npcs = gated && flags & (2 | 0x40) != 0;
-                let player = clients && self.player_inside(world, id, player_feet);
+                let physics_objects = gated && flags & (8 | 0x40) != 0;
+                let filter = gated
+                    .then(|| e.get("filtername").map(str::trim).filter(|f| !f.is_empty()))
+                    .flatten()
+                    .map(str::to_owned);
+                let passes = |scene: &Self, other: usize| {
+                    filter
+                        .as_deref()
+                        .is_none_or(|f| scene.passes_filter(world, f, other))
+                };
+                let player = clients
+                    && self.player_inside(world, id, player_feet)
+                    && passes(self, usize::MAX);
                 let npc = if npcs && !player {
                     (0..self.states.len()).find(|&n| {
                         self.ent(world, n).class().starts_with("npc_")
                             && !self.states[n].killed
                             && self.states[n].visible
                             && self.player_inside(world, id, self.states[n].origin)
+                            && passes(self, n)
                     })
                 } else {
                     None
                 };
-                let inside = player || npc.is_some();
-                let activator = npc.unwrap_or(usize::MAX);
+                // A VPhysics object's origin inside the brush (small-object test).
+                let object = if physics_objects && !player && npc.is_none() {
+                    (0..self.states.len()).find(|&n| {
+                        is_vphysics_class(self.ent(world, n).class())
+                            && !self.states[n].killed
+                            && self.states[n].visible
+                            && self.touches(world, id, self.states[n].origin, Vec3::splat(2.))
+                            && passes(self, n)
+                    })
+                } else {
+                    None
+                };
+                let inside = player || npc.is_some() || object.is_some();
+                let activator = npc.or(object).unwrap_or(usize::MAX);
                 if inside && !self.states[id].touching {
                     self.diagnostics.trigger_entries += 1;
                     self.fire(id, "OnStartTouch", activator);
@@ -3411,7 +3641,46 @@ impl Scene {
         }
         self.diagnostics.budget_exhaustions += 1;
     }
+    /// CBaseFilter::PassesFilter for a trigger's filter entity: filter_activator_name
+    /// (targetname) and filter_activator_class (classname), with Negated; other filter
+    /// classes (filter_multi, ...) pass, not modeled. `other` usize::MAX is the player.
+    fn passes_filter(&self, world: &World, filter: &str, other: usize) -> bool {
+        let Some((_, f)) = world.entities.iter().enumerate().find(|(i, x)| {
+            !self.states[*i].killed
+                && x.class().starts_with("filter_")
+                && x.get("targetname")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(filter))
+        }) else {
+            return true;
+        };
+        // FIELD_BOOLEAN: atoi, so Hammer's "Allow entities that match criteria" is 0.
+        let negated = f
+            .get("Negated")
+            .and_then(|v| v.trim().parse::<i32>().ok())
+            .unwrap_or(0)
+            != 0;
+        let (name, class) = if other == usize::MAX {
+            ("", "player")
+        } else {
+            let o = self.ent(world, other);
+            (o.get("targetname").unwrap_or(""), o.class())
+        };
+        let matched = match f.class() {
+            "filter_activator_name" => f
+                .get("filtername")
+                .is_some_and(|n| !n.is_empty() && n.eq_ignore_ascii_case(name)),
+            "filter_activator_class" => f
+                .get("filterclass")
+                .is_some_and(|c| c.eq_ignore_ascii_case(class)),
+            _ => return true,
+        };
+        matched != negated
+    }
     fn player_inside(&self, world: &World, id: usize, feet: Vec3) -> bool {
+        self.touches(world, id, feet + Vec3::Z * 36., Vec3::new(16., 16., 36.))
+    }
+    /// A box (center, half extents) overlapping the entity's brush model.
+    fn touches(&self, world: &World, id: usize, center: Vec3, half: Vec3) -> bool {
         let e = self.ent(world, id);
         let Some(model) = e
             .get("model")
@@ -3422,13 +3691,11 @@ impl Scene {
             return false;
         };
         let state = &self.states[id];
-        let center = feet + Vec3::Z * 36.;
         model.brushes.iter().any(|b| {
             !b.planes.is_empty()
                 && b.planes.iter().all(|p| {
                     let normal = state.rotation * p.normal;
-                    normal.dot(center - state.origin)
-                        <= p.distance + normal.abs().dot(Vec3::new(16., 16., 36.))
+                    normal.dot(center - state.origin) <= p.distance + normal.abs().dot(half)
                 })
         })
     }
@@ -3540,6 +3807,59 @@ mod tests {
                 .map(|(k, v)| (k.into(), v.into()))
                 .collect(),
         }
+    }
+    #[test]
+    fn random_timers_filters_and_cancel_pending_follow_the_sdk() {
+        let world = World {
+            entities: vec![
+                entity(
+                    "logic_timer",
+                    "nag",
+                    &[
+                        ("UseRandomTime", "1"),
+                        ("LowerRandomBound", "10"),
+                        ("UpperRandomBound", "20"),
+                        ("OnTimer", "relay,Trigger,,0,-1"),
+                    ],
+                ),
+                entity(
+                    "filter_activator_name",
+                    "only_can",
+                    &[
+                        ("filtername", "can"),
+                        ("Negated", "Allow entities that match criteria"),
+                    ],
+                ),
+                entity(
+                    "filter_activator_name",
+                    "not_can",
+                    &[("filtername", "can"), ("Negated", "1")],
+                ),
+                entity("prop_physics", "can", &[]),
+                entity(
+                    "logic_relay",
+                    "relay",
+                    &[("OnTrigger", "nag,Disable,,5,-1")],
+                ),
+            ],
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        // CTimerEntity::ResetTimer: the first delay is RandomFloat(10, 20), not RefireTime.
+        let first = scene.states[0].timer_at;
+        assert!((10. ..=20.).contains(&first), "{first}");
+        // PassesFilter: the name filter (Hammer's text Negated parses as 0) and its negation.
+        assert!(scene.passes_filter(&world, "only_can", 3));
+        assert!(!scene.passes_filter(&world, "only_can", usize::MAX));
+        assert!(!scene.passes_filter(&world, "not_can", 3));
+        assert!(scene.passes_filter(&world, "missing", 3));
+        // CancelPending drops the relay's delayed outputs.
+        scene.send(4, "Trigger", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(scene.queue.iter().any(|q| q.caller == 4));
+        scene.send(4, "CancelPending", "");
+        scene.tick(&world, Vec3::ZERO, 0.015);
+        assert!(!scene.queue.iter().any(|q| q.caller == 4));
     }
     #[test]
     fn ambient_inputs_follow_sdk_active_state() {
@@ -4123,6 +4443,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 2,
+                body: 0,
                 scale: 1.,
                 kind: "npc_citizen".into(),
                 solid: false,
@@ -4332,6 +4653,7 @@ mod tests {
                 origin: world.entities[id].origin(),
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: world.entities[id].class().into(),
                 solid: true,
@@ -4803,6 +5125,7 @@ mod tests {
                     origin: Vec3::ZERO,
                     angles: Vec3::ZERO,
                     skin: 0,
+                    body: 0,
                     scale: 1.,
                     kind: "npc_metropolice".into(),
                     solid: false,
@@ -4868,6 +5191,7 @@ mod tests {
                     origin: Vec3::ZERO,
                     angles: Vec3::ZERO,
                     skin: 0,
+                    body: 0,
                     scale: 1.,
                     kind: "npc_combine_camera".into(),
                     solid: false,
@@ -5001,6 +5325,7 @@ mod tests {
                 origin: Vec3::new(100., 0., 0.),
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "npc_barney".into(),
                 solid: false,
@@ -5100,6 +5425,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "prop_dynamic".into(),
                 solid: false,
@@ -5209,6 +5535,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "npc_citizen".into(),
                 solid: true,
@@ -5302,6 +5629,7 @@ mod tests {
                 origin: Vec3::ZERO,
                 angles: Vec3::ZERO,
                 skin: 0,
+                body: 0,
                 scale: 1.,
                 kind: "npc_kleiner".into(),
                 background: false,

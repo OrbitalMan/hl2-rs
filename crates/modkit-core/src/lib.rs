@@ -188,6 +188,18 @@ pub struct PropData {
     /// override the entity's ExplodeDamage / ExplodeRadius keyvalues).
     pub explosive_damage: Option<f32>,
     pub explosive_radius: Option<f32>,
+    /// fire_interactions (PROPINTER_FIRE_FLAMMABLE, _EXPLOSIVE_RESIST,
+    /// _IGNITE_HALFHEALTH): the model's sections beside prop_data, or a base's own.
+    #[serde(default)]
+    pub flammable: bool,
+    #[serde(default)]
+    pub explosive_resist: bool,
+    #[serde(default)]
+    pub ignite_halfhealth: bool,
+    /// physgun_interactions onbreak explode_fire (PROPINTER_PHYSGUN_BREAK_EXPLODE: the gas
+    /// can's PropaneTank.Burst instead of the explosion sound).
+    #[serde(default)]
+    pub break_explode: bool,
 }
 impl Default for PropData {
     fn default() -> Self {
@@ -202,6 +214,10 @@ impl Default for PropData {
             breakable_skin: 0,
             explosive_damage: None,
             explosive_radius: None,
+            flammable: false,
+            explosive_resist: false,
+            ignite_halfhealth: false,
+            break_explode: false,
         }
     }
 }
@@ -333,6 +349,9 @@ pub struct ModelInstance {
     /// Pitch, yaw, roll, in degrees, applied in Source's Z-up convention.
     pub angles: Vec3,
     pub skin: usize,
+    /// The studio body value (m_nBody: each body part's submodel, SetBodygroup).
+    #[serde(default)]
+    pub body: i32,
     pub scale: f32,
     pub kind: String,
     #[serde(default)]
@@ -346,7 +365,11 @@ pub struct ModelInstance {
 }
 impl ModelInstance {
     pub fn asset_key(&self) -> String {
-        format!("{}#{}", self.model.to_lowercase(), self.skin)
+        if self.body == 0 {
+            format!("{}#{}", self.model.to_lowercase(), self.skin)
+        } else {
+            format!("{}#{}@{}", self.model.to_lowercase(), self.skin, self.body)
+        }
     }
 }
 impl World {

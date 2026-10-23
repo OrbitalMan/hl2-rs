@@ -905,6 +905,35 @@ pub fn present(
         !sim.world_running(),
         &sim.physics,
     );
+    // C_EntityFlame's burning_character on burning props (control points: the prop's
+    // center and world bounds).
+    {
+        let eye = glam::Vec3::from_array(sim.eye().to_array());
+        let flames: Vec<(usize, hl2_simulation::pcf_runtime::ControlPoints)> = game
+            .scene
+            .fires
+            .flames
+            .keys()
+            .filter_map(|&id| {
+                let state = game.scene.states.get(id).filter(|s| !s.killed)?;
+                let (min, max) = sim.physics.entity_world_bounds(id).unwrap_or((
+                    state.origin - glam::Vec3::splat(16.),
+                    state.origin + glam::Vec3::splat(16.),
+                ));
+                Some((
+                    id,
+                    hl2_simulation::pcf_runtime::ControlPoints {
+                        origin: (min + max) * 0.5,
+                        model_min: min,
+                        model_max: max,
+                    },
+                ))
+            })
+            .collect();
+        effects
+            .source
+            .burning(&flames, eye, direction, game.scene.time, sim.paused());
+    }
     // Active stunsticks' halos (C_WeaponStunStick::DrawModel), new sizes every frame.
     if effects
         .source

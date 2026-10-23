@@ -268,6 +268,7 @@ pub fn queue_prop_damage(
     world: &World,
     scene: &mut Scene,
     launched: &mut std::collections::HashSet<usize>,
+    thrown: &mut std::collections::HashSet<usize>,
     held: &dyn Fn(usize) -> bool,
 ) {
     for event in collisions {
@@ -286,6 +287,18 @@ pub fn queue_prop_damage(
                 continue;
             }
             let first_after_launch = launched.remove(&id);
+            // m_bThrownByPlayer || m_bFirstCollisionAfterLaunch: an NPC hit gets
+            // DispatchInteraction(g_interactionHitByPlayerThrownPhysObj).
+            if let Some(npc) = event.entities[other].filter(|n| {
+                world
+                    .entities
+                    .get(*n)
+                    .is_some_and(|e| e.class().starts_with("npc_"))
+            }) {
+                if thrown.remove(&id) || first_after_launch {
+                    scene.thrown_hits.push((id, npc));
+                }
+            }
             // Held objects: no static damage (other side static) and none from the player.
             if held(id) && event.masses[other] <= 0. {
                 continue;
@@ -477,6 +490,7 @@ mod tests {
                 &world,
                 &mut scene,
                 &mut physics.launched,
+                &mut Default::default(),
                 &|_| false,
             );
             total += scene.entity_damage.drain(..).map(|d| d.amount).sum::<f32>();

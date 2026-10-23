@@ -400,9 +400,126 @@ fn decode_face(data: &[u8], l: &Layout, face: usize) -> Result<Image> {
         translucent: l.flags & (0x1000 | 0x2000) != 0,
     })
 }
+/// One frame of a sheet sequence: its duration and up to four images' texture
+/// rectangles (u0, v0, u1, v1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetFrame {
+    pub duration: f32,
+    pub images: Vec<[f32; 4]>,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetSequence {
+    pub number: i32,
+    pub clamp: bool,
+    pub total_time: f32,
+    pub frames: Vec<SheetFrame>,
+}
+/// The VTF_RSRC_SHEET resource (particle sprite-card sheets). Layout read from the
+/// installed sheets (no SDK source: the loader is in the closed particles library):
+/// u32 size, then i32 version (1: four images per frame, 0: one), i32 sequence
+/// count, and per sequence i32 number, i32 clamp, i32 frame count, f32 total time, then
+/// per frame f32 duration and the images' (u0, v0, u1, v1). The whole resource must be
+/// consumed. None when the texture has no sheet.
+pub fn sheet(data: &[u8]) -> Result<Option<Vec<SheetSequence>>> {
+    if bytes(data, 0, 4)? != b"VTF\0" || u32le(data, 8)? < 3 {
+        return Ok(None);
+    }
+    let resources = u32le(data, 68)? as usize;
+    if resources > 32 {
+        bail!("invalid VTF resource count");
+    }
+    let Some(offset) = (0..resources).find_map(|i| {
+        let o = 80 + i * 8;
+        (bytes(data, o, 4).ok()? == [0x10, 0, 0, 0]).then(|| u32le(data, o + 4).ok())?
+    }) else {
+        return Ok(None);
+    };
+    let offset = offset as usize;
+    let size = u32le(data, offset)? as usize;
+    let end = offset + 4 + size;
+    let mut o = offset + 4;
+    let int = |o: &mut usize| -> Result<i32> {
+        let v = crate::i32le(data, *o)?;
+        *o += 4;
+        Ok(v)
+    };
+    let version = int(&mut o)?;
+    let images = if version == 0 { 1 } else { 4 };
+    let count = int(&mut o)?;
+    if !(0..=1024).contains(&count) {
+        bail!("invalid sheet sequence count {count}");
+    }
+    let float = |o: &mut usize| -> Result<f32> {
+        let v = crate::f32le(data, *o)?;
+        *o += 4;
+        Ok(v)
+    };
+    let mut sequences = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let number = int(&mut o)?;
+        let clamp = int(&mut o)? != 0;
+        let frames = int(&mut o)?;
+        if !(0..=4096).contains(&frames) {
+            bail!("invalid sheet frame count {frames}");
+        }
+        let total_time = float(&mut o)?;
+        let mut list = Vec::with_capacity(frames as usize);
+        for _ in 0..frames {
+            let duration = float(&mut o)?;
+            let mut rects = Vec::with_capacity(images);
+            for _ in 0..images {
+                rects.push([
+                    float(&mut o)?,
+                    float(&mut o)?,
+                    float(&mut o)?,
+                    float(&mut o)?,
+                ]);
+            }
+            list.push(SheetFrame {
+                duration,
+                images: rects,
+            });
+        }
+        sequences.push(SheetSequence {
+            number,
+            clamp,
+            total_time,
+            frames: list,
+        });
+    }
+    if o != end {
+        bail!(
+            "sheet resource has {} unread bytes",
+            end as isize - o as isize
+        );
+    }
+    Ok(Some(sequences))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "reads the installed game (HL2_ROOT)"]
+    fn installed_particle_sheets_parse_exactly() {
+        let game = crate::install::discover().unwrap();
+        let vfs = crate::vpk::Vfs::mount(&game).unwrap();
+        for (path, sequences) in [
+            (
+                "materials/particle/fire_burning_character/fire_burning_character.vtf",
+                6,
+            ),
+            ("materials/particle/vistasmokev1/vistasmokev1.vtf", 34),
+        ] {
+            let data = vfs.read(path).unwrap().unwrap();
+            let sheet = sheet(&data).unwrap().unwrap();
+            assert_eq!(sheet.len(), sequences, "{path}");
+            assert!(sheet.iter().all(|s| !s.frames.is_empty()
+                && s.frames
+                    .iter()
+                    .all(|f| f.images.len() == 4
+                        && f.images[0].iter().all(|c| (0. ..=1.).contains(c)))));
+        }
+    }
     #[test]
     fn dxt1_red_block() {
         let b = [0, 248, 0, 0, 0, 0, 0, 0];

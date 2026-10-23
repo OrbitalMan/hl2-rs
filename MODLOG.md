@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-23 Merge: main into orbitalman/hl2-ui (sessions 28-30: squads, zombies, particles, ragdoll data)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- Merged `main` (d9295d5) into `orbitalman/hl2-ui` (from 210849b; merge base 62ca67a). Conflicts:
+  - `crates/source-assets/src/models.rs`: main's body selection (`read_model_body`) and this branch's root LOD (`read_model_lod`) are now one reader, `read_model_variant(vfs, path, skin, body, root_lod)`; `read_model`, `read_model_body` and `read_model_lod` are thin wrappers, and the model cache passes both body and root LOD. The LOD choice is the pure, unit-tested `root_lod_index` (clamped to the authored LODs, a trailing shadow LOD excluded), applied to the submodel the body selects.
+  - `MODLOG.md`, `docs/DESIGN.md`, `docs/validation.md`: kept both sides of the prepended entries.
+- main's owned-install bodygroup test read `HL2_ROOT` directly; it now locates the game with `install::discover()` like every owned test.
+- Packaged replay check: `Weapon_Alyx_Shotgun.Cock` is recorded as a model sound with no installed Half-Life 2 script (`MISSING_MODEL_SOUNDS`). The female citizen and Alyx `shoot_shotgun` AE_CL_PLAYSOUND names an Episode One script, and main's F4 citizen spawn pool (one template per head) now preloads it on every map. The `body_medium_impact_soft` gap main shows too now also covers `bevy-pallet-kills-cop-physdamagescale1` and `bevy-physcannon-npc-impact`.
+- Gameplay expected outcomes re-recorded (`test-inputs/expected/`): I/O counters (+1..+5 inputs/outputs from main's actbusy, physics-trigger and can-cop entity work), plaza cop look targets and forward rays.
+
+**Why:** User request: "Merge main to orbitalman/hl2-ui. In merge conflicts, resolve preferring code reusability, isolation, testability and maintainability."
+
+**Tested how:**
+- `cargo fmt --check`, strict workspace Clippy (`--workspace --all-targets --locked -D warnings`) and `scripts/checks/check_windows.sh`: clean.
+- `cargo test --workspace --locked`: all pass. Owned-install tests (`-- --ignored`): all pass except two hl2-bevy campaign headless tests that time out (5 s async background load) only when run in parallel with the other heavy owned hl2-bevy tests; alone they pass both before and after the merge.
+- Owned model tests (`cargo test -p source-assets models -- --ignored`): 13 pass, including main's zombie headcrab bodygroup test and the Barney LOD test on the combined reader.
+- Packaged replays (`scripts/checks/replays.py`, JOBS=4): the first run failed every gameplay fixture on the shotgun sound above; with it recorded, outcomes differed from the pre-merge recording. Referee: a headless build of main ran every gameplay fixture beside the merged build. Per-label outcomes agree except fields `replays.py` already treats as varying between runs of the same build (pallet hits/rays, `occluded_blast_targets`) and `env_zoom.Zoom`, which this branch implements and main reports as unsupported. Only after that review were the outcomes recorded with `UPDATE_EXPECTED=1`. A second full run then verified them: 93 checks, 91 pass, 2 fail (`fov_settings`, `console`, below), plus `monitors-kleiner-scene`, whose recording run had caught a one-off 7 of 8 gibs removed (8 in the pre-merge recording, on main and in the verify run; gibs fade only out of view). That fixture was re-recorded serially (8) and passed twice more.
+
+**Result:** Merge complete; no merge-introduced behavior difference found against main.
+
+**Still broken or not tested:** `fov_settings` (portrait viewmodel FOV 84.34, expected 93.78 after the portrait re-tuning) and `console` ("the weapon selection opens without switching") also fail on the pre-merge commit; they are not merge regressions and are left for their own fix. Windowed replays not run. Ordinary playthrough not tested.
+
+**Next:** Update the stale portrait viewmodel FOV assertion and look into the console weapon-selection check.
+
 ## 2026-10-23 Stack developer overlays down the left edge
 
 **Agent/model:** Claude Code, Claude Sonnet 5.5 (`claude-sonnet-5-5`). No subagents.
@@ -3782,6 +3808,211 @@ Also fixed: the check scripts' watchdog `sleep` outlived its subshell and kept t
 - `target/debug/hl2-bevy --frames 60 --no-focus`: verified 60 frames on Apple M1 Pro (Metal backend) loading `d1_trainstation_02` with 0 validation errors.
 
 **Result:** Clean resolution scaling and crash-free display mode and resolution switching.
+## 2026-10-22 Codex offline research handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list and queued_damage are credited in their milestone entries; all worker tasks completed.
+
+**Changed / Why:** Recorded precise private pickup/dispatch continuation and lean prompt, sealed evidence inventory, preserved failures/gaps and offline-only next step.
+
+**Tested how / Result:** All13 seals and independent navigator checks pass; final closeout records scoped docs, empty staged index, actual tree/remote status and private artifact hashes after commit/push. Concurrent edits appeared in crates/hl2-bevy/src/gameplay.rs and crates/hl2-simulation/src/npc.rs during closeout; Codex left those implementation files untouched and uncommitted. Inventory57 distinct/63 per-root body identities/64 source paths includes five navigation-only occurrences.
+
+**Still broken or not tested / Next:** Native ordering/physics/carry/window/exit and Rust parity untested, first_map_finished:false. Follow the private continuation, preserve the owner's running game and Claude's implementation, and revalidate before any new bounded discovery.
+
+## 2026-10-22 offline callback-writer and navigator milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material worker queued_damage completed V, inherited model family/exact identifier unavailable; primary reviewed/sealed V and built/independently checked the navigator.
+
+**Changed / Why:** Bound the exact motion callback's error-time writer and target/arrival dataflow; provided finite paged evidence navigation preserving source reuse, raw-only boundaries and navigation-only roles.
+
+**Tested how / Result:** V seal24/21 files/bindings passes; all13 J..V seals gated. Navigator independent checks pass57 distinct bodies/63 per-root identity occurrences/64 source paths/five navigation-only occurrences, with no body output or corpus discovery. Failures retained; older frozen counts unchanged.
+
+**Still broken or not tested / Next:** Actual callback/input/physics order, motion/units, carry/throw/window/exit and Rust parity untested. Finish quota checkpoint with scoped docs committed/pushed, clean/remote verification and precise private continuation; preserve current offline constraint.
+
+## 2026-10-22 offline target-search and error-consumer milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list(T) and queued_damage(U), inherited model family/exact identifiers unavailable; primary reviewed/sealed both.
+
+**Changed / Why:** Bound use-target search predicates and stateful carry-error consumption, preventing long-ray reach and zero-error return values from being mistaken for successful interaction or physical convergence.
+
+**Tested how / Result:** T/U sealed32/21 and21/18 files/bindings; independent1123/94 bounded byte-record checks, exact immutable DB identities, constants/call sites and pinned references pass. Rejected wrong-width decode retained.
+
+**Still broken or not tested / Next:** Live targets/caps/LOS, accumulator replenishment/order, carry/motion/timing/units, window break/exit and Rust parity untested. One tightly bounded offline writer follow-up and metadata navigator remain; no owner game disturbance or Rust changes.
+
+## 2026-10-22 offline scale-key and grab-target milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material workers physics_list(R) and queued_damage(S), inherited model family/exact identifiers unavailable; primary reviewed and sealed both.
+
+**Changed / Why:** Bound authored crate scale key spelling to retail float destinations and clarified ignored UpdateObject results/target requests so the handoff cannot mistake acceptance or return values for native motion/release.
+
+**Tested how / Result:** R/S independent raw/identity/source checks pass; closed-set seals53/17 and24/16 files/bindings. R1004 and S806 bounded records; rejected navigation/admin reads retained. Native artifacts remain private and the owner's running game undisturbed.
+
+**Still broken or not tested / Next:** Live key assignment/locale/numeric conversion, carry error/state/motion, units/cadence, break/exit and Rust parity untested. Continue only bounded offline target-selection/error-metric questions, preserve original scene gaps and publish reviewed docs.
+
+## 2026-10-22 offline frame/input and crate-resource milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material static workers physics_list completed O and queued_damage completed P, inherited model family/exact identifiers unavailable. Primary agent reviewed/sealed O/P and completed N/Q.
+
+**Changed / Why:** Connected selected held-frame and generic input routes; retained exact two-crate resource data/parser disagreement and bound class spawn/create to existing scale/override evidence. Kept owner game undisturbed and native material private.
+
+**Tested how / Result:** N/O/P/Q seals pass22/13,33/22,20/16,22/15 retained-file/binding counts; native528/208/414 bounded records plus resource14 witnesses. Exact identities, selected bytes/CRCs/hashes/source ranges and preserved parser disagreement checked. No Rust/native execution.
+
+**Still broken or not tested / Next:** Native key/frame cadence, final mass/physics/units, actual carry/throw/window/exit and Rust parity untested. Finish bounded scale-key and grab-update follow-ups offline; retain original gaps and commit/push reviewed docs at checkpoints.
+
+## 2026-10-22 offline list, queued damage and logical use milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material static workers physics_list (K) and queued_damage (L), inherited model family/exact identifier unavailable. Primary agent reviewed/sealed their work and completed M.
+
+**Changed / Why:** Bound the prop's singleton physics list, selected deferred-damage forwarding gates and logical use-press clearing while preserving the owner's running game. Kept historical input descriptors distinct from new observations.
+
+**Tested how / Result:** Three seals pass18/21,43/41,32/18 retained-file/binding counts; one/16/four retained exact bodies and25/1428/264 bounded records. M has two semantic methods and two navigation-only bodies; L reuses ten frozen bodies. Raw/identity/source checks passed and rejected construction/navigation work retained. No Rust/native execution.
+
+**Still broken or not tested / Next:** Physical object stability, actual damage/output/break/exit, key/tick dispatch and Rust parity untested. Keep first-map/original-gap boundaries and game-preservation constraint; complete the bounded generic Use input bridge if needed, then leave a committed/pushed handoff.
+
+## 2026-10-22 offline pickup saved-state milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Primary agent completed Attach research. Independent static workers physics_list and queued_damage are researching separate follow-ups; their unfinished findings are not promoted here.
+
+**Changed / Why:** Sealed the narrow saved-mass/rotational-damping capture, temporary carry setters and ordinary +use caller order while preserving the owner's running game.
+
+**Tested how / Result:**17 retained files/13 external bindings,two exact bodies/646 byte-matched records; predecessor use/detach seals pass. Complete identities, byte sites, constants and pinned reference excerpts checked. No Rust changes/builds or native launch.
+
+**Still broken or not tested / Next:** Actual saved/restored values, list membership/order, dynamic physics/units, carry/throw/window/exit and Rust parity untested. Continue bounded offline list-contract and damage-dispatch research; commit/push reviewed docs and leave a clean checkpoint near quota.
+
+## 2026-10-22 offline detach supplement and final research handoff
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. The earlier material static worker exit_registration contributed exit/use/throw evidence; the late detach supplement and handoff were completed by the primary agent.
+
+**Changed / Why:** Sealed the narrow detach helper and selected velocity branches; left a six-root private handoff and lean next-chat prompt while preserving the owner's running game and Claude's implementation lane.
+
+**Tested how / Result:** Late seal passes20 retained files/12 bindings/three exact bodies/370 bounded records; original five seals and the corrected metadata navigator pass. Saved-mass/damping setter requests precede later throw mass querying; false-clear can clamp velocity. Reviewed documentation checks/publication are recorded separately; no Rust change/build or native launch.
+
+**Still broken or not tested / Next:** Actual restoration/settings/units/velocity, window interaction, exit and Rust parity untested; original gaps retained. Continue offline under the owner constraint. Later permitted idle-session research must observe fresh identities and resulting state/motion. Read the new private continuation/closeout; commit/push reviewed shared docs and verify the final checkout state before ending.
+
+## 2026-10-22 offline throw/impact and private navigator checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Material static worker exit_registration researched the throw branch with inherited model family; exact identifier unavailable.
+
+**Changed / Why:** Sealed held-throw ordering and the window collision-to-damage bridge; added a paged private evidence navigator to support the next bounded runtime observation while preserving the owner's running game.
+
+**Tested how / Result:** Throw seal passes54 retained files/13 bindings,13 bodies/914 records. Impact seal passes25/nine,five bodies/463 records. Corrected navigator verifies five roots/66 distinct exact bodies/69 occurrences/five raw-only missing startup procedures; the undercounted initial draft is rejected and retained. No native execution or Rust implementation change.
+
+**Still broken or not tested / Next:** Actual live state/settings, release/throw/contact/damage/window break/exit, native units and Rust parity untested. Keep original authored gaps. Finish the precise continuation receipt and clean/synced publication; later idle-session runtime must bind fresh identities and observe resulting state/motion, not just outputs.
+
+## 2026-10-22 offline window-health and crate-use milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Material static worker exit_registration researched crate use with inherited model family; exact identifier unavailable.
+
+**Changed / Why:** Sealed private CBreakable health/propdata and CPhysicsProp +use evidence while keeping the owner's running game undisturbed. Distinguished authored window health17 from conditional profile15, and pickup outputs from attachment/carry.
+
+**Tested how / Result:** Window seal passes116 retained files/26 bindings,23 exact bodies/2,569 instruction records/13 metadata stores plus fresh owned-file parsing/provenance. Crate seal passes76 files/14 bindings,18 bodies/1,093 records/five authored crates and edges. Misleading decompiler signature/output branches and rejected drafts remain explicit. Shared docs reviewed and committed separately.
+
+**Still broken or not tested / Next:** Live health, actual pickup/throw, window break, exit and Rust parity remain untested. Finish the bounded held-object throw ordering supplement, then leave a precise offline/runtime handoff; do not disturb the owner's game or alter original authored gaps.
+
+## 2026-10-22 offline exit-registration checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. Materially involved static worker: exit_registration, inherited model family; exact identifier unavailable.
+
+**Changed / Why:** Bound retail CChangeLevel metadata/callback/reset path and prepared offline window/crate follow-up while preserving the owner's running game. All native material remains private.
+
+**Tested how / Result:** Registration seal passes53 retained files/seven external bindings,10 exact bodies/503 instruction records. Named touch/Spawn assignment and ordinary Activate latch reset are byte checked. Exact registration-stub absence and a rejected verifier draft remain retained. A guarded launch deferred before process creation; no game/input/focus/cursor control followed.
+
+**Still broken or not tested / Next:** Live trigger instance, ordinary exit and Rust parity untested. Keep the original16 gaps/four missing procedures. Continue bounded offline CBreakable damage and CPhysicsProp use/pickup; runtime waits for the owner's existing game to be left undisturbed.
+
+## 2026-10-22 static exit preparation checkpoint
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Prepared the next storage exit observation with two exact retail touch/gate candidates and duplicate-preserving authored routing. Kept the native material private and sealed separately.
+
+**Tested how / Result:** Static seal passes13 files/eight bindings, two exact bodies/280 PE instruction records,27 BSP entities/47 output edges/five submodels. No game launch or Rust changes. Reviewed documentation committed separately.
+
+**Still broken or not tested / Next:** SDK-correlated method names still require retail class/live-trigger binding. Latch ordering and the distinct output member inform the next observer; they do not establish a fired exit. Ordinary crate/window escape, map exit and Rust parity remain untested. Use the private section/storage continuation and both sealed guides.
+
+## 2026-10-22 sealed SECTION repeat, control and storage research
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Sealed private native SECTION/ETA evidence and input-led storage/ladder continuation; added a read-only verifier, paged query and Claude implementation/research handoff. Native material stays outside Git. No Rust implementation changes.
+
+**Tested how / Result:** Six static/raw audits pass; 1504 files/52 external bindings sealed.31 exact bodies/1310 instruction records; sampled native677 events/157 call pairs/5 scoped starts; all3 automatic resumes plus fresh14,003-sample control corroboration. Seven intro01b clock rewinds and genuine storage security04 start retained. Ladder climb/dismount raw bytes and capture checked. Owned research processes closed with checked installed identities unchanged. Reviewed shared docs published separately.
+
+**Still broken or not tested / Next:** Earlier V3 gap/rejected approaches remain explicit. First map unfinished; full audiovisual replay, timing fidelity, runtime ETA/ABI and Rust parity untested. Next: ordinary crate/window escape from storage platform, keeping original16 authored gaps and four missing exact procedures. Private `work/publishing/research-section-storage-continuation-20261022b.md` carries reproduction and provenance.
+
+## 2026-10-22 doorway SECTION callback and native room milestone
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Recovered exact retail callback/SECTION targets, added fresh output-generation checks and followed the genuine room route. Added bounded shared research findings; all native material and observer tools remain private.
+
+**Tested how / Result:** Static and raw-window verifiers pass23 exact bodies,988 instruction records,1,183 closed call pairs,12 scoped outputs and4,252 motion samples. Native automatic resume is retained for intro02/security03; a capture shows Barney's face after reveal. The sampled observer passes13 offline checks. Reviewed docs committed separately.
+
+**Still broken or not tested / Next:** Dense trace gap1376..1673, unfinished storage continuation and a stopped control replay remain rejected/partial. Follow the measured clear queue lane and repeat SECTION observation with bounded sampled groups and a fresh uninstrumented control. Full playback, exit and Rust parity remain untested; canonical16 gaps remain.
+
+## 2026-10-22 session 30, part 2: particle runtime (burning props), burning zombies, ragdoll keyvalues (`wip/squads-20261022`)
+
+- Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.
+- Changed: VTF sheet reader; `pcf_runtime` (PCF systems with children, burning_fx operator subset, sheet-animated sprites, SpriteCard overbright, lock to model center) drawn through the effect quads; burning props start/stop burning_character; zombie fire rules, Ignite inputs, on-fire activities; `phy::ragdoll` KeyValues reader.
+- Why: prompt step 2 (flame visuals), owner question about ragdolls.
+- Tested how: owned tests (sheet layout, burning_character runtime, NPC ragdolls), hl2-simulation 354 unit tests, strict Clippy/fmt, packaged barrel-burn and zombie-burn, native oracle burning barrel A/B (burn-native-vs-ours.png), regression artifacts/s30-regression-b.
+- Result: see STATUS "Current session 30".
+- Still broken or not tested: operators follow PCF parameter names (closed particle library not decompiled); smoke dual sequence/frame blending, warp/pre-age, scorch, burning ragdolls; ragdoll geometry/joints/death spawn.
+- Next: owner playtest; ragdolls (b)-(c) or particle operator decompiles per the owner.
+
+## 2026-10-22 session 30: NPC retargeting (ChooseEnemy), can cop reaction/walk-off (actbusy), speech-only scenes keep AI, citizen die voice gender, F4 citizen heads (`wip/squads-20261022`)
+
+- Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.
+- Changed: `ai::enemy_choice` (ChooseEnemy/ShouldChooseNewEnemy/BestEnemy) with the CAI_Enemies serial and the SDK elusion rule; metrocop PHYSOBJECT_ASSAULT raised in its gather; `ai::actbusy` (ai_goal_actbusy inputs, hint search/locks, START_BUSYING/BUSY/STOP_BUSYING) hosted by metrocops; ACT_BUSY_STAND in NPC_BASE_AI_ACTIVITIES; speech-only scenes no longer suspend NPC AI; NPC_Citizen.Die carries the actor model; F4 npc_citizen pool = 15 head templates chosen by the least-used rule at spawn; audio trace request lines record actor_model/entity.
+- Why: owner playtest notes 2026-10-22 (NPCs never change targets; can cop ignores a thrown can and blocks the way after "carry on"; nag escalation; citizen voices in the wrong gender; F4 citizens only female).
+- Tested how: hl2-simulation 353 unit tests, strict Clippy/fmt, packaged fixtures artifacts/s30 (retarget-zombie before/after, retarget-soldier, cancop-pass, cancop-throw(-dense), cancop-ignore, f4-citizens, squad-battle), native oracle dwell at the can scene (nags), owned suite (HL2_ROOT, --ignored) 56 pass; regression artifacts/s30-regression: weapons 17/17, attention 26/26, movement 25/26 (known doll01); finals vs s29-regression-b within known variance except Breen's monitor mouth (721 px, max 114; lip/flex timing like Kleiner's known 17 px); next batches diff against s30-regression.
+- Result: see STATUS "Current session 30".
+- Still broken or not tested: native A/B of the can throw (the owner remembers one hit; ours swings up to three times in the policing window, SDK-consistent), native npc_create head choice, male speaker voice in the battle run, actbusy beyond the can cop, unreachable/fear paths in BestEnemy, ragdolls (not started).
+- Next: owner playtest; can-throw native A/B; ragdoll steps (DESIGN 14n session 30 (11)) or the session 29 Open list per the owner.
+
+## 2026-10-22 natural customs, security pen and Barney introduction research
+
+**Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Added a sealed private native-route supplement and paged implementation-review guide;updated shared research documentation. Observed actual authored requests/actor bindings instead of advancing the second map or seeding campaign actors. No Rust implementation changes.
+
+**Tested how / Result:** Ten exact bodies,six relocated entries per script,2183 selected events/1005 pairs,25 controller names,168 requests/166 accepted nested starts and164 authored caller joins pass.54 player snapshots and4416 motion samples retain the ordinary route to Barney's introduction. Seal461 files/33 bindings and five query cases pass. Three actor reads,three unscoped outputs and one empty input guard capture remain unpromoted. Game closed,Frida detached,checked installed identities unchanged. Reviewed documentation committed separately.
+
+**Still broken or not tested / Next:** No full scene/SECTION/helmet reveal/exit or Rust parity validation. Continue the natural doorway/room transition with fresh output identity and actor readiness;preserve16 gaps and missing exact procedures. Private handoff research-customs-pen-continuation-20261022.md.
+
+## 2026-10-22 native grate crossing and player input evidence
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Added private BSP/PE/native input evidence and research documentation to resolve the prior first-map side boundary. No Rust implementation changes.
+
+**Tested how / Result:** One exact server.dll metadata body, six live/PE input-field bindings,617 raw motion samples/eight captures, and original BSP world brush2040 pass acceptance. A fresh no-Frida player stops at the matching plane, jumps across the32-unit grate, and lands beyond it. Private seal passes99 files/seven bindings; game closed and checked installed identities match. Reviewed public docs committed separately from concurrent implementation work.
+
+**Still broken or not tested / Next:** Full train-exit route, first-map completion, camera/audio/animation/SECTION behavior and Rust parity not tested. Continue toward genuine customs/security controllers, preserving all prior gaps and the rejected direct-button attempt.
+
+## 2026-10-22 session 29: owner playtest fixes (thrown debris, can pickup outputs, voice gender, gravity gun hold glow), bodygroups and zombie headcrabs, npc_zombie AI, PVS-gated idle chatter, burning props, PCF reader, gas can/propane burst, poison zombie (`wip/squads-20261022`)
+
+- Agent/model: Claude Code desktop, `claude-opus-5-5`. No subagents.
+- Changed: debris props become COLLISION_GROUP_INTERACTIVE_DEBRIS when picked up/held/punted/thrown (hit NPCs until they sleep); prop_physics/func_physbox OnPhysGunPickup/OnPhysGunOnlyPickup/OnPhysGunPunt/OnPlayerPickup/OnPhysGunDrop; player-ally speech passes the speaker model ($gender); gravity gun attack2 holding effect and deny sound without a target; studio bodygroups (`ModelInstance.body`, raw submodel records, zombie Spawn bodygroups); `ai::zombie` (npc_zombie chase/claws/sounds/moans, walk-only ground mover) and `NPC_BASE_AI_ACTIVITIES` for every NPC model; `ai::efficiency` and the PVS gate on idle sounds; `fire` (prop ignition rules, CEntityFlame damage/sounds, PropData fire_interactions); `source_assets::pcf` (binary DMX particle definitions); PROPINTER_PHYSGUN_BREAK_EXPLODE (PropaneTank.Burst for the gas can and propane tank); prop bullet surfaces from the .phy; `zombie::Kind::Poison` (npc_poisonzombie bites).
+- Why: owner playtest notes 2026-10-22 (cans phase through the cop, no "put it in the trashcan" line, female/male pain voices swapped, gravity gun glow/sound only on a target, zombies without headcrabs, no natural attacks, cop radio chatter everywhere); owner request to load AI activities for all NPC classes.
+- Tested how: unit tests (hl2-simulation 344, source-assets bodygroup math, zombie conditions/punches/schedules/moans, efficiency mapping, interactive debris), owned suite 55 pass (new: zombie headcrab bodygroup meshes; locomotion test covers the zombie walk), strict Clippy/fmt; packaged runs artifacts/s29: cancop-throw (pickup nag plays; the thrown can hits the cop, OnCupCopped, throwcan_trigger -> fail relay), zombie-look (headcrabs on classic/fast/poison zombies), zombie-hall (chase + 9 claw hits, zombie sounds start after the preload fix), idle-plaza (10 -> 6 cop lines in 60 s with the plaza cops in view); native plaza dwell with snd_showstart (see STATUS); regression artifacts/s29-regression; barrel-burn (a shot explosive barrel ignites, burns ~3 s, explodes); owned PCF test; gascan-shoot/propane-shoot (PropaneTank.Burst, SolidMetal.BulletImpact); poison-hall (10 bites).
+- Result: see STATUS "Current session 29".
+- Still broken or not tested: owner listening (voice gender, gravity gun deny sound vs native hum), headcrab release/torso/fast/poison zombies/headcrabs, flame particle visuals, cop chatter rate (native 1 vs ours 6 lines a minute at the plaza), can scene native A/B, real-input playtest.
+- Next: STATUS "Current session 29" Open list.
+
+## 2026-10-21 session 28 (cont.): NPC squads and sentence criteria; the can cop scene (`wip/squads-20261022`)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Research: SDK 2013 ai_squad.cpp, ai_basenpc.cpp (InitSquad, SelectIdealState SquadNewEnemy, UpdateEnemyMemory, FOkToMakeSound/JustMadeSound), ai_sentence.cpp/h (Speak criteria defaults), npc_combine.cpp/npc_metropolice.cpp (NotifyDeadFriend, IdleSound chatter, every Speak call's criteria), ai_behavior_police.cpp/ai_goal_police.cpp (GatherConditions, knock-out), weapon_stunstick.cpp, scripted.h/ai_default.cpp (CINE_MOVETO), physobj.cpp (CPhysImpact), logicentities.cpp (CTimerEntity), logicrelay.cpp; d1_trainstation_02 entity lump (can cop chain, squads, gag flags); installed npc_sounds_metropolice/soldier.txt.
+
+**Changed:** `ai::squad` (GetLeader rule, NumMembers, sound gate), `ai::runtime` squads (join on entering the world, AddToSquad memory copy, shared sightings, SquadNewEnemy, NotifyDeadFriend lines, per-group sentence criteria, squad sound gate, CNPC_MetroPolice idle chatter exchange and harassment memory), spawn requests carry targetname/squadname; scripted_sequence walk/run/wait-facing moves, env_physimpact, trigger physics-object touches and filter entities, host VPhysics pose sync into the scene, random logic_timer intervals, logic_relay CancelPending, policing disabled when its goal dies.
+
+**Why:** owner step 14 speech list (squad speech) and owner reports (station cops chatter across the map; the can cop never knocks the can over and beats an ignoring player forever).
+
+**Tested how / Result:** unit tests (squad leader/gate, runtime squads: membership, criteria, gate, SquadNewEnemy, memory sharing, MAN_DOWN/LAST_OF_SQUAD; cop chatter exchange and harassment; random timers, filters, CancelPending), workspace release tests (two known release-only failures), strict Clippy/fmt; packaged artifacts/s28: idle-plaza (main 18 idle lines/min vs 10 with squads), squad-battle (MAN_DOWN, LAST_OF_SQUAD), cancop-walk/-pass/-fail (can knocked over, trash pass with "Cupcop.Success", escape fail with one knock-out and no endless beating); artifacts/s28-regression-b (built at 0856a32): weapons 17/17, attention 26/26, movement 25/26 (known doll01); vs s28-regression only the plaza cop's glance/pose, foliage timing and a few speckles differ (expected); owned suite 54 pass; dense walk samples (no stall after the fix).
+
+**Also changed (860ab03):** scene/script moves for AI actors (the controller's ai_only refusal removed), script walks with the short tolerance, thrown-prop interaction dispatch.
+
+**Still broken or not tested:** a scripted +USE throw left the can frozen in mid-air (gravity 0; open bug, OnCupCopped unverified); squad strategy slots, AnnounceEnemyType/FLANK/GREN, BestEnemy from shared memory; ai_goal_actbusy (the can cop's walk-off), the can-throw branch, native A/B of the can scene and of chatter rates; real-input playtest.
+
+**Next:** owner playtest; ai_goal_actbusy; squad slots; native A/B.
 
 ## 2026-10-21 session 28: F4 overlay mouse, filter and common props; ent_create placement; sessions 18-28 merged into main
 
@@ -3852,6 +4083,16 @@ Also fixed: the check scripts' watchdog `sleep` outlived its subshell and kept t
 **Still broken or not tested:** native A/B listening of the distance mix; stereo panning/DSP; AI gesture layers (no recoil gesture while moving); native comparisons of move-and-shoot, RPG guidance and elite cadence; runtime skin change for a plain soldier given a shotgun.
 
 **Next:** regression/owned suite results, AI gesture layers, DESIGN 14r part A (runtime spawning of already-loaded classes).
+
+## 2026-10-21 first-map player-triggered passenger scene (research only)
+
+**Agent/model:** Codex desktop,GPT-6 family;exact model identifier unavailable. No subagents.
+
+**Changed / Why:** Retained timed-console walking,player raw reads and genuine trigger/caller/actor playback evidence to close the prior unmeasured-movement gap. Added private scene-player-route-20261021 and a research handoff;updated research documentation only. Incoming player activator and OnStart scene-self identities are distinguished.
+
+**Tested how / Result:** Prior natural-start verifier/seal pass. New acceptance checks six exact bodies/six relocated entries,512 events/253 paired calls,29 player raw snapshots and fresh named-state reconstruction. Instrumented300.869-unit walk requests lcs_trainride_sit_respond at114.180 with genuine citizen_train_2/male_07;fresh never-attached361.622-unit walk corroborates playback at114.420. Both owned games closed;checked installed cfg/module identities unchanged. Repeat verify.py/verify_seal.py commands in docs/validation.md and the private handoff.
+
+**Still broken or not tested / Next:** Strafe stops at y=-1969.96875;no completed train exit. Full scene/audio/animation/SECTION outputs,customs/Barney/full traversal and Rust parity not tested. Inspect real doorway brush/parent transforms and use short measured exit inputs,then observe a genuine downstream controller. No Rust/build/Git mutations by this pass;concurrent Claude implementation is separate. Stay on first map;preserve16 gaps and missing exact procedures.
 
 ## 2026-10-21 session 24, second part (same chat): native soldier comparisons, soldiers/citizens move, grenade-before-reload (`wip/npc-ai-20261014`)
 

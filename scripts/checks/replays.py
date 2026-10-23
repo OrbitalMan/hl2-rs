@@ -705,12 +705,17 @@ SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
                                           "ambience/steamburst1.wav"}}
+# Sound scripts that installed Half-Life 2 models name in their events but only another game
+# defines: the female citizen and Alyx `shoot_shotgun` AE_CL_PLAYSOUND names an Episode One
+# script. Every map preloads it through the F4 citizen spawn pool (one template per head).
+MISSING_MODEL_SOUNDS = {"Weapon_Alyx_Shotgun.Cock"}
 
 
 # Sound errors that main shows too, by fixture: (wave prefix, reason).
 KNOWN_SOUND_GAPS = {
     f: ("physics/body/body_medium_impact_soft", "a body impact variant is not preloaded (main too, not a regression)")
-    for f in ("bevy-pallet-on-npc-hull", "bevy-pallet-tips-off-npc-hull", "bevy-pallet-tips-off-plaza-cop")
+    for f in ("bevy-pallet-on-npc-hull", "bevy-pallet-tips-off-npc-hull", "bevy-pallet-tips-off-plaza-cop",
+              "bevy-pallet-kills-cop-physdamagescale1", "bevy-physcannon-npc-impact")
 }
 # Collision models the loader does not support yet (it reports them and uses the render hull).
 KNOWN_COLLISION_WARNINGS = {
@@ -771,7 +776,7 @@ def check_report(run: Run, steps: list, map_: str, fixture: str = "") -> None:
     effects = presentation["effects"]
     holds("effect sprites and models load", not effects["sprite_errors"] and not effects["model_errors"],
           effects["sprite_errors"] or effects["model_errors"])
-    audio = set(presentation["audio"]["errors"]) - MISSING_SOUNDS.get(map_, set())
+    audio = set(presentation["audio"]["errors"]) - MISSING_SOUNDS.get(map_, set()) - MISSING_MODEL_SOUNDS
     if fixture in KNOWN_SOUND_GAPS:
         prefix, why = KNOWN_SOUND_GAPS[fixture]
         known = {k for k in audio if k.startswith(prefix)}

@@ -1360,6 +1360,7 @@ mod tests {
             origin: glam::Vec3::ZERO,
             angles: glam::Vec3::ZERO,
             skin: 0,
+            body: 0,
             scale: 1.,
             kind: "npc_combine_s".into(),
             solid: true,
