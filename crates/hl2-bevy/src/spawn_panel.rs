@@ -71,17 +71,18 @@ impl PanelFont {
     }
     /// List rows that fit in a canvas `height` below the title, tabs, headings, the two
     /// "more" notes and the message footer.
-    pub fn rows_fit(&self, height: f32) -> usize {
-        let free = height - TOP - 2. * PAD - 6. * self.row();
+    pub fn rows_fit(&self, top: f32, height: f32) -> usize {
+        let free = height - top - 2. * PAD - 6. * self.row();
         ((free / self.row()).floor() as usize).max(5)
     }
-    /// Draw the overlay panel at the left of the screen below the F1 bar; returns each
+    /// Draw the overlay panel at the left of the screen with its top edge at `top`; returns each
     /// clickable row's rectangle (x, y, width, height in canvas pixels) and target.
     pub fn draw(
         &self,
         canvas: &Canvas,
         panel: &Panel,
         message: Option<&str>,
+        top: f32,
     ) -> Vec<([f32; 4], PanelTarget)> {
         let pad = PAD;
         let row = self.row();
@@ -110,15 +111,15 @@ impl PanelFont {
         let height = (rows + 2 + footer) as f32 * row + 2. * pad;
         canvas.rectangle(
             LEFT,
-            TOP,
+            top,
             width,
             height,
             Color::new(0.025, 0.045, 0.07, 0.88),
         );
         let title = Color::from_rgba(240, 180, 90, 255);
-        self.text(canvas, &panel.title, LEFT + pad, TOP + pad, title);
+        self.text(canvas, &panel.title, LEFT + pad, top + pad, title);
         // Tab bar: NPCs | Props | the filter box.
-        let tabs_top = TOP + pad + row;
+        let tabs_top = top + pad + row;
         let mut x = LEFT + pad;
         for tab in &panel.tabs {
             let w = (tab.text.len() + 2) as f32 * self.advance;
@@ -198,7 +199,6 @@ impl PanelFont {
     }
 }
 const LEFT: f32 = 20.;
-const TOP: f32 = 118.;
 const PAD: f32 = 10.;
 /// The drawn row under a pointer position (canvas pixels), from `PanelFont::draw`.
 pub fn hit(hits: &[([f32; 4], PanelTarget)], x: f32, y: f32) -> Option<PanelTarget> {
@@ -229,6 +229,8 @@ mod tests {
         assert!(font.glyphs[0].is_none());
         assert!(font.glyphs[usize::from(b'A' - 32)].is_some());
     }
+    /// A top edge below the F1 and F5 overlays.
+    const TOP: f32 = 118.;
     #[test]
     fn drawn_rows_are_clickable_where_they_are_drawn() {
         use hl2_simulation::ai::spawn::{Column, Overlay, OverlayKey, PanelTarget, Tab};
@@ -236,8 +238,8 @@ mod tests {
         let canvas = hl2_ui::canvas::Canvas::default();
         let mut overlay = Overlay::default();
         overlay.key(OverlayKey::Toggle);
-        overlay.rows_visible = font.rows_fit(720.);
-        let hits = font.draw(&canvas, &overlay.panel(true, false), Some("spawned"));
+        overlay.rows_visible = font.rows_fit(TOP, 720.);
+        let hits = font.draw(&canvas, &overlay.panel(true, false), Some("spawned"), TOP);
         // Every list row fits a 720-pixel window.
         assert!(hits.iter().all(|([_, top, _, h], _)| top + h <= 720.));
         let center = |target| {

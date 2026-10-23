@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-23 Stack developer overlays down the left edge
+
+**Agent/model:** Claude Code, Claude Sonnet 5.5 (`claude-sonnet-5-5`). No subagents.
+
+**Changed:** The F1 developer header, F5 viewmodel tuner and F4 NPC spawn panel stack from the top-left corner in that order; a hidden overlay leaves no gap, so the next one moves up. `draw_debug` and `draw_viewmodel_debug` return their bottom edge and the spawn panel takes its top edge as a parameter (`rows_fit` too).
+
+**Why:** The F4 panel and F5 tuner sat at fixed offsets that assumed F1 was visible.
+
+**Tested how:** `cargo test --workspace`, strict workspace Clippy. Layout of the seven visibility combinations is not covered by a test.
+
+**Result:** Builds and tests pass.
+
+**Still broken or not tested:** Not looked at in a running game or capture.
+
+**Next:** Check F1/F5/F4 combinations in a packaged run.
+
 ## 2026-10-23 Repeat F5 viewmodel adjust keys and add F6 reset
 
 **Agent/model:** Cursor Grok 4.6. No subagents.

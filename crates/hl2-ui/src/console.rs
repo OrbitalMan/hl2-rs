@@ -605,6 +605,10 @@ impl Default for Console {
     }
 }
 
+/// Height of the F1 developer overlay's header, and of the F5 viewmodel overlay panel.
+const DEBUG_HEADER_HEIGHT: f32 = 105.;
+const VIEWMODEL_DEBUG_HEIGHT: f32 = 130.;
+
 impl Console {
     pub fn load(vfs: &Vfs, canvas: Canvas) -> Self {
         let font = |path: &str| {
@@ -3866,12 +3870,13 @@ impl Console {
     }
     /// Four compact header rows and a footer, preserving the retained host's developer layout.
     /// Font data is bundled under its own MIT license, independent of installed game content.
-    pub fn draw_debug(&self, lines: &[String]) {
+    /// Returns the height the overlay occupies at the top of the canvas.
+    pub fn draw_debug(&self, lines: &[String]) -> f32 {
         self.canvas.rectangle(
             0.,
             0.,
             self.canvas.width(),
-            105.,
+            DEBUG_HEADER_HEIGHT,
             Color::new(0.025, 0.045, 0.07, 0.88),
         );
         let rows = [
@@ -3908,16 +3913,17 @@ impl Console {
             );
             draw(footer, vec2(20., self.canvas.height() - 13.), 18., WHITE);
         }
+        DEBUG_HEADER_HEIGHT
     }
 
-    /// Draws the live viewmodel tuning values below the F1 developer overlay.
-    pub fn draw_viewmodel_debug(&self, lines: &[String]) {
-        let top = 110.;
+    /// Draws the live viewmodel tuning values with their top edge at `top`; returns the bottom
+    /// edge.
+    pub fn draw_viewmodel_debug(&self, lines: &[String], top: f32) -> f32 {
         self.canvas.rectangle(
             0.,
             top,
             self.canvas.width(),
-            130.,
+            VIEWMODEL_DEBUG_HEIGHT,
             Color::new(0.025, 0.045, 0.07, 0.9),
         );
         let draw = |line: &str, origin: Vec2, color| {
@@ -3947,6 +3953,7 @@ impl Console {
             };
             draw(line, vec2(22., y), color);
         }
+        top + VIEWMODEL_DEBUG_HEIGHT
     }
 
     pub fn draw(&self, time: f64) {

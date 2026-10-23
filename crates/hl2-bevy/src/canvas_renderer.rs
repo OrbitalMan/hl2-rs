@@ -21,6 +21,9 @@ use bevy::{
 use hl2_ui::canvas::{FilterMode, Quad, Texture2D};
 use std::collections::HashMap;
 
+/// Space between stacked developer overlays.
+const OVERLAY_GAP: f32 = 5.;
+
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(HudMaterialKey)]
 pub struct HudMaterial {
@@ -373,8 +376,10 @@ pub fn present(
             format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
         ];
     }
+    // Overlays stack down the left edge in the order F1, F5, F4; hidden ones leave no gap.
+    let mut stack_top = 0.;
     if !hud.debug_lines.is_empty() {
-        ui.source.draw_debug(&hud.debug_lines);
+        stack_top = ui.source.draw_debug(&hud.debug_lines) + OVERLAY_GAP;
     }
     if sim.viewmodel_debug.enabled
         && let Some(profile) = sim.viewmodel_debug.profile
@@ -390,7 +395,7 @@ pub fn present(
             ),
             "Shift = 0.01    hold to repeat    F6 reset    F5".to_owned(),
         ];
-        ui.source.draw_viewmodel_debug(&lines);
+        stack_top = ui.source.draw_viewmodel_debug(&lines, stack_top) + OVERLAY_GAP;
     }
     // F4 NPC spawn panel (ours, outside the hl2-ui menus).
     hud.spawn_panel = game.spawn_overlay.open.then(|| {
@@ -415,7 +420,7 @@ pub fn present(
             .spawn_log
             .last()
             .and_then(|entry| entry["message"].as_str());
-        let hits = font.draw(&hud.source.canvas, panel, message);
+        let hits = font.draw(&hud.source.canvas, panel, message, stack_top);
         // The panel can cover the screen center: mark where spawns aim (ours).
         let (x, y) = ((width / 2.).round(), (height / 2.).round());
         let canvas = &hud.source.canvas;
@@ -433,7 +438,7 @@ pub fn present(
     hud.spawn_rows = hud
         .spawn_font
         .as_ref()
-        .map_or(0, |font| font.rows_fit(height));
+        .map_or(0, |font| font.rows_fit(stack_top, height));
     ui.source.draw(clock.elapsed_secs_f64());
     game.scene
         .sounds
