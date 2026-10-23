@@ -236,6 +236,15 @@ impl Vox {
 }
 /// `--mute-ambient`: skip map-start ambient_generic loops so test recordings isolate cues.
 pub static MUTE_AMBIENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// `--mute`: silence the output for this run only (unattended replays). Sounds still start and
+/// are reported; the Audio settings and the saved volume are left as they are.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct OutputMute(pub bool);
+/// Whether every channel is silent: a forced `--mute`, or `snd_mute_losefocus` while the
+/// window is not focused.
+pub fn output_muted(forced: bool, mute_losefocus: bool, unfocused: bool) -> bool {
+    forced || (mute_losefocus && unfocused)
+}
 
 #[derive(Clone)]
 struct Ambient {
@@ -538,8 +547,10 @@ pub struct Audio {
     vox: Vox,
     /// Audio page music volume (`snd_musicvolume`) applied to music channels.
     music_volume: f32,
-    /// `snd_mute_losefocus` with the window unfocused.
+    /// `--mute`, or `snd_mute_losefocus` with the window unfocused ([`output_muted`]).
     muted: bool,
+    /// The loudest linear volume given to any sink (0 for a silent `--mute` run).
+    peak_output: f32,
     /// CSoundPatch envelopes by (emitter, cue).
     patches: HashMap<(u64, String), hl2_simulation::sounds::PatchEnvelope>,
     /// Captions of sounds started outside `queue` (ambient_generic spawns).
@@ -608,6 +619,11 @@ impl Audio {
         } else {
             1.
         }
+    }
+    /// A sink volume, recorded in `peak_output`.
+    fn output(&mut self, linear: f32) -> bevy::audio::Volume {
+        self.peak_output = self.peak_output.max(linear);
+        bevy::audio::Volume::Linear(linear)
     }
 }
 /// `--audio-trace PATH`: one JSON line per sound request, sink start and sink removal,
@@ -729,9 +745,7 @@ impl Audio {
             },
             AudioPlayer::new(handle.clone()),
             PlaybackSettings {
-                volume: bevy::audio::Volume::Linear(
-                    self.start_volume(volume, spatial) * self.mix(music),
-                ),
+                volume: self.output(self.start_volume(volume, spatial) * self.mix(music)),
                 speed: pitch / 100.,
                 paused,
                 ..settings
@@ -788,9 +802,7 @@ impl Audio {
             },
             AudioPlayer::new(sources.add(AudioSource { bytes: wav.into() })),
             PlaybackSettings {
-                volume: bevy::audio::Volume::Linear(
-                    self.start_volume(volume, spatial) * self.mix(false),
-                ),
+                volume: self.output(self.start_volume(volume, spatial) * self.mix(false)),
                 paused,
                 ..PlaybackSettings::DESPAWN
             },
@@ -803,6 +815,7 @@ impl Audio {
             "requested":self.requested,"started_sinks":self.started,"failed_requests":self.failed,"capacity_rejections":self.capacity_rejections,
             "pending_sinks":self.pending_sinks,"active_sinks":self.active_sinks,"paused_sinks":self.paused_sinks,
             "pause_changes":self.pause_changes,"resume_changes":self.resume_changes,"spatial":self.spatial,
+            "muted":self.muted,"peak_output":self.peak_output,
             "variants":self.library.variants_played,"decoded":self.library.decoded,"errors":self.library.errors,
             "soundscape":{"definitions":self.soundscapes.len(),"active":self.soundscape.active(),"started":self.soundscape.started,
                 "loops":self.soundscape.loops(),"random_plays":self.soundscape_plays,"unknown":self.soundscape.unknown},
@@ -810,10 +823,12 @@ impl Audio {
             "mixing":"ambient_generic loops and positional soundscape sounds use Source distance gain; distance-variant (^) waves play the near/far premix for the start distance; stereo panning and DSP are not implemented"})
     }
 }
+/// `mute` (`--mute`) silences the map-start sounds spawned here; the mixer keeps it after.
 pub fn install(
     commands: &mut Commands,
     sources: &mut Assets<AudioSource>,
     prepared: PreparedAudio,
+    mute: bool,
 ) {
     let handles = prepared
         .waves
@@ -852,7 +867,8 @@ pub fn install(
         soundscape_plays: 0,
         vox: prepared.vox,
         music_volume: 1.,
-        muted: false,
+        muted: mute,
+        peak_output: 0.,
         patches: HashMap::new(),
         captions: Vec::new(),
         listener: glam::Vec3::ZERO,
@@ -884,11 +900,13 @@ pub fn install(
     }
     commands.insert_resource(audio);
 }
-/// Master volume, Audio settings and the primary window (focus) used to mix every channel.
+/// Master volume, Audio settings, the primary window (focus) and `--mute` used to mix every
+/// channel.
 type MixInputs<'w, 's> = (
     Res<'w, GlobalVolume>,
     Option<Res<'w, crate::ui_host::Console>>,
     Query<'w, 's, &'static Window, With<bevy::window::PrimaryWindow>>,
+    Option<Res<'w, OutputMute>>,
 );
 pub fn queue(
     mut commands: Commands,
@@ -905,14 +923,20 @@ pub fn queue(
         Option<&mut AudioSink>,
     )>,
     mut sources: ResMut<Assets<AudioSource>>,
-    (global, ui, windows): MixInputs,
+    (global, ui, windows, forced_mute): MixInputs,
 ) {
     // Audio page settings: snd_musicvolume for music channels and snd_mute_losefocus.
+    let mut mute_losefocus = false;
     if let Some(ui) = ui.as_deref() {
         let settings = &ui.source.config.audio;
         audio.music_volume = settings.music_volume.clamp(0., 1.);
-        audio.muted = settings.mute_losefocus && windows.single().is_ok_and(|w| !w.focused);
+        mute_losefocus = settings.mute_losefocus;
     }
+    audio.muted = output_muted(
+        forced_mute.is_some_and(|m| m.0),
+        mute_losefocus,
+        windows.single().is_ok_and(|w| !w.focused),
+    );
     let listener = glam::Vec3::from_array(simulation.view_origin().to_array());
     audio.listener = listener;
     // Caption radius checks measure from the player (its eye stands in for its origin).
@@ -958,9 +982,10 @@ pub fn queue(
                 let gain = player.spatial.map_or(1., |(origin, soundlevel)| {
                     hl2_simulation::sounds::dist_gain(soundlevel, listener.distance(origin))
                 });
-                sink.set_volume(bevy::audio::Volume::Linear(
-                    (volume * gain).clamp(0., 1.) * global.volume.to_linear(),
-                ));
+                let linear = (volume * gain).clamp(0., 1.)
+                    * audio.mix(player.music)
+                    * global.volume.to_linear();
+                sink.set_volume(audio.output(linear));
                 sink.set_speed(pitch.max(1.) / 100.);
             }
         }
@@ -971,12 +996,12 @@ pub fn queue(
             .unwrap_or(player.volume);
         let mix = audio.mix(player.music) * global.volume.to_linear();
         if let (None, Some(sink)) = (player.spatial, sink.as_deref_mut()) {
-            sink.set_volume(bevy::audio::Volume::Linear(base.clamp(0., 1.) * mix));
+            sink.set_volume(audio.output(base.clamp(0., 1.) * mix));
         }
         if let (Some((origin, soundlevel)), Some(sink)) = (player.spatial, sink.as_deref_mut()) {
             let gain = hl2_simulation::sounds::dist_gain(soundlevel, listener.distance(origin));
             let volume = (base * gain).clamp(0., 1.);
-            sink.set_volume(bevy::audio::Volume::Linear(volume * mix));
+            sink.set_volume(audio.output(volume * mix));
             let distance = listener.distance(origin);
             audio.spatial.push((player.path.clone(), distance, volume));
         }
@@ -1275,6 +1300,18 @@ pub fn observe(
 mod tests {
     use super::*;
     use bevy::audio::{Decodable, Source};
+
+    #[test]
+    fn forced_mute_silences_regardless_of_focus_and_settings() {
+        for mute_losefocus in [false, true] {
+            for unfocused in [false, true] {
+                assert!(output_muted(true, mute_losefocus, unfocused));
+            }
+        }
+        assert!(output_muted(false, true, true));
+        assert!(!output_muted(false, true, false));
+        assert!(!output_muted(false, false, true));
+    }
 
     #[test]
     fn backend_resampling_preserves_tone_and_pads_stereo_one_shots() {

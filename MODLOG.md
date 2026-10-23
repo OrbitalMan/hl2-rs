@@ -1,5 +1,59 @@
 # MODLOG
 
+## 2026-10-23 Cap parallel replays by physical memory
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `scripts/checks/replays.py` runs no more gameplay replays at once than fit in physical memory: `parallel_jobs(JOBS, physical_memory(), GAME_MEMORY_GB)` with 6 GB per game (default) and 4 GB left to the system, printing a note when it caps. `physical_memory()` uses `sysconf` (macOS, Linux) or `GlobalMemoryStatusEx` (Windows). A new `parallel_jobs` check covers the rule. On a 16 GB machine `JOBS=4` now runs two games.
+
+**Why:** Owner report: replay suites took up to an hour and the machine became unresponsive while they ran. The `JOBS=4` runs started four games at once; each packaged game peaks at 5.4-5.8 GB on the station maps (`footprint`: ~3.7 GB small heap, ~0.7 GB graphics), so the 16 GB machine compressed and swapped (10.9 GB of swap). Fixtures took 80-130 s instead of 20-60 s, and the suite (2063-2304 s) was no faster than a serial run.
+
+**Tested how:** the `parallel_jobs` check (16 GB -> 2, 64 GB -> 4, 4 GB -> 1, unknown memory keeps the request; this machine reports 16 GB) and `coverage` pass. Peak footprint of one fixture (`bevy-frag-lob`, one process at a time, twice): main d9295d5 3.15 GB, this branch before the merge 5.36-5.55 GB, after it 5.48-5.77 GB. The merge adds about 0.2 GB; the branch was already about 2.3 GB above main.
+
+**Result:** Parallel replays stay within memory.
+
+**Still broken or not tested:** A capped `JOBS=4` suite not timed yet. Why this branch's game takes about 2.3 GB more than main's is not investigated.
+
+**Next:** Find the branch-side memory (heap profile of one fixture against main).
+
+## 2026-10-23 Silent packaged checks: `--mute`
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New host flag `--mute` (`audio::OutputMute`): silences every channel for this run only. Sounds still start, play and are reported; the Audio settings and the saved volume are untouched. The mixer's mute is now `audio::output_muted(forced, snd_mute_losefocus, unfocused)` (unit-tested), and `audio::install` seeds it so map-start ambient sounds are silent from their first frame.
+- The audio report gains `muted` and `peak_output` (the loudest linear volume given to any sink, recorded through `Audio::output` at every spawn and volume update). CSoundPatch envelope updates now include the channel mix too.
+- `scripts/checks/replays.py` launches every check with `--mute` instead of `--volume 0.01`, and fails a run whose report is not muted with peak output 0. `--volume 0.01` only set the startup master volume: a settings change (Options Apply, the console `volume` the save-config replay sets to 0.55) reset it to the saved value, so later checks played gameplay audio.
+- `launch-bevy.sh` help and docs/validation.md list the flag.
+
+**Why:** Owner report: gameplay audio was audible while background replays ran; replays and UI checks must be silent without changing the in-game audio settings.
+
+**Tested how:** `cargo test -p hl2-bevy` (110, including `forced_mute_silences_regardless_of_focus_and_settings`); packaged `console` and `save_config` replays: muted, peak output 0.0, 17 sinks started, saved volume 0.55 kept. Full replay suite (JOBS=4, before the memory cap): 93 checks, 0 failed, every run muted with peak output 0; strict workspace Clippy, fmt and the Windows-target check clean.
+
+**Result:** Packaged checks are silent and assert it.
+
+**Still broken or not tested:** Windowed replays not run. Audible silence is backed by the report (`peak_output` 0), not by a recording.
+
+**Next:** none.
+
+## 2026-10-23 Fix the fov_settings and console replay checks
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- `fov_settings`: the portrait and super-ultrawide viewmodel expectations (93.78 and 68.09 degrees vertical) were from the former `fov_offset` boosts. The per-weapon tuning (5d20861) keeps every portrait and ultrawide `fov_offset` at 0 and moves the weapons by offset, so the viewmodel keeps its 54 degree 4:3 width in portrait, 2·atan(tan 27° / (9/16)) = 84.34, and its 41.83 vertical view on wide frames. Assertions, comments and docs/validation.md updated.
+- `console`: the replay closed the console and went straight to weapon selection. Since the 2026-10-21 owner change (docs/gameui.md section 18), the console opened mid-game brings up the pause menu and closing it returns there, so every later step ran paused. `test-inputs/bevy-console.json` now presses Escape at tick 17 (`resumed-from-pause`). The check asserts both stages (console closes to the pause menu, Escape resumes) before the weapon selection.
+
+**Why:** User request: fix the two replay failures that predate the main merge.
+
+**Tested how:** `scripts/checks/replays.py` with `ONLY="fov_settings console"`: both pass (4 and 16 assertions). Full replay suite: 93 checks, 0 failed.
+
+**Result:** Both checks pass; no game code changed.
+
+**Still broken or not tested:** Windowed replays not run.
+
+**Next:** none for these checks.
+
 ## 2026-10-23 Merge: main into orbitalman/hl2-ui (sessions 28-30: squads, zombies, particles, ragdoll data)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

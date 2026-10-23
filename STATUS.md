@@ -6,7 +6,8 @@
 
 - main d9295d5 (sessions 28-30) merged over 210849b. Model reading is one `read_model_variant` (body + root LOD) with `read_model`/`read_model_body`/`read_model_lod` wrappers.
 - Verified: fmt, strict workspace Clippy, Windows-target Clippy, workspace tests, owned-install tests (two hl2-bevy campaign headless tests time out only under parallel load; alone they pass before and after the merge), packaged replays (93 checks: 91 pass after re-recording the gameplay outcomes; `monitors-kleiner-scene` gib removal varied once under parallel load). A headless build of main used as referee gives the same gameplay outcomes, apart from fields that already vary between runs and this branch's `env_zoom`.
-- Pre-existing on this branch (fail before the merge too): replay checks `fov_settings` (portrait viewmodel FOV 84.34 vs 93.78 expected) and `console` (weapon selection opens without switching).
+- Fixed after the merge: the replay checks `fov_settings` and `console`, which failed before it too. `fov_settings` expected the old portrait (+8) and ultrawide viewmodel FOV boosts that the per-weapon offset tuning removed; the console replay now resumes from the pause menu after closing the console.
+- Packaged checks run with `--mute` (silent, settings untouched, asserted per run) and cap `JOBS` by physical memory: a packaged game peaks at about 5.5 GB on the station maps (main: about 3.2 GB; the extra ~2.3 GB is branch-side, predates the merge, not investigated), so a 16 GB machine runs two at once.
 - Known content gap: `Weapon_Alyx_Shotgun.Cock` (female citizen / Alyx `shoot_shotgun` event) has no Half-Life 2 sound script; main's F4 citizen spawn pool preloads it on every map.
 
 ## Current session: portrait viewmodel framing and Fit Display continuation (2026-10-22)

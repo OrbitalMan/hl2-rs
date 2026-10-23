@@ -290,6 +290,7 @@ pub fn poll(
             options.world_partition,
         ),
         ui.source.config.video.advanced.filtering,
+        options.mute,
     );
 }
 

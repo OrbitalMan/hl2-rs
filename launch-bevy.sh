@@ -32,8 +32,9 @@ Options:
       --main-menu                     Open the main menu (overlaid on top of --map if specified)
       --map <name>                    Map to load directly into gameplay (e.g. d1_trainstation_01)
       --movement-script <path.json>   Replay recorded player inputs from a movement script fixture (requires --map)
+      --mute                          Silence all audio output for this run (Audio settings unchanged)
       --mute-ambient                  Mute looping ambient soundscapes and background environment audio
-      --no-build                      Launch the existing binary without checking freshness or rebuilding
+      --no-build                     Launch the existing binary without checking freshness or rebuilding
       --no-focus                      Launch window without requesting input focus (for unattended test runs)
       --no-pvs                        Disable BSP potential visible set (PVS) occlusion culling
       --no-setup                      Fail with an error instead of opening setup if installation is missing

@@ -29,7 +29,9 @@ Categories:
 Environment (no arguments, so the command line never changes):
   ONLY="console options"   run these checks only
   GROUP=ui | GROUP=gameplay   run one group
-  JOBS=4                   run up to 4 gameplay replays at once (default 1)
+  JOBS=4                   run up to 4 gameplay replays at once (default 1), never more than
+                           fit in physical memory (GAME_MEMORY_GB per game, default 6, plus
+                           4 GB left to the system), so the machine never swaps
   WINDOWED=1               also run the windowed checks of this platform
   NO_BUILD=1               use bin/ as it is
   UPDATE_EXPECTED=1        record the gameplay outcomes as expected (after a reviewed change)
@@ -101,7 +103,8 @@ def game(name: str, *args: str, timeout: int = 240, background: bool = True, cap
     for stale in (report, png):
         if stale and stale.exists():
             stale.unlink()
-    command = [str(EXE), "--no-setup", "--volume", "0.01", *args, "--report", str(report)]
+    # --mute silences the run without touching the saved Audio settings.
+    command = [str(EXE), "--no-setup", "--mute", *args, "--report", str(report)]
     command.insert(2, "--background" if background else "--no-focus")
     if png:
         command += ["--capture", str(png)]
@@ -123,6 +126,11 @@ def game(name: str, *args: str, timeout: int = 240, background: bool = True, cap
         raise Failure(f"{name}: no capture")
     if "--movement-script" in args and not run.report["render"]["simulation"].get("script_finished"):
         raise Failure(f"{name}: the replay did not finish")
+    # Checks never make a sound: every sink stays at zero volume under --mute.
+    audio = run.report.get("render", {}).get("presentation", {}).get("audio")
+    if audio is not None and not (audio.get("muted") and audio.get("peak_output") == 0):
+        raise Failure(f"{name}: audio was not silent (muted {audio.get('muted')}, "
+                      f"peak output {audio.get('peak_output')})")
     return run
 
 
@@ -351,11 +359,14 @@ def check_fov_settings():
     custom = camera("fov_custom", (1920, 1080), vertical_fov=90.0, viewmodel_fov=70.0)
     holds("custom: 90 degrees vertical, 55.41 for the viewmodel", near(custom, [90.0, 55.41]), custom)
     portrait = camera("fov_portrait", (1080, 1920))
-    holds("portrait: taller vertical view without extreme fish-eye (89.16), plus portrait viewmodel framing",
-          near(portrait, [89.16, 93.78]), portrait)
+    # The portrait profiles change only the viewmodel offset (fov_offset 0), so the viewmodel
+    # keeps its 54 degree 4:3 horizontal view: 84.34 degrees vertical at 9:16.
+    holds("portrait: taller vertical view without extreme fish-eye (89.16), viewmodel keeps its 4:3 width (84.34)",
+          near(portrait, [89.16, 84.34]), portrait)
     ultrawide = camera("fov_ultrawide", (5120, 1440))
-    holds("super-ultrawide: world trims to 50.22 vertical (116.19 horizontal), viewmodel widens with ultrawide framing",
-          near(ultrawide, [50.22, 68.09]), ultrawide)
+    # Likewise ultrawide (fov_offset 0): wider than 4:3 the viewmodel keeps its 41.83 vertical view.
+    holds("super-ultrawide: world trims to 50.22 vertical (116.19 horizontal), viewmodel keeps its 41.83 vertical view",
+          near(ultrawide, [50.22, 41.83]), ultrawide)
 
 
 def check_resolution_stress():
@@ -528,6 +539,12 @@ def check_console():
           any("Queued station_entrance.Close" in x for x in out("setpos-paused")))
     expect("Unicode input", s["unicode-input"]["console"]["input"], "é\U0001f980")
     expect("Unicode editing keeps whole characters", s["unicode-edit"]["console"]["input"], "é")
+    # The console opened mid-game brings up the pause menu; closing it leaves that menu up
+    # and Escape then resumes (docs/gameui.md section 18).
+    holds("closing the console returns to the pause menu",
+          mode("resume-transition") == "Pause" and s["resume-transition"]["paused"])
+    holds("Escape on the pause menu resumes the game",
+          mode("resumed-from-pause") == "Gameplay" and not s["resumed-from-pause"]["paused"])
     holds("the weapon selection opens without switching",
           g("selection-open")["pending"] == "weapon_smg1"
           and g("selection-open")["inventory"]["active"] == "weapon_pistol")
@@ -1168,6 +1185,51 @@ def check_no_border():
     holds("the window is borderless full screen", "BorderlessFullscreen" in run.log)
 
 
+GIB = 1 << 30
+# Memory left to the operating system and the user's own applications while replays run.
+MEMORY_RESERVE = 4 * GIB
+
+
+def physical_memory() -> Optional[int]:
+    """Installed memory in bytes, or None when the platform does not say."""
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")  # macOS, Linux
+    except (AttributeError, ValueError, OSError):
+        pass
+    if platform.system() == "Windows":
+        import ctypes
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                        ("total", ctypes.c_ulonglong), ("available", ctypes.c_ulonglong),
+                        ("total_page", ctypes.c_ulonglong), ("available_page", ctypes.c_ulonglong),
+                        ("total_virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
+                        ("available_extended", ctypes.c_ulonglong)]
+        status = MemoryStatus(length=ctypes.sizeof(MemoryStatus))
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return status.total
+    return None
+
+
+def parallel_jobs(requested: int, memory: Optional[int], per_game: int) -> int:
+    """Gameplay replays to run at once: `requested`, but no more games than fit in `memory`
+    beside MEMORY_RESERVE (a packaged game takes about 5-6 GB on a station map); unknown memory
+    keeps `requested`. More games than memory makes the system swap: every check, and
+    everything else on the machine, slows down instead of the suite finishing sooner."""
+    if memory is None or per_game <= 0:
+        return max(1, requested)
+    return max(1, min(requested, (memory - MEMORY_RESERVE) // per_game))
+
+
+def check_parallel_jobs() -> None:
+    """The JOBS cap keeps parallel games within physical memory."""
+    expect("16 GB fits two 6 GB games", parallel_jobs(4, 16 * GIB, 6 * GIB), 2)
+    expect("64 GB keeps the requested four", parallel_jobs(4, 64 * GIB, 6 * GIB), 4)
+    expect("too little memory still runs one", parallel_jobs(4, 4 * GIB, 6 * GIB), 1)
+    expect("unknown memory keeps the request", parallel_jobs(3, None, 6 * GIB), 3)
+    holds("this machine reports its memory", (physical_memory() or 0) > 0, physical_memory())
+
+
 @dataclass
 class Check:
     name: str
@@ -1203,6 +1265,7 @@ CHECKS = [
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),
     Check("coverage", check_coverage, "shared", "gameplay"),
+    Check("parallel_jobs", check_parallel_jobs, "shared", "gameplay"),
     *(Check(f[len("bevy-"):], gameplay_check(f), "shared", "gameplay") for f in sorted(GAMEPLAY_MAPS)),
 ]
 
@@ -1300,7 +1363,14 @@ def main() -> int:
         if CONFIG.exists():
             CONFIG.unlink()
         gameplay = [c for c in checks if c.group == "gameplay"]
-        with ThreadPoolExecutor(max(1, int(os.environ.get("JOBS", "1")))) as pool:
+        requested = max(1, int(os.environ.get("JOBS", "1")))
+        jobs = parallel_jobs(requested, physical_memory(),
+                             int(float(os.environ.get("GAME_MEMORY_GB", "6")) * GIB))
+        if jobs < requested:
+            print(f"JOBS={requested} capped to {jobs}: each game takes up to "
+                  f"{os.environ.get('GAME_MEMORY_GB', '6')} GB and this machine has "
+                  f"{physical_memory() / GIB:.0f} GB")
+        with ThreadPoolExecutor(jobs) as pool:
             results += pool.map(lambda c: run_check(c, output), gameplay)
     finally:
         sys.stdout = output.console

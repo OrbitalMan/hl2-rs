@@ -15,7 +15,10 @@ game to `artifacts/replays/game/`, runs each check as bounded launches of that c
 captures in `artifacts/replays/`. The copy keeps its own settings next to it, so every check starts
 from default settings and `bin/hl2-config.json` (and a game running from `bin/`) is never touched.
 Environment instead of arguments: `ONLY="console movement"` runs those checks, `GROUP=ui` or
-`GROUP=gameplay` one group, `JOBS=4` up to four gameplay replays at once, `WINDOWED=1` adds the
+`GROUP=gameplay` one group, `JOBS=4` up to four gameplay replays at once (never more games than fit in
+physical memory: `GAME_MEMORY_GB` per game, default 6, plus 4 GB for the system; a packaged game
+measured 4.9-5.8 GB on the station maps on 2026-10-23, so a 16 GB machine runs two; the
+`parallel_jobs` check covers the rule), `WINDOWED=1` adds the
 windowed ones of this platform, `NO_BUILD=1` keeps `bin/` as it is, `UPDATE_EXPECTED=1` records the
 gameplay outcomes (below).
 
@@ -60,7 +63,7 @@ fixture is never silently left out.
 | `video_portrait` | shared | `bevy-menu-video-portrait.json` with `--fake-monitor 1080x1920` at 1080 x 1920: by keyboard (Tab, Right, Alt+Down) Video > Aspect Ratio opens with Portrait 9:16 selected; the Resolution choices are the 9:16 modes up to the panel; frame and capture are 1080 x 1920. | The Options dialog lies inside the frame (report `options.frame`).
 | `video_keep` | shared | `bevy-menu-video-keep-{timeout,ok,escape}.json` with `--fake-monitor 1920x1080`: Normal (4:3) picked and applied by keyboard renders 1440 x 1080 at once and opens the keep box (report `console.confirm.kind` = `keep_video`); the timeout and Escape put back 1280 x 720 (rendered and saved); OK keeps 1440 x 1080 past the timeout |
 | `narrow_layout` | shared | `bevy-console-open.json` at 1080 x 1920, 1080 x 1080 and 1920 x 1080 (report `console.menu`, `console.console_frame`): menu rows fit the width; on the narrow sizes the text is not shrunk with the width and the console spans the width inside the design area; on 1920 x 1080 the console frame is the retail one (half the screen wide, origin `(w/2 - 16, 64)` units) | It also runs 3440 x 1440 and 5120 x 1440: the menu grows relative to the height and its row stack stays inside the screen, the console is the retail one, and on every size (menu backgrounds) the world camera keeps the 4:3 vertical view (59.84 degrees at FOV 75).
-| `fov_settings` | shared | `bevy-hud.json` on `d1_trainstation_02` with the settings file preset (report sample `camera`): default 1920 x 1080 gives 59.84 degrees vertical for the world and 41.83 for the viewmodel; `vertical_fov` 90 and `viewmodel_fov` 70 give 90 and 55.41; at 1080 x 1920 the automatic world view is 89.16 (aspect-tuned Vert+) and viewmodel 93.78; at 5120 x 1440 the automatic world view is 50.22 (116.19 horizontal) and viewmodel 68.09 |
+| `fov_settings` | shared | `bevy-hud.json` on `d1_trainstation_02` with the settings file preset (report sample `camera`): default 1920 x 1080 gives 59.84 degrees vertical for the world and 41.83 for the viewmodel; `vertical_fov` 90 and `viewmodel_fov` 70 give 90 and 55.41; at 1080 x 1920 the automatic world view is 89.16 (aspect-tuned Vert+) and viewmodel 84.34 (its 4:3 width kept; the portrait profiles move it, `fov_offset` 0); at 5120 x 1440 the automatic world view is 50.22 (116.19 horizontal) and viewmodel 41.83 (vertical view kept) |
 | `hud_aspect` | shared | `bevy-hud.json` on `d1_trainstation_02` at 3440 x 1440 with each `video.hud_aspect` (report `hud.frame`, `hud.panels`): Fit spans the screen (health near the left edge, ammo near the right); Centered 4:3, 16:9 and 16:10 give a centered frame of that aspect with the panels inside it at their frame-relative distances; at 1920 x 1080 Centered 16:9 equals Fit (frame, panels, quad count) | Captures `hud_aspect_*.png` inspected by eye; panel rectangles are the layout at rest, not the sliding ammo animation. |
 | `resolution_stress` | shared | `bevy-menu-resolution-stress.json` with the faked 8K monitor: Options > Video picks 7680 x 4320 from the list and Apply renders it; `mat_setvideomode` to the smallest (320 x 240) and largest (8192 x 8192) sizes the console accepts, and four changes on consecutive ticks mixing full screen and windowed (the last, 1280 x 720, wins); each labelled sample's `frame` (size of the frame image being rendered) is checked, host ticks keep advancing, the saved settings and the capture end at 1024 x 768 |
 | `chapter_quit` | shared | `--map d2_coast_01` quit mid-game: the saved background goes from `hl2/background01` to `hl2/background04` |
@@ -69,7 +72,7 @@ fixture is never silently left out.
 | `captions` | shared | `episodic/ep1_background02`: closed captions on process speech, off process none |
 | `bg_compare` | shared | each game's chapter 1 background loads (FOV 75, 1024x768 captures for comparison with the installed pre-blurred `materials/console/*.vtf`) |
 | `save_config` | shared | `bevy-save-config.json`: `volume`, `sensitivity`, `fov`, `mat_hdr_level` from the console are saved |
-| `console` | shared | `bevy-console.json`: cheats refused then granted, quoted `;` kept, the console freezes the scene, `setpos` / queued `ent_fire`, Unicode input and editing, weapon selection cancelled by Escape before pausing, pause menu, outside click, console over the pause menu and back, unknown commands rejected, sounds pause and resume with the UI; the same replay at 1920x1080 (viewport and capture size) |
+| `console` | shared | `bevy-console.json`: cheats refused then granted, quoted `;` kept, the console freezes the scene, `setpos` / queued `ent_fire`, Unicode input and editing, closing the console returns to the pause menu and Escape resumes, weapon selection cancelled by Escape before pausing, pause menu, outside click, console over the pause menu and back, unknown commands rejected, sounds pause and resume with the UI; the same replay at 1920x1080 (viewport and capture size) |
 | `console_map` | shared | `bevy-console-map.json`: two `map` loads, a missing map reported once without losing the player or scene, console state kept across loads |
 | `campaign` | shared | `bevy-campaign.json`: `d1_trainstation_01` > 02 > 03 through their triggers, inventory kept, the clock restarts per map |
 | `dev_overlay` | shared | `bevy-dev-overlay.json`: F1 overlay visible with its five lines and live statistics |
@@ -84,6 +87,11 @@ Shared checks run in the background (`--background`: no window, nothing takes fo
 read the game frame); windowed ones open a window and take focus. On macOS a windowed run becomes
 the frontmost app at launch (winit activates the app; Bevy offers no switch); on Windows `--no-focus`
 shows the window without activating it (winit `SW_SHOWNOACTIVATE`; not run here).
+Every check runs with `--mute` (since 2026-10-23, replacing `--volume 0.01`, which a settings
+change such as the console `volume` reset to the saved value): sounds start and are reported, but
+every sink stays at zero volume, whatever the Audio settings say, and nothing is saved. Each run's
+report must show `audio.muted` true and `audio.peak_output` 0 (the loudest volume given to any
+sink), or the check fails.
 
 Verified 2026-10-17 on macOS (Apple Silicon): all 85 checks ok (14 UI, `coverage`, 70 gameplay
 fixtures) in 616 s with `JOBS=4`; the outcomes were recorded with `JOBS=4` and reproduced by a

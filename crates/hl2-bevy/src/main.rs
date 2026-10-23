@@ -80,6 +80,8 @@ struct Options {
     movement_script: Option<PathBuf>,
     /// Master volume, like Source's `volume` convar (0..1).
     volume: f32,
+    /// Silence the output for this run without touching the Audio settings (`--mute`).
+    mute: bool,
     /// JSON-lines sound lifecycle trace (requests, sink starts, removals).
     audio_trace: Option<PathBuf>,
     /// Do not take focus at window creation, so unattended tests leave the desktop usable.
@@ -165,6 +167,7 @@ impl Options {
             fly: false,
             movement_script: None,
             volume: config.audio.volume,
+            mute: false,
             audio_trace: None,
             no_focus: false,
             background: false,
@@ -232,6 +235,7 @@ impl Options {
                 "--movement-script" => options.movement_script = Some(next(&mut args)?.into()),
                 "--volume" => options.volume = next(&mut args)?.parse()?,
                 "--audio-trace" => options.audio_trace = Some(next(&mut args)?.into()),
+                "--mute" => options.mute = true,
                 "--mute-ambient" => {
                     audio::MUTE_AMBIENT.store(true, std::sync::atomic::Ordering::Relaxed)
                 }
@@ -344,6 +348,9 @@ impl Options {
                     );
                     println!(
                         "      --movement-script <path.json>   Replay recorded player inputs from a movement script fixture (requires --map)"
+                    );
+                    println!(
+                        "      --mute                          Silence all audio output for this run (Audio settings unchanged)"
                     );
                     println!(
                         "      --mute-ambient                  Mute looping ambient soundscapes and background environment audio"
@@ -714,6 +721,7 @@ fn main() -> Result<()> {
         app.insert_resource(audio::AudioTrace::create(path)?);
     }
     app.insert_resource(options.clone())
+        .insert_resource(audio::OutputMute(options.mute))
         .insert_resource(tonemap::Tonemap::new(options.tonemap_scale))
         .insert_resource(status.clone())
         .insert_resource(PreparedMap(Some(loaded), background_level))
@@ -964,6 +972,7 @@ fn setup(
             options.world_partition,
         ),
         options.config.video.advanced.filtering,
+        options.mute,
     );
     let mut console_ui = ui_host::Console::new(ui);
     console_ui.source.set_history(console_host::load_history());
@@ -1099,6 +1108,7 @@ pub(crate) fn install_map(
     status: &Status,
     (cpu_skinning, no_pvs, world_partition): (bool, bool, bool),
     filtering: hl2_ui::config::Filtering,
+    mute: bool,
 ) -> hl2_ui::console::Console {
     {
         let mut stats = status.0.lock().expect("map stats");
@@ -1153,7 +1163,7 @@ pub(crate) fn install_map(
         }
     });
     commands.insert_resource(canvas_renderer::Hud::new(loaded.hud));
-    audio::install(commands, sounds, loaded.audio);
+    audio::install(commands, sounds, loaded.audio, mute);
     loaded.console
 }
 type EntityDrawQuery<'w, 's> = Query<
