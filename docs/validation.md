@@ -2,7 +2,7 @@
 
 ## Local check scripts (2026-10-17)
 
-`scripts/checks/validate.sh` (`cargo test -p hl2-ui`, `-p hl2-bevy`, strict clippy
+`scripts/checks/validate.sh` (`cargo test --workspace --locked`, strict clippy
 `--workspace --all-targets --locked -D warnings` as CI, `cargo fmt --check`) and
 `scripts/checks/check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`
 without linking, from macOS/Linux) are bash.

@@ -3,11 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-echo "=== Running hl2-ui tests ==="
-cargo test -p hl2-ui
-
-echo "=== Running hl2-bevy tests ==="
-cargo test -p hl2-bevy
+echo "=== Running workspace tests ==="
+cargo test --workspace --locked
 
 echo "=== Running cargo clippy ==="
 cargo clippy --workspace --all-targets --locked -- -D warnings

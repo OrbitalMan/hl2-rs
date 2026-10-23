@@ -9,7 +9,7 @@
 - Footprint, same fixture, default settings, one game at a time: gameplay 4.27-4.75 GB (before 4.96-5.51), peak 5.06-5.22 GB (before ~5.87); the fixture runs in ~9 s instead of ~15 s. Main: gameplay 3.30-3.45 GB.
 - Remaining gap to main (~1 GB, not fixed): fonts parsed by fontdue (~166 MB: the four closed-caption styles are four different DejaVu Sans files, about 29 MB each once fontdue has parsed every glyph; no two UI fonts share a file, so there is nothing to share), `Console::load` (~99 MB), Metal command-buffer storage (115-357 MB vs 16 MB), ~0.5 GB resident but not live heap, and 150-600 MB more graphics memory. Model LOD, picmip and texture copies are the same as main's.
 - Not tested: the fallback for a map that passes installation validation and then fails to load (installation validation rejects missing and invalid BSPs before startup, and the installed game is read-only).
-- Known flaky test: `console::tests::loading_dialog_state_transitions_and_dismissal` (hl2-ui) failed once in a full run and passed six times alone; it reads the process-wide loading progress that parallel tests reset.
+- Fixed: the flaky `console::tests::loading_dialog_state_transitions_and_dismissal` (hl2-ui). Map-load progress was one process-wide static that parallel tests reset; it is now a `gameui::loading::ProgressReport` owned by each `Console` and handed to the campaign loader's worker (`assets::load_with_progress`). hl2-ui tests: 30 of 30 repeated runs pass. `scripts/checks/validate.sh` now runs `cargo test --workspace --locked` (all 1,019 tests; it ran 489 before).
 
 ## Merge of main into orbitalman/hl2-ui (2026-10-23)
 

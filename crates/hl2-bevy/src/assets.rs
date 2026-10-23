@@ -187,6 +187,19 @@ pub fn load_with_config(
     new_game: bool,
     config: &hl2_ui::config::Config,
 ) -> Result<LoadedMap> {
+    let progress = hl2_ui::gameui::loading::ProgressReport::default();
+    load_with_progress(root, game, map, canvas, new_game, config, &progress)
+}
+/// [`load_with_config`] reporting its stages to `progress` (a console's loading dialog).
+pub fn load_with_progress(
+    root: &Path,
+    game: &str,
+    map: &str,
+    canvas: hl2_ui::canvas::Canvas,
+    new_game: bool,
+    config: &hl2_ui::config::Config,
+    progress: &hl2_ui::gameui::loading::ProgressReport,
+) -> Result<LoadedMap> {
     let root_lod = config.video.advanced.model_detail.root_lod();
     let picmip = config.video.advanced.texture_detail.picmip();
     let map = map.trim_end_matches(".bsp");
@@ -198,7 +211,7 @@ pub fn load_with_config(
     {
         bail!("map must be a bare Source map name");
     }
-    hl2_ui::gameui::loading::report_progress(0.05, "LoadingProgress_SpawningServer");
+    progress.report(0.05, "LoadingProgress_SpawningServer");
     if game.is_empty()
         || !game
             .chars()
@@ -207,7 +220,7 @@ pub fn load_with_config(
         bail!("game must be a bare installation folder name");
     }
     let mut vfs = Vfs::mount_game(root, game).context("mount installed owned content")?;
-    hl2_ui::gameui::loading::report_progress(0.15, "LoadingProgress_LoadMap");
+    progress.report(0.15, "LoadingProgress_LoadMap");
     let bytes = vfs
         .read(&format!("maps/{map}.bsp"))?
         .with_context(|| format!("owned map {game}/maps/{map}.bsp not found"))?;
@@ -216,7 +229,7 @@ pub fn load_with_config(
     }
     let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {map}.bsp"))?;
     vfs.mount_pak(bsp.lump(40)).context("mount map pak")?;
-    hl2_ui::gameui::loading::report_progress(0.35, "LoadingProgress_PrecacheWorld");
+    progress.report(0.35, "LoadingProgress_PrecacheWorld");
     let mut world = bsp.world(map).context("decode Source world")?;
     world.warnings.extend(vfs.warnings.iter().cloned());
     normalize_bsp_render_winding(&mut world);
@@ -280,7 +293,7 @@ pub fn load_with_config(
             hl2_simulation::projectiles::FRAG_MODEL
         ));
     }
-    hl2_ui::gameui::loading::report_progress(0.50, "LoadingProgress_SignonDataLocal");
+    progress.report(0.50, "LoadingProgress_SignonDataLocal");
     let mut gameplay =
         crate::gameplay::Gameplay::load_with_campaign(world, &vfs, bsp.revision, new_game)?;
     let world = gameplay.world.clone();
@@ -323,7 +336,7 @@ pub fn load_with_config(
     for (i, name) in names.into_iter().enumerate() {
         if i % 10 == 0 || i + 1 == total_materials {
             let frac = 0.55 + 0.30 * (i as f32 / total_materials as f32);
-            hl2_ui::gameui::loading::report_progress(frac, "LoadingProgress_LoadResources");
+            progress.report(frac, "LoadingProgress_LoadResources");
         }
         let material = load_material(
             &vfs,
@@ -336,7 +349,7 @@ pub fn load_with_config(
         );
         materials.insert(name, material);
     }
-    hl2_ui::gameui::loading::report_progress(0.90, "LoadingProgress_SignonLocal");
+    progress.report(0.90, "LoadingProgress_SignonLocal");
     let mut eyes = BTreeMap::new();
     let mut gaze = BTreeMap::new();
     let mut flexes = BTreeMap::new();
@@ -404,7 +417,7 @@ pub fn load_with_config(
             None
         }
     };
-    hl2_ui::gameui::loading::report_progress(1.0, "LoadingProgress_SignonLocal");
+    progress.report(1.0, "LoadingProgress_SignonLocal");
     Ok(LoadedMap {
         game: game.to_owned(),
         console,

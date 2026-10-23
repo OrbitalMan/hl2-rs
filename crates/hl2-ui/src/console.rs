@@ -225,6 +225,8 @@ pub struct Console {
     /// [`Console::tick`] or [`Console::input`].
     deferred: Vec<Effect>,
     pub loading_dialog: Option<crate::gameui::loading::LoadingDialog>,
+    /// The progress the map loader reports for [`Console::loading_dialog`].
+    loading_progress: crate::gameui::loading::ProgressReport,
     pub background_transition: crate::gameui::loading::BackgroundTransitionState,
     /// The loaded map is a menu background: no HUD, and the main menu cannot be dismissed.
     background_level: bool,
@@ -585,6 +587,7 @@ impl Default for Console {
             ui_clock: 0.,
             deferred: Vec::new(),
             loading_dialog: None,
+            loading_progress: Default::default(),
             background_transition: crate::gameui::loading::BackgroundTransitionState::Idle,
             background_level: false,
             loaded_map: None,
@@ -1002,7 +1005,7 @@ impl Console {
             self.background_transition.finish();
         }
         self.loading_dialog = None;
-        crate::gameui::loading::reset_progress();
+        self.loading_progress.reset();
         self.background_level = background;
         // A pending keep-video confirmation outlives the load: closing it would keep the change.
         if !matches!(self.confirm_box, Some((_, ConfirmKind::KeepVideo(_)))) {
@@ -1127,7 +1130,7 @@ impl Console {
     pub fn start_loading(&mut self, map: &str) {
         self.clear_menu_hover();
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new(map));
-        crate::gameui::loading::reset_progress();
+        self.loading_progress.reset();
     }
 
     /// Starts the background transition to `game`'s `map` and shows the corner loading plaque.
@@ -1135,7 +1138,7 @@ impl Console {
     pub fn start_background_loading(&mut self, game: &str, map: &str) {
         self.background_transition.start(map, game);
         self.loading_dialog = Some(crate::gameui::loading::LoadingDialog::new_background(map));
-        crate::gameui::loading::reset_progress();
+        self.loading_progress.reset();
     }
 
     /// Updates loading progress from the latest background loader report.
@@ -1144,7 +1147,7 @@ impl Console {
             self.background_transition.update(1.0 / 60.0);
         }
         if let Some(loading) = &mut self.loading_dialog {
-            loading.update(crate::gameui::loading::current_progress());
+            loading.update(self.loading_progress.current());
         }
     }
 
@@ -1155,7 +1158,7 @@ impl Console {
             loading.set_error(reason);
         }
         self.loading_dialog = None;
-        crate::gameui::loading::reset_progress();
+        self.loading_progress.reset();
     }
 
     /// Ends the background transition if `game`'s `map` is the target, ignoring stale failures.
@@ -1166,7 +1169,7 @@ impl Console {
             return;
         }
         self.loading_dialog = None;
-        crate::gameui::loading::reset_progress();
+        self.loading_progress.reset();
     }
 
     /// Marks the active loading dialog as failed with the given error message.
@@ -1176,7 +1179,7 @@ impl Console {
             if loading.is_background() {
                 self.background_transition.fail(error);
                 self.loading_dialog = None;
-                crate::gameui::loading::reset_progress();
+                self.loading_progress.reset();
             }
         } else if self.background_transition.is_active() {
             self.background_transition.fail(error);
@@ -1195,7 +1198,12 @@ impl Console {
         }
         self.loading_dialog = None;
         self.clear_menu_hover();
-        crate::gameui::loading::reset_progress();
+        self.loading_progress.reset();
+    }
+
+    /// The report the map loader fills for this console's loading dialog (shared, cheap to clone).
+    pub fn loading_progress(&self) -> crate::gameui::loading::ProgressReport {
+        self.loading_progress.clone()
     }
 
     /// Whether a map load is currently in progress.
@@ -5930,6 +5938,27 @@ mod tests {
     }
 
     #[test]
+    fn loader_thread_progress_reaches_only_its_consoles_dialog() {
+        let mut console = Console::default();
+        let mut other = Console::default();
+        console.start_loading("d1_trainstation_01");
+        other.start_loading("d1_trainstation_02");
+        let progress = console.loading_progress();
+        std::thread::spawn(move || progress.report(0.35, "LoadingProgress_PrecacheWorld"))
+            .join()
+            .unwrap();
+        console.update_loading();
+        other.update_loading();
+        let dialog = console.loading_dialog.as_ref().unwrap();
+        assert_eq!(dialog.fraction, 0.35);
+        assert_eq!(dialog.stage, Some("LoadingProgress_PrecacheWorld"));
+        assert_eq!(other.loading_dialog.as_ref().unwrap().stage, None);
+        // Completing the load clears the report for the next one.
+        console.loading_complete();
+        assert_eq!(console.loading_progress().current(), None);
+    }
+
+    #[test]
     fn loading_dialog_state_transitions_and_dismissal() {
         let mut console = installed_console();
         console.level_loaded(true);
@@ -5945,7 +5974,9 @@ mod tests {
         );
 
         // Update progress via global reporting
-        crate::gameui::loading::report_progress(0.5, "LoadingProgress_SignonDataLocal");
+        console
+            .loading_progress()
+            .report(0.5, "LoadingProgress_SignonDataLocal");
         console.update_loading();
         assert_eq!(console.loading_dialog.as_ref().unwrap().fraction, 0.5);
         assert_eq!(

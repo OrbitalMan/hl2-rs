@@ -14,7 +14,7 @@ use crate::{
     },
 };
 use glam::Vec2;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Dimensions of the loading dialog frame (380 x 112 per `LoadingDialogNoBanner.res`).
 pub const LOADING_DIALOG_SIZE: Vec2 = Vec2::new(380., 112.);
@@ -26,27 +26,32 @@ pub struct LoadProgress {
     pub stage: &'static str,
 }
 
-static PROGRESS: Mutex<Option<LoadProgress>> = Mutex::new(None);
+/// Where a map load reports its progress: the loader writes it from its thread, the console
+/// that shows the loading dialog reads and resets it. Clones share one report.
+#[derive(Clone, Debug, Default)]
+pub struct ProgressReport(Arc<Mutex<Option<LoadProgress>>>);
 
-/// Reports loader progress from any thread during map loading.
-pub fn report_progress(fraction: f32, stage: &'static str) {
-    if let Ok(mut lock) = PROGRESS.lock() {
-        *lock = Some(LoadProgress {
-            fraction: fraction.clamp(0.0, 1.0),
-            stage,
-        });
+impl ProgressReport {
+    /// Reports loader progress (fraction clamped to 0..=1) from any thread.
+    pub fn report(&self, fraction: f32, stage: &'static str) {
+        if let Ok(mut lock) = self.0.lock() {
+            *lock = Some(LoadProgress {
+                fraction: fraction.clamp(0.0, 1.0),
+                stage,
+            });
+        }
     }
-}
 
-/// Retrieves the latest progress report since the last reset.
-pub fn current_progress() -> Option<LoadProgress> {
-    PROGRESS.lock().ok().and_then(|lock| *lock)
-}
+    /// The latest report since the last reset.
+    pub fn current(&self) -> Option<LoadProgress> {
+        self.0.lock().ok().and_then(|lock| *lock)
+    }
 
-/// Resets loader progress before beginning a new map load.
-pub fn reset_progress() {
-    if let Ok(mut lock) = PROGRESS.lock() {
-        *lock = None;
+    /// Clears the report before a new map load and once a load is over.
+    pub fn reset(&self) {
+        if let Ok(mut lock) = self.0.lock() {
+            *lock = None;
+        }
     }
 }
 
@@ -842,13 +847,14 @@ mod tests {
     }
 
     #[test]
-    fn global_progress_reporting_and_reset() {
-        reset_progress();
-        assert_eq!(current_progress(), None);
+    fn progress_report_is_shared_by_clones_and_reset() {
+        let report = ProgressReport::default();
+        let loader = report.clone();
+        assert_eq!(report.current(), None);
 
-        report_progress(0.45, "LoadingProgress_SignonDataLocal");
+        loader.report(0.45, "LoadingProgress_SignonDataLocal");
         assert_eq!(
-            current_progress(),
+            report.current(),
             Some(LoadProgress {
                 fraction: 0.45,
                 stage: "LoadingProgress_SignonDataLocal",
@@ -856,17 +862,19 @@ mod tests {
         );
 
         // Clamping check
-        report_progress(1.5, "LoadingProgress_SignonLocal");
+        loader.report(1.5, "LoadingProgress_SignonLocal");
         assert_eq!(
-            current_progress(),
+            report.current(),
             Some(LoadProgress {
                 fraction: 1.0,
                 stage: "LoadingProgress_SignonLocal",
             })
         );
 
-        reset_progress();
-        assert_eq!(current_progress(), None);
+        report.reset();
+        assert_eq!(loader.current(), None);
+        // Another report is independent.
+        assert_eq!(ProgressReport::default().current(), None);
     }
 
     #[test]

@@ -136,11 +136,14 @@ pub fn poll(
         let canvas = ui.source.canvas.clone();
         let new_game = request.direct;
         let config = ui.source.config.clone();
+        let progress = ui.source.loading_progress();
         let worker = std::thread::Builder::new()
             .name("hl2-owned-map-loader".into())
             .spawn(move || {
                 let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    assets::load_with_config(&root, &map_game, &map, canvas, new_game, &config)
+                    assets::load_with_progress(
+                        &root, &map_game, &map, canvas, new_game, &config, &progress,
+                    )
                 }))
                 .map_err(|_| "owned map loader panicked".to_owned())
                 .and_then(|r| r.map_err(|e| format!("{e:#}")));

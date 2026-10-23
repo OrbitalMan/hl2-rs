@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-23 Per-console load progress; validate.sh runs the whole workspace
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- `hl2-ui::gameui::loading`: the process-wide `static PROGRESS` and its `report_progress` / `current_progress` / `reset_progress` functions are replaced by `ProgressReport`, a cloneable shared report (`report`, `current`, `reset`). Each `Console` owns one (`Console::loading_progress()` hands out a clone); its loading dialog reads it in `update_loading` and the start / finish / failure paths reset it.
+- `hl2-bevy::assets::load_with_progress` takes the report the loader writes its stages to; `load_with_config` keeps its signature and passes a fresh, unread report (startup and tests). `campaign::poll` gives its worker the host console's report.
+- `scripts/checks/validate.sh` runs `cargo test --workspace --locked` instead of only hl2-ui and hl2-bevy; docs/validation.md says so.
+
+**Why:** Code review findings. `loading_dialog_state_transitions_and_dismissal` failed once in a full run: it reported progress into the global and read it back while other tests running in parallel reset the same global. And the local check skipped the source-assets, modkit-core and hl2-simulation tests (529 of 1,018), which only ran in CI.
+
+**Tested how:** `scripts/checks/validate.sh` (now 110 hl2-bevy, 363 hl2-simulation, 380 hl2-ui, 59 modkit-core, 107 source-assets tests, strict Clippy, fmt) and the Windows-target check pass. `cargo test -p hl2-ui --lib` 30 times in a row: 30 passed. New `loader_thread_progress_reaches_only_its_consoles_dialog` (a report from another thread reaches its console's dialog, not a second console's; completion clears it); `progress_report_is_shared_by_clones_and_reset` replaces the global-progress test. Packaged replays `submenus`, `return_menu`, `chapter_menu`, `chapter_quit`, `bg_compare`, `console`, `console_map`, `campaign`: all pass.
+
+**Result:** Load progress is per console, so tests no longer share it, and the local check runs every unit test.
+
+**Still broken or not tested:** No packaged report records the dialog's progress, so the end-to-end flow from the loader thread to the drawn bar is covered by the unit test and the one-line hand-over in `campaign::poll`, not by a replay. The old code's failure rate under repetition was not measured (one failure seen). The host's global atomics (`AI_ENABLED`, `MUTE_AMBIENT`, `FRAG_RIGID_BODY`) are unchanged.
+
+**Next:** none.
+
 ## 2026-10-23 Load a gameplay `--map` directly at startup
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
