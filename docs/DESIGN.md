@@ -6,6 +6,8 @@ Keep requested wall timing, process submission completion, console markers and n
 
 The separately verified retail parser compares the exact wait token with an ASCII-case comparison helper, gates special handling on object byte +0x2049 and adds a selected scalar to its local accumulator. The tick/buffer interpretation agrees with SDK comparison; actual units, defaults, active instance/flag and command routing remain unobserved. Static code existence does not explain the failed batches. Next bind the actual normal-command buffer path before choosing a timing mechanism. Original first-map semantics and Rust parity remain open; no implementation change follows automatically.
 
+Current private continuation: work/publishing/research-input-ack-continuation-20261023ac.md; AC/AD seals and the final closeout receipt govern this result.
+
 ## Research plan: observed native input acknowledgement (2026-10-23)
 
 After two batches fail to expose ordered button phases, stop that runtime approach. A separate exact engine follow-up may use the raw wait-string reference to bind its containing retail procedure, retrieve one exact pass14 implementation and one necessary comparison helper, and independently verify bytes. Buffer-instance flags and actual command-source routing remain runtime questions; static wait handling alone does not explain the failed batches.
