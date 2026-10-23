@@ -22,7 +22,7 @@ Packaged visual comparison on an actual portrait display remains not tested.
 
 F5 toggles a runtime-only viewmodel tuning mode. Its debug overlay reports the current aspect
 profile, active weapon classname, and direct profile `fov_offset` / `[forward, left, up]` offsets.
-`[`/`]` adjust FOV, `,`/`.` adjust Z, Up/Down adjust forward X, and Left/Right adjust lateral Y;
+`[`/`]` adjust FOV, `,`/`.` adjust forward X, Up/Down adjust Z, and Left/Right adjust lateral Y;
 Shift changes each step from 0.1 to 0.01. Adjust keys autorepeat while held, using the same delay
 and interval as Options > Keyboard list arrows (press once, then repeat after 0.4 s every 0.05 s;
 the latest pressed adjust key is the one that repeats). F6 zeros `fov_offset` and `offset` for the

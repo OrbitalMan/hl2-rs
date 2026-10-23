@@ -385,7 +385,7 @@ pub fn present(
             format!("weapon: {}", sim.viewmodel_debug.weapon),
             format!("fov_offset: {:.2}    [ ]", value.fov_offset),
             format!(
-                "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:X  ,/.:Z",
+                "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:Z  ,/.:X",
                 value.offset[0], value.offset[1], value.offset[2]
             ),
             "Shift = 0.01    hold to repeat    F6 reset    F5".to_owned(),

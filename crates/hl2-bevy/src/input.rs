@@ -524,10 +524,10 @@ fn adjust_viewmodel_framing(framing: &mut ViewmodelFraming, fired: &[KeyCode], f
         match *key {
             KeyCode::BracketLeft => apply(&mut framing.fov_offset, -step),
             KeyCode::BracketRight => apply(&mut framing.fov_offset, step),
-            KeyCode::Comma => apply(&mut framing.offset[2], -step),
-            KeyCode::Period => apply(&mut framing.offset[2], step),
-            KeyCode::ArrowUp => apply(&mut framing.offset[0], step),
-            KeyCode::ArrowDown => apply(&mut framing.offset[0], -step),
+            KeyCode::Comma => apply(&mut framing.offset[0], -step),
+            KeyCode::Period => apply(&mut framing.offset[0], step),
+            KeyCode::ArrowUp => apply(&mut framing.offset[2], step),
+            KeyCode::ArrowDown => apply(&mut framing.offset[2], -step),
             KeyCode::ArrowLeft => apply(&mut framing.offset[1], step),
             KeyCode::ArrowRight => apply(&mut framing.offset[1], -step),
             _ => {}
