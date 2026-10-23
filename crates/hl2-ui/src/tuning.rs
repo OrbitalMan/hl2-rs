@@ -100,6 +100,7 @@ impl ViewmodelProfile {
 /// aspect) and local camera-space translation offset (`[forward, left, up]` in Source units) for
 /// frames narrower than `5:4` or wider than `16:9`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct ViewmodelFraming {
     pub fov_offset: f32,
     pub offset: [f32; 3],
@@ -602,6 +603,16 @@ mod tests {
         assert!(unknown_weapon_snapshot.contains(
             "\"weapon_crowbar\": {\n        \"portrait\": {\"fov_offset\": 8.0, \"offset\": [0.0, 0.0, -11.0]},\n        \"ultrawide\": {\"fov_offset\": 30.0, \"offset\": [0.0, 0.0, -3.5]}\n      },"
         ));
+    }
+
+    #[test]
+    fn viewmodel_profile_fields_may_be_omitted() {
+        let framing: ViewmodelFraming =
+            serde_json::from_str(r#"{"offset": [-5.1, 0.0, -3.2]}"#).unwrap();
+        assert_eq!(framing.fov_offset, 0.0);
+        assert_eq!(framing.offset, [-5.1, 0.0, -3.2]);
+        let framing: ViewmodelFraming = serde_json::from_str(r#"{"fov_offset": 4.0}"#).unwrap();
+        assert_eq!(framing.offset, [0.0; 3]);
     }
 
     #[test]
