@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Active buffer and single-line delivery evidence (2026-10-23)
+
+Private AF binds the observed parser return to exact engine caller 0x10190d40 and its buffer immediate. Nineteen entry/leave pairs and eight interior wait-site records show flag/default 1, separate-line accumulator reset and cumulative additions within one semicolon line. The instrumented control then shows server input phases; it is not a general scheduling-unit proof. Actual hook-prefix reads were not separately retained, so prefix equality is source/ready-attested rather than a complete raw preflight transcript.
+
+Fresh never-attached-by-this-task AG observes jump/duck/release in all three controls. First-observed delays vary across identical counts (nine/five server ticks for wait12; three for wait6), with conservative acquisition bounds. AF/AG seals pass 99/93 files; each game closed with checked settings unchanged. Earlier lifecycle/ledger failures remain private. The corrected fresh storage route is in progress; no new exit or first-map completion claim. No Rust changes/builds/parity evidence.
+
 ## Native input acknowledgement and raw wait anchor (2026-10-23)
 
 Fresh private AC distinguishes separate-subprocess latency from requested 50 ms timing: first observed 25 ticks/0.375 game seconds, acquisition bounds 0.360..0.480. Two batches containing wait 4/wait 12 emit ordered markers but show no sampled server button phases. Acquisition gaps around submission remain below 17 ms; shorter transients and actual command-source routing are unresolved. The batching approach stops after two failures. AC seals 94 files/593 samples/5488 reads/five native captures; no Frida by this task, campaign replay or Rust changes.

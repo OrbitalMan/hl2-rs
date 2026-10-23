@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-23: observed per-line reset and fresh single-line controls
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Continued research at the owner's request. Bound the actual command-buffer instance/flag/caller, diagnosed the failed newline batches and tested a materially different single-line input path. Prepared a fresh measured first-map route rather than reusing the old invalid window lane.
+
+**Tested how / Result:** AF seal99 files checks 19 complete parser call pairs/eight wait-site observations, one exact caller (106 bytes), two reused bodies, 662 passive samples and 6409 source reads. AG seal93 files checks 400 samples/4151 reads/five captures: all three fresh controls show ordered jump/duck/release. Identical wait12 cases first observe nine/five server ticks; wait6 observes three. Source clocks and acquisition limits remain explicit. Both runs closed/settings unchanged; Frida unloaded/detached.
+
+**Still broken or not tested / Next:** Source/ready attests AF's prefix equality; actual prefix reads were not separately logged. AE EOF/failed attachment, AG ledger newline mismatch and AH preempted missing-import setup remain retained. Corrected AI route is in progress; fresh passage/exit, full first-map semantics and Rust parity remain unverified. No Rust builds/tests.
+
 ## 2026-10-23: measured input latency and static wait gate
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents; Claude's implementation unchanged.

@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Per-line reset and fresh ordering controls (2026-10-23)
+
+Read-only python -B ../../work/hl2-decompiled/scene-command-buffer-20261023af/verify_seal.py and python -B ../../work/hl2-decompiled/scene-command-buffer-control-20261023ag/verify_seal.py pass closed file sets 99/93. AF independently checks 48 events/19 complete call pairs/eight wait sites, raw buffer/frame/clock/source fields, one exact 106-byte caller and its static global-buffer binding. Its 662 passive samples/6409 reads exclude 15 clock races. Prefix equality is attested by hashed observer source plus successful ready, with the missing separate prefix-read transcript explicitly limited.
+
+AG checks 400 samples/4151 reads/1200920 source bytes/five captures; 12 clock-raced samples excluded. All three fresh controls show 0->2->6->0 buttons. First-observed tick deltas are 9/3/5 for wait12/wait6/wait12, bounded 7..10/2..4/4..7. This corroborates ordering, not fixed wait units. Both games closed/settings unchanged; AF script unloaded/session detached. Setup and ledger failures remain retained. Fresh route AI is not yet an accepted exit; no Rust tests/builds or Rust parity validation.
+
 ## Input acknowledgement and conditional wait acceptance (2026-10-23)
 
 Run python -B ../../work/hl2-decompiled/scene-input-ack-20261023ac/verify_seal.py and python -B ../../work/hl2-decompiled/scene-command-wait-20261023ad/verify_seal.py. Both pass closed file sets of 94/25 files. AC independently checks raw descriptor m_nButtons/type5/+a80, 593 samples/5488 reads/1754824 bytes, process/module/entity-generation/clock brackets, inputs/markers, five PNG/TGA pixel identities and cleanup. Nine raced samples are excluded. Separate requested 50 ms input yields first observed 25 ticks/0.375 seconds; bounds 0.360..0.480. Two batches fail to expose ordered phases despite ordered markers and selected maximum acquisition gaps below 17 ms. Acceptance validates the evidence, not successful batching.

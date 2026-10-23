@@ -1,5 +1,11 @@
 # STATUS
 
+## Active buffer diagnosis and fresh input controls (2026-10-23)
+
+Sealed AF/AG (99/93 files) resolve the earlier batching question. The actual engine buffer is bound through one newly retrieved exact caller and raw ECX/call bytes. Its wait flag/default increment are both 1. In the instrumented fixture, newline configuration lines arrive as separate parser calls; their local wait additions do not carry into the following line. One semicolon line preserves cumulative additions and actual server button phases. Fresh no-Frida-by-this-task controls corroborate jump/duck/release ordering, but identical wait counts give different sampled server-tick delays. Do not equate command-buffer scalars with server ticks or promise fixed timing.
+
+AF checks 19 call pairs/eight wait-site events/662 passive samples; AG checks 400 samples/three positive ordering controls. Both owned runs closed/settings unchanged; AF instrumentation unloaded/detached. AE's EOF setup failure and AG's LF/CRLF binding rejection are retained. AH was preempted before storage after a missing driver import was found; corrected AI passes startup checks and its fresh route is currently in progress, with no new crossing/exit claim. Precise prior milestone: private research-command-buffer-progress-20261023af.md. No Rust edits/builds; original first-map gaps and Rust parity remain open.
+
 ## Native input latency and conditional wait research (2026-10-23)
 
 Resumed in fresh private AC; the naturally controlled train fixture measures separate-command jump-to-duck at first observed 25 ticks/0.375 game seconds despite a requested 50 ms wall pause. Acquisition bounds are 0.360..0.480 seconds; the actual wall pause is 62 ms and each submission process takes about 0.27..0.28 seconds. Two wait 4/wait 12 batches emit markers but no sampled button phases; that approach stops at two failures. No campaign route replay.

@@ -1,5 +1,17 @@
 # Design
 
+## Command delivery scope and native clock separation (2026-10-23)
+
+Observed parser calls bind the concrete buffer to engine base +0x6379c8, through exact caller bytes. Its enabled wait path can update a local accumulator without carrying that update across separate input lines. Keep same-line scheduling distinct from a sequence of newline configuration entries. The semicolon control preserves cumulative additions and produces actual button phases; fresh controls corroborate ordering while exposing variable relations among buffer scalars, server ticks, render frames and wall time. Use observed button/pose/support brackets for the next route, not a fixed wait conversion. Current sealed milestone is private research-command-buffer-progress-20261023af.md; no Rust change follows automatically.
+
+## Research plan: measured fresh storage approach (2026-10-23)
+
+Following the observed per-line reset and fresh single-line controls, replay the known first-map route in a new private process without Frida by this task. Stop before window crossing. Measure actual player ground-handle generation, feet position, crate state and clear lateral lane before choosing input. Use same-line scheduling with raw button/clock observations, while preserving its variable relation to server ticks. Do not reuse Z's invalid lane or assume a thrown crate is still supporting the player. At most two unsuccessful attempts per evidence-led approach; retain failures. No teleport/noclip/entity changes, direct scene/break/changelevel input, native getter calls or Rust edits. A fresh controlled exit would remain distinct from ordinary playthrough, full scene/audio semantics and parity.
+
+## Research plan: live command-buffer diagnosis (2026-10-23)
+
+The owner requests sustained research continuation. Reuse AD's byte-verified parser in a fresh guarded private native session. Observe the actual ECX buffer pointer, command bytes, object flag/scalars, caller and selected wait-path instruction sites during one diagnostic reproduction of the failed batch. Read-only observations apart from declared Frida detours; no native calls, data/argument/return replacement, flag changes or campaign replay. Bind every event to raw source reads and clock/call brackets. Use the measured route/flag result to choose the next materially different command-delivery investigation; do not repeat blind wait counts. Keep exact bodies and tools private, and preserve first-map/parity limits.
+
 ## Measured input and conditional command handling boundary (2026-10-23)
 
 Keep requested wall timing, process submission completion, console markers and native server button/tick observations separate. Under explicit fps_max=66/mat_vsync=0 conditions, a 50 ms requested pause gives a 25-tick/0.375-second first-observed jump-to-duck interval; measured acquisition bounds are 0.360..0.480. Two wait batches emit markers but expose no sampled input phases. Do not use that batching approach for another campaign crossing.
