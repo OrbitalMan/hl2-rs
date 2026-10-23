@@ -1,5 +1,17 @@
 # Design
 
+## Measured native interaction and transfer boundary (2026-10-23)
+
+Keep loaded state, notifications, physical state and map transfer distinct. The selected window loads15/15 and Glass.Window/glass; its+374 field holds a string pointer, while24 is authored input. Four observed pickups save mass25; carry setter/restoration requests, attachment generations and later prop motion are separate evidence. Sampled native callback/Shadow and double Error groups corroborate arrival/errorTime interleaving, without proving every-frame scheduling or a full solver law. Preserve x87 return dataflow despite void decompiler prototypes.
+
+Primary throw detaches/drops before concrete force/torque application; immediate core vectors can remain unchanged across those calls, with motion integrated later. Do not implement a generic initial-velocity assignment from a thrown flag. Collision results10/75 and health15->5->-70 are selected observations. Break/Die/entity removal, visible opening, crouched crossing, player Touch/Gate/output and fresh destination map identity establish separate milestones. Door-only trigger touches and an old-player zero slot during transfer do not prove continuous player traversal.
+
+The first non-Frida control breaks the window but lands below it; fixed input durations do not guarantee the same crate perch. The successor tests delayed crouching after launch and retains actual button/hull/motion timing. First-map full scene/audio/animation semantics and Rust parity remain open; no implementation change follows automatically from these research results.
+
+## Research plan: native storage interaction (2026-10-23)
+
+The owner lifted the previous running-game restriction and authorized native HL2 testing. Codex will first bind the selected grab-controller physics virtual to one exact retail implementation, with at most two necessary direct helpers and existing constructor/table evidence reused. A fresh guarded private session will then replay the input-led first-map route and distinguish actual window health, pickup, sustained carry, throw, damage, break, passage and map transfer. Each milestone needs fresh identity/state and visual evidence; outputs alone are insufficient. Preserve rejected attempts and stop an approach after two failures. No Rust implementation changes, full solver reconstruction or campaign/parity completion claim is implied.
+
 ## Offline research continuation boundary (2026-10-22)
 
 The sealed pickup/dispatch handoff connects named crate settings, use/frame/target dispatch, saved carry state, target requests and error consumer/writer dataflow. It establishes no dynamic callback ordering or solver fidelity. Any next virtual implementation investigation must first bind a concrete class/module/hash/address and reuse existing server-integration evidence; a missing binding stops that line. No full corpus/solver expansion or automatic native replay is authorized by this checkpoint. Precise continuation and final receipt are in private work/publishing/research-pickup-dispatch-continuation-20261022j.md and research-pickup-dispatch-closeout-20261022j.json.

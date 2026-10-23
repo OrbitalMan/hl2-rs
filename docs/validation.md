@@ -1,5 +1,13 @@
 # Local validation — 2026-10-05
 
+## Native interaction and exit acceptance (2026-10-23)
+
+Private python -B scene-shadow-control-20261023w/verify_seal.py passes28 files/11 external bindings, three new/three reused identities and selected return/call/table byte checks. scene-storage-interaction-20261023x/verify_seal.py passes694 files/38 bindings,21 exact identities,20 hook entries/one interior site,3197 main events/1543 closed pairs, seven collision pairs and54 exit pairs.371 storage samples/5889 motion samples retain source transcripts; these bracketed reads are not atomic frames or a timing-fidelity proof.
+
+Accepted native observations: window15/15/profile strings, same-generation pickup/carry, three throws, computed damage10/75, health15->5->-70, Break/Die/removal, crouched crossing and actual destination status/player/map-time identity. The failed first impact, intermediate nonthrow shutdown, stopped jamb approaches, watcher parent timeout and fixed-player transition rejection remain retained. The large watcher file independently parses120 complete samples despite its parent's failed status. Both installed module identities and checked configuration identities remain bounded to the recorded build/settings.
+
+Fresh non-Frida scene-storage-control-20261023y/verify_seal.py passes498 files,58 motion captures/5142 samples,11 storage captures and62563 source reads. It corroborates carry and window removal, **not** window passage or map transfer; its failed crossing stays explicit. A successor movement control is pending. Owned runs closed and settings matched. No Rust implementation/build/test or Rust-parity result follows from these native/documentation checks; first-map full semantic/audiovisual completion remains false.
+
 ## Offline research final publication boundary (2026-10-22)
 
 Final private closeout checks scoped documentation-only commits, unchanged whitelist, published HEAD against the actual branch remote, empty staged index/clean tree and private handoff/navigator/seal hashes. See research-pickup-dispatch-closeout-20261022j.json. Root and navigator acceptance commands above establish static provenance; publication checks establish Git hygiene only. No Rust tests/builds, native launches/captures, actual motion/break/exit or Rust parity were tested.

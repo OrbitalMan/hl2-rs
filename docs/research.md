@@ -1,5 +1,13 @@
 # Sources and native research
 
+## Native storage, window and authored transfer (2026-10-23)
+
+The owner explicitly lifted the offline restriction. New private W/X/Y lanes preserve exact retail identities and failures outside Git. W binds the already selected VPhysics table slot through existing construction witnesses and three exact bodies, with at most two necessary helpers. Raw x87 return flow supports an arrival scalar despite void bridge prototypes; conversion/vector/solver helpers remain unexpanded.
+
+X binds actual loaded window/profile and crate/controller/physics generations. Its sampled native trace checks3197 main events/1543 pairs,297 callback/Shadow groups and293 double-error reset groups. Three throws retain detach/drop before application; particular collisions10/75 produce health15->5->-70 and Break/Die/removal. Input-led window passage and the live player exit callback/output precede separately observed d1_trainstation_02 arrival. The51 earlier door-pointer touches never reached the gate.21 exact identities include two newly exported application bodies; counts overlap older evidence and must not be added as distinct global coverage.
+
+Fresh non-Frida Y corroborates carry/window removal, but its crossing fails and the owned run closes. A separate phased movement control is pending. All raw/byte material stays private. Original scene/startup gaps, full audiovisual/solver/timing fidelity, ordinary unassisted campaign and Rust parity remain open. Controlled native exit is a narrower result than first-map semantic completion.
+
 ## Pickup/dispatch handoff receipt (2026-10-22)
 
 Private research-pickup-dispatch-continuation-20261022j.md and next-research-prompt-20261022j.txt retain all13 sealed roots, provenance, failures, original native state/gaps, query commands and bounded next work. research-pickup-dispatch-closeout-20261022j.json records final publication/remote/tree/index/quota and artifact hashes after push. Historical D..H66/69/startup gaps and I remain separate from J..V57/63 inventory. No new native or Rust parity evidence was produced.

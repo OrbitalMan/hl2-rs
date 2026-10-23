@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-23: native storage interaction and first-map exit research
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents. Claude's Rust implementation unchanged by Codex.
+
+**Changed / Why:** Bound the concrete grab physics virtual and its return chain, then used the owner's newly authorized native session to resolve the earlier static-only window/pickup/exit boundaries. Loaded health/profile, sustained carry, detach/drop/application order, two positive damage results, window break/crossing and actual authored map transfer are now separately observed. Original gaps remain open.
+
+**Tested how / Result:** Private W seal28 files/11 bindings; X seal694/38, immutable DB/PE/raw-read/call-pair/identity/capture checks pass. Window15->5->-70; actual native status identifies d1_trainstation_02. Fresh non-Frida Y seal498 files corroborates carry/window removal but stops at a failed crossing. Both owned runs closed with checked installed settings unchanged. Documentation-only checks apply; no Rust tests/builds were run.
+
+**Still broken or not tested / Next:** First oblique impact, intermediate nonthrow shutdown, stopped jamb approaches, large-watcher parent timeout and transition-reader rejection are retained. Full motion law, timing/audiovisual fidelity, original authored gaps, ordinary unassisted campaign and Rust parity remain untested. Complete the bounded fresh movement/exit control without assuming the same crate poses.
+
 ## 2026-10-22 session 31: particle operators from the SDK particle library
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

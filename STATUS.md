@@ -1,5 +1,13 @@
 # STATUS
 
+## Native first-map window escape and authored exit (2026-10-23, research only)
+
+The owner lifted the previous running-game restriction. A fresh instrumented native route now observes authored crate pickup/sustained carry, normal throws, window damage/break, crouched passage and actual transfer to d1_trainstation_02 through the live changelevel trigger. Loaded window health15/15, modifiers.5/1/1 and Glass.Window/glass strings are measured. Selected collision results10 then75 change health15->5->-70; these are particular impacts, not a constant damage rule. A stopped oblique throw and doorway-jamb attempts remain retained.
+
+Private scene-shadow-control-20261023w is sealed28 files/11 bindings: three new exact bodies/two necessary helpers bind the selected physics virtual and scalar return chain. scene-storage-interaction-20261023x is sealed694/38:21 exact identities,3197 main events/1543 pairs, seven collision pairs,54 exit pairs and raw/capture validation. The old-player reader rejects a zero slot during transfer; fresh native status/player/map-time evidence establishes arrival separately. Owned game closed; checked installed settings unchanged. No Rust changes/builds.
+
+Fresh non-Frida control scene-storage-control-20261023y is sealed498 files. It corroborates pickup/carried rotation, window15->5 and later removal, but its copied crossing sequence lands below the opening and stops; exit comparison is not completed by Y. A new bounded phased-input control is in progress. Original16 authored gaps/four missing scene procedures and separate startup gaps stay open. **first_map_finished:false** remains the full semantic/audiovisual boundary; the narrower **native_input_led_exit_observed:true** is now established. Ordinary unassisted campaign completion and Rust parity **not tested**. No second-map campaign research was started.
+
 ## Codex offline research handoff (2026-10-22)
 
 Current private continuation: work/publishing/research-pickup-dispatch-continuation-20261022j.md; lean prompt: next-research-prompt-20261022j.txt; final publication/remote/tree/quota receipt: research-pickup-dispatch-closeout-20261022j.json in the same directory. J..V are sealed13 roots/361 retained files,57 distinct exact bodies/63 per-root identity occurrences/64 export paths/five navigation-only occurrences. These are inventory counts, not semantic/runtime completion. Native material/tools remain outside Git; reviewed docs are committed/pushed.
