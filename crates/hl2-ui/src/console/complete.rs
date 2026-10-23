@@ -183,7 +183,7 @@ pub fn arg_help(line: &str) -> Option<ArgHelp> {
         args,
         current,
         description,
-        cvar: spec.cvar,
+        cvar: spec.is_cvar(),
     })
 }
 

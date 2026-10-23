@@ -5,6 +5,7 @@
 ## Architecture review: structure without behaviour change (2026-10-23)
 
 - Plan in docs/DESIGN.md (same title). Every step keeps output, errors, effects and gameplay outcomes unchanged and is verified by `scripts/checks/validate.sh`, the Windows-target check and packaged replays.
+- Step 1 done: console commands are described once. Each `console::commands::Spec` carries its handler and, for a cvar, its value function; the handlers live in `console/commands/{cheats,video,audio,mouse,map,developer}.rs`, `Console::interpret` is a 6-line dispatcher (was 1,066 lines) and `cvar_value` reads the spec. Verified: validate.sh (1,020 tests), Windows-target check, packaged `console`, `console_map`, `campaign`, `options`, `menu_options`, `save_config`; existing console tests unchanged.
 - Fixed: a flaky hl2-bevy setup test. Parallel `setup` tests could share one temporary folder (the macOS clock moves in microseconds), so one test's cleanup deleted another's `response.json`; the folder name now carries a counter.
 
 ## Startup memory: a gameplay `--map` loads directly (2026-10-23)

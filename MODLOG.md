@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-23 Console commands described once: each spec carries its handler
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- `hl2-ui::console::commands::Spec` gains `run: Handler` (`fn(&mut Console, &'static Spec, &[String]) -> Outcome`, `Outcome = Result<Option<Effect>, String>`) and `value: Option<Value>` (`fn(&Console) -> Option<String>`, set for cvars). The `cvar: bool` field became `Spec::is_cvar()`; `Spec::usage()` returns the help text that wrong arguments print. `PartialEq`/`Eq` were dropped from `Spec` (function pointers).
+- The 1,066-line `match` in `Console::interpret` moved verbatim into handler functions in `console/commands/` by area: `cheats` (sv_cheats, impulse, noclip, getpos/setpos/setang, npc_create family, ai_disable/ai_enable, ent_fire), `video` (fov cvars, `mat_*`, `r_*`, mat_setvideomode), `audio`, `mouse` (sensitivity, `m_*`, autoaim), `map` (map, mainmenu, background_map, map_background, skill, migrate_episodic_data) and `developer` (help, find, clear, echo, toggleconsole, quit, `con_*`). The `sv_cheats` gate is a private `cheats::cheat` helper; `boolean`/`vector` stay in `console.rs`.
+- `Console::interpret` is now a 6-line dispatcher (look the name up, call `spec.run`, else "Unknown or unimplemented command"); `Console::cvar_value` (a third hand-kept name list) reads `spec.value`.
+- New test `every_spec_runs_its_own_handler`: any spelling of every spec's name dispatches; each cvar's bare query prints `"<name>" = "<value>"` from that cvar's own value function (`fov_desired` answers as `fov`); the NPC console commands pass their own name on; nine junk arguments get the spec's usage. Handler modules are private, so a handler no spec names fails strict Clippy as dead code.
+
+**Why:** Code review: every command was registered twice (the `COMMANDS` table and a `match` arm), and cvars three times (`cvar_value`), with nothing keeping them in sync.
+
+**Tested how:** `scripts/checks/validate.sh` (1,020 tests, strict Clippy, fmt) and the Windows-target check pass; every existing console test passes unchanged. A deliberate miswiring (`volume` given `snd_musicvolume`'s handler) fails the new test; swapping two value functions is caught only when their values differ. The table's names, help texts and argument lists are byte-identical to before (compared mechanically). Packaged replays `console`, `console_map`, `campaign`, `options`, `menu_options`, `save_config`: all pass. Sizes (code metrics script): `interpret` 1,066 -> 6 lines; console.rs production lines 4,822 -> 3,645; hl2-ui production lines 24,130 -> 24,700 (the handler signatures, the table's handler/value lines and the module headers; the longest handler, `mat_forceaniso`, is 45 lines).
+
+**Result:** Each command and cvar is one `COMMANDS` entry; the console's output, errors and effects are unchanged.
+
+**Still broken or not tested:** The cvar handlers still repeat the query/set/save/`ApplyConfig` pattern (moved verbatim on purpose); folding them into a shared helper would shrink the code but is a separate change.
+
+**Next:** Step 2: entity input dispatch table in `hl2-simulation::entities::Scene::deliver`.
+
 ## 2026-10-23 Setup tests no longer share a temporary folder
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

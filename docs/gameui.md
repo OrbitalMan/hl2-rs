@@ -1142,8 +1142,11 @@ White, `RichText.*`) and Source's own console variables. Code:
   lines while new output arrives and old lines leave the 1024-line buffer; Ctrl+L clears it.
 
 - Commands and cvars are described once (`console::commands::COMMANDS`: name, help as
-  `name args: description`, what each argument completes from, cvar or command). `help` and
-  `find` print from it.
+  `name args: description`, what each argument completes from, the handler that runs it and, for
+  a cvar, its current value). The handlers live in `console/commands/` by area (`cheats`,
+  `video`, `audio`, `mouse`, `map`, `developer`); `Console::interpret` only looks the name up and
+  calls the handler, and `Console::cvar_value` reads the spec's value. `help` and `find` print
+  from the table, in its order.
 - Completion (retail `RebuildCompletionList`, extended): the line's last command (after the last
   `;` outside quotes) completes its first word from every command and cvar, later words from the
   argument's source: installed maps (`source_assets::install::installed_maps`, loose and in each
