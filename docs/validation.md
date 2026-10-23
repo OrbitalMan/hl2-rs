@@ -1,5 +1,9 @@
 # Local validation — 2026-10-05
 
+## Owner-requested research stop (2026-10-23)
+
+python -B ../../work/publishing/verify-native-exit-index-20261023w.py passes five roots/1868 retained files/22 query checks with original 16 gaps preserved. Private AB experiment.py passes AST parsing only; phase trials did not run. session-d1_trainstation_01-20261023T105448Z/owner-stop.json binds PID70548 and creation/module identities; cleanup.json confirms closure and unchanged checked installed settings. driver-close.json records interrupted child exit1 at request6 with zero pulses. Stop-related reader/acknowledgement errors retained; AB is unsealed. No Rust tests/builds or Rust parity validation performed.
+
 ## Native interaction and exit acceptance (2026-10-23)
 
 Private python -B scene-shadow-control-20261023w/verify_seal.py passes 28 files/11 external bindings, three new/three reused identities and selected return/call/table byte checks . scene-storage-interaction-20261023x/verify_seal.py passes 694 files/38 bindings, 21 exact identities, 20 hook entries/one interior site, 3197 main events/1543 closed pairs, seven collision pairs and 54 exit pairs.371 storage samples/5889 motion samples retain source transcripts; these bracketed reads are not atomic frames or a timing-fidelity proof.

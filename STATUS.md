@@ -1,5 +1,9 @@
 # STATUS
 
+## Research stopped at owner request (2026-10-23)
+
+Frozen W/X/Y/Z/AA navigator revalidation passes five roots/1868 files/22 query checks; original 16 gaps preserved. New private scene-input-ack-20261023ab prepares isolated input acknowledgement tests, but the owner requested wrap-up during the native introduction. No phase trial/new decompilation ran. Owned PID70548 closed through freshly guarded quit; six checked installed settings identities match. Interrupted reader/parent errors retained; AB is incomplete/unsealed. Private continuation: work/publishing/research-input-ack-continuation-20261023ab.md. No Rust changes/builds; first_map_finished:false and Rust parity untested.
+
 ## Native first-map window escape and authored exit (2026-10-23, research only)
 
 The owner lifted the previous running-game restriction. A fresh instrumented native route now observes authored crate pickup/sustained carry, normal throws, window damage/break, crouched passage and actual transfer to d1_trainstation_02 through the live changelevel trigger. Loaded window health 15/15, modifiers .5/1/1 and Glass.Window/glass strings are measured. Selected collision results 10 then 75 change health 15->5->-70; these are particular impacts, not a constant damage rule. A stopped oblique throw and doorway-jamb attempts remain retained.

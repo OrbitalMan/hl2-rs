@@ -1,5 +1,9 @@
 # Sources and native research
 
+## Interrupted input-harness preparation (2026-10-23)
+
+Frozen native-exit navigator revalidation passes five roots/1868 files/22 query cases without changing original gaps. New private AB prepares button/tick tests. Owner-requested shutdown occurred during the natural introduction, before trials. No wait result/new exact body was obtained. AB is incomplete/unsealed; owned PID70548 closed with checked installed settings unchanged. Stop-related errors retained. Private continuation: research-input-ack-continuation-20261023ab.md. Timing, campaign completion and Rust parity remain untested.
+
 ## Native storage, window and authored transfer (2026-10-23)
 
 The owner explicitly lifted the offline restriction. New private W/X/Y lanes preserve exact retail identities and failures outside Git. W binds the already selected VPhysics table slot through existing construction witnesses and three exact bodies, with at most two necessary helpers. Raw x87 return flow supports an arrival scalar despite void bridge prototypes; conversion/vector/solver helpers remain unexpanded.

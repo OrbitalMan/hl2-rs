@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-23: input harness preparation and owner-requested stop
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents.
+
+**Changed / Why:** Resumed private research, revalidated the predecessor and prepared isolated input-phase tests. Owner requested wrap-up to reserve usage for another project.
+
+**Tested how / Result:** Existing navigator passes five roots/1868 files/22 query cases. New harness AST parses; phase trials did not run. Guarded quit closed owned PID70548; six checked installed settings identities match. Stop-related reader/acknowledgement errors retained; AB stays incomplete/unsealed.
+
+**Still broken or not tested / Next:** Timing/wait semantics remain unvalidated. Resume from research-input-ack-continuation-20261023ab.md with a new guarded run. No Rust changes/builds, new body, campaign completion or Rust parity claim.
+
 ## 2026-10-23: fresh-control limits, core-state audit and handoff
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier unavailable. No subagents; no Rust implementation changes.

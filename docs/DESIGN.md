@@ -1,5 +1,11 @@
 # Design
 
+## Research plan: observed native input acknowledgement (2026-10-23)
+
+Owner-requested stop: AB was closed during the natural introduction, before phase tests. The prepared harness has syntax validation only. Interrupted reader/acknowledgement errors are retained. Owned PID70548 closed; checked installed settings match. AB remains incomplete/unsealed. Resume with a new guarded root using private research-input-ack-continuation-20261023ab.md.
+
+Use a new private write mount and the existing guarded native oracle to isolate command submission, subprocess return, console markers and observed server buttons/game ticks. Stay on d1_trainstation_01; wait for natural player control and test stationary jump/duck phases without replaying the storage route. Compare separate hijack phases with a single command batch containing bounded wait commands. Retain raw reads, generation/clock brackets, screenshots and failures; stop each approach after two failures. A successful fixture establishes only measured command/input behavior for this process, not exact engine implementation, campaign passage, audiovisual completion or Rust parity. No Rust edits/builds or broad native discovery are planned.
+
 ## Measured native interaction and transfer boundary (2026-10-23)
 
 The sealed follow-up reuses frozen X raw reads: 12 mass-set pairs in the same sampled physics/core chain show coefficient 0.04->1->0.04, while rotational-damping fields show 0->10->0 across carried/released states. Six reused exact bodies/four table slots bind these fields . No new solver functions or native execution were needed. Measured fields remain separate from setter requests; typed inverse-mass getters, damping-setter invocation, units and exclusive causality remain unproved.
