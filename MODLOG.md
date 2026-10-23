@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-23 Oversized files split by concern
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- Test modules moved into their own files: `console/tests.rs`, `gameui/options/tests.rs`, `entities/tests.rs`, `ai/runtime/tests.rs`. The console tests take their font from `crate::PROGGY_CLEAN` (the same embedded ProggyClean.ttf) instead of a relative `include_bytes!` path, which would have had to climb two levels.
+- Whole methods moved into child modules, one `impl` block per concern; private methods became `pub(super)`, nothing else changed:
+  - `console.rs` (9,587 -> 1,505 lines; keeps the types, `load`, `tick`, `draw`): `console/focus.rs` (window stack, focus, Escape, input routing), `menu_flow.rs` (menus, titles, backgrounds, chapter backgrounds, quit box), `loading.rs`, `options_dialog.rs` (the Options lifecycle), `panel.rs` (output, command line, history, completion, drawing).
+  - `gameui/options.rs`: tests only (5,935 -> 2,741).
+  - `entities.rs` (5,621 -> 1,006): `entities/choreography.rs` (scenes and actor animation, 1,329), `sequences.rs` (scripted sequences and the AI animation bridge), `io.rs` (outputs, targets, queued inputs, `deliver`, +USE), `parenting.rs`, `triggers.rs`.
+  - `ai/runtime.rs` (5,588 -> 2,616): `ai/runtime/goal_inputs.rs`, `equipment.rs` (actors and weapons), `squads.rs`, `speech.rs`, `requests.rs` (applying think results and world events). Seven `super::<module>::` paths in the moved code now read `crate::ai::<module>::` (one level deeper).
+- The hard-coded-string audit test reads the five new console files too, and its Console title check covers all of them (it read only `console.rs`).
+
+**Why:** Code review: the largest files mixed many concerns (console.rs 9.6k lines, options.rs 5.9k, entities.rs 5.6k, ai/runtime.rs 5.6k).
+
+**Tested how:** A script compared the moved code with the previous version item by item (whitespace and `pub(super)` aside): console 390/390, entities 267/267, ai/runtime 281/281 identical (before the seven path fixes); the moved test modules are identical apart from rustfmt re-indentation and the braces it drops from closures that now fit on one line. `scripts/checks/validate.sh` (1,021 tests, strict Clippy, fmt), the Windows-target check and the 81 owned-install tests pass (the two hl2-bevy headless campaign tests fail under parallel load and pass alone, as before). Full packaged replay suite, one game at a time: 94 of 94; comparing its reports with the baseline run (1,439 labelled samples), only the fields the replay checks already mark as varying between runs differ.
+
+**Result:** No production file in these four exceeds 2,741 lines; behaviour is unchanged.
+
+**Still broken or not tested:** Long functions are unchanged: `AiRuntime::think` (1,225 lines), `tick_choreography` (376), `Console::draw` (368); splitting them would change code, not only move it.
+
+**Next:** Optional steps (host atomics as Bevy resources; MODLOG/STATUS archive) wait for the owner.
+
 ## 2026-10-23 hl2-ui no longer depends on hl2-simulation: new hl2-shared crate
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

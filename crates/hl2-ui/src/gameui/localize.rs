@@ -367,14 +367,21 @@ mod tests {
     fn audit_no_hardcoded_user_visible_strings_in_ui_code_outside_fallback_constants() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let src_dir = manifest_dir.join("src");
-        let ui_files = [
+        let console_files = [
             "console.rs",
+            "console/focus.rs",
+            "console/loading.rs",
+            "console/menu_flow.rs",
+            "console/options_dialog.rs",
+            "console/panel.rs",
+        ];
+        let ui_files = console_files.into_iter().chain([
             "gameui/loading.rs",
             "gameui/menu.rs",
             "gameui/options.rs",
             "gameui/resources.rs",
             "hud.rs",
-        ];
+        ]);
         let banned = [
             "Are you sure?\nAll unsaved progress will be lost.",
             "Are you sure you want to quit?",
@@ -405,13 +412,15 @@ mod tests {
             }
         }
 
-        // Specifically check that console.rs non-test code does not hardcode "Console" title
-        let console_src = std::fs::read_to_string(src_dir.join("console.rs")).unwrap();
-        let console_non_test = console_src.split("#[cfg(test)]").next().unwrap();
-        assert!(
-            !console_non_test.contains("text(\n                \"Console\""),
-            "console.rs should not hardcode Console title string"
-        );
+        // Specifically check that the console's non-test code does not hardcode "Console" title
+        for rel in console_files {
+            let console_src = std::fs::read_to_string(src_dir.join(rel)).unwrap();
+            let console_non_test = console_src.split("#[cfg(test)]").next().unwrap();
+            assert!(
+                !console_non_test.contains("text(\n                \"Console\""),
+                "{rel} should not hardcode Console title string"
+            );
+        }
 
         // Check that hud.rs non-test code does not hardcode numeric panel labels
         let hud_src = std::fs::read_to_string(src_dir.join("hud.rs")).unwrap();

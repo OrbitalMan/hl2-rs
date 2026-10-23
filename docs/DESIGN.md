@@ -23,7 +23,12 @@ output, errors, effects, UI behaviour or gameplay outcomes.
    re-exports everything at the old paths.
 4. Oversized files are split: test modules first, then `console.rs` by concern (windows/focus,
    menu flow, the Options lifecycle), and `entities.rs` / `ai/runtime.rs` if step 2 leaves them
-   large.
+   large. Done as whole-method moves into child modules (`impl` blocks per concern; private
+   methods become `pub(super)`): `console/{focus,menu_flow,loading,options_dialog,panel}.rs`,
+   `entities/{choreography,parenting,io,sequences,triggers}.rs` and
+   `ai/runtime/{goal_inputs,equipment,squads,speech,requests}.rs`. Long functions stay as they
+   are (`AiRuntime::think` 1,225 lines, `tick_choreography` 376, `Console::draw` 368); splitting
+   them changes code, not just its place.
 
 Validation per step: `scripts/checks/validate.sh`, the Windows-target check, the packaged console
 and UI replays (steps 1 and 4) or the full replay suite with every gameplay outcome unchanged

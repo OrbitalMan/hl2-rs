@@ -1141,6 +1141,11 @@ White, `RichText.*`) and Source's own console variables. Code:
   `Clipboard`. Rows are numbered since start, so the selection stays on its
   lines while new output arrives and old lines leave the 1024-line buffer; Ctrl+L clears it.
 
+- Code layout: `console.rs` keeps the types, loading, `tick` and `draw`; `impl Console` is split by
+  concern into `console/focus.rs` (window stack, focus, Escape, input routing), `menu_flow.rs`
+  (menus, titles, backgrounds, quit box), `loading.rs`, `options_dialog.rs` (the Options
+  lifecycle) and `panel.rs` (output, command line, completion, drawing); the unit tests live in
+  `console/tests.rs` (Options: `gameui/options/tests.rs`).
 - Commands and cvars are described once (`console::commands::COMMANDS`: name, help as
   `name args: description`, what each argument completes from, the handler that runs it and, for
   a cvar, its current value). The handlers live in `console/commands/` by area (`cheats`,
