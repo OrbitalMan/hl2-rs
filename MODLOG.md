@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-23 Load a gameplay `--map` directly at startup
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `hl2-bevy::main::load_startup_map` loads a gameplay `--map` (no `--main-menu`) itself and starts in gameplay, instead of always loading the menu background first and handing `--map` to the campaign loader. Without `--map`, with `--main-menu`, or when the map fails to load, startup is unchanged (menu background, then the campaign loader with the loading dialog and the existing failure rules). `setup` logs `Loaded <game>/<map>` for the startup gameplay map and locks the pointer like the campaign loader; the simulation only starts as loading when a map is still to come.
+
+**Why:** Find the branch-side memory (previous entry). Heap profile of `bevy-frag-lob` on d1_trainstation_02 (one process, `footprint` and `malloc_history -callTree` with MallocStackLogging=lite) against a headless build of main: the startup background (`hl2/background01`) and the requested map were both live during the load, and after the switch about 0.8 GB of the freed background stayed resident (resident heap 3641 MB vs 2863 MB live; main 2267 vs 2268). Returning the pages with `malloc_zone_pressure_relief` released 0 bytes on macOS, so the background load itself had to go.
+
+**Tested how:** `scripts/checks/validate.sh` (379 hl2-ui and 110 hl2-bevy tests, strict workspace Clippy, fmt) and the Windows-target check pass. Full packaged replay suite: 94 checks, 93 passed; `campaign` failed because the startup map no longer logged `Loaded hl2/d1_trainstation_01`. After adding that line, `campaign`, `console`, `console_map`, `hud` and `dev_overlay` pass. Footprint of `bevy-frag-lob` at 1280x720 with default settings, one game at a time: gameplay 4.27-4.75 GB (before 4.96-5.51 GB), peak 5.06-5.22 GB (before about 5.87 GB), run time about 9 s (before about 15 s). Main: gameplay 3.30-3.45 GB.
+
+**Result:** Gameplay startup no longer pays for a menu background; replays use about 0.6 GB less memory and start faster.
+
+**Still broken or not tested:** The fallback for a map that passes installation validation but fails to load is not exercised: installation validation rejects missing and invalid BSPs before startup. Full suite not rerun after the log line (only the five console/campaign checks). Remaining ~1 GB gap to main not fixed (fontdue caption faces ~166 MB, `Console::load` ~99 MB, Metal command-buffer storage, ~0.5 GB resident but not live heap, more graphics memory). `loading_dialog_state_transitions_and_dismissal` is flaky under parallel tests (shared loading progress).
+
+**Next:** Share one parsed font between caption styles that use the same file; make the loading-progress test independent of other tests.
+
 ## 2026-10-23 Cap parallel replays by physical memory
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

@@ -36,7 +36,7 @@ use bevy::{
         renderer::RenderAdapterInfo,
         view::screenshot::{Screenshot, ScreenshotCaptured},
     },
-    window::WindowResolution,
+    window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowResolution},
 };
 use serde::Serialize;
 use std::{
@@ -534,13 +534,32 @@ fn source_direction(yaw: f32, pitch: f32) -> Vec3 {
     )
 }
 
-/// Loads the startup background map. If `--map` was given, it will be loaded asynchronously
-/// by the campaign loader with a loading dialog and progress bar.
+/// Loads the startup map and says whether it is a main-menu background level. A gameplay
+/// `--map` is loaded directly, without a menu background first: the background's freed memory
+/// would stay resident for the whole run. A `--main-menu` map, or a `--map` that fails to load,
+/// loads the menu background instead, and the campaign loader then loads the requested map
+/// asynchronously with the loading dialog (reporting the failure, see `campaign::poll`).
 fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
-    let vfs =
-        source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
     let config = hl2_ui::config::Config::load_or_default();
     let base_game = source_assets::install::BASE_GAME;
+    if let Some(map) = options.map.as_ref().filter(|_| !options.main_menu) {
+        let game = source_assets::install::game_for_map(&options.game, map, None)
+            .unwrap_or_else(|| base_game.to_owned());
+        println!("Loading owned {game}/{map}...");
+        match assets::load_with_config(
+            &options.game,
+            &game,
+            map,
+            hl2_ui::canvas::Canvas::default(),
+            true,
+            &config,
+        ) {
+            Ok(loaded) => return Ok((loaded, false)),
+            Err(err) => eprintln!("Warning: map {game}/{map} failed to load: {err:#}"),
+        }
+    }
+    let vfs =
+        source_assets::vpk::Vfs::mount(&options.game).context("mount installed owned content")?;
     let default_background = hl2_ui::gameui::resources::startup_background_map(&vfs);
     // `--background-map` loads in the game that ships the map; the persisted background
     // remembers its game (one saved without it belongs to the game that ships it).
@@ -649,7 +668,7 @@ fn main() -> Result<()> {
             .with_flexible_aspect(options.flexible_aspect),
     );
     simulation.run_after_script = options.capture_live;
-    if options.map.is_some() {
+    if options.map.is_some() && background_level {
         simulation.loading = true;
     }
     let status = Status::default();
@@ -943,7 +962,10 @@ fn setup(
     status: Res<Status>,
     (mut meshes, mut materials, mut images, mut sounds, mut effect_materials, mut inverse_binds): StartupAssets,
     mut present_materials: ResMut<Assets<video::PresentMaterial>>,
-    adapter: Option<Res<RenderAdapterInfo>>,
+    (adapter, mut windows): (
+        Option<Res<RenderAdapterInfo>>,
+        Query<&mut CursorOptions, With<PrimaryWindow>>,
+    ),
 ) {
     let loaded = prepared.0.take().expect("startup map consumed once");
     let map_name = loaded.world.name.clone();
@@ -981,6 +1003,17 @@ fn setup(
     console_ui
         .source
         .level_loaded_for_map(&map_game, &map_name, prepared.1);
+    // A gameplay startup map is reported and captures the pointer like a map the campaign
+    // loader installs.
+    if !prepared.1 {
+        console_ui
+            .source
+            .log(format!("Loaded {map_game}/{map_name}"));
+        if let Ok(mut cursor) = windows.single_mut() {
+            cursor.grab_mode = CursorGrabMode::Locked;
+            cursor.visible = false;
+        }
+    }
     let max_samples = video::adapter_max_msaa_samples(adapter.as_deref());
     if let Some(adapter) = adapter.as_deref() {
         let device_type_str = format!("{:?}", adapter.0.device_type);
@@ -1007,7 +1040,7 @@ fn setup(
         let rec = hl2_ui::gameui::recommendation::SystemRecommendation::from_specs(cpu, gpu);
         console_ui.source.set_system_recommendation(rec);
     }
-    if let Some(map) = &options.map {
+    if let Some(map) = options.map.as_ref().filter(|_| prepared.1) {
         // A command-line map has no running game: it is not resolved against the game of the
         // saved menu background that was loaded first.
         let game = source_assets::install::game_for_map(&options.game, map, None)

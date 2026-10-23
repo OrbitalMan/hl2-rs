@@ -2,12 +2,21 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
+## Startup memory: a gameplay `--map` loads directly (2026-10-23)
+
+- A heap profile of one packaged fixture (`bevy-frag-lob`, d1_trainstation_02, 1280x720, `footprint` plus `malloc_history` with stack logging) against a headless build of main: startup always loaded the menu background (`hl2/background01`) on the main thread before the campaign loader loaded `--map`, so both maps were live during the load, and after the switch ~0.8 GB of the freed background stayed resident (resident heap above live heap; main: none). `malloc_zone_pressure_relief` after the switch released 0 bytes (tried and dropped).
+- Now `load_startup_map` loads a gameplay `--map` itself (as main does); `--main-menu`, no `--map`, or a map that fails to load still start over the menu background, and the campaign loader then handles the map with the loading dialog and the existing failure rules. The startup map logs `Loaded <game>/<map>` and captures the pointer like a loaded map.
+- Footprint, same fixture, default settings, one game at a time: gameplay 4.27-4.75 GB (before 4.96-5.51), peak 5.06-5.22 GB (before ~5.87); the fixture runs in ~9 s instead of ~15 s. Main: gameplay 3.30-3.45 GB.
+- Remaining gap to main (~1 GB, not fixed): fonts parsed by fontdue (~166 MB: each of the four closed-caption styles is a full DejaVu Sans face), `Console::load` (~99 MB), Metal command-buffer storage (115-357 MB vs 16 MB), ~0.5 GB resident but not live heap, and 150-600 MB more graphics memory. Model LOD, picmip and texture copies are the same as main's.
+- Not tested: the fallback for a map that passes installation validation and then fails to load (installation validation rejects missing and invalid BSPs before startup, and the installed game is read-only).
+- Known flaky test: `console::tests::loading_dialog_state_transitions_and_dismissal` (hl2-ui) failed once in a full run and passed six times alone; it reads the process-wide loading progress that parallel tests reset.
+
 ## Merge of main into orbitalman/hl2-ui (2026-10-23)
 
 - main d9295d5 (sessions 28-30) merged over 210849b. Model reading is one `read_model_variant` (body + root LOD) with `read_model`/`read_model_body`/`read_model_lod` wrappers.
 - Verified: fmt, strict workspace Clippy, Windows-target Clippy, workspace tests, owned-install tests (two hl2-bevy campaign headless tests time out only under parallel load; alone they pass before and after the merge), packaged replays (93 checks: 91 pass after re-recording the gameplay outcomes; `monitors-kleiner-scene` gib removal varied once under parallel load). A headless build of main used as referee gives the same gameplay outcomes, apart from fields that already vary between runs and this branch's `env_zoom`.
 - Fixed after the merge: the replay checks `fov_settings` and `console`, which failed before it too. `fov_settings` expected the old portrait (+8) and ultrawide viewmodel FOV boosts that the per-weapon offset tuning removed; the console replay now resumes from the pause menu after closing the console.
-- Packaged checks run with `--mute` (silent, settings untouched, asserted per run) and cap `JOBS` by physical memory: a packaged game peaks at about 5.5 GB on the station maps (main: about 3.2 GB; the extra ~2.3 GB is branch-side, predates the merge, not investigated), so a 16 GB machine runs two at once.
+- Packaged checks run with `--mute` (silent, settings untouched, asserted per run) and cap `JOBS` by physical memory: a packaged game peaks at about 5.5 GB on the station maps (main: about 3.2 GB; see the startup memory section above), so a 16 GB machine runs two at once.
 - Known content gap: `Weapon_Alyx_Shotgun.Cock` (female citizen / Alyx `shoot_shotgun` event) has no Half-Life 2 sound script; main's F4 citizen spawn pool preloads it on every map.
 
 ## Current session: portrait viewmodel framing and Fit Display continuation (2026-10-22)
