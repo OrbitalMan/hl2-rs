@@ -1,6 +1,16 @@
 # Design
 
+## Measured input and conditional command handling boundary (2026-10-23)
+
+Keep requested wall timing, process submission completion, console markers and native server button/tick observations separate. Under explicit fps_max=66/mat_vsync=0 conditions, a 50 ms requested pause gives a 25-tick/0.375-second first-observed jump-to-duck interval; measured acquisition bounds are 0.360..0.480. Two wait batches emit markers but expose no sampled input phases. Do not use that batching approach for another campaign crossing.
+
+The separately verified retail parser compares the exact wait token with an ASCII-case comparison helper, gates special handling on object byte +0x2049 and adds a selected scalar to its local accumulator. The tick/buffer interpretation agrees with SDK comparison; actual units, defaults, active instance/flag and command routing remain unobserved. Static code existence does not explain the failed batches. Next bind the actual normal-command buffer path before choosing a timing mechanism. Original first-map semantics and Rust parity remain open; no implementation change follows automatically.
+
 ## Research plan: observed native input acknowledgement (2026-10-23)
+
+After two batches fail to expose ordered button phases, stop that runtime approach. A separate exact engine follow-up may use the raw wait-string reference to bind its containing retail procedure, retrieve one exact pass14 implementation and one necessary comparison helper, and independently verify bytes. Buffer-instance flags and actual command-source routing remain runtime questions; static wait handling alone does not explain the failed batches.
+
+Resumed at owner request in new private AC. Preserve stopped AB; add cooperative stop checks between phases/commands and during pauses. Revalidate raw button descriptors/generation/clock brackets independently, then report measured phase intervals under explicit fps_max66/mat_vsync0 conditions. No campaign retry until the harness result is understood.
 
 Owner-requested stop: AB was closed during the natural introduction, before phase tests. The prepared harness has syntax validation only. Interrupted reader/acknowledgement errors are retained. Owned PID70548 closed; checked installed settings match. AB remains incomplete/unsealed. Resume with a new guarded root using private research-input-ack-continuation-20261023ab.md.
 

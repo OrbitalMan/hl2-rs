@@ -1,5 +1,11 @@
 # Local validation — 2026-10-05
 
+## Input acknowledgement and conditional wait acceptance (2026-10-23)
+
+Run python -B ../../work/hl2-decompiled/scene-input-ack-20261023ac/verify_seal.py and python -B ../../work/hl2-decompiled/scene-command-wait-20261023ad/verify_seal.py. Both pass closed file sets of 94/25 files. AC independently checks raw descriptor m_nButtons/type5/+a80, 593 samples/5488 reads/1754824 bytes, process/module/entity-generation/clock brackets, inputs/markers, five PNG/TGA pixel identities and cleanup. Nine raced samples are excluded. Separate requested 50 ms input yields first observed 25 ticks/0.375 seconds; bounds 0.360..0.480. Two batches fail to expose ordered phases despite ordered markers and selected maximum acquisition gaps below 17 ms. Acceptance validates the evidence, not successful batching.
+
+AD verifies one exact retail parser plus one comparison helper against immutable pass14 BLOBs and exact PE bytes: 514 body bytes/216 instruction starts/219 retained byte records. Helper padding is excluded; static wait recognition/flag/scalar dataflow is established. Runtime instance/flag/path, units/defaults and ABI remain unverified. Owned PID 31504 closed with six checked installed settings identities unchanged; REA session closed. No campaign route replay, Rust builds/tests or Rust parity evidence. AB remains stopped/unsealed and unchanged. Current continuation is private research-input-ack-continuation-20261023ac.md.
+
 ## Owner-requested research stop (2026-10-23)
 
 python -B ../../work/publishing/verify-native-exit-index-20261023w.py passes five roots/1868 retained files/22 query checks with original 16 gaps preserved. Private AB experiment.py passes AST parsing only; phase trials did not run. session-d1_trainstation_01-20261023T105448Z/owner-stop.json binds PID70548 and creation/module identities; cleanup.json confirms closure and unchanged checked installed settings. driver-close.json records interrupted child exit1 at request6 with zero pulses. Stop-related reader/acknowledgement errors retained; AB is unsealed. No Rust tests/builds or Rust parity validation performed.

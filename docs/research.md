@@ -1,5 +1,11 @@
 # Sources and native research
 
+## Native input acknowledgement and raw wait anchor (2026-10-23)
+
+Fresh private AC distinguishes separate-subprocess latency from requested 50 ms timing: first observed 25 ticks/0.375 game seconds, acquisition bounds 0.360..0.480. Two batches containing wait 4/wait 12 emit ordered markers but show no sampled server button phases. Acquisition gaps around submission remain below 17 ms; shorter transients and actual command-source routing are unresolved. The batching approach stops after two failures. AC seals 94 files/593 samples/5488 reads/five native captures; no Frida by this task, campaign replay or Rust changes.
+
+AD follows the exact engine image's raw NUL-terminated wait reference to 0x102805b0 and one necessary comparison helper 0x10274d00. Full module/hash/address/baseline/original bindings and PE/dumpbin/REA checks cover 514 body bytes/216 instruction starts, excluding the helper's three-byte gap. It establishes conditional static wait handling through byte +0x2049 and additive scalar dataflow, not the active buffer flag, branch taken by AC, native timing units or a guarantee. The old literal-only text search remains a bounded non-result. AD seals 25 files; REA session closed. Fresh native process closed/settings unchanged. Current private handoff: research-input-ack-continuation-20261023ac.md. Original scene gaps, ordinary completion and Rust parity remain open.
+
 ## Interrupted input-harness preparation (2026-10-23)
 
 Frozen native-exit navigator revalidation passes five roots/1868 files/22 query cases without changing original gaps. New private AB prepares button/tick tests. Owner-requested shutdown occurred during the natural introduction, before trials. No wait result/new exact body was obtained. AB is incomplete/unsealed; owned PID70548 closed with checked installed settings unchanged. Stop-related errors retained. Private continuation: research-input-ack-continuation-20261023ab.md. Timing, campaign completion and Rust parity remain untested.

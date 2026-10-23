@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-23: measured input latency and static wait gate
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents; Claude's implementation unchanged.
+
+**Changed / Why:** Completed a fresh private input fixture to distinguish requested timing from native button state. Stopped two ineffective wait batches and followed a different raw engine-string reference to conditional retail wait handling.
+
+**Tested how / Result:** AC seal of 94 files checks 593 samples/5488 raw reads/five captures; nine clock races excluded. Requested 50 ms yields first observed 25 ticks/0.375 game seconds between jump/duck, bounded 0.360..0.480. Separate submissions take about 0.27..0.28 seconds each. Both batches show ordered markers but no sampled phases. AD seal of 25 files binds two exact pass14 bodies/514 bytes/216 instruction starts through PE/dumpbin/REA checks. Owned PID 31504 and REA session closed, checked installed settings unchanged. Documentation diff/whitelist checks apply; no Rust build/tests.
+
+**Still broken or not tested / Next:** Actual command-buffer instance/flag/path, reliable short phase delivery, fresh window passage/exit, original scene gaps and Rust parity remain open. Bind the actual buffer path before any more timing/campaign attempts. Private continuation: research-input-ack-continuation-20261023ac.md.
+
 ## 2026-10-23: input harness preparation and owner-requested stop
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents.

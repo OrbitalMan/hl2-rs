@@ -1,5 +1,11 @@
 # STATUS
 
+## Native input latency and conditional wait research (2026-10-23)
+
+Resumed in fresh private AC; the naturally controlled train fixture measures separate-command jump-to-duck at first observed 25 ticks/0.375 game seconds despite a requested 50 ms wall pause. Acquisition bounds are 0.360..0.480 seconds; the actual wall pause is 62 ms and each submission process takes about 0.27..0.28 seconds. Two wait 4/wait 12 batches emit markers but no sampled button phases; that approach stops at two failures. No campaign route replay.
+
+AC is sealed with 94 files: 593 samples/5488 raw reads/1754824 bytes/five captures; nine clock-raced samples excluded from timing. New AD is sealed with 25 files: a different exact raw wait-string anchor binds one retail parser and one comparison helper, 514 body bytes/216 instruction starts. Conditional wait handling exists statically; the active buffer/flag/path and scheduling guarantees remain unobserved. Owned PID 31504 and REA session closed; checked installed settings unchanged. Current private handoff: work/publishing/research-input-ack-continuation-20261023ac.md. No Rust edits/builds; first_map_finished:false, original gaps/fresh passage/exit/Rust parity remain open.
+
 ## Research stopped at owner request (2026-10-23)
 
 Frozen W/X/Y/Z/AA navigator revalidation passes five roots/1868 files/22 query checks; original 16 gaps preserved. New private scene-input-ack-20261023ab prepares isolated input acknowledgement tests, but the owner requested wrap-up during the native introduction. No phase trial/new decompilation ran. Owned PID70548 closed through freshly guarded quit; six checked installed settings identities match. Interrupted reader/parent errors retained; AB is incomplete/unsealed. Private continuation: work/publishing/research-input-ack-continuation-20261023ab.md. No Rust changes/builds; first_map_finished:false and Rust parity untested.
