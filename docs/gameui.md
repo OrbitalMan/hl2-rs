@@ -1005,7 +1005,9 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
   - F5 toggles the runtime-only viewmodel tuning overlay during unpaused gameplay. It shows the
     active aspect profile, weapon classname, `fov_offset`, and `[x, y, z]` offset. `[`/`]` adjust FOV,
     `,`/`.` lower/raise Z, Up/Down adjust forward X, and Left/Right adjust lateral Y. Steps are
-    `0.1`, or `0.01` while Shift is held. Adjustments apply immediately without disabling normal
+    `0.1`, or `0.01` while Shift is held. Adjust keys repeat while held (same timing as Options >
+    Keyboard list arrows). F6 zeros the selected weapon's current profile `fov_offset` and `offset`.
+    Adjustments apply immediately without disabling normal
     mouse look, movement, firing, reloading, or weapon selection. The tuner retains
     edits in memory by weapon and aspect profile for the current F5 session; number keys 1-6 use
     normal weapon selection/confirmation, and revisiting a weapon/profile restores its prior edit. The

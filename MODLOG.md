@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-23 Repeat F5 viewmodel adjust keys and add F6 reset
+
+**Agent/model:** Cursor Grok 4.6. No subagents.
+
+**Changed:** F5 viewmodel tuning now autorepeats `[`/`]`, `,`/`.`, and arrow keys while held, using the same `HoldRepeat` delay/interval as Options > Keyboard list arrows (latest pressed adjust key repeats). F6 zeros the selected weapon's current profile `fov_offset` and `offset` and records that session edit. Overlay hint updated.
+
+**Why:** Repeated tapping was tedious when dialing viewmodel framing, and there was no way to clear a weapon back to zero offsets without toggling F5.
+
+**Tested how:** Added unit tests for hold-repeat timing/latest-key takeover and F6 zeroing while keeping other weapons' session edits. `cargo test --locked -p hl2-bevy` for the input tests; full `scripts/checks/validate.sh` and Windows-target Clippy pending in this session.
+
+**Result:** Holding an adjust key steps framing after the UI repeat delay; F6 clears the on-screen weapon profile to zeros.
+
+**Still broken or not tested:** Packaged hold-to-repeat and F6 overlay interaction.
+
+**Next:** Owner can hold keys and use F6 during a live F5 session.
+
 ## 2026-10-22 Replace live viewmodel tuning snapshots in console history
 
 **Agent/model:** Codex, GPT-5. No subagents.

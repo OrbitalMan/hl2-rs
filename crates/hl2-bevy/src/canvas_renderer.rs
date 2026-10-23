@@ -388,7 +388,7 @@ pub fn present(
                 "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:X  ,/.:Z",
                 value.offset[0], value.offset[1], value.offset[2]
             ),
-            "Shift = 0.01    F5".to_owned(),
+            "Shift = 0.01    hold to repeat    F6 reset    F5".to_owned(),
         ];
         ui.source.draw_viewmodel_debug(&lines);
     }

@@ -14,7 +14,7 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
-use hl2_ui::config::Config;
+use hl2_ui::{config::Config, gameui::widgets::HoldRepeat, tuning::ViewmodelFraming};
 use modkit_core::movement::Input;
 
 type InputDevices<'w> = (
@@ -257,6 +257,7 @@ pub(crate) fn action_pressed(
     .pressed(action, config)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn controls(
     (keys, buttons, mouse, scroll, frame): InputDevices,
     windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>,
@@ -264,6 +265,8 @@ pub(crate) fn controls(
     mut game: Option<ResMut<crate::gameplay::Gameplay>>,
     mut ui: Option<ResMut<crate::ui_host::Console>>,
     mut mouse_filter: Local<hl2_ui::input::MouseFilter>,
+    mut viewmodel_repeat: Local<ViewmodelAdjustRepeat>,
+    real_time: Option<Res<Time<Real>>>,
 ) {
     // CGameRules::Think reads `skill` every frame, and weapon selection reads
     // `hud_fastswitch` on each key, so changed settings apply at once.
@@ -289,27 +292,30 @@ pub(crate) fn controls(
     if sim.viewmodel_debug.enabled && !sim.paused() && !sim.transition {
         let Some(weapon) = game.as_deref().map(|game| game.inventory.active.clone()) else {
             sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
+            *viewmodel_repeat = ViewmodelAdjustRepeat::default();
             return;
         };
         let profile = hl2_ui::tuning::viewmodel_profile(aspect);
         select_viewmodel_debug_target(&mut sim.viewmodel_debug, &weapon, profile);
-        if adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &keys) {
-            let framing = sim.viewmodel_debug.framing;
-            sim.viewmodel_debug.edits.insert((weapon, profile), framing);
-            match hl2_ui::tuning::tuning_json_with_viewmodel_profiles(&sim.viewmodel_debug.edits) {
-                Ok(json) => {
-                    if let Some(ui) = ui.as_deref_mut() {
-                        ui.source.log_viewmodel_tuning(json);
-                    } else {
-                        bevy::log::info!(target: "hl2_bevy::viewmodel_debug", "{json}");
-                    }
-                }
-                Err(error) => bevy::log::error!(
-                    target: "hl2_bevy::viewmodel_debug",
-                    "Could not serialize tuning.json snapshot: {error}"
-                ),
-            }
+        let time = real_time.as_deref().map(Time::elapsed_secs_f64);
+        let fired = viewmodel_repeat.update(&keys, time);
+        let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let reset = window.focused && keys.just_pressed(KeyCode::F6);
+        let changed = if reset {
+            reset_viewmodel_debug_weapon(&mut sim.viewmodel_debug)
+        } else {
+            adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &fired, fine)
+        };
+        if changed {
+            commit_viewmodel_debug_edit(
+                &mut sim.viewmodel_debug,
+                weapon,
+                profile,
+                ui.as_deref_mut(),
+            );
         }
+    } else {
+        *viewmodel_repeat = ViewmodelAdjustRepeat::default();
     }
     if !sim.commands.is_empty() {
         return;
@@ -433,44 +439,99 @@ fn select_viewmodel_debug_target(
         .unwrap_or_else(|| hl2_ui::tuning::viewmodel_profile_framing(weapon, profile));
 }
 
+const VIEWMODEL_ADJUST_KEYS: &[KeyCode] = &[
+    KeyCode::BracketLeft,
+    KeyCode::BracketRight,
+    KeyCode::Comma,
+    KeyCode::Period,
+    KeyCode::ArrowUp,
+    KeyCode::ArrowDown,
+    KeyCode::ArrowLeft,
+    KeyCode::ArrowRight,
+];
+
+/// Latest viewmodel adjust key repeats while held, using the same [`HoldRepeat`] timing as
+/// Options > Keyboard list arrows.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ViewmodelAdjustRepeat {
+    key: Option<KeyCode>,
+    timer: HoldRepeat,
+}
+
+impl ViewmodelAdjustRepeat {
+    fn update(&mut self, keys: &ButtonInput<KeyCode>, time: Option<f64>) -> Vec<KeyCode> {
+        let pressed: Vec<KeyCode> = VIEWMODEL_ADJUST_KEYS
+            .iter()
+            .copied()
+            .filter(|key| keys.just_pressed(*key))
+            .collect();
+        if let Some(&key) = pressed.last() {
+            self.key = Some(key);
+            self.timer.press(time);
+            return pressed;
+        }
+        if let Some(key) = self.key {
+            if !keys.pressed(key) {
+                *self = Self::default();
+            } else if self.timer.held(time) {
+                return vec![key];
+            }
+        }
+        Vec::new()
+    }
+}
+
+fn commit_viewmodel_debug_edit(
+    debug: &mut crate::simulation::ViewmodelDebug,
+    weapon: String,
+    profile: hl2_ui::tuning::ViewmodelProfile,
+    ui: Option<&mut crate::ui_host::Console>,
+) {
+    debug.edits.insert((weapon, profile), debug.framing);
+    match hl2_ui::tuning::tuning_json_with_viewmodel_profiles(&debug.edits) {
+        Ok(json) => {
+            if let Some(ui) = ui {
+                ui.source.log_viewmodel_tuning(json);
+            } else {
+                bevy::log::info!(target: "hl2_bevy::viewmodel_debug", "{json}");
+            }
+        }
+        Err(error) => bevy::log::error!(
+            target: "hl2_bevy::viewmodel_debug",
+            "Could not serialize tuning.json snapshot: {error}"
+        ),
+    }
+}
+
+/// Zero FOV and position offsets for the selected weapon's current aspect profile.
+fn reset_viewmodel_debug_weapon(debug: &mut crate::simulation::ViewmodelDebug) -> bool {
+    if debug.framing == ViewmodelFraming::ZERO {
+        return false;
+    }
+    debug.framing = ViewmodelFraming::ZERO;
+    true
+}
+
 /// Applies one-frame viewmodel debug key presses. Returns whether the profile changed.
-fn adjust_viewmodel_framing(
-    framing: &mut hl2_ui::tuning::ViewmodelFraming,
-    keys: &ButtonInput<KeyCode>,
-) -> bool {
-    let step = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-        0.01
-    } else {
-        0.1
-    };
+fn adjust_viewmodel_framing(framing: &mut ViewmodelFraming, fired: &[KeyCode], fine: bool) -> bool {
+    let step = if fine { 0.01 } else { 0.1 };
     let mut changed = false;
     let mut apply = |value: &mut f32, delta: f32| {
         *value = ((*value + delta) * 100.0).round() / 100.0;
         changed = true;
     };
-    if keys.just_pressed(KeyCode::BracketLeft) {
-        apply(&mut framing.fov_offset, -step);
-    }
-    if keys.just_pressed(KeyCode::BracketRight) {
-        apply(&mut framing.fov_offset, step);
-    }
-    if keys.just_pressed(KeyCode::Comma) {
-        apply(&mut framing.offset[2], -step);
-    }
-    if keys.just_pressed(KeyCode::Period) {
-        apply(&mut framing.offset[2], step);
-    }
-    if keys.just_pressed(KeyCode::ArrowUp) {
-        apply(&mut framing.offset[0], step);
-    }
-    if keys.just_pressed(KeyCode::ArrowDown) {
-        apply(&mut framing.offset[0], -step);
-    }
-    if keys.just_pressed(KeyCode::ArrowLeft) {
-        apply(&mut framing.offset[1], step);
-    }
-    if keys.just_pressed(KeyCode::ArrowRight) {
-        apply(&mut framing.offset[1], -step);
+    for key in fired {
+        match *key {
+            KeyCode::BracketLeft => apply(&mut framing.fov_offset, -step),
+            KeyCode::BracketRight => apply(&mut framing.fov_offset, step),
+            KeyCode::Comma => apply(&mut framing.offset[2], -step),
+            KeyCode::Period => apply(&mut framing.offset[2], step),
+            KeyCode::ArrowUp => apply(&mut framing.offset[0], step),
+            KeyCode::ArrowDown => apply(&mut framing.offset[0], -step),
+            KeyCode::ArrowLeft => apply(&mut framing.offset[1], step),
+            KeyCode::ArrowRight => apply(&mut framing.offset[1], -step),
+            _ => {}
+        }
     }
     changed
 }
@@ -529,28 +590,89 @@ mod tests {
             fov_offset: 0.0,
             offset: [0.0, 0.0, -11.5],
         };
-        let mut keys = ButtonInput::default();
-        for key in [
-            KeyCode::BracketRight,
-            KeyCode::Period,
-            KeyCode::ArrowUp,
-            KeyCode::ArrowLeft,
-        ] {
-            keys.press(key);
-        }
-        assert!(adjust_viewmodel_framing(&mut framing, &keys));
+        assert!(adjust_viewmodel_framing(
+            &mut framing,
+            &[
+                KeyCode::BracketRight,
+                KeyCode::Period,
+                KeyCode::ArrowUp,
+                KeyCode::ArrowLeft,
+            ],
+            false
+        ));
         assert_eq!(framing.fov_offset, 0.1);
         assert_eq!(framing.offset, [0.1, 0.1, -11.4]);
 
-        let mut fine_keys = ButtonInput::default();
-        fine_keys.press(KeyCode::ShiftRight);
-        fine_keys.press(KeyCode::BracketLeft);
-        fine_keys.press(KeyCode::Comma);
-        fine_keys.press(KeyCode::ArrowDown);
-        fine_keys.press(KeyCode::ArrowRight);
-        assert!(adjust_viewmodel_framing(&mut framing, &fine_keys));
+        assert!(adjust_viewmodel_framing(
+            &mut framing,
+            &[
+                KeyCode::BracketLeft,
+                KeyCode::Comma,
+                KeyCode::ArrowDown,
+                KeyCode::ArrowRight,
+            ],
+            true
+        ));
         assert_eq!(framing.fov_offset, 0.09);
         assert_eq!(framing.offset, [0.09, 0.09, -11.41]);
+    }
+
+    fn held_keys(codes: &[KeyCode]) -> ButtonInput<KeyCode> {
+        let mut keys = ButtonInput::default();
+        for &key in codes {
+            keys.press(key);
+            keys.clear_just_pressed(key);
+        }
+        keys
+    }
+
+    #[test]
+    fn viewmodel_debug_adjust_keys_repeat_like_options_keyboard_arrows() {
+        let mut repeat = ViewmodelAdjustRepeat::default();
+        let mut pressed = ButtonInput::default();
+        pressed.press(KeyCode::ArrowUp);
+        assert_eq!(repeat.update(&pressed, Some(0.0)), vec![KeyCode::ArrowUp]);
+
+        let held = held_keys(&[KeyCode::ArrowUp]);
+        assert!(repeat.update(&held, Some(0.2)).is_empty());
+        assert_eq!(repeat.update(&held, Some(0.4)), vec![KeyCode::ArrowUp]);
+        assert!(repeat.update(&held, Some(0.44)).is_empty());
+        assert_eq!(repeat.update(&held, Some(0.45)), vec![KeyCode::ArrowUp]);
+
+        let mut both = held.clone();
+        both.press(KeyCode::ArrowLeft);
+        assert_eq!(repeat.update(&both, Some(0.5)), vec![KeyCode::ArrowLeft]);
+        both.clear_just_pressed(KeyCode::ArrowLeft);
+        assert_eq!(repeat.update(&both, Some(0.9)), vec![KeyCode::ArrowLeft]);
+        assert!(repeat.update(&held, Some(1.0)).is_empty());
+    }
+
+    #[test]
+    fn f6_resets_the_selected_weapon_profile_to_zero_offsets() {
+        use hl2_ui::tuning::ViewmodelProfile;
+
+        let mut debug = crate::simulation::ViewmodelDebug::default();
+        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        debug.framing.fov_offset = 1.5;
+        debug.framing.offset = [2.0, -3.0, -4.0];
+        debug.edits.insert(
+            ("weapon_pistol".into(), ViewmodelProfile::Portrait),
+            ViewmodelFraming {
+                fov_offset: 8.0,
+                offset: [0.0, 0.0, -9.0],
+            },
+        );
+        assert!(reset_viewmodel_debug_weapon(&mut debug));
+        assert_eq!(debug.framing, ViewmodelFraming::ZERO);
+        debug.edits.insert(
+            (debug.weapon.clone(), debug.profile.unwrap()),
+            debug.framing,
+        );
+        assert!(!reset_viewmodel_debug_weapon(&mut debug));
+        select_viewmodel_debug_target(&mut debug, "weapon_pistol", ViewmodelProfile::Portrait);
+        assert_eq!(debug.framing.fov_offset, 8.0);
+        select_viewmodel_debug_target(&mut debug, "weapon_physcannon", ViewmodelProfile::Portrait);
+        assert_eq!(debug.framing, ViewmodelFraming::ZERO);
     }
 
     #[test]
