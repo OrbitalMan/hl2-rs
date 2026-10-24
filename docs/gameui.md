@@ -1716,7 +1716,7 @@ research notes for this option.
   is not zero. `bloom::motion_blur_pass` runs after that camera's main pass: it copies the frame to a scratch texture and
   draws it back blurred (7 / 11 / 15 taps by frame height, `motion_blur.wgsl`) into the camera's attachment, the
   multisampled one included, so the viewmodel camera that follows draws the weapon sharp over the blurred world and
-  bloom, color correction and the HUD come after, as in the engine. A still view, or the option off, has no pass, no
-  scratch texture and no buffer.
+  bloom, color correction and the HUD come after, as in the engine. With the option off nothing of it exists; with it on and a still
+  view one scratch texture is kept and no pass runs.
 - Not matched: retail averages gamma-space values in an LDR frame (HL2RS averages linear at every level);
   the `mat_motion_blur_*` cvars have no console commands. Not tested: Windows.

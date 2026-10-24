@@ -4,8 +4,8 @@
 
 ## Options audit (2026-10-24)
 
-- Motion blur implemented (docs/gameui.md 23c): packaged `d1_trainstation_02` turn capture shows the world blurred, the weapon and HUD sharp; frame time (3 runs each, 1920x1080) previous commit 21.62 / off 21.79 / on 21.93 ms turning, 17.92 / 18.59 / 17.89 ms still: within noise. Not tested: Windows, real mouse look (scripted turns step once per simulation tick), a retail comparison.
-- Color correction implemented (docs/gameui.md 23b): packaged `ep2_background01` capture off vs on (mean difference 9.2 / 3.7 / 6.6 per channel, 1920x1080), also at HDR level none; frame time 10.04 ms off vs 9.92 ms on (3 interleaved runs each, within noise). Not tested: Windows, the other Episode maps and entity inputs in a packaged run, a retail comparison.
+- Motion blur implemented (docs/gameui.md 23c): packaged `d1_trainstation_02` turn capture shows the world blurred, the weapon and HUD sharp; frame time (6 rotating runs each, 1920x1080) previous commit 21.22 / off 21.66 / on 21.72 ms stop-start turning, 17.60 / 18.05 / 18.07 ms still: on vs off within noise, but off is about 0.45 ms slower than the previous commit for a reason not found (see MODLOG). Not tested: Windows, real mouse look (scripted turns step once per simulation tick), a retail comparison.
+- Color correction implemented (docs/gameui.md 23b): packaged `ep2_background01` capture off vs on (mean difference 9.2 / 3.7 / 6.6 per channel, 1920x1080), also at HDR level none; frame time 10.10 ms previous commit, 10.11 off, 10.12 on (6 rotating runs each, within noise). Not tested: Windows, the other Episode maps and entity inputs in a packaged run, a retail comparison.
 - docs/gameui.md section 23 lists every Mouse, Audio, Video > HDR and Video > Advanced option with its consumer and verdict. HDR is implemented (23a). Unfinished, with reasons: Raw input, Aim-Assist, Speakers, Sound quality, Spoken language, shader/water/shadow detail, classic effects, multicore, D3D9Ex (not applicable); Mute when unfocused is partial.
 
 ## Architecture guardrails (2026-10-24)

@@ -1,7 +1,8 @@
 //! Image-space motion blur, host side. [`hl2_simulation::motion_blur`] turns how the world
 //! camera moved since the previous frame into four blur values; this module feeds it each frame
-//! and puts [`SourceMotionBlur`] on the camera only while some value is not zero, so with the
-//! option off, or while the view is still, nothing is computed beyond the check and no pass runs.
+//! and keeps [`SourceMotionBlur`] on the camera while the option is on (the pass itself runs
+//! only for frames with a non-zero value). With the option off nothing is computed and no
+//! component, texture or buffer exists.
 use crate::{FlyCamera, ui_host::Console, video::GameFrame};
 use bevy::{
     camera::Projection,
@@ -20,7 +21,7 @@ use bevy::{
 use hl2_simulation::motion_blur::{MotionBlur, Settings, View};
 
 /// The blur of this frame, on the world camera.
-#[derive(Component, Clone, Copy, ExtractComponent)]
+#[derive(Component, Clone, Copy, PartialEq, ExtractComponent)]
 pub struct SourceMotionBlur {
     pub values: Vec4,
     /// The longest blur vector, as a fraction of the screen (`mat_motion_blur_percent_of_screen_max`).
@@ -30,7 +31,6 @@ pub struct SourceMotionBlur {
 #[derive(Resource, Default)]
 pub struct MotionBlurState {
     model: MotionBlur,
-    applied: bool,
 }
 
 /// The Source view of the world camera: origin and angles back from the Bevy transform, the 4:3
@@ -57,32 +57,47 @@ pub fn update(
     time: Res<Time<Real>>,
     frame: Option<Res<GameFrame>>,
     mut state: ResMut<MotionBlurState>,
-    cameras: Query<(Entity, &Transform, &Projection), With<FlyCamera>>,
+    mut cameras: Query<
+        (
+            Entity,
+            &Transform,
+            &Projection,
+            Option<&mut SourceMotionBlur>,
+        ),
+        With<FlyCamera>,
+    >,
 ) {
     let enabled = ui.is_some_and(|ui| ui.source.config.video.advanced.motion_blur);
-    let Ok((camera, transform, projection)) = cameras.single() else {
+    let Ok((camera, transform, projection, current)) = cameras.single_mut() else {
         return;
     };
-    let settings = Settings::default();
-    let values = if enabled {
-        let aspect = crate::video::frame_aspect(frame.as_deref());
-        let view = view_of(transform, projection, aspect);
-        state.model.update(&view, time.elapsed_secs(), &settings)
-    } else {
-        [0.; 4]
-    };
-    if values == [0.; 4] {
-        if state.applied {
+    if !enabled {
+        if current.is_some() {
             commands.entity(camera).remove::<SourceMotionBlur>();
-            state.applied = false;
         }
         return;
     }
-    commands.entity(camera).insert(SourceMotionBlur {
+    let settings = Settings::default();
+    let aspect = crate::video::frame_aspect(frame.as_deref());
+    let values = state.model.update(
+        &view_of(transform, projection, aspect),
+        time.elapsed_secs(),
+        &settings,
+    );
+    let blur = SourceMotionBlur {
         values: Vec4::from_array(values),
         max: settings.percent_of_screen_max / 100.,
-    });
-    state.applied = true;
+    };
+    match current {
+        Some(mut current) => {
+            if *current != blur {
+                *current = blur;
+            }
+        }
+        None => {
+            commands.entity(camera).insert(blur);
+        }
+    }
 }
 
 #[cfg(test)]
