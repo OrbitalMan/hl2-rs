@@ -52,5 +52,6 @@ pub mod lipsync;
 
 pub mod color_correction;
 pub mod monitors;
+pub mod motion_blur;
 pub mod tonemap;
 pub mod view_control;

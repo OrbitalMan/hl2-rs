@@ -1638,7 +1638,7 @@ observed retail behavior, so nothing is implemented).
 | Advanced: Antialiasing | `advanced.antialiasing` | `video::sync_antialiasing` (MSAA, limited to the adapter) | complete |
 | Advanced: Filtering | `advanced.filtering` | `video::sync_filtering` (sampler anisotropy and mip filter) | complete |
 | Advanced: Vertical sync | `advanced.vsync` | `video::sync_present_mode` | complete |
-| Advanced: Motion blur | `advanced.motion_blur` | nothing | placeholder |
+| Advanced: Motion blur `mat_motion_blur_enabled` | `advanced.motion_blur` | `hl2_simulation::motion_blur` (the four blur values from the view change), `hl2-bevy` `bloom::motion_blur` (per-frame update, component only while a value is not zero), `bloom::motion_blur_pass` and `motion_blur.wgsl` (the frame copy and the blur pass after the world camera) | complete since 2026-10-24 (section 23c) |
 | Advanced: Multicore rendering `mat_queue_mode` | `advanced.multicore` | nothing: Bevy has no runtime equivalent | unclear |
 | Advanced: Classic effects | `advanced.classic_effects` | nothing: there is no particle system to switch | placeholder |
 | Advanced: Windows Aero extensions `mat_disable_d3d9ex` | `advanced.d3d9ex` | nothing | not applicable: no Direct3D 9 under wgpu (the layout shows it on Windows only) |
@@ -1701,3 +1701,22 @@ one lookup per file name). Findings are recorded in the research notes for this 
 - Not modeled: `mat_colcorrection_disableentities` (developer cvar), the engine's one-frame skip on its first
   post pass, a lookup file of the wrong size (the whole option stays off for that map and a warning is logged).
   Not verified against a retail capture: the colors are the lookup files' own, drawn by the SDK's shader math.
+
+### 23c. Video > Advanced > Motion blur (`mat_motion_blur_enabled`) implemented (2026-10-24)
+
+Evidence: Source SDK `game/client/viewpostprocess.cpp` (`DoImageSpaceMotionBlur`, the material proxy),
+`viewrender.cpp` (where it is called), `materialsystem/stdshaders/motion_blur_*`; the installed `materials/dev/motion_blur.vmt`,
+`dxsupport.cfg` (31 hardware classes enable it) and the cvar and material names in the installed client. Details in the
+research notes for this option.
+
+- `hl2_simulation::motion_blur::MotionBlur::update` turns the world camera's view (origin, Source angles, FOV, aspect)
+  and the real time into the four values with the SDK's thresholds (30 / 50 units, 0.5 s, 15 fps), compensations,
+  intensities (rotation 0.15, roll 0.3) and the 50-to-30 fps fade; the cvar defaults are in `Settings`.
+- `bloom::motion_blur::update` runs it only with the option on and puts `SourceMotionBlur` on the world camera while a value
+  is not zero. `bloom::motion_blur_pass` runs after that camera's main pass: it copies the frame to a scratch texture and
+  draws it back blurred (7 / 11 / 15 taps by frame height, `motion_blur.wgsl`) into the camera's attachment, the
+  multisampled one included, so the viewmodel camera that follows draws the weapon sharp over the blurred world and
+  bloom, color correction and the HUD come after, as in the engine. A still view, or the option off, has no pass, no
+  scratch texture and no buffer.
+- Not matched: retail averages gamma-space values in an LDR frame (HL2RS averages linear at every level);
+  the `mat_motion_blur_*` cvars have no console commands. Not tested: Windows.

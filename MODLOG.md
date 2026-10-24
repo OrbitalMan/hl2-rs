@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-24 Options > Video > Advanced > Motion blur takes effect
+
+**Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.
+
+**Changed:** `hl2_simulation::motion_blur` (new): the SDK's four blur values (yaw, pitch, falling, roll) from the view change, with its thresholds, compensations, intensities and the 50-to-30 fps fade, and the sample count by frame height. Host: `bloom/motion_blur.rs` (each frame, only with the option on, feeds the world camera's view and puts `SourceMotionBlur` on it while a value is not zero) and `bloom/motion_blur_pass.rs` + `assets/shaders/motion_blur.wgsl`: after the world camera's main pass the frame is copied to a scratch texture and drawn back blurred into the camera's (multisampled) attachment, so the viewmodel camera draws the weapon sharp afterwards, and bloom, color correction and the HUD follow, as the engine orders them. No pass, scratch texture or buffer exists while the option is off or the view is still.
+
+**Why:** Owner request (second of the four Advanced options). Evidence: Source SDK `viewpostprocess.cpp`, `viewrender.cpp`, `motion_blur_*` shaders; the installed `dev/motion_blur.vmt`, `dxsupport.cfg` (31 hardware classes enable it; the stored default is on) and the cvar names in the installed client.
+
+**Tested how:** 9 unit tests in hl2-simulation (still view, yaw scale, fps fade and cut-off, first frame and far jump, portal hold, roll, falling, strength, samples) and 1 in hl2-bevy (view from camera); `scripts/checks/validate.sh` and the isolation check pass. Packaged release, `d1_trainstation_02`, a scripted 3-degrees-per-tick turn with the bugbait out: the burst frame shows the world blurred and the weapon, crosshair and HUD sharp (with MSAA x4); a 10-degree-per-tick turn shows the maximum-length blur. Frame time at 1920x1080, `--uncapped --profile`, 600 frames, three interleaved runs each, mean frame ms, previous commit / option off / option on: turning 21.62 / 21.79 / 21.93, still view 17.92 / 18.59 / 17.89.
+
+**Result:** The cost while turning is about 0.15 ms (0.7 %), inside the run-to-run spread of 0.3-0.7 ms; with the option off, or the view still, the frame time equals the previous commit's (no pass).
+
+**Still broken or not tested:** Windows; real mouse look (a scripted turn steps once per simulation tick, so some frames show no change); a retail capture comparison; LDR frames average linear values where retail averages gamma values; the `mat_motion_blur_*` cvars have no console commands; GPU pass timing (the profile report has none).
+
+**Next:** Shadow detail.
+
 ## 2026-10-24 Options > Video > Advanced > Color correction takes effect
 
 **Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.

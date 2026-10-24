@@ -24,6 +24,8 @@ use bevy::{
 
 pub mod color_correction;
 mod correction_pass;
+pub mod motion_blur;
+mod motion_blur_pass;
 
 /// Bloom amount on the last 3D camera of the main view, and the image that receives the
 /// pre-bloom frame for auto exposure.
@@ -42,6 +44,9 @@ impl Plugin for SourceBloomPlugin {
         >::default())
             .init_resource::<color_correction::Lookups>()
             .add_systems(Update, color_correction::update);
+        app.add_plugins(motion_blur_pass::MotionBlurPlugin)
+            .init_resource::<motion_blur::MotionBlurState>()
+            .add_systems(Update, motion_blur::update);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
