@@ -65,8 +65,8 @@ belongs to the toolkit.
 4. `Console` (63 fields, 121 methods) split along the toolkit/app line: the source-ui shell
    (window stack, focus, Escape, pointer and keyboard routing, modal occlusion, the developer
    console panel) and hl2-ui's GameUI (main and pause menus, backgrounds and chapters, the quit
-   box, the Options lifecycle, loading, commands, `Config`), each owning the fields it uses. Its
-   own design section comes before the code.
+   box, the Options lifecycle, loading, commands, `Config`), each owning the fields it uses. The
+   design (see "Step 4 design" below) comes before the code.
 5. hl2-shared folds back into hl2-simulation (weapons, selection, damage and `VIEWMODEL_FOV`
    return to their original modules; `InventoryView`, `Inventory`'s delegating methods and the
    HUD tests' copy of the inventory go); hl2-ui depends on hl2-simulation, source-ui still does
@@ -81,6 +81,66 @@ source-ui), the packaged console and UI replays (steps 2, 3 and 6) or the full r
 (steps 1, 4, 5 and 7) compared with the recorded baseline (only fields the suite marks unstable
 may differ), the repository isolation check, the owned-install tests after steps 1, 4 and 5, and
 the size change of each step in MODLOG.
+
+### Step 4 design: the shell and HL2's GameUI
+
+After step 3 the developer console dialog is the toolkit's `ConsolePanel`; `Console` still holds
+the window stack and runs the control flow every frame goes through. That control flow is generic
+(which window gets the pointer and the keyboard, Escape's hold-and-release, the console's own
+Escape and toggling), but every step of it asks GameUI questions (is the loading dialog or the
+quit box up, which Options layer is active, does the menu take the pointer). Three shapes were
+weighed:
+
+- A shell struct that only bundles the toolkit state (`Windows`, `ConsolePanel`, key repeat,
+  Escape hold) moves five fields and leaves Escape, routing and modal occlusion in hl2-ui:
+  little value, and not the split asked for.
+- Splitting `Console` into separately borrowed `{shell, ui}` parts with the routing calling into
+  the UI part breaks the command handlers, which run inside the routing loop (a submitted
+  `map` starts loading and the loop then stops on the modal loading dialog) on `&mut Console`:
+  they would have to be rethreaded or run after the loop, which changes behaviour.
+- Chosen: the shell's control flow as generic toolkit code over a host trait that `Console`
+  implements. `Console` stays hl2-bevy's facade and the commands' context; the toolkit code
+  reaches the shell's state through short `host.shell()` / `host.shell_mut()` borrows and asks
+  the host everything that is GameUI's.
+
+The toolkit (`source_ui::shell`, `source_ui::windows`):
+
+- `windows::WindowId`: what the toolkit needs of an app's window ids, whether one is modal and
+  which one is the developer console. `Windows<W: WindowId>` keeps the z-order, focus, pointer
+  ownership and fades as today. HL2's `Window` enum (Options, Console, SubDialog, Confirmation)
+  moves back to hl2-ui and implements it, so reports still name the windows as before.
+- `shell::Shell<W>` owns the window stack, the console dialog (`ConsolePanel`), whether Escape
+  is held, the key repeat and the latest pointer. It answers what only needs them: the console
+  window's theme and bounds, its cursor hint, opening it on screen.
+- `shell::Host`: the hooks the control flow calls, in the order it calls them today: the host's
+  mode (the key repeat stops when it changes) and key capture; its modal input (the loading
+  dialog and the quit box, with the menu's occlusion); preparing a frame's windows (its dialog
+  windows synchronized, the modal layer, which dialog takes input); window bounds and the
+  console popup's; whether the base takes the pointer; per-window input (the console window's
+  too, through the host, which owns the canvas and completion sources); whether the rest is
+  blocked; the base's occlusion and input; and for Escape: whether a modal state blocks it,
+  whether it closes a window, the held looks, cancelling the host's own drag, the modal Escape
+  (loading, quit box), a dialog's Escape, the base's; for the console toggle: blocked,
+  enabled, opening, closed; and window-closed bookkeeping.
+- `shell::{input, escape_pressed, escape_released, escape, toggle, close_window}`: today's
+  `Console` control flow, generic over the host. The order of every check and side effect is
+  kept (for example Escape: the host's drag, the console's drag, the console's history search
+  and completion list, the loading dialog and quit box, the top window, the base).
+
+hl2-ui keeps everything GameUI: `Mode`, the base, menus, backgrounds and chapters, the quit box
+and its placement, the Options lifecycle and its sub-dialog and confirmation windows, loading,
+commands, `Config`, saving placements, themes and fonts; `Console` implements `Host` and its
+public API (`input`, `escape_pressed`, `toggle`, `log`...) calls the toolkit functions.
+
+Commits, each with `scripts/checks/validate.sh`, the Windows-target check and the console and UI
+replays; the full replay suite against the baseline and the owned-install tests after the last:
+
+- 4a: `WindowId`, generic `Windows<W>`, `Window` back to hl2-ui (the toolkit's window tests get
+  a local window enum).
+- 4b: `Shell<W>`: the window stack, console dialog, Escape hold, key repeat and pointer move
+  from `Console` into `console.shell`.
+- 4c: input routing over `Host` (`shell::input`).
+- 4d: Escape, the console toggle and closing windows over `Host`.
 
 ## Architecture review: structure without behaviour change (2026-10-23)
 

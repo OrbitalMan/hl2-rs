@@ -25,10 +25,30 @@ use source_ui::{
     message_box::{MessageBox, MessageBoxLayout},
     placement::{self, CursorHint, Placement},
     widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
-    windows::{Layer, Pointer, Window, Windows},
+    windows::{Layer, Pointer, WindowId, Windows},
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+/// A dialog window over the base layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+pub enum Window {
+    Options,
+    Console,
+    /// A sub-dialog over a parent dialog (e.g. Video Advanced, Keyboard Advanced, Gamma, Credits).
+    SubDialog,
+    /// A modal confirmation / message box dialog (Quit, Return to menu, Video keep, Reset defaults).
+    Confirmation,
+}
+
+impl WindowId for Window {
+    const CONSOLE: Self = Window::Console;
+
+    /// Whether this window is modal (captures focus until closed).
+    fn is_modal(&self) -> bool {
+        matches!(self, Window::SubDialog | Window::Confirmation)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub enum Mode {
@@ -108,7 +128,7 @@ pub struct Console {
     base: Mode,
     /// The Options dialog and the console: non-modal windows over the base (retail VGUI
     /// frames), in z-order with the keyboard focus (`source_ui::windows`).
-    windows: Windows,
+    windows: Windows<Window>,
     pub cheats: bool,
     /// The developer console dialog: output, history, command line, completion, its placement
     /// and drawing (kept while the game runs).

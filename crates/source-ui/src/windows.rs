@@ -15,30 +15,20 @@
 
 use glam::Vec2;
 
-/// A dialog window over the base layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
-pub enum Window {
-    Options,
-    Console,
-    /// A sub-dialog over a parent dialog (e.g. Video Advanced, Keyboard Advanced, Gamma, Credits).
-    SubDialog,
-    /// A modal confirmation / message box dialog (Quit, Return to menu, Video keep, Reset defaults).
-    Confirmation,
-}
-
-impl Window {
+/// What the toolkit needs of an app's window ids.
+pub trait WindowId: Copy + Eq + std::fmt::Debug {
+    /// The developer console's window.
+    const CONSOLE: Self;
     /// Whether this window is modal (captures focus until closed).
-    pub fn is_modal(&self) -> bool {
-        matches!(self, Window::SubDialog | Window::Confirmation)
-    }
+    fn is_modal(&self) -> bool;
 }
 
 /// A layer that can take the pointer or the keyboard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Layer {
+pub enum Layer<W> {
     /// The menu (or the game) under every window.
     Base,
-    Window(Window),
+    Window(W),
 }
 
 /// The left button this frame.
@@ -84,8 +74,8 @@ impl Fade {
 
 /// The state of an open or fading dialog window.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WindowRecord {
-    pub window: Window,
+pub struct WindowRecord<W> {
+    pub window: W,
     /// How far the window is faded towards its focused look (0 out of focus, 1 in focus).
     pub focus_fade: Fade,
     /// How far the window is faded towards full visibility (0 hidden/closed, 1 fully visible).
@@ -96,14 +86,14 @@ pub struct WindowRecord {
 
 /// The open windows, bottom to top, and the focus.
 #[derive(Clone, Debug)]
-pub struct Windows {
-    order: Vec<WindowRecord>,
+pub struct Windows<W> {
+    order: Vec<WindowRecord<W>>,
     /// Fade state of the base (main menu / gameplay). 1.0 when base is focused, 0.0 when out of focus.
     base_fade: Fade,
     /// The base has the focus although windows are open.
     base_focused: bool,
     /// The layer the held button belongs to.
-    press: Option<Layer>,
+    press: Option<Layer<W>>,
     /// Time of the current frame, stamped on focus changes.
     now: f64,
     /// `Frame.FocusTransitionEffectTime` and `Frame.TransitionEffectTime` in seconds.
@@ -112,7 +102,7 @@ pub struct Windows {
     pub unfocused_alpha: f32,
 }
 
-impl Default for Windows {
+impl<W> Default for Windows<W> {
     fn default() -> Self {
         Self {
             order: Vec::new(),
@@ -130,7 +120,7 @@ impl Default for Windows {
     }
 }
 
-impl Windows {
+impl<W: WindowId> Windows<W> {
     /// No windows; focus and window fades take `fade_time` seconds (`Frame.FocusTransitionEffectTime`)
     /// and an unfocused window keeps `unfocused_alpha` of its focused look.
     pub fn new(fade_time: f32, unfocused_alpha: f32) -> Self {
@@ -147,17 +137,17 @@ impl Windows {
     }
 
     /// Whether `window` is present in the window stack (open or currently fading out).
-    pub fn is_open(&self, window: Window) -> bool {
+    pub fn is_open(&self, window: W) -> bool {
         self.order.iter().any(|r| r.window == window)
     }
 
     /// Whether `window` is active (open and not closing).
-    pub fn is_active(&self, window: Window) -> bool {
+    pub fn is_active(&self, window: W) -> bool {
         self.order.iter().any(|r| r.window == window && !r.closing)
     }
 
     /// Whether `window` is currently closing and fading out.
-    pub fn is_closing(&self, window: Window) -> bool {
+    pub fn is_closing(&self, window: W) -> bool {
         self.order.iter().any(|r| r.window == window && r.closing)
     }
 
@@ -172,22 +162,22 @@ impl Windows {
     }
 
     /// Whether the specified layer holds focus.
-    pub fn is_focused(&self, layer: Layer) -> bool {
+    pub fn is_focused(&self, layer: Layer<W>) -> bool {
         self.focus() == layer
     }
 
     /// All windows currently present (including those fading out), bottom to top.
-    pub fn order(&self) -> impl DoubleEndedIterator<Item = Window> + '_ {
+    pub fn order(&self) -> impl DoubleEndedIterator<Item = W> + '_ {
         self.order.iter().map(|r| r.window)
     }
 
     /// All active windows (excluding those fading out), bottom to top.
-    pub fn active_order(&self) -> impl DoubleEndedIterator<Item = Window> + '_ {
+    pub fn active_order(&self) -> impl DoubleEndedIterator<Item = W> + '_ {
         self.order.iter().filter(|r| !r.closing).map(|r| r.window)
     }
 
     /// The topmost active (non-closing) window.
-    pub fn top(&self) -> Option<Window> {
+    pub fn top(&self) -> Option<W> {
         self.order
             .iter()
             .rev()
@@ -199,7 +189,7 @@ impl Windows {
     /// If a modal window is open, the topmost modal window holds focus.
     /// Otherwise, the top active window holds focus unless the base took it.
     /// If no windows are active, the base holds focus.
-    pub fn focus(&self) -> Layer {
+    pub fn focus(&self) -> Layer<W> {
         if self.has_modal() {
             if let Some(modal) = self
                 .order
@@ -222,7 +212,7 @@ impl Windows {
     }
 
     /// Opens `window` on top with the focus (or raises it if it is open).
-    pub fn open(&mut self, window: Window) {
+    pub fn open(&mut self, window: W) {
         let now = self.now;
         let rec = if let Some(mut existing) = self.take_record(window) {
             if existing.closing {
@@ -244,7 +234,7 @@ impl Windows {
     }
 
     /// Raises an open `window` to the top and focuses it.
-    pub fn raise(&mut self, window: Window) {
+    pub fn raise(&mut self, window: W) {
         if self.is_open(window) {
             self.open(window);
         }
@@ -252,7 +242,7 @@ impl Windows {
 
     /// Closes `window`. If `fade_time > 0`, it begins fading out over `fade_time` while focus
     /// immediately restores to the next active surface.
-    pub fn close(&mut self, window: Window) {
+    pub fn close(&mut self, window: W) {
         if self.fade_time <= 0. {
             self.take_record(window);
             if self.press == Some(Layer::Window(window)) {
@@ -286,7 +276,7 @@ impl Windows {
     }
 
     /// Immediately removes `window` without fading.
-    pub fn close_immediate(&mut self, window: Window) {
+    pub fn close_immediate(&mut self, window: W) {
         self.take_record(window);
         if self.press == Some(Layer::Window(window)) {
             self.press = None;
@@ -316,7 +306,7 @@ impl Windows {
 
     /// Cleans up any windows that have completed their closing fade-out.
     /// Returns the list of windows that finished closing.
-    pub fn clean_closed(&mut self) -> Vec<Window> {
+    pub fn clean_closed(&mut self) -> Vec<W> {
         let now = self.now;
         let duration = self.fade_time;
         let mut closed = Vec::new();
@@ -342,7 +332,7 @@ impl Windows {
     }
 
     /// How far `window` is faded towards full visibility (0 hidden, 1 visible).
-    pub fn window_alpha(&self, window: Window, now: f64) -> f32 {
+    pub fn window_alpha(&self, window: W, now: f64) -> f32 {
         self.order
             .iter()
             .find(|r| r.window == window)
@@ -350,7 +340,7 @@ impl Windows {
     }
 
     /// How far `window` is faded towards its focused look at `now` (0..1).
-    pub fn focus_amount(&self, window: Window, now: f64) -> f32 {
+    pub fn focus_amount(&self, window: W, now: f64) -> f32 {
         self.order
             .iter()
             .find(|r| r.window == window)
@@ -359,7 +349,7 @@ impl Windows {
 
     /// The combined composite alpha multiplier for drawing `window` (combining visibility fade
     /// and unfocused translucency).
-    pub fn window_composite_alpha(&self, window: Window, now: f64) -> f32 {
+    pub fn window_composite_alpha(&self, window: W, now: f64) -> f32 {
         let vis = self.window_alpha(window, now);
         let focus = self.focus_amount(window, now);
         let factor = self.unfocused_alpha + (1.0 - self.unfocused_alpha) * focus;
@@ -372,10 +362,10 @@ impl Windows {
     pub fn route(
         &mut self,
         pointer: Pointer,
-        modal: Option<Window>,
+        modal: Option<W>,
         base_takes_pointer: bool,
-        hit: impl Fn(Window, Vec2) -> bool,
-    ) -> Option<Layer> {
+        hit: impl Fn(W, Vec2) -> bool,
+    ) -> Option<Layer<W>> {
         let pressed = self
             .press
             .filter(|_| pointer.held || pointer.released)
@@ -430,12 +420,12 @@ impl Windows {
         layer
     }
 
-    fn take_record(&mut self, window: Window) -> Option<WindowRecord> {
+    fn take_record(&mut self, window: W) -> Option<WindowRecord<W>> {
         let index = self.order.iter().position(|r| r.window == window)?;
         Some(self.order.remove(index))
     }
 
-    fn set_focus(&mut self, focus: Layer) {
+    fn set_focus(&mut self, focus: Layer<W>) {
         self.base_focused = focus == Layer::Base;
         let now = self.now;
         let duration = self.fade_time;
@@ -479,6 +469,22 @@ impl Windows {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Window ids like an app's: two dialogs, the console and two modal layers.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Window {
+        Options,
+        Console,
+        SubDialog,
+        Confirmation,
+    }
+
+    impl WindowId for Window {
+        const CONSOLE: Self = Window::Console;
+        fn is_modal(&self) -> bool {
+            matches!(self, Window::SubDialog | Window::Confirmation)
+        }
+    }
     use glam::vec2;
 
     /// Options covers x 0..100, the console x 50..150; the menu is everywhere else.
@@ -523,7 +529,7 @@ mod tests {
         }
     }
 
-    fn both() -> Windows {
+    fn both() -> Windows<Window> {
         let mut windows = Windows::default();
         windows.open(Window::Options);
         windows.open(Window::Console);
@@ -533,7 +539,7 @@ mod tests {
     #[test]
     fn the_pointer_goes_to_the_topmost_window_under_it_else_the_base() {
         let mut w = both();
-        let route = |w: &mut Windows, x| w.route(hover(x), None, true, hit);
+        let route = |w: &mut Windows<Window>, x| w.route(hover(x), None, true, hit);
         assert_eq!(
             route(&mut w, 75.),
             Some(Layer::Window(Window::Console)),

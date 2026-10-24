@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 4a: generic window stack; the step 4 design
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- docs/DESIGN.md has the step 4 design ("Step 4 design: the shell and HL2's GameUI"): the shell's control flow (input routing, Escape, the console toggle, closing windows) becomes generic toolkit code over a `shell::Host` trait that `Console` implements; `Console` stays hl2-bevy's facade and the commands' context. It records the two shapes weighed and set aside (a shell struct that only bundles state; separately borrowed `{shell, ui}` parts, which would move command handlers out of the routing loop) and the four commits.
+- `source_ui::windows` is generic over the app's window ids: `WindowId` (`is_modal`, the console's id `CONSOLE`), `Layer<W>`, `WindowRecord<W>`, `Windows<W>`. HL2's `Window` enum (Options, Console, SubDialog, Confirmation) is back in hl2-ui (`console.rs`), implementing `WindowId`; it serializes as before, so the reports' `windows` lists are unchanged.
+- The toolkit's window tests use a local window enum shaped like HL2's (their only change).
+
+**Why:** Step 4 of the toolkit split: the toolkit's window stack must not name HL2's dialogs.
+
+**Tested how:** Every test passes unchanged apart from the toolkit window tests' local enum. `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays pass, 10 of 10; the repository isolation check passes.
+
+**Result:** No behaviour change.
+
+**Still broken or not tested:** The shell state and control flow are still in `Console` (4b-4d).
+
+**Next:** 4b: `Shell<W>`.
+
 ## 2026-10-24 UI toolkit split, step 3b: the console dialog in source-ui
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
