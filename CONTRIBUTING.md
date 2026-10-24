@@ -22,7 +22,7 @@ GitHub Actions runs formatting, strict workspace Clippy and unit tests on Window
 
 ## Code and distribution boundaries
 
-- Put file-format readers in `source-assets`, common data/player/mod contracts in `modkit-core`, player data both the simulation and the UI read (weapon script data, selection, damage/fade messages, `InventoryView`) in `hl2-shared`, engine-independent physics/entities/NPCs/weapons/choreography in `hl2-simulation`, portable owned-resource HUD/menu/console logic in `hl2-ui`, and Bevy presentation/input/host adapters in `hl2-bevy`.
+- Put file-format readers in `source-assets`, common data/player/mod contracts in `modkit-core`, player data both the simulation and the UI read (weapon script data, selection, damage/fade messages, `InventoryView`) in `hl2-shared`, engine-independent physics/entities/NPCs/weapons/choreography in `hl2-simulation`, game-agnostic UI toolkit pieces (canvas, fonts, input frames, widgets, dialog frames, window focus, `.res` layouts, the localization engine; nothing about HL2 content or settings) in `source-ui`, portable owned-resource HUD/menu/console logic in `hl2-ui`, and Bevy presentation/input/host adapters in `hl2-bevy`.
 - Read the owned game installation in place. Keep game files, generated world exports, native binary copies, decompiler output and research tools outside the repository.
 - Ship only project source and properly attributed open-source dependencies. Do not submit ripped assets, leaked source, game executables, credentials or private local paths.
 - Add meaningful regression coverage for simulation/parser changes. A screenshot should illustrate a tested behavior, not stand in for a reproducible check.

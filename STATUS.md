@@ -2,6 +2,12 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
+## UI toolkit split: source-ui and Half-Life 2's UI (2026-10-24)
+
+- Plan in docs/DESIGN.md (same title): a game-agnostic, Source-aware toolkit crate (`source-ui`, like the SDK's `vgui_controls`) and Half-Life 2's own UI (`hl2-ui`: GameUI, HUD, captions, fades, `Config`, console commands), in seven steps, none changing behaviour.
+- Step 1 done: `source-ui` holds the canvas, fonts (`FontFace`, GDI on Windows), input frames (`Key`, `Input`, `KeyRepeat`), widgets, placement, window focus, the message box, `.res` layouts, scheme fonts, key names, the generic viewport geometry and the localization engine; it depends on no hl2-* crate. `input.rs`, `gameui/display.rs`, `gameui/loading.rs`, `proportional.rs`, `tuning.rs` and the Fit Display frame functions (`flexible_frame`) stay in hl2-ui: they read HL2RS settings or tuning. Verified: validate.sh, the Windows-target check, all 81 owned-install tests (the two headless campaign tests alone), the full replay suite (93 of 94; the one difference is noted below) and the isolation check.
+- Known: `pallet-gibs-fade`'s kill tick varies between runs of one build. In one of four runs the pallet's kill and its gibs came at tick 32 instead of 34; only its `hits` is marked as varying in the replay checks.
+
 ## Architecture review: structure without behaviour change (2026-10-23)
 
 - Plan in docs/DESIGN.md (same title). Every step keeps output, errors, effects and gameplay outcomes unchanged and is verified by `scripts/checks/validate.sh`, the Windows-target check and packaged replays.

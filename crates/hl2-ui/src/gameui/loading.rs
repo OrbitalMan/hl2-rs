@@ -6,14 +6,12 @@
 //! - Progress bar (x: 20, y: 64, w: 340, h: 24) with sunken depressed border, transparent background,
 //!   and segmented chunks (width 8, gap 4, inset 4 per Source SDK `ProgressBar.cpp`).
 
-use crate::{
-    canvas::{Color, Rect},
-    gameui::{
-        localize::Localization,
-        widgets::{FrameSpec, Painter},
-    },
-};
+use crate::gameui::localize::Localization;
 use glam::Vec2;
+use source_ui::{
+    canvas::{Color, Rect},
+    widgets::{FrameSpec, Painter},
+};
 use std::sync::{Arc, Mutex};
 
 /// Dimensions of the loading dialog frame (380 x 112 per `LoadingDialogNoBanner.res`).
@@ -400,12 +398,12 @@ const BACKGROUND_TEXTURE_ASPECT: f32 = 4. / 3.;
 /// screens (square, portrait) it keeps the full height and crops the sides of the 4:3 image, and
 /// on screens wider than 16:9 ([`crate::tuning::widest_design_aspect`]) it keeps the full width
 /// and crops the top and bottom of the 16:9 widescreen image, so neither stretches.
-pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> crate::canvas::Rect {
+pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> source_ui::canvas::Rect {
     let aspect = canvas.x / canvas.y.max(1.);
     let widest = crate::tuning::widest_design_aspect();
     if crate::proportional::design_height(canvas) < canvas.y && aspect < BACKGROUND_TEXTURE_ASPECT {
         let kept = aspect / BACKGROUND_TEXTURE_ASPECT;
-        crate::canvas::Rect::new(
+        source_ui::canvas::Rect::new(
             texture.x * (1. - kept) * 0.5,
             0.,
             texture.x * kept,
@@ -413,27 +411,30 @@ pub fn background_source(canvas: glam::Vec2, texture: glam::Vec2) -> crate::canv
         )
     } else if aspect > widest {
         let kept = widest / aspect;
-        crate::canvas::Rect::new(
+        source_ui::canvas::Rect::new(
             0.,
             texture.y * (1. - kept) * 0.5,
             texture.x,
             texture.y * kept,
         )
     } else {
-        crate::canvas::Rect::new(0., 0., texture.x, texture.y)
+        source_ui::canvas::Rect::new(0., 0., texture.x, texture.y)
     }
 }
 
 /// Draws a pre-blurred background texture over the whole canvas ([`background_source`]).
-pub fn draw_background_texture(canvas: &crate::canvas::Canvas, texture: &crate::canvas::Texture2D) {
+pub fn draw_background_texture(
+    canvas: &source_ui::canvas::Canvas,
+    texture: &source_ui::canvas::Texture2D,
+) {
     let size = glam::vec2(canvas.width(), canvas.height());
-    crate::canvas::draw_texture_ex(
+    source_ui::canvas::draw_texture_ex(
         canvas,
         texture,
         0.,
         0.,
-        crate::canvas::WHITE,
-        crate::canvas::DrawTextureParams {
+        source_ui::canvas::WHITE,
+        source_ui::canvas::DrawTextureParams {
             source: Some(background_source(
                 size,
                 glam::vec2(texture.width(), texture.height()),
@@ -593,7 +594,7 @@ impl LoadingDialog {
         // Center localized `#GameUI_Loading` ("LOADING...") text within plaque
         let title = loc.text("#GameUI_Loading");
         let text_w = p.text_width(&title, false);
-        let font_tall = crate::gameui::widgets::FONT_TALL;
+        let font_tall = source_ui::widgets::FONT_TALL;
         let text_x = ((BACKGROUND_LOADING_SIZE.x - text_w) * 0.5)
             .max(4.0)
             .round();
@@ -609,8 +610,8 @@ impl LoadingDialog {
     /// Never applies to gameplay map loading.
     pub fn draw_background_overlay(
         &self,
-        canvas: &crate::canvas::Canvas,
-        bg_texture: Option<&crate::canvas::Texture2D>,
+        canvas: &source_ui::canvas::Canvas,
+        bg_texture: Option<&source_ui::canvas::Texture2D>,
     ) {
         if !self.is_background() || !self.transition.is_active() {
             return;
@@ -638,13 +639,12 @@ impl LoadingDialog {
         };
         // Wrap status/warning text to 340px width (parent dialog width 380 - 20px padding each side)
         let max_label_w = 340.0;
-        let lines = crate::gameui::widgets::wrap(&label_text, max_label_w, |s| {
-            painter.text_width(s, false)
-        });
+        let lines =
+            source_ui::widgets::wrap(&label_text, max_label_w, |s| painter.text_width(s, false));
         let line_count = lines.len().max(1);
 
         // Dynamically expand dialog height and shift progress bar if text wraps beyond 2 lines
-        let font_tall = crate::gameui::widgets::FONT_TALL;
+        let font_tall = source_ui::widgets::FONT_TALL;
         let label_h = (line_count as f32 * font_tall).max(24.0);
         let bar_y = 34.0 + label_h + 6.0;
         let dialog_h = (bar_y + 24.0 + 16.0).max(LOADING_DIALOG_SIZE.y);
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn the_overlay_draws_the_cropped_texture_over_the_whole_screen() {
-        use crate::canvas::{Canvas, Texture2D};
+        use source_ui::canvas::{Canvas, Texture2D};
         let texture = Texture2D::from_rgba8(2, 2, &[255; 16]);
         let canvas = Canvas::default();
         for (w, h, source_w, source_h) in [
@@ -699,7 +699,10 @@ mod tests {
             draw_background_texture(&canvas, &texture);
             let quads = canvas.drain();
             assert_eq!(quads.len(), 1);
-            assert_eq!(quads[0].destination, crate::canvas::Rect::new(0., 0., w, h));
+            assert_eq!(
+                quads[0].destination,
+                source_ui::canvas::Rect::new(0., 0., w, h)
+            );
             assert!(
                 (quads[0].source.w - source_w).abs() < 1e-3
                     && (quads[0].source.h - source_h).abs() < 1e-3,
@@ -721,7 +724,7 @@ mod tests {
         ] {
             assert_eq!(
                 background_source(canvas, texture),
-                crate::canvas::Rect::new(0., 0., 512., 512.),
+                source_ui::canvas::Rect::new(0., 0., 512., 512.),
                 "{canvas}: whole texture as in retail"
             );
         }
@@ -754,7 +757,7 @@ mod tests {
         let super_ultrawide = background_source(vec2(5120., 1440.), texture);
         assert_eq!(
             super_ultrawide,
-            crate::canvas::Rect::new(0., 128., 512., 256.),
+            source_ui::canvas::Rect::new(0., 128., 512., 256.),
             "32:9 keeps the middle half of the 16:9 image"
         );
     }
@@ -914,8 +917,8 @@ mod tests {
 
     #[test]
     fn loading_dialog_multiline_status_wraps_and_expands_bounds() {
-        use crate::canvas::Canvas;
-        use crate::gameui::widgets::{Fonts, Theme};
+        use source_ui::canvas::Canvas;
+        use source_ui::widgets::{Fonts, Theme};
 
         let loc = Localization::default();
         let mut dialog = LoadingDialog::new("ep1_citadel_00");
@@ -953,8 +956,8 @@ mod tests {
 
     #[test]
     fn background_loading_plaque_geometry_and_drawing() {
-        use crate::canvas::Canvas;
-        use crate::gameui::widgets::{Fonts, Theme};
+        use source_ui::canvas::Canvas;
+        use source_ui::widgets::{Fonts, Theme};
 
         let mut loc = Localization::default();
         loc.insert("#GameUI_Loading", "LOADING...");
@@ -1005,7 +1008,7 @@ mod tests {
 
     #[test]
     fn background_loading_overlay_emits_backdrop_quad() {
-        use crate::canvas::Canvas;
+        use source_ui::canvas::Canvas;
 
         let canvas = Canvas::default();
         canvas.resize(1920., 1080.);
@@ -1023,8 +1026,8 @@ mod tests {
 
     #[test]
     fn gameplay_loading_overlay_does_not_emit_backdrop_quad() {
-        use crate::canvas::Canvas;
-        use crate::gameui::widgets::{Fonts, Theme};
+        use source_ui::canvas::Canvas;
+        use source_ui::widgets::{Fonts, Theme};
 
         let canvas = Canvas::default();
         canvas.resize(1920., 1080.);
@@ -1200,8 +1203,8 @@ mod tests {
 
     #[test]
     fn test_background_loading_dialog_failure_ends_transition_and_suppresses_overlay() {
-        use crate::canvas::Canvas;
-        use crate::gameui::widgets::{Fonts, Theme};
+        use source_ui::canvas::Canvas;
+        use source_ui::widgets::{Fonts, Theme};
 
         let canvas = Canvas::default();
         canvas.resize(1920., 1080.);
@@ -1249,8 +1252,8 @@ mod tests {
 
     #[test]
     fn test_background_loading_plaque_styled_with_shared_frame_rounded_corners_no_3d_border() {
-        use crate::canvas::Canvas;
-        use crate::gameui::widgets::{Fonts, Theme};
+        use source_ui::canvas::Canvas;
+        use source_ui::widgets::{Fonts, Theme};
 
         let canvas = Canvas::default();
         canvas.resize(1920., 1080.);
@@ -1308,8 +1311,8 @@ mod tests {
 
     #[test]
     fn test_gameplay_loading_dialog_uses_shared_frame_rounded_corners_no_3d_border() {
-        use crate::canvas::Canvas;
-        use crate::gameui::widgets::{Fonts, Theme};
+        use source_ui::canvas::Canvas;
+        use source_ui::widgets::{Fonts, Theme};
 
         let canvas = Canvas::default();
         canvas.resize(1920., 1080.);
@@ -1351,7 +1354,7 @@ mod tests {
 
     #[test]
     fn test_background_overlay_drawing_with_and_without_texture() {
-        let canvas = crate::canvas::Canvas::default();
+        let canvas = source_ui::canvas::Canvas::default();
         let mut dialog = LoadingDialog::new_background("background01");
         assert!(dialog.is_background());
         assert!(dialog.transition.is_active());
@@ -1367,12 +1370,12 @@ mod tests {
         assert!(quads[0].texture.is_none());
 
         // With background texture: queues the textured background quad then the backdrop rectangle
-        let bg_tex = crate::canvas::Texture2D::from_rgba8(2, 2, &[200; 16]);
+        let bg_tex = source_ui::canvas::Texture2D::from_rgba8(2, 2, &[200; 16]);
         dialog.draw_background_overlay(&canvas, Some(&bg_tex));
         let quads = canvas.drain();
         assert_eq!(quads.len(), 2);
         assert!(quads[0].texture.is_some());
-        assert_eq!(quads[0].color, crate::canvas::WHITE);
+        assert_eq!(quads[0].color, source_ui::canvas::WHITE);
         assert_eq!(
             quads[1].color,
             BackgroundTransitionState::MAIN_MENU_BACKDROP

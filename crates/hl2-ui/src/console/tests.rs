@@ -519,7 +519,7 @@ fn the_quit_box_moves_alone_and_opens_centered() {
     console.set_mode(Mode::MainMenu);
     let loc = console.gameui.localization.clone();
     console.quit_placement.reset();
-    console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+    console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     let quit = console.confirm_box.as_ref().unwrap().0.clone();
     let (origin, _, _) = console.quit_geometry(&quit);
     pointer_drag(
@@ -1679,7 +1679,7 @@ fn a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it() {
     let mut console = installed_console();
     let loc = crate::gameui::localize::Localization::default();
     console.set_mode(Mode::MainMenu);
-    console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+    console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     console.sync_dialog_windows();
     assert_eq!(console.windows.top(), Some(Window::Confirmation));
     assert!(console.confirm_box.is_some());
@@ -1712,7 +1712,7 @@ fn a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it() {
     );
 
     // Test dragging confirm box: pressing Escape cancels the drag, dialog stays open
-    console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+    console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     console.sync_dialog_windows();
     let bounds = console.window_bounds(Window::Confirmation);
     let caption_pt = vec2(bounds.x + 50., bounds.y + 10.);
@@ -1972,7 +1972,7 @@ fn modal_dialog_blocks_underlying_menu_hover_sounds_and_clicks() {
 
     // 3. Open confirmation dialog: modal check is true, underlying rows inert
     let loc = console.gameui.localization.clone();
-    console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+    console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     assert!(console.modal_dialog_open());
     let confirm_bounds = console.modal_bounds().expect("confirm box bounds");
     assert!(console.is_occluded(vec2(
@@ -2537,7 +2537,7 @@ fn menu_buttons_draw_letters_with_border_along_edge_path_and_no_box_fill() {
     console.canvas.resize(1280., 720.);
     console.set_mode(Mode::MainMenu);
     console.title = String::new();
-    let font_bytes = crate::PROGGY_CLEAN;
+    let font_bytes = source_ui::PROGGY_CLEAN;
     console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
     assert!(console.menu_font.is_some());
 
@@ -2629,7 +2629,7 @@ fn menu_titles_and_subtitles_draw_letters_with_border_along_edge_path() {
     console.canvas.resize(1280., 720.);
     console.set_mode(Mode::MainMenu);
 
-    let font_bytes = crate::PROGGY_CLEAN;
+    let font_bytes = source_ui::PROGGY_CLEAN;
     console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
     console.menu_metrics = CellMetrics::from_bytes(font_bytes).unwrap_or_default();
     assert!(console.menu_font.is_some());
@@ -2806,7 +2806,7 @@ fn test_subtitle_font_selection_and_glyph_decoration() {
     };
     console.canvas.resize(1280., 720.);
 
-    let font_bytes = crate::PROGGY_CLEAN;
+    let font_bytes = source_ui::PROGGY_CLEAN;
     console.menu_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
     console.menu_metrics = CellMetrics::from_bytes(font_bytes).unwrap_or_default();
     console.title_font = FontFace::load(font_bytes, console.canvas.clone()).ok();
@@ -3124,7 +3124,7 @@ fn row_of(console: &Console, command: MenuCommand) -> usize {
 /// A point of the Options dialog, from layout units inside its frame.
 fn in_options(console: &Console, local: Vec2) -> Vec2 {
     let bounds = console.window_bounds(Window::Options);
-    let scale = Painter::scale_for_canvas(console.canvas_size());
+    let scale = crate::proportional::dialog_scale(console.canvas_size());
     vec2(bounds.x, bounds.y) + local * scale
 }
 
@@ -3378,10 +3378,11 @@ fn the_console_completion_popup_past_its_frame_is_part_of_the_console() {
     console.canvas.resize(1280., 720.);
     console.toggle();
     // At the top of the canvas, so the list opens below the entry line, past the frame.
-    console.console_placement = Placement::from_saved(Some(crate::config::DialogPlacement {
-        offset: [0., -2000.],
-        size: None,
-    }));
+    console.console_placement =
+        Placement::from_saved(Some(source_ui::placement::DialogPlacement {
+            offset: [0., -2000.],
+            size: None,
+        }));
     console.input(&Input {
         text: "s".into(),
         ..Default::default()
@@ -3709,7 +3710,7 @@ fn subdialog_buttons_can_be_activated_by_mouse_click() {
     console.set_resources((*crate::gameui::options::tests::resources()).clone());
     console.open_options();
 
-    let scale = Painter::scale_for_canvas(console.canvas_size());
+    let scale = crate::proportional::dialog_scale(console.canvas_size());
 
     // Test 1: Sub::VideoAdvanced OK button click
     console
@@ -3753,8 +3754,8 @@ fn subdialog_buttons_can_be_activated_by_mouse_click() {
     let size = console
         .options
         .sub_frame_size(crate::gameui::options::Sub::AudioCredits, |_| 0.);
-    let title_close_pt = vec2(bounds.x, bounds.y)
-        + (crate::gameui::widgets::close_button_rect(size).center() * scale);
+    let title_close_pt =
+        vec2(bounds.x, bounds.y) + (source_ui::widgets::close_button_rect(size).center() * scale);
 
     pointer_frame(&mut console, title_close_pt, true, true, false);
     pointer_frame(&mut console, title_close_pt, false, false, true);
@@ -3805,7 +3806,7 @@ fn subdialog_buttons_can_be_activated_by_mouse_click() {
 fn keyboard_use_defaults_confirmation_works_with_click_and_keys() {
     let mut console = menu_with_options(720.);
     let res = GameUiResources {
-        key_rows: vec![crate::gameui::keys::KeyRow::Action {
+        key_rows: vec![source_ui::keys::KeyRow::Action {
             command: "+forward".into(),
             label: "Move forward".into(),
         }],
@@ -4047,7 +4048,7 @@ fn console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open() {
 
     // 6. When Quit confirmation box is open: toggle() is blocked!
     let loc = console.gameui.localization.clone();
-    console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+    console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     assert!(console.modal_dialog_open());
 
     console.toggle();
@@ -4070,7 +4071,7 @@ fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
     let entry_canvas = layout.canvas(layout.entry);
     let caret_h = (layout.entry.h - 8.) * layout.scale;
 
-    let has_console_caret = |quads: &[crate::canvas::Quad]| {
+    let has_console_caret = |quads: &[source_ui::canvas::Quad]| {
         quads.iter().any(|q| {
             (q.destination.w - layout.scale).abs() < 1e-3
                 && (q.destination.h - caret_h).abs() < 1e-3
@@ -4127,7 +4128,7 @@ fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
     assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
 
     let loc = console.gameui.localization.clone();
-    console.confirm_box = Some((MessageBox::quit(&loc), ConfirmKind::Quit));
+    console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     console.sync_dialog_windows();
     assert_eq!(console.windows.focus(), Layer::Window(Window::Confirmation));
 

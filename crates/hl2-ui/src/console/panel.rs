@@ -349,10 +349,10 @@ impl Console {
         placement::Frame {
             origin,
             size,
-            scale: Painter::scale_for_canvas(canvas),
+            scale: crate::proportional::dialog_scale(canvas),
             canvas,
             min_size: Some(dialog::MIN_SIZE),
-            close: crate::gameui::widgets::close_button_rect,
+            close: source_ui::widgets::close_button_rect,
         }
     }
 
@@ -604,7 +604,7 @@ impl Console {
         painter.sunken(layout.entry);
         let console_focused = self.windows.focus() == Layer::Window(Window::Console);
         let entry_focused = !self.console_placement.active();
-        let model = crate::gameui::widgets::TextInputModel::new(console_focused, entry_focused);
+        let model = source_ui::widgets::TextInputModel::new(console_focused, entry_focused);
         if model.should_draw_focus_edge() {
             let edge = painter.theme.entry_focus_edge;
             painter.border(

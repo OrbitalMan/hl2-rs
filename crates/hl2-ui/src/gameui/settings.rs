@@ -8,13 +8,13 @@
 use super::{
     display::{self, AspectRatio, DisplayModes, Resolution},
     localize::Localization,
-    widgets::SliderRange,
 };
 use crate::config::{
     AdvancedVideoSettings, AimAssist, Antialiasing, Captions, Config, DisplayMode, Filtering,
     HdrMode, HudAspect, Listed, ModelDetail, ShaderDetail, ShadowDetail, SoundQuality, Speakers,
     TextureDetail, WaterDetail, WeaponSelectionStyle,
 };
+use source_ui::widgets::SliderRange;
 
 /// The options being edited: the draft configuration plus the Video page's aspect filter, which
 /// is page state rather than a stored setting (retail derives it from the resolution), except

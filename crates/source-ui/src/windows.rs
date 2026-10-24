@@ -131,11 +131,12 @@ impl Default for Windows {
 }
 
 impl Windows {
-    /// No windows; focus and window fades take `fade_time` seconds (`Frame.FocusTransitionEffectTime`).
-    pub fn new(fade_time: f32) -> Self {
+    /// No windows; focus and window fades take `fade_time` seconds (`Frame.FocusTransitionEffectTime`)
+    /// and an unfocused window keeps `unfocused_alpha` of its focused look.
+    pub fn new(fade_time: f32, unfocused_alpha: f32) -> Self {
         Self {
             fade_time,
-            unfocused_alpha: crate::tuning::unfocused_alpha_factor(),
+            unfocused_alpha,
             ..Self::default()
         }
     }
@@ -694,7 +695,7 @@ mod tests {
 
     #[test]
     fn single_focus_state_machine_across_menus_dialogs_and_subdialogs() {
-        let mut w = Windows::new(0.3);
+        let mut w = Windows::new(0.3, 0.3);
         w.set_time(0.0);
 
         // 1. Main menu alone (focused)
@@ -723,7 +724,7 @@ mod tests {
         assert!((w.focus_amount(Window::Options, 1.3) - 0.0).abs() < 1e-4);
 
         // 4. Options + Dev console open simultaneously (strictly one focused)
-        let mut w2 = Windows::new(0.3);
+        let mut w2 = Windows::new(0.3, 0.3);
         w2.set_time(0.0);
         w2.open(Window::Options);
         assert_eq!(w2.focus(), Layer::Window(Window::Options));
@@ -769,7 +770,7 @@ mod tests {
 
     #[test]
     fn shared_fade_state_and_interpolation_logic_with_deterministic_timesteps() {
-        let mut w = Windows::new(0.3);
+        let mut w = Windows::new(0.3, 0.3);
         w.set_time(0.0);
 
         // 1. Opening fade-in: Window opens at t=0.0

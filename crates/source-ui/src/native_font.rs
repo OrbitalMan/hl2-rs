@@ -9,7 +9,7 @@ use std::{
 };
 use windows_sys::Win32::{Foundation::HANDLE, Graphics::Gdi::*};
 
-pub(crate) struct Glyph {
+pub struct Glyph {
     pub texture: Option<Texture2D>,
     pub origin: Vec2,
     pub advance: i32,
@@ -67,7 +67,7 @@ fn decode_bitmap(width: usize, height: usize, bitmap: &[u8]) -> Result<Vec<u8>> 
         .collect())
 }
 
-pub(crate) fn load(
+pub fn load(
     bytes: &[u8],
     requests: &BTreeSet<(char, u16)>,
 ) -> Result<BTreeMap<(char, u16), Glyph>> {

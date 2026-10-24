@@ -23,21 +23,23 @@
 
 use super::{
     display::DisplayModes,
-    keys::{self, KeyRow},
-    layout::{Align as LayoutAlign, Control, ControlKind},
-    menu::MessageBox,
-    placement::{self, Placement},
     resources::{GameUiResources, Image},
     settings::{self, Binding, Choice, Command, Draft, Env, Panel, Value},
+};
+use crate::config::Config;
+use glam::{vec2, Vec2};
+use source_ui::{
+    canvas::{Rect, Texture2D},
+    input::{Input, Key},
+    keys::{self, KeyRow},
+    layout::{Align as LayoutAlign, Control, ControlKind},
+    message_box::MessageBox,
+    placement::{self, Placement},
     widgets::{
         self, Align, ButtonState, FrameSpec, Painter, Theme, CLIENT_INSET_X, CLIENT_TOP, FONT_TALL,
         MENU_ROW, SCROLLBAR_WIDTH, SLIDER_HIT_TALL, SLIDER_TRACK_Y,
     },
 };
-use crate::canvas::{Rect, Texture2D};
-use crate::config::Config;
-use crate::console::{Input, Key};
-use glam::{vec2, Vec2};
 use std::sync::Arc;
 
 /// Options dialog frame size (retail default `OptionsDialog` size).
@@ -431,7 +433,7 @@ fn centered(canvas: Vec2, size: Vec2, scale: f32) -> Vec2 {
 
 /// A dialog layer of `size` (layout units) centered on `canvas`, moveable by its caption.
 fn layer_frame(canvas: Vec2, size: Vec2, close: fn(Vec2) -> Rect) -> placement::Frame {
-    let scale = Painter::scale_for_canvas(canvas);
+    let scale = crate::proportional::dialog_scale(canvas);
     placement::Frame {
         origin: centered(canvas, size, scale),
         size,
@@ -519,7 +521,7 @@ fn authored_frame_size(res: &GameUiResources, sub: Sub) -> Vec2 {
 const FOOTER_GAP: f32 = 8.;
 
 /// The controls a layout draws (visible, not frame chrome or the frame record itself).
-fn drawn_controls(panel: Panel, layout: &super::layout::Layout) -> Vec<&Control> {
+fn drawn_controls(panel: Panel, layout: &source_ui::layout::Layout) -> Vec<&Control> {
     layout
         .controls
         .iter()
@@ -766,7 +768,9 @@ impl OptionsDialog {
     }
 
     /// The dialog's placement to save, once after a drag or reset changed it.
-    pub fn take_placement_changed(&mut self) -> Option<Option<crate::config::DialogPlacement>> {
+    pub fn take_placement_changed(
+        &mut self,
+    ) -> Option<Option<source_ui::placement::DialogPlacement>> {
         self.placement
             .take_changed()
             .then(|| self.placement.saved())
@@ -905,7 +909,7 @@ impl OptionsDialog {
     /// Returns the tooltip text that should be shown for the given pointer position on the active tab, if any.
     pub fn tooltip_at(&self, canvas: Vec2, pointer: Vec2) -> Option<String> {
         let panel = self.tab.panel()?;
-        let scale = Painter::scale_for_canvas(canvas);
+        let scale = crate::proportional::dialog_scale(canvas);
         let origin = self.placement.place(&main_frame(canvas)).origin;
         let dialog_pointer = (pointer - origin) / scale;
         let page = page_rect();
@@ -977,7 +981,7 @@ impl OptionsDialog {
     pub fn input(&mut self, input: &Input, measure: &Painter) -> OptionsOutcome {
         self.now = input.time;
         let canvas = vec2(measure.canvas.width(), measure.canvas.height());
-        let scale = Painter::scale_for_canvas(canvas);
+        let scale = crate::proportional::dialog_scale(canvas);
         let local = |origin: Vec2| input.pointer.map(|p| (p - origin) / scale);
         if let Some(mut confirm) = self.confirm.take() {
             self.occlude(input);
@@ -2055,7 +2059,7 @@ impl OptionsDialog {
         canvas: Vec2,
         measure_w: impl Fn(&str) -> f32,
     ) -> bool {
-        let scale = Painter::scale_for_canvas(canvas);
+        let scale = crate::proportional::dialog_scale(canvas);
         let size = self.sub_frame_size(sub, measure_w);
         size.x * scale <= canvas.x && size.y * scale <= canvas.y
     }
@@ -2149,7 +2153,7 @@ impl OptionsDialog {
     ) {
         let time_val = time.or(self.now).unwrap_or(0.0);
         let canvas = vec2(base.canvas.width(), base.canvas.height());
-        let scale = Painter::scale_for_canvas(canvas);
+        let scale = crate::proportional::dialog_scale(canvas);
         let modal = self.sub.is_some() || self.confirm.is_some();
         let parent_focused = parent_focused.unwrap_or(self.parent_focused) && !modal;
         let options_theme = if self.sub_theme.is_some() || self.confirm_theme.is_some() {
@@ -2681,7 +2685,7 @@ impl OptionsDialog {
                         let fill = theme.selection_bg_dim;
                         p.fill(
                             Rect::new(header.x, y, action_w, MENU_ROW),
-                            crate::canvas::Color {
+                            source_ui::canvas::Color {
                                 a: fill.a * CAPTURE_ACTION_FADE,
                                 ..fill
                             },

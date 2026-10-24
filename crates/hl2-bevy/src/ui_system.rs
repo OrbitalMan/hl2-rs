@@ -16,7 +16,7 @@ pub fn cursor_to_canvas(
     viewport: Option<&VideoViewport>,
     window: &Window,
 ) -> Option<glam::Vec2> {
-    hl2_ui::viewport::cursor_to_canvas(
+    source_ui::viewport::cursor_to_canvas(
         cursor_pos.map(|p| glam::Vec2::new(p.x, p.y)),
         viewport.map(|v| v.bounds()).as_ref(),
         glam::Vec2::new(window.width(), window.height()),
@@ -25,11 +25,11 @@ pub fn cursor_to_canvas(
 
 /// Resizes the UI canvas to the game-frame resolution it is drawn into.
 pub fn resize_canvas(
-    canvas: &hl2_ui::canvas::Canvas,
+    canvas: &source_ui::canvas::Canvas,
     viewport: Option<&VideoViewport>,
     window: &Window,
 ) {
-    hl2_ui::viewport::resize_canvas(
+    source_ui::viewport::resize_canvas(
         canvas,
         viewport.map(|v| v.bounds()).as_ref(),
         glam::Vec2::new(window.width(), window.height()),
@@ -222,7 +222,7 @@ pub fn update_ui(
                 .paste
                 .then(|| clipboard.as_deref_mut()?.fetch_text().poll_result()?.ok())
                 .flatten();
-            let effects = ui.source.input(&hl2_ui::console::Input {
+            let effects = ui.source.input(&source_ui::input::Input {
                 text: if modifiers.ctrl || modifiers.command {
                     String::new()
                 } else {
@@ -466,7 +466,7 @@ mod tests {
 
     #[test]
     fn resize_canvas_resizes_to_viewport_logical_size() {
-        let canvas = hl2_ui::canvas::Canvas::default();
+        let canvas = source_ui::canvas::Canvas::default();
         let window = Window {
             resolution: bevy::window::WindowResolution::new(1920, 1080),
             ..default()

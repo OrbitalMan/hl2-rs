@@ -145,9 +145,9 @@ pub fn log_layer(_: &mut App) -> Option<BoxedLayer> {
 }
 
 /// The window cursor for a placement hint: resize arrows over the console's corner grips.
-pub fn cursor_icon(hint: hl2_ui::gameui::placement::CursorHint) -> bevy::window::CursorIcon {
+pub fn cursor_icon(hint: source_ui::placement::CursorHint) -> bevy::window::CursorIcon {
     use bevy::window::SystemCursorIcon;
-    use hl2_ui::gameui::placement::CursorHint;
+    use source_ui::placement::CursorHint;
     bevy::window::CursorIcon::System(match hint {
         CursorHint::Arrow => SystemCursorIcon::Default,
         CursorHint::ResizeNwSe => SystemCursorIcon::NwseResize,

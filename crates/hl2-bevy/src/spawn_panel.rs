@@ -1,9 +1,9 @@
 //! F4 NPC spawn overlay drawing (DESIGN 14w step 4): a two-column panel on the HUD
 //! canvas (classes | weapons and options) in the project's ProggyClean developer font
-//! (hl2-ui/assets/fonts, MIT). Glyphs are rasterized once at setup; frame systems only
+//! (source-ui/assets/fonts, MIT). Glyphs are rasterized once at setup; frame systems only
 //! queue quads. The panel content comes from `hl2_simulation::ai::spawn::Overlay`.
 use hl2_simulation::ai::spawn::{Panel, PanelRow, PanelTarget};
-use hl2_ui::canvas::{Canvas, Color, FilterMode, Texture2D, draw_texture};
+use source_ui::canvas::{Canvas, Color, FilterMode, Texture2D, draw_texture};
 
 struct Glyph {
     texture: Texture2D,
@@ -19,7 +19,7 @@ pub struct PanelFont {
 }
 impl PanelFont {
     pub fn load(px: f32) -> Option<Self> {
-        let bytes: &[u8] = hl2_ui::PROGGY_CLEAN;
+        let bytes: &[u8] = source_ui::PROGGY_CLEAN;
         let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()?;
         let lines = font.horizontal_line_metrics(px)?;
         let glyphs = (32u8..127)
@@ -235,7 +235,7 @@ mod tests {
     fn drawn_rows_are_clickable_where_they_are_drawn() {
         use hl2_simulation::ai::spawn::{Column, Overlay, OverlayKey, PanelTarget, Tab};
         let font = super::PanelFont::load(18.).expect("ProggyClean");
-        let canvas = hl2_ui::canvas::Canvas::default();
+        let canvas = source_ui::canvas::Canvas::default();
         let mut overlay = Overlay::default();
         overlay.key(OverlayKey::Toggle);
         overlay.rows_visible = font.rows_fit(TOP, 720.);

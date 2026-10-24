@@ -18,7 +18,7 @@ use bevy::{
     sprite_render::{AlphaMode2d, Material2d, Material2dKey},
     window::PrimaryWindow,
 };
-use hl2_ui::canvas::{FilterMode, Quad, Texture2D};
+use source_ui::canvas::{FilterMode, Quad, Texture2D};
 use std::collections::HashMap;
 
 /// Space between stacked developer overlays.
@@ -412,7 +412,7 @@ pub fn present(
             "A.I. Disabled...",
             width * 0.7,
             height * 0.65,
-            hl2_ui::canvas::WHITE,
+            source_ui::canvas::WHITE,
         );
     }
     let hits = if let (Some(font), Some(panel)) = (&hud.spawn_font, &hud.spawn_panel) {
@@ -424,10 +424,10 @@ pub fn present(
         // The panel can cover the screen center: mark where spawns aim (ours).
         let (x, y) = ((width / 2.).round(), (height / 2.).round());
         let canvas = &hud.source.canvas;
-        let dark = hl2_ui::canvas::Color::new(0., 0., 0., 0.8);
+        let dark = source_ui::canvas::Color::new(0., 0., 0., 0.8);
         canvas.rectangle(x - 8., y - 2., 17., 5., dark);
         canvas.rectangle(x - 2., y - 8., 5., 17., dark);
-        let mark = hl2_ui::canvas::Color::from_rgba(255, 238, 160, 255);
+        let mark = source_ui::canvas::Color::from_rgba(255, 238, 160, 255);
         canvas.rectangle(x - 7., y - 1., 15., 3., mark);
         canvas.rectangle(x - 1., y - 7., 3., 15., mark);
         hits
@@ -527,7 +527,7 @@ fn quad_mesh(quad: &Quad, viewport: Vec2) -> Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hl2_ui::canvas::{Color, Rect};
+    use source_ui::canvas::{Color, Rect};
     #[test]
     fn atlas_crop_remains_pixel_aligned_in_camera_coordinates() {
         let quad = Quad {

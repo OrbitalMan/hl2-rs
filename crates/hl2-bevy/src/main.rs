@@ -550,7 +550,7 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
             &options.game,
             &game,
             map,
-            hl2_ui::canvas::Canvas::default(),
+            source_ui::canvas::Canvas::default(),
             true,
             &config,
         ) {
@@ -590,7 +590,7 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
         &options.game,
         &game,
         &background,
-        hl2_ui::canvas::Canvas::default(),
+        source_ui::canvas::Canvas::default(),
         true,
         &config,
     ) {
@@ -604,7 +604,7 @@ fn load_startup_map(options: &Options) -> Result<(assets::LoadedMap, bool)> {
                 &options.game,
                 base_game,
                 &default_bg,
-                hl2_ui::canvas::Canvas::default(),
+                source_ui::canvas::Canvas::default(),
                 true,
                 &config,
             )

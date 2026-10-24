@@ -11,25 +11,27 @@ mod panel;
 
 use crate::gameui::{
     display::DisplayModes,
-    menu::{GameMenu, MenuLayout, MenuOutcome, MessageBox, MessageBoxLayout},
+    menu::{GameMenu, MenuLayout, MenuOutcome},
     options::{OptionsDialog, OptionsOutcome},
-    placement::{self, CursorHint, Placement},
     resources::{self, fallback_game_menu, GameUiResources},
     video_confirm::{VideoConfirm, VideoMode},
-    widgets::{
-        scheme_color, Align, ButtonState, ButtonTracker, Fonts, FrameSpec, HoldRepeat, Painter,
-        ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
-    },
-    windows::{Layer, Pointer, Window, Windows},
-};
-use crate::{
-    canvas::*,
-    hud::{FontFace, TextOutline},
 };
 use dialog::{wrap, DialogLayout, Selection};
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
+use source_ui::{
+    canvas::*,
+    font::{FontFace, TextOutline},
+    input::{Input, Key, KeyRepeat},
+    message_box::{MessageBox, MessageBoxLayout},
+    placement::{self, CursorHint, Placement},
+    widgets::{
+        scheme_color, Align, ButtonState, ButtonTracker, Fonts, FrameSpec, Painter,
+        ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
+    },
+    windows::{Layer, Pointer, Window, Windows},
+};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
@@ -157,7 +159,7 @@ pub struct Console {
     /// What the windows are over: the main menu, the pause menu or the game.
     base: Mode,
     /// The Options dialog and the console: non-modal windows over the base (retail VGUI
-    /// frames), in z-order with the keyboard focus (`gameui::windows`).
+    /// frames), in z-order with the keyboard focus (`source_ui::windows`).
     windows: Windows,
     pub cheats: bool,
     pub output: VecDeque<Line>,
@@ -355,138 +357,6 @@ pub(crate) fn rectangle_lines(
     canvas.rectangle(x, y, thickness, h, color);
     canvas.rectangle(x + w - thickness, y, thickness, h, color);
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Key {
-    Up,
-    Down,
-    Enter,
-    Backspace,
-    Delete,
-    Left,
-    Right,
-    Home,
-    End,
-    PageUp,
-    PageDown,
-    Tab,
-    /// Presses the focused dialog button, check box or radio button (SDK `Button`).
-    Space,
-}
-impl Key {
-    /// Keys that repeat while held: moving through lists and text, deleting. Enter, Tab, Home
-    /// and End act once per press.
-    pub const fn repeats(self) -> bool {
-        matches!(
-            self,
-            Self::Up
-                | Self::Down
-                | Self::Left
-                | Self::Right
-                | Self::Backspace
-                | Self::Delete
-                | Self::PageUp
-                | Self::PageDown
-        )
-    }
-}
-
-/// Keyboard repeat for every UI layer at once, applied to [`Input::keys`] in [`Console::input`]:
-/// like an operating system, the latest pressed key repeats while held ([`HoldRepeat`]), and any
-/// other press takes over or (when it does not repeat) stops it. Typed text already arrives with
-/// the system's own repeat and is left alone.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct KeyRepeat {
-    key: Option<Key>,
-    timer: HoldRepeat,
-}
-impl KeyRepeat {
-    /// Adds this frame's repeat of the held key to `input.keys`.
-    pub fn apply(&mut self, input: &mut Input) {
-        if let Some(&pressed) = input.keys.iter().next_back() {
-            self.key = pressed.repeats().then_some(pressed);
-            self.timer.press(input.time);
-        } else if let Some(key) = self.key {
-            if !input.held_keys.contains(&key) {
-                self.cancel();
-            } else if self.timer.held(input.time) {
-                input.keys.insert(key);
-            }
-        }
-    }
-
-    /// Stops the repeat until the next press.
-    pub fn cancel(&mut self) {
-        *self = Self::default();
-    }
-}
-
-#[derive(Clone, Default, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Input {
-    pub keys: std::collections::BTreeSet<Key>,
-    /// Keys held down this frame (pressed earlier or now); [`KeyRepeat`] repeats them.
-    pub held_keys: std::collections::BTreeSet<Key>,
-    pub text: String,
-    pub pointer: Option<Vec2>,
-    /// Left button went down this frame.
-    pub click: bool,
-    /// Left button is held (slider drags).
-    pub held: bool,
-    /// Left button was released this frame.
-    pub released: bool,
-    /// Mouse wheel steps this frame; positive scrolls up.
-    pub wheel: f32,
-    /// Keys and buttons pressed this frame as persisted binding names (`KeyW`, `SuperLeft`,
-    /// `MOUSE1`, `MWHEELUP`), used when the keyboard page captures a new key.
-    pub binding_keys: Vec<String>,
-    /// Monotonic real time of this frame in seconds, used for double clicks. `None` (scripted
-    /// input without times) disables double-click detection.
-    pub time: Option<f64>,
-    /// Control is held (console editing shortcuts); typed text is ignored meanwhile.
-    pub ctrl: bool,
-    /// Shift is held (Shift+Tab steps the completion list back).
-    pub shift: bool,
-    /// Alt (Option) is held: Alt+Up/Down opens a focused combo box's list (SDK `ComboBox`).
-    pub alt: bool,
-    /// Text pasted this frame (the host reads the clipboard on its paste shortcut).
-    pub paste: Option<String>,
-    /// The copy shortcut (Cmd+C on macOS, Ctrl+C elsewhere) was pressed this frame.
-    pub copy: bool,
-}
-impl Input {
-    pub(crate) fn pressed(&self, key: Key) -> bool {
-        self.keys.contains(&key)
-    }
-
-    /// What one UI layer receives of this frame: the pointer (position, button, wheel) when it
-    /// owns it, the keyboard (keys, text, modifiers, clipboard) when it has the focus, and the
-    /// time either way.
-    pub(crate) fn share(&self, pointer: bool, keyboard: bool) -> Input {
-        let mut share = if keyboard {
-            self.clone()
-        } else {
-            Input {
-                time: self.time,
-                ..Input::default()
-            }
-        };
-        if pointer {
-            share.pointer = self.pointer;
-            share.click = self.click;
-            share.held = self.held;
-            share.released = self.released;
-            share.wheel = self.wheel;
-        } else {
-            share.pointer = None;
-            share.click = false;
-            share.held = false;
-            share.released = false;
-            share.wheel = 0.;
-        }
-        share
-    }
-}
 
 /// The console's completion popup: its rows (colored runs), the highlighted row, how many help
 /// rows lead, and its rectangle in canvas pixels.
@@ -545,7 +415,7 @@ impl Default for Console {
             mode: Mode::Gameplay,
             base: Mode::Gameplay,
             // `Frame.FocusTransitionEffectTime` of the installed desktop scheme.
-            windows: Windows::new(0.3),
+            windows: Windows::new(0.3, crate::tuning::unfocused_alpha_factor()),
             cheats: false,
             output: VecDeque::new(),
             output_start: 0,
@@ -625,11 +495,7 @@ impl Console {
                 .flatten()
                 .and_then(|bytes| FontFace::load(&bytes, canvas.clone()).ok())
         };
-        let developer_font = FontFace::load(
-            include_bytes!("../assets/fonts/ProggyClean.ttf"),
-            canvas.clone(),
-        )
-        .ok();
+        let developer_font = FontFace::load(source_ui::PROGGY_CLEAN, canvas.clone()).ok();
         // Menu items draw the source scheme's MenuLarge face (GorDIN 600 in the installed
         // scheme) from the font files the scheme registers.
         let reader = crate::gameui::resources::Reader::new(vfs);
@@ -638,7 +504,7 @@ impl Console {
             .and_then(|bytes| keyvalues::parse_resource(&bytes).ok())
             .and_then(|roots| roots.into_iter().next())
             .and_then(|root| {
-                crate::gameui::scheme_fonts::resolve(&root, "MenuLarge", |path| reader.read(path))
+                source_ui::scheme_fonts::resolve(&root, "MenuLarge", |path| reader.read(path))
             })
             .or_else(|| {
                 vfs.read("resource/linux_fonts/liberationsans-regular.ttf")
@@ -985,7 +851,7 @@ impl Console {
         }
         if self.mode == Mode::Gameplay {
             if let Some(loading) = &self.loading_dialog {
-                let scale = Painter::scale_for_canvas(self.canvas_size());
+                let scale = crate::proportional::dialog_scale(self.canvas_size());
                 loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
             }
             return;
@@ -1343,7 +1209,7 @@ impl Console {
             self.canvas.set_alpha_multiplier(old_alpha);
         }
         if let Some(loading) = &self.loading_dialog {
-            let scale = Painter::scale_for_canvas(self.canvas_size());
+            let scale = crate::proportional::dialog_scale(self.canvas_size());
             loading.draw(&self.painter(Vec2::ZERO, scale), &self.gameui.localization);
         }
     }

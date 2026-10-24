@@ -3121,6 +3121,7 @@ dependencies = [
  "serde",
  "serde_json",
  "source-assets",
+ "source-ui",
 ]
 
 [[package]]
@@ -3161,8 +3162,8 @@ dependencies = [
  "serde",
  "serde_json",
  "source-assets",
+ "source-ui",
  "ttf-parser",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5190,6 +5191,19 @@ dependencies = [
  "serde",
  "vmdl",
  "zip",
+]
+
+[[package]]
+name = "source-ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fontdue",
+ "glam 0.27.0",
+ "serde",
+ "source-assets",
+ "ttf-parser",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

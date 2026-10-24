@@ -333,7 +333,7 @@ mod tests {
             });
 
         let vfs = source_assets::vpk::Vfs::mount(&game).expect("mount game");
-        let canvas = hl2_ui::canvas::Canvas::default();
+        let canvas = source_ui::canvas::Canvas::default();
         let mut console = hl2_ui::console::Console::load(&vfs, canvas);
         console.loaded_map = Some(hl2_ui::console::GameMap::new("hl2", "background01"));
         console.level_loaded(true);
@@ -635,7 +635,7 @@ mod tests {
             });
 
         let vfs = source_assets::vpk::Vfs::mount(&game).expect("mount game");
-        let canvas = hl2_ui::canvas::Canvas::default();
+        let canvas = source_ui::canvas::Canvas::default();
         let mut console = hl2_ui::console::Console::load(&vfs, canvas);
         console.loaded_map = Some(hl2_ui::console::GameMap::new("hl2", "background01"));
         console.level_loaded(true);

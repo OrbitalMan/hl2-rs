@@ -1,6 +1,6 @@
 //! Key binding data: `scripts/kb_act.lst` rows, `cfg/config_default.cfg` binds and the mapping
-//! between Source key names (`w`, `SPACE`, `CTRL`, `MOUSE1`) and the persisted binding names used
-//! by [`crate::config::Config::keys`] (`KeyW`, `Space`, `ControlLeft`).
+//! between Source key names (`w`, `SPACE`, `CTRL`, `MOUSE1`) and the persisted binding names an
+//! app saves its bindings under (`KeyW`, `Space`, `ControlLeft`).
 //!
 //! Source binds keys to commands (`bind "w" "+forward"`); the options page shows one key per
 //! command. Keys without a host equivalent (mouse buttons, wheel) keep their Source name so they

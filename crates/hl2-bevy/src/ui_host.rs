@@ -41,7 +41,7 @@ pub enum Action {
         command: String,
     },
     Input {
-        input: hl2_ui::console::Input,
+        input: source_ui::input::Input,
     },
     /// One F4 overlay key, as if pressed (Toggle, Up, Down, Left, Right, Enter).
     SpawnOverlay {
@@ -125,8 +125,8 @@ impl crate::simulation::Simulation {
     }
 }
 /// The UI keys and the native keys they come from.
-const UI_KEYS: [(KeyCode, hl2_ui::console::Key); 13] = {
-    use hl2_ui::console::Key;
+const UI_KEYS: [(KeyCode, source_ui::input::Key); 13] = {
+    use source_ui::input::Key;
     [
         (KeyCode::ArrowUp, Key::Up),
         (KeyCode::ArrowDown, Key::Down),
@@ -145,20 +145,20 @@ const UI_KEYS: [(KeyCode, hl2_ui::console::Key); 13] = {
 };
 
 /// UI keys pressed this frame.
-pub fn keys(native: &ButtonInput<KeyCode>) -> std::collections::BTreeSet<hl2_ui::console::Key> {
+pub fn keys(native: &ButtonInput<KeyCode>) -> std::collections::BTreeSet<source_ui::input::Key> {
     ui_keys(|code| native.just_pressed(code))
 }
 
 /// UI keys held this frame (for key repeat).
 pub fn held_keys(
     native: &ButtonInput<KeyCode>,
-) -> std::collections::BTreeSet<hl2_ui::console::Key> {
+) -> std::collections::BTreeSet<source_ui::input::Key> {
     ui_keys(|code| native.pressed(code))
 }
 
 fn ui_keys(
     mut down: impl FnMut(KeyCode) -> bool,
-) -> std::collections::BTreeSet<hl2_ui::console::Key> {
+) -> std::collections::BTreeSet<source_ui::input::Key> {
     UI_KEYS
         .into_iter()
         .filter_map(|(code, key)| down(code).then_some(key))

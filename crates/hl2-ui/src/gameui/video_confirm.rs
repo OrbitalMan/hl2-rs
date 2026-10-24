@@ -10,8 +10,8 @@
 
 use super::display::AspectRatio;
 use super::localize::{placeholders, Localization};
-use super::menu::MessageBox;
 use crate::config::{DisplayMode, VideoSettings};
+use source_ui::message_box::MessageBox;
 
 /// The window-affecting video settings the confirmation can restore.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -6,12 +6,12 @@
 //! Missing files leave the matching field empty; callers fall back to token names and built-in
 //! menu structure rather than failing.
 
-use super::{
+use super::localize::Localization;
+use source_assets::{keyvalues, vpk::Vfs};
+use source_ui::{
     keys::{self, KeyRow},
     layout::Layout,
-    localize::Localization,
 };
-use source_assets::{keyvalues, vpk::Vfs};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -869,6 +869,42 @@ pub fn fallback_category_titles(loc: &Localization) -> BTreeMap<String, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mean advance of the capital letters (menu labels are upper case) per cap height.
+    fn capital_width(bytes: &[u8]) -> f32 {
+        let face = ttf_parser::Face::parse(bytes, 0).unwrap();
+        let cap = f32::from(face.capital_height().unwrap());
+        let advances: Vec<f32> = ('A'..='Z')
+            .filter_map(|c| face.glyph_index(c))
+            .filter_map(|g| face.glyph_hor_advance(g))
+            .map(f32::from)
+            .collect();
+        advances.iter().sum::<f32>() / advances.len() as f32 / cap
+    }
+
+    #[test]
+    #[ignore = "requires an owned Half-Life 2 installation"]
+    fn owned_menu_font_is_the_schemes_semibold_gordin() {
+        let root = source_assets::install::discover().expect("installed game");
+        let vfs = source_assets::vpk::Vfs::mount(&root).unwrap();
+        let reader = Reader::new(&vfs);
+        let scheme = keyvalues::parse_resource(&reader.read("resource/SourceScheme.res").unwrap())
+            .unwrap()
+            .remove(0);
+        let bytes =
+            source_ui::scheme_fonts::resolve(&scheme, "MenuLarge", |path| reader.read(path))
+                .expect("MenuLarge");
+        let info = source_ui::scheme_fonts::FontFileInfo::read(&bytes).unwrap();
+        assert!(info.matches("GorDIN"), "{info:?}");
+        assert_eq!(info.weight, 600);
+        let liberation = reader
+            .read("resource/linux_fonts/liberationsans-regular.ttf")
+            .unwrap();
+        // GorDIN SemiBold capitals are 0.86 cap heights wide on average, Liberation Sans
+        // Regular ones 0.98: the former menu face looked stretched.
+        let (gordin, liberation) = (capital_width(&bytes), capital_width(&liberation));
+        assert!(gordin < 0.9 * liberation, "{gordin} vs {liberation}");
+    }
 
     #[test]
     fn game_menu_entries_keep_file_order_categories_and_spacers() {

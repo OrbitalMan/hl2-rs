@@ -10,9 +10,9 @@
 //! design area ends ([`crate::proportional::design_height`]), keeping the proportions of the
 //! retail frame on a 5:4 screen.
 
-use crate::canvas::Rect;
-use crate::gameui::widgets::{close_button_rect, Painter, CLIENT_INSET_X, CLIENT_TOP};
 use glam::{vec2, Vec2};
+use source_ui::canvas::Rect;
+use source_ui::widgets::{close_button_rect, CLIENT_INSET_X, CLIENT_TOP};
 use std::ops::Range;
 
 /// `Frame.ClientInsetY`: space under the client area.
@@ -46,7 +46,7 @@ pub const MIN_SIZE: Vec2 = Vec2::new(
 pub struct DialogLayout {
     /// Frame top-left in canvas pixels.
     pub origin: Vec2,
-    /// Canvas pixels per layout unit ([`Painter::scale_for`]).
+    /// Canvas pixels per layout unit ([`source_ui::widgets::Painter::scale_for`]).
     pub scale: f32,
     /// Frame size in layout units.
     pub size: Vec2,
@@ -60,12 +60,12 @@ impl DialogLayout {
     /// The retail placement on `canvas`.
     pub fn new(canvas: Vec2) -> Self {
         let (origin, size) = Self::default_frame(canvas);
-        Self::at(Painter::scale_for_canvas(canvas), origin, size)
+        Self::at(crate::proportional::dialog_scale(canvas), origin, size)
     }
 
     /// The retail frame on `canvas`: top-left in canvas pixels and size in layout units.
     pub fn default_frame(canvas: Vec2) -> (Vec2, Vec2) {
-        let scale = Painter::scale_for_canvas(canvas);
+        let scale = crate::proportional::dialog_scale(canvas);
         let design = crate::proportional::design_height(canvas);
         let proportional = |value: f32| (value * design / PROPORTIONAL_BASE).floor();
         let (origin, extent) = if design < canvas.y {
@@ -292,7 +292,7 @@ mod tests {
     fn landscape_frames_are_the_retail_ones_and_narrow_screens_get_a_bounded_frame() {
         for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
             let (origin, size) = DialogLayout::default_frame(canvas);
-            let scale = Painter::scale_for_canvas(canvas);
+            let scale = crate::proportional::dialog_scale(canvas);
             let p = |v: f32| (v * canvas.y / PROPORTIONAL_BASE).floor();
             assert_eq!(
                 origin,
@@ -307,7 +307,7 @@ mod tests {
         }
         for canvas in [vec2(1080., 1080.), vec2(1080., 1920.), vec2(720., 1280.)] {
             let (origin, size) = DialogLayout::default_frame(canvas);
-            let scale = Painter::scale_for_canvas(canvas);
+            let scale = crate::proportional::dialog_scale(canvas);
             let (right, bottom) = (origin.x + size.x * scale, origin.y + size.y * scale);
             let design = crate::proportional::design_height(canvas);
             assert!(

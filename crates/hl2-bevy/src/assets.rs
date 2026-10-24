@@ -163,7 +163,7 @@ pub static FRAG_RIGID_BODY: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
 #[allow(dead_code)]
 pub fn load(root: &Path, game: &str, map: &str) -> Result<LoadedMap> {
-    load_with_canvas(root, game, map, hl2_ui::canvas::Canvas::default(), true)
+    load_with_canvas(root, game, map, source_ui::canvas::Canvas::default(), true)
 }
 /// Loads `maps/<map>.bsp` through the search path of `game`, the installation folder of the
 /// game the map belongs to (`hl2`, `episodic`, `ep2`, `lostcoast`).
@@ -172,7 +172,7 @@ pub fn load_with_canvas(
     root: &Path,
     game: &str,
     map: &str,
-    canvas: hl2_ui::canvas::Canvas,
+    canvas: source_ui::canvas::Canvas,
     new_game: bool,
 ) -> Result<LoadedMap> {
     let config = hl2_ui::config::Config::load_or_default();
@@ -183,7 +183,7 @@ pub fn load_with_config(
     root: &Path,
     game: &str,
     map: &str,
-    canvas: hl2_ui::canvas::Canvas,
+    canvas: source_ui::canvas::Canvas,
     new_game: bool,
     config: &hl2_ui::config::Config,
 ) -> Result<LoadedMap> {
@@ -195,7 +195,7 @@ pub fn load_with_progress(
     root: &Path,
     game: &str,
     map: &str,
-    canvas: hl2_ui::canvas::Canvas,
+    canvas: source_ui::canvas::Canvas,
     new_game: bool,
     config: &hl2_ui::config::Config,
     progress: &hl2_ui::gameui::loading::ProgressReport,
@@ -1611,7 +1611,7 @@ mod owned_frag_replay {
             &root,
             "hl2",
             "d1_trainstation_02",
-            hl2_ui::canvas::Canvas::default(),
+            source_ui::canvas::Canvas::default(),
             true,
             &cfg_high,
         )
@@ -1621,7 +1621,7 @@ mod owned_frag_replay {
             &root,
             "hl2",
             "d1_trainstation_02",
-            hl2_ui::canvas::Canvas::default(),
+            source_ui::canvas::Canvas::default(),
             true,
             &cfg_low,
         )

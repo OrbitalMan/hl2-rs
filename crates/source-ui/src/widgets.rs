@@ -13,7 +13,7 @@
 use std::borrow::Cow;
 
 use crate::canvas::{draw_texture_ex, Canvas, Color, DrawTextureParams, Rect, Texture2D, WHITE};
-use crate::hud::FontFace;
+use crate::font::FontFace;
 use glam::{vec2, Vec2};
 use source_assets::keyvalues::Entry;
 
@@ -425,8 +425,8 @@ pub fn scheme_color(root: &Entry, name: &str) -> Option<Color> {
 /// Fonts used by the controls. Missing fonts skip text drawing but keep layout and input working.
 #[derive(Clone, Default)]
 pub struct Fonts {
-    pub(crate) text: Option<FontFace>,
-    pub(crate) bold: Option<FontFace>,
+    pub text: Option<FontFace>,
+    pub bold: Option<FontFace>,
 }
 
 /// Text alignment inside a rectangle.
@@ -450,12 +450,6 @@ impl Painter<'_> {
     /// The dialog scale for a canvas height (see module documentation).
     pub fn scale_for(canvas_height: f32) -> f32 {
         (canvas_height / 720.).max(1.)
-    }
-
-    /// The dialog scale for a canvas: [`Self::scale_for`] its
-    /// [`crate::proportional::design_height`], so dialogs fit narrow (square, portrait) screens.
-    pub fn scale_for_canvas(canvas: Vec2) -> f32 {
-        Self::scale_for(crate::proportional::design_height(canvas))
     }
 
     /// Computes the dialog scale for a given window logical height and display scale factor.
@@ -953,7 +947,7 @@ pub fn focus_step<T: Copy + PartialEq>(
 /// one-frame key) activates at once; focus moving away drops the press.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyPress<T: Copy + PartialEq> {
-    down: Option<(crate::console::Key, T)>,
+    down: Option<(crate::input::Key, T)>,
 }
 
 impl<T: Copy + PartialEq> Default for KeyPress<T> {
@@ -977,8 +971,8 @@ impl<T: Copy + PartialEq> KeyPress<T> {
     pub fn update(
         &mut self,
         focused: Option<T>,
-        pressed: Option<crate::console::Key>,
-        held: impl Fn(crate::console::Key) -> bool,
+        pressed: Option<crate::input::Key>,
+        held: impl Fn(crate::input::Key) -> bool,
     ) -> Option<T> {
         if let Some((key, target)) = self.down {
             if focused != Some(target) {

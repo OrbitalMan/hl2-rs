@@ -6,6 +6,7 @@
 //! [`VideoSettings::display_mode`] in [`Config::migrate`].
 
 use serde::{Deserialize, Serialize};
+use source_ui::placement::DialogPlacement;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -574,15 +575,6 @@ impl Default for KeyboardSettings {
             developer_console: true,
         }
     }
-}
-
-/// Where a dialog was dragged (and, if sizeable, resized): an offset from its default position
-/// and its size, in layout units.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DialogPlacement {
-    pub offset: [f32; 2],
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<[f32; 2]>,
 }
 
 /// Saved dialog placements; unset dialogs open at their default place.

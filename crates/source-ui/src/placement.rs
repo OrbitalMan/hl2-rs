@@ -15,8 +15,17 @@
 //! size.
 
 use crate::canvas::Rect;
-use crate::config::DialogPlacement;
 use glam::{vec2, Vec2};
+use serde::{Deserialize, Serialize};
+
+/// Where a dialog was dragged (and, if sizeable, resized): an offset from its default position
+/// and its size, in layout units.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DialogPlacement {
+    pub offset: [f32; 2],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<[f32; 2]>,
+}
 
 /// `Frame::GetCaptionHeight`.
 pub const CAPTION_TALL: f32 = 23.;

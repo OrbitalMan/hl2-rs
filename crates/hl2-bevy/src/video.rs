@@ -166,7 +166,7 @@ const SUSPEND_FRAMES: u32 = 4;
 pub struct GameFrame {
     pub image: Handle<Image>,
     /// Frame size in pixels: the configured video resolution, or for a flexible frame the size
-    /// [`hl2_ui::viewport::flexible_frame_resolution`] derives from it and the window.
+    /// [`hl2_ui::flexible_frame::flexible_frame_resolution`] derives from it and the window.
     pub resolution: UVec2,
     /// Configured video resolution, in frame pixels (also the requested windowed size).
     pub configured: UVec2,
@@ -194,7 +194,7 @@ impl GameFrame {
         } else if physical.x == 0 || physical.y == 0 {
             self.resolution
         } else {
-            let size = hl2_ui::viewport::flexible_frame_resolution(
+            let size = hl2_ui::flexible_frame::flexible_frame_resolution(
                 glam::UVec2::new(self.configured.x, self.configured.y),
                 glam::UVec2::new(physical.x, physical.y),
             );
@@ -401,7 +401,7 @@ impl VideoViewport {
     }
 
     /// [`Self::compute`] for a fixed or flexible frame
-    /// ([`hl2_ui::viewport::ViewportBounds::compute_with_mode`]).
+    /// ([`source_ui::viewport::ViewportBounds::compute_with_mode`]).
     pub fn compute_with_mode(
         target_w: u32,
         target_h: u32,
@@ -412,7 +412,7 @@ impl VideoViewport {
         let win_h = window.resolution.physical_height().max(1);
         let scale = window.scale_factor().max(1.0);
 
-        let bounds = hl2_ui::viewport::ViewportBounds::compute_with_mode(
+        let bounds = hl2_ui::flexible_frame::compute_with_mode(
             glam::UVec2::new(target_w, target_h),
             glam::UVec2::new(win_w, win_h),
             scale,
@@ -434,8 +434,8 @@ impl VideoViewport {
     }
 
     /// Returns the portable viewport bounds.
-    pub fn bounds(&self) -> hl2_ui::viewport::ViewportBounds {
-        hl2_ui::viewport::ViewportBounds {
+    pub fn bounds(&self) -> source_ui::viewport::ViewportBounds {
+        source_ui::viewport::ViewportBounds {
             target_resolution: glam::UVec2::new(self.target_resolution.x, self.target_resolution.y),
             physical_offset: glam::UVec2::new(
                 self.physical_rect.physical_position.x,
@@ -499,7 +499,7 @@ pub(crate) fn apply_video_config_to_window(
                 window.resolution.physical_height(),
             );
             if physical.x > 0 && physical.y > 0 {
-                let size = hl2_ui::viewport::flexible_presented_resolution(glam::UVec2::new(
+                let size = hl2_ui::flexible_frame::flexible_presented_resolution(glam::UVec2::new(
                     physical.x, physical.y,
                 ));
                 let native = UVec2::new(size.x, size.y);
@@ -720,7 +720,7 @@ pub fn window_resize(
 
 /// [`window_resize`] with the monitor's usable [`DesktopArea`] when it is known (macOS): the
 /// client size then fits that area exactly instead of the monitor minus [`WINDOW_MARGIN`].
-/// A `flexible` frame fits each side on its own ([`hl2_ui::viewport::flexible_windowed_size`])
+/// A `flexible` frame fits each side on its own ([`hl2_ui::flexible_frame::flexible_windowed_size`])
 /// instead of shrinking the requested shape uniformly.
 pub fn window_resize_in(
     window: &Window,
@@ -741,9 +741,9 @@ pub fn window_resize_in(
         let resolution = glam::UVec2::new(resolution.x, resolution.y);
         let room = room.map(|room| glam::Vec2::new(room.x, room.y));
         let size = if flexible {
-            hl2_ui::viewport::flexible_windowed_size(resolution, room)
+            hl2_ui::flexible_frame::flexible_windowed_size(resolution, room)
         } else {
-            hl2_ui::viewport::windowed_size(resolution, room)
+            source_ui::viewport::windowed_size(resolution, room)
         };
         Vec2::new(size.x, size.y)
     };

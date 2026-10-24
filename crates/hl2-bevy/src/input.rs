@@ -14,8 +14,9 @@ use bevy::{
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
 };
-use hl2_ui::{config::Config, gameui::widgets::HoldRepeat, tuning::ViewmodelFraming};
+use hl2_ui::{config::Config, tuning::ViewmodelFraming};
 use modkit_core::movement::Input;
+use source_ui::widgets::HoldRepeat;
 
 type InputDevices<'w> = (
     Res<'w, ButtonInput<KeyCode>>,
@@ -550,7 +551,7 @@ fn adjust_viewmodel_framing(framing: &mut ViewmodelFraming, fired: &[KeyCode], s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hl2_ui::gameui::keys::NAMED_KEYS;
+    use source_ui::keys::NAMED_KEYS;
 
     #[test]
     fn f5_viewmodel_debug_toggle_loads_the_selected_direct_profile() {
@@ -731,7 +732,7 @@ mod tests {
             parse_binding("Ctrl"),
             Some(Trigger::Key(KeyCode::ControlLeft))
         );
-        assert_eq!(parse_binding(hl2_ui::gameui::keys::UNBOUND), None);
+        assert_eq!(parse_binding(source_ui::keys::UNBOUND), None);
         assert_eq!(parse_binding("JOY1"), None);
     }
 

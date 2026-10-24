@@ -18,7 +18,7 @@ menu/options work; other documents link here instead of repeating it.
   are filtered by aspect bucket (normal < 1.5, 16:10 ~ 1.6, otherwise 16:9); the current size is the
   fallback when no modes are reported.
 - **Small widget helpers, canvas drawing.** Widget logic (combo list, slider fraction/value, focus) is
-  separate from drawing; drawing uses the existing ordered CPU canvas (`hl2-ui::canvas`).
+  separate from drawing; drawing uses the existing ordered CPU canvas (`source_ui::canvas`).
 - **Typed configuration.** Choices edit a draft `Config`; OK/Apply commit and persist it, Cancel discards it.
 - **Scope.** Single-player Half-Life 2 GameUI only; multiplayer dialogs are out of scope.
 
@@ -99,12 +99,12 @@ Correction (2026-10-11): `#GameUI_NoWindowBorder` is defined in the UTF-16 `game
 
 What exists:
 
-- `hl2-ui::gameui::widgets`: scheme-derived `Theme` (`sourcescheme.res`/`clientscheme.res` colours),
+- `source_ui::widgets`: scheme-derived `Theme` (`sourcescheme.res`/`clientscheme.res` colours),
   Tahoma/Tahoma Bold widget fonts, a `Painter` over the ordered CPU canvas, button states and text
   wrapping.
 - `hl2-ui::gameui::menu`: `GameMenu` built from `gamemenu.res` categories (main, hl2, episodic,
   ep2), with spacers, keyboard/pointer navigation and no armed entry until hover or arrow keys;
-  `MessageBox` for the "QUIT GAME" confirmation.
+  the "QUIT GAME" confirmation (`menu::quit_box`, a `source_ui::message_box::MessageBox`).
 - Startup (`hl2-bevy::main::load_startup_map`):
   - a loadable `--map` starts gameplay (`--main-menu` turns it into a menu background instead);
   - no `--map`, or one that fails to load, loads the chapter-1 background map (`background01`)
@@ -165,7 +165,7 @@ Architecture:
   `optionssub*.res` files (`hl2/resource/`), OK/Cancel/Apply, sub-dialogs (brightness, key-defaults
   confirmation, credits), key capture, and the placeholder log. Input is a plain `Input` snapshot,
   so the dialog is unit-testable without Bevy.
-- `hl2-ui::gameui::widgets`: Painter widgets (check box, radio, slider, text entry, combo with drop
+- `source_ui::widgets`: Painter widgets (check box, radio, slider, text entry, combo with drop
   list, menu list with scroll bar, divider, URL label, tab, image) using the scheme colours.
 - Host (`hl2-bevy`): mouse wheel and held-button state, Source key names for capture
   (`MOUSE1`-`MOUSE5`, `MWHEELUP`/`MWHEELDOWN`), display modes from `Monitor::video_modes`
@@ -333,7 +333,7 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
   release; first repeat after `HOLD_REPEAT_DELAY` 400 ms, then every `HOLD_REPEAT_INTERVAL`
   50 ms, at most once a frame, never without `Input::time`), drives both the scroll bar arrows
   and the keyboard. Keyboard repeat is applied once, at the top of `Console::input`
-  (`console::KeyRepeat` over `Input::held_keys`), so every layer that reads `Input::keys` repeats
+  (`source_ui::input::KeyRepeat` over `Input::held_keys`), so every layer that reads `Input::keys` repeats
   without code of its own: console editing, cursor, completion and history keys, main and pause
   menu Up/Down, the Options key list, open popup lists and Options text fields (Backspace). Like an operating system, the latest pressed key
   repeats; any other press takes over, and a key that acts once stops it. Up, Down, Left, Right,
@@ -616,7 +616,7 @@ Design (`crates/hl2-bevy/src/video.rs`):
   mouse, audio, FOV or gamma settings never resizes, re-centres or re-modes it, so a manually
   resized window keeps its size. Such an OK/Apply in windowed mode stores the resolution in `GameFrame` and starts a
   bounded resize (`resize_window`, up to 120 frames). The window's client area is set to the
-  resolution in physical pixels (`hl2_ui::viewport::windowed_size` against the monitor's pixel
+  resolution in physical pixels (`source_ui::viewport::windowed_size` against the monitor's pixel
   size), so the frame is shown 1:1 without scaling, also on high-DPI displays: on a 2x Retina panel
   a 2560x1600 window is 1280x800 points. (Updated 2026-10-12 at the owner's request; it was first
   sized in logical points, which upscaled the frame 2x and made every resolution above the
@@ -887,7 +887,7 @@ kept and reverts on its own (Cancel does the same).
   at least as wide as 5:4. `proportional::design_height(canvas)` is the screen height limited to
   `width / narrowest_design_aspect` (5:4, `crates/hl2-ui/assets/ui/tuning.json`); on 5:4 to
   ultrawide screens it is the height, so nothing changes there. Dialogs
-  (`Painter::scale_for_canvas`), the main menu (`MenuLayout::geometry`), the console window,
+  (`proportional::dialog_scale`), the main menu (`MenuLayout::geometry`), the console window,
   HUD fonts and panels and the caption panel scale by it. HUD panels and the caption panel keep
   their vertical place by the full height (`proportional::y_scale`), so bottom panels stay at the
   bottom while their size follows the width. Never scale UI by the raw canvas height.
@@ -1088,9 +1088,9 @@ Options > Video > Aspect Ratio adds **Fit Display** (`AspectRatio::Flexible`, pe
   - `cubic_bezier_ease(t)` evaluates smooth 1D cubic Bézier ease with zero slope at endpoints ($3t^2 - 2t^3$), preventing slope kinks where tunings leave the untouched 5:4..=16:9 plateau or saturate at 9:16 / 32:9.
   - `aspect_factors(aspect) -> (portrait, ultrawide)` smoothly blends tuning values between known aspect ratios; drives both `world_fov_offset(aspect)` and `viewmodel_framing(weapon, aspect)`.
 - **Viewport and resolution:**
-  - `viewport::flexible_frame_resolution(configured, physical_window_size)`: the frame adopts the window's aspect ratio (clamped to 9:16..=32:9). The configured resolution sets detail (the short side: 1080 lines in landscape, 1080 columns in portrait), rendering 1:1 on smaller windows and upscaling cleanly on high-DPI/larger displays.
+  - `flexible_frame::flexible_frame_resolution(configured, physical_window_size)`: the frame adopts the window's aspect ratio (clamped to 9:16..=32:9). The configured resolution sets detail (the short side: 1080 lines in landscape, 1080 columns in portrait), rendering 1:1 on smaller windows and upscaling cleanly on high-DPI/larger displays.
   - `ViewportBounds::compute_with_mode(..., flexible)` / `VideoViewport::compute_with_mode(..., flexible)`: fills 100% of the active window/display without letterbox or pillarbox bars when within 9:16..=32:9; letterboxes below 9:16 and pillarboxes above 32:9.
-  - In windowed mode, `viewport::flexible_windowed_size(resolution, bounds)` limits each dimension independently to workspace bounds (`DesktopArea::client_room` on macOS, available screen on Windows/Linux) without forcing uniform aspect scaling, only narrowing/shortening if exceeding 9:16..=32:9. Live window resizes adapt `GameFrame::resolution` dynamically on presented frames.
+  - In windowed mode, `flexible_frame::flexible_windowed_size(resolution, bounds)` limits each dimension independently to workspace bounds (`DesktopArea::client_room` on macOS, available screen on Windows/Linux) without forcing uniform aspect scaling, only narrowing/shortening if exceeding 9:16..=32:9. Live window resizes adapt `GameFrame::resolution` dynamically on presented frames.
   - While Fit Display is selected, the **Resolution** dropdown is disabled (`settings::enabled` returns false when `draft.aspect == AspectRatio::Flexible`, which also automatically disables its associated label `ResolutionLabel`). The combo displays the active content resolution in physical pixels without letterbox or pillarbox black stripes (`"{w} x {h}"`, e.g. `"1920 x 1080"`, via `current.without_stripes_for_flexible()` clamped to 9:16..=32:9). Selecting from it is a no-op; switching back to any fixed aspect ratio re-enables the control and restores the selectable resolution choices for that aspect ratio.
   - Applying Fit Display in Options prompts with `VideoConfirm` to keep or revert the mode.
   - **Ordering and resolution handoff (2026-10-22):** Fit Display is the first Aspect Ratio
@@ -1188,7 +1188,7 @@ White, `RichText.*`) and Source's own console variables. Code:
 
 Evidence: SDK `vgui_controls/Frame.cpp` (`CaptionGripPanel`, `GripPanel`, `GetCaptionHeight` 23,
 `GetCornerSize` 8, `GetBottomRightSize` 18, clip-to-parent snapping). Code:
-`hl2-ui::gameui::placement` (pure, unit-tested), used by the Options dialog, its sub-dialogs and
+`source_ui::placement` (pure, unit-tested), used by the Options dialog, its sub-dialogs and
 confirmation box, the console dialog and the quit / main-menu box; cursor shapes set by
 `hl2-bevy::console_host::apply_cursor_hint`.
 
@@ -1261,7 +1261,7 @@ Owner report: the menu could not be used while the Options dialog was open, unli
 game; the developer console must not block the menu or Options either; dialogs show their focus
 as the original does.
 
-- **Model.** `gameui::windows::Windows` holds the open windows (Options, the console) bottom to
+- **Model.** `source_ui::windows::Windows` holds the open windows (Options, the console) bottom to
   top over a base (main menu, pause menu or gameplay) and which layer has the keyboard focus. It
   is a pure model (no drawing, no `Console`), unit-tested on its own.
 - **Pointer.** Each frame `Windows::route` picks the layer that gets the pointer: the layer a held
@@ -1292,7 +1292,7 @@ as the original does.
   `Frame.BgColor` (the stacked-dialog rule; the focused window is always the top one). Known
   case: with the menu focused, an unfocused console over an unfocused Options shows Options
   through it.
-- **Tests.** `gameui::windows` (topmost hit, raise and focus, press ownership across layers,
+- **Tests.** `source_ui::windows` (topmost hit, raise and focus, press ownership across layers,
   modal layer, gameplay base, focus after closing, a closed window's press, pointerless input,
   linear fade); `console` (menu beside Options works; a press on Options released over the menu,
   a menu press dragged onto Options, a caption drag across the menu at scale 1 and 2, a sub-dialog
@@ -1326,7 +1326,7 @@ and confirmation dialogs):
     `Frame.OutOfFocusBgColor` ratio `62 / 212`).
   - Closing the top-most focused dialog restores focus step by step to the parent dialog, and finally
     back to the main menu when all dialogs are dismissed.
-- **Shared layer management:** managed centrally via `gameui::windows::Windows` (`Window::SubDialog`,
+- **Shared layer management:** managed centrally via `source_ui::windows::Windows` (`Window::SubDialog`,
   `Window::Confirmation`, `Windows::base_focus_amount`) and synchronized through `Console::sync_dialog_windows`,
   eliminating per-dialog focus checks.
 
@@ -1341,7 +1341,7 @@ a unified fade and focus-transition model:
 - **Canvas alpha multiplier:** implemented `Canvas::set_alpha_multiplier` and `Canvas::alpha_multiplier`
   mirroring Source SDK `surface()->DrawSetAlphaMultiplier()`. Modulates all primitives (`quad`, `polygon`,
   `rectangle`, text glyphs, borders, buttons, drop-downs) without per-widget drawing modifications.
-- **Window state and closing fade-out:** `gameui::windows::WindowRecord` tracks both `focus_fade` (0..1)
+- **Window state and closing fade-out:** `source_ui::windows::WindowRecord` tracks both `focus_fade` (0..1)
   and `alpha_fade` (0..1), with a `closing: bool` flag. When a dialog closes (`close`):
   - It is marked `closing = true` and fades visibility alpha from current down to 0.0 over 0.3 s.
   - Focus hands off immediately to the underlying active window or base menu; closing windows are
@@ -1351,7 +1351,7 @@ a unified fade and focus-transition model:
 - **Unified composite alpha:** each surface computes $A_{\text{comp}} = A_{\text{vis}} \times (u + (1 - u) \times F)$
   where $u = 0.3$, $A_{\text{vis}} \in [0, 1]$ is visibility alpha (opening/closing), and $F \in [0, 1]$
   is focus amount (focused vs translucent).
-- **Verification:** unit-tested in `gameui::windows::tests::shared_fade_state_and_interpolation_logic_with_deterministic_timesteps`
+- **Verification:** unit-tested in `source_ui::windows::tests::shared_fade_state_and_interpolation_logic_with_deterministic_timesteps`
   with deterministic timestep updates. Visual smoothness is documented as unverified, needs manual check.
 
 ## 17. Context-aware background dim overlay (menu background vs. mid-gameplay) (2026-10-21)
@@ -1417,7 +1417,7 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
   - On Escape release, `Console::escape_released` dismisses the confirmation dialog. Active placement drags on confirmation dialogs are cancelled immediately on Escape press without triggering held Escape.
 - **Verification:**
   - Added unit tests:
-    - `crates/hl2-ui/src/gameui/menu.rs`: `message_box_escape_held_arms_cancel_when_no_close_button` verifies `MessageBox::draw` renders depressed Cancel borders when `escape_held` is true on boxes without close button, and leaves Cancel un-depressed on boxes with close button.
+    - `crates/source-ui/src/message_box.rs`: `message_box_escape_held_arms_cancel_when_no_close_button` verifies `MessageBox::draw` renders depressed Cancel borders when `escape_held` is true on boxes without close button, and leaves Cancel un-depressed on boxes with close button.
     - `crates/hl2-ui/src/console.rs`:
       - `subdialog_buttons_can_be_activated_by_mouse_click`: verifies mouse click activation of OK and Cancel in `Sub::VideoAdvanced`, title bar close and bottom Close in `Sub::AudioCredits`, and OK in `Sub::Gamma`.
       - `keyboard_use_defaults_confirmation_works_with_click_and_keys`: verifies opening Use Defaults confirmation box, retaining it across frames, and activating OK restores default keybindings.
@@ -1432,9 +1432,9 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
   - Removed 100% opacity logic for stacked dialogs (`Theme::stacked()` no longer overrides `frame_bg.a = 1.0`). All dialogs out of focus or stacked over another dialog preserve their authentic translucent scheme background (`Frame.BgColor` / `Frame.OutOfFocusBgColor` from `sourcescheme.res`).
   - In `Console::window_theme`, `OptionsDialog::draw_with_occluders`, and `Console::draw`, dialogs use `Theme::focus_faded` directly without forced 100% alpha.
 - **Underlying content occlusion clipping:**
-  - In `crates/hl2-ui/src/canvas.rs`, added an occluder stack (`push_occluder`, `pop_occluder`, `clear_occluders`) to `Canvas`.
+  - In `crates/source-ui/src/canvas.rs`, added an occluder stack (`push_occluder`, `pop_occluder`, `clear_occluders`) to `Canvas`.
   - When occluders are active, `Canvas::quad` clips destination rectangles and proportionally interpolates source texture coordinates using 2D axis-aligned box subtraction (`clip_quad_against_occluder`). Portions of quads falling inside any active occluder rectangle are removed, while portions outside are preserved. Polygons with all vertices inside an active occluder are dropped. `Canvas::drain` clears active occluders between frames.
-  - In `Painter` (`crates/hl2-ui/src/gameui/widgets.rs`), split `frame_spec` into `frame_background(&spec)` (which renders the rounded or rectangular frame fill and outer border) and `frame_foreground(&spec, close)` (which renders the title text and close button).
+  - In `Painter` (`crates/source-ui/src/widgets.rs`), split `frame_spec` into `frame_background(&spec)` (which renders the rounded or rectangular frame fill and outer border) and `frame_foreground(&spec, close)` (which renders the title text and close button).
   - In `OptionsDialog::draw_with_occluders`, the Options frame background is drawn first unclipped via `p.frame_background(&spec)`. Active occluders for any overlying subdialog (`sub_bounds`), confirmation box (`confirm_bounds`), or external window are then pushed before drawing the foreground title, close button, tabs, page controls, and bottom buttons.
   - Subdialogs similarly draw their frame background unclipped via `sp.frame_background(&sub_spec)`, then push occluders for any overlying confirmation box (`confirm_bounds`) before drawing subdialog content.
   - In `Console::draw`, `draw_console_with_occluders` similarly draws the console frame background unclipped via `painter.frame_background(&spec)`, then pushes occluders for any window or confirmation box above it before drawing console history, entry, submit button, and completion popup.
@@ -1444,7 +1444,7 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
   - Pressing tilde (`KeyCode::Backquote`), activating `Action::ToggleConsole`, or executing `toggleconsole` while in Options > Video > Advanced, Gamma, Credits, Keyboard Advanced, or a confirmation dialog does not open or toggle the console, matching retail Half-Life 2 behavior.
 - **Verification:**
   - Added unit tests:
-    - `crates/hl2-ui/src/canvas.rs`: `occluder_clips_quads_and_proportional_texture_coordinates` tests quads outside, quads inside, partial quad splitting with proportional source UVs, and occluder clearing on drain.
+    - `crates/source-ui/src/canvas.rs`: `occluder_clips_quads_and_proportional_texture_coordinates` tests quads outside, quads inside, partial quad splitting with proportional source UVs, and occluder clearing on drain.
     - `crates/hl2-ui/src/gameui/options.rs`: `dialogs_over_the_options_dialog_are_translucent_and_clip_underlying_content` verifies subdialogs and confirmation boxes have frame alpha < 1.0, options frame background is drawn across full bounds unclipped, and underlying options content quads behind the subdialog are clipped outside its bounds.
     - `crates/hl2-ui/src/console.rs`: `console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open` verifies that `Console::toggle()` is blocked when `Sub::VideoAdvanced`, `Command::KeyDefaults` confirmation, or Quit confirmation is open, and unblocked when they are closed.
   - Ran `scripts/checks/validate.sh` (343 hl2-ui unit tests, 93 hl2-bevy tests, strict clippy, rustfmt check) and `scripts/checks/check_windows.sh`.
@@ -1456,7 +1456,7 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
   - Calling `base.theme.focus_faded(1.0, true)` on that theme previously interpolated between `frame_bg_out_of_focus` (62) and `frame_bg` (which had already been overwritten to 62), permanently trapping subdialogs in the out-of-focus dimmed look even though they held keyboard and mouse focus.
   - Furthermore, `Console::sync_dialog_windows` computed `self.options.sub_alpha` and `confirm_alpha` but did not synchronize `sub_theme` or `confirm_theme`.
 - **Reversible focus transitions on `Theme`:**
-  - Added `frame_bg_focused: Color` and `title_text_focused: Color` to `Theme` (`crates/hl2-ui/src/gameui/widgets.rs`), initialized in `Theme::default()` and recorded from `sourcescheme.res` in `Theme::from_scheme()`.
+  - Added `frame_bg_focused: Color` and `title_text_focused: Color` to `Theme` (`crates/source-ui/src/widgets.rs`), initialized in `Theme::default()` and recorded from `sourcescheme.res` in `Theme::from_scheme()`.
   - In `Theme::focus_faded(fade, focused)`, interpolated between `frame_bg_out_of_focus` and `frame_bg_focused` (rather than mutating against current `frame_bg`), restoring `title_text_focused` when `focused` is true. Any theme can now transition to out-of-focus and back to focused idempotently without losing its authentic scheme colors.
 - **Subdialog and confirmation dialog focus appearance:**
   - In `crates/hl2-ui/src/gameui/options.rs`, added `pub sub_theme: Option<Theme>` and `pub confirm_theme: Option<Theme>` to `OptionsDialog`.
@@ -1472,8 +1472,8 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
 
 ## 22. Text input with blinking cursor and parent-child focus hierarchy (2026-10-22)
 
-- **Focus hierarchy and blinking caret models (`hl2-ui::gameui::widgets`):**
-  - Added `InputFocus` (`crates/hl2-ui/src/gameui/widgets.rs`): models child-of-dialog focus relationships via `parent_focused: bool` and `child_focused: bool`. Under VGUI hierarchy rules, `is_active()` returns `true` if and only if both parent dialog and child control are focused. When a parent dialog loses focus (or has an overlying modal dialog), child inputs immediately become inactive.
+- **Focus hierarchy and blinking caret models (`source_ui::widgets`):**
+  - Added `InputFocus` (`crates/source-ui/src/widgets.rs`): models child-of-dialog focus relationships via `parent_focused: bool` and `child_focused: bool`. Under VGUI hierarchy rules, `is_active()` returns `true` if and only if both parent dialog and child control are focused. When a parent dialog loses focus (or has an overlying modal dialog), child inputs immediately become inactive.
   - Added `BlinkingCaret`: models the authentic Source SDK (`vgui_controls/TextEntry.cpp`) caret blink cycle (`rate: f64`, default 2.0 Hz -> 500 ms visible, 500 ms hidden). Evaluates phase toggling via `.is_multiple_of(2)`. Carets are only visible when `focus.is_active()` is `true` and the current periodic phase is on; when out of focus, carets are unconditionally hidden.
   - Added `TextInputModel`: unites `InputFocus`, `BlinkingCaret`, and optional interaction timestamp (`record_interaction` / SDK `ResetCursorBlink`). Distinguishes between `should_draw_focus_edge()` (which stays visible continuously while focused) and `should_draw_caret(time)` (which blinks over time).
   - Updated `Painter::text_entry` to accept `(focused: bool, caret_visible: bool)` and added `Painter::text_entry_model(rect, text, enabled, model, time)`.

@@ -364,7 +364,7 @@ impl Console {
 
     /// The quit / main-menu box's frame (centered, moveable, no close button).
     pub(super) fn quit_frame(&self, quit: &MessageBox) -> placement::Frame {
-        let scale = Painter::scale_for_canvas(self.canvas_size());
+        let scale = crate::proportional::dialog_scale(self.canvas_size());
         let measure = self.painter(Vec2::ZERO, 1.);
         let size = quit.layout(|text| measure.text_width(text, false)).size;
         let canvas = vec2(self.canvas.width(), self.canvas.height());
@@ -396,7 +396,7 @@ impl Console {
 
     /// Canvas origin, scale and layout of the open quit box (centered on the canvas).
     pub(super) fn quit_geometry(&self, quit: &MessageBox) -> (Vec2, f32, MessageBoxLayout) {
-        let scale = Painter::scale_for_canvas(self.canvas_size());
+        let scale = crate::proportional::dialog_scale(self.canvas_size());
         let measure = self.painter(Vec2::ZERO, 1.);
         let layout = quit.layout(|text| measure.text_width(text, false));
         let origin = self.quit_placement.place(&self.quit_frame(quit)).origin;
@@ -496,7 +496,7 @@ impl Console {
             MenuOutcome::ConfirmQuit => {
                 self.reset_menu_interaction();
                 self.quit_placement.reset();
-                self.confirm_box = Some((MessageBox::quit(loc), ConfirmKind::Quit));
+                self.confirm_box = Some((crate::gameui::menu::quit_box(loc), ConfirmKind::Quit));
             }
             // Starting a game closes the windows (Options without applying).
             MenuOutcome::NewGame(map) => {
@@ -510,7 +510,7 @@ impl Console {
                 self.reset_menu_interaction();
                 self.quit_placement.reset();
                 self.confirm_box = Some((
-                    MessageBox::return_to_main_menu(loc),
+                    crate::gameui::menu::return_to_main_menu_box(loc),
                     ConfirmKind::ReturnToMainMenu,
                 ));
             }

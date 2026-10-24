@@ -207,7 +207,7 @@ impl Console {
     pub fn modal_bounds(&self) -> Option<Rect> {
         if let Some(loading) = &self.loading_dialog {
             if !loading.is_background() {
-                let scale = Painter::scale_for_canvas(self.canvas_size());
+                let scale = crate::proportional::dialog_scale(self.canvas_size());
                 let canvas = vec2(self.canvas.width(), self.canvas.height());
                 let (origin, _) =
                     crate::gameui::loading::LoadingDialog::layout_geometry(canvas, scale);

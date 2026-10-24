@@ -974,7 +974,7 @@ fn font_definition(scheme: &source_assets::keyvalues::Entry, name: &str) -> Opti
 /// A registered font file: family names, weight and slant.
 struct FontFile {
     bytes: Vec<u8>,
-    info: crate::gameui::scheme_fonts::FontFileInfo,
+    info: source_ui::scheme_fonts::FontFileInfo,
     italic: bool,
 }
 
@@ -1004,9 +1004,9 @@ pub struct CaptionHud {
     /// `Panel.BgColor` of the scheme; its alpha is replaced by `BgAlpha`.
     background: [f32; 4],
     /// Faces in [`Style`] order with their proportional tall (480-line units).
-    fonts: Vec<(Style, crate::hud::FontFace, f32)>,
-    pub state: crate::canvas::MutexCell<CloseCaption>,
-    clock: crate::canvas::MutexCell<Option<f64>>,
+    fonts: Vec<(Style, source_ui::font::FontFace, f32)>,
+    pub state: source_ui::canvas::MutexCell<CloseCaption>,
+    clock: source_ui::canvas::MutexCell<Option<f64>>,
     pub errors: Vec<String>,
 }
 
@@ -1017,7 +1017,7 @@ impl CaptionHud {
         vfs: &source_assets::vpk::Vfs,
         scheme: &source_assets::keyvalues::Entry,
         layout: &source_assets::keyvalues::Entry,
-        canvas: crate::canvas::Canvas,
+        canvas: source_ui::canvas::Canvas,
         language: &str,
     ) -> Self {
         let mut errors = Vec::new();
@@ -1027,11 +1027,11 @@ impl CaptionHud {
                 Default::default()
             });
         errors.extend(captions.errors.iter().cloned());
-        let files: Vec<FontFile> = crate::gameui::scheme_fonts::custom_font_files(scheme)
+        let files: Vec<FontFile> = source_ui::scheme_fonts::custom_font_files(scheme)
             .iter()
             .filter_map(|path| vfs.read(path).ok().flatten())
             .filter_map(|bytes| {
-                let info = crate::gameui::scheme_fonts::FontFileInfo::read(&bytes)?;
+                let info = source_ui::scheme_fonts::FontFileInfo::read(&bytes)?;
                 let face = ttf_parser::Face::parse(&bytes, 0).ok()?;
                 let italic = face.is_italic() || face.is_oblique();
                 Some(FontFile {
@@ -1051,7 +1051,7 @@ impl CaptionHud {
                 errors.push(format!("no registered font file for {name}"));
                 continue;
             };
-            match crate::hud::FontFace::load(&file.bytes, canvas.clone()) {
+            match source_ui::font::FontFace::load(&file.bytes, canvas.clone()) {
                 Ok(face) => fonts.push((style, face, definition.tall)),
                 Err(error) => errors.push(format!("{name}: {error:#}")),
             }
@@ -1075,8 +1075,8 @@ impl CaptionHud {
                 .unwrap_or_default(),
             background,
             fonts,
-            state: crate::canvas::MutexCell::new(CloseCaption::new()),
-            clock: crate::canvas::MutexCell::new(None),
+            state: source_ui::canvas::MutexCell::new(CloseCaption::new()),
+            clock: source_ui::canvas::MutexCell::new(None),
             errors,
         }
     }
@@ -1104,12 +1104,12 @@ impl CaptionHud {
 
     /// Lays out the panel for a canvas `size` in pixels; None while there is nothing to draw
     /// or the fonts are missing.
-    pub fn paint(&self, size: (f32, f32), time: f64) -> Option<(crate::canvas::Rect, Paint)> {
+    pub fn paint(&self, size: (f32, f32), time: f64) -> Option<(source_ui::canvas::Rect, Paint)> {
         let canvas = glam::vec2(size.0, size.1);
         let scale = crate::proportional::scale(canvas);
         let measure = self.measure(scale)?;
         let x = crate::hud::panel_axis(&self.layout.xpos, size.0, scale).unwrap_or(0.);
-        let rect = crate::canvas::Rect::new(
+        let rect = source_ui::canvas::Rect::new(
             x.trunc(),
             (self.layout.ypos * crate::proportional::y_scale(canvas)).trunc(),
             (self.layout.wide * scale).trunc(),
@@ -1135,7 +1135,11 @@ impl CaptionHud {
     }
 
     /// The face drawing `style` at the panel's font height.
-    pub(crate) fn face(&self, style: Style, scale: f32) -> Option<(&crate::hud::FontFace, f32)> {
+    pub(crate) fn face(
+        &self,
+        style: Style,
+        scale: f32,
+    ) -> Option<(&source_ui::font::FontFace, f32)> {
         let measure = self.measure(scale)?;
         Some((measure.face(style), measure.tall))
     }
@@ -1152,12 +1156,12 @@ fn scheme_color(text: &str) -> Option<[f32; 4]> {
 
 /// The loaded caption faces as a [`Measure`].
 struct Fonts<'a> {
-    fonts: &'a [(Style, crate::hud::FontFace, f32)],
+    fonts: &'a [(Style, source_ui::font::FontFace, f32)],
     tall: f32,
 }
 
 impl<'a> Fonts<'a> {
-    fn face(&self, style: Style) -> &'a crate::hud::FontFace {
+    fn face(&self, style: Style) -> &'a source_ui::font::FontFace {
         self.fonts
             .iter()
             .find(|(s, ..)| *s == style)
@@ -1443,7 +1447,7 @@ mod tests {
     fn caption_faces_come_from_registered_files_with_the_requested_slant() {
         let file = |family: &str, weight: u16, italic: bool| FontFile {
             bytes: Vec::new(),
-            info: crate::gameui::scheme_fonts::FontFileInfo {
+            info: source_ui::scheme_fonts::FontFileInfo {
                 families: vec![family.into()],
                 weight,
             },

@@ -1,5 +1,37 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 1: new source-ui crate
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New workspace crate `source-ui` (anyhow, glam, serde, source-assets, fontdue, ttf-parser; windows-sys on Windows): the game-agnostic, Source-aware UI toolkit, as the Source SDK's `vgui_controls` is to every Source game. It depends on no hl2-* crate. Moved verbatim from hl2-ui, with their tests (only paths and visibility change; `pub(crate)` items the app uses became `pub`):
+  - whole files: `canvas`, `native_font` (Windows GDI, now linted by the Windows-target check), `widgets`, `placement`, `windows`, `layout`, `scheme_fonts`, `keys`, the generic part of `viewport` (`ViewportBounds`, pointer and window-size geometry) and the ProggyClean font with its license;
+  - new files from parts of others: `font` (`FontFace`, `TextOutline`, glyph cache and blur, from `hud.rs`, with its outline test), `input` (`Key`, `Input`, `KeyRepeat`, from `console.rs`), `message_box` (`MessageBox`, `MessageBoxLayout`, from `gameui/menu.rs`, with four of its tests), `localize` (the token table, parser, escapes and key-name fallback, with five tests), and `DialogPlacement` into `placement` (from `config.rs`; `Config` stores it as before).
+- The localization engine takes an app's own text through a `Fallback` trait. hl2-ui's `gameui::localize::Localization` is the engine with HL2RS's `InRepoText` (the placeholders, then `FALLBACK_STRINGS`), so every GameUI table, `Localization::default()` included, resolves exactly as before. The fallback-table tests and the hard-coded-string audit stay in hl2-ui.
+- The audit test reads every file it read before plus the source-ui files that received code from them (`input.rs` from `console.rs`, also in the Console title check; `message_box.rs` from `gameui/menu.rs`; `font.rs` from `hud.rs`).
+- Kept in hl2-ui after reading the code (the starting classification put them in the toolkit):
+  - `input.rs`: binding lookup and mouse filtering read `Config` and `MouseSettings` (Source's client `CInput`, not vgui).
+  - `gameui/display.rs`: the Video page's aspect and resolution choices, labelled with `HL2RS_` placeholder tokens and stored in `VideoSettings`.
+  - `gameui/loading.rs`: the loading dialog carries the background-map transition (`BackgroundTransitionState`, menu categories) and the pre-blurred backgrounds; its reusable parts (frame, progress bar) are already toolkit widgets.
+  - `proportional.rs` and `tuning.rs`: the design height limits the scale by HL2RS's narrowest design aspect and the menu grows by its widescreen tuning, both from `assets/ui/tuning.json`; moving them would split that file and change the viewmodel tuner's `tuning.json` snapshot output.
+  - The flexible-frame ("Fit Display") viewport functions use HL2RS's `9:16..=32:9` range from the same file: now `hl2_ui::flexible_frame` (`ViewportBounds::compute_with_mode` became `flexible_frame::compute_with_mode`), with their three tests.
+  - The owned-install scheme-font test reads through hl2-ui's `resources::Reader` (the `hl2_complete` overlay): now in `gameui/resources.rs`'s tests.
+- Small seams where code left hl2-ui: `Painter::scale_for_canvas` applied hl2-ui's design height, so it is `proportional::dialog_scale`; `MessageBox::quit` / `return_to_main_menu` (GameUI tokens) are `menu::quit_box` / `menu::return_to_main_menu_box`; `Windows::new(fade_time, unfocused_alpha)` takes the alpha the console reads from HL2's tuning (tests pass 0.3, the tuning value); the console's developer font is `source_ui::PROGGY_CLEAN` (the same bytes it embedded).
+- hl2-ui and hl2-bevy import moved items from source-ui directly; there are no re-exports. hl2-ui no longer depends on windows-sys.
+- The `Window` ids (Options, Console, SubDialog, Confirmation) are unchanged; step 4 designs the shell.
+- docs/DESIGN.md has the plan of the whole split (citing the SDK's `vgui2/vgui_controls/` and the client HUD files); AGENTS.md, README, CONTRIBUTING, docs/gameui.md and docs/bevy-migration.md name the new paths and the new crate.
+
+**Why:** Owner goal: maintainability. A toolkit that knows nothing about the game (like UIKit and an app, or vgui_controls and GameUI/the client HUD) makes it obvious where UI code lives.
+
+**Tested how:** `cargo tree -p source-ui` lists no hl2-* crate. `scripts/checks/validate.sh` (1,021 tests, strict Clippy, fmt) and the Windows-target check (now also linting source-ui) pass; the workspace lists the same 1,102 tests by name before and after (81 owned-install). Owned-install tests: 79 pass in the workspace run; the two hl2-bevy headless campaign tests time out under parallel load and pass alone, as before. Full packaged replay suite, one game at a time: 93 of 94. Compared with the baseline run (1,439 labelled samples), the differences are the fields the checks already mark as varying between runs (`occluded_blast_targets`, pallet `ray`) and `pallet-gibs-fade` at tick 32: the pallet's kill and its 7 gibs one sample earlier (tick 32 instead of 34; its `hits` is already marked varying). The same build rerun three times on that fixture matched the expected outcomes each time, so the kill tick varies between runs of one build. The repository isolation check passes. Cargo.lock only gains the new package and the edited dependency lists.
+
+**Result:** hl2-ui 24,744 -> 18,879 production lines (tests 16,412 -> 13,532); source-ui 5,952 production and 2,905 test lines; the workspace's production code grows by 87 lines (module docs, imports, the `Fallback` trait and `InRepoText`). Longest functions unchanged. Behaviour is unchanged.
+
+**Still broken or not tested:** The console's editor, completion, output and panel drawing are still in hl2-ui (step 3). `widgets.rs` docs still mention the 20th-anniversary layout's empty `SourceSchemeBase.res` as the reason for its defaults.
+
+**Next:** Step 2: declarative cvars.
+
 ## 2026-10-23 Oversized files split by concern
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

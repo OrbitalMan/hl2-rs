@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 modkit-core.workspace = true
 source-assets.workspace = true
+source-ui.workspace = true
 hl2-ui.workspace = true
 glam.workspace = true
 hl2-simulation = { path = "../hl2-simulation" }

@@ -234,7 +234,7 @@ impl Resolution {
     /// Returns the active resolution without letterbox or pillarbox black stripes when flexible
     /// aspect ratio is enabled (clamped to the supported 9:16..=32:9 range).
     pub fn without_stripes_for_flexible(self) -> Self {
-        let size = crate::viewport::flexible_presented_resolution(glam::UVec2::new(
+        let size = crate::flexible_frame::flexible_presented_resolution(glam::UVec2::new(
             self.width,
             self.height,
         ));

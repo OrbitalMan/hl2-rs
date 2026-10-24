@@ -5,17 +5,11 @@
 //! installed game (see `docs/gameui.md`); hosts only translate input and apply effects.
 pub mod chapters;
 pub mod display;
-pub mod keys;
-pub mod layout;
 pub mod loading;
 pub mod localize;
 pub mod menu;
 pub mod options;
-pub mod placement;
 pub mod recommendation;
 pub mod resources;
-pub mod scheme_fonts;
 pub mod settings;
 pub mod video_confirm;
-pub mod widgets;
-pub mod windows;

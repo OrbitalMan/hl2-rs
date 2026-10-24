@@ -1,10 +1,12 @@
 use super::*;
-use crate::canvas::Canvas;
 use crate::config::{AimAssist, HdrMode};
 use crate::gameui::{
     display::{AspectRatio, Resolution},
-    layout::Layout,
     localize::Localization,
+};
+use source_ui::{
+    canvas::Canvas,
+    layout::Layout,
     widgets::{Fonts, Theme},
 };
 use std::collections::BTreeMap;
@@ -867,7 +869,7 @@ fn combos_select_items_and_aspect_resets_resolution() {
 }
 
 /// Quads of the dialog drawn on its own (no fonts, so no glyph quads).
-fn drawn(h: &Harness) -> Vec<crate::canvas::Quad> {
+fn drawn(h: &Harness) -> Vec<source_ui::canvas::Quad> {
     let painter = Painter {
         canvas: &h.canvas,
         fonts: &h.fonts,
@@ -880,7 +882,7 @@ fn drawn(h: &Harness) -> Vec<crate::canvas::Quad> {
 }
 
 /// Quads of the dialog drawn at a specific timestamp.
-fn drawn_at(h: &Harness, time: f64) -> Vec<crate::canvas::Quad> {
+fn drawn_at(h: &Harness, time: f64) -> Vec<source_ui::canvas::Quad> {
     let painter = Painter {
         canvas: &h.canvas,
         fonts: &h.fonts,
@@ -898,7 +900,7 @@ fn options_slider_text_entry_cursor_blinks_when_focused_and_hides_when_unfocused
     let mut h = Harness::new();
     h.tab(Tab::Mouse);
 
-    let has_caret = |quads: &[crate::canvas::Quad]| {
+    let has_caret = |quads: &[source_ui::canvas::Quad]| {
         quads.iter().any(|q| {
             q.destination.x >= 793.0
                 && q.destination.x <= 841.0
@@ -992,7 +994,7 @@ fn key_list_separates_groups_and_capture_highlights_only_the_key_cell() {
 
     // Selected row: the whole row is orange.
     h.click(page(30., 10. + KEY_HEADER + MENU_ROW * 1.5));
-    let orange = |quads: &[crate::canvas::Quad]| {
+    let orange = |quads: &[source_ui::canvas::Quad]| {
         quads
             .iter()
             .filter(|q| q.color == theme.selection_bg)
@@ -1009,7 +1011,7 @@ fn key_list_separates_groups_and_capture_highlights_only_the_key_cell() {
         .iter()
         .filter(|q| {
             q.color
-                == crate::canvas::Color {
+                == source_ui::canvas::Color {
                     a: theme.selection_bg_dim.a * CAPTURE_ACTION_FADE,
                     ..theme.selection_bg_dim
                 }
@@ -1401,7 +1403,7 @@ fn footer_moves_below_content_it_overlaps_and_the_frame_grows() {
     // The Windows rows (caption 442, buttons 468) already clear the content.
     let mut clear = overlapping.clone();
     for (name, y) in [("Label11", 442.), ("Button1", 468.), ("Button2", 468.)] {
-        clear.get_mut(name).unwrap().y = crate::gameui::layout::Coord::Start(y);
+        clear.get_mut(name).unwrap().y = source_ui::layout::Coord::Start(y);
     }
     let controls: Vec<&Control> = clear.controls.iter().collect();
     assert_eq!(

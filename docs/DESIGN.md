@@ -1,5 +1,72 @@
 # Design
 
+## UI toolkit split: source-ui and Half-Life 2's UI (2026-10-24)
+
+Goal (owner): code that is easy to find and understand. hl2-ui is split into a game-agnostic,
+Source-aware UI toolkit, `source-ui`, and Half-Life 2's own UI, `hl2-ui`, the way the Source SDK
+keeps `vgui_controls` (Source SDK `vgui2/vgui_controls/`: `Button.cpp`, `Frame.cpp`,
+`PropertySheet.cpp`, `Menu.cpp`, `RichText.cpp`, `MessageBox.cpp`, `consoledialog.cpp`, shared by
+every Source game) apart from the game's GameUI module (main menu, Options pages, loading dialog;
+not part of the SDK 2013 release) and the client HUD (Source SDK
+`game/client/hl2/hud_weaponselection.cpp`, `game/client/hud_closecaption.cpp`). The toolkit reads
+Source formats through source-assets (`.res` layouts, KeyValues, schemes, fonts from the game's
+file system), depends on no hl2-* crate and knows no HL2 content or settings: no `Config`,
+`Effect`, weapons, maps, chapters, cvars, console commands, `HL2RS_` tokens or fallback strings.
+hl2-ui keeps its name and depends on source-ui (and, from step 5, on hl2-simulation directly).
+Call sites import from where the code lives; there are no compatibility re-exports. Nothing
+changes behaviour: output, errors, effects, UI and gameplay outcomes stay identical.
+
+Rule: what Source keeps in `vgui_controls`, or what knows nothing about HL2 content or settings,
+belongs to the toolkit.
+
+1. `source-ui` with the clearly generic modules, moved verbatim (only paths and visibility
+   change, tests move with their code): `canvas`, `native_font` (Windows GDI), `font`
+   (`FontFace`, `TextOutline`, from `hud.rs`), `input` (`Key`, `Input`, `KeyRepeat`, from
+   `console.rs`), `widgets`, `placement` (with `DialogPlacement`, from `config.rs`), `windows`,
+   `layout`, `scheme_fonts`, `keys`, `message_box` (from `gameui/menu.rs`), `viewport` (its
+   generic part), `localize` (the token table, parser, escapes and key-name fallback, with a
+   `Fallback` trait through which an app adds its own text) and the ProggyClean font. Kept in
+   hl2-ui after reading the code: `input.rs` (bindings and mouse filtering read `Config` and
+   `MouseSettings`; Source's client `CInput`), `gameui/display.rs` (the Video page's choices,
+   with `HL2RS_` placeholder labels, stored in `VideoSettings`), `gameui/loading.rs` (the
+   loading dialog carries the background-map transition and the pre-blurred backgrounds),
+   `proportional.rs` and `tuning.rs` (HL2RS's narrow-screen design height and menu growth from
+   `assets/ui/tuning.json`), and the flexible-frame ("Fit Display") viewport functions, which
+   use HL2RS's `9:16..=32:9` range from the same file (`hl2_ui::flexible_frame`). So
+   `Painter::scale_for_canvas`, which applied that design height, is hl2-ui's
+   `proportional::dialog_scale`; the quit and return-to-menu boxes are `menu::quit_box` /
+   `menu::return_to_main_menu_box` over the toolkit's `MessageBox`; `Windows::new` takes the
+   unfocused alpha from the app; hl2-ui's `gameui::localize::Localization` is the toolkit engine
+   with HL2RS's `InRepoText` (the placeholders, then `FALLBACK_STRINGS`). The `Window` ids
+   (Options, Console, SubDialog, Confirmation) stay as they are until step 4.
+2. Declarative cvars in hl2-ui `console/commands/`: a golden test of every cvar (query, valid
+   set, invalid value, too many arguments: logged lines, error, `Effect`) committed first, then
+   each cvar described once (value function and setter) with one shared function that prints
+   `"name" = "value"`, saves, echoes and returns `ApplyConfig`, keeping the special cases exact.
+3. A generic console framework in source-ui: line editor, history, completion, output buffer,
+   panel drawing and a command registry the app fills in, with handlers over an app-provided
+   context. HL2's command table, handlers and completion sources (maps, entity targets and
+   inputs) stay in hl2-ui and register into it.
+4. `Console` (63 fields, 121 methods) split along the toolkit/app line: the source-ui shell
+   (window stack, focus, Escape, pointer and keyboard routing, modal occlusion, the developer
+   console panel) and hl2-ui's GameUI (main and pause menus, backgrounds and chapters, the quit
+   box, the Options lifecycle, loading, commands, `Config`), each owning the fields it uses. Its
+   own design section comes before the code.
+5. hl2-shared folds back into hl2-simulation (weapons, selection, damage and `VIEWMODEL_FOV`
+   return to their original modules; `InventoryView`, `Inventory`'s delegating methods and the
+   HUD tests' copy of the inventory go); hl2-ui depends on hl2-simulation, source-ui still does
+   not.
+6. Visibility and imports narrowed: functions used only in their own file become private
+   (checked by the compiler), glob imports become explicit.
+7. `AiRuntime::think` (1,225 lines) split into its phases, one commit per phase, if its local
+   state allows it.
+
+Validation per step: `scripts/checks/validate.sh`, the Windows-target check (it also lints
+source-ui), the packaged console and UI replays (steps 2, 3 and 6) or the full replay suite
+(steps 1, 4, 5 and 7) compared with the recorded baseline (only fields the suite marks unstable
+may differ), the repository isolation check, the owned-install tests after steps 1, 4 and 5, and
+the size change of each step in MODLOG.
+
 ## Architecture review: structure without behaviour change (2026-10-23)
 
 Code review findings, worked through in order, one reviewable commit each. None changes console
@@ -233,19 +300,19 @@ The bootstrap window runs in a short-lived helper process so the gameplay proces
 
 Reconstruct HL2 in Rust using owned content. No host-game transport or Valve DLL dependency. Native analysis/databases stay private; public source contains original implementation and permitted third-party resources.
 
-Owned VPK/loose/map content -> source-assets bounded decoders -> modkit-core contracts/player/pose math -> hl2-simulation gameplay/choreography/Rapier -> Bevy or retained presentation. hl2-ui records CPU draw commands for both hosts; it shares player data with the simulation through hl2-shared (weapons, selection, damage/fade messages, `InventoryView`) and does not depend on hl2-simulation. Setup or asynchronous transitions load resources; frame systems consume prepared data.
+Owned VPK/loose/map content -> source-assets bounded decoders -> modkit-core contracts/player/pose math -> hl2-simulation gameplay/choreography/Rapier -> Bevy or retained presentation. source-ui is the game-agnostic UI toolkit (CPU canvas, fonts, widgets, dialog frames, window focus, `.res` layouts, localization engine; see the toolkit split above). hl2-ui, Half-Life 2's UI over it, records CPU draw commands for both hosts; it shares player data with the simulation through hl2-shared (weapons, selection, damage/fade messages, `InventoryView`) and does not depend on hl2-simulation. Setup or asynchronous transitions load resources; frame systems consume prepared data.
 
 AGENTS.md records fixed-step order and renderer invariants. Bevy uses custom materials/lightmaps, separate sky/world/viewmodel/HUD cameras, GPU skinning/current bounds and player/monitor PVS/frustum rejection. Identical material/lightmap pairs share handles. Spatial splitting remains off by default. Replacing Rapier is a separate behavior migration.
 
 ## UI, render-frame input, and movement boundary (2026-10-09)
 
-The portable `hl2-ui` crate owns UI-facing policy and data: canvas geometry, viewport fitting and pointer translation, binding names/defaults, text/menu input interpretation, and the CPU draw-command interface. A host adapts its native events and window/camera API at the edge only; it does not duplicate viewport math or UI-state policy. Bevy input is split by consumer: `ui.rs` handles menu/console focus, pointer/text adaptation, cursor capture, and UI effects; `input.rs` converts the captured keyboard/mouse frame into gameplay actions and a character movement intent; `video.rs` applies `hl2-ui` viewport bounds to Bevy cameras.
+The portable UI crates own UI-facing policy and data: `source-ui` the canvas geometry, viewport fitting and pointer translation and the CPU draw-command interface, `hl2-ui` binding names/defaults and text/menu input interpretation. A host adapts its native events and window/camera API at the edge only; it does not duplicate viewport math or UI-state policy. Bevy input is split by consumer: `ui.rs` handles menu/console focus, pointer/text adaptation, cursor capture, and UI effects; `input.rs` converts the captured keyboard/mouse frame into gameplay actions and a character movement intent; `video.rs` applies the toolkit's viewport bounds to Bevy cameras.
 
 `movement.rs` owns only character state advancement: the Source player/physics controller, walking/flying, eye origin, angles and fixed-tick movement outcome. Script replay, report sampling, gameplay sequencing, console effects, and Bevy camera presentation are hosted in their respective runtime/input/UI/camera modules. Preserve the existing 15 ms order: UI transition/focus first, input sampling second, then scene/weapons/entity refresh/NPCs/physics/player; a UI transition consumes held attacks and jump before character movement. Validate with the existing UI/menu and movement tests plus a scripted packaged console run. This is a structural move only; it must not change binding defaults, cursor/letterbox hit testing, paused-input semantics, or fixed-step behavior.
 
 ## GameUI: startup flow, main menu, options (2026-10-11)
 
-Bounded plan and architecture: [gameui.md](gameui.md). `hl2-ui::gameui` owns resource-driven menu/options models (installed `GameMenu.res`, `OptionsSub*.res`, localization with key-name fallback, `kb_act.lst`) and draws on the existing CPU canvas; `hl2-bevy` only adapts input, display modes (`Monitor::video_modes`) and applies `Config` effects. Without a valid `--map` the host starts in the main menu over the chapter-1 background map. Validation: unit tests per model/parser plus headless Bevy system tests and a packaged capture.
+Bounded plan and architecture: [gameui.md](gameui.md). `hl2-ui::gameui` owns resource-driven menu/options models (installed `GameMenu.res`, `OptionsSub*.res`) over the toolkit's `.res` layouts, localization with key-name fallback and `kb_act.lst` parsing (`source-ui`), and draws on the toolkit's CPU canvas; `hl2-bevy` only adapts input, display modes (`Monitor::video_modes`) and applies `Config` effects. Without a valid `--map` the host starts in the main menu over the chapter-1 background map. Validation: unit tests per model/parser plus headless Bevy system tests and a packaged capture.
 
 ## Campaign NPC scene research (owner request, 2026-10-16)
 

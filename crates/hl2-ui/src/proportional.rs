@@ -6,6 +6,7 @@
 
 use crate::gameui::menu::BASE_SCREEN_HEIGHT;
 use glam::Vec2;
+use source_ui::widgets::Painter;
 
 /// The height the UI scales by: the screen height, limited to the width divided by the
 /// narrowest design aspect ([`crate::tuning::narrowest_design_aspect`]).
@@ -23,6 +24,12 @@ pub fn widescreen_menu_scale(canvas: Vec2) -> f32 {
     let aspect = canvas.x / canvas.y.max(1.);
     (aspect / crate::tuning::widest_design_aspect())
         .clamp(1., crate::tuning::widescreen_menu_scale_max())
+}
+
+/// The dialog scale for a canvas: [`Painter::scale_for`] its [`design_height`], so dialogs fit
+/// narrow (square, portrait) screens.
+pub fn dialog_scale(canvas: Vec2) -> f32 {
+    Painter::scale_for(design_height(canvas))
 }
 
 /// Pixels per 480-line design unit for sizes and horizontal offsets.

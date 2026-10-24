@@ -1,6 +1,5 @@
 //! The PC HL2 HUD layout is read from the owned game's scheme and resource files.
 //! Bucket positioning and visibility follow CHudWeaponSelection, rather than a new UI design.
-use crate::canvas::*;
 use crate::gameui::localize::Localization;
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
@@ -13,10 +12,8 @@ use source_assets::{
     keyvalues::{self, Entry},
     vpk::Vfs,
 };
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc,
-};
+use source_ui::{canvas::*, font::FontFace};
+use std::collections::{BTreeMap, HashSet};
 
 fn find<'a>(entries: &'a [Entry], name: &str) -> Option<&'a Entry> {
     entries.iter().find(|e| e.key.eq_ignore_ascii_case(name))
@@ -51,350 +48,6 @@ fn alpha(mut color: Color, amount: f32) -> Color {
 fn uses_secondary_ammo(weapon: &Weapon) -> bool {
     !weapon.secondary_ammo_type.is_empty()
         && !weapon.secondary_ammo_type.eq_ignore_ascii_case("none")
-}
-
-/// Outline style for rendering borders along font glyph contours.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TextOutline {
-    pub color: Color,
-    pub thickness: f32,
-}
-
-impl Default for TextOutline {
-    fn default() -> Self {
-        Self::NONE
-    }
-}
-
-impl TextOutline {
-    pub const NONE: Self = Self {
-        color: Color::new(0., 0., 0., 0.),
-        thickness: 0.,
-    };
-
-    pub const DEFAULT: Self = Self {
-        color: Color::new(0.0, 0.0, 0.0, 0.45),
-        thickness: 1.0,
-    };
-
-    pub const fn new(color: Color, thickness: f32) -> Self {
-        Self { color, thickness }
-    }
-
-    pub fn is_visible(&self) -> bool {
-        self.color.a > 0.0 && self.thickness > 0.0
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct FontFace {
-    canvas: Canvas,
-    font: Arc<fontdue::Font>,
-    glyphs: GlyphCache,
-    cell_height: f32,
-    ascent: f32,
-}
-type GlyphCache = Arc<MutexCell<HashMap<(char, u32, u16, u16), Glyph>>>;
-#[derive(Clone)]
-struct Glyph {
-    texture: Option<Texture2D>,
-    x: f32,
-    y: f32,
-    advance: f32,
-}
-impl FontFace {
-    pub(crate) fn load(bytes: &[u8], canvas: Canvas) -> Result<Self> {
-        let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default())
-            .map_err(anyhow::Error::msg)?;
-        let face = ttf_parser::Face::parse(bytes, 0).context("read HUD font metrics")?;
-        let units = f32::from(face.units_per_em()).max(1.);
-        let (ascent, cell_height) = face.tables().os2.map_or_else(
-            || {
-                let metrics = font.horizontal_line_metrics(1.).unwrap();
-                (metrics.ascent, metrics.ascent - metrics.descent)
-            },
-            |table| {
-                let ascent = f32::from(table.windows_ascender()) / units;
-                let descent = f32::from(table.windows_descender()).abs() / units;
-                (ascent, ascent + descent)
-            },
-        );
-        Ok(Self {
-            canvas,
-            font: Arc::new(font),
-            glyphs: Arc::new(MutexCell::new(HashMap::new())),
-            cell_height: cell_height.max(0.01),
-            ascent,
-        })
-    }
-    fn width(&self, value: &str, size: f32) -> f32 {
-        // Retail CWin32Font uses a positive CreateFontA height: a character cell,
-        // whereas fontdue's size is pixels per EM. Windows OS/2 metrics supply the
-        // conversion; hhea descent differs significantly in the owned HalfLife2 font.
-        let size = size.round().max(1.) / self.cell_height;
-        value
-            .chars()
-            .map(|c| self.font.metrics(c, size).advance_width)
-            .sum()
-    }
-    fn glyph(&self, c: char, size: u16, blur: u16, scanlines: u16) -> Glyph {
-        self.raster(c, f32::from(size) / self.cell_height, blur, scanlines)
-    }
-    fn raster(&self, c: char, em_size: f32, blur: u16, scanlines: u16) -> Glyph {
-        let key = (c, em_size.to_bits(), blur, scanlines);
-        if let Some(glyph) = self.glyphs.borrow().get(&key) {
-            return glyph.clone();
-        }
-        let (metrics, coverage) = self.font.rasterize(c, em_size);
-        let margin = usize::from(blur);
-        let width = metrics.width + margin * 2;
-        let height = metrics.height + margin * 2;
-        let ascent = self.ascent * em_size;
-        let texture = if metrics.width == 0 || metrics.height == 0 {
-            None
-        } else {
-            let mut bitmap = vec![0.; width * height];
-            for y in 0..metrics.height {
-                for x in 0..metrics.width {
-                    bitmap[(y + margin) * width + x + margin] =
-                        f32::from(coverage[y * metrics.width + x]) / 255.;
-                }
-            }
-            if blur > 0 {
-                bitmap = gaussian_blur(&bitmap, width, height, margin);
-            }
-            let rgba = bitmap
-                .iter()
-                .enumerate()
-                .flat_map(|(i, coverage)| {
-                    // The configured scanline pitch is retained. Exact GDI scanline and
-                    // blur rasterization are not claimed equivalent to VGUI's native font engine.
-                    let brightness = if scanlines > 1 && (i / width) % usize::from(scanlines) != 0 {
-                        180
-                    } else {
-                        255
-                    };
-                    [
-                        brightness,
-                        brightness,
-                        brightness,
-                        (coverage.clamp(0., 1.) * 255.).round() as u8,
-                    ]
-                })
-                .collect::<Vec<_>>();
-            let texture = Texture2D::from_rgba8(width as u16, height as u16, &rgba);
-            texture.set_filter(FilterMode::Linear);
-            Some(texture)
-        };
-        let glyph = Glyph {
-            texture,
-            x: metrics.xmin as f32 - f32::from(blur),
-            y: ascent - metrics.ymin as f32 - metrics.height as f32 - f32::from(blur),
-            advance: metrics.advance_width,
-        };
-        self.glyphs.borrow_mut().insert(key, glyph.clone());
-        glyph
-    }
-    fn draw(&self, value: &str, mut x: f32, y: f32, size: f32, effects: (u16, u16), color: Color) {
-        let (blur, scanlines) = effects;
-        let size = size.round().clamp(1., 1024.) as u16;
-        for c in value.chars() {
-            let glyph = self.glyph(c, size, blur.min(64), scanlines);
-            if let Some(texture) = &glyph.texture {
-                draw_texture(&self.canvas, texture, x + glyph.x, y + glyph.y, color);
-            }
-            x += glyph.advance;
-        }
-    }
-    pub(crate) fn face(&self) -> Arc<fontdue::Font> {
-        self.font.clone()
-    }
-    pub(crate) fn advance_em(&self, c: char, em: f32) -> f32 {
-        self.font.metrics(c, em).advance_width
-    }
-    pub(crate) fn width_em(&self, value: &str, em: f32) -> f32 {
-        value
-            .chars()
-            .map(|c| self.font.metrics(c, em).advance_width)
-            .sum()
-    }
-    /// Width of `value` for a font whose character cell is `cell` pixels tall.
-    pub(crate) fn width_cell(&self, value: &str, cell: f32) -> f32 {
-        self.width_em(value, cell / self.cell_height)
-    }
-    /// Draws `value` with an outline/border along the letter edge path with its character cell's
-    /// top-left corner at `top_left`. Glyphs are rasterized at a whole-pixel EM and scaled.
-    pub(crate) fn draw_cell_outlined(
-        &self,
-        value: &str,
-        top_left: Vec2,
-        cell: f32,
-        color: Color,
-        outline: TextOutline,
-    ) {
-        let em = (cell / self.cell_height).max(1.);
-        let raster = em.round().clamp(1., 1024.);
-        self.draw_baseline_outlined(
-            value,
-            top_left + Vec2::new(0., (self.ascent * em).round()),
-            raster,
-            em / raster,
-            color,
-            outline,
-        );
-    }
-    /// Draws `value` with its character cell's top-left corner at `top_left`. Glyphs are
-    /// rasterized at a whole-pixel EM and scaled, so the glyph cache stays bounded.
-    pub(crate) fn draw_cell(&self, value: &str, top_left: Vec2, cell: f32, color: Color) {
-        self.draw_cell_outlined(value, top_left, cell, color, TextOutline::NONE);
-    }
-    /// Draws `value` with an outline/border along the letter edge path.
-    pub(crate) fn draw_baseline_outlined(
-        &self,
-        value: &str,
-        origin: Vec2,
-        em: f32,
-        scale: f32,
-        color: Color,
-        outline: TextOutline,
-    ) {
-        let mut pen = origin;
-        let mut glyphs = Vec::with_capacity(value.len());
-        for c in value.chars() {
-            let glyph = self.raster(c, em, 0, 0);
-            if let Some(texture) = &glyph.texture {
-                let pos = vec2(
-                    pen.x + glyph.x * scale,
-                    pen.y + (glyph.y - self.ascent * em) * scale,
-                );
-                glyphs.push((texture.clone(), pos, texture.size() * scale));
-            }
-            pen.x += glyph.advance * scale;
-        }
-
-        if outline.is_visible() {
-            const OFFSETS: [(f32, f32); 8] = [
-                (-1.0, 0.0),
-                (1.0, 0.0),
-                (0.0, -1.0),
-                (0.0, 1.0),
-                (-1.0, -1.0),
-                (1.0, -1.0),
-                (-1.0, 1.0),
-                (1.0, 1.0),
-            ];
-            for (dx, dy) in OFFSETS {
-                let offset = vec2(dx * outline.thickness, dy * outline.thickness);
-                for (texture, pos, size) in &glyphs {
-                    draw_texture_ex(
-                        &self.canvas,
-                        texture,
-                        pos.x + offset.x,
-                        pos.y + offset.y,
-                        outline.color,
-                        DrawTextureParams {
-                            dest_size: Some(*size),
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-        }
-
-        if color.a > 0.0 {
-            for (texture, pos, size) in &glyphs {
-                draw_texture_ex(
-                    &self.canvas,
-                    texture,
-                    pos.x,
-                    pos.y,
-                    color,
-                    DrawTextureParams {
-                        dest_size: Some(*size),
-                        ..Default::default()
-                    },
-                );
-            }
-        }
-    }
-    pub(crate) fn draw_baseline(
-        &self,
-        value: &str,
-        origin: Vec2,
-        em: f32,
-        scale: f32,
-        color: Color,
-    ) {
-        self.draw_baseline_outlined(value, origin, em, scale, color, TextOutline::NONE);
-    }
-    fn draw_cropped(
-        &self,
-        value: &str,
-        origin: Vec2,
-        size: f32,
-        effects: (u16, u16),
-        color: Color,
-        rows: Vec2,
-    ) {
-        let (blur, scanlines) = effects;
-        let size = size.round().clamp(1., 1024.) as u16;
-        let mut x = origin.x;
-        for c in value.chars() {
-            let glyph = self.glyph(c, size, blur.min(64), scanlines);
-            if let Some(texture) = &glyph.texture {
-                let first = (rows.x - glyph.y).clamp(0., texture.height());
-                let last = (rows.y - glyph.y).clamp(0., texture.height());
-                if last > first {
-                    draw_texture_ex(
-                        &self.canvas,
-                        texture,
-                        x + glyph.x,
-                        origin.y + glyph.y + first,
-                        color,
-                        DrawTextureParams {
-                            source: Some(Rect::new(0., first, texture.width(), last - first)),
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-            x += glyph.advance;
-        }
-    }
-}
-
-fn gaussian_blur(bitmap: &[f32], width: usize, height: usize, radius: usize) -> Vec<f32> {
-    let sigma = (radius as f32 * 0.5).max(0.5);
-    let mut kernel = (-(radius as isize)..=radius as isize)
-        .map(|x| (-(x * x) as f32 / (2. * sigma * sigma)).exp())
-        .collect::<Vec<_>>();
-    let sum: f32 = kernel.iter().sum();
-    for weight in &mut kernel {
-        *weight /= sum;
-    }
-    let mut horizontal = vec![0.; bitmap.len()];
-    let mut result = vec![0.; bitmap.len()];
-    for y in 0..height {
-        for x in 0..width {
-            for (i, weight) in kernel.iter().enumerate() {
-                let sample = x as isize + i as isize - radius as isize;
-                if sample >= 0 && (sample as usize) < width {
-                    horizontal[y * width + x] += bitmap[y * width + sample as usize] * weight;
-                }
-            }
-        }
-    }
-    for y in 0..height {
-        for x in 0..width {
-            for (i, weight) in kernel.iter().enumerate() {
-                let sample = y as isize + i as isize - radius as isize;
-                if sample >= 0 && (sample as usize) < height {
-                    result[y * width + x] += horizontal[sample as usize * width + x] * weight;
-                }
-            }
-        }
-    }
-    result
 }
 
 struct FontRange {
@@ -1548,7 +1201,7 @@ pub struct WeaponHud {
     selected_icons: HudFont,
     crosshairs: HudFont,
     #[cfg(windows)]
-    native_crosshairs: BTreeMap<(char, u16), crate::native_font::Glyph>,
+    native_crosshairs: BTreeMap<(char, u16), source_ui::native_font::Glyph>,
     numbers: HudFont,
     number_glow: HudFont,
     small_numbers: HudFont,
@@ -1762,7 +1415,7 @@ impl WeaponHud {
                     })
                 })
                 .collect();
-            crate::native_font::load(&icon_font, &requests)?
+            source_ui::native_font::load(&icon_font, &requests)?
         };
         let mut corners = Vec::new();
         for number in 1..=4 {
@@ -3336,42 +2989,5 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].target, "128");
         assert!(keyvalues::parse_resource(b"Scheme { x 1").is_err());
-    }
-
-    #[test]
-    fn font_draw_baseline_and_cell_outlined_emits_glyph_edge_contours() {
-        let canvas = Canvas::default();
-        let font_bytes = include_bytes!("../assets/fonts/ProggyClean.ttf");
-        let font = FontFace::load(font_bytes, canvas.clone()).expect("load font");
-
-        // Transparent outline / zero thickness should emit only 1 foreground quad per glyph
-        font.draw_baseline("OK", vec2(10., 20.), 16., 1.0, WHITE);
-        let quads = canvas.drain();
-        assert_eq!(quads.len(), 2, "2 foreground quads for 'OK'");
-        assert!(quads
-            .iter()
-            .all(|q| q.color == WHITE && q.texture.is_some()));
-
-        // Active outline should emit 8 offset outline quads plus 1 foreground quad per glyph
-        let border_color = Color::new(0.0, 0.0, 0.0, 0.45);
-        let outline = TextOutline::new(border_color, 1.0);
-        font.draw_baseline_outlined("OK", vec2(10., 20.), 16., 1.0, WHITE, outline);
-        let quads = canvas.drain();
-        // 2 characters * 8 outline offsets = 16 outline quads, + 2 foreground quads = 18 total quads
-        assert_eq!(quads.len(), 18);
-
-        let outline_quads: Vec<_> = quads.iter().filter(|q| q.color == border_color).collect();
-        let fg_quads: Vec<_> = quads.iter().filter(|q| q.color == WHITE).collect();
-        assert_eq!(outline_quads.len(), 16);
-        assert_eq!(fg_quads.len(), 2);
-
-        // Verify draw_cell_outlined also emits the 8 outline quads + foreground
-        font.draw_cell_outlined("A", vec2(50., 60.), 16., WHITE, outline);
-        let quads = canvas.drain();
-        assert_eq!(quads.len(), 9, "8 outline + 1 fg for 'A'");
-        let outline_count = quads.iter().filter(|q| q.color == border_color).count();
-        let fg_count = quads.iter().filter(|q| q.color == WHITE).count();
-        assert_eq!(outline_count, 8);
-        assert_eq!(fg_count, 1);
     }
 }
