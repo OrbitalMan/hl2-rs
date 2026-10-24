@@ -26,6 +26,9 @@ the current scope is the UI, so entity and NPC work from that review is not part
      unmarked fields are marked as varying.
    - Done when each of the four fixtures gives identical outcomes over ten runs, and every field
      still listed as varying is explained in STATUS.
+   - Closed without a change (owner): the cause is in the physics library (STATUS), and its fix
+     (rapier3d's `enhanced-determinism`, which also forces software math) is not worth its cost
+     for UI work; performance is never traded. The fields keep varying as before.
 2. Tests for the toolkit itself. Five source-ui files have no tests of their own (`shell.rs`,
    `console/panel.rs`, `console/editor.rs`, `console/command.rs`, `input.rs`: 2,143 lines, 65
    public functions); hl2-ui's console tests cover them only through HL2's `Console`.

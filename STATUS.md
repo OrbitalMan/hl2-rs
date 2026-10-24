@@ -5,7 +5,8 @@
 ## Exact and local checks (2026-10-24)
 
 - Plan in docs/DESIGN.md (same title): replays that repeat exactly, then tests for the toolkit itself. The current scope is the UI.
-- Step 1 in progress: why `bevy-pallet-gibs-fade`'s kill tick and `bevy-monitors-kleiner-scene`'s gib removals (and the fields already left out of the comparison) vary between runs of one build.
+- Step 1 closed without a change. Why gameplay replays vary between runs of one build: Rapier 0.26.1's broad phase reports new contact pairs from Parry 0.21.1's default hash map (hashbrown 0.15.5, `foldhash` seeded at random per map), so every physics world solves the same new contacts in its own order. Props made of several convex pieces (d1_trainstation_02 entities 485, 738, 807) already differ after the first tick; the drift later shows as the pallet's kill tick, hits, the forward ray and the Kleiner fixture's gib count. Evidence: two physics worlds built from the same loaded map have bit-identical colliders and the same 48 active contact pairs after one step, in a different order, and three bodies differ (a throwaway test, not committed); ten packaged runs of each of the four fixtures all differed at their first sample. Rapier's determinism guide promises identical results for identical construction order; the hash map's random seed breaks that.
+- The fix tried and reverted: rapier3d's `enhanced-determinism` feature (ordered maps; it also forces software math through simba's `libm_force`). With it two worlds and two processes step bit-identically, and ten packaged runs of each fixture gave identical labelled outcomes (other report fields still differed between some runs, so a second, unidentified source remains). Timings were not shown neutral (one run each: physics within about 5%, `bevy-monitors-kleiner-scene`'s mean step time +35%). Owner decision: not worth it for UI work; performance is never traded.
 
 ## UI toolkit split: source-ui and Half-Life 2's UI (2026-10-24)
 

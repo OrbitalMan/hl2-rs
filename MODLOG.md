@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-24 Exact and local checks, step 1: closed without a change
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** Documentation only (STATUS, DESIGN, this entry). No code or dependency change is kept.
+
+**Why:** Step 1 asked why gameplay replays vary between runs of one build. Found: Rapier 0.26.1's broad phase reports new contact pairs from Parry 0.21.1's default hash map (hashbrown 0.15.5, randomly seeded `foldhash`), so each physics world solves the same new contacts in its own order and multi-piece props drift apart from the first tick. rapier3d's `enhanced-determinism` feature removes that source but also forces software math; the owner judged it not worth it for UI work and never trades performance, so it was reverted.
+
+**Tested how:** Ten packaged runs of each of `bevy-pallet-gibs-fade`, `bevy-monitors-kleiner-scene`, `bevy-pallet-launched-into-wall` and `bevy-pallet-tips-off-plaza-cop`: none identical to the first at its first sample (tick 1). A throwaway test (not committed) built d1_trainstation_02's physics twice from one load: colliders bit-identical, the same 48 active contact pairs after one step in a different order, three bodies different. With the feature: both worlds and two processes bit-identical, ten packaged runs per fixture with identical labelled outcomes (other report fields still differed between some runs); timings one run each, physics within about 5%, the Kleiner fixture's mean step time +35%. A synthetic two-world unit test failed at tick 1 without the feature in 4 of 4 runs and passed with it; it went with the revert.
+
+**Result:** Cause recorded; behaviour unchanged.
+
+**Still broken or not tested:** The fields that vary keep varying (the comparison still leaves out the same ones as before); a second source of run-to-run differences remains unidentified.
+
+**Next:** Step 2: tests for source-ui's own shell, console dialog, command registry, line editor and input frames.
+
 ## 2026-10-24 Plan: exact and local checks
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
