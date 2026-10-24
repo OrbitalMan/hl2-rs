@@ -671,7 +671,7 @@ Antigravity, Gemini 3.8 Flash model family. 10-task follow-up pass underway:
 - **GameUI follow-up pass (Tasks 1-10): All 10 tasks complete and verified.**
 - **Next:** Follow-up milestones in owner's order:
   2. Gamma (`mat_monitorgamma`) in the renderer (medium): stored and edited by the brightness dialog, no visual effect yet.
-  3. HDR None/Bloom/Full switching the render pipeline (large; design note first).
+  3. (done 2026-10-24) HDR None/Bloom/Full: see docs/gameui.md 23a; the other unfinished Options items are listed in docs/gameui.md 23.
   4. Captions/subtitles (large: closed-caption parser, HUD drawing, timing); speaker setup, sound quality and spoken language (stored only; language needs a restart path).
   5. Gamepad page and aim assist (large; new input path).
   6. Placeholders still disabled: Load Game, Achievements, Workshop, Gamepad, Keyboard/Video Advanced; background map frozen and seen from the spawn; music ducking not modeled.

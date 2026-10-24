@@ -2861,7 +2861,7 @@ fn video_options_hdr_control_layout_and_selection() {
     assert_eq!(items[1], "GameUI_hdr_level1");
     assert_eq!(items[2], "GameUI_hdr_level2");
 
-    assert_eq!(Choice::Hdr.selected(&env, &draft), Some(0));
+    assert_eq!(Choice::Hdr.selected(&env, &draft), Some(2));
 
     Choice::Hdr.select(&env, &mut draft, 1);
     assert_eq!(draft.config.video.hdr, HdrMode::Bloom);

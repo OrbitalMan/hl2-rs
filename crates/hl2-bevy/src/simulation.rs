@@ -156,8 +156,8 @@ pub struct Simulation {
     /// Window settings last given to the window: startup values (after command-line overrides)
     /// or the last queued apply. `None` applies the next configuration unconditionally.
     pub applied_window: Option<WindowSettings>,
-    /// Detail settings last applied: model and texture quality.
-    pub applied_detail: Option<(hl2_ui::config::ModelDetail, hl2_ui::config::TextureDetail)>,
+    /// Detail settings last applied: model and texture quality, and whether the frame is HDR.
+    pub applied_detail: Option<hl2_ui::config::LoadDetail>,
     /// Size of the game frame image being rendered, kept by `video::record_frame_size` (reports
     /// show whether a resolution change was carried out).
     pub frame_size: Option<[u32; 2]>,
@@ -463,10 +463,7 @@ impl Simulation {
                         self.applied_window = Some(target);
                         self.pending_video_config = Some(cfg.video.clone());
                     }
-                    let detail = (
-                        cfg.video.advanced.model_detail,
-                        cfg.video.advanced.texture_detail,
-                    );
+                    let detail = cfg.video.load_detail();
                     let detail_changed = self.applied_detail.is_some_and(|prev| prev != detail);
                     self.applied_detail = Some(detail);
                     ui.source.config = *cfg;
@@ -1413,13 +1410,7 @@ mod tests {
             vec![hl2_ui::console::Effect::ApplyConfig(Box::new(cfg.clone()))],
         );
         assert_eq!(ui.map_request, None);
-        assert_eq!(
-            sim.applied_detail,
-            Some((
-                cfg.video.advanced.model_detail,
-                cfg.video.advanced.texture_detail
-            ))
-        );
+        assert_eq!(sim.applied_detail, Some(cfg.video.load_detail()));
 
         // Change model detail -> triggers map reload
         cfg.video.advanced.model_detail = hl2_ui::config::ModelDetail::Low;
@@ -1442,6 +1433,36 @@ mod tests {
         );
         assert_eq!(ui.map_request.as_deref(), Some("d1_trainstation_01"));
         assert!(sim.loading);
+    }
+
+    #[test]
+    fn config_effect_hdr_change_reloads_only_when_the_frame_kind_changes() {
+        use hl2_ui::config::HdrMode;
+        let mut sim = Simulation::new(&World::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
+        let world = World {
+            name: "d1_trainstation_01".into(),
+            ..Default::default()
+        };
+        let mut game = crate::gameplay::Gameplay::synthetic(world);
+        let mut ui = crate::ui_host::Console::new(Default::default());
+        let mut cfg = ui.source.config.clone();
+        let mut apply = |sim: &mut Simulation, cfg: &hl2_ui::config::Config| {
+            sim.console_effects(
+                &mut ui,
+                &mut game,
+                vec![hl2_ui::console::Effect::ApplyConfig(Box::new(cfg.clone()))],
+            );
+            let reloaded = ui.map_request.take().is_some();
+            sim.loading = false;
+            reloaded
+        };
+        assert!(!apply(&mut sim, &cfg), "the first apply only records");
+        cfg.video.hdr = HdrMode::Bloom;
+        assert!(apply(&mut sim, &cfg), "Full to Bloom leaves HDR");
+        cfg.video.hdr = HdrMode::None;
+        assert!(!apply(&mut sim, &cfg), "Bloom and None are both LDR");
+        cfg.video.hdr = HdrMode::Full;
+        assert!(apply(&mut sim, &cfg), "back to HDR");
     }
 
     #[test]

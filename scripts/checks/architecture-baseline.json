@@ -169,7 +169,7 @@
   "fed629d3999b"
  ],
  "files": {
-  "crates/hl2-bevy/src/assets.rs": 1256,
+  "crates/hl2-bevy/src/assets.rs": 1213,
   "crates/hl2-bevy/src/audio.rs": 1298,
   "crates/hl2-bevy/src/effects.rs": 1298,
   "crates/hl2-bevy/src/gameplay.rs": 1671,
@@ -200,7 +200,7 @@
    229
   ],
   "crates/hl2-bevy/src/assets.rs::load_with_progress": [
-   247
+   242
   ],
   "crates/hl2-bevy/src/audio.rs::load": [
    245
@@ -269,7 +269,7 @@
    106
   ],
   "crates/hl2-bevy/src/simulation.rs::console_effects": [
-   140
+   137
   ],
   "crates/hl2-bevy/src/simulation.rs::step": [
    244

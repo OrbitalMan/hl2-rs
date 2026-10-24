@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-24 Options > Video > HDR (`mat_hdr_level`) takes effect
+
+**Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.
+
+**Changed:** `HdrMode` moved to `hl2_ui::hdr` and defaults to Full (the SDK cvar default and what the renderer always did); a saved `"hdr": "none"` from the old default is migrated to Full once (`video.hdr_migrated`). Below Full the load reads the LDR lightmaps/faces/ambient samples/world lights (`Bsp::parse_with`, `lighting::choose_hdr`), the plain `$envmap` cubemaps, the `ldr?` material-var branches and the plain sky faces; the tone map scale is 1 (no auto exposure, no histogram readback) and bloom is 0 at level 0 and scaled by 0.3 at level 1 (`mat_non_hdr_bloom_scalefactor`). Changing between LDR and HDR reloads the active map (`LoadDetail`), Bloom to None does not.
+
+**Why:** Owner request: HDR option implemented end to end. Level meanings come from SDK `viewpostprocess.cpp` (see docs/gameui.md 23a).
+
+**Tested how:** Unit tests (hdr levels and migration, `choose_hdr`, material `hdr?`/`ldr?` branches, reload rule, LDR tone scale), the cvar golden transcript (default query now 2), the local validation (`scripts/checks/validate.sh`). Packaged release captures of `d1_trainstation_02` (1280x720, windowed, 90 frames) with copies of the config at Full, Bloom and None: Full reports 12 histogram readbacks and an auto exposure scale of 1.59; None and Bloom report 0 readbacks and scale 1.0; the None frame is slightly different in brightness and looks plausible.
+
+**Result:** The HDR combo and `mat_hdr_level` change the rendered frame as described above.
+
+**Still broken or not tested:** LDR brightness against retail (no side-by-side), the bloom look at level 1 was not captured separately, Windows.
+
+**Next:** none planned.
+
 ## 2026-10-24 Viewmodel tuning moves from F5/F6 to console commands
 
 **Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.

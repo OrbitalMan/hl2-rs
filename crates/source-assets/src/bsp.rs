@@ -16,6 +16,8 @@ pub struct Bsp {
     pub static_props: Vec<modkit_core::ModelInstance>,
     lightmaps: Vec<modkit_core::Lightmap>,
     face_lighting: Vec<Option<crate::lighting::FaceLight>>,
+    /// Whether the HDR lighting copies are wanted (see [`crate::lighting::choose_hdr`]).
+    hdr: bool,
 }
 
 /// Independent sky eligibility bits in the camera's containing BSP leaf.
@@ -80,6 +82,11 @@ pub fn read_entities(path: &std::path::Path) -> Result<Vec<modkit_core::Entity>>
 
 impl Bsp {
     pub fn parse(data: &[u8]) -> Result<Self> {
+        Self::parse_with(data, true)
+    }
+    /// Parses a map for an HDR (`hdr`) or an LDR frame: the lightmaps, faces, ambient samples and
+    /// world lights come from the matching lump copies.
+    pub fn parse_with(data: &[u8], hdr: bool) -> Result<Self> {
         if bytes(data, 0, 4)? != b"VBSP" {
             bail!("not a Valve BSP");
         }
@@ -97,7 +104,7 @@ impl Bsp {
             lump_versions.push(u32le(data, o + 8)?);
             lumps.push(decode_lump(bytes(data, offset, len)?, i)?);
         }
-        let (lightmaps, face_lighting) = crate::lighting::build(&lumps)?;
+        let (lightmaps, face_lighting) = crate::lighting::build(&lumps, hdr)?;
         Ok(Self {
             lightmaps,
             face_lighting,
@@ -106,6 +113,7 @@ impl Bsp {
             revision: u32le(data, 1032)?,
             lumps,
             lump_versions,
+            hdr,
         })
     }
     pub fn lump(&self, id: usize) -> &[u8] {
@@ -113,7 +121,7 @@ impl Bsp {
     }
     /// Leaf ambient samples, world lights and the leaf tree for model lighting.
     pub fn model_lighting(&self) -> Result<modkit_core::lighting::LightingData> {
-        let mut data = crate::model_lighting::read(&self.lumps, &self.lump_versions)?;
+        let mut data = crate::model_lighting::read(&self.lumps, &self.lump_versions, self.hdr)?;
         data.dynamic_minlight = self.dynamic_minlight();
         Ok(data)
     }
@@ -248,7 +256,7 @@ impl Bsp {
         let model = models.get(model_index).context("BSP missing model")?;
         let first = i32le(model, 40)?;
         let count = i32le(model, 44)?;
-        let use_hdr = crate::lighting::use_hdr(&self.lumps);
+        let use_hdr = crate::lighting::choose_hdr(&self.lumps, self.hdr);
         let faces = records(self.lump(if use_hdr { 58 } else { 7 }), 56)?.collect::<Vec<_>>();
         let lighting = self.lump(if use_hdr { 53 } else { 8 });
         let disps = records(self.lump(26), 176)?.collect::<Vec<_>>();
@@ -771,6 +779,7 @@ mod tests {
             static_props: Vec::new(),
             lightmaps: Vec::new(),
             face_lighting: Vec::new(),
+            hdr: true,
         }
     }
     #[test]

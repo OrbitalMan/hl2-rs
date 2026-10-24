@@ -1,4 +1,5 @@
 //! Read owned Source assets before constructing the Bevy app; no system performs file I/O.
+mod vmt_vars;
 use anyhow::{Context, Result, bail};
 use modkit_core::World;
 use source_assets::{
@@ -14,6 +15,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
+use vmt_vars::{direct_properties, material_properties};
 
 const MAX_TEXTURE_DIMENSION: usize = 2048;
 const MAX_TEXTURE_BYTES: usize = 64 * 1024 * 1024;
@@ -202,6 +204,7 @@ pub fn load_with_progress(
 ) -> Result<LoadedMap> {
     let root_lod = config.video.advanced.model_detail.root_lod();
     let picmip = config.video.advanced.texture_detail.picmip();
+    let hdr = config.video.hdr.is_hdr();
     let map = map.trim_end_matches(".bsp");
     if map.is_empty()
         || map.len() > 128
@@ -227,7 +230,7 @@ pub fn load_with_progress(
     if bytes.len() > 512 * 1024 * 1024 {
         bail!("owned map exceeds 512 MiB read limit");
     }
-    let bsp = Bsp::parse(&bytes).with_context(|| format!("decode {map}.bsp"))?;
+    let bsp = Bsp::parse_with(&bytes, hdr).with_context(|| format!("decode {map}.bsp"))?;
     vfs.mount_pak(bsp.lump(40)).context("mount map pak")?;
     progress.report(0.35, "LoadingProgress_PrecacheWorld");
     let mut world = bsp.world(map).context("decode Source world")?;
@@ -345,7 +348,7 @@ pub fn load_with_progress(
             &mut frame_cache,
             &mut decoded_bytes,
             &mut texture_errors,
-            picmip,
+            (picmip, hdr),
         );
         materials.insert(name, material);
     }
@@ -410,13 +413,7 @@ pub fn load_with_progress(
             .lipsync
             .add_sentence(&wave, sentence, seconds);
     }
-    let sky = match source_assets::sky::load(&vfs, &world.entities, 512) {
-        Ok(sky) => sky,
-        Err(e) => {
-            texture_errors.push(format!("2D sky assets: {e:#}"));
-            None
-        }
-    };
+    let sky = load_sky(&vfs, &world, hdr, &mut texture_errors);
     progress.report(1.0, "LoadingProgress_SignonLocal");
     Ok(LoadedMap {
         game: game.to_owned(),
@@ -470,6 +467,7 @@ pub fn prepare_model_with_config(
 ) -> Result<PreparedModel> {
     let root_lod = config.video.advanced.model_detail.root_lod();
     let picmip = config.video.advanced.texture_detail.picmip();
+    let hdr = config.video.hdr.is_hdr();
     let mut world = World {
         entities: vec![modkit_core::Entity {
             properties: vec![
@@ -515,7 +513,7 @@ pub fn prepare_model_with_config(
             &mut frames,
             &mut decoded,
             &mut errors,
-            picmip,
+            (picmip, hdr),
         );
         materials.insert(name, material);
     }
@@ -569,7 +567,7 @@ fn add_static_decals(world: &mut World, vfs: &Vfs, errors: &mut Vec<String>) {
     world.surfaces.extend(added);
 }
 fn decal_size(vfs: &Vfs, material: &str) -> Result<glam::Vec2> {
-    let definition = definition(vfs, material, 0)?;
+    let definition = definition(vfs, material, 0, true)?;
     let base = definition
         .properties
         .get("$basetexture")
@@ -653,6 +651,28 @@ struct Definition {
     proxies: Vec<Entry>,
 }
 
+/// The 2D sky; an LDR frame (below `mat_hdr_level` 2) keeps only the plain faces.
+fn load_sky(
+    vfs: &Vfs,
+    world: &World,
+    hdr: bool,
+    errors: &mut Vec<String>,
+) -> Option<source_assets::sky::Skybox> {
+    let mut sky = match source_assets::sky::load(vfs, &world.entities, 512) {
+        Ok(sky) => sky?,
+        Err(e) => {
+            errors.push(format!("2D sky assets: {e:#}"));
+            return None;
+        }
+    };
+    if !hdr {
+        for face in &mut sky.faces {
+            face.hdr = None;
+        }
+    }
+    Some(sky)
+}
+
 fn asset_path(name: &str, extension: &str) -> Result<String> {
     if name.is_empty() || name.len() > 1024 {
         bail!("material asset name must contain 1..1024 bytes");
@@ -664,80 +684,11 @@ fn asset_path(name: &str, extension: &str) -> Result<String> {
     Ok(format!("materials/{name}{extension}"))
 }
 
-/// Direct material vars, with retail MaterialSystem key conditionals (`test?$var`, optional
-/// `!`): a key whose test fails is skipped, and a passing one replaces the plain value.
-fn direct_properties(entries: &[Entry]) -> BTreeMap<String, String> {
-    let mut properties = BTreeMap::new();
-    let mut conditional = Vec::new();
-    for entry in entries {
-        let Some(text) = entry.text() else {
-            continue;
-        };
-        let key = entry.key.to_lowercase();
-        match key.split_once('?') {
-            Some((test, name)) if !test.is_empty() => {
-                if material_condition(test) {
-                    conditional.push((name.to_owned(), text.to_owned()));
-                }
-            }
-            _ => {
-                properties.insert(key, text.to_owned());
-            }
-        }
-    }
-    properties.extend(conditional);
-    properties
-}
-
-/// Tests as evaluated on a DX9, sRGB-capable renderer in HDR mode (mat_hdr_level 2, the
-/// Source default and the owner's setting). Unknown tests are false, as in retail (which
-/// also warns).
-fn material_condition(test: &str) -> bool {
-    let (negate, test) = test.strip_prefix('!').map_or((false, test), |t| (true, t));
-    let value = matches!(test, "srgb" | "hdr");
-    value != negate
-}
-
-/// DirectX-level blocks inside a material (`">=dx90_20b" { ... }`, `"<dx90" { ... }`):
-/// whether the block applies on a DX level 95 renderer (SM3 HDR, the owner's native
-/// setting). `dx90_20b` (ps2.0b) sits between levels 90 and 95. Other keys are not
-/// DX-level blocks (None).
-fn dx_level_block(key: &str) -> Option<bool> {
-    const LEVEL: f32 = 95.;
-    let key = key.to_ascii_lowercase();
-    let (op, rest) = ["<=", ">=", "<", ">"]
-        .into_iter()
-        .find_map(|op| key.strip_prefix(op).map(|rest| (op, rest)))
-        .unwrap_or(("=", key.as_str()));
-    let digits = rest.strip_prefix("dx")?;
-    let (number, b20) = digits
-        .strip_suffix("_20b")
-        .map_or((digits, false), |n| (n, true));
-    let level = number.parse::<f32>().ok()? + if b20 { 0.5 } else { 0. };
-    Some(match op {
-        "<=" => LEVEL <= level,
-        ">=" => LEVEL >= level,
-        "<" => LEVEL < level,
-        ">" => LEVEL > level,
-        _ => LEVEL == level,
-    })
-}
-/// Direct material vars plus the DX-level blocks that apply (their vars win).
-fn material_properties(entries: &[Entry]) -> BTreeMap<String, String> {
-    let mut properties = direct_properties(entries);
-    for entry in entries {
-        if matches!(entry.value, Value::Block(_)) && dx_level_block(&entry.key) == Some(true) {
-            properties.extend(direct_properties(entry.children()));
-        }
-    }
-    properties
-}
-
 // Reuse the bounded KeyValues decoder, preserving direct material parameters and
 // Patch insert/replace semantics. DX-level blocks are evaluated for level 95; the authored
 // Eyes_dx8 fallback is selected for EyeRefract; other shader fallbacks/proxies remain
 // unsupported.
-fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
+fn definition(vfs: &Vfs, name: &str, depth: usize, hdr: bool) -> Result<Definition> {
     if depth > 8 {
         bail!("VMT include cycle/depth limit");
     }
@@ -756,8 +707,8 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
     if root.key.eq_ignore_ascii_case("eyerefract")
         && let Some(fallback) = root.get("Eyes_dx8")
     {
-        let mut properties = direct_properties(root.children());
-        properties.extend(direct_properties(fallback.children()));
+        let mut properties = direct_properties(root.children(), hdr);
+        properties.extend(direct_properties(fallback.children(), hdr));
         return Ok(Definition {
             shader: "eyes_dx8".into(),
             proxies: Vec::new(),
@@ -767,7 +718,7 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
     if !root.key.eq_ignore_ascii_case("patch") {
         return Ok(Definition {
             shader: root.key.clone(),
-            properties: material_properties(root.children()),
+            properties: material_properties(root.children(), hdr),
             proxies: root
                 .get("Proxies")
                 .map_or(vec![], |p| p.children().to_vec()),
@@ -777,13 +728,13 @@ fn definition(vfs: &Vfs, name: &str, depth: usize) -> Result<Definition> {
         .get("include")
         .and_then(Entry::text)
         .context("VMT Patch has no include")?;
-    let mut inherited = definition(vfs, include, depth + 1)?;
+    let mut inherited = definition(vfs, include, depth + 1, hdr)?;
     for operation in ["insert", "replace"] {
         if let Some(block) = root.get(operation) {
             if !matches!(block.value, Value::Block(_)) {
                 bail!("VMT Patch {operation} must be a block");
             }
-            for (key, value) in direct_properties(block.children()) {
+            for (key, value) in direct_properties(block.children(), hdr) {
                 if inherited.properties.contains_key(&key) == (operation == "replace") {
                     inherited.properties.insert(key, value);
                 }
@@ -940,7 +891,7 @@ fn load_envmap(
     vfs: &Vfs,
     definition: &Definition,
     decoded_bytes: &mut usize,
-    picmip: i32,
+    (picmip, hdr): (i32, bool),
 ) -> Result<Option<(String, source_assets::vtf::Cube)>> {
     if !definition.shader.eq_ignore_ascii_case("lightmappedgeneric") {
         return Ok(None);
@@ -952,9 +903,15 @@ fn load_envmap(
         return Ok(None);
     }
     let path = asset_path(name, ".vtf")?;
-    let hdr = format!("{}.hdr.vtf", path.trim_end_matches(".vtf"));
-    let (path, data) = match vfs.read(&hdr)? {
-        Some(data) => (hdr, data),
+    let hdr_path = format!("{}.hdr.vtf", path.trim_end_matches(".vtf"));
+    // An LDR frame reads the plain cubemap and keeps the HDR copy only as a fallback.
+    let preferred = if hdr { hdr_path.clone() } else { path.clone() };
+    let (path, data) = match vfs.read(&preferred)? {
+        Some(data) => (preferred, data),
+        None if !hdr => match vfs.read(&hdr_path)? {
+            Some(data) => (hdr_path, data),
+            None => bail!("envmap absent: {path}"),
+        },
         None => {
             let data = vfs
                 .read(&path)?
@@ -984,9 +941,9 @@ fn load_material(
     frame_cache: &mut BTreeMap<String, TextureFrames>,
     decoded_bytes: &mut usize,
     errors: &mut Vec<String>,
-    picmip: i32,
+    (picmip, hdr): (i32, bool),
 ) -> MaterialData {
-    let definition = match definition(vfs, name, 0) {
+    let definition = match definition(vfs, name, 0, hdr) {
         Ok(definition) => definition,
         Err(error) => {
             errors.push(format!("{name}: {error:#}"));
@@ -1146,7 +1103,7 @@ fn load_material(
         Err(error) => errors.push(format!("{name}: selfillum: {error:#}")),
     }
     let envmap = envmap_parameters(&definition, &mut material)
-        .and_then(|()| load_envmap(vfs, &definition, decoded_bytes, picmip));
+        .and_then(|()| load_envmap(vfs, &definition, decoded_bytes, (picmip, hdr)));
     let envmap = envmap.and_then(|cube| {
         let Some(cube) = cube else {
             return Ok(None);
@@ -1257,20 +1214,6 @@ fn cached_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn dx_level_blocks_apply_like_a_dx95_renderer() {
-        assert_eq!(dx_level_block(">=dx90_20b"), Some(true));
-        assert_eq!(dx_level_block("<dx90_20b"), Some(false));
-        assert_eq!(dx_level_block("<dx90"), Some(false));
-        assert_eq!(dx_level_block(">dx90"), Some(true));
-        assert_eq!(dx_level_block("dx95"), Some(true));
-        assert_eq!(dx_level_block("Proxies"), None);
-        // combine_soldier/combinesoldiersheet.vmt: the base texture lives only there.
-        let text = "\"VertexLitGeneric\" { \"$model\" 1 \">=dx90_20b\" { \"$baseTexture\" \"a\" } \"<dx90_20b\" { \"$baseTexture\" \"b\" } }";
-        let entries = keyvalues::parse(text).unwrap();
-        let p = material_properties(entries[0].children());
-        assert_eq!(p.get("$basetexture").map(String::as_str), Some("a"));
-    }
 
     #[test]
     fn self_illum_needs_a_translucent_base() {
@@ -1334,21 +1277,6 @@ mod tests {
             ([1.; 3], [0.5; 3])
         );
         assert!(envmap_parameters(&definition(&[("$envmaptint", "[1 2]")]), &mut m).is_err());
-    }
-
-    #[test]
-    fn conditional_material_vars_follow_retail_tests() {
-        let entries = keyvalues::parse(
-            r#""srgb?$color2" "[2.5 2.5 2.5]" "$color2" "[1 1 1]" "hdr?$alpha" "0.5"
-            "!hdr?$nocull" "1" "ldr?$additive" "1" "360?$translucent" "1" "dx9?$x" "1""#,
-        )
-        .unwrap();
-        let p = direct_properties(&entries);
-        assert_eq!(p["$color2"], "[2.5 2.5 2.5]");
-        assert_eq!(p["$alpha"], "0.5");
-        for absent in ["$nocull", "$additive", "$translucent", "$x", "srgb?$color2"] {
-            assert!(!p.contains_key(absent), "{absent}");
-        }
     }
 
     #[test]
@@ -1558,7 +1486,7 @@ mod tests {
         .unwrap();
         let definition = Definition {
             shader: entries[0].key.clone(),
-            properties: direct_properties(entries[0].children()),
+            properties: direct_properties(entries[0].children(), true),
             proxies: Vec::new(),
         };
         let material = metadata(&definition).unwrap();

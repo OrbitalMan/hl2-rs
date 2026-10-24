@@ -376,17 +376,17 @@ mat_forceaniso
     value Some("1")
 mat_hdr_level
   query: no effect
-    | "mat_hdr_level" = "0"
+    | "mat_hdr_level" = "2"
+    value Some("2")
+  0: ApplyConfig [video.hdr: "full" -> "none"]
+    | mat_hdr_level 0
     value Some("0")
-  1: ApplyConfig [video.hdr: "none" -> "bloom"]
-    | mat_hdr_level 1
-    value Some("1")
   x: error "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)"
-    value Some("0")
+    value Some("2")
   9: error "mat_hdr_level must be 0 (None), 1 (Bloom) or 2 (Full)"
-    value Some("0")
+    value Some("2")
   1 1: error "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)"
-    value Some("0")
+    value Some("2")
 mat_motion_blur_enabled
   query: no effect
     | "mat_motion_blur_enabled" = "1"

@@ -10,35 +10,7 @@ use source_ui::placement::DialogPlacement;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// `mat_hdr_level`: 0 None, 1 Bloom, 2 Full.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HdrMode {
-    #[default]
-    None,
-    Bloom,
-    Full,
-}
-
-impl HdrMode {
-    pub const ALL: [Self; 3] = [Self::None, Self::Bloom, Self::Full];
-
-    pub fn level(self) -> u8 {
-        self as u8
-    }
-
-    pub fn from_level(level: u8) -> Option<Self> {
-        Self::ALL.get(usize::from(level)).copied()
-    }
-
-    pub fn token(self) -> &'static str {
-        match self {
-            Self::None => "#GameUI_hdr_level0",
-            Self::Bloom => "#GameUI_hdr_level1",
-            Self::Full => "#GameUI_hdr_level2",
-        }
-    }
-}
+pub use crate::hdr::HdrMode;
 
 /// The Video page's Display mode combo.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,6 +265,8 @@ pub struct VideoSettings {
     /// `viewmodel_fov`: the viewmodel's horizontal 4:3 field of view in degrees.
     pub viewmodel_fov: f32,
     pub hdr: HdrMode,
+    /// Set once the old default `hdr: none` has been replaced (see [`crate::hdr::migrate_default`]).
+    pub hdr_migrated: Option<bool>,
     pub hud_aspect: HudAspect,
     /// `mat_monitorgamma` (1.6 bright to 2.6 dark).
     pub gamma: f32,
@@ -301,6 +275,19 @@ pub struct VideoSettings {
     /// Legacy flag from older files; read once by [`Config::migrate`], never written.
     #[serde(skip_serializing)]
     pub borderless: Option<bool>,
+}
+
+/// What a loaded map is built from: a change of any reloads the map.
+pub type LoadDetail = (ModelDetail, TextureDetail, bool);
+
+impl VideoSettings {
+    pub fn load_detail(&self) -> LoadDetail {
+        (
+            self.advanced.model_detail,
+            self.advanced.texture_detail,
+            self.hdr.is_hdr(),
+        )
+    }
 }
 
 impl Default for VideoSettings {
@@ -313,7 +300,8 @@ impl Default for VideoSettings {
             fov: 75.0,
             vertical_fov: 0.0,
             viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,
-            hdr: HdrMode::None,
+            hdr: HdrMode::Full,
+            hdr_migrated: None,
             hud_aspect: HudAspect::Fit,
             gamma: 2.2,
             advanced: AdvancedVideoSettings::default(),
@@ -666,6 +654,7 @@ impl Config {
     pub fn from_json(bytes: &[u8]) -> Option<Self> {
         let mut config: Self = serde_json::from_slice(bytes).ok()?;
         config.migrate();
+        crate::hdr::migrate_default(&mut config.video);
         Some(config)
     }
 
@@ -814,8 +803,10 @@ mod tests {
         let serialized = serde_json::to_string_pretty(&default_cfg).unwrap();
         assert!(!serialized.contains("borderless"));
         let deserialized = Config::from_json(serialized.as_bytes()).unwrap();
-        assert_eq!(default_cfg, deserialized);
-        assert_eq!(deserialized.video.hdr, HdrMode::None);
+        let mut expected = default_cfg.clone();
+        expected.video.hdr_migrated = Some(true);
+        assert_eq!(expected, deserialized);
+        assert_eq!(deserialized.video.hdr, HdrMode::Full);
         assert_eq!(deserialized.video.display_mode, DisplayMode::Fullscreen);
         assert_eq!(deserialized.audio.volume, 1.0);
         assert_eq!(deserialized.mouse.sensitivity, 3.0);

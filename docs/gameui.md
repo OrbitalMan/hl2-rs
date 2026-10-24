@@ -648,7 +648,7 @@ Steps (one commit):
 
 Limitations:
 
-- Stored only, no effect yet: HDR mode, speaker setup, sound quality, spoken
+- Stored only, no effect yet: speaker setup, sound quality, spoken
   language, aim assist. (Gamma is applied since 2026-10-15, see section 6; closed captions
   since 2026-10-17: none = `closecaption 0`, subtitles and sound effects = `closecaption 1`,
   subtitles = `closecaption 1, cc_subtitles 1`, drawn by `hl2_ui::closecaption`, see
@@ -1650,3 +1650,29 @@ and `server.dll` also carry `m_autoaim_mode`, `m_autoaim_scale`, magnetism and d
 (`m_autoaim_magnetism`, `m_autoaimdampen*`) that the SDK does not have, and the Options page writes
 those. How Basic and Enhanced map onto them, and their defaults, cannot be read from the SDK or the
 layouts, so the option stays unimplemented. It is also gameplay work outside the current UI scope.
+
+### 23a. Video > HDR (`mat_hdr_level`) implemented (2026-10-24)
+
+Evidence (SDK `client/viewpostprocess.cpp`): `mat_hdr_level` defaults to 2; bloom needs level 1 or
+more; an LDR frame (hardware HDR type none) gets no pre-bloom tone mapping (no automatic
+exposure) and its bloom is scaled by `mat_non_hdr_bloom_scalefactor` (0.3) through the 8-bit bloom
+generator; `MapHasHDRLighting` gates bloom. So level 0 = LDR without bloom, level 1 = LDR with the
+scaled bloom, level 2 = the HDR frame HL2-RS always rendered before.
+
+- `hl2_ui::hdr::HdrMode` (moved out of `config.rs`) now defaults to Full; `is_hdr()` is true only for
+  Full and `bloom_factor()` is 0 / 0.3 / 1.
+- Files written while the default was None hold `"hdr": "none"` that was never a choice:
+  `hdr::migrate_default` turns it into Full on the first load (marker `video.hdr_migrated`), later
+  choices are kept.
+- An LDR load reads the LDR copies: lightmaps and faces (lumps 8/7), ambient samples (52/56) and
+  world lights (15) (`Bsp::parse_with`, `lighting::choose_hdr`; a map without LDR faces keeps the
+  HDR data), the plain `$envmap` cubemap instead of `.hdr.vtf`, the `ldr?` branch of material vars
+  instead of `hdr?`, and the plain sky faces (no `$hdrcompressedtexture`).
+- The tone map scale is 1 below Full (no readback, no adaptation) and the bloom pass is skipped at
+  level 0.
+- Changing between LDR and HDR reloads the active map, like model and texture detail (retail
+  asks for a restart); Bloom to None or back does not reload.
+
+Not verified against retail: how the LDR lightmap values compare in brightness (the lumps decode
+with the same RGBExp32 formula and the frame is clamped by the 8-bit target); the mat_hdr_level to
+hardware HDR-type mapping beyond the SDK's own use.

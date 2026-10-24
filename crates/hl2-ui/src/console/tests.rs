@@ -4421,8 +4421,8 @@ fn video_hdr_cvar_query_set_and_cvar_value() {
     let mut console = installed_console();
     console.set_mode(Mode::Console);
 
-    assert_eq!(console.config.video.hdr, crate::config::HdrMode::None);
-    assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("0"));
+    assert_eq!(console.config.video.hdr, crate::config::HdrMode::Full);
+    assert_eq!(console.cvar_value("mat_hdr_level").as_deref(), Some("2"));
 
     console.submit("mat_hdr_level 1");
     assert_eq!(console.config.video.hdr, crate::config::HdrMode::Bloom);
