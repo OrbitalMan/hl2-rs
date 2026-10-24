@@ -1,6 +1,6 @@
 # STATUS
  
- Checkpoint: 2026-10-24 (Claude Code desktop, claude-opus-5-5) on orbitalman/hl2-ui. The UI toolkit split is done (source-ui and hl2-ui); the current plan is docs/DESIGN.md "Exact and local checks" (step 1 closed without a change, step 2: source-ui's own tests). Sections below are newest first.
+ Checkpoint: 2026-10-24 (Claude Code desktop, claude-opus-5-5) on orbitalman/hl2-ui. The refactoring series is finished (UI toolkit split, source-ui's own tests, architecture guardrails, AGENTS.md rework); nothing is in progress and the next task comes from the owner. Sections below are newest first.
 
 ## Architecture guardrails (2026-10-24)
 
