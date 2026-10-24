@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 7: `AiRuntime::think` not split (reported)
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** Documentation only (STATUS, DESIGN, this entry). `AiRuntime::think` (hl2-simulation `ai/runtime.rs`, 1,225 lines) is unchanged.
+
+**Why:** The owner's condition for step 7: if the phases share too much local state to split cleanly, report that instead of forcing it. They do. Its phases are recognizable (senses; conditions and enemy choice; attack conditions; speech and listening; the ideal state; the classes' pre-schedule logic; the motor and the schedule; outputs), but:
+- One `&mut AiActor` borrow from `self.actors` (`let actor = self.actors.get_mut(&id)`) covers about 1,040 of the 1,225 lines. While it is held the code also borrows 13 other `AiRuntime` fields (`busy_anims`, `busy_hints`, `combine_question`, `diagnostics`, `hint_locks`, `idle_lines`, `rally_locks`, `schedules`, `serial`, `sounds`, `squad_events`, `squads`, `weapon_defs`) and uses 7 parameters; `&mut self` phase methods cannot be called inside that span.
+- A count of `think`'s top-level locals: 19 live more than 300 lines and several 750 to 1,170 (`now`, `ctx`, `origin`, the speech and hint dice, `eye`, `facing`, `sight`, `sound_interests`, `viewer`, `goal`, `enemy_fovs`, `moving`, `ideal`...).
+- Splitting would mean taking the actor out of `self.actors` for the whole think and threading a context struct of 20 to 30 values through every phase. The one seam without that, the 160-line sensing prefix, would pass about 23 values on through a struct borrowing `physics` and `world`, keep the `self.random()` draws in order, and leave a 1,070-line function, still the longest in the workspace.
+
+**Tested how:** Not applicable (no code change). The repository isolation check passes.
+
+**Result:** Step 7 not done; the facts above are in STATUS and DESIGN.
+
+**Still broken or not tested:** `AiRuntime::think` remains the longest function (1,225 lines).
+
+**Next:** None planned in this series.
+
 ## 2026-10-24 UI toolkit split, step 6 follow-up: source-ui's glob imports
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

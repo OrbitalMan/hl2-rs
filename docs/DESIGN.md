@@ -74,7 +74,10 @@ belongs to the toolkit.
 6. Visibility and imports narrowed: functions used only in their own file become private
    (checked by the compiler), glob imports become explicit.
 7. `AiRuntime::think` (1,225 lines) split into its phases, one commit per phase, if its local
-   state allows it.
+   state allows it. Not done: one `&mut AiActor` borrow spans about 1,040 of its lines beside 13
+   other `AiRuntime` fields and 7 parameters, and 19 locals live more than 300 lines, so phase
+   functions would need the actor taken out of `self.actors` for the whole think and a context
+   struct of 20 to 30 values; the sensing prefix alone would leave a 1,070-line function.
 
 Validation per step: `scripts/checks/validate.sh`, the Windows-target check (it also lints
 source-ui), the packaged console and UI replays (steps 2, 3 and 6) or the full replay suite
