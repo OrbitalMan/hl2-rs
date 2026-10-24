@@ -685,7 +685,7 @@ mod tests {
                     spec.name
                 };
                 let value = value(&console).unwrap_or_else(|| panic!("{} unset", spec.name));
-                let printed = console.output.back().map(|line| line.text.as_str());
+                let printed = console.panel.output.back().map(|line| line.text.as_str());
                 assert_eq!(printed, Some(format!("\"{label}\" = \"{value}\"").as_str()));
             }
             let tokens: Vec<String> = std::iter::once(spec.name.to_owned())
@@ -798,7 +798,7 @@ mod tests {
             for args in cases {
                 let mut console = Console::default();
                 let before = serde_json::to_value(&console.config).unwrap();
-                let printed = console.output.len();
+                let printed = console.panel.output.len();
                 let tokens: Vec<String> = std::iter::once(spec.name.to_owned())
                     .chain(args.iter().cloned())
                     .collect();
@@ -825,7 +825,7 @@ mod tests {
                     args.join(" ")
                 };
                 transcript += &format!("  {call}: {outcome}\n");
-                for line in console.output.iter().skip(printed) {
+                for line in console.panel.output.iter().skip(printed) {
                     transcript += &format!("    | {}\n", line.text);
                 }
                 transcript += &format!("    value {:?}\n", value(&console));

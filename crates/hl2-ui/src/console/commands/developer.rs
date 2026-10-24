@@ -40,7 +40,7 @@ pub(super) fn clear(console: &mut Console, spec: &'static Spec, args: &[String])
     if !args.is_empty() {
         return Err(spec.usage());
     }
-    console.clear_output();
+    console.panel.clear_output();
     Ok(None)
 }
 
@@ -83,7 +83,7 @@ fn console_cvar(
         }
         [value] => {
             set(console, value)?;
-            console.scroll = 0;
+            console.panel.scroll = 0;
         }
         _ => return Err(spec.usage()),
     }
@@ -96,7 +96,7 @@ pub(super) fn con_filter_enable(
     args: &[String],
 ) -> Outcome {
     console_cvar(console, spec, args, |console, value| {
-        console.con_filter = value
+        console.panel.con_filter = value
             .parse::<u8>()
             .ok()
             .filter(|v| *v <= 2)
@@ -106,7 +106,7 @@ pub(super) fn con_filter_enable(
 }
 
 pub(super) fn con_filter_enable_value(console: &Console) -> Option<String> {
-    Some(console.con_filter.to_string())
+    Some(console.panel.con_filter.to_string())
 }
 
 pub(super) fn con_filter_text(
@@ -115,13 +115,13 @@ pub(super) fn con_filter_text(
     args: &[String],
 ) -> Outcome {
     console_cvar(console, spec, args, |console, value| {
-        console.con_filter_text = value.clone();
+        console.panel.con_filter_text = value.clone();
         Ok(())
     })
 }
 
 pub(super) fn con_filter_text_value(console: &Console) -> Option<String> {
-    Some(console.con_filter_text.clone())
+    Some(console.panel.con_filter_text.clone())
 }
 
 pub(super) fn con_timestamp(
@@ -130,11 +130,11 @@ pub(super) fn con_timestamp(
     args: &[String],
 ) -> Outcome {
     console_cvar(console, spec, args, |console, value| {
-        console.con_timestamp = boolean(value).ok_or_else(|| spec.usage())?;
+        console.panel.con_timestamp = boolean(value).ok_or_else(|| spec.usage())?;
         Ok(())
     })
 }
 
 pub(super) fn con_timestamp_value(console: &Console) -> Option<String> {
-    Some(u8::from(console.con_timestamp).to_string())
+    Some(u8::from(console.panel.con_timestamp).to_string())
 }

@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 3b: the console dialog in source-ui
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New `source_ui::console::panel::ConsolePanel`: the developer console dialog's state and behaviour, moved from hl2-ui's `Console` and `console/panel.rs`: the output buffer (`Line`, `Level`, the 1,024-line scrollback, line numbering), `con_filter*` / `con_timestamp` display, wrapping with its caches, scrolling, row selection and copying, the line editor, the entry with its reverse search, the completion popup with the help line and cvar values, the Close and Submit buttons, the dialog's placement, and its drawing (`draw`, the popup over everything).
+- `source_ui::console::dialog` (moved from hl2-ui): the dialog layout, row wrapping and `Selection`. The retail frame takes the app's scaling policy (`Scaling`: dialog scale and design height); hl2-ui supplies `proportional::SCALING` (`dialog_scale`, `design_height`).
+- What stays HL2's, passed in: the canvas (every panel method that needs the layout takes it; `Console::load` builds `Self { canvas, ..Default::default() }`, so a stored copy could diverge), the texts (`#Console_Title`, `#Console_Submit` and the `HL2RS_` reverse-search placeholder, resolved through HL2's localization), the window theme, the popup theme, the focus and the Escape-held look of Close (`Look`), and the command table and context the popup reads the help and cvar values from. The panel answers input with `Action::{None, Close, Submit { line, clicked }}`; hl2-ui's `console/panel.rs` turns them into effects in the old order (Close: toggle, then the release sound; Submit button: the sound, then the line's effects; Enter: the line's effects). Saving the placement in `Config` stays in hl2-ui.
+- `Level::ViewmodelTuning` (an HL2 tool's name) is `Level::Snapshot`, replaced in place by `ConsolePanel::replace_snapshot`; hl2-ui's `Console::log_viewmodel_tuning` calls it.
+- The console's colors (`RichText.*`, `Console.*`) are the panel's `Style`; hl2-ui's `Style` keeps the menu colors. `Console::log`, `print`, `submit`, `input_line`, `take_copied`, `set_history`, `take_changed_history` and `set_completion_sources` stay hl2-ui's API (hl2-bevy unchanged apart from paths: `Level` and `panel.output`).
+- Tests: path changes only (`console.output` -> `console.panel.output`, `console.dialog_layout()` -> `console.panel.dialog_layout(&console.canvas)` and the like, `Level::ViewmodelTuning` -> `Level::Snapshot`). The wrapping and selection tests moved to source-ui; the three layout tests check HL2's frame with HL2's scaling and moved to `console/tests.rs`.
+- The hard-coded-string audit also reads `source-ui/src/console/panel.rs`, in both checks.
+- Removed: `Console::draw_console` (it was `#[allow(dead_code)]`, unused) and hl2-ui's `rectangle_lines` (only the popup used it; it went with it).
+
+**Why:** Step 3 of the toolkit split: the developer console dialog is the SDK's `vgui_controls` `CConsoleDialog`, shared by every Source game.
+
+**Tested how:** Every console test passes with path changes only, and the golden cvar transcript is unchanged; the workspace lists the same 1,103 tests by name. A throwaway test (not committed) recorded every quad the console dialog draws in nine states (open with wrapped history and every level, scrolled back while printing, a selection, the completion popup, the help line with a cvar value, reverse search, `con_filter_enable` 2 with timestamps, `con_filter_enable` 1, closed): byte-identical before and after (12,848 lines). `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays pass, 10 of 10; the repository isolation check passes. `source-ui/src/console` names no HL2 command, cvar, `Config`, map or tool.
+
+**Result:** hl2-ui production lines 17,727 -> 16,556; source-ui 6,750 -> 8,126. hl2-ui's `Console` loses 18 fields. Behaviour unchanged.
+
+**Still broken or not tested:** `Console` still holds the window stack, focus and Escape routing (step 4).
+
+**Next:** Step 4: the design of the `Console` split, then its commits.
+
 ## 2026-10-24 UI toolkit split, step 3a: console registry, completion and line editor in source-ui
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

@@ -6,6 +6,7 @@
 
 use crate::gameui::menu::BASE_SCREEN_HEIGHT;
 use glam::Vec2;
+use source_ui::console::dialog::Scaling;
 use source_ui::widgets::Painter;
 
 /// The height the UI scales by: the screen height, limited to the width divided by the
@@ -31,6 +32,12 @@ pub fn widescreen_menu_scale(canvas: Vec2) -> f32 {
 pub fn dialog_scale(canvas: Vec2) -> f32 {
     Painter::scale_for(design_height(canvas))
 }
+
+/// HL2's dialog scaling for the toolkit's dialogs: [`dialog_scale`] and [`design_height`].
+pub const SCALING: Scaling = Scaling {
+    dialog_scale,
+    design_height,
+};
 
 /// Pixels per 480-line design unit for sizes and horizontal offsets.
 pub fn scale(canvas: Vec2) -> f32 {

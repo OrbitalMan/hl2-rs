@@ -7,26 +7,26 @@
 //! put the frame at `(w/2 - 16, 64)`, half the screen wide and `h - 2 * 64` tall. On a screen
 //! narrower than the UI design (square, portrait) half the width is too narrow and the full
 //! height too tall, so the frame spans the width between the 16 margins and ends where the
-//! design area ends ([`crate::proportional::design_height`]), keeping the proportions of the
-//! retail frame on a 5:4 screen.
+//! design area ends ([`Scaling::design_height`]), keeping the proportions of the retail frame on
+//! a 5:4 screen.
 
+use crate::canvas::Rect;
+use crate::widgets::{close_button_rect, CLIENT_INSET_X, CLIENT_TOP};
 use glam::{vec2, Vec2};
-use source_ui::canvas::Rect;
-use source_ui::widgets::{close_button_rect, CLIENT_INSET_X, CLIENT_TOP};
 use std::ops::Range;
 
 /// `Frame.ClientInsetY`: space under the client area.
 const CLIENT_INSET_Y: f32 = 6.;
 /// `CConsolePanel::PerformLayout` insets.
 const INSET: f32 = 8.;
-const ENTRY_TALL: f32 = 24.;
+pub const ENTRY_TALL: f32 = 24.;
 const TOP_TALL: f32 = 4.;
 const ENTRY_INSET: f32 = 4.;
-const SUBMIT_WIDE: f32 = 64.;
+pub const SUBMIT_WIDE: f32 = 64.;
 /// Pulls the Submit button away from the frame's resize grip.
 const SUBMIT_INSET: f32 = 7.;
 /// Retail proportional values are relative to a 480-line screen.
-const PROPORTIONAL_BASE: f32 = 480.;
+pub const PROPORTIONAL_BASE: f32 = 480.;
 /// Smallest size the corner grips allow: the SDK `CConsolePanel` minimum (100 x 100), raised so the
 /// entry keeps at least a Submit button's width and the history three entry rows.
 pub const MIN_SIZE: Vec2 = Vec2::new(
@@ -40,13 +40,23 @@ pub const MIN_SIZE: Vec2 = Vec2::new(
         + 3. * ENTRY_TALL,
 );
 
+/// How an app sizes its dialogs on a canvas.
+#[derive(Clone, Copy, Debug)]
+pub struct Scaling {
+    /// Canvas pixels per layout unit.
+    pub dialog_scale: fn(Vec2) -> f32,
+    /// The height the app's 480-line design spans: the canvas height, or less on screens
+    /// narrower than the design.
+    pub design_height: fn(Vec2) -> f32,
+}
+
 /// Where the console dialog and its controls are. Control rectangles are in layout units
 /// relative to the frame; [`Self::canvas`] maps them to canvas pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DialogLayout {
     /// Frame top-left in canvas pixels.
     pub origin: Vec2,
-    /// Canvas pixels per layout unit ([`source_ui::widgets::Painter::scale_for`]).
+    /// Canvas pixels per layout unit ([`Scaling::dialog_scale`]).
     pub scale: f32,
     /// Frame size in layout units.
     pub size: Vec2,
@@ -58,15 +68,15 @@ pub struct DialogLayout {
 
 impl DialogLayout {
     /// The retail placement on `canvas`.
-    pub fn new(canvas: Vec2) -> Self {
-        let (origin, size) = Self::default_frame(canvas);
-        Self::at(crate::proportional::dialog_scale(canvas), origin, size)
+    pub fn new(canvas: Vec2, scaling: Scaling) -> Self {
+        let (origin, size) = Self::default_frame(canvas, scaling);
+        Self::at((scaling.dialog_scale)(canvas), origin, size)
     }
 
     /// The retail frame on `canvas`: top-left in canvas pixels and size in layout units.
-    pub fn default_frame(canvas: Vec2) -> (Vec2, Vec2) {
-        let scale = crate::proportional::dialog_scale(canvas);
-        let design = crate::proportional::design_height(canvas);
+    pub fn default_frame(canvas: Vec2, scaling: Scaling) -> (Vec2, Vec2) {
+        let scale = (scaling.dialog_scale)(canvas);
+        let design = (scaling.design_height)(canvas);
         let proportional = |value: f32| (value * design / PROPORTIONAL_BASE).floor();
         let (origin, extent) = if design < canvas.y {
             (
@@ -260,87 +270,6 @@ impl Selection {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn layout_follows_the_console_panel_insets_at_1024x768() {
-        let layout = DialogLayout::new(vec2(1024., 768.));
-        // Proportional 16 and 64 at 768 lines are 25 and 102 pixels.
-        assert_eq!(layout.origin, vec2(487., 102.));
-        let scale = 768. / 720.;
-        assert_eq!(layout.scale, scale);
-        assert_eq!(layout.size, (vec2(512., 564.) / scale).round());
-        let (w, h) = (layout.size.x, layout.size.y);
-        // Client area: x 8, y 30, w - 16 wide, down to 6 above the frame edge.
-        assert_eq!(layout.history, Rect::new(16., 42., w - 32., h - 36. - 52.));
-        let bottom = h - 6. - 8. - 24.;
-        assert_eq!(layout.submit, Rect::new(w - 8. - 79., bottom, 64., 24.));
-        assert_eq!(
-            layout.entry,
-            Rect::new(16., bottom, w - 16. - 79. - 4. - 16., 24.)
-        );
-        // History, entry and button stay inside the frame, entry left of the button.
-        assert!(layout.entry.x + layout.entry.w < layout.submit.x);
-        assert!(layout.history.y + layout.history.h < layout.entry.y);
-        assert!(layout.submit.x + layout.submit.w < w);
-        // Layout and canvas coordinates round-trip.
-        let submit = layout.canvas(layout.submit);
-        let centre = vec2(submit.x + submit.w * 0.5, submit.y + submit.h * 0.5);
-        assert!(layout.submit.contains(layout.local(centre)));
-    }
-
-    #[test]
-    fn landscape_frames_are_the_retail_ones_and_narrow_screens_get_a_bounded_frame() {
-        for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
-            let (origin, size) = DialogLayout::default_frame(canvas);
-            let scale = crate::proportional::dialog_scale(canvas);
-            let p = |v: f32| (v * canvas.y / PROPORTIONAL_BASE).floor();
-            assert_eq!(
-                origin,
-                vec2((canvas.x * 0.5).floor() - p(16.), p(64.)),
-                "{canvas}"
-            );
-            assert_eq!(
-                size,
-                (vec2((canvas.x * 0.5).floor(), canvas.y - 2. * p(64.)) / scale).round(),
-                "{canvas}"
-            );
-        }
-        for canvas in [vec2(1080., 1080.), vec2(1080., 1920.), vec2(720., 1280.)] {
-            let (origin, size) = DialogLayout::default_frame(canvas);
-            let scale = crate::proportional::dialog_scale(canvas);
-            let (right, bottom) = (origin.x + size.x * scale, origin.y + size.y * scale);
-            let design = crate::proportional::design_height(canvas);
-            assert!(
-                origin.x > 0. && right < canvas.x,
-                "{canvas}: spans the width"
-            );
-            assert!(right > canvas.x * 0.9, "{canvas}: {right}");
-            assert!(
-                bottom <= design,
-                "{canvas}: ends in the design area, not at the bottom"
-            );
-            assert!(
-                bottom < canvas.y * 0.8 || canvas.y == canvas.x,
-                "{canvas}: {bottom}"
-            );
-        }
-    }
-
-    #[test]
-    fn small_canvases_and_resizes_keep_the_minimum_size() {
-        let layout = DialogLayout::new(vec2(120., 100.));
-        assert_eq!(layout.size, MIN_SIZE);
-        let smallest = DialogLayout::at(1., Vec2::ZERO, vec2(10., 10.));
-        assert_eq!(smallest.size, MIN_SIZE);
-        assert!(smallest.entry.w >= SUBMIT_WIDE, "{:?}", smallest.entry);
-        assert!(
-            smallest.history.h >= 3. * ENTRY_TALL,
-            "{:?}",
-            smallest.history
-        );
-        assert!(smallest.entry.x + smallest.entry.w < smallest.submit.x);
-        assert!(smallest.submit.x + smallest.submit.w < smallest.size.x);
-    }
 
     #[test]
     fn selections_cover_their_span_in_either_direction() {

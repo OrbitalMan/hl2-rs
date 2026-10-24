@@ -15,7 +15,8 @@ use bevy::log::{
     tracing_subscriber::{Layer, layer::Context},
 };
 use bevy::prelude::*;
-use hl2_ui::console::{Level, complete::Sources};
+use hl2_ui::console::complete::Sources;
+use source_ui::console::panel::Level;
 use std::sync::{Mutex, OnceLock};
 
 /// Every map name the installed games ship, sorted.

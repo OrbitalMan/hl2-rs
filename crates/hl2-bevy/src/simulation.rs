@@ -1067,6 +1067,7 @@ mod tests {
         assert_eq!(sim.eye, glam::Vec3::new(10., 20., 94.));
         let position = ui
             .source
+            .panel
             .output
             .iter()
             .find(|s| s.starts_with("setpos 10.000000 20.000000 94.000000; setang "))
@@ -1475,6 +1476,7 @@ mod tests {
         assert!(!ui.background_request);
         assert!(
             ui.source
+                .panel
                 .output
                 .iter()
                 .any(|s| s.contains("Gameplay map load in progress"))

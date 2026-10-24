@@ -133,7 +133,7 @@ impl Console {
 
     pub(super) fn close_window(&mut self, window: Window) {
         if window == Window::Console {
-            self.console_placement.end();
+            self.panel.placement.end();
         }
         self.escape_held = false;
         self.options.escape_held = false;
@@ -164,10 +164,8 @@ impl Console {
 
     /// The console's completion popup on the canvas, while it shows.
     pub(super) fn completion_bounds(&self) -> Option<Rect> {
-        let layout = self.dialog_layout();
-        let entry = layout.canvas(layout.entry);
-        self.completion(layout.scale, (entry.x, entry.y, entry.w, entry.h))
-            .map(|c| c.rect)
+        self.panel
+            .completion_bounds(&self.canvas, &self.theme, commands::COMMANDS, self)
     }
 
     /// A window's frame on the canvas, in canvas pixels.
@@ -176,7 +174,7 @@ impl Console {
         match window {
             Window::Options => self.options.frame_bounds(canvas),
             Window::Console => {
-                let layout = self.dialog_layout();
+                let layout = self.panel.dialog_layout(&self.canvas);
                 Rect::new(
                     layout.origin.x,
                     layout.origin.y,
@@ -280,7 +278,9 @@ impl Console {
         }
         match self.windows.top() {
             Some(Window::Options | Window::SubDialog) => self.options.escape_closes(),
-            Some(Window::Console) => !self.console_placement.active() && !self.editor.can_dismiss(),
+            Some(Window::Console) => {
+                !self.panel.placement.active() && !self.panel.editor.can_dismiss()
+            }
             Some(Window::Confirmation) => {
                 if self.confirm_box.is_some() {
                     !self.quit_placement.active()
@@ -295,11 +295,11 @@ impl Console {
     pub fn escape(&mut self) {
         // A drag or resize in progress is undone first.
         let console_on_top = self.windows.top() == Some(Window::Console);
-        if self.quit_placement.cancel() || (console_on_top && self.console_placement.cancel()) {
+        if self.quit_placement.cancel() || (console_on_top && self.panel.placement.cancel()) {
             return;
         }
         // In the console Escape first ends a history search, then hides the completion list.
-        if console_on_top && self.editor.dismiss() {
+        if console_on_top && self.panel.editor.dismiss() {
             return;
         }
         if let Some(loading) = &self.loading_dialog {
@@ -398,8 +398,8 @@ impl Console {
             }
             self.windows.open(Window::Console);
             self.sync_mode();
-            let frame = self.console_frame();
-            self.console_placement.reset_if_off_screen(&frame);
+            let frame = self.panel.frame(&self.canvas);
+            self.panel.placement.reset_if_off_screen(&frame);
         }
     }
 
@@ -546,8 +546,8 @@ impl Console {
             self.config.dialogs.options = options;
             changed = true;
         }
-        if self.console_placement.take_changed() {
-            self.config.dialogs.console = self.console_placement.saved();
+        if self.panel.placement.take_changed() {
+            self.config.dialogs.console = self.panel.placement.saved();
             changed = true;
         }
         if changed {
@@ -563,7 +563,8 @@ impl Console {
         if !self.console_open() || self.confirm_box.is_some() {
             return CursorHint::Arrow;
         }
-        self.console_placement
-            .hint(&self.console_frame(), self.pointer)
+        self.panel
+            .placement
+            .hint(&self.panel.frame(&self.canvas), self.pointer)
     }
 }

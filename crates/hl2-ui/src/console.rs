@@ -1,7 +1,6 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
 pub mod commands;
 pub mod complete;
-pub mod dialog;
 mod focus;
 mod loading;
 mod menu_flow;
@@ -15,72 +14,21 @@ use crate::gameui::{
     resources::{self, fallback_game_menu, GameUiResources},
     video_confirm::{VideoConfirm, VideoMode},
 };
-use dialog::{wrap, DialogLayout, Selection};
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
 use source_ui::{
     canvas::*,
-    console::editor::LineEditor,
+    console::panel::{ConsolePanel, Style as ConsoleStyle},
     font::{FontFace, TextOutline},
     input::{Input, Key, KeyRepeat},
     message_box::{MessageBox, MessageBoxLayout},
     placement::{self, CursorHint, Placement},
-    widgets::{
-        scheme_color, Align, ButtonState, ButtonTracker, Fonts, FrameSpec, Painter,
-        ScrollAccumulator, ScrollBarLayout, ScrollBarState, ScrollMode, Theme, SCROLLBAR_WIDTH,
-    },
+    widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
     windows::{Layer, Pointer, Window, Windows},
 };
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::ops::Range;
-use std::sync::{Arc, Mutex};
-
-/// Output lines kept for scrollback.
-const OUTPUT_LINES: usize = 1024;
-
-/// How a console line was printed, which picks its color.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Level {
-    /// The echo of a submitted line (`] command`).
-    Input,
-    /// Ordinary output (`Msg`): scheme `Console.TextColor`.
-    Normal,
-    /// Developer output (`DevMsg`, mirrored engine log): scheme `Console.DevTextColor`.
-    Developer,
-    /// Replaceable snapshot emitted by the live viewmodel tuning utility.
-    ViewmodelTuning,
-    Warning,
-    Error,
-}
-
-/// A console output line. It reads and serializes as its text.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Line {
-    pub level: Level,
-    pub text: String,
-    /// Seconds since start when printed (`con_timestamp`).
-    pub time: f64,
-}
-
-impl std::ops::Deref for Line {
-    type Target = str;
-    fn deref(&self) -> &str {
-        &self.text
-    }
-}
-
-impl PartialEq<str> for Line {
-    fn eq(&self, other: &str) -> bool {
-        self.text == other
-    }
-}
-
-impl Serialize for Line {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.text)
-    }
-}
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub enum Mode {
@@ -162,48 +110,18 @@ pub struct Console {
     /// frames), in z-order with the keyboard focus (`source_ui::windows`).
     windows: Windows,
     pub cheats: bool,
-    pub output: VecDeque<Line>,
-    /// Line number (since start) of `output[0]`: lines dropped from the front count on.
-    output_start: u64,
-    /// Output rows selected by dragging over the history, copied by the copy shortcut.
-    selection: Option<Selection>,
-    /// A drag that started in the history is extending the selection.
-    selecting: bool,
-    /// Where the console dialog was dragged or resized (kept while the game runs).
-    console_placement: Placement,
+    /// The developer console dialog: output, history, command line, completion, its placement
+    /// and drawing (kept while the game runs).
+    pub panel: ConsolePanel,
     /// Where the quit / main-menu box was dragged (centered on opening).
     quit_placement: Placement,
     /// The pointer of the latest input frame (cursor hints).
     pointer: Option<Vec2>,
-    /// Text the copy shortcut put on the clipboard, until the host takes it.
-    copied: Option<String>,
-    /// The dialog's close (×) and Submit buttons.
-    console_buttons: ButtonTracker<ConsoleButton>,
-    console_hover: Option<ConsoleButton>,
     /// Escape is held and closes the top dialog on release ([`Console::escape_pressed`]).
     escape_held: bool,
-    history_bar: ScrollBarState,
-    history_wheel: ScrollAccumulator,
     key_repeat: KeyRepeat,
-    /// The input line: editing, completion, history and reverse search.
-    editor: LineEditor,
     /// Names arguments complete from (installed maps, the loaded map's entities), set by the host.
     completion: complete::Sources,
-    /// Seconds since start of the latest input frame, stamped on printed lines.
-    clock: f64,
-    /// `con_filter_enable`: 0 off, 1 only lines containing `con_filter_text`, 2 those brighter.
-    con_filter: u8,
-    con_filter_text: String,
-    /// `con_timestamp`: prefix lines with the time they were printed.
-    con_timestamp: bool,
-    /// History rows scrolled back from the newest.
-    scroll: usize,
-    /// Each output line's wrapped rows by line number, rebuilt when its shown text or the
-    /// history width changes.
-    wrapped: Mutex<HashMap<u64, Wrapped>>,
-    /// ASCII advances of the console font at one size (rewrapping on resize measures every
-    /// character of the history).
-    ascii_advances: Mutex<Option<(u32, [f32; 128])>>,
     font: Option<FontFace>,
     menu_font: Option<FontFace>,
     menu_metrics: CellMetrics,
@@ -343,49 +261,12 @@ fn text(
         font.draw_baseline(value, origin, em, scale, color);
     }
 }
-pub(crate) fn rectangle_lines(
-    canvas: &Canvas,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    thickness: f32,
-    color: Color,
-) {
-    canvas.rectangle(x, y, w, thickness, color);
-    canvas.rectangle(x, y + h - thickness, w, thickness, color);
-    canvas.rectangle(x, y, thickness, h, color);
-    canvas.rectangle(x + w - thickness, y, thickness, h, color);
-}
 
-/// The console's completion popup: its rows (colored runs), the highlighted row, how many help
-/// rows lead, and its rectangle in canvas pixels.
-struct Completion {
-    rows: Vec<Vec<(String, Color)>>,
-    highlighted: Option<usize>,
-    help_rows: usize,
-    rect: Rect,
-}
-
-/// The console dialog's push buttons.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConsoleButton {
-    Close,
-    Submit,
-}
-
+/// The menu colors from the scheme (the console's are the panel's).
 struct Style {
     menu: Color,
     menu_armed: Color,
     panel: Color,
-    entry: Color,
-    /// `Console.TextColor`.
-    text: Color,
-    /// `Console.DevTextColor`.
-    dev_text: Color,
-    /// Selected history rows (`RichText.SelectedBgColor` / `RichText.SelectedTextColor`).
-    selected_bg: Color,
-    selected_text: Color,
 }
 impl Default for Style {
     fn default() -> Self {
@@ -393,11 +274,6 @@ impl Default for Style {
             menu: WHITE,
             menu_armed: Color::from_rgba(200, 200, 200, 255),
             panel: Color::from_rgba(132, 132, 132, 212),
-            entry: Color::from_rgba(0, 0, 0, 128),
-            text: Color::from_rgba(221, 221, 221, 255),
-            dev_text: WHITE,
-            selected_bg: Color::from_rgba(255, 155, 0, 255),
-            selected_text: Color::from_rgba(0, 0, 0, 255),
         }
     }
 }
@@ -417,29 +293,12 @@ impl Default for Console {
             // `Frame.FocusTransitionEffectTime` of the installed desktop scheme.
             windows: Windows::new(0.3, crate::tuning::unfocused_alpha_factor()),
             cheats: false,
-            output: VecDeque::new(),
-            output_start: 0,
-            selection: None,
-            selecting: false,
-            console_placement: Placement::default(),
+            panel: ConsolePanel::new(crate::proportional::SCALING),
             quit_placement: Placement::default(),
             pointer: None,
-            copied: None,
-            console_buttons: ButtonTracker::capturing(),
-            console_hover: None,
             escape_held: false,
-            history_bar: ScrollBarState::default(),
-            history_wheel: ScrollAccumulator::default(),
             key_repeat: KeyRepeat::default(),
-            editor: LineEditor::default(),
             completion: complete::Sources::default(),
-            clock: 0.,
-            con_filter: 0,
-            con_filter_text: String::new(),
-            con_timestamp: false,
-            scroll: 0,
-            wrapped: Mutex::default(),
-            ascii_advances: Mutex::default(),
             font: None,
             menu_font: None,
             menu_metrics: CellMetrics::default(),
@@ -546,7 +405,8 @@ impl Console {
         }
         console.set_resources(gameui);
         // Saved dialog placements (checked against the canvas when each dialog opens).
-        console.console_placement = Placement::from_saved(console.config.dialogs.console);
+        console.panel.font = console.mono.clone();
+        console.panel.placement = Placement::from_saved(console.config.dialogs.console);
         console
             .options
             .set_placement(Placement::from_saved(console.config.dialogs.options));
@@ -648,11 +508,13 @@ impl Console {
                 menu_armed: scheme_color(&root, "MainMenu.ArmedTextColor")
                     .unwrap_or(console.style.menu_armed),
                 panel: scheme_color(&root, "Frame.BgColor").unwrap_or(console.style.panel),
-                entry: scheme_color(&root, "RichText.BgColor").unwrap_or(console.style.entry),
-                text: scheme_color(&root, "Console.TextColor").unwrap_or(console.style.text),
-                dev_text: scheme_color(&root, "Console.DevTextColor")
-                    .unwrap_or(console.style.dev_text),
-                ..console.style
+            };
+            let style = &mut console.panel.style;
+            *style = ConsoleStyle {
+                entry: scheme_color(&root, "RichText.BgColor").unwrap_or(style.entry),
+                text: scheme_color(&root, "Console.TextColor").unwrap_or(style.text),
+                dev_text: scheme_color(&root, "Console.DevTextColor").unwrap_or(style.dev_text),
+                ..*style
             };
             console.menu_layout.apply_source_scheme(&root);
         }
@@ -664,13 +526,16 @@ impl Console {
             .and_then(|roots| roots.into_iter().next())
         {
             for (name, color) in [
-                ("Console.TextColor", &mut console.style.text),
-                ("Console.DevTextColor", &mut console.style.dev_text),
-                ("RichText.BgColor", &mut console.style.entry),
-                ("RichText.SelectedBgColor", &mut console.style.selected_bg),
+                ("Console.TextColor", &mut console.panel.style.text),
+                ("Console.DevTextColor", &mut console.panel.style.dev_text),
+                ("RichText.BgColor", &mut console.panel.style.entry),
+                (
+                    "RichText.SelectedBgColor",
+                    &mut console.panel.style.selected_bg,
+                ),
                 (
                     "RichText.SelectedTextColor",
-                    &mut console.style.selected_text,
+                    &mut console.panel.style.selected_text,
                 ),
             ] {
                 if let Some(value) = scheme_color(&root, name) {
@@ -1215,90 +1080,8 @@ impl Console {
     }
 }
 
-/// Warning and error lines (not in the scheme; HL2-RS colors).
-const WARNING_TEXT: Color = Color::new(1.0, 0.8, 0.3, 1.0);
-const ERROR_TEXT: Color = Color::new(1.0, 0.4, 0.35, 1.0);
-/// SDK `CConsolePanel` shows at most this many completion rows, the last one `...` when more.
-const COMPLETION_ROWS: usize = 10;
-/// History rows scrolled per mouse wheel notch.
-const WHEEL_ROWS: usize = 3;
 /// Dialog push buttons play this when they activate.
 const RELEASE_SOUND: &str = "ui/buttonclickrelease.wav";
-/// Console history and completion row height, text size and baseline distance from the row
-/// bottom, in layout units.
-const CONSOLE_ROW: f32 = 14.;
-const CONSOLE_TEXT: f32 = 12.;
-const CONSOLE_DESCENT: f32 = 3.;
-/// Space between the history's border and its rows.
-const HISTORY_PAD: f32 = 3.;
-
-/// A tab is this many spaces wide in the history.
-const TAB_SPACES: usize = 8;
-/// Advance per EM of every character when the console font is missing.
-const NOMINAL_ADVANCE: f32 = 0.6;
-
-/// What history rows wrap to: the text width and font size in canvas pixels.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct WrapMetrics {
-    width: f32,
-    em: f32,
-    /// Whether the console font measures characters (else they take a nominal advance).
-    font: bool,
-}
-
-/// A line's wrapped rows and what they were wrapped from.
-struct Wrapped {
-    metrics: WrapMetrics,
-    /// The time shown before the text (`con_timestamp`).
-    stamp: Option<f64>,
-    text: String,
-    rows: Vec<Range<usize>>,
-}
-
-/// A history row: a byte range of a shown line's [`Console::shown_text`].
-struct HistoryRow<'a> {
-    number: u64,
-    line: &'a Line,
-    text: Range<usize>,
-}
-
-/// The history's text rows and scroll bar inside its border, in frame layout units.
-struct HistoryView {
-    text: Rect,
-    bar: Rect,
-    /// Whole rows that fit.
-    rows: usize,
-}
-
-impl HistoryView {
-    fn new(layout: &DialogLayout) -> Self {
-        let h = layout.history;
-        let bar = Rect::new(
-            h.x + h.w - 1. - SCROLLBAR_WIDTH,
-            h.y + 1.,
-            SCROLLBAR_WIDTH,
-            (h.h - 2.).max(0.),
-        );
-        let text = Rect::new(
-            h.x + HISTORY_PAD,
-            h.y + HISTORY_PAD,
-            (bar.x - h.x - 2. * HISTORY_PAD).max(0.),
-            (h.h - 2. * HISTORY_PAD).max(0.),
-        );
-        let rows = ((text.h / CONSOLE_ROW) as usize).max(1);
-        Self { text, bar, rows }
-    }
-
-    /// The row at layout height `y`; `clamp` puts points above or below on the first or last.
-    fn row_at(&self, y: f32, clamp: bool) -> Option<usize> {
-        let row = ((y - self.text.y) / CONSOLE_ROW).floor();
-        if clamp {
-            Some(row.clamp(0., (self.rows - 1) as f32) as usize)
-        } else {
-            (row >= 0. && (row as usize) < self.rows).then_some(row as usize)
-        }
-    }
-}
 
 fn vector(args: &[String]) -> Option<glam::Vec3> {
     if !(2..=3).contains(&args.len()) {

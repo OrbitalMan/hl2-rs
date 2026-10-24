@@ -2,6 +2,14 @@ use super::*;
 use crate::gameui::localize::Localization;
 use crate::gameui::menu::MenuCommand;
 use crate::gameui::resources::{MenuItem, Visibility};
+use crate::proportional;
+use source_ui::console::dialog::{
+    DialogLayout, ENTRY_TALL, MIN_SIZE, PROPORTIONAL_BASE, SUBMIT_WIDE,
+};
+use source_ui::console::panel::{
+    HistoryView, Level, Line, CONSOLE_ROW, NOMINAL_ADVANCE, OUTPUT_LINES, WHEEL_ROWS,
+};
+use source_ui::widgets::ScrollMode;
 #[test]
 fn cell_metrics_rejects_missing_font() {
     assert!(CellMetrics::from_bytes(b"missing font").is_none());
@@ -72,8 +80,12 @@ fn ai_disable_is_a_cheat_toggle_without_arguments() {
 fn quoted_separators_are_text_and_bad_quotes_execute_nothing() {
     let mut console = Console::default();
     console.submit("echo \"hello; world\"; echo done");
-    assert!(console.output.iter().any(|line| line == "hello; world"));
-    assert!(console.output.iter().any(|line| line == "done"));
+    assert!(console
+        .panel
+        .output
+        .iter()
+        .any(|line| line == "hello; world"));
+    assert!(console.panel.output.iter().any(|line| line == "done"));
     console.submit("sv_cheats 1; echo \"unfinished");
     assert!(!console.cheats);
 }
@@ -209,7 +221,7 @@ fn explicit_text_input_edits_unicode_at_boundaries_and_completes_commands() {
     );
     keys(&mut console, &[Key::Enter]);
     assert!(console.input_line().is_empty());
-    assert!(console.output.iter().any(|s| s.contains("sv_cheats")));
+    assert!(console.panel.output.iter().any(|s| s.contains("sv_cheats")));
 }
 #[test]
 fn console_shortcuts_search_paste_filter_and_timestamps() {
@@ -226,7 +238,7 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         text: "fov".into(),
         ..Default::default()
     });
-    assert_eq!(console.editor.search(), Some(("fov", Some("fov 90"))));
+    assert_eq!(console.panel.editor.search(), Some(("fov", Some("fov 90"))));
     console.escape();
     assert_eq!(
         console.mode(),
@@ -253,7 +265,7 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         console.cvar_value("con_filter_text").as_deref(),
         Some("Loaded")
     );
-    assert!(console.con_timestamp);
+    assert!(console.panel.con_timestamp);
     assert!(console.submit("con_filter_enable 3").is_empty());
     assert_eq!(
         console.cvar_value("con_filter_enable").as_deref(),
@@ -264,7 +276,7 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         text: "Loaded hl2/background01".into(),
         time: 0.,
     };
-    assert!(console.filter_match(&loaded));
+    assert!(console.panel.filter_match(&loaded));
     assert_eq!(
         serde_json::to_string(&loaded).unwrap(),
         "\"Loaded hl2/background01\"",
@@ -275,16 +287,16 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         binding_keys: vec!["KeyL".into()],
         ..Default::default()
     });
-    assert!(console.output.is_empty(), "Ctrl+L clears the output");
+    assert!(console.panel.output.is_empty(), "Ctrl+L clears the output");
 }
 /// Canvas point at the middle of a frame-relative layout rectangle of the console dialog.
 fn dialog_point(console: &Console, rect: Rect) -> Vec2 {
-    let r = console.dialog_layout().canvas(rect);
+    let r = console.panel.dialog_layout(&console.canvas).canvas(rect);
     vec2(r.x + r.w * 0.5, r.y + r.h * 0.5)
 }
 /// Canvas point on the history row `row` (0 is the top row shown).
 fn history_point(console: &Console, row: usize) -> Vec2 {
-    let layout = console.dialog_layout();
+    let layout = console.panel.dialog_layout(&console.canvas);
     let text = layout.canvas(HistoryView::new(&layout).text);
     vec2(
         text.x + 10.,
@@ -422,10 +434,10 @@ fn the_console_moves_by_its_caption_and_escape_undoes_a_drag() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    let start = console.dialog_layout();
+    let start = console.panel.dialog_layout(&console.canvas);
     let caption = start.origin + vec2(100., 10.) * start.scale;
     pointer_drag(&mut console, caption, caption - vec2(200., 50.));
-    let moved = console.dialog_layout();
+    let moved = console.panel.dialog_layout(&console.canvas);
     assert_eq!(moved.origin, start.origin - vec2(200., 50.));
     assert_eq!(moved.size, start.size);
     // The caption press is the placement's: no history row selection started.
@@ -440,11 +452,17 @@ fn the_console_moves_by_its_caption_and_escape_undoes_a_drag() {
     });
     console.escape();
     assert_eq!(console.mode(), Mode::Console);
-    assert_eq!(console.dialog_layout().origin, moved.origin);
+    assert_eq!(
+        console.panel.dialog_layout(&console.canvas).origin,
+        moved.origin
+    );
     // Closing and reopening keeps the place.
     console.toggle();
     console.toggle();
-    assert_eq!(console.dialog_layout().origin, moved.origin);
+    assert_eq!(
+        console.panel.dialog_layout(&console.canvas).origin,
+        moved.origin
+    );
 }
 
 #[test]
@@ -452,27 +470,28 @@ fn the_console_resizes_by_its_corners_within_limits() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    let start = console.dialog_layout();
+    let start = console.panel.dialog_layout(&console.canvas);
     let corner = start.origin + start.size * start.scale - Vec2::splat(4.);
     console.pointer = Some(corner);
     assert_eq!(console.cursor_hint(), CursorHint::ResizeNwSe);
     pointer_drag(&mut console, corner, corner + vec2(-100., -60.));
-    let resized = console.dialog_layout();
+    let resized = console.panel.dialog_layout(&console.canvas);
     assert_eq!(resized.origin, start.origin, "the top-left stays");
     assert!((resized.size.x - (start.size.x - 100. / start.scale)).abs() <= 1.);
     assert!(resized.entry.w > 0. && resized.history.h > 0.);
     // Way past the minimum: the layout keeps every control.
     let corner = resized.origin + resized.size * resized.scale - Vec2::splat(4.);
     pointer_drag(&mut console, corner, start.origin);
-    assert_eq!(console.dialog_layout().size, dialog::MIN_SIZE);
+    assert_eq!(console.panel.dialog_layout(&console.canvas).size, MIN_SIZE);
     // The top-left grip shows the same diagonal; the caption keeps the arrow.
-    console.pointer = Some(console.dialog_layout().origin + Vec2::splat(2.));
+    console.pointer = Some(console.panel.dialog_layout(&console.canvas).origin + Vec2::splat(2.));
     assert_eq!(console.cursor_hint(), CursorHint::ResizeNwSe);
-    console.pointer = Some(console.dialog_layout().origin + vec2(60., 10.) * start.scale);
+    console.pointer =
+        Some(console.panel.dialog_layout(&console.canvas).origin + vec2(60., 10.) * start.scale);
     assert_eq!(console.cursor_hint(), CursorHint::Arrow);
     // A smaller window never leaves the console larger than it or off it.
     console.canvas.resize(640., 480.);
-    let small = console.dialog_layout();
+    let small = console.panel.dialog_layout(&console.canvas);
     assert!(small.origin.x >= 0. && small.origin.y >= 0.);
     assert!(small.origin.x + small.size.x * small.scale <= 640.);
     assert!(small.origin.y + small.size.y * small.scale <= 480.);
@@ -483,10 +502,11 @@ fn console_placement_survives_a_restart_and_resets_off_screen() {
     let mut console = Console::default();
     console.canvas.resize(1920., 1080.);
     console.toggle();
-    let start = console.dialog_layout();
+    let start = console.panel.dialog_layout(&console.canvas);
     let caption = start.origin + vec2(100., 10.) * start.scale;
     pointer_drag(&mut console, caption, caption - vec2(600., 0.));
-    let corner = console.dialog_layout().origin + console.dialog_layout().size * start.scale
+    let corner = console.panel.dialog_layout(&console.canvas).origin
+        + console.panel.dialog_layout(&console.canvas).size * start.scale
         - Vec2::splat(4.);
     pointer_drag(&mut console, corner, corner - vec2(100., 100.));
     console.input(&Input::default());
@@ -495,19 +515,22 @@ fn console_placement_survives_a_restart_and_resets_off_screen() {
         .dialogs
         .console
         .expect("saved after the gesture");
-    let placed = console.dialog_layout();
+    let placed = console.panel.dialog_layout(&console.canvas);
     // The next run restores it.
     let mut next = Console::default();
     next.canvas.resize(1920., 1080.);
-    next.console_placement = Placement::from_saved(Some(saved));
+    next.panel.placement = Placement::from_saved(Some(saved));
     next.toggle();
-    assert_eq!(next.dialog_layout(), placed);
+    assert_eq!(next.panel.dialog_layout(&next.canvas), placed);
     // Opened on a smaller window where it would not fit as saved: the default frame.
     let mut small = Console::default();
     small.canvas.resize(800., 600.);
-    small.console_placement = Placement::from_saved(Some(saved));
+    small.panel.placement = Placement::from_saved(Some(saved));
     small.toggle();
-    assert_eq!(small.dialog_layout(), DialogLayout::new(vec2(800., 600.)));
+    assert_eq!(
+        small.panel.dialog_layout(&small.canvas),
+        DialogLayout::new(vec2(800., 600.), proportional::SCALING)
+    );
     small.input(&Input::default());
     assert_eq!(small.config.dialogs.console, None, "the reset is saved");
 }
@@ -543,7 +566,7 @@ fn dragging_over_history_rows_selects_them_for_copy() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    console.output.clear();
+    console.panel.output.clear();
     for i in 0..5 {
         console.log(format!("line {i}"));
     }
@@ -560,15 +583,15 @@ fn dragging_over_history_rows_selects_them_for_copy() {
         console.log(format!("line {i}"));
     }
     assert_eq!(copy(&mut console), None, "the selected lines scrolled out");
-    console.output.clear();
-    console.output_start = 0;
+    console.panel.output.clear();
+    console.panel.output_start = 0;
     for i in 0..5 {
         console.log(format!("line {i}"));
     }
     drag(&mut console, 2, 2);
     console.log("printed after");
-    console.output.pop_front();
-    console.output_start += 1;
+    console.panel.output.pop_front();
+    console.panel.output_start += 1;
     assert_eq!(copy(&mut console).as_deref(), Some("line 2"));
 
     // Copying follows what the history shows: the filter and timestamps.
@@ -595,22 +618,22 @@ fn dragging_over_history_rows_selects_them_for_copy() {
 #[test]
 fn live_viewmodel_tuning_log_replaces_its_snapshot_and_keeps_other_output() {
     let mut console = Console::default();
-    console.clear_output();
+    console.panel.clear_output();
     console.log("before snapshot");
     console.log_viewmodel_tuning("{\"fov_offset\": 0.1}");
     console.log("unrelated output");
     console.log_viewmodel_tuning("{\"fov_offset\": 0.2}");
 
-    assert_eq!(console.output.len(), 3);
-    assert_eq!(console.output[0].text, "before snapshot");
-    assert_eq!(console.output[1].level, Level::ViewmodelTuning);
-    assert_eq!(console.output[1].text, "{\"fov_offset\": 0.2}");
-    assert_eq!(console.output[2].text, "unrelated output");
+    assert_eq!(console.panel.output.len(), 3);
+    assert_eq!(console.panel.output[0].text, "before snapshot");
+    assert_eq!(console.panel.output[1].level, Level::Snapshot);
+    assert_eq!(console.panel.output[1].text, "{\"fov_offset\": 0.2}");
+    assert_eq!(console.panel.output[2].text, "unrelated output");
 
-    console.clear_output();
+    console.panel.clear_output();
     console.log_viewmodel_tuning("{\"fov_offset\": 0.3}");
-    assert_eq!(console.output.len(), 1);
-    assert_eq!(console.output[0].text, "{\"fov_offset\": 0.3}");
+    assert_eq!(console.panel.output.len(), 1);
+    assert_eq!(console.panel.output[0].text, "{\"fov_offset\": 0.3}");
 }
 
 #[test]
@@ -626,28 +649,31 @@ fn scrolled_back_history_stays_put_while_output_arrives() {
         ..Default::default()
     });
     let rows = 2 * ScrollMode::platform().rows_per_step(WHEEL_ROWS);
-    assert_eq!(console.scroll, rows);
+    assert_eq!(console.panel.scroll, rows);
     console.log("more");
-    assert_eq!(console.scroll, rows + 1);
+    assert_eq!(console.panel.scroll, rows + 1);
     keys(&mut console, &[Key::Enter]);
-    assert_eq!(console.scroll, 0, "submitting returns to the newest output");
+    assert_eq!(
+        console.panel.scroll, 0,
+        "submitting returns to the newest output"
+    );
 }
 
 /// Characters that fit a history row with the nominal advance of a console without fonts.
 fn row_chars(console: &Console) -> usize {
-    let metrics = console.wrap_metrics();
+    let metrics = console.panel.wrap_metrics(&console.canvas);
     (metrics.width / (metrics.em * NOMINAL_ADVANCE)) as usize
 }
 /// The top history row shown: its line number and text.
 fn top_row(console: &Console) -> (u64, String) {
-    let rows = HistoryView::new(&console.dialog_layout()).rows;
-    let history = console.history_rows();
+    let rows = HistoryView::new(&console.panel.dialog_layout(&console.canvas)).rows;
+    let history = console.panel.history_rows(&console.canvas);
     let shown = rows.min(history.len());
-    let first = history.len() - shown - console.scroll.min(history.len() - shown);
+    let first = history.len() - shown - console.panel.scroll.min(history.len() - shown);
     let row = &history[first];
     (
         row.number,
-        console.shown_text(row.line)[row.text.clone()].to_owned(),
+        console.panel.shown_text(row.line)[row.text.clone()].to_owned(),
     )
 }
 /// Words long enough to wrap to at least `rows` history rows.
@@ -664,8 +690,8 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    console.output.clear();
-    console.output_start = 0;
+    console.panel.output.clear();
+    console.panel.output_start = 0;
     let long = long_line(&console, 3);
     let warning = "Encountered an error in command `<Enable the debug feature to see the name>`:\n\
                        Entity despawned: The entity with ID 2224v1 is invalid";
@@ -673,14 +699,14 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     console.log(long.clone());
     console.print(Level::Warning, warning);
     console.log("last");
-    let metrics = console.wrap_metrics();
-    let history = console.history_rows();
+    let metrics = console.panel.wrap_metrics(&console.canvas);
+    let history = console.panel.history_rows(&console.canvas);
     let rows: Vec<(u64, String)> = history
         .iter()
         .map(|row| {
             (
                 row.number,
-                console.shown_text(row.line)[row.text.clone()].to_owned(),
+                console.panel.shown_text(row.line)[row.text.clone()].to_owned(),
             )
         })
         .collect();
@@ -690,7 +716,7 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     for (_, text) in &rows {
         let width: f32 = text
             .chars()
-            .map(|c| console.console_advance(c, metrics.em))
+            .map(|c| console.panel.advance(c, metrics.em))
             .sum();
         assert!(width <= metrics.width, "{text}");
         assert!(!text.starts_with(' ') && !text.ends_with(' '), "{text:?}");
@@ -739,8 +765,13 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     // The filter keeps or hides whole lines, all their rows.
     // (Set directly: the echo of a `con_filter_text` command contains its text.)
     console.submit("con_timestamp 0; con_filter_enable 1");
-    console.con_filter_text = "despawned".into();
-    let shown: Vec<u64> = console.history_rows().iter().map(|r| r.number).collect();
+    console.panel.con_filter_text = "despawned".into();
+    let shown: Vec<u64> = console
+        .panel
+        .history_rows(&console.canvas)
+        .iter()
+        .map(|r| r.number)
+        .collect();
     assert_eq!(shown, vec![2; count]);
 }
 
@@ -749,8 +780,8 @@ fn scrolled_back_wrapped_history_stays_put_and_reaches_the_top() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    console.output.clear();
-    console.output_start = 0;
+    console.panel.output.clear();
+    console.panel.output_start = 0;
     let long = long_line(&console, 2);
     for i in 0..100 {
         console.log(if i % 2 == 0 {
@@ -764,19 +795,20 @@ fn scrolled_back_wrapped_history_stays_put_and_reaches_the_top() {
         ..Default::default()
     });
     let top = top_row(&console);
-    let scroll = console.scroll;
+    let scroll = console.panel.scroll;
     assert!(scroll > 0);
     // New output below adds its rows to the scroll, so the shown rows stay.
     console.log(long.clone());
     let added = console
-        .history_rows()
+        .panel
+        .history_rows(&console.canvas)
         .iter()
         .filter(|r| r.number == 100)
         .count();
     assert!(added >= 2);
-    assert_eq!(console.scroll, scroll + added);
+    assert_eq!(console.panel.scroll, scroll + added);
     console.log("one\ntwo");
-    assert_eq!(console.scroll, scroll + added + 2);
+    assert_eq!(console.panel.scroll, scroll + added + 2);
     assert_eq!(top_row(&console), top);
     console.input(&Input::default());
     assert_eq!(top_row(&console), top, "the next frame keeps the view");
@@ -800,7 +832,7 @@ fn scrolled_back_wrapped_history_stays_put_and_reaches_the_top() {
         ctrl: true,
         ..Default::default()
     });
-    assert_eq!(console.scroll, 0);
+    assert_eq!(console.panel.scroll, 0);
 }
 
 #[test]
@@ -814,7 +846,10 @@ fn submit_button_runs_the_line_and_close_button_closes_the_console() {
         text: "echo clicked".into(),
         ..Default::default()
     });
-    let submit = dialog_point(&console, console.dialog_layout().submit);
+    let submit = dialog_point(
+        &console,
+        console.panel.dialog_layout(&console.canvas).submit,
+    );
     press(&mut console, submit);
     assert_eq!(console.input_line(), "echo clicked", "runs on release");
     assert_eq!(
@@ -823,11 +858,11 @@ fn submit_button_runs_the_line_and_close_button_closes_the_console() {
     );
     assert_eq!(console.input_line(), "");
     assert_eq!(
-        console.output.back().map(|l| l.text.as_str()),
+        console.panel.output.back().map(|l| l.text.as_str()),
         Some("clicked")
     );
 
-    let close = dialog_point(&console, console.dialog_layout().close);
+    let close = dialog_point(&console, console.panel.dialog_layout(&console.canvas).close);
     press(&mut console, close);
     assert_eq!(console.mode(), Mode::Console);
     release(&mut console, close);
@@ -916,7 +951,12 @@ fn pause_menu_entries_activate_by_pointer_and_keyboard() {
         "Load Game is a placeholder"
     );
     assert_eq!(console.mode(), Mode::Pause);
-    assert!(console.output.back().unwrap().contains("not implemented"));
+    assert!(console
+        .panel
+        .output
+        .back()
+        .unwrap()
+        .contains("not implemented"));
     assert_eq!(
         click_row(&mut console, 5),
         vec![Effect::PlaySound("ui/buttonclickrelease.wav".into())]
@@ -1776,6 +1816,7 @@ fn background_map_and_map_background_console_commands() {
     let effects = console.submit("background_map");
     assert!(effects.is_empty());
     assert!(console
+        .panel
         .output
         .iter()
         .any(|line| line.contains("\"background_map\" = \"background01\"")));
@@ -2205,6 +2246,7 @@ fn lostcoast_navigation_and_missing_content_error_recovery() {
     assert_eq!(console.main_menu.entries()[1].label, "WORKSHOP");
     console.activate_menu(1);
     assert!(console
+        .panel
         .output
         .iter()
         .any(|line| line.contains("WORKSHOP: not implemented")));
@@ -3378,11 +3420,10 @@ fn the_console_completion_popup_past_its_frame_is_part_of_the_console() {
     console.canvas.resize(1280., 720.);
     console.toggle();
     // At the top of the canvas, so the list opens below the entry line, past the frame.
-    console.console_placement =
-        Placement::from_saved(Some(source_ui::placement::DialogPlacement {
-            offset: [0., -2000.],
-            size: None,
-        }));
+    console.panel.placement = Placement::from_saved(Some(source_ui::placement::DialogPlacement {
+        offset: [0., -2000.],
+        size: None,
+    }));
     console.input(&Input {
         text: "s".into(),
         ..Default::default()
@@ -4067,7 +4108,7 @@ fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
     console.sync_dialog_windows();
     assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
 
-    let layout = console.dialog_layout();
+    let layout = console.panel.dialog_layout(&console.canvas);
     let entry_canvas = layout.canvas(layout.entry);
     let caret_h = (layout.entry.h - 8.) * layout.scale;
 
@@ -4720,7 +4761,10 @@ fn gameplay_skill_cvar_and_migrate_command() {
 
     // Query skill
     console.submit("skill");
-    assert_eq!(console.output.back().unwrap().text, "\"skill\" = \"2\"");
+    assert_eq!(
+        console.panel.output.back().unwrap().text,
+        "\"skill\" = \"2\""
+    );
 
     // Set skill 1 (Easy)
     console.submit("skill 1");
@@ -4741,7 +4785,88 @@ fn gameplay_skill_cvar_and_migrate_command() {
     // Placeholder migrate_episodic_data command
     console.submit("migrate_episodic_data");
     assert_eq!(
-        console.output.back().unwrap().text,
+        console.panel.output.back().unwrap().text,
         "migrate_episodic_data: save data migration is not implemented in this build"
     );
+}
+
+#[test]
+fn layout_follows_the_console_panel_insets_at_1024x768() {
+    let layout = DialogLayout::new(vec2(1024., 768.), proportional::SCALING);
+    // Proportional 16 and 64 at 768 lines are 25 and 102 pixels.
+    assert_eq!(layout.origin, vec2(487., 102.));
+    let scale = 768. / 720.;
+    assert_eq!(layout.scale, scale);
+    assert_eq!(layout.size, (vec2(512., 564.) / scale).round());
+    let (w, h) = (layout.size.x, layout.size.y);
+    // Client area: x 8, y 30, w - 16 wide, down to 6 above the frame edge.
+    assert_eq!(layout.history, Rect::new(16., 42., w - 32., h - 36. - 52.));
+    let bottom = h - 6. - 8. - 24.;
+    assert_eq!(layout.submit, Rect::new(w - 8. - 79., bottom, 64., 24.));
+    assert_eq!(
+        layout.entry,
+        Rect::new(16., bottom, w - 16. - 79. - 4. - 16., 24.)
+    );
+    // History, entry and button stay inside the frame, entry left of the button.
+    assert!(layout.entry.x + layout.entry.w < layout.submit.x);
+    assert!(layout.history.y + layout.history.h < layout.entry.y);
+    assert!(layout.submit.x + layout.submit.w < w);
+    // Layout and canvas coordinates round-trip.
+    let submit = layout.canvas(layout.submit);
+    let centre = vec2(submit.x + submit.w * 0.5, submit.y + submit.h * 0.5);
+    assert!(layout.submit.contains(layout.local(centre)));
+}
+
+#[test]
+fn landscape_frames_are_the_retail_ones_and_narrow_screens_get_a_bounded_frame() {
+    for canvas in [vec2(1280., 1024.), vec2(1920., 1080.), vec2(5120., 1440.)] {
+        let (origin, size) = DialogLayout::default_frame(canvas, proportional::SCALING);
+        let scale = proportional::dialog_scale(canvas);
+        let p = |v: f32| (v * canvas.y / PROPORTIONAL_BASE).floor();
+        assert_eq!(
+            origin,
+            vec2((canvas.x * 0.5).floor() - p(16.), p(64.)),
+            "{canvas}"
+        );
+        assert_eq!(
+            size,
+            (vec2((canvas.x * 0.5).floor(), canvas.y - 2. * p(64.)) / scale).round(),
+            "{canvas}"
+        );
+    }
+    for canvas in [vec2(1080., 1080.), vec2(1080., 1920.), vec2(720., 1280.)] {
+        let (origin, size) = DialogLayout::default_frame(canvas, proportional::SCALING);
+        let scale = proportional::dialog_scale(canvas);
+        let (right, bottom) = (origin.x + size.x * scale, origin.y + size.y * scale);
+        let design = proportional::design_height(canvas);
+        assert!(
+            origin.x > 0. && right < canvas.x,
+            "{canvas}: spans the width"
+        );
+        assert!(right > canvas.x * 0.9, "{canvas}: {right}");
+        assert!(
+            bottom <= design,
+            "{canvas}: ends in the design area, not at the bottom"
+        );
+        assert!(
+            bottom < canvas.y * 0.8 || canvas.y == canvas.x,
+            "{canvas}: {bottom}"
+        );
+    }
+}
+
+#[test]
+fn small_canvases_and_resizes_keep_the_minimum_size() {
+    let layout = DialogLayout::new(vec2(120., 100.), proportional::SCALING);
+    assert_eq!(layout.size, MIN_SIZE);
+    let smallest = DialogLayout::at(1., Vec2::ZERO, vec2(10., 10.));
+    assert_eq!(smallest.size, MIN_SIZE);
+    assert!(smallest.entry.w >= SUBMIT_WIDE, "{:?}", smallest.entry);
+    assert!(
+        smallest.history.h >= 3. * ENTRY_TALL,
+        "{:?}",
+        smallest.history
+    );
+    assert!(smallest.entry.x + smallest.entry.w < smallest.submit.x);
+    assert!(smallest.submit.x + smallest.submit.w < smallest.size.x);
 }
