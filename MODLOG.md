@@ -1,5 +1,28 @@
 # MODLOG
 
+## 2026-10-24 Exact and local checks, step 2: source-ui tests itself
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- Tests in source-ui for the five files that had none, each over a small fake app:
+  - `shell.rs` (7 tests): an app with a dialog, the console, a modal window and a menu base that logs the hooks the shell calls. Escape's order (the app's drag, the console's history search, the app's modal state, the top window, the base), a held Escape closing on release (and acting at once while the app blocks it), the console toggle (disabled, opening on top with the focus, closing unfocused, blocked, not over a modal window), `close_window`, the pointer going to the topmost window under it or the base (a press staying with its window until release, the base occluded), modal layers taking the frame, key repeat stopping during a key capture and across a mode change.
+  - `console/panel.rs` (6): the 1,024-line scrollback and its numbering across a clear, snapshot lines replaced in place, `con_filter` 1/2 and timestamps, Enter submitting (the console key's characters never reach the line), Close and Submit acting on release over the button, copying selected lines once.
+  - `console/command.rs` (3): tokenizing (separators, quotes, an unterminated quote), running by name through the handlers (usage and unknown-command errors, cvar values, help words), typed values.
+  - `console/editor.rs` (4) and `input.rs` (2): the line editor's and key repeat's tests moved from hl2-ui (`console/complete.rs`, `console/tests.rs`) with a fake completer in place of HL2's sources, plus how a frame is shared between layers.
+- hl2-ui keeps its tests of HL2's own completion and of the console through `Console`; it lost the five moved tests and their now-unused imports.
+- STATUS's first line is a current checkpoint (it was the 2026-10-09 one); STATUS's step 6 note names where production `use super::*` remains (hl2-bevy's `video.rs`); the step 6 follow-up entry below now lists all remaining production globs (it said two enum-variant imports; there are 13, plus the Windows GDI import).
+
+**Why:** Plan step 2 (DESIGN "Exact and local checks"): 2,143 lines of toolkit code were tested only through hl2-ui's `Console`, so a toolkit mistake failed far from its cause.
+
+**Tested how:** `scripts/checks/validate.sh` (1,039 tests: source-ui 114, was 92; hl2-ui 285, was 290; strict Clippy, fmt), the Windows-target check and the repository isolation check pass. Moving `shell::escape`'s modal-state check before the console's history search (on purpose, reverted) fails `escape_undoes_a_drag_then_ends_the_console_search_then_the_modal_state_then_closes_the_top` with only source-ui's tests run. Two first drafts of the shell tests expected a new press to go elsewhere while the button was still held; the shell keeps a press with its window until release, as documented, so the tests were fixed.
+
+**Result:** Every source-ui file with code has tests of its own. Tests and documentation only.
+
+**Still broken or not tested:** The fake app is the only second user of `shell::Host` and `command::Context`; no other app uses the toolkit.
+
+**Next:** None planned in this series.
+
 ## 2026-10-24 Exact and local checks, step 1: closed without a change
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
@@ -55,7 +78,7 @@
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
 
-**Changed:** source-ui's last production glob imports (`use crate::canvas::*` in `font.rs` and `console/panel.rs`) are explicit (Clippy's `wildcard_imports` fix); the font test imports `WHITE`, which it took through the glob. The production globs left in the workspace are the Bevy and Rapier preludes (`bevy::prelude::*`, `rapier3d::prelude::*`) and the two enum-variant imports of the AI relationship table (`use Class::*; use Disposition::*;`); test modules keep `use super::*`.
+**Changed:** source-ui's last production glob imports (`use crate::canvas::*` in `font.rs` and `console/panel.rs`) are explicit (Clippy's `wildcard_imports` fix); the font test imports `WHITE`, which it took through the glob. The production globs left in the workspace are the Bevy and Rapier preludes (`bevy::prelude::*`, `rapier3d::prelude::*`), the Windows GDI import in `native_font.rs` and 13 local enum-variant imports (`use Class::*; use Disposition::*;` in the AI relationship table, `use TaskStatus::*;` and the like; corrected 2026-10-24, this entry first said two); test modules keep `use super::*`.
 
 **Why:** Step 6 covered hl2-ui and hl2-simulation; source-ui had two more.
 

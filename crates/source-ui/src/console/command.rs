@@ -207,3 +207,123 @@ pub fn tokenize(line: &str) -> Result<Vec<Vec<String>>, String> {
     }
     Ok(commands)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A console app: `echo` prints its words, `volume` is a cvar.
+    #[derive(Default)]
+    struct App {
+        printed: Vec<String>,
+        volume: f32,
+    }
+
+    impl Context for App {
+        type Effect = &'static str;
+        type Names = ();
+    }
+
+    fn echo(app: &mut App, spec: &'static Spec<App>, args: &[String]) -> Outcome<&'static str> {
+        if args.is_empty() {
+            return Err(spec.usage());
+        }
+        app.printed.push(args.join(" "));
+        Ok(Some("printed"))
+    }
+
+    fn volume(app: &App) -> Option<String> {
+        Some(app.volume.to_string())
+    }
+
+    fn set_volume(app: &mut App, _: &'static Spec<App>, args: &[String]) -> Outcome<&'static str> {
+        match args {
+            [value] => {
+                app.volume = parse(value).map_err(|_| "volume <0..1>".to_owned())?;
+                Ok(None)
+            }
+            _ => Err("volume <0..1>".into()),
+        }
+    }
+
+    const COMMANDS: &[Spec<App>] = &[
+        Spec {
+            name: "echo",
+            help: "echo <text>: print the text",
+            args: &[Arg::Free],
+            run: echo,
+            value: None,
+            setting: None,
+        },
+        Spec {
+            name: "volume",
+            help: "volume <0..1>: sound volume",
+            args: &[Arg::Values(&["0", "1"])],
+            run: set_volume,
+            value: Some(volume),
+            setting: None,
+        },
+    ];
+
+    fn words(line: &str) -> Vec<Vec<String>> {
+        tokenize(line).unwrap()
+    }
+
+    #[test]
+    fn semicolons_separate_commands_and_quotes_keep_text_together() {
+        assert_eq!(
+            words("echo a  b; volume 1"),
+            [vec!["echo", "a", "b"], vec!["volume", "1"]]
+        );
+        assert_eq!(words(r#"echo "a; b" c"#), [vec!["echo", "a; b", "c"]]);
+        assert_eq!(
+            words(r#"echo """#),
+            [vec!["echo", ""]],
+            "an empty quoted argument counts"
+        );
+        assert!(words(" ;; ").is_empty());
+        assert_eq!(
+            tokenize(r#"echo "open; volume 1"#),
+            Err("Unterminated quoted argument; no commands executed".into())
+        );
+    }
+
+    #[test]
+    fn commands_run_by_name_through_their_handlers() {
+        let mut app = App::default();
+        let line = |text: &str| words(text).remove(0);
+        assert_eq!(
+            run(&mut app, COMMANDS, &line("ECHO hi there")),
+            Ok(Some("printed"))
+        );
+        assert_eq!(app.printed, ["hi there"], "names match in any case");
+        assert_eq!(
+            run(&mut app, COMMANDS, &line("echo")),
+            Err("echo <text>: print the text".into())
+        );
+        assert_eq!(run(&mut app, COMMANDS, &line("volume 0.5")), Ok(None));
+        assert_eq!(app.volume, 0.5);
+        assert_eq!(
+            run(&mut app, COMMANDS, &line("noclip")),
+            Err("Unknown or unimplemented command: noclip".into())
+        );
+        let volume = find(COMMANDS, "Volume").unwrap();
+        assert!(volume.is_cvar() && !find(COMMANDS, "echo").unwrap().is_cvar());
+        assert_eq!((volume.value.unwrap())(&app).as_deref(), Some("0.5"));
+        assert_eq!(
+            usage(volume),
+            (vec!["<0..1>".to_owned()], "sound volume".to_owned())
+        );
+    }
+
+    #[test]
+    fn typed_values_parse_or_ask_for_the_usage() {
+        assert_eq!(
+            (boolean("0"), boolean("1"), boolean("2")),
+            (Some(false), Some(true), None)
+        );
+        assert_eq!((flag("1"), flag("yes")), (Ok(true), Err(Invalid::Usage)));
+        assert_eq!(parse::<f32>("0.25"), Ok(0.25));
+        assert_eq!(parse::<u8>("300"), Err(Invalid::Usage));
+    }
+}

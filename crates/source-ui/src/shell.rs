@@ -298,3 +298,492 @@ pub fn close_window<H: Host>(host: &mut H, window: H::Window) {
     host.shell_mut().windows.close(window);
     host.window_closed();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::Key;
+    use crate::widgets::Painter;
+    use glam::vec2;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Window {
+        Dialog,
+        Console,
+        Modal,
+    }
+
+    impl WindowId for Window {
+        const CONSOLE: Self = Window::Console;
+        fn is_modal(&self) -> bool {
+            *self == Window::Modal
+        }
+    }
+
+    fn dialog_scale(canvas: Vec2) -> f32 {
+        Painter::scale_for(canvas.y)
+    }
+
+    fn design_height(canvas: Vec2) -> f32 {
+        canvas.y
+    }
+
+    const SCALING: Scaling = Scaling {
+        dialog_scale,
+        design_height,
+    };
+
+    /// An app over the shell: a dialog at x 0..100, the console at x 50..150, a modal window
+    /// at x 20..80 and a menu as the base everywhere. It logs the hooks that change or decide
+    /// something, in the order the shell calls them; its input effects say what each layer got.
+    struct App {
+        shell: Shell<Window>,
+        canvas: Canvas,
+        log: Vec<String>,
+        mode: u32,
+        capturing: bool,
+        /// A modal layer of the app (a loading dialog) takes every frame.
+        loading: bool,
+        escape_blocked: bool,
+        /// A drag of the app's own box is in progress.
+        dragging: bool,
+        /// The app's modal state answers Escape.
+        modal_escape: bool,
+        console_enabled: bool,
+        console_blocked: bool,
+        /// The input of this window opens a modal layer of the app.
+        blocks: Option<Window>,
+        blocked: bool,
+        /// Enter on the base changes the app's mode.
+        enter_changes_mode: bool,
+    }
+
+    impl App {
+        fn new() -> Self {
+            Self {
+                shell: Shell::new(0., 0.3, SCALING),
+                canvas: Canvas::default(),
+                log: Vec::new(),
+                mode: 0,
+                capturing: false,
+                loading: false,
+                escape_blocked: false,
+                dragging: false,
+                modal_escape: false,
+                console_enabled: true,
+                console_blocked: false,
+                blocks: None,
+                blocked: false,
+                enter_changes_mode: false,
+            }
+        }
+
+        fn with(windows: &[Window]) -> Self {
+            let mut app = Self::new();
+            for &window in windows {
+                app.shell.windows.open(window);
+            }
+            app
+        }
+
+        fn note(&mut self, entry: impl Into<String>) {
+            self.log.push(entry.into());
+        }
+
+        fn take_log(&mut self) -> Vec<String> {
+            std::mem::take(&mut self.log)
+        }
+    }
+
+    impl Host for App {
+        type Window = Window;
+        type Effect = String;
+        type Mode = u32;
+        type Frame = ();
+
+        fn shell(&self) -> &Shell<Window> {
+            &self.shell
+        }
+        fn shell_mut(&mut self) -> &mut Shell<Window> {
+            &mut self.shell
+        }
+        fn mode(&self) -> u32 {
+            self.mode
+        }
+        fn capturing_key(&self) -> bool {
+            self.capturing
+        }
+        fn modal_input(&mut self, _: &Input) -> Option<Vec<String>> {
+            self.loading.then(|| vec!["loading".to_owned()])
+        }
+        fn prepare_windows(&mut self) -> (Option<Window>, ()) {
+            let modal = self
+                .shell
+                .windows
+                .is_active(Window::Modal)
+                .then_some(Window::Modal);
+            (modal, ())
+        }
+        fn window_bounds(&self, window: Window) -> Rect {
+            match window {
+                Window::Dialog => Rect::new(0., 0., 100., 100.),
+                Window::Console => Rect::new(50., 0., 100., 100.),
+                Window::Modal => Rect::new(20., 0., 60., 100.),
+            }
+        }
+        fn console_popup_bounds(&self) -> Option<Rect> {
+            None
+        }
+        fn base_takes_pointer(&self) -> bool {
+            true
+        }
+        fn focus_changed(&mut self) {}
+        fn window_input(
+            &mut self,
+            _: &(),
+            window: Window,
+            share: &Input,
+            _: &Input,
+        ) -> Vec<String> {
+            if self.blocks == Some(window) {
+                self.blocked = true;
+            }
+            vec![format!(
+                "{window:?} click {} keys {:?}",
+                share.click, share.keys
+            )]
+        }
+        fn input_blocked(&self) -> bool {
+            self.blocked
+        }
+        fn occlude_base(&mut self, down: bool) {
+            self.note(format!("occlude base {down}"));
+        }
+        fn base_input(&mut self, share: &Input, owns_pointer: bool) -> Vec<String> {
+            if self.enter_changes_mode && share.pressed(Key::Enter) {
+                self.mode += 1;
+            }
+            vec![format!(
+                "base click {} owns {owns_pointer} keys {:?}",
+                share.click, share.keys
+            )]
+        }
+        fn sync_windows(&mut self) {
+            self.note("sync");
+        }
+        fn escape_blocked(&self) -> bool {
+            self.escape_blocked
+        }
+        fn escape_closes(&self, window: Window) -> bool {
+            window == Window::Dialog
+        }
+        fn hold_escape(&mut self, top: Option<Window>) {
+            self.note(format!("hold {top:?}"));
+        }
+        fn release_escape(&mut self) {
+            self.note("release");
+        }
+        fn cancel_drag(&mut self) -> bool {
+            self.note("cancel drag");
+            std::mem::take(&mut self.dragging)
+        }
+        fn escape_modal(&mut self) -> bool {
+            self.note("escape modal");
+            self.modal_escape
+        }
+        fn escape_window(&mut self, window: Window) {
+            self.note(format!("escape {window:?}"));
+            close_window(self, window);
+        }
+        fn escape_base(&mut self) {
+            self.note("escape base");
+        }
+        fn window_closed(&mut self) {
+            self.note("closed");
+        }
+        fn console_blocked(&self) -> bool {
+            self.console_blocked
+        }
+        fn console_enabled(&self) -> bool {
+            self.console_enabled
+        }
+        fn console_opening(&mut self) {
+            self.note("console opening");
+        }
+        fn console_closed(&mut self) {
+            self.note("console closed");
+        }
+        fn canvas(&self) -> &Canvas {
+            &self.canvas
+        }
+    }
+
+    fn click(x: f32) -> Input {
+        Input {
+            pointer: Some(vec2(x, 50.)),
+            click: true,
+            held: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn escape_undoes_a_drag_then_ends_the_console_search_then_the_modal_state_then_closes_the_top()
+    {
+        let mut app = App::with(&[Window::Dialog, Window::Console]);
+        app.dragging = true;
+        escape(&mut app);
+        assert_eq!(app.take_log(), ["cancel drag"]);
+        app.shell.panel.editor.search_back();
+        escape(&mut app);
+        assert!(
+            app.shell.panel.editor.search().is_none(),
+            "the history search ends"
+        );
+        assert_eq!(app.take_log(), ["cancel drag"]);
+        app.modal_escape = true;
+        escape(&mut app);
+        assert_eq!(app.take_log(), ["cancel drag", "escape modal"]);
+        assert!(app.shell.windows.is_active(Window::Console));
+        app.modal_escape = false;
+        escape(&mut app);
+        assert_eq!(
+            app.take_log(),
+            [
+                "cancel drag",
+                "escape modal",
+                "release",
+                "closed",
+                "console closed"
+            ]
+        );
+        assert!(!app.shell.windows.is_open(Window::Console));
+        escape(&mut app);
+        assert_eq!(
+            app.take_log(),
+            [
+                "cancel drag",
+                "escape modal",
+                "escape Dialog",
+                "release",
+                "closed"
+            ]
+        );
+        escape(&mut app);
+        assert_eq!(
+            app.take_log(),
+            ["cancel drag", "escape modal", "escape base"]
+        );
+    }
+
+    #[test]
+    fn a_held_escape_shows_the_close_button_and_closes_on_release() {
+        let mut app = App::with(&[Window::Dialog]);
+        escape_pressed(&mut app);
+        assert_eq!(app.take_log(), ["sync", "hold Some(Dialog)"]);
+        assert!(app.shell.escape_held && app.shell.windows.is_active(Window::Dialog));
+        escape_released(&mut app);
+        assert_eq!(
+            app.take_log(),
+            [
+                "sync",
+                "release",
+                "cancel drag",
+                "escape modal",
+                "escape Dialog",
+                "release",
+                "closed"
+            ]
+        );
+        assert!(!app.shell.escape_held && app.shell.windows.is_empty());
+        // The console closes the same way unless Escape first ends something in it.
+        let mut app = App::with(&[Window::Console]);
+        escape_pressed(&mut app);
+        assert!(app.shell.escape_held);
+        app.shell.escape_held = false;
+        app.shell.panel.editor.search_back();
+        escape_pressed(&mut app);
+        assert!(!app.shell.escape_held, "a history search ends at once");
+        assert!(app.shell.windows.is_active(Window::Console));
+        // While the app blocks it, Escape acts at once and holds nothing.
+        let mut app = App::with(&[Window::Dialog]);
+        app.escape_blocked = true;
+        escape_pressed(&mut app);
+        assert!(!app.shell.escape_held);
+        assert_eq!(
+            app.take_log(),
+            [
+                "sync",
+                "cancel drag",
+                "escape modal",
+                "escape Dialog",
+                "release",
+                "closed"
+            ]
+        );
+        // A release with nothing held does nothing.
+        escape_released(&mut app);
+        assert_eq!(app.take_log(), ["sync"]);
+    }
+
+    #[test]
+    fn the_console_toggle_opens_it_on_top_with_the_focus_and_closes_it() {
+        let mut app = App::with(&[Window::Dialog]);
+        app.console_enabled = false;
+        toggle(&mut app);
+        assert!(
+            !app.shell.windows.is_open(Window::Console),
+            "disabled by the app"
+        );
+        app.console_enabled = true;
+        toggle(&mut app);
+        assert_eq!(app.take_log(), ["console opening"]);
+        assert_eq!(app.shell.windows.top(), Some(Window::Console));
+        assert_eq!(app.shell.windows.focus(), Layer::Window(Window::Console));
+        app.shell.windows.open(Window::Dialog);
+        toggle(&mut app);
+        assert_eq!(
+            app.take_log(),
+            ["release", "closed", "console closed"],
+            "closes unfocused too"
+        );
+        assert!(!app.shell.windows.is_open(Window::Console));
+        app.console_blocked = true;
+        toggle(&mut app);
+        assert!(
+            !app.shell.windows.is_open(Window::Console),
+            "blocked by the app"
+        );
+        app.console_blocked = false;
+        app.shell.windows.open(Window::Modal);
+        toggle(&mut app);
+        assert!(
+            !app.shell.windows.is_open(Window::Console),
+            "not over a modal window"
+        );
+        assert!(app.take_log().is_empty());
+    }
+
+    #[test]
+    fn close_window_ends_the_held_escape_and_tells_the_app() {
+        let mut app = App::with(&[Window::Dialog, Window::Console]);
+        app.shell.escape_held = true;
+        close_window(&mut app, Window::Console);
+        assert!(!app.shell.escape_held);
+        assert_eq!(app.take_log(), ["release", "closed"]);
+        assert_eq!(app.shell.windows.top(), Some(Window::Dialog));
+        assert_eq!(
+            app.shell.windows.focus(),
+            Layer::Window(Window::Dialog),
+            "focus goes back"
+        );
+    }
+
+    #[test]
+    fn the_pointer_goes_to_the_topmost_window_under_it_else_to_the_base() {
+        let mut app = App::with(&[Window::Dialog, Window::Console]);
+        let effects = input(&mut app, &click(75.));
+        assert_eq!(
+            effects,
+            [
+                "Dialog click false keys {}",
+                "Console click true keys {}",
+                "base click false owns false keys {}"
+            ]
+        );
+        assert_eq!(
+            app.take_log(),
+            ["occlude base true"],
+            "the base only follows the button"
+        );
+        // The press stays with the console until the button is released.
+        let mut drag = click(20.);
+        drag.click = false;
+        assert_eq!(input(&mut app, &drag)[1], "Console click false keys {}");
+        let release = Input {
+            pointer: Some(vec2(20., 50.)),
+            released: true,
+            ..Default::default()
+        };
+        input(&mut app, &release);
+        app.take_log();
+        // A press on the dialog raises it and gives it the keys too.
+        let mut press = click(20.);
+        press.keys.insert(Key::Enter);
+        let effects = input(&mut app, &press);
+        assert_eq!(
+            effects,
+            [
+                "Console click false keys {}",
+                "Dialog click true keys {Enter}",
+                "base click false owns false keys {}"
+            ]
+        );
+        assert_eq!(app.shell.windows.top(), Some(Window::Dialog));
+        input(&mut app, &release);
+        app.take_log();
+        let effects = input(&mut app, &click(400.));
+        assert_eq!(effects.last().unwrap(), "base click true owns true keys {}");
+        assert!(
+            app.take_log().is_empty(),
+            "the base owns the pointer: not occluded"
+        );
+    }
+
+    #[test]
+    fn modal_layers_take_the_frame_and_stop_the_layers_under_them() {
+        // The app's own modal layer (a loading dialog) takes the whole frame.
+        let mut app = App::with(&[Window::Dialog]);
+        app.loading = true;
+        assert_eq!(input(&mut app, &click(10.)), ["loading"]);
+        // A modal window takes every press, even outside its frame.
+        let mut app = App::with(&[Window::Dialog, Window::Modal]);
+        let effects = input(&mut app, &click(90.));
+        assert_eq!(
+            effects[..2],
+            ["Dialog click false keys {}", "Modal click true keys {}"]
+        );
+        // A window whose input opens a modal layer ends the frame there: the press raised the
+        // dialog over the console, and the base gets nothing.
+        let mut app = App::with(&[Window::Dialog, Window::Console]);
+        app.blocks = Some(Window::Dialog);
+        assert_eq!(
+            input(&mut app, &click(10.)),
+            ["Console click false keys {}", "Dialog click true keys {}"]
+        );
+        assert!(app.take_log().is_empty(), "nor is it occluded");
+    }
+
+    #[test]
+    fn held_keys_repeat_for_every_layer_except_into_a_key_capture_or_across_a_mode_change() {
+        let frame = |t: f64, pressed: &[Key], held: &[Key]| Input {
+            keys: pressed.iter().copied().collect(),
+            held_keys: held.iter().chain(pressed).copied().collect(),
+            time: Some(t),
+            ..Default::default()
+        };
+        let base_keys = |effects: Vec<String>| effects.last().unwrap().contains("keys {Down}");
+        let mut app = App::new();
+        assert!(base_keys(input(&mut app, &frame(0., &[Key::Down], &[]))));
+        assert!(!base_keys(input(&mut app, &frame(0.2, &[], &[Key::Down]))));
+        assert!(
+            base_keys(input(&mut app, &frame(0.45, &[], &[Key::Down]))),
+            "repeats"
+        );
+        app.capturing = true;
+        assert!(
+            !base_keys(input(&mut app, &frame(0.6, &[], &[Key::Down]))),
+            "not into a capture"
+        );
+        app.capturing = false;
+        assert!(
+            !base_keys(input(&mut app, &frame(1.5, &[], &[Key::Down]))),
+            "stays stopped"
+        );
+        // A frame that changes the app's mode stops the repeat it started.
+        app.enter_changes_mode = true;
+        input(&mut app, &frame(2., &[Key::Down, Key::Enter], &[]));
+        assert_eq!(app.mode, 1);
+        assert!(!base_keys(input(&mut app, &frame(3., &[], &[Key::Down]))));
+    }
+}

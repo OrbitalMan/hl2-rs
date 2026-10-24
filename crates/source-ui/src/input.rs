@@ -135,3 +135,82 @@ impl Input {
         share
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key_frame(t: f64, pressed: &[Key], held: &[Key]) -> Input {
+        Input {
+            keys: pressed.iter().copied().collect(),
+            held_keys: held.iter().chain(pressed).copied().collect(),
+            time: Some(t),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn key_repeat_follows_the_latest_press_while_it_is_held() {
+        let mut repeat = KeyRepeat::default();
+        let mut frame = |t: f64, pressed: &[Key], held: &[Key]| {
+            let mut input = key_frame(t, pressed, held);
+            repeat.apply(&mut input);
+            input.keys.into_iter().collect::<Vec<_>>()
+        };
+        assert_eq!(frame(0., &[Key::Down], &[]), [Key::Down]);
+        assert_eq!(frame(0.2, &[], &[Key::Down]), []);
+        assert_eq!(frame(0.4, &[], &[Key::Down]), [Key::Down]);
+        // A newer press takes over; the earlier key, still held, no longer repeats.
+        assert_eq!(frame(0.5, &[Key::Left], &[Key::Down]), [Key::Left]);
+        assert_eq!(frame(0.9, &[], &[Key::Down, Key::Left]), [Key::Left]);
+        // Releasing stops it, and it stays stopped when the key goes down again unpressed.
+        assert_eq!(frame(1.0, &[], &[Key::Down]), []);
+        assert_eq!(frame(2.0, &[], &[Key::Down, Key::Left]), []);
+        // Keys that act once never repeat, and their press stops the repeating key.
+        assert_eq!(frame(3.0, &[Key::Up], &[]), [Key::Up]);
+        assert_eq!(frame(3.1, &[Key::Enter], &[Key::Up]), [Key::Enter]);
+        assert_eq!(frame(4.0, &[], &[Key::Up, Key::Enter]), []);
+        // Scripted input carries no time: nothing repeats.
+        let mut input = key_frame(0., &[Key::Down], &[]);
+        input.time = None;
+        repeat.apply(&mut input);
+        let mut held = Input {
+            held_keys: [Key::Down].into(),
+            ..Default::default()
+        };
+        repeat.apply(&mut held);
+        assert!(held.keys.is_empty());
+    }
+
+    #[test]
+    fn a_layer_gets_the_pointer_when_it_owns_it_and_the_keyboard_when_it_has_the_focus() {
+        let frame = Input {
+            keys: [Key::Enter].into(),
+            text: "a".into(),
+            pointer: Some(Vec2::new(10., 20.)),
+            click: true,
+            held: true,
+            wheel: 1.,
+            time: Some(2.5),
+            ctrl: true,
+            copy: true,
+            ..Default::default()
+        };
+        let both = frame.share(true, true);
+        assert!(both.pressed(Key::Enter) && both.click && both.ctrl && both.copy);
+        assert_eq!(
+            (both.pointer, both.wheel, both.time),
+            (frame.pointer, 1., Some(2.5))
+        );
+        let pointer = frame.share(true, false);
+        assert!(pointer.keys.is_empty() && pointer.text.is_empty() && !pointer.ctrl);
+        assert!(pointer.click && pointer.held && pointer.pointer.is_some());
+        let keyboard = frame.share(false, true);
+        assert!(keyboard.pressed(Key::Enter) && keyboard.text == "a" && keyboard.copy);
+        assert!(keyboard.pointer.is_none() && !keyboard.click && !keyboard.held);
+        assert_eq!(keyboard.wheel, 0.);
+        let neither = frame.share(false, false);
+        assert!(neither.keys.is_empty() && neither.pointer.is_none() && !neither.click);
+        assert_eq!(neither.time, Some(2.5), "every layer keeps the clock");
+    }
+}

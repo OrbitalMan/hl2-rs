@@ -9,7 +9,7 @@ use source_ui::console::dialog::{
 use source_ui::console::panel::{
     HistoryView, Level, Line, CONSOLE_ROW, NOMINAL_ADVANCE, OUTPUT_LINES, WHEEL_ROWS,
 };
-use source_ui::input::{Input, Key, KeyRepeat};
+use source_ui::input::{Input, Key};
 use source_ui::placement::CursorHint;
 use source_ui::shell;
 use source_ui::widgets::ScrollMode;
@@ -364,39 +364,6 @@ fn key_frame(t: f64, pressed: &[Key], held: &[Key]) -> Input {
         time: Some(t),
         ..Default::default()
     }
-}
-
-#[test]
-fn key_repeat_follows_the_latest_press_while_it_is_held() {
-    let mut repeat = KeyRepeat::default();
-    let mut frame = |t: f64, pressed: &[Key], held: &[Key]| {
-        let mut input = key_frame(t, pressed, held);
-        repeat.apply(&mut input);
-        input.keys.into_iter().collect::<Vec<_>>()
-    };
-    assert_eq!(frame(0., &[Key::Down], &[]), [Key::Down]);
-    assert_eq!(frame(0.2, &[], &[Key::Down]), []);
-    assert_eq!(frame(0.4, &[], &[Key::Down]), [Key::Down]);
-    // A newer press takes over; the earlier key, still held, no longer repeats.
-    assert_eq!(frame(0.5, &[Key::Left], &[Key::Down]), [Key::Left]);
-    assert_eq!(frame(0.9, &[], &[Key::Down, Key::Left]), [Key::Left]);
-    // Releasing stops it, and it stays stopped when the key goes down again unpressed.
-    assert_eq!(frame(1.0, &[], &[Key::Down]), []);
-    assert_eq!(frame(2.0, &[], &[Key::Down, Key::Left]), []);
-    // Keys that act once never repeat, and their press stops the repeating key.
-    assert_eq!(frame(3.0, &[Key::Up], &[]), [Key::Up]);
-    assert_eq!(frame(3.1, &[Key::Enter], &[Key::Up]), [Key::Enter]);
-    assert_eq!(frame(4.0, &[], &[Key::Up, Key::Enter]), []);
-    // Scripted input carries no time: nothing repeats.
-    let mut input = key_frame(0., &[Key::Down], &[]);
-    input.time = None;
-    repeat.apply(&mut input);
-    let mut held = Input {
-        held_keys: [Key::Down].into(),
-        ..Default::default()
-    };
-    repeat.apply(&mut held);
-    assert!(held.keys.is_empty());
 }
 
 #[test]

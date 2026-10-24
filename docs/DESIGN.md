@@ -46,6 +46,11 @@ the current scope is the UI, so entity and NPC work from that review is not part
    - hl2-ui's console tests stay: they test HL2's use of the toolkit.
    - Done when no source-ui file is without tests, and an Escape-order bug introduced on purpose
      fails a source-ui test (then reverted).
+   - Done: the five files test themselves over a fake app (`shell::tests::App`, a `command`
+     test context, a completer for the editor, one that completes nothing for the dialog). The
+     key-repeat test and the four line-editor tests moved from hl2-ui, which keeps its tests of
+     HL2's own completion; moving the app's modal-state check before the console's history
+     search fails `escape_undoes_a_drag_then_ends_the_console_search_then_the_modal_state_then_closes_the_top`.
 
 Validation: step 1 with the repeated runs and the full replay suite; step 2 with
 `scripts/checks/validate.sh` and the Windows-target check (tests only, no behaviour change).

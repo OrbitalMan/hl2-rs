@@ -1102,3 +1102,193 @@ impl ConsolePanel {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::console::complete::Completion;
+
+    fn dialog_scale(canvas: Vec2) -> f32 {
+        Painter::scale_for(canvas.y)
+    }
+
+    fn design_height(canvas: Vec2) -> f32 {
+        canvas.y
+    }
+
+    const SCALING: Scaling = Scaling {
+        dialog_scale,
+        design_height,
+    };
+
+    /// An app whose console completes nothing.
+    struct Nothing;
+
+    impl Completer for Nothing {
+        fn complete(&self, _: &str) -> Completion {
+            Completion::default()
+        }
+    }
+
+    fn texts(panel: &ConsolePanel) -> Vec<&str> {
+        panel
+            .shown_lines()
+            .into_iter()
+            .map(|(_, line)| line.text.as_str())
+            .collect()
+    }
+
+    fn typed(text: &str) -> Input {
+        Input {
+            text: text.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_scrollback_keeps_the_newest_lines_numbered_from_the_start() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        for i in 0..OUTPUT_LINES + 6 {
+            panel.print(&canvas, Level::Normal, format!("line {i}"));
+        }
+        assert_eq!((panel.output.len(), panel.output_start), (OUTPUT_LINES, 6));
+        let shown = panel.shown_lines();
+        assert_eq!((shown[0].0, shown[0].1.text.as_str()), (6, "line 6"));
+        panel.clear_output();
+        assert!(panel.output.is_empty());
+        panel.print(&canvas, Level::Normal, "after");
+        assert_eq!(
+            panel.shown_lines()[0].0,
+            OUTPUT_LINES as u64 + 6,
+            "numbers keep counting past a clear"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_line_is_replaced_in_place() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        panel.print(&canvas, Level::Normal, "a");
+        panel.replace_snapshot(&canvas, "tuning 1");
+        panel.print(&canvas, Level::Normal, "b");
+        panel.replace_snapshot(&canvas, "tuning 2");
+        assert_eq!(texts(&panel), ["a", "tuning 2", "b"]);
+        assert_eq!(panel.output[1].level, Level::Snapshot);
+    }
+
+    #[test]
+    fn filters_and_timestamps_change_what_the_history_shows() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        let at = Input {
+            time: Some(1.5),
+            ..Default::default()
+        };
+        panel.input(&canvas, &at, &Nothing);
+        for text in ["Loaded map", "fov 90", "MAP changed"] {
+            panel.print(&canvas, Level::Normal, text);
+        }
+        panel.con_filter_text = "map".into();
+        panel.con_filter = 1;
+        assert_eq!(
+            texts(&panel),
+            ["Loaded map", "MAP changed"],
+            "matches in any case"
+        );
+        panel.con_filter = 2;
+        assert_eq!(texts(&panel).len(), 3, "every line, the matches brighter");
+        assert_eq!(panel.line_color(&panel.output[0]), panel.style.dev_text);
+        assert_eq!(panel.line_color(&panel.output[1]), panel.style.text);
+        panel.con_timestamp = true;
+        assert_eq!(panel.shown_text(&panel.output[1]), "[   1.50] fov 90");
+    }
+
+    #[test]
+    fn enter_submits_the_line_and_the_console_keys_never_reach_it() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        assert_eq!(
+            panel.input(&canvas, &typed("say hi"), &Nothing),
+            Action::None
+        );
+        let enter = Input {
+            keys: [Key::Enter].into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            panel.input(&canvas, &enter, &Nothing),
+            Action::Submit {
+                line: "say hi".into(),
+                clicked: false
+            }
+        );
+        assert_eq!(
+            (panel.editor.text(), panel.editor.history()),
+            ("", &["say hi".to_owned()][..])
+        );
+        panel.input(&canvas, &typed("`~x"), &Nothing);
+        assert_eq!(panel.editor.text(), "x");
+    }
+
+    #[test]
+    fn close_and_submit_act_on_release_over_the_button() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        let layout = panel.dialog_layout(&canvas);
+        let center = |rect: Rect| {
+            let rect = layout.canvas(rect);
+            vec2(rect.x + rect.w / 2., rect.y + rect.h / 2.)
+        };
+        let press = |at: Vec2| Input {
+            pointer: Some(at),
+            click: true,
+            held: true,
+            ..Default::default()
+        };
+        let release = |at: Vec2| Input {
+            pointer: Some(at),
+            released: true,
+            ..Default::default()
+        };
+        let close = center(layout.close);
+        assert_eq!(panel.input(&canvas, &press(close), &Nothing), Action::None);
+        assert_eq!(
+            panel.input(&canvas, &release(close), &Nothing),
+            Action::Close
+        );
+        panel.input(&canvas, &typed("x"), &Nothing);
+        let submit = center(layout.submit);
+        panel.input(&canvas, &press(submit), &Nothing);
+        assert_eq!(
+            panel.input(&canvas, &release(submit), &Nothing),
+            Action::Submit {
+                line: "x".into(),
+                clicked: true
+            }
+        );
+        // Dragged off before the release, the press does nothing.
+        panel.input(&canvas, &press(close), &Nothing);
+        assert_eq!(
+            panel.input(&canvas, &release(vec2(1., 1.)), &Nothing),
+            Action::None
+        );
+    }
+
+    #[test]
+    fn the_copy_shortcut_copies_the_selected_lines_once() {
+        let canvas = Canvas::default();
+        let mut panel = ConsolePanel::new(SCALING);
+        for text in ["one", "two", "three"] {
+            panel.print(&canvas, Level::Normal, text);
+        }
+        panel.selection = Some(Selection { anchor: 2, head: 1 });
+        let copy = Input {
+            copy: true,
+            ..Default::default()
+        };
+        panel.input(&canvas, &copy, &Nothing);
+        assert_eq!(panel.take_copied().as_deref(), Some("two\nthree"));
+        assert_eq!(panel.take_copied(), None);
+    }
+}
