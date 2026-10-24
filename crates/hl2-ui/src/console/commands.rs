@@ -662,4 +662,138 @@ mod tests {
         let (args, _) = usage(find("clear").unwrap());
         assert!(args.is_empty());
     }
+
+    /// A value each cvar accepts, different from its default where it can be: the first listed
+    /// value that is not the current one, else a typical value for free arguments.
+    fn golden_value(spec: &Spec, current: &str) -> String {
+        if let Some(Arg::Values(values)) = spec.args.first() {
+            return values
+                .iter()
+                .find(|v| **v != current)
+                .unwrap_or(&values[0])
+                .to_string();
+        }
+        match spec.name {
+            "volume" => "0.5",
+            "snd_musicvolume" => "0.25",
+            "sensitivity" => "2.5",
+            "m_pitch" => "-0.022",
+            "m_customaccel_exponent" => "1.2",
+            "sk_autoaim_scale1" | "m_autoaim_scale" => "1.5",
+            "fov" | "fov_desired" => "100",
+            "vertical_fov" => "60",
+            "viewmodel_fov" => "70",
+            "con_filter_text" => "bridge",
+            "background_map" => "background02",
+            other => panic!("{other}: no golden value"),
+        }
+        .to_owned()
+    }
+
+    /// The settings that differ between two serialized configurations, `path: before -> after`.
+    fn config_changes(before: &serde_json::Value, after: &serde_json::Value) -> Vec<String> {
+        fn leaves(value: &serde_json::Value, path: String, out: &mut Vec<(String, String)>) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    for (key, value) in map {
+                        let path = if path.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{path}.{key}")
+                        };
+                        leaves(value, path, out);
+                    }
+                }
+                other => out.push((path, other.to_string())),
+            }
+        }
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        leaves(before, String::new(), &mut a);
+        leaves(after, String::new(), &mut b);
+        let a: std::collections::BTreeMap<_, _> = a.into_iter().collect();
+        let b: std::collections::BTreeMap<_, _> = b.into_iter().collect();
+        a.keys()
+            .chain(b.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .filter(|key| a.get(*key) != b.get(*key))
+            .map(|key| {
+                let side = |m: &std::collections::BTreeMap<String, String>| {
+                    m.get(key).cloned().unwrap_or_else(|| "-".into())
+                };
+                format!("{key}: {} -> {}", side(&a), side(&b))
+            })
+            .collect()
+    }
+
+    /// Every cvar on a fresh console: a query, a valid set, an invalid value, an out-of-range
+    /// number and too many arguments, with the lines each logs, its error or effect (for
+    /// `ApplyConfig`, the settings it changed) and the value afterwards. The transcript is recorded in `cvars.golden`;
+    /// `UPDATE_GOLDEN=1` rewrites it after a reviewed change.
+    #[test]
+    fn every_cvar_matches_its_golden_transcript() {
+        let mut transcript = String::new();
+        for spec in COMMANDS.iter().filter(|spec| spec.is_cvar()) {
+            let value = spec.value.expect("a cvar");
+            let current = value(&Console::default()).unwrap_or_default();
+            let mut cases = vec![
+                Vec::new(),
+                vec![golden_value(spec, &current)],
+                vec!["x".to_owned()],
+                vec!["9".to_owned()],
+                vec!["1".to_owned(), "1".to_owned()],
+            ];
+            if spec.name == "background_map" {
+                // `default` resets the background instead of naming a map.
+                cases.insert(2, vec!["default".to_owned()]);
+            }
+            transcript += &format!("{}\n", spec.name);
+            for args in cases {
+                let mut console = Console::default();
+                let before = serde_json::to_value(&console.config).unwrap();
+                let printed = console.output.len();
+                let tokens: Vec<String> = std::iter::once(spec.name.to_owned())
+                    .chain(args.iter().cloned())
+                    .collect();
+                let outcome = match console.interpret(&tokens) {
+                    Ok(None) => "no effect".to_owned(),
+                    Ok(Some(Effect::ApplyConfig(config))) => {
+                        assert_eq!(
+                            *config, console.config,
+                            "{}: applies the stored settings",
+                            spec.name
+                        );
+                        let after = serde_json::to_value(&*config).unwrap();
+                        format!(
+                            "ApplyConfig [{}]",
+                            config_changes(&before, &after).join(", ")
+                        )
+                    }
+                    Ok(Some(effect)) => format!("{effect:?}"),
+                    Err(error) => format!("error {error:?}"),
+                };
+                let call = if args.is_empty() {
+                    "query".to_owned()
+                } else {
+                    args.join(" ")
+                };
+                transcript += &format!("  {call}: {outcome}\n");
+                for line in console.output.iter().skip(printed) {
+                    transcript += &format!("    | {}\n", line.text);
+                }
+                transcript += &format!("    value {:?}\n", value(&console));
+            }
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/console/commands/cvars.golden");
+        if std::env::var_os("UPDATE_GOLDEN").is_some() {
+            std::fs::write(&path, &transcript).unwrap();
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            transcript == expected,
+            "cvar transcript differs from {} (rerun with UPDATE_GOLDEN=1 after review):\n{transcript}",
+            path.display()
+        );
+    }
 }

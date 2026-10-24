@@ -33,6 +33,7 @@
 !/crates/hl2-ui/assets/display/modes.json
 !/crates/hl2-ui/assets/ui/tuning.json
 !/crates/hl2-ui/assets/ui/*.res
+!/crates/hl2-ui/src/console/commands/cvars.golden
 # Generated/private directories remain closed to all extensions.
 **/target/
 /bin/
