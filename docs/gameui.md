@@ -1600,3 +1600,53 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
 
 
 
+
+## 23. Audit: Options > Mouse, Audio, Video > HDR and Video > Advanced (2026-10-24)
+
+Method: every verdict traces the stored field to the code that consumes it (host systems in
+`hl2-bevy`, `hl2-simulation`), not only to a console command; older prose audits in STATUS.md were
+not trusted where they disagreed with the code. Retail evidence: the installed `optionssub*.res`
+layouts and the strings of the installed `GameUI.dll`, `client.dll`, `server.dll`; the SDK
+(`client/in_mouse.cpp`, `server/hl2/hl2_player.cpp`, `shared/gamerules.cpp`).
+Verdicts: **complete** (changes the game as retail does), **partial**, **placeholder** (stored and
+shown, no effect), **unclear** (retail behavior cannot be fixed from the SDK, the installed files or
+observed retail behavior, so nothing is implemented).
+
+| Option (tab) | Stored in | Applied by | Verdict |
+|---|---|---|---|
+| Reverse mouse (Mouse) | `mouse.invert` | `hl2-bevy::input::controls` (`pitch_sign`) | complete |
+| Mouse filter `m_filter` | `mouse.filter` | `hl2_ui::input::MouseFilter::apply`, two-sample average as SDK `GetMouseDelta` | complete |
+| Mouse sensitivity | `mouse.sensitivity` | `MouseFilter::apply`, 0.022 degrees per count | complete |
+| Mouse acceleration `m_customaccel 3` and its exponent | `mouse.acceleration`, `mouse.accel_exponent` | `MouseFilter::apply` = `dist^(exponent-1) * sensitivity` (SDK mode 3); the layout disables both on macOS (`enabled 0 [$OSX]`) and the dialog honors that | complete (a value stored on another platform still applies on macOS) |
+| Raw input `m_rawinput` | `mouse.raw_input` | nothing: Bevy's locked-cursor motion is already the raw device delta | unclear: the unchecked state would need OS pointer-ballistics deltas, which cannot be observed or tested here; disabled on macOS in retail |
+| Aim-Assist `m_autoaim_mode` and its scale `m_autoaim_scale` | `mouse.aim_assist`, `mouse.aim_assist_scale` | nothing | unclear (see below) |
+| Audio: Sound effects volume | `audio.volume` | `hl2-bevy::audio::queue` (global volume, existing sounds included) | complete |
+| Audio: Music volume `snd_musicvolume` | `audio.music_volume` | `audio::queue` (dry-mix `#` channels at soundlevel 0) | complete (the engine's smoothed music factor is not modeled) |
+| Audio: Mute when unfocused `snd_mute_losefocus` | `audio.mute_losefocus` | `audio::output_muted` | partial: honored, but losing focus pauses the whole game (`ui_system`), so "off" cannot keep sounds playing; whether retail pauses single player on focus loss is not established |
+| Audio: Closed captioning | `audio.captions` | `hl2_ui::closecaption` | complete |
+| Audio: Speaker configuration `snd_surround_speakers` | `audio.speakers` | nothing: the output is the stereo stream of `bevy_audio` | unclear: the engine mixer is not in the SDK, multi-channel output cannot be tested here |
+| Audio: Sound quality `dsp_slow_cpu`, `snd_pitchquality` | `audio.quality` | nothing | unclear: both live in the engine mixer; the soundscape DSP is not modeled |
+| Audio: Spoken language | `audio.language` | nothing reads it at startup: `gameinfo.txt` names `hl2_sound_vo_english.vpk` and the host mounts it | placeholder; only the English pack is installed, so a switch cannot be observed |
+| Audio: Third-party credits | none | dialog | complete |
+| Video: HDR `mat_hdr_level` | `video.hdr` | nothing: the renderer always runs the full HDR path (HDR lightmap lumps, `.hdr.vtf` cubemaps, auto exposure, bloom) | placeholder |
+| Advanced: Model detail `r_rootlod` | `advanced.model_detail` | `assets::load_with_config`; map reload on change | complete |
+| Advanced: Texture detail `mat_picmip` | `advanced.texture_detail` | VTF mip skipping; map reload on change | complete |
+| Advanced: Shader detail `mat_reducefillrate` | `advanced.shader_detail` | nothing | placeholder |
+| Advanced: Water detail | `advanced.water_detail` | nothing: no reflection or refraction pass exists | placeholder |
+| Advanced: Shadow detail | `advanced.shadow_detail` | nothing: no render-to-texture or flashlight shadows exist | placeholder |
+| Advanced: Color correction | `advanced.color_correction` | nothing: no `color_correction` lookup | placeholder |
+| Advanced: Antialiasing | `advanced.antialiasing` | `video::sync_antialiasing` (MSAA, limited to the adapter) | complete |
+| Advanced: Filtering | `advanced.filtering` | `video::sync_filtering` (sampler anisotropy and mip filter) | complete |
+| Advanced: Vertical sync | `advanced.vsync` | `video::sync_present_mode` | complete |
+| Advanced: Motion blur | `advanced.motion_blur` | nothing | placeholder |
+| Advanced: Multicore rendering `mat_queue_mode` | `advanced.multicore` | nothing: Bevy has no runtime equivalent | unclear |
+| Advanced: Classic effects | `advanced.classic_effects` | nothing: there is no particle system to switch | placeholder |
+| Advanced: Windows Aero extensions `mat_disable_d3d9ex` | `advanced.d3d9ex` | nothing | not applicable: no Direct3D 9 under wgpu (the layout shows it on Windows only) |
+| Advanced: Field of view, vertical FOV, viewmodel FOV | `video.fov`, `video.vertical_fov`, `video.viewmodel_fov` | camera and `effects` viewmodel projection | complete |
+
+Aim-Assist: the SDK has the old single-player autoaim (`sk_autoaim_mode`, `sk_autoaim_scale<skill>`,
+`autoaim_max_dist`, `FL_AIMTARGET`, `GetAutoaimVector`). The installed 20th-anniversary `client.dll`
+and `server.dll` also carry `m_autoaim_mode`, `m_autoaim_scale`, magnetism and dampening cvars
+(`m_autoaim_magnetism`, `m_autoaimdampen*`) that the SDK does not have, and the Options page writes
+those. How Basic and Enhanced map onto them, and their defaults, cannot be read from the SDK or the
+layouts, so the option stays unimplemented. It is also gameplay work outside the current UI scope.
