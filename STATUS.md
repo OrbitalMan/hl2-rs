@@ -4,6 +4,8 @@
 
 ## Architecture guardrails (2026-10-24)
 
+- AGENTS.md is rules only (18 KB, was 41 KB): new "Architecture rules" for agents and hard rule 11 (never make the game slower); the UI conventions moved verbatim to docs/gameui.md section 0; the architecture check keeps AGENTS.md under 20 KB.
+
 - `scripts/checks/architecture.py` (validate.sh, CI, the local pre-commit hook): size limits with a shrink-only baseline (113 functions over 100 lines, 25 files over 1,000 production lines, 3 test files over 2,000), crate layers and engine-crate owners, no file IO in modkit-core / hl2-simulation / source-ui, no HL2 names in source-ui, no new duplicated 8-line blocks (143 known), per-crate counts of mutable statics, lint allowances and glob imports. Each rule was shown to fail on a deliberate violation. Plan and limits in DESIGN.
 - Correction to the 2026-10-23 and 2026-10-24 reviews' figures: their metric cut each file at its first `#[cfg(test)]`, and four files have one early, so it missed production code: `source-assets/src/models.rs` has 1,614 production lines (counted 202), hl2-bevy `gameplay.rs` 1,671 (401), `video.rs` 1,191 (711), `hl2-simulation/src/attention.rs` 557 (487). The missed code holds the second-longest function, hl2-bevy `Gameplay::tick` (808 lines).
 

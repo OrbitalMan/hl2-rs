@@ -91,6 +91,14 @@ fixture is never silently left out.
 | `window_place` | macOS | windowed at 2560x1600 and 1024x768: sized and centred in the screen's visible frame, below the menu bar and above the Dock |
 | `no_border` | Windows | `--borderless`: "Windowed (No Border)" is a borderless window over the monitor (on macOS the same mode is the native full-screen Space, which a replay cannot drive). Not run on this machine |
 
+Writing replays: Escape clears the main menu selection, so Down then selects row 0; keyboard Down
+skips spacers; scripted `pointer` positions are UI canvas pixels of the render resolution (pin
+`--width 1024 --height 768`: Keyboard tab (389, 215), Advanced... (464, 537)); script ticks keep
+running while Options is open; end a replay with a settle step so the capture follows a presented
+frame. `bevy-console.json` has one step more than upstream's (tick 17 Escape, `resumed-from-pause`,
+because closing the console returns to the pause menu here); its `menu-resume` step presses Enter
+with no pause-menu row selected, which no longer resumes, so its assertions are left out.
+
 Shared checks run in the background (`--background`: no window, nothing takes focus, captures
 read the game frame); windowed ones open a window and take focus. On macOS a windowed run becomes
 the frontmost app at launch (winit activates the app; Bevy offers no switch); on Windows `--no-focus`

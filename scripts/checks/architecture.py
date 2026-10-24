@@ -9,7 +9,8 @@ Fails when a change:
   names HL2 code in the toolkit;
 - repeats DUPLICATE_WINDOW significant lines of production code that already exist elsewhere;
 - raises a counted smell of a crate (mutable statics, `too_many_arguments` and `dead_code`
-  allowances, glob imports in production code).
+  allowances, glob imports in production code);
+- makes AGENTS.md longer than AGENTS_BYTES (it holds rules, one line each).
 
 Existing offenders are in architecture-baseline.json and may only shrink. After shrinking one,
 run `UPDATE_BASELINE=1 python3 scripts/checks/architecture.py`: it only lowers or removes entries.
@@ -31,6 +32,7 @@ FUNCTION_LINES = 100
 FILE_LINES = 1000
 TEST_LINES = 2000
 DUPLICATE_WINDOW = 8
+AGENTS_BYTES = 20_000
 
 # Workspace crate -> the workspace crates it may depend on (any dependency table).
 LAYERS = {
@@ -269,6 +271,10 @@ def measure():
     for block, places in windows.items():
         if len(places) > 1:
             duplicates[hashlib.sha1(block.encode()).hexdigest()[:12]] = places
+    agents = REPO / "AGENTS.md"
+    if agents.exists() and agents.stat().st_size > AGENTS_BYTES:
+        problems.append(f"AGENTS.md is {agents.stat().st_size} bytes (limit {AGENTS_BYTES}): it holds "
+                        f"rules, one line each; move details to docs/ and point to them")
     state["functions"] = {k: sorted(v, reverse=True) for k, v in state["functions"].items()}
     state["counts"] = {c: dict(v) for c, v in state["counts"].items()}
     state["duplicates"] = sorted(duplicates)

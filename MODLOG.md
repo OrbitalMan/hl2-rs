@@ -1,5 +1,27 @@
 # MODLOG
 
+## 2026-10-24 AGENTS.md: rules only, architecture rules for agents
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- AGENTS.md is 18,153 bytes (was 41,386). Upstream's text is unchanged apart from two lines: "read first" now asks for the parts a task needs (STATUS's first section, the plan's DESIGN section, docs/gameui.md section 0 for UI work) instead of five whole documents, and the crate map points to the new "Architecture rules".
+- New "Architecture rules": where code goes, the crate layers, no file IO in modkit-core / hl2-simulation / source-ui, size limits and what to do when touching code already over them, one concern per module, parameter structs instead of `too_many_arguments`, no new mutable statics or glob imports, reuse before writing, and the places that are described once and dispatched (console commands and cvars, entity inputs, widgets, frames, placement, focus, key repeat, scroll bars). The architecture check is described as their backstop.
+- This branch's rules 7 to 10 and its How-to-work lines are one-liners; new hard rule 11: never make the game slower to get something else (owner, 2026-10-24). A "GameUI, HUD and localization" section summarizes each UI convention in one line.
+- docs/gameui.md section 0 "Conventions for UI, HUD and localization work" holds the full conventions, moved verbatim, with the macOS display-mode, startup, installation, window and caption details.
+- docs/validation.md has the notes for writing replays (menu selection after Escape, canvas-pixel pointers at 1024x768, the settle step, `bevy-console.json`'s extra step).
+- The architecture check also keeps AGENTS.md under 20,000 bytes.
+
+**Why:** Owner: shorter, more efficient agent instructions that a smaller model can still follow, and instructions that keep the architecture from decaying.
+
+**Tested how:** Every rule line of the old AGENTS.md was checked for its terms in the new AGENTS.md and docs/gameui.md: all found except three reworded lines (third-party crates, two lines of the former guardrails section) whose meaning is kept. `scripts/checks/validate.sh` (architecture check, tests, strict Clippy, fmt) and the repository isolation check pass.
+
+**Result:** Documentation and the check's size budget only.
+
+**Still broken or not tested:** Merging main may conflict on the two changed upstream lines of AGENTS.md. Whether a smaller model follows the new file is not tested.
+
+**Next:** None planned.
+
 ## 2026-10-24 Architecture guardrails
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
