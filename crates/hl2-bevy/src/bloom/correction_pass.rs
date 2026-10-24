@@ -65,7 +65,7 @@ type Buffers = HashMap<Entity, Prepared>;
 
 pub(super) struct Prepared {
     buffer: UniformBuffer<CorrectionData>,
-    group: Option<(Vec<TextureViewId>, BindGroup)>,
+    group: Option<([Option<TextureViewId>; MAX_LOOKUPS], BindGroup)>,
 }
 
 fn queue_pipeline(
@@ -116,13 +116,15 @@ pub(super) fn prepare(
     for entity in &stale {
         commands.entity(entity).remove::<Correction>();
     }
+    // A view without the component keeps neither its buffer nor its bind group (which holds the volumes).
+    prepared.retain(|entity, _| views.contains(*entity));
     for (entity, view, bloom, correction) in &views {
-        let views: Vec<&GpuImage> = correction
-            .lookups
-            .iter()
-            .filter_map(|handle| images.get(handle))
-            .collect();
-        if views.is_empty() || views.len() != correction.lookups.len() {
+        let count = correction.lookups.len().min(MAX_LOOKUPS);
+        let mut gpu = [None; MAX_LOOKUPS];
+        for (slot, handle) in gpu.iter_mut().zip(correction.lookups.iter()) {
+            *slot = images.get(handle);
+        }
+        if count == 0 || gpu[..count].iter().any(Option::is_none) {
             // Still uploading: the composite runs without the lookups.
             commands.entity(entity).remove::<Correction>();
             continue;
@@ -137,33 +139,31 @@ pub(super) fn prepare(
             default_weight: Vec4::new(correction.mix.default, 0., 0., 0.),
         });
         state.buffer.write_buffer(&device, &queue);
-        let ids: Vec<TextureViewId> = views.iter().map(|image| image.texture_view.id()).collect();
+        let ids = gpu.map(|image| image.map(|image| image.texture_view.id()));
         if state
             .group
             .as_ref()
             .is_none_or(|(known_ids, _)| *known_ids != ids)
         {
             // Slots past the bound lookups repeat the first volume; the shader never reads them.
-            let slot = |i: usize| &views[i.min(views.len() - 1)].texture_view;
+            let slot = |i: usize| gpu[i.min(count - 1)].map(|image| &image.texture_view);
             let layout = cache.get_bind_group_layout(&pipelines.correction_layout);
-            let Some(buffer) = state.buffer.binding() else {
+            let (Some(buffer), Some(v0), Some(v1), Some(v2), Some(v3)) =
+                (state.buffer.binding(), slot(0), slot(1), slot(2), slot(3))
+            else {
                 continue;
             };
             let group = device.create_bind_group(
                 Some("source_color_correction_bind_group"),
                 &layout,
-                &BindGroupEntries::sequential((slot(0), slot(1), slot(2), slot(3), buffer)),
+                &BindGroupEntries::sequential((v0, v1, v2, v3, buffer)),
             );
             state.group = Some((ids, group));
         }
         let Some((_, group)) = &state.group else {
             continue;
         };
-        let key = (
-            view.target_format,
-            views.len().min(MAX_LOOKUPS),
-            bloom.amount > 0.,
-        );
+        let key = (view.target_format, count, bloom.amount > 0.);
         let pipeline = *known
             .entry(key)
             .or_insert_with(|| queue_pipeline(&pipelines, &cache, key));
