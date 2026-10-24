@@ -3,7 +3,7 @@
 //! dialog it will close, keyboard repeat and the latest pointer. The app (its menus, dialogs and
 //! base layer) keeps everything that is its own.
 
-use crate::canvas::Rect;
+use crate::canvas::{Canvas, Rect};
 use crate::console::dialog::Scaling;
 use crate::console::panel::ConsolePanel;
 use crate::input::{Input, KeyRepeat};
@@ -84,6 +84,38 @@ pub trait Host {
     fn occlude_base(&mut self, down: bool);
     /// The base's input: its share of the frame, and whether it owns the pointer.
     fn base_input(&mut self, share: &Input, owns_pointer: bool) -> Vec<Self::Effect>;
+    /// Synchronizes the app's own windows (its dialogs' layers) with the window stack.
+    fn sync_windows(&mut self);
+    /// A state of the app in which Escape closes no window (a loading dialog, the app's own box
+    /// being dragged).
+    fn escape_blocked(&self) -> bool;
+    /// Escape closes the app's window `window` on top (on release, after showing its button).
+    fn escape_closes(&self, window: Self::Window) -> bool;
+    /// Escape is held over `top`: the app shows the button Escape will press.
+    fn hold_escape(&mut self, top: Option<Self::Window>);
+    /// Escape was let go, or a window closed: the app's held looks end.
+    fn release_escape(&mut self);
+    /// Undoes a drag or resize of the app's own in progress (a box over the windows).
+    fn cancel_drag(&mut self) -> bool;
+    /// Escape in a modal state of the app (a loading dialog, a box over the windows); `true`
+    /// when that took it.
+    fn escape_modal(&mut self) -> bool;
+    /// Escape on the app's window `window`, on top.
+    fn escape_window(&mut self, window: Self::Window);
+    /// Escape on the base (no window open).
+    fn escape_base(&mut self);
+    /// A window closed: the app's interaction state follows.
+    fn window_closed(&mut self);
+    /// The console can neither open nor close now (a modal state of the app).
+    fn console_blocked(&self) -> bool;
+    /// The console may open (the app's setting).
+    fn console_enabled(&self) -> bool;
+    /// The console is about to open over the base.
+    fn console_opening(&mut self);
+    /// The console closed.
+    fn console_closed(&mut self);
+    /// The canvas the console dialog is placed on.
+    fn canvas(&self) -> &Canvas;
 }
 
 /// One frame of input: held keys repeat for every layer (except into a key binding being
@@ -166,4 +198,103 @@ fn windows_input<H: Host>(host: &mut H, input: &Input) -> Vec<H::Effect> {
         effects.extend(host.base_input(&share, owns));
     }
     effects
+}
+
+/// Escape went down. When it would close a dialog that shows a close or Cancel button, that
+/// button shows pressed until Escape is released and the dialog closes then; everything else
+/// Escape does happens at once.
+pub fn escape_pressed<H: Host>(host: &mut H) {
+    host.sync_windows();
+    if escape_closes_dialog(host) {
+        host.shell_mut().escape_held = true;
+        let top = host.shell().windows.top();
+        host.hold_escape(top);
+    } else {
+        escape(host);
+    }
+}
+
+/// Escape went up: closes the dialog whose close or Cancel button it held.
+pub fn escape_released<H: Host>(host: &mut H) {
+    host.sync_windows();
+    if std::mem::take(&mut host.shell_mut().escape_held) {
+        host.release_escape();
+        if escape_closes_dialog(host) {
+            escape(host);
+        }
+    }
+}
+
+/// Whether Escape closes the top window (on release, after showing the button it presses).
+fn escape_closes_dialog<H: Host>(host: &H) -> bool {
+    if host.escape_blocked() {
+        return false;
+    }
+    match host.shell().windows.top() {
+        Some(window) if window == H::Window::CONSOLE => {
+            let panel = &host.shell().panel;
+            !panel.placement.active() && !panel.editor.can_dismiss()
+        }
+        Some(window) => host.escape_closes(window),
+        None => false,
+    }
+}
+
+/// Escape: undoes a drag or resize in progress first, then in the console ends a history
+/// search or hides the completion list, then answers the app's modal state, then closes the top
+/// window, else it is the base's.
+pub fn escape<H: Host>(host: &mut H) {
+    // A drag or resize in progress is undone first.
+    let console_on_top = host.shell().windows.top() == Some(H::Window::CONSOLE);
+    if host.cancel_drag() || (console_on_top && host.shell_mut().panel.placement.cancel()) {
+        return;
+    }
+    // In the console Escape first ends a history search, then hides the completion list.
+    if console_on_top && host.shell_mut().panel.editor.dismiss() {
+        return;
+    }
+    if host.escape_modal() {
+        return;
+    }
+    // Escape closes the top window first, whichever layer has the focus.
+    match host.shell().windows.top() {
+        Some(window) if window == H::Window::CONSOLE => {
+            close_window(host, window);
+            host.console_closed();
+        }
+        Some(window) => host.escape_window(window),
+        None => host.escape_base(),
+    }
+}
+
+/// Opens the console on top with the focus, or closes it (focused or not); nothing happens while
+/// a modal layer is open, and it opens only while the app enables it.
+pub fn toggle<H: Host>(host: &mut H) {
+    if host.shell().windows.has_modal() || host.console_blocked() {
+        return;
+    }
+    if host.shell().windows.is_active(H::Window::CONSOLE) {
+        close_window(host, H::Window::CONSOLE);
+        host.console_closed();
+    } else if host.console_enabled() {
+        host.console_opening();
+        host.shell_mut().windows.open(H::Window::CONSOLE);
+        host.focus_changed();
+        let canvas = host.canvas().clone();
+        let panel = &mut host.shell_mut().panel;
+        let frame = panel.frame(&canvas);
+        panel.placement.reset_if_off_screen(&frame);
+    }
+}
+
+/// Closes `window`: the console's drag or resize ends, Escape's held look goes and the window
+/// fades out.
+pub fn close_window<H: Host>(host: &mut H, window: H::Window) {
+    if window == H::Window::CONSOLE {
+        host.shell_mut().panel.placement.end();
+    }
+    host.shell_mut().escape_held = false;
+    host.release_escape();
+    host.shell_mut().windows.close(window);
+    host.window_closed();
 }

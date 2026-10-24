@@ -12,6 +12,8 @@
 - Step 4 design in docs/DESIGN.md (the shell's control flow generic over a `shell::Host` trait that `Console` implements). 4a done: `source_ui::windows` is generic (`WindowId`, `Windows<W>`); HL2's `Window` enum is in hl2-ui. Verified: validate.sh, the Windows-target check, the console and UI replays (10 of 10).
 - 4b done: `source_ui::shell::Shell<W>` (window stack, console dialog, Escape hold, key repeat, pointer) is `Console::shell`. Verified: validate.sh, the Windows-target check, the console and UI replays (10 of 10).
 - 4c done: input routing is `source_ui::shell::input` over `shell::Host`, which `Console` implements. Verified: validate.sh, the Windows-target check, the console and UI replays (10 of 10).
+- 4d done (step 4 complete): Escape, the console toggle and closing windows are `source_ui::shell` functions over `Host`. Verified: validate.sh, the Windows-target check, all 81 owned-install tests, the full replay suite (93 of 94, the difference noted below) and the isolation check.
+- Known: `monitors-kleiner-scene`'s gib removal count varies between runs of one build: once in four runs 7 gibs were removed instead of 8 at its last two labels; the replay checks do not mark it as varying.
 - Known: `pallet-gibs-fade`'s kill tick varies between runs of one build. In one of four runs the pallet's kill and its gibs came at tick 32 instead of 34; only its `hits` is marked as varying in the replay checks.
 
 ## Architecture review: structure without behaviour change (2026-10-23)

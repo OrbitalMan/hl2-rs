@@ -2,6 +2,7 @@
 //! its input, applying settings and reverting a video change.
 
 use super::*;
+use source_ui::shell;
 
 impl Console {
     /// Resolutions for the Video page, from the host's monitor query.
@@ -111,7 +112,7 @@ impl Console {
             OptionsOutcome::Close(config) => (config, true),
         };
         if close {
-            self.close_window(Window::Options);
+            shell::close_window(self, Window::Options);
         }
         let Some(config) = config else {
             return effects;

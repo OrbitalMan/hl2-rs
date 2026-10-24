@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 4d: Escape, the console toggle and closing windows in the shell
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- `source_ui::shell::{escape_pressed, escape_released, escape, toggle, close_window}`: `Console`'s Escape, console toggle and window closing, generic over `shell::Host`. Escape keeps its order: the app's own drag (the quit box) is undone first, then the console's drag, then the console's history search or completion list, then the app's modal state (a failed load, the quit box), then the top window (the console closes in the shell), else the base. Held Escape: the shell decides whether the top window closes (the console's own rule in the shell, the app's windows through the host), holds it and lets the host show the pressed button.
+- New `Host` hooks, each carrying `Console`'s original statements in order: `sync_windows`, `escape_blocked` (loading dialog, quit box drag), `escape_closes`, `hold_escape`, `release_escape` (the Options and quit box held looks), `cancel_drag`, `escape_modal`, `escape_window` (Options, its sub-dialog and confirmation), `escape_base` (the menus and gameplay), `window_closed` (`reset_menu_interaction`, `sync_mode`), `console_blocked`, `console_enabled` (`con_enable`), `console_opening` (the menu hover cleared, gameplay paused under the console), `console_closed`, `canvas`.
+- `Console::escape_pressed`, `escape_released`, `escape` and `toggle` stay hl2-bevy's API and call the shell; `Console::close_window` is gone: its callers (Options, four tests) call `shell::close_window`.
+- docs/gameui.md names the shell's routing and toggle.
+
+**Why:** Step 4 of the toolkit split (DESIGN "Step 4 design"): Escape and the console's window are the shell's.
+
+**Tested how:** Every test passes, the four `close_window` calls being the only test change. `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; all 81 owned-install tests pass (the two hl2-bevy headless campaign tests alone, as before). Full packaged replay suite, one game at a time: 93 of 94. Compared with the baseline run (1,439 labelled samples), the differences are the fields the checks already mark as varying (pallet `hits`, `ray`) and `monitors-kleiner-scene`'s gibs: 7 removed instead of 8 at two labels; the same build rerun three times on that fixture matched the expected outcomes each time. The repository isolation check passes.
+
+**Result:** Step 4 is complete: `source_ui::shell` holds the window stack, the console dialog, Escape, key repeat and the pointer (`Shell<W>`) and the control flow over them (`input`, Escape, `toggle`, `close_window`), and names nothing of HL2; `Console` keeps the GameUI fields and answers the `Host` hooks. Sizes over step 4: hl2-ui production lines 16,556 -> 16,584 (the hooks' signatures), source-ui 8,126 -> 8,417.
+
+**Still broken or not tested:** `monitors-kleiner-scene`'s gib removal count varies between runs of one build (once in four runs here); the replay checks mark only other fields as varying for it.
+
+**Next:** Step 5: fold hl2-shared back into hl2-simulation.
+
 ## 2026-10-24 UI toolkit split, step 4c: input routing in the shell
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

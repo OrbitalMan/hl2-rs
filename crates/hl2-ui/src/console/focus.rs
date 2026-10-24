@@ -136,21 +136,6 @@ impl Console {
         matches!(self.base, Mode::MainMenu | Mode::Pause)
     }
 
-    pub(super) fn close_window(&mut self, window: Window) {
-        if window == Window::Console {
-            self.shell.panel.placement.end();
-        }
-        self.shell.escape_held = false;
-        self.options.escape_held = false;
-        if let Some((box_, _)) = &mut self.confirm_box {
-            box_.escape_held = false;
-        }
-        self.options.set_confirm_escape_held(false);
-        self.shell.windows.close(window);
-        self.reset_menu_interaction();
-        self.sync_mode();
-    }
-
     /// A window's frame look: faded towards its focused look (SDK `Frame` focus).
     pub(super) fn window_theme(&self, window: Window, time: f64) -> Theme {
         self.theme.focus_faded(
@@ -250,167 +235,22 @@ impl Console {
     /// button shows pressed/armed until Escape is released and the dialog closes then.
     /// Everything else Escape does happens at once.
     pub fn escape_pressed(&mut self) {
-        self.sync_dialog_windows();
-        if self.escape_closes_dialog() {
-            self.shell.escape_held = true;
-            self.options.escape_held = matches!(
-                self.shell.windows.top(),
-                Some(Window::Options | Window::SubDialog)
-            );
-            let is_confirm = self.shell.windows.top() == Some(Window::Confirmation);
-            if let Some((box_, _)) = &mut self.confirm_box {
-                box_.escape_held = is_confirm;
-            }
-            self.options.set_confirm_escape_held(is_confirm);
-        } else {
-            self.escape();
-        }
+        shell::escape_pressed(self);
     }
 
     /// Escape went up: closes the dialog whose close button or cancel button it held.
     pub fn escape_released(&mut self) {
-        self.sync_dialog_windows();
-        if std::mem::take(&mut self.shell.escape_held) {
-            self.options.escape_held = false;
-            if let Some((box_, _)) = &mut self.confirm_box {
-                box_.escape_held = false;
-            }
-            self.options.set_confirm_escape_held(false);
-            if self.escape_closes_dialog() {
-                self.escape();
-            }
-        }
-    }
-
-    pub(super) fn escape_closes_dialog(&self) -> bool {
-        if self.loading_dialog.is_some() || self.quit_placement.active() {
-            return false;
-        }
-        match self.shell.windows.top() {
-            Some(Window::Options | Window::SubDialog) => self.options.escape_closes(),
-            Some(Window::Console) => {
-                !self.shell.panel.placement.active() && !self.shell.panel.editor.can_dismiss()
-            }
-            Some(Window::Confirmation) => {
-                if self.confirm_box.is_some() {
-                    !self.quit_placement.active()
-                } else {
-                    self.options.escape_closes()
-                }
-            }
-            None => false,
-        }
+        shell::escape_released(self);
     }
 
     pub fn escape(&mut self) {
-        // A drag or resize in progress is undone first.
-        let console_on_top = self.shell.windows.top() == Some(Window::Console);
-        if self.quit_placement.cancel() || (console_on_top && self.shell.panel.placement.cancel()) {
-            return;
-        }
-        // In the console Escape first ends a history search, then hides the completion list.
-        if console_on_top && self.shell.panel.editor.dismiss() {
-            return;
-        }
-        if let Some(loading) = &self.loading_dialog {
-            if loading.is_failed() {
-                self.loading_dialog = None;
-                self.set_mode(Mode::MainMenu);
-                self.main_menu.back(&self.gameui.localization);
-                self.clear_menu_hover();
-            }
-            return;
-        }
-        if let Some((mut box_, kind)) = self.confirm_box.take() {
-            box_.escape_held = false;
-            self.closing_confirm_box = Some((box_, kind.clone()));
-            self.reset_menu_interaction();
-            if let ConfirmKind::KeepVideo(keep) = kind {
-                let effect = self.revert_video(keep.previous);
-                self.deferred.push(effect);
-            }
-            self.sync_dialog_windows();
-            return;
-        }
-        // Escape closes the top window first, whichever layer has the focus.
-        match self.shell.windows.top() {
-            Some(Window::Confirmation) => {
-                if !self.options.escape_closes() {
-                    self.options.escape();
-                } else {
-                    self.options.dismiss_confirm();
-                }
-                self.sync_dialog_windows();
-                return;
-            }
-            Some(Window::SubDialog) => {
-                self.options.escape();
-                self.sync_dialog_windows();
-                return;
-            }
-            Some(Window::Options) => {
-                if !self.options.escape() {
-                    self.close_window(Window::Options);
-                }
-                return;
-            }
-            Some(Window::Console) => {
-                self.close_window(Window::Console);
-                self.clear_menu_hover();
-                return;
-            }
-            None => {}
-        }
-        let menu = if self.background_level {
-            Mode::MainMenu
-        } else {
-            Mode::Pause
-        };
-        let base = match self.base {
-            Mode::Gameplay => menu,
-            Mode::Pause => {
-                if self.background_level {
-                    Mode::MainMenu
-                } else {
-                    Mode::Gameplay
-                }
-            }
-            Mode::MainMenu => {
-                if self.main_menu.back(&self.gameui.localization) || self.background_level {
-                    Mode::MainMenu
-                } else {
-                    Mode::Gameplay
-                }
-            }
-            // Windows are never the base.
-            window @ (Mode::Console | Mode::Options) => window,
-        };
-        self.set_mode(base);
+        shell::escape(self);
     }
 
     /// Opens the console on top with the focus, or closes it (focused or not); it opens only
     /// while `con_enable` is on. Blocked when a modal dialog or blocking subdialog is open.
     pub fn toggle(&mut self) {
-        if self.shell.windows.has_modal()
-            || self.modal_dialog_open()
-            || self.options.has_sub()
-            || self.options.has_confirm()
-        {
-            return;
-        }
-        if self.console_open() {
-            self.close_window(Window::Console);
-            self.clear_menu_hover();
-        } else if self.config.keyboard.developer_console {
-            self.clear_menu_hover();
-            if !self.background_level && self.base == Mode::Gameplay {
-                self.base = Mode::Pause;
-            }
-            self.shell.windows.open(Window::Console);
-            self.sync_mode();
-            let frame = self.shell.panel.frame(&self.canvas);
-            self.shell.panel.placement.reset_if_off_screen(&frame);
-        }
+        shell::toggle(self);
     }
 
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
@@ -576,5 +416,153 @@ impl Host for Console {
 
     fn base_input(&mut self, share: &Input, owns_pointer: bool) -> Vec<Effect> {
         self.menu_input(share, owns_pointer)
+    }
+
+    fn sync_windows(&mut self) {
+        self.sync_dialog_windows();
+    }
+
+    fn escape_blocked(&self) -> bool {
+        self.loading_dialog.is_some() || self.quit_placement.active()
+    }
+
+    fn escape_closes(&self, window: Window) -> bool {
+        match window {
+            Window::Options | Window::SubDialog => self.options.escape_closes(),
+            Window::Confirmation => {
+                if self.confirm_box.is_some() {
+                    !self.quit_placement.active()
+                } else {
+                    self.options.escape_closes()
+                }
+            }
+            // The shell answers for the console.
+            Window::Console => false,
+        }
+    }
+
+    fn hold_escape(&mut self, top: Option<Window>) {
+        self.options.escape_held = matches!(top, Some(Window::Options | Window::SubDialog));
+        let is_confirm = top == Some(Window::Confirmation);
+        if let Some((box_, _)) = &mut self.confirm_box {
+            box_.escape_held = is_confirm;
+        }
+        self.options.set_confirm_escape_held(is_confirm);
+    }
+
+    fn release_escape(&mut self) {
+        self.options.escape_held = false;
+        if let Some((box_, _)) = &mut self.confirm_box {
+            box_.escape_held = false;
+        }
+        self.options.set_confirm_escape_held(false);
+    }
+
+    fn cancel_drag(&mut self) -> bool {
+        self.quit_placement.cancel()
+    }
+
+    fn escape_modal(&mut self) -> bool {
+        if let Some(loading) = &self.loading_dialog {
+            if loading.is_failed() {
+                self.loading_dialog = None;
+                self.set_mode(Mode::MainMenu);
+                self.main_menu.back(&self.gameui.localization);
+                self.clear_menu_hover();
+            }
+            return true;
+        }
+        if let Some((mut box_, kind)) = self.confirm_box.take() {
+            box_.escape_held = false;
+            self.closing_confirm_box = Some((box_, kind.clone()));
+            self.reset_menu_interaction();
+            if let ConfirmKind::KeepVideo(keep) = kind {
+                let effect = self.revert_video(keep.previous);
+                self.deferred.push(effect);
+            }
+            self.sync_dialog_windows();
+            return true;
+        }
+        false
+    }
+
+    fn escape_window(&mut self, window: Window) {
+        match window {
+            Window::Confirmation => {
+                if !self.options.escape_closes() {
+                    self.options.escape();
+                } else {
+                    self.options.dismiss_confirm();
+                }
+                self.sync_dialog_windows();
+            }
+            Window::SubDialog => {
+                self.options.escape();
+                self.sync_dialog_windows();
+            }
+            Window::Options => {
+                if !self.options.escape() {
+                    shell::close_window(self, Window::Options);
+                }
+            }
+            // The shell closes the console.
+            Window::Console => {}
+        }
+    }
+
+    fn escape_base(&mut self) {
+        let menu = if self.background_level {
+            Mode::MainMenu
+        } else {
+            Mode::Pause
+        };
+        let base = match self.base {
+            Mode::Gameplay => menu,
+            Mode::Pause => {
+                if self.background_level {
+                    Mode::MainMenu
+                } else {
+                    Mode::Gameplay
+                }
+            }
+            Mode::MainMenu => {
+                if self.main_menu.back(&self.gameui.localization) || self.background_level {
+                    Mode::MainMenu
+                } else {
+                    Mode::Gameplay
+                }
+            }
+            // Windows are never the base.
+            window @ (Mode::Console | Mode::Options) => window,
+        };
+        self.set_mode(base);
+    }
+
+    fn window_closed(&mut self) {
+        self.reset_menu_interaction();
+        self.sync_mode();
+    }
+
+    fn console_blocked(&self) -> bool {
+        self.modal_dialog_open() || self.options.has_sub() || self.options.has_confirm()
+    }
+
+    fn console_enabled(&self) -> bool {
+        self.config.keyboard.developer_console
+    }
+
+    fn console_opening(&mut self) {
+        self.clear_menu_hover();
+        if !self.background_level && self.base == Mode::Gameplay {
+            self.base = Mode::Pause;
+        }
+    }
+
+    fn console_closed(&mut self) {
+        self.clear_menu_hover();
+    }
+
+    fn canvas(&self) -> &Canvas {
+        &self.canvas
     }
 }

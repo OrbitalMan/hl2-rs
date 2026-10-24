@@ -332,8 +332,8 @@ Evidence: SDK `vgui_controls` (`Button.cpp`, `PropertySheet.cpp` `PageTab`) and 
 - **Press-and-hold repeat (2026-10-17)**: one timer, `widgets::HoldRepeat` (press, held,
   release; first repeat after `HOLD_REPEAT_DELAY` 400 ms, then every `HOLD_REPEAT_INTERVAL`
   50 ms, at most once a frame, never without `Input::time`), drives both the scroll bar arrows
-  and the keyboard. Keyboard repeat is applied once, at the top of `Console::input`
-  (`source_ui::input::KeyRepeat` over `Input::held_keys`), so every layer that reads `Input::keys` repeats
+  and the keyboard. Keyboard repeat is applied once, at the top of `source_ui::shell::input`,
+  which `Console::input` runs (`source_ui::input::KeyRepeat` over `Input::held_keys`), so every layer that reads `Input::keys` repeats
   without code of its own: console editing, cursor, completion and history keys, main and pause
   menu Up/Down, the Options key list, open popup lists and Options text fields (Backspace). Like an operating system, the latest pressed key
   repeats; any other press takes over, and a key that acts once stops it. Up, Down, Left, Right,
@@ -1403,8 +1403,8 @@ Aligning mid-gameplay developer console activation with authentic Half-Life 2 / 
 
 Fixing input routing and visual defects across Options sub-dialogs and out-of-focus menu text:
 - **Options sub-dialog mouse click activation:**
-  - In `Console::windows_input`, previously `Window::Options`, `Window::SubDialog`, and `Window::Confirmation` were all in the window order list, and `self.options_input` was called for each. When a sub-dialog was open, `Window::Options` was passed an unowned share with no pointer coordinates, which reset the dialog's `ButtonTracker` and cleared button press state on release.
-  - Now, `Console::windows_input` resolves `active_options_window` (giving precedence to `Window::Confirmation`, then `Window::SubDialog`, then `Window::Options`), and strictly routes input to `self.options_input(&share)` for the active layer.
+  - In the window routing (then `Console::windows_input`), previously `Window::Options`, `Window::SubDialog`, and `Window::Confirmation` were all in the window order list, and `self.options_input` was called for each. When a sub-dialog was open, `Window::Options` was passed an unowned share with no pointer coordinates, which reset the dialog's `ButtonTracker` and cleared button press state on release.
+  - Now, the routing (`source_ui::shell::input`, with `Console`'s `Host::prepare_windows` and `Host::window_input`) resolves `active_options_window` (giving precedence to `Window::Confirmation`, then `Window::SubDialog`, then `Window::Options`), and strictly routes input to `self.options_input(&share)` for the active layer.
   - In `gameui::settings::command_binding`, added `"apply"` alongside `"ok"` (mapping to `Binding::Command(Command::SubOk)`) to support `OptionsSubVideoAdvancedDlg.res` which authors the OK button with `"Command" "Apply"`.
 - **Keyboard Use Defaults confirmation dialog persistence:**
   - In `OptionsDialog::input`, when `self.confirm` was handled, an unresolved outcome (`None`) previously did not restore `confirm` into `self.confirm`, causing the confirmation dialog to be discarded on the very first frame after opening. Now `confirm` is properly retained on `None`, and `closing_confirm` is set on resolution (`Some(true)` or `Some(false)`).
@@ -1443,7 +1443,7 @@ Fixing input routing and visual defects across Options sub-dialogs and out-of-fo
   - In `Console::draw`, `draw_console_with_occluders` similarly draws the console frame background unclipped via `painter.frame_background(&spec)`, then pushes occluders for any window or confirmation box above it before drawing console history, entry, submit button, and completion popup.
   - Result: dialog frames behind a focused dialog retain their translucent background tint, but all controls, text, tabs, buttons, and borders behind the focused dialog are hidden/clipped, matching retail Source VGUI behavior.
 - **Console invocation gating:**
-  - In `Console::toggle()`, added a modal/subdialog guard: if any modal dialog or blocking subdialog is open (`self.windows.has_modal() || self.modal_dialog_open() || self.options.has_sub() || self.options.has_confirm()`), console toggle invocation is blocked early.
+  - In the console toggle (`source_ui::shell::toggle`, which `Console::toggle()` runs), added a modal/subdialog guard: if any modal dialog or blocking subdialog is open (`windows.has_modal()`, or `Console`'s `Host::console_blocked`: `modal_dialog_open() || options.has_sub() || options.has_confirm()`), console toggle invocation is blocked early.
   - Pressing tilde (`KeyCode::Backquote`), activating `Action::ToggleConsole`, or executing `toggleconsole` while in Options > Video > Advanced, Gamma, Credits, Keyboard Advanced, or a confirmation dialog does not open or toggle the console, matching retail Half-Life 2 behavior.
 - **Verification:**
   - Added unit tests:

@@ -10,6 +10,7 @@ use source_ui::console::panel::{
     HistoryView, Level, Line, CONSOLE_ROW, NOMINAL_ADVANCE, OUTPUT_LINES, WHEEL_ROWS,
 };
 use source_ui::input::KeyRepeat;
+use source_ui::shell;
 use source_ui::widgets::ScrollMode;
 #[test]
 fn cell_metrics_rejects_missing_font() {
@@ -3584,7 +3585,7 @@ fn main_menu_loses_focus_and_becomes_translucent_when_dialog_opens_and_restores_
     assert!((console.shell.windows.focus_amount(Window::Options, 2.3) - 1.0).abs() < 1e-4);
 
     // Close Options: restores focus to MainMenu (Base)
-    console.close_window(Window::Options);
+    shell::close_window(&mut console, Window::Options);
     console.sync_dialog_windows();
     console.shell.windows.set_time(3.0);
     assert_eq!(console.shell.windows.focus(), Layer::Base);
@@ -3705,7 +3706,7 @@ fn context_aware_background_dim_overlay_across_all_four_cases() {
 
     // Close options at t=1.0: restores focus to menu, fading dim out
     console.shell.windows.set_time(1.0);
-    console.close_window(Window::Options);
+    shell::close_window(&mut console, Window::Options);
     console.sync_dialog_windows();
     assert!((console.dim_overlay_alpha(1.0) - backdrop).abs() < 1e-4);
     assert!((console.dim_overlay_alpha(1.15) - backdrop * 0.5).abs() < 1e-4);
@@ -3735,7 +3736,7 @@ fn context_aware_background_dim_overlay_across_all_four_cases() {
 
     // Close options at t=3.0: fades back down to gameplay_dim
     play_console.shell.windows.set_time(3.0);
-    play_console.close_window(Window::Options);
+    shell::close_window(&mut play_console, Window::Options);
     play_console.sync_dialog_windows();
     assert!((play_console.dim_overlay_alpha(3.0) - backdrop).abs() < 1e-4);
     assert!((play_console.dim_overlay_alpha(3.15) - mid_dim).abs() < 1e-4);
@@ -4225,7 +4226,7 @@ fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
     );
 
     // 3. When Quit confirmation box appears over console:
-    console.close_window(Window::Options);
+    shell::close_window(&mut console, Window::Options);
     console.sync_dialog_windows();
     assert_eq!(
         console.shell.windows.focus(),
