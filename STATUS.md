@@ -11,6 +11,7 @@
 - Step 3b done (step 3 complete): the developer console dialog is the toolkit's `source_ui::console::panel::ConsolePanel` (output buffer, history, entry, completion popup, buttons, placement, drawing; `dialog` holds its layout with the app's `Scaling`); hl2-ui's `console/panel.rs` passes HL2's texts, look and commands and turns its actions into effects. Verified: validate.sh, the Windows-target check, the console and UI replays (10 of 10), the dialog's draw output byte-identical in nine states.
 - Step 4 design in docs/DESIGN.md (the shell's control flow generic over a `shell::Host` trait that `Console` implements). 4a done: `source_ui::windows` is generic (`WindowId`, `Windows<W>`); HL2's `Window` enum is in hl2-ui. Verified: validate.sh, the Windows-target check, the console and UI replays (10 of 10).
 - 4b done: `source_ui::shell::Shell<W>` (window stack, console dialog, Escape hold, key repeat, pointer) is `Console::shell`. Verified: validate.sh, the Windows-target check, the console and UI replays (10 of 10).
+- 4c done: input routing is `source_ui::shell::input` over `shell::Host`, which `Console` implements. Verified: validate.sh, the Windows-target check, the console and UI replays (10 of 10).
 - Known: `pallet-gibs-fade`'s kill tick varies between runs of one build. In one of four runs the pallet's kill and its gibs came at tick 32 instead of 34; only its `hits` is marked as varying in the replay checks.
 
 ## Architecture review: structure without behaviour change (2026-10-23)

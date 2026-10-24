@@ -26,7 +26,7 @@ use source_ui::{
     placement::{self, CursorHint, Placement},
     shell::Shell,
     widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
-    windows::{Layer, Pointer, WindowId},
+    windows::{Layer, WindowId},
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;

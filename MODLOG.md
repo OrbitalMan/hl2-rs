@@ -1,5 +1,23 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 4c: input routing in the shell
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New `source_ui::shell::Host` (input hooks) and `shell::input`: the frame's control flow that was `Console::input_frame`, `layer_input` and `windows_input`, generic over the host: the key repeat (stopped while a key binding is captured and when the host's mode changes), the window stack's clock, the host's modal layer, the pointer routed to the topmost window under it (or the console's completion popup) else the base, each open window's share in z-order until a modal layer opens, then the base's share and its occlusion.
+- `Console` implements `Host`: the mode, key capture, the modal input (the menus' occlusion under a modal dialog, the loading dialog, the quit box), preparing the windows (the Options dialog's sub-dialog and confirmation windows synchronized, the active Options window and its modal layer), window and popup bounds, the menu as the base taking the pointer, `sync_mode`, each window's input (Options and its layers, the console, the quit box), whether a modal layer blocks the rest, and the menu's occlusion and input. Every statement kept its order; `Console::input` calls `shell::input` between the deferred effects and saving placements, as before.
+
+**Why:** Step 4 of the toolkit split (DESIGN "Step 4 design"): pointer and keyboard routing is the shell's.
+
+**Tested how:** Every test passes unchanged. `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays pass, 10 of 10; the repository isolation check passes.
+
+**Result:** No behaviour change.
+
+**Still broken or not tested:** Escape, the console toggle and closing windows are still `Console`'s (4d).
+
+**Next:** 4d.
+
 ## 2026-10-24 UI toolkit split, step 4b: the shell's state
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

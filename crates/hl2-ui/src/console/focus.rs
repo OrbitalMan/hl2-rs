@@ -2,6 +2,7 @@
 //! console, their modal layers), Escape, and routing each frame's input to the layers.
 
 use super::*;
+use source_ui::shell::{self, Host};
 
 impl Console {
     pub fn modal_dialog_open(&self) -> bool {
@@ -414,138 +415,9 @@ impl Console {
 
     pub fn input(&mut self, input: &Input) -> Vec<Effect> {
         let mut effects = std::mem::take(&mut self.deferred);
-        effects.extend(self.input_frame(input));
+        effects.extend(shell::input(self, input));
         // A drag, resize or reset that ended this frame is saved at once.
         self.save_placements();
-        effects
-    }
-
-    pub(super) fn input_frame(&mut self, input: &Input) -> Vec<Effect> {
-        // Held keys repeat for every layer below, except into a key binding being captured.
-        let mut repeated = input.clone();
-        if self.options_open() && self.options.capturing_key() {
-            self.shell.key_repeat.cancel();
-        } else {
-            self.shell.key_repeat.apply(&mut repeated);
-        }
-        let mode = self.mode;
-        let effects = self.layer_input(&repeated);
-        if self.mode != mode {
-            self.shell.key_repeat.cancel();
-        }
-        effects
-    }
-
-    pub(super) fn layer_input(&mut self, input: &Input) -> Vec<Effect> {
-        if let Some(time) = input.time {
-            self.shell.windows.set_time(time);
-        }
-        if self.modal_dialog_open() {
-            // The menus are occluded: keep their tracker on the physical button so the rest of
-            // a click that closes the modal layer is not read as a new menu press.
-            self.menu_tracker.occlude(input.click || input.held);
-        }
-        if let Some(loading) = &self.loading_dialog {
-            if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {
-                self.loading_dialog = None;
-                self.set_mode(Mode::MainMenu);
-                self.main_menu.back(&self.gameui.localization);
-                self.clear_menu_hover();
-            }
-            return Vec::new();
-        }
-        if self.confirm_box.is_some() {
-            return self.confirm_input(input);
-        }
-        self.windows_input(input)
-    }
-
-    /// The Options dialog and the console are not modal (retail VGUI frames): the pointer goes
-    /// to the topmost window under it, else to the menu behind them; a press raises and focuses
-    /// its layer and stays with it until release; the keyboard goes to the focused layer. A
-    /// modal layer inside Options (sub-dialog, its confirmation box, an open list, a key
-    /// capture) takes every click. Every layer sees every frame, with only its share of it.
-    pub(super) fn windows_input(&mut self, input: &Input) -> Vec<Effect> {
-        self.sync_dialog_windows();
-        let active_options_window = if self.confirm_box.is_none()
-            && self.options.has_confirm()
-            && self.shell.windows.is_open(Window::Confirmation)
-        {
-            Window::Confirmation
-        } else if self.options.has_sub() && self.shell.windows.is_open(Window::SubDialog) {
-            Window::SubDialog
-        } else {
-            Window::Options
-        };
-        let modal = if self.options_open() && self.options.modal_layer_open() {
-            Some(active_options_window)
-        } else {
-            None
-        };
-        let completion = self.completion_bounds();
-        let bounds: Vec<(Window, Rect)> = self
-            .shell
-            .windows
-            .order()
-            .map(|w| (w, self.window_bounds(w)))
-            .collect();
-        let pointer = Pointer {
-            at: input.pointer,
-            click: input.click,
-            held: input.held,
-            released: input.released,
-        };
-        let base_takes_pointer = self.base_is_menu();
-        let owner = self
-            .shell
-            .windows
-            .route(pointer, modal, base_takes_pointer, |window, at| {
-                bounds.iter().any(|(w, r)| *w == window && r.contains(at))
-                    || window == Window::Console && completion.is_some_and(|r| r.contains(at))
-            });
-        self.sync_mode();
-        let focus = self.shell.windows.focus();
-        let mut effects = Vec::new();
-        let windows: Vec<Window> = self.shell.windows.order().collect();
-        for window in windows {
-            if !self.shell.windows.is_open(window) {
-                continue;
-            }
-            let layer = Layer::Window(window);
-            let share = input.share(owner == Some(layer), focus == layer);
-            effects.extend(match window {
-                Window::Options | Window::SubDialog => {
-                    if window == active_options_window {
-                        self.options_input(&share)
-                    } else {
-                        Vec::new()
-                    }
-                }
-                Window::Console => self.console_input(&share),
-                Window::Confirmation => {
-                    if self.confirm_box.is_some() {
-                        self.confirm_input(input)
-                    } else if window == active_options_window {
-                        self.options_input(&share)
-                    } else {
-                        Vec::new()
-                    }
-                }
-            });
-            if self.confirm_box.is_some() || self.modal_dialog_open() {
-                return effects;
-            }
-        }
-        if self.base_is_menu() {
-            let owns = owner == Some(Layer::Base);
-            if !owns {
-                // A window has the pointer: the menu only follows the button (occluded).
-                self.menu_tracker.occlude(input.click || input.held);
-            }
-            let focus = self.shell.windows.focus();
-            let share = input.share(owns, focus == Layer::Base);
-            effects.extend(self.menu_input(&share, owns));
-        }
         effects
     }
 
@@ -578,5 +450,131 @@ impl Console {
             .panel
             .placement
             .hint(&self.shell.panel.frame(&self.canvas), self.shell.pointer)
+    }
+}
+
+/// HL2's answers to the shell's control flow: the GameUI's mode, its modal layers (the loading
+/// dialog, the quit box), the Options dialog's windows and the menu under them.
+impl Host for Console {
+    type Window = Window;
+    type Effect = Effect;
+    type Mode = Mode;
+    /// The Options window that takes input this frame (the dialog, its sub-dialog or its
+    /// confirmation box).
+    type Frame = Window;
+
+    fn shell(&self) -> &Shell<Window> {
+        &self.shell
+    }
+
+    fn shell_mut(&mut self) -> &mut Shell<Window> {
+        &mut self.shell
+    }
+
+    fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    fn capturing_key(&self) -> bool {
+        self.options_open() && self.options.capturing_key()
+    }
+
+    fn modal_input(&mut self, input: &Input) -> Option<Vec<Effect>> {
+        if self.modal_dialog_open() {
+            // The menus are occluded: keep their tracker on the physical button so the rest of
+            // a click that closes the modal layer is not read as a new menu press.
+            self.menu_tracker.occlude(input.click || input.held);
+        }
+        if let Some(loading) = &self.loading_dialog {
+            if loading.is_failed() && (input.pressed(Key::Enter) || input.click) {
+                self.loading_dialog = None;
+                self.set_mode(Mode::MainMenu);
+                self.main_menu.back(&self.gameui.localization);
+                self.clear_menu_hover();
+            }
+            return Some(Vec::new());
+        }
+        if self.confirm_box.is_some() {
+            return Some(self.confirm_input(input));
+        }
+        None
+    }
+
+    /// A modal layer inside Options (sub-dialog, its confirmation box, an open list, a key
+    /// capture) takes every click.
+    fn prepare_windows(&mut self) -> (Option<Window>, Window) {
+        self.sync_dialog_windows();
+        let active_options_window = if self.confirm_box.is_none()
+            && self.options.has_confirm()
+            && self.shell.windows.is_open(Window::Confirmation)
+        {
+            Window::Confirmation
+        } else if self.options.has_sub() && self.shell.windows.is_open(Window::SubDialog) {
+            Window::SubDialog
+        } else {
+            Window::Options
+        };
+        let modal = if self.options_open() && self.options.modal_layer_open() {
+            Some(active_options_window)
+        } else {
+            None
+        };
+        (modal, active_options_window)
+    }
+
+    fn window_bounds(&self, window: Window) -> Rect {
+        Console::window_bounds(self, window)
+    }
+
+    fn console_popup_bounds(&self) -> Option<Rect> {
+        self.completion_bounds()
+    }
+
+    fn base_takes_pointer(&self) -> bool {
+        self.base_is_menu()
+    }
+
+    fn focus_changed(&mut self) {
+        self.sync_mode();
+    }
+
+    fn window_input(
+        &mut self,
+        active_options_window: &Window,
+        window: Window,
+        share: &Input,
+        input: &Input,
+    ) -> Vec<Effect> {
+        match window {
+            Window::Options | Window::SubDialog => {
+                if window == *active_options_window {
+                    self.options_input(share)
+                } else {
+                    Vec::new()
+                }
+            }
+            Window::Console => self.console_input(share),
+            Window::Confirmation => {
+                if self.confirm_box.is_some() {
+                    self.confirm_input(input)
+                } else if window == *active_options_window {
+                    self.options_input(share)
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+    }
+
+    fn input_blocked(&self) -> bool {
+        self.confirm_box.is_some() || self.modal_dialog_open()
+    }
+
+    fn occlude_base(&mut self, down: bool) {
+        self.menu_tracker.occlude(down);
+    }
+
+    fn base_input(&mut self, share: &Input, owns_pointer: bool) -> Vec<Effect> {
+        self.menu_input(share, owns_pointer)
     }
 }
