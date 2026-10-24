@@ -1,7 +1,8 @@
 //! Maps and the campaign: loading maps, the main menu and its background map, skill and save
 //! data.
 
-use super::{Outcome, Spec};
+use super::{parse, Invalid, Outcome, Spec};
+use crate::config::Config;
 use crate::console::{Console, Effect, Mode};
 
 pub(super) fn map(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {
@@ -100,27 +101,17 @@ pub(super) fn map_background(
     Ok(Some(Effect::MainMenuMap(background)))
 }
 
-pub(super) fn skill(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {
-    let usage = || spec.usage();
-    if args.is_empty() {
-        console.log(format!("\"skill\" = \"{}\"", console.config.gameplay.skill));
-    } else if args.len() == 1 {
-        let skill: u8 = args[0].parse().map_err(|_| usage())?;
-        if !(1..=3).contains(&skill) {
-            return Err(usage());
-        }
-        console.config.gameplay.skill = skill;
-        let _ = console.config.save();
-        console.log(format!("skill {skill}"));
-        return Ok(Some(Effect::ApplyConfig(Box::new(console.config.clone()))));
-    } else {
-        return Err(usage());
-    }
-    Ok(None)
-}
-
 pub(super) fn skill_value(console: &Console) -> Option<String> {
     Some(console.config.gameplay.skill.to_string())
+}
+
+pub(super) fn set_skill(config: &mut Config, arg: &str) -> Result<(), Invalid> {
+    let skill = parse::<u8>(arg)?;
+    if !(1..=3).contains(&skill) {
+        return Err(Invalid::Usage);
+    }
+    config.gameplay.skill = skill;
+    Ok(())
 }
 
 pub(super) fn migrate_episodic_data(

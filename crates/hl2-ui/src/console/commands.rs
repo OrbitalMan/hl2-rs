@@ -1,7 +1,9 @@
 //! The console's implemented commands and cvars, described once: name, help text (`name args:
 //! description`, the usage line `help` prints and the completion help line marks the argument
 //! being typed in), what each argument completes from, the handler that runs it and, for a
-//! cvar, its current value. The handlers live in submodules by area.
+//! cvar, its current value. A cvar stored in the settings is a value function and a setter
+//! ([`setting`]); one handler queries, stores, saves and echoes all of them. The handlers, value
+//! functions and setters live in submodules by area.
 
 mod audio;
 mod cheats;
@@ -10,7 +12,8 @@ mod map;
 mod mouse;
 mod video;
 
-use super::{Console, Effect};
+use super::{boolean, Console, Effect};
+use crate::config::Config;
 
 /// What an argument completes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +52,38 @@ pub struct Spec {
     pub run: Handler,
     /// A cvar's current value: completion shows it.
     pub value: Option<Value>,
+    /// A cvar stored in the settings: [`run_setting`] stores typed values with it.
+    pub setting: Option<Setting>,
+}
+
+/// How a setting cvar stores a typed value.
+#[derive(Clone, Copy, Debug)]
+pub struct Setting {
+    pub set: Set,
+    /// The name the console prints for it, when an alias answers as what it aliases.
+    pub prints_as: Option<&'static str>,
+}
+
+/// Stores a typed value in the settings, or says why it is not one the cvar takes.
+pub type Set = fn(&mut Config, &str) -> Result<(), Invalid>;
+
+/// Why a typed value was not stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Invalid {
+    /// The console prints the cvar's usage line.
+    Usage,
+    /// The console prints the cvar's own message.
+    Message(&'static str),
+}
+
+/// A number or other value parsed from a typed argument.
+fn parse<T: std::str::FromStr>(arg: &str) -> Result<T, Invalid> {
+    arg.parse().map_err(|_| Invalid::Usage)
+}
+
+/// `0` or `1`.
+fn flag(arg: &str) -> Result<bool, Invalid> {
+    boolean(arg).ok_or(Invalid::Usage)
 }
 
 impl Spec {
@@ -75,6 +110,7 @@ const fn command(
         args,
         run,
         value: None,
+        setting: None,
     }
 }
 
@@ -91,6 +127,77 @@ const fn cvar(
         args,
         run,
         value: Some(value),
+        setting: None,
+    }
+}
+
+/// A cvar stored in the settings: `value` is what the console prints, `set` stores a typed value.
+const fn setting(
+    name: &'static str,
+    help: &'static str,
+    args: &'static [Arg],
+    value: Value,
+    set: Set,
+) -> Spec {
+    Spec {
+        name,
+        help,
+        args,
+        run: run_setting,
+        value: Some(value),
+        setting: Some(Setting {
+            set,
+            prints_as: None,
+        }),
+    }
+}
+
+/// A [`setting`] alias that prints as the cvar it aliases.
+const fn setting_alias(
+    name: &'static str,
+    prints_as: &'static str,
+    help: &'static str,
+    args: &'static [Arg],
+    value: Value,
+    set: Set,
+) -> Spec {
+    Spec {
+        name,
+        help,
+        args,
+        run: run_setting,
+        value: Some(value),
+        setting: Some(Setting {
+            set,
+            prints_as: Some(prints_as),
+        }),
+    }
+}
+
+/// Runs a [`setting`]: without an argument it prints `"name" = "value"`; with one it stores the
+/// value, saves the settings, echoes `name value` and has the host apply them.
+fn run_setting(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {
+    let (Some(value), Some(setting)) = (spec.value, spec.setting) else {
+        unreachable!("{} is built by `setting`", spec.name);
+    };
+    let name = setting.prints_as.unwrap_or(spec.name);
+    match args {
+        [] => {
+            let current = value(console).unwrap_or_default();
+            console.log(format!("\"{name}\" = \"{current}\""));
+            Ok(None)
+        }
+        [arg] => {
+            (setting.set)(&mut console.config, arg).map_err(|invalid| match invalid {
+                Invalid::Usage => spec.usage(),
+                Invalid::Message(message) => message.to_owned(),
+            })?;
+            let _ = console.config.save();
+            let stored = value(console).unwrap_or_default();
+            console.log(format!("{name} {stored}"));
+            Ok(Some(Effect::ApplyConfig(Box::new(console.config.clone()))))
+        }
+        _ => Err(spec.usage()),
     }
 }
 
@@ -224,159 +331,160 @@ pub const COMMANDS: &[Spec] = &[
         &[],
         developer::quit,
     ),
-    cvar(
+    setting(
         "volume",
         "volume [0..1]: query or set master audio volume",
         &[Arg::Free],
-        audio::volume,
         audio::volume_value,
+        audio::set_volume,
     ),
-    cvar(
+    setting(
         "snd_musicvolume",
         "snd_musicvolume [0..1]: query or set music volume",
         &[Arg::Free],
-        audio::snd_musicvolume,
         audio::snd_musicvolume_value,
+        audio::set_snd_musicvolume,
     ),
-    cvar(
+    setting(
         "snd_mute_losefocus",
         "snd_mute_losefocus [0|1]: query or toggle muting audio when window loses focus",
         BOOLEAN,
-        audio::snd_mute_losefocus,
         audio::snd_mute_losefocus_value,
+        audio::set_snd_mute_losefocus,
     ),
-    cvar(
+    setting(
         "closecaption",
         "closecaption [0|1]: query or toggle closed captioning",
         BOOLEAN,
-        audio::closecaption,
         audio::closecaption_value,
+        audio::set_closecaption,
     ),
-    cvar(
+    setting(
         "cc_subtitles",
         "cc_subtitles [0|1]: query or toggle subtitles only (dialogue only, no sound effects)",
         BOOLEAN,
-        audio::cc_subtitles,
         audio::cc_subtitles_value,
+        audio::set_cc_subtitles,
     ),
-    cvar(
+    setting(
         "snd_surround_speakers",
         "snd_surround_speakers [0|2|4|5|7]: query or set speaker configuration (0=headphones, 2=stereo, 4=surround, 5=5.1, 7=7.1)",
         &[Arg::Values(&["0", "2", "4", "5", "7"])],
-        audio::snd_surround_speakers,
         audio::snd_surround_speakers_value,
+        audio::set_snd_surround_speakers,
     ),
-    cvar(
+    setting(
         "snd_pitchquality",
         "snd_pitchquality [0|1]: query or toggle sound pitch quality (0=low, 1=high)",
         BOOLEAN,
-        audio::snd_pitchquality,
         audio::snd_pitchquality_value,
+        audio::set_snd_pitchquality,
     ),
-    cvar(
+    setting(
         "dsp_slow_cpu",
         "dsp_slow_cpu [0|1]: query or toggle reduced DSP CPU quality (1=slow CPU/low, 0=normal/high)",
         BOOLEAN,
-        audio::dsp_slow_cpu,
         audio::dsp_slow_cpu_value,
+        audio::set_dsp_slow_cpu,
     ),
-    cvar(
+    setting(
         "sensitivity",
         "sensitivity [value]: query or set mouse sensitivity",
         &[Arg::Free],
-        mouse::sensitivity,
         mouse::sensitivity_value,
+        mouse::set_sensitivity,
     ),
-    cvar(
+    setting(
         "m_pitch",
         "m_pitch [value]: query or set mouse pitch factor (negative inverts pitch)",
         &[Arg::Free],
-        mouse::m_pitch,
         mouse::m_pitch_value,
+        mouse::set_m_pitch,
     ),
-    cvar(
+    setting(
         "m_filter",
         "m_filter [0|1]: query or toggle two-frame mouse movement averaging",
         BOOLEAN,
-        mouse::m_filter,
         mouse::m_filter_value,
+        mouse::set_m_filter,
     ),
-    cvar(
+    setting(
         "m_rawinput",
         "m_rawinput [0|1]: query or toggle raw mouse input",
         BOOLEAN,
-        mouse::m_rawinput,
         mouse::m_rawinput_value,
+        mouse::set_m_rawinput,
     ),
-    cvar(
+    setting(
         "m_customaccel",
         "m_customaccel [0|1|3]: query or toggle custom mouse acceleration",
         &[Arg::Values(&["0", "1", "3"])],
-        mouse::m_customaccel,
         mouse::m_customaccel_value,
+        mouse::set_m_customaccel,
     ),
-    cvar(
+    setting(
         "m_customaccel_exponent",
         "m_customaccel_exponent [value]: query or set mouse acceleration exponent",
         &[Arg::Free],
-        mouse::m_customaccel_exponent,
         mouse::m_customaccel_exponent_value,
+        mouse::set_m_customaccel_exponent,
     ),
-    cvar(
+    setting(
         "sk_autoaim_mode",
         "sk_autoaim_mode [0|1|2]: query or set autoaim mode (0=off, 1=basic, 2=enhanced)",
         &[Arg::Values(&["0", "1", "2"])],
-        mouse::autoaim_mode,
         mouse::autoaim_mode_value,
+        mouse::set_autoaim_mode,
     ),
-    cvar(
+    setting(
         "m_autoaim_mode",
         "m_autoaim_mode [0|1|2]: query or set autoaim mode (alias for sk_autoaim_mode)",
         &[Arg::Values(&["0", "1", "2"])],
-        mouse::autoaim_mode,
         mouse::autoaim_mode_value,
+        mouse::set_autoaim_mode,
     ),
-    cvar(
+    setting(
         "sk_autoaim_scale1",
         "sk_autoaim_scale1 [scale]: query or set autoaim deflection scale",
         &[Arg::Free],
-        mouse::autoaim_scale,
         mouse::autoaim_scale_value,
+        mouse::set_autoaim_scale,
     ),
-    cvar(
+    setting(
         "m_autoaim_scale",
         "m_autoaim_scale [scale]: query or set autoaim deflection scale (alias for sk_autoaim_scale1)",
         &[Arg::Free],
-        mouse::autoaim_scale,
         mouse::autoaim_scale_value,
+        mouse::set_autoaim_scale,
     ),
-    cvar(
+    setting(
         "fov",
         "fov [degrees]: query or set camera field of view",
         &[Arg::Free],
-        video::fov,
         video::fov_value,
+        video::set_fov,
     ),
-    cvar(
+    setting_alias(
         "fov_desired",
+        "fov",
         "fov_desired [degrees]: query or set desired field of view (alias for fov)",
         &[Arg::Free],
-        video::fov,
         video::fov_value,
+        video::set_fov,
     ),
-    cvar(
+    setting(
         "vertical_fov",
         "vertical_fov [degrees]: query or set vertical field of view (0 = automatic)",
         &[Arg::Free],
-        video::vertical_fov,
         video::vertical_fov_value,
+        video::set_vertical_fov,
     ),
-    cvar(
+    setting(
         "viewmodel_fov",
         "viewmodel_fov [degrees]: query or set viewmodel field of view",
         &[Arg::Free],
-        video::viewmodel_fov,
         video::viewmodel_fov_value,
+        video::set_viewmodel_fov,
     ),
     cvar(
         "mat_aaquality",
@@ -385,131 +493,131 @@ pub const COMMANDS: &[Spec] = &[
         video::mat_aaquality,
         video::mat_aaquality_value,
     ),
-    cvar(
+    setting(
         "mat_antialias",
         "mat_antialias [0|1|2|4|8]: query or set multisample antialiasing mode",
         &[Arg::Values(&["0", "1", "2", "4", "8"])],
-        video::mat_antialias,
         video::mat_antialias_value,
+        video::set_mat_antialias,
     ),
-    cvar(
+    setting(
         "mat_colorcorrection",
         "mat_colorcorrection [0|1]: query or toggle color correction",
         BOOLEAN,
-        video::mat_colorcorrection,
         video::mat_colorcorrection_value,
+        video::set_mat_colorcorrection,
     ),
-    cvar(
+    setting(
         "mat_disable_d3d9ex",
         "mat_disable_d3d9ex [0|1]: query or toggle disabling Direct3D 9Ex extensions (0=enabled, 1=disabled)",
         BOOLEAN,
-        video::mat_disable_d3d9ex,
         video::mat_disable_d3d9ex_value,
+        video::set_mat_disable_d3d9ex,
     ),
-    cvar(
+    setting(
         "mat_forceaniso",
         "mat_forceaniso [1|2|4|8|16]: query or set anisotropic texture filtering mode",
         &[Arg::Values(&["1", "2", "4", "8", "16"])],
-        video::mat_forceaniso,
         video::mat_forceaniso_value,
+        video::set_mat_forceaniso,
     ),
-    cvar(
+    setting(
         "mat_hdr_level",
         "mat_hdr_level [0|1|2]: query or set HDR level (0=None, 1=Bloom, 2=Full)",
         &[Arg::Values(&["0", "1", "2"])],
-        video::mat_hdr_level,
         video::mat_hdr_level_value,
+        video::set_mat_hdr_level,
     ),
-    cvar(
+    setting(
         "mat_motion_blur_enabled",
         "mat_motion_blur_enabled [0|1]: query or toggle motion blur",
         BOOLEAN,
-        video::mat_motion_blur_enabled,
         video::mat_motion_blur_enabled_value,
+        video::set_mat_motion_blur_enabled,
     ),
-    cvar(
+    setting(
         "mat_picmip",
         "mat_picmip [-1|0|1|2]: query or set texture detail (-1=very high, 0=high, 1=medium, 2=low)",
         &[Arg::Values(&["-1", "0", "1", "2"])],
-        video::mat_picmip,
         video::mat_picmip_value,
+        video::set_mat_picmip,
     ),
-    cvar(
+    setting(
         "mat_queue_mode",
         "mat_queue_mode [-1|0|1|2]: query or set multicore rendering (-1=multicore, 0=single threaded)",
         &[Arg::Values(&["-1", "0", "1", "2"])],
-        video::mat_queue_mode,
         video::mat_queue_mode_value,
+        video::set_mat_queue_mode,
     ),
-    cvar(
+    setting(
         "mat_reducefillrate",
         "mat_reducefillrate [0|1]: query or toggle reduced shader fillrate (0=high, 1=low)",
         BOOLEAN,
-        video::mat_reducefillrate,
         video::mat_reducefillrate_value,
+        video::set_mat_reducefillrate,
     ),
-    cvar(
+    setting(
         "mat_trilinear",
         "mat_trilinear [0|1]: query or toggle trilinear texture filtering",
         BOOLEAN,
-        video::mat_trilinear,
         video::mat_trilinear_value,
+        video::set_mat_trilinear,
     ),
-    cvar(
+    setting(
         "mat_vsync",
         "mat_vsync [0|1]: query or toggle vertical sync",
         BOOLEAN,
-        video::mat_vsync,
         video::mat_vsync_value,
+        video::set_mat_vsync,
     ),
-    cvar(
+    setting(
         "r_classic_blood",
         "r_classic_blood [0|1]: query or toggle classic blood effects",
         BOOLEAN,
-        video::r_classic_blood,
         video::classic_effects_value,
+        video::set_classic_effects,
     ),
-    cvar(
+    setting(
         "r_classic_fire",
         "r_classic_fire [0|1]: query or toggle classic fire effects",
         BOOLEAN,
-        video::r_classic_fire,
         video::classic_effects_value,
+        video::set_classic_effects,
     ),
-    cvar(
+    setting(
         "r_flashlightdepthtexture",
         "r_flashlightdepthtexture [0|1]: query or toggle depth texture flashlight shadows (0=medium, 1=high)",
         BOOLEAN,
-        video::r_flashlightdepthtexture,
         video::r_flashlightdepthtexture_value,
+        video::set_r_flashlightdepthtexture,
     ),
-    cvar(
+    setting(
         "r_rootlod",
         "r_rootlod [0|1|2]: query or set model detail (0=high, 1=medium, 2=low)",
         &[Arg::Values(&["0", "1", "2"])],
-        video::r_rootlod,
         video::r_rootlod_value,
+        video::set_r_rootlod,
     ),
-    cvar(
+    setting(
         "r_shadowrendertotexture",
         "r_shadowrendertotexture [0|1]: query or toggle dynamic render-to-texture shadows (0=low, 1=medium/high)",
         BOOLEAN,
-        video::r_shadowrendertotexture,
         video::r_shadowrendertotexture_value,
+        video::set_r_shadowrendertotexture,
     ),
-    cvar(
+    setting(
         "r_waterforceexpensive",
         "r_waterforceexpensive [0|1]: query or toggle expensive water reflections (0=simple, 1=world/all)",
         BOOLEAN,
-        video::r_waterforceexpensive,
         video::r_waterforceexpensive_value,
+        video::set_r_waterforceexpensive,
     ),
-    cvar(
+    setting(
         "r_waterforcereflectentities",
         "r_waterforcereflectentities [0|1]: query or toggle water entity reflections (0=world only, 1=all)",
         BOOLEAN,
-        video::r_waterforcereflectentities,
         video::r_waterforcereflectentities_value,
+        video::set_r_waterforcereflectentities,
     ),
     command(
         "mat_setvideomode",
@@ -557,12 +665,12 @@ pub const COMMANDS: &[Spec] = &[
         developer::con_timestamp,
         developer::con_timestamp_value,
     ),
-    cvar(
+    setting(
         "skill",
         "skill [1|2|3]: query or set game skill level (1=easy, 2=normal, 3=hard)",
         &[Arg::Values(&["1", "2", "3"])],
-        map::skill,
         map::skill_value,
+        map::set_skill,
     ),
     command(
         "migrate_episodic_data",

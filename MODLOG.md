@@ -1,5 +1,26 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 2: declarative setting cvars
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- First, on its own commit: `console::commands::tests::every_cvar_matches_its_golden_transcript` runs every cvar on a fresh console (query, a valid value, `x`, `9`, `1 1`, and `background_map default`) and records the logged lines, the error or effect (for `ApplyConfig`, the settings that changed) and the value afterwards in `console/commands/cvars.golden` (whitelisted; `UPDATE_GOLDEN=1` rewrites it after review).
+- The 41 cvars stored in the settings are now described once: a value function (unchanged, `fn(&Console) -> Option<String>`, which completion and `cvar_value` already used) and a setter (`fn(&mut Config, &str) -> Result<(), Invalid>`). `commands::setting` / `setting_alias` build their specs; one shared handler, `run_setting`, prints `"name" = "value"`, or stores the value, saves the settings, echoes `name value` (the stored value, through the same value function) and returns `ApplyConfig`. `Invalid::Usage` prints the usage line, `Invalid::Message` its own text (only `mat_hdr_level`'s "must be 0 (None), 1 (Bloom) or 2 (Full)").
+- Each value is formatted once: the query, the echo and completion all use the value function (the `mat_antialias` mapping was written three times, the other mappings twice).
+- Special cases kept: `fov_desired` is a `setting_alias` that prints as `fov`; the autoaim aliases print their own names as before; `mat_aaquality` (echoes its input, saves nothing, no effect), `background_map` ("is not set", the reset), `sv_cheats` and the `con_*` cvars (console state, not settings) keep their own handlers. `snd_surround_speakers` and `mat_hdr_level` echoed the parsed number: `Speakers::from_channels`/`channels` and `HdrMode::from_level`/`level` are exact inverses on every accepted number, so echoing the stored value prints the same text.
+- `Spec` gained `setting: Option<Setting>` (the setter and the optional alias name).
+
+**Why:** Code review: the 40 setting handlers repeated the same query / parse / save / log / `ApplyConfig` sequence, and each value's formatting existed twice.
+
+**Tested how:** The golden test and every existing console test pass unchanged (the transcript file did not change). `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays (console, console_map, campaign, options, menu_options, save_config, submenus, return_menu, chapter_menu, captions) pass, 10 of 10; the repository isolation check passes.
+
+**Result:** hl2-ui production lines 18,879 -> 18,373 (-506); tests +134 (the golden test). Behaviour unchanged.
+
+**Still broken or not tested:** Saving is not observable from the golden test (the settings file is shared by parallel tests); that each setting saves and `mat_aaquality` does not is by construction (`run_setting` saves, `mat_aaquality` has its own handler).
+
+**Next:** Step 3: a generic console framework in source-ui.
+
 ## 2026-10-24 UI toolkit split, step 1: new source-ui crate
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
