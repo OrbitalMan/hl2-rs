@@ -8,8 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 mod choreography;
+mod color_correction;
 mod inputs;
 mod io;
+mod movers;
 mod parenting;
 mod sequences;
 mod triggers;
@@ -356,6 +358,8 @@ pub struct Scene {
     pub monitors: crate::monitors::Cameras,
     /// env_tonemap_controller auto-exposure limits and rate.
     pub tonemap: crate::tonemap::Control,
+    /// color_correction and color_correction_volume entities.
+    pub color_correction: crate::color_correction::ColorCorrection,
     /// The point_viewcontrol and env_zoom the local player's view follows.
     pub view_control: crate::view_control::ViewControl,
     /// point_template children that do not exist until ForceSpawn, with their authored
@@ -600,15 +604,16 @@ impl Scene {
             lipsync: Default::default(),
             monitors: crate::monitors::Cameras::new(world),
             tonemap: Default::default(),
+            color_correction: crate::color_correction::ColorCorrection::new(world),
             view_control: Default::default(),
             templates: BTreeMap::new(),
             player_feet: Vec3::ZERO,
             tick_dt: 0.,
         };
-        for e in &world.entities {
-            let state = Self::initial_state(world, e, &mut scene.diagnostics);
-            scene.states.push(state);
-        }
+        let diagnostics = &mut scene.diagnostics;
+        scene.states = (world.entities.iter())
+            .map(|e| Self::initial_state(world, e, diagnostics))
+            .collect();
         // Preserve explicit/default labels and existing loaded poses. Unsupported
         // implicit NPC labels may resolve through the model-authored idle activity.
         for id in 0..world.entities.len() {
@@ -630,15 +635,7 @@ impl Scene {
                 scene.animate(world, id, "ACT_IDLE", false);
             }
         }
-        // CNPC_CombineCamera::Spawn: deployed (open idle) unless spawnflag 0x80
-        // (StartInactive), which keeps it closed and disabled.
-        for id in 0..world.entities.len() {
-            if world.entities[id].class() == "npc_combine_camera" {
-                let enabled = number(&world.entities[id], "spawnflags", 0.) as u32 & 0x80 == 0;
-                scene.states[id].enabled = enabled;
-                scene.camera_activity(world, id, false);
-            }
-        }
+        scene.spawn_combine_cameras(world);
         // Metrocops without a DefaultAnim start on their (weapon-translated) idle activity,
         // as do other weapon users given a weapon (a citizen's SMG1: ACT_IDLE_SMG1).
         for id in 0..world.entities.len() {
@@ -744,6 +741,7 @@ impl Scene {
         }
         self.player_feet = player_feet;
         self.monitors.tick(&self.states, self.time);
+        self.update_color_correction(world);
         self.look_targets.cleanup(self.time, |id| {
             self.states.get(id).is_some_and(|s| !s.killed)
         });
@@ -804,29 +802,7 @@ impl Scene {
                 e.class(),
                 "func_door" | "func_door_rotating" | "prop_door_rotating" | "func_movelinear"
             ) {
-                if self.states[id].return_at.is_some_and(|t| t <= self.time) {
-                    self.send(id, "Close", "");
-                    self.states[id].return_at = None;
-                }
-                let s = &mut self.states[id];
-                if (s.target - s.fraction).abs() > 0.00001 {
-                    s.fraction += (s.target - s.fraction).clamp(-s.rate * dt, s.rate * dt);
-                    s.origin = s.base_origin + s.translation * s.fraction;
-                    s.rotation =
-                        s.base_rotation * Quat::from_axis_angle(s.axis, s.angle * s.fraction);
-                    if (s.target - s.fraction).abs() < 0.00001 {
-                        let open = s.target > 0.;
-                        if open && s.wait >= 0. {
-                            s.return_at = Some(self.time + s.wait);
-                        }
-                        self.diagnostics.door_completions += 1;
-                        self.fire(
-                            id,
-                            if open { "OnFullyOpen" } else { "OnFullyClosed" },
-                            usize::MAX,
-                        );
-                    }
-                }
+                self.advance_mover(id, dt);
             }
             if e.class() == "logic_timer"
                 && self.states[id].enabled

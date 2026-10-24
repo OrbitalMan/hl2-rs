@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-24 Options > Video > Advanced > Color correction takes effect
+
+**Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.
+
+**Changed:** `hl2_simulation::color_correction` (new): `color_correction` and `color_correction_volume` state (spawn weight 1, `StartDisabled`, Enable/Disable, fade durations with the truncated-duration formulas, the volume ramp, client falloff from the player's feet) and the retail lookup weights (first four lookups, default weight `1 - sum`, normalization above 1, a second entity with an already registered file drives nothing). `Scene` holds it, updates it once per tick (`entities/color_correction.rs`) and routes the inputs through `entities::inputs::HANDLERS`. Host: `hl2-bevy` `bloom/color_correction.rs` (worker read of the lookup files once per map, 32^3 `Rgba8Unorm` volumes, `SourceColorCorrection` on the bloom camera only while the option is on and a lookup has weight) and `bloom/correction_pass.rs` (pipelines per format, lookup count and bloom, one persistent uniform buffer and bind group per view); `bloom.wgsl` gets `composite_cc`, which applies the lookups after the bloom add in the same composite pass (alone when bloom is off). To keep the size limits, the door advance moved out of `Scene::tick` (`entities/movers.rs`), the Combine camera spawn out of `with_campaign`, and `source_bloom` was split (154 -> 114 lines; a `Pass` struct); baselines tightened.
+
+**Why:** Owner request: the four Advanced options end to end, in order. Retail evidence: Source SDK `viewpostprocess.cpp`, `colorcorrectionmgr.cpp`, `c_colorcorrection*.cpp`, server `colorcorrection*.cpp`, `Engine_Post_ps2x.fxc`; the installed maps (no base-game or Lost Coast map has the entities; Episode One 10, Episode Two 36) and `scripts/**/*.raw` (all 98,304 bytes); retail weight rules from the installed engine's control flow. Float HDR skips the pass in the SDK, but HL2RS models the integer HDR path the retail device picks by default (23a), so the option applies at every HDR level.
+
+**Tested how:** Unit tests (hl2-simulation 13, hl2-bevy 3 new), owned-install tests (`-- --ignored`): every Episode One and Two map names at most four lookups that exist and have the retail size; base maps have none. `scripts/checks/validate.sh` plus the isolation check pass (strict Clippy, fmt, architecture guardrails, all tests). Packaged release capture of `ep2_background01` (1920x1080, `--uncapped --profile`, 600 frames, three interleaved runs of each state, a build of the previous commit as baseline): option off vs on differs by a mean 9.2 / 3.7 / 6.6 per channel (max 27 / 14 / 23), a cool blue grade; also correct at HDR level none (8.4 / 3.0 / 6.0); off vs the previous commit 0.06 per channel (noise).
+
+**Result:** Mean frame time, previous commit / option off / option on: 9.06 / 9.16 / 9.20 ms in one batch and 9.98 / 10.04 / 9.92 ms in a second (run-to-run spread about 0.15 ms); the pass adds one 3D-texture lookup per bound lookup to a composite that already ran, so the cost is below what this measurement resolves, and off returns to the previous frame time (no volume, bind group or component exists then).
+
+**Still broken or not tested:** Windows; the Episode maps' entity inputs, fades and volume in a packaged run (unit-tested only); a retail capture comparison; `mat_colcorrection_disableentities`; the engine's one-frame skip at its first post pass; GPU-only pass timing (the profile report has no pass breakdown here).
+
+**Next:** Motion blur.
+
 ## 2026-10-24 Options audit: Mouse, Audio, Video > Advanced options left unfinished
 
 **Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.

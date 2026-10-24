@@ -4,7 +4,8 @@
 
 ## Options audit (2026-10-24)
 
-- docs/gameui.md section 23 lists every Mouse, Audio, Video > HDR and Video > Advanced option with its consumer and verdict. HDR is implemented (23a). Unfinished, with reasons: Raw input, Aim-Assist, Speakers, Sound quality, Spoken language, shader/water/shadow detail, color correction, motion blur, classic effects, multicore, D3D9Ex (not applicable); Mute when unfocused is partial.
+- Color correction implemented (docs/gameui.md 23b): packaged `ep2_background01` capture off vs on (mean difference 9.2 / 3.7 / 6.6 per channel, 1920x1080), also at HDR level none; frame time 10.04 ms off vs 9.92 ms on (3 interleaved runs each, within noise). Not tested: Windows, the other Episode maps and entity inputs in a packaged run, a retail comparison.
+- docs/gameui.md section 23 lists every Mouse, Audio, Video > HDR and Video > Advanced option with its consumer and verdict. HDR is implemented (23a). Unfinished, with reasons: Raw input, Aim-Assist, Speakers, Sound quality, Spoken language, shader/water/shadow detail, motion blur, classic effects, multicore, D3D9Ex (not applicable); Mute when unfocused is partial.
 
 ## Architecture guardrails (2026-10-24)
 

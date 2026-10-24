@@ -31,6 +31,10 @@ struct Job {
     result: Slot,
 }
 impl RuntimeProps {
+    /// The map's mounted content.
+    pub fn vfs(&self) -> &Arc<source_assets::vpk::Vfs> {
+        &self.vfs
+    }
     pub fn new(vfs: Arc<source_assets::vpk::Vfs>) -> Self {
         Self {
             vfs,

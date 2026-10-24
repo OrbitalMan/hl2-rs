@@ -1634,7 +1634,7 @@ observed retail behavior, so nothing is implemented).
 | Advanced: Shader detail `mat_reducefillrate` | `advanced.shader_detail` | nothing | placeholder |
 | Advanced: Water detail | `advanced.water_detail` | nothing: no reflection or refraction pass exists | placeholder |
 | Advanced: Shadow detail | `advanced.shadow_detail` | nothing: no render-to-texture or flashlight shadows exist | placeholder |
-| Advanced: Color correction | `advanced.color_correction` | nothing: no `color_correction` lookup | placeholder |
+| Advanced: Color correction `mat_colorcorrection` | `advanced.color_correction` | `hl2_simulation::color_correction` (entities, fades, weights), `hl2-bevy` `bloom::color_correction` (lookup volumes, per-frame weights), the bloom composite (`bloom.wgsl`) | complete since 2026-10-24 (section 23b); base HL2 and Lost Coast maps have no such entity, so it changes only Episode One and Two |
 | Advanced: Antialiasing | `advanced.antialiasing` | `video::sync_antialiasing` (MSAA, limited to the adapter) | complete |
 | Advanced: Filtering | `advanced.filtering` | `video::sync_filtering` (sampler anisotropy and mip filter) | complete |
 | Advanced: Vertical sync | `advanced.vsync` | `video::sync_present_mode` | complete |
@@ -1676,3 +1676,28 @@ scaled bloom, level 2 = the HDR frame HL2-RS always rendered before.
 Not verified against retail: how the LDR lightmap values compare in brightness (the lumps decode
 with the same RGBExp32 formula and the frame is clamped by the 8-bit target); the mat_hdr_level to
 hardware HDR-type mapping beyond the SDK's own use.
+
+### 23b. Video > Advanced > Color correction (`mat_colorcorrection`) implemented (2026-10-24)
+
+Evidence: Source SDK `game/client/viewpostprocess.cpp` (the engine post pass), `game/client/colorcorrectionmgr.cpp`,
+`c_colorcorrection.cpp`, `c_colorcorrectionvolume.cpp`, `game/server/colorcorrection.cpp`,
+`colorcorrectionvolume.cpp`, `materialsystem/stdshaders/Engine_Post_ps2x.fxc`; the installed maps and
+`scripts/**/*.raw`; the retail lookup weights (first four lookups, default weight `1 - sum`, normalization above 1,
+one lookup per file name). Findings are recorded in the research notes for this option.
+
+- Data: only Episode One (10) and Episode Two (35 `color_correction`, 1 `color_correction_volume`) maps carry the
+  entities; base Half-Life 2 and Lost Coast maps have none, so nothing is loaded or drawn there. Lookups are the
+  98,304-byte `scripts/colorcorrection/*.raw` and `scripts/intro_cc_*.raw` files (32x32x32 RGB, x fastest).
+- `hl2_simulation::color_correction::ColorCorrection` models the server fades (`FadeInThink` / `FadeOutThink`,
+  `Enable`, `Disable`, `SetFadeInDuration`, `SetFadeOutDuration`), the volume ramp, the client falloff from the
+  player's feet and the retail weights ([`Mix`]); `Scene` updates it once per tick and routes the inputs through
+  `entities::inputs::HANDLERS`.
+- Host: with the option on and a map that has the entities, a worker reads the lookup files once per map (a changed
+  file list reloads), they become 32^3 `Rgba8Unorm` volumes, and `SourceColorCorrection` on the bloom camera carries
+  them with the weights of the frame. The bloom composite pipeline is specialized per lookup count and applies
+  `rgb * default + sum(lookup(rgb * 31/32 + 0.5/32) * weight)` after the bloom add on the gamma frame, in the same
+  pass (as the engine's combined pass); without bloom (HDR level none) that composite runs alone. With the option
+  off, on maps without the entities, or while no lookup has weight, no volume, bind group or pass exists.
+- Not modeled: `mat_colcorrection_disableentities` (developer cvar), the engine's one-frame skip on its first
+  post pass, a lookup file of the wrong size (the whole option stays off for that map and a warning is logged).
+  Not verified against a retail capture: the colors are the lookup files' own, drawn by the SDK's shader math.

@@ -50,6 +50,7 @@ pub mod attention;
 pub mod gestures;
 pub mod lipsync;
 
+pub mod color_correction;
 pub mod monitors;
 pub mod tonemap;
 pub mod view_control;

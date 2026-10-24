@@ -103,6 +103,13 @@ pub(super) fn tonemap_controller(scene: &mut Scene, d: &Delivery) -> bool {
     true
 }
 
+/// color_correction and color_correction_volume: Enable, Disable and the fade durations.
+pub(super) fn color_correction(scene: &mut Scene, d: &Delivery) -> bool {
+    scene
+        .color_correction
+        .input(d.id, d.input, d.value, scene.time)
+}
+
 /// Explode.
 pub(super) fn physexplosion(scene: &mut Scene, d: &Delivery) -> bool {
     if d.input != "explode" {

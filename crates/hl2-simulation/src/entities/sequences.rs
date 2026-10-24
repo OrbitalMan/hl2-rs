@@ -190,6 +190,19 @@ impl Scene {
     /// Combine camera activity for its enabled state (MaintainActivity toward the ideal
     /// activity): open idle when enabled; when disabled the close transition plays first
     /// (if `transition`), then closed idle. The reversed opening transition is not modeled.
+    /// CNPC_CombineCamera::Spawn: deployed (open idle) unless spawnflag 0x80 (StartInactive),
+    /// which keeps it closed and disabled.
+    pub(super) fn spawn_combine_cameras(&mut self, world: &World) {
+        for id in 0..world.entities.len() {
+            if world.entities[id].class() == "npc_combine_camera" {
+                let enabled =
+                    super::number(&world.entities[id], "spawnflags", 0.) as u32 & 0x80 == 0;
+                self.states[id].enabled = enabled;
+                self.camera_activity(world, id, false);
+            }
+        }
+    }
+
     pub(super) fn camera_activity(&mut self, world: &World, id: usize, transition: bool) {
         let open = self.states[id].animation.eq_ignore_ascii_case("idlealert");
         if self.states[id].enabled {

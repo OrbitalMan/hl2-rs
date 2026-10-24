@@ -48,6 +48,8 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("env_zoom", env::zoom),
     ("env_fade", env::fade),
     ("env_tonemap_controller", env::tonemap_controller),
+    ("color_correction", env::color_correction),
+    ("color_correction_volume", env::color_correction),
     ("env_physexplosion", env::physexplosion),
     ("env_physimpact", env::physimpact),
     ("ambient_generic", env::ambient_generic),
