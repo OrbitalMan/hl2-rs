@@ -4,6 +4,7 @@
 //! viewport geometry and the localization token table. It reads Source formats through
 //! source-assets and knows nothing about the game that uses it (see `docs/DESIGN.md`).
 pub mod canvas;
+pub mod console;
 pub mod font;
 pub mod input;
 pub mod keys;

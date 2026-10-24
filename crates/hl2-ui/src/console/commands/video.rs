@@ -1,20 +1,21 @@
 //! Video cvars (the Options Video page and its Advanced dialog): fields of view, the video mode
 //! and the material/render detail settings.
 
-use super::{flag, parse, Invalid, Outcome, Spec};
+use super::{Outcome, Spec};
 use crate::config::{
-    Antialiasing, Config, DisplayMode, Filtering, HdrMode, ModelDetail, ShaderDetail, ShadowDetail,
+    Antialiasing, DisplayMode, Filtering, HdrMode, ModelDetail, ShaderDetail, ShadowDetail,
     TextureDetail, WaterDetail,
 };
 use crate::console::{Console, Effect};
+use source_ui::console::command::{flag, parse, Invalid};
 
 /// `fov` and its alias `fov_desired`.
 pub(super) fn fov_value(console: &Console) -> Option<String> {
     Some(format!("{:.0}", console.config.video.fov))
 }
 
-pub(super) fn set_fov(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.fov = parse::<f32>(arg)?.clamp(50.0, 120.0);
+pub(super) fn set_fov(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.fov = parse::<f32>(arg)?.clamp(50.0, 120.0);
     Ok(())
 }
 
@@ -22,9 +23,9 @@ pub(super) fn vertical_fov_value(console: &Console) -> Option<String> {
     Some(format!("{:.0}", console.config.video.vertical_fov))
 }
 
-pub(super) fn set_vertical_fov(config: &mut Config, arg: &str) -> Result<(), Invalid> {
+pub(super) fn set_vertical_fov(console: &mut Console, arg: &str) -> Result<(), Invalid> {
     let fov = parse::<f32>(arg)?;
-    config.video.vertical_fov = if fov <= 0.0 {
+    console.config.video.vertical_fov = if fov <= 0.0 {
         0.0
     } else {
         fov.clamp(40.0, 100.0)
@@ -36,8 +37,8 @@ pub(super) fn viewmodel_fov_value(console: &Console) -> Option<String> {
     Some(format!("{:.0}", console.config.video.viewmodel_fov))
 }
 
-pub(super) fn set_viewmodel_fov(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.viewmodel_fov = parse::<f32>(arg)?.clamp(40.0, 80.0);
+pub(super) fn set_viewmodel_fov(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.viewmodel_fov = parse::<f32>(arg)?.clamp(40.0, 80.0);
     Ok(())
 }
 
@@ -45,8 +46,8 @@ pub(super) fn mat_colorcorrection_value(console: &Console) -> Option<String> {
     Some(u8::from(console.config.video.advanced.color_correction).to_string())
 }
 
-pub(super) fn set_mat_colorcorrection(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.color_correction = flag(arg)?;
+pub(super) fn set_mat_colorcorrection(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.color_correction = flag(arg)?;
     Ok(())
 }
 
@@ -54,8 +55,8 @@ pub(super) fn mat_hdr_level_value(console: &Console) -> Option<String> {
     Some(console.config.video.hdr.level().to_string())
 }
 
-pub(super) fn set_mat_hdr_level(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.hdr = HdrMode::from_level(parse(arg)?).ok_or(Invalid::Message(
+pub(super) fn set_mat_hdr_level(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.hdr = HdrMode::from_level(parse(arg)?).ok_or(Invalid::Message(
         "mat_hdr_level must be 0 (None), 1 (Bloom) or 2 (Full)",
     ))?;
     Ok(())
@@ -65,8 +66,8 @@ pub(super) fn mat_motion_blur_enabled_value(console: &Console) -> Option<String>
     Some(u8::from(console.config.video.advanced.motion_blur).to_string())
 }
 
-pub(super) fn set_mat_motion_blur_enabled(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.motion_blur = flag(arg)?;
+pub(super) fn set_mat_motion_blur_enabled(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.motion_blur = flag(arg)?;
     Ok(())
 }
 
@@ -78,8 +79,8 @@ pub(super) fn mat_queue_mode_value(console: &Console) -> Option<String> {
     })
 }
 
-pub(super) fn set_mat_queue_mode(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.multicore = parse::<i32>(arg)? != 0;
+pub(super) fn set_mat_queue_mode(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.multicore = parse::<i32>(arg)? != 0;
     Ok(())
 }
 
@@ -95,8 +96,8 @@ pub(super) fn mat_antialias_value(console: &Console) -> Option<String> {
     )
 }
 
-pub(super) fn set_mat_antialias(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.antialiasing = match arg {
+pub(super) fn set_mat_antialias(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.antialiasing = match arg {
         "0" | "1" => Antialiasing::None,
         "2" => Antialiasing::X2,
         "4" => Antialiasing::X4,
@@ -130,8 +131,8 @@ pub(super) fn mat_disable_d3d9ex_value(console: &Console) -> Option<String> {
     Some(u8::from(!console.config.video.advanced.d3d9ex).to_string())
 }
 
-pub(super) fn set_mat_disable_d3d9ex(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.d3d9ex = !flag(arg)?;
+pub(super) fn set_mat_disable_d3d9ex(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.d3d9ex = !flag(arg)?;
     Ok(())
 }
 
@@ -148,10 +149,10 @@ pub(super) fn mat_forceaniso_value(console: &Console) -> Option<String> {
     )
 }
 
-pub(super) fn set_mat_forceaniso(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.filtering = match arg {
+pub(super) fn set_mat_forceaniso(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.filtering = match arg {
         "0" | "1" => {
-            if matches!(config.video.advanced.filtering, Filtering::Bilinear) {
+            if matches!(console.config.video.advanced.filtering, Filtering::Bilinear) {
                 Filtering::Bilinear
             } else {
                 Filtering::Trilinear
@@ -170,12 +171,13 @@ pub(super) fn mat_trilinear_value(console: &Console) -> Option<String> {
     Some(u8::from(console.config.video.advanced.filtering != Filtering::Bilinear).to_string())
 }
 
-pub(super) fn set_mat_trilinear(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.filtering = match (flag(arg)?, config.video.advanced.filtering) {
-        (false, _) => Filtering::Bilinear,
-        (true, Filtering::Bilinear) => Filtering::Trilinear,
-        (true, other) => other,
-    };
+pub(super) fn set_mat_trilinear(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.filtering =
+        match (flag(arg)?, console.config.video.advanced.filtering) {
+            (false, _) => Filtering::Bilinear,
+            (true, Filtering::Bilinear) => Filtering::Trilinear,
+            (true, other) => other,
+        };
     Ok(())
 }
 
@@ -183,8 +185,8 @@ pub(super) fn mat_vsync_value(console: &Console) -> Option<String> {
     Some(u8::from(console.config.video.advanced.vsync).to_string())
 }
 
-pub(super) fn set_mat_vsync(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.vsync = flag(arg)?;
+pub(super) fn set_mat_vsync(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.vsync = flag(arg)?;
     Ok(())
 }
 
@@ -200,8 +202,8 @@ pub(super) fn mat_picmip_value(console: &Console) -> Option<String> {
     )
 }
 
-pub(super) fn set_mat_picmip(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.texture_detail = match arg {
+pub(super) fn set_mat_picmip(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.texture_detail = match arg {
         "-1" => TextureDetail::VeryHigh,
         "0" => TextureDetail::High,
         "1" => TextureDetail::Medium,
@@ -215,8 +217,8 @@ pub(super) fn mat_reducefillrate_value(console: &Console) -> Option<String> {
     Some(u8::from(console.config.video.advanced.shader_detail == ShaderDetail::Low).to_string())
 }
 
-pub(super) fn set_mat_reducefillrate(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.shader_detail = if flag(arg)? {
+pub(super) fn set_mat_reducefillrate(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.shader_detail = if flag(arg)? {
         ShaderDetail::Low
     } else {
         ShaderDetail::High
@@ -229,8 +231,8 @@ pub(super) fn classic_effects_value(console: &Console) -> Option<String> {
     Some(u8::from(console.config.video.advanced.classic_effects).to_string())
 }
 
-pub(super) fn set_classic_effects(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.classic_effects = flag(arg)?;
+pub(super) fn set_classic_effects(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.classic_effects = flag(arg)?;
     Ok(())
 }
 
@@ -245,8 +247,8 @@ pub(super) fn r_rootlod_value(console: &Console) -> Option<String> {
     )
 }
 
-pub(super) fn set_r_rootlod(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.model_detail = match arg {
+pub(super) fn set_r_rootlod(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.model_detail = match arg {
         "0" => ModelDetail::High,
         "1" => ModelDetail::Medium,
         "2" => ModelDetail::Low,
@@ -259,12 +261,13 @@ pub(super) fn r_waterforceexpensive_value(console: &Console) -> Option<String> {
     Some(u8::from(console.config.video.advanced.water_detail != WaterDetail::Simple).to_string())
 }
 
-pub(super) fn set_r_waterforceexpensive(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.water_detail = match (flag(arg)?, config.video.advanced.water_detail) {
-        (false, _) => WaterDetail::Simple,
-        (true, WaterDetail::Simple) => WaterDetail::World,
-        (true, other) => other,
-    };
+pub(super) fn set_r_waterforceexpensive(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.water_detail =
+        match (flag(arg)?, console.config.video.advanced.water_detail) {
+            (false, _) => WaterDetail::Simple,
+            (true, WaterDetail::Simple) => WaterDetail::World,
+            (true, other) => other,
+        };
     Ok(())
 }
 
@@ -273,15 +276,15 @@ pub(super) fn r_waterforcereflectentities_value(console: &Console) -> Option<Str
 }
 
 pub(super) fn set_r_waterforcereflectentities(
-    config: &mut Config,
+    console: &mut Console,
     arg: &str,
 ) -> Result<(), Invalid> {
-    config.video.advanced.water_detail = if flag(arg)? {
+    console.config.video.advanced.water_detail = if flag(arg)? {
         WaterDetail::All
-    } else if config.video.advanced.water_detail == WaterDetail::All {
+    } else if console.config.video.advanced.water_detail == WaterDetail::All {
         WaterDetail::World
     } else {
-        config.video.advanced.water_detail
+        console.config.video.advanced.water_detail
     };
     Ok(())
 }
@@ -290,12 +293,13 @@ pub(super) fn r_shadowrendertotexture_value(console: &Console) -> Option<String>
     Some(u8::from(console.config.video.advanced.shadow_detail != ShadowDetail::Low).to_string())
 }
 
-pub(super) fn set_r_shadowrendertotexture(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.shadow_detail = match (flag(arg)?, config.video.advanced.shadow_detail) {
-        (false, _) => ShadowDetail::Low,
-        (true, ShadowDetail::Low) => ShadowDetail::High,
-        (true, other) => other,
-    };
+pub(super) fn set_r_shadowrendertotexture(console: &mut Console, arg: &str) -> Result<(), Invalid> {
+    console.config.video.advanced.shadow_detail =
+        match (flag(arg)?, console.config.video.advanced.shadow_detail) {
+            (false, _) => ShadowDetail::Low,
+            (true, ShadowDetail::Low) => ShadowDetail::High,
+            (true, other) => other,
+        };
     Ok(())
 }
 
@@ -303,13 +307,16 @@ pub(super) fn r_flashlightdepthtexture_value(console: &Console) -> Option<String
     Some(u8::from(console.config.video.advanced.shadow_detail == ShadowDetail::High).to_string())
 }
 
-pub(super) fn set_r_flashlightdepthtexture(config: &mut Config, arg: &str) -> Result<(), Invalid> {
-    config.video.advanced.shadow_detail = if flag(arg)? {
+pub(super) fn set_r_flashlightdepthtexture(
+    console: &mut Console,
+    arg: &str,
+) -> Result<(), Invalid> {
+    console.config.video.advanced.shadow_detail = if flag(arg)? {
         ShadowDetail::High
-    } else if config.video.advanced.shadow_detail == ShadowDetail::High {
+    } else if console.config.video.advanced.shadow_detail == ShadowDetail::High {
         ShadowDetail::Medium
     } else {
-        config.video.advanced.shadow_detail
+        console.config.video.advanced.shadow_detail
     };
     Ok(())
 }

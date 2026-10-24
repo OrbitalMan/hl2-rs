@@ -1,7 +1,8 @@
 //! The developer console itself: help, output, filters and leaving.
 
 use super::{Outcome, Spec, COMMANDS};
-use crate::console::{boolean, Console, Effect};
+use crate::console::{Console, Effect};
+use source_ui::console::command::boolean;
 
 pub(super) fn help(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {
     if args.len() > 1 {

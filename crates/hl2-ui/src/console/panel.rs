@@ -2,6 +2,7 @@
 //! scrolling, selection and drawing.
 
 use super::*;
+use source_ui::console::command;
 
 impl Console {
     pub fn log(&mut self, text: impl Into<String>) {
@@ -59,7 +60,7 @@ impl Console {
             return Vec::new();
         }
         self.print(Level::Input, format!("] {line}"));
-        let commands = match tokenize(line) {
+        let commands = match command::tokenize(line) {
             Ok(commands) => commands,
             Err(error) => {
                 self.log(error);
@@ -79,10 +80,7 @@ impl Console {
 
     /// Runs one command through its [`commands::Spec`] handler.
     pub(super) fn interpret(&mut self, tokens: &[String]) -> commands::Outcome {
-        let Some(spec) = commands::find(&tokens[0]) else {
-            return Err(format!("Unknown or unimplemented command: {}", tokens[0]));
-        };
-        (spec.run)(self, spec, &tokens[1..])
+        command::run(self, commands::COMMANDS, tokens)
     }
 
     /// The current value of an implemented cvar, as the console prints it.

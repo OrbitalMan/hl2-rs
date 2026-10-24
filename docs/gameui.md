@@ -1106,7 +1106,10 @@ Options > Video > Aspect Ratio adds **Fit Display** (`AspectRatio::Flexible`, pe
 Evidence: SDK `vgui_controls/consoledialog.cpp`/`.h` (`CConsolePanel`), the installed
 `hl2_complete/resource/sourcescheme.res` (`Console.TextColor` OffWhite, `Console.DevTextColor`
 White, `RichText.*`) and Source's own console variables. Code:
-`hl2-ui::console::{commands, complete, dialog, editor}` (pure, unit-tested), drawing in
+`source_ui::console::{command, complete, editor}` (the registry, completion and line editor
+any app shares), HL2's command table, handlers and completion sources in
+`hl2-ui::console::{commands, complete}`, the dialog layout in `hl2-ui::console::dialog` (pure,
+unit-tested), drawing in
 `Console::draw_console`/`draw_completion`, host side in `hl2-bevy::console_host`.
 
 - The dialog (`CConsoleDialog`): a `#Console_Title` frame drawn through the shared dialog frame

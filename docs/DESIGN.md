@@ -46,7 +46,22 @@ belongs to the toolkit.
 3. A generic console framework in source-ui: line editor, history, completion, output buffer,
    panel drawing and a command registry the app fills in, with handlers over an app-provided
    context. HL2's command table, handlers and completion sources (maps, entity targets and
-   inputs) stay in hl2-ui and register into it.
+   inputs) stay in hl2-ui and register into it. Two commits:
+   - 3a: `source_ui::console::{command, complete, editor}`. The registry is generic over the app
+     (`command::Context`: the effect type and the app's lists of names, `Arg::Names`);
+     `Spec<C>`, handlers, value functions and setters take the app's context, so HL2's setters
+     take the console. hl2-ui's `console::commands` is HL2's instantiation (`Names`,
+     `impl Context for Console`, aliases of `Spec`/`Arg`/`Outcome`, the table, `run_setting`);
+     its `console::complete` keeps the host-supplied `Sources` and binds the toolkit's
+     completion to `COMMANDS` (the editor completes through `complete::Completer`).
+   - 3b: the output buffer and the console dialog as one toolkit component: the lines, levels
+     (the viewmodel tuner's replaceable line becomes a neutral replaceable level), filter,
+     timestamps, wrapping, scrolling, selection, copying, the entry, the completion popup and
+     the dialog's buttons and placement. The app passes in what is its own: the scale policy
+     (hl2-ui's `proportional::dialog_scale`), the resolved title, Submit and reverse-search
+     texts, the window theme and focus, and the Painter's fonts; the component answers input
+     with actions (close, submit a line), which the app turns into effects in the current
+     order; the app keeps saving the placement in `Config`.
 4. `Console` (63 fields, 121 methods) split along the toolkit/app line: the source-ui shell
    (window stack, focus, Escape, pointer and keyboard routing, modal occlusion, the developer
    console panel) and hl2-ui's GameUI (main and pause menus, backgrounds and chapters, the quit

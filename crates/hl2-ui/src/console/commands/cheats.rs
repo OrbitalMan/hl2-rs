@@ -2,7 +2,8 @@
 //! NPC AI switches and the player position.
 
 use super::{Outcome, Spec};
-use crate::console::{boolean, vector, Console, Effect};
+use crate::console::{vector, Console, Effect};
+use source_ui::console::command::boolean;
 
 /// `Err` unless `sv_cheats` is on.
 fn cheat(console: &Console, spec: &Spec) -> Result<(), String> {

@@ -2,7 +2,6 @@
 pub mod commands;
 pub mod complete;
 pub mod dialog;
-pub mod editor;
 mod focus;
 mod loading;
 mod menu_flow;
@@ -22,6 +21,7 @@ use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
 use source_ui::{
     canvas::*,
+    console::editor::LineEditor,
     font::{FontFace, TextOutline},
     input::{Input, Key, KeyRepeat},
     message_box::{MessageBox, MessageBoxLayout},
@@ -186,7 +186,7 @@ pub struct Console {
     history_wheel: ScrollAccumulator,
     key_repeat: KeyRepeat,
     /// The input line: editing, completion, history and reverse search.
-    editor: editor::LineEditor,
+    editor: LineEditor,
     /// Names arguments complete from (installed maps, the loaded map's entities), set by the host.
     completion: complete::Sources,
     /// Seconds since start of the latest input frame, stamped on printed lines.
@@ -431,7 +431,7 @@ impl Default for Console {
             history_bar: ScrollBarState::default(),
             history_wheel: ScrollAccumulator::default(),
             key_repeat: KeyRepeat::default(),
-            editor: editor::LineEditor::default(),
+            editor: LineEditor::default(),
             completion: complete::Sources::default(),
             clock: 0.,
             con_filter: 0,
@@ -1300,13 +1300,6 @@ impl HistoryView {
     }
 }
 
-fn boolean(value: &str) -> Option<bool> {
-    match value {
-        "0" => Some(false),
-        "1" => Some(true),
-        _ => None,
-    }
-}
 fn vector(args: &[String]) -> Option<glam::Vec3> {
     if !(2..=3).contains(&args.len()) {
         return None;
@@ -1321,51 +1314,5 @@ fn vector(args: &[String]) -> Option<glam::Vec3> {
         .all(|v| v.is_finite())
         .then(|| glam::Vec3::new(values[0], values[1], values.get(2).copied().unwrap_or(0.)))
 }
-/// Semicolons outside quotes separate commands; quoted arguments preserve spaces and separators.
-fn tokenize(line: &str) -> Result<Vec<Vec<String>>, String> {
-    let mut commands = Vec::new();
-    let mut tokens = Vec::new();
-    let mut token = String::new();
-    let mut quoted = false;
-    let mut started = false;
-    for c in line.chars() {
-        match c {
-            '"' => {
-                quoted = !quoted;
-                started = true;
-            }
-            ';' if !quoted => {
-                if started {
-                    tokens.push(std::mem::take(&mut token));
-                    started = false;
-                }
-                if !tokens.is_empty() {
-                    commands.push(std::mem::take(&mut tokens));
-                }
-            }
-            c if c.is_whitespace() && !quoted => {
-                if started {
-                    tokens.push(std::mem::take(&mut token));
-                    started = false;
-                }
-            }
-            _ => {
-                token.push(c);
-                started = true;
-            }
-        }
-    }
-    if quoted {
-        return Err("Unterminated quoted argument; no commands executed".into());
-    }
-    if started {
-        tokens.push(token);
-    }
-    if !tokens.is_empty() {
-        commands.push(tokens);
-    }
-    Ok(commands)
-}
-
 #[cfg(test)]
 mod tests;

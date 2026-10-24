@@ -3,7 +3,8 @@
 //! being typed in), what each argument completes from, the handler that runs it and, for a
 //! cvar, its current value. A cvar stored in the settings is a value function and a setter
 //! ([`setting`]); one handler queries, stores, saves and echoes all of them. The handlers, value
-//! functions and setters live in submodules by area.
+//! functions and setters live in submodules by area; the registry's types are the toolkit's
+//! ([`source_ui::console::command`]).
 
 mod audio;
 mod cheats;
@@ -12,91 +13,35 @@ mod map;
 mod mouse;
 mod video;
 
-use super::{boolean, Console, Effect};
-use crate::config::Config;
+use super::{Console, Effect};
+use source_ui::console::command::{self, Context, Invalid, Setting};
 
-/// What an argument completes from.
+/// The lists of names HL2's command arguments complete from (the host supplies them, see
+/// [`super::complete::Sources`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Arg {
+pub enum Names {
     /// An installed map name.
     Map,
     /// A targetname of the loaded map's entities.
     EntityTarget,
     /// An input the loaded map's own connections fire.
     EntityInput,
-    /// An implemented command or cvar name.
-    Command,
-    /// One of these literal values.
-    Values(&'static [&'static str]),
-    /// Free text or a number: nothing to complete.
-    Free,
 }
 
-/// What a command returns: an effect for the host, or the error line the console prints.
-pub type Outcome = Result<Option<Effect>, String>;
-
-/// Runs a command with its arguments (the words after its name).
-pub type Handler = fn(&mut Console, &'static Spec, &[String]) -> Outcome;
-
-/// A cvar's current value, as the console prints it (`None` while unset).
-pub type Value = fn(&Console) -> Option<String>;
-
-/// An implemented command or cvar.
-#[derive(Clone, Copy, Debug)]
-pub struct Spec {
-    pub name: &'static str,
-    /// `name args: description`, as `help` prints it.
-    pub help: &'static str,
-    /// Completion for each argument, in order.
-    pub args: &'static [Arg],
-    pub run: Handler,
-    /// A cvar's current value: completion shows it.
-    pub value: Option<Value>,
-    /// A cvar stored in the settings: [`run_setting`] stores typed values with it.
-    pub setting: Option<Setting>,
+impl Context for Console {
+    type Effect = Effect;
+    type Names = Names;
 }
 
-/// How a setting cvar stores a typed value.
-#[derive(Clone, Copy, Debug)]
-pub struct Setting {
-    pub set: Set,
-    /// The name the console prints for it, when an alias answers as what it aliases.
-    pub prints_as: Option<&'static str>,
-}
-
-/// Stores a typed value in the settings, or says why it is not one the cvar takes.
-pub type Set = fn(&mut Config, &str) -> Result<(), Invalid>;
-
-/// Why a typed value was not stored.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Invalid {
-    /// The console prints the cvar's usage line.
-    Usage,
-    /// The console prints the cvar's own message.
-    Message(&'static str),
-}
-
-/// A number or other value parsed from a typed argument.
-fn parse<T: std::str::FromStr>(arg: &str) -> Result<T, Invalid> {
-    arg.parse().map_err(|_| Invalid::Usage)
-}
-
-/// `0` or `1`.
-fn flag(arg: &str) -> Result<bool, Invalid> {
-    boolean(arg).ok_or(Invalid::Usage)
-}
-
-impl Spec {
-    /// A cvar: completion shows its current value.
-    pub fn is_cvar(&self) -> bool {
-        self.value.is_some()
-    }
-
-    /// The error line for wrong arguments: the help text.
-    pub fn usage(&self) -> String {
-        self.help.to_string()
-    }
-}
+/// HL2's commands and cvars: the toolkit's [`command::Spec`] over the console.
+pub type Spec = command::Spec<Console>;
+/// What an HL2 command argument completes from.
+pub type Arg = command::Arg<Names>;
+/// What an HL2 command returns: an effect for the host, or the error line the console prints.
+pub type Outcome = command::Outcome<Effect>;
+type Handler = command::Handler<Console>;
+type Value = command::Value<Console>;
+type Set = command::Set<Console>;
 
 const fn command(
     name: &'static str,
@@ -188,7 +133,7 @@ fn run_setting(console: &mut Console, spec: &'static Spec, args: &[String]) -> O
             Ok(None)
         }
         [arg] => {
-            (setting.set)(&mut console.config, arg).map_err(|invalid| match invalid {
+            (setting.set)(console, arg).map_err(|invalid| match invalid {
                 Invalid::Usage => spec.usage(),
                 Invalid::Message(message) => message.to_owned(),
             })?;
@@ -256,7 +201,7 @@ pub const COMMANDS: &[Spec] = &[
     command(
         "map",
         "map <name>: load an installed map and reset the player inventory",
-        &[Arg::Map],
+        &[Arg::Names(Names::Map)],
         map::map,
     ),
     command(
@@ -310,7 +255,7 @@ pub const COMMANDS: &[Spec] = &[
     command(
         "ent_fire",
         "ent_fire <targetname> [input=Use] [parameter] [delay]: queue entity input; names/globs supported (cheat)",
-        &[Arg::EntityTarget, Arg::EntityInput, Arg::Free, Arg::Free],
+        &[Arg::Names(Names::EntityTarget), Arg::Names(Names::EntityInput), Arg::Free, Arg::Free],
         cheats::ent_fire,
     ),
     command(
@@ -634,14 +579,14 @@ pub const COMMANDS: &[Spec] = &[
     cvar(
         "background_map",
         "background_map [name|default]: query or set the persistent main-menu background map",
-        &[Arg::Map],
+        &[Arg::Names(Names::Map)],
         map::background_map,
         map::background_map_value,
     ),
     command(
         "map_background",
         "map_background <name>: load an installed map as the main-menu background and persist it",
-        &[Arg::Map],
+        &[Arg::Names(Names::Map)],
         map::map_background,
     ),
     cvar(
@@ -682,19 +627,13 @@ pub const COMMANDS: &[Spec] = &[
 
 /// The implemented command or cvar named `name` (case-insensitive).
 pub fn find(name: &str) -> Option<&'static Spec> {
-    COMMANDS.iter().find(|s| s.name.eq_ignore_ascii_case(name))
-}
-
-/// A help text's argument words (after the name, before the `:`) and its description.
-pub fn usage(spec: &Spec) -> (Vec<String>, String) {
-    let (head, description) = spec.help.split_once(": ").unwrap_or((spec.help, ""));
-    let args = head.split_whitespace().skip(1).map(str::to_owned).collect();
-    (args, description.to_owned())
+    command::find(COMMANDS, name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use source_ui::console::command::usage;
 
     #[test]
     fn every_spec_is_unique_and_its_help_starts_with_its_name() {

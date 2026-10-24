@@ -168,8 +168,8 @@ mod tests {
     #[test]
     fn audit_no_hardcoded_user_visible_strings_in_ui_code_outside_fallback_constants() {
         // The workspace's crates folder: the UI files are in hl2-ui and in source-ui, which holds
-        // code that came from the console (input.rs), the menu (message_box.rs) and the HUD
-        // (font.rs).
+        // code that came from the console (input.rs, console/command.rs), the menu
+        // (message_box.rs) and the HUD (font.rs).
         let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("crates folder");
@@ -181,6 +181,7 @@ mod tests {
             "hl2-ui/src/console/options_dialog.rs",
             "hl2-ui/src/console/panel.rs",
             "source-ui/src/input.rs",
+            "source-ui/src/console/command.rs",
         ];
         let ui_files = console_files.into_iter().chain([
             "hl2-ui/src/gameui/loading.rs",

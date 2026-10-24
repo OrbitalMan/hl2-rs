@@ -1,9 +1,9 @@
 //! Maps and the campaign: loading maps, the main menu and its background map, skill and save
 //! data.
 
-use super::{parse, Invalid, Outcome, Spec};
-use crate::config::Config;
+use super::{Outcome, Spec};
 use crate::console::{Console, Effect, Mode};
+use source_ui::console::command::{parse, Invalid};
 
 pub(super) fn map(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {
     if args.len() != 1 {
@@ -105,12 +105,12 @@ pub(super) fn skill_value(console: &Console) -> Option<String> {
     Some(console.config.gameplay.skill.to_string())
 }
 
-pub(super) fn set_skill(config: &mut Config, arg: &str) -> Result<(), Invalid> {
+pub(super) fn set_skill(console: &mut Console, arg: &str) -> Result<(), Invalid> {
     let skill = parse::<u8>(arg)?;
     if !(1..=3).contains(&skill) {
         return Err(Invalid::Usage);
     }
-    config.gameplay.skill = skill;
+    console.config.gameplay.skill = skill;
     Ok(())
 }
 

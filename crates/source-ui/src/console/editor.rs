@@ -8,7 +8,7 @@
 //! it with a space after it, Up/Down browse the history while the line has no matches, Escape
 //! hides the list, Ctrl+R searches the history backwards, and word and line editing keys.
 
-use super::complete::{self, Candidate, Sources};
+use super::complete::{Candidate, Completer};
 
 /// SDK `CConsolePanel::MAX_HISTORY_ITEMS`.
 pub const HISTORY_MAX: usize = 100;
@@ -113,12 +113,12 @@ impl LineEditor {
     }
 
     /// Rebuilds the completion list when the line no longer is what the list shows.
-    pub fn refresh(&mut self, sources: &Sources) {
+    pub fn refresh(&mut self, completer: &impl Completer) {
         if self.list.as_ref().is_some_and(|l| l.shows == self.text) {
             return;
         }
         self.list = (!self.text.trim().is_empty()).then(|| {
-            let completion = complete::candidates(&self.text, sources);
+            let completion = completer.complete(&self.text);
             List {
                 head: completion.head,
                 items: completion.items,
@@ -389,139 +389,5 @@ impl LineEditor {
             self.history_changed = true;
         }
         line
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn typed(text: &str) -> LineEditor {
-        let mut editor = LineEditor::default();
-        editor.insert(text);
-        editor.refresh(&Sources::default());
-        editor
-    }
-
-    #[test]
-    fn editing_keys_work_on_characters_and_words() {
-        let mut e = typed("ent_fire lab_door Open");
-        assert_eq!(e.cursor(), 22);
-        e.delete_word_back();
-        assert_eq!(e.text(), "ent_fire lab_door ");
-        e.word_left();
-        assert_eq!(e.cursor(), 9);
-        e.delete_word_forward();
-        assert_eq!(e.text(), "ent_fire  ");
-        e.home();
-        e.insert("é");
-        assert_eq!((e.text(), e.cursor()), ("éent_fire  ", 1));
-        e.right();
-        e.kill_to_start();
-        assert_eq!((e.text(), e.cursor()), ("nt_fire  ", 0));
-        e.word_right();
-        e.kill_to_end();
-        assert_eq!(e.text(), "nt_fire  ");
-        e.end();
-        e.backspace();
-        assert_eq!(e.text(), "nt_fire ");
-        e.home();
-        e.delete();
-        assert_eq!(e.text(), "t_fire ");
-        e.paste("a\r\nb\n");
-        assert_eq!(e.text(), "a; bt_fire ");
-    }
-
-    #[test]
-    fn tab_steps_the_list_and_typing_rebuilds_it() {
-        let mut e = typed("ma");
-        let (items, index) = e.popup().unwrap();
-        assert_eq!((items[0].text.as_str(), index), ("mainmenu", None));
-        e.step(false, true);
-        assert_eq!(e.text(), "mainmenu");
-        e.step(false, true);
-        assert_eq!(e.text(), "map");
-        e.step(true, true);
-        assert_eq!(e.text(), "mainmenu", "Shift+Tab steps back");
-        e.step(false, true);
-        e.refresh(&Sources::default());
-        assert_eq!(e.popup().unwrap().1, Some(1), "stepping keeps the list");
-        e.insert(" d");
-        e.refresh(&Sources {
-            maps: vec!["d1_trainstation_01".into()],
-            ..Sources::default()
-        });
-        e.step(false, true);
-        assert_eq!(
-            e.text(),
-            "map d1_trainstation_01 ",
-            "one match: taken with a space"
-        );
-        assert!(e.popup().is_none());
-    }
-
-    #[test]
-    fn an_empty_line_steps_through_the_history_and_submit_dedupes() {
-        let mut e = LineEditor::default();
-        for line in ["fov 90", "map x", "fov 90", "  "] {
-            e.insert(line);
-            e.submit();
-        }
-        assert_eq!(
-            e.history(),
-            ["map x", "fov 90"],
-            "repeat moves to the end; blanks skipped"
-        );
-        assert!(e.take_history_changed());
-        assert!(!e.take_history_changed());
-        e.step(true, false);
-        assert_eq!(e.text(), "fov 90", "Up starts at the newest");
-        e.refresh(&Sources::default());
-        e.step(true, false);
-        assert_eq!(e.text(), "map x");
-        let (items, index) = e.popup().unwrap();
-        assert_eq!((items.len(), index), (2, Some(0)));
-        e.step(false, false);
-        assert_eq!(e.text(), "fov 90");
-        let mut many = LineEditor::default();
-        many.set_history((0..150).map(|i| i.to_string()).collect());
-        assert_eq!(
-            (many.history().len(), many.history()[0].as_str()),
-            (HISTORY_MAX, "50")
-        );
-    }
-
-    #[test]
-    fn escape_ends_a_search_then_hides_the_list() {
-        let mut e = LineEditor::default();
-        for line in ["volume 0.5", "fov 90", "volume 1"] {
-            e.insert(line);
-            e.submit();
-        }
-        e.search_back();
-        e.insert("vol");
-        assert_eq!(e.search(), Some(("vol", Some("volume 1"))));
-        e.search_back();
-        assert_eq!(e.search(), Some(("vol", Some("volume 0.5"))));
-        e.search_back();
-        assert_eq!(
-            e.search().unwrap().1,
-            Some("volume 0.5"),
-            "stays on the oldest match"
-        );
-        assert!(e.dismiss(), "Escape ends the search");
-        assert_eq!(e.text(), "");
-        e.search_back();
-        e.insert("fov");
-        assert_eq!(e.submit(), "fov 90", "Enter runs the match");
-        e.insert("vo");
-        e.refresh(&Sources::default());
-        assert!(e.popup().is_some());
-        assert!(e.dismiss(), "Escape hides the list");
-        assert!(e.popup().is_none());
-        assert!(!e.dismiss(), "then Escape closes the console");
-        e.insert("l");
-        e.refresh(&Sources::default());
-        assert!(e.popup().is_some(), "typing brings it back");
     }
 }

@@ -1,5 +1,29 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 3a: console registry, completion and line editor in source-ui
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New `source_ui::console`, following the SDK's `CConsolePanel` (`vgui2/vgui_controls/consoledialog.cpp`):
+  - `command`: the registry, generic over the app. `command::Context` names the app's effect type and its lists of names for completion (`Arg::Names(N)` replaces HL2's `Arg::Map` / `EntityTarget` / `EntityInput`). `Spec<C>`, `Handler<C>`, `Value<C>`, `Setting<C>` / `Set<C>`, `Invalid`, `Outcome<E>`, `find`, `usage`, `run` (the "Unknown or unimplemented command" error), `tokenize`, `boolean`, `parse`, `flag`. `Spec<C>` and `Setting<C>` implement Clone/Copy/Debug by hand, since a derive would require them of the console.
+  - `complete`: candidates, ranking, the help line, generic over a command table and the app's name lists; the editor completes through a `Completer` trait.
+  - `editor`: the line editor (moved verbatim; `refresh` takes a `Completer` instead of HL2's `Sources`).
+- hl2-ui's `console::commands` is HL2's instantiation: `Names` (Map, EntityTarget, EntityInput), `impl Context for Console`, the aliases `Spec`, `Arg` and `Outcome` (so the handlers keep their signatures), the constructors, `run_setting`, the table and `find`. The setters take the console (`Set<Console>`), reading and writing `console.config`. hl2-ui's `console::complete` keeps the host's `Sources` (which implements `Completer`) and binds the toolkit's completion to `COMMANDS`; `Console::interpret` runs `command::run(self, COMMANDS, tokens)`.
+- Tests: the ranking test moved to source-ui; the completion tests and the four editor tests complete from HL2's table, so they stay in hl2-ui (`console/complete.rs`), bodies unchanged (two import lines). The golden cvar transcript did not change.
+- The hard-coded-string audit also reads `source-ui/src/console/command.rs` (where `tokenize` went from `console.rs`), in both its checks.
+- docs/DESIGN.md details step 3 (3a and the 3b boundary); docs/gameui.md names the new console paths.
+
+**Why:** Step 3 of the toolkit split: the console's registry, completion and editor know nothing about HL2; HL2's commands register into them.
+
+**Tested how:** The golden cvar transcript, `every_spec_runs_its_own_handler` and every console test pass; the workspace lists the same 1,103 tests by name before and after. `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays pass, 10 of 10; the repository isolation check passes. `source-ui/src/console` names no HL2 command, cvar, `Config` or `Effect` (its `Context` has an associated `Effect` type).
+
+**Result:** hl2-ui production lines 18,373 -> 17,727; source-ui 5,952 -> 6,750 (the generic registry and completion are slightly longer than the HL2-bound originals: trait bounds, manual trait impls). Behaviour unchanged.
+
+**Still broken or not tested:** The output buffer and the console dialog (panel state, input, drawing) are still in hl2-ui (step 3b).
+
+**Next:** Step 3b: the output buffer and the console dialog as a toolkit component.
+
 ## 2026-10-24 UI toolkit split, step 2: declarative setting cvars
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
