@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 5: hl2-shared folded back into hl2-simulation
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- The `hl2-shared` crate is gone (workspace, Cargo.lock). Its code is back where it came from, restored byte for byte from the commit before the crate existed (none of these files changed since): weapon script data (`gameplay::{Weapon, definitions}`), the damage and fade messages and bits (`player_damage`), the bucket selection module (`selection`) and `viewmodel_effects::VIEWMODEL_FOV`. `InventoryView` and `Inventory`'s delegating `reserve_for` / `secondary_for` are gone: `Inventory` has its own methods again and selection and the HUD take `&Inventory`.
+- hl2-ui depends on hl2-simulation, as HL2's UI depends on its model layer; `hud.rs`, `fades.rs` and `config.rs` import from it again (the HUD changes of the commit that introduced hl2-shared reverse-applied cleanly onto today's file). The HUD tests use the real `Inventory` again: the test-only inventory with its copied `give`, `give_ammo` and `refill_ammo` is gone, and the test bodies and assertions are the original ones.
+- `cargo tree -p source-ui` still lists no hl2-* crate.
+- AGENTS.md, README, CONTRIBUTING and DESIGN's architecture paragraph no longer describe hl2-shared; hl2-ui is described as depending on hl2-simulation.
+
+**Why:** hl2-shared existed only so that hl2-ui could avoid the simulation; HL2's own UI may depend on it, and the toolkit (source-ui) is the part that must not.
+
+**Tested how:** The workspace lists the same 1,103 tests by name. `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; all 81 owned-install tests pass (the two hl2-bevy headless campaign tests alone, as before). Full packaged replay suite, one game at a time: 94 of 94; compared with the baseline run (1,439 labelled samples), only `pallet-launched-into-wall`'s `hits` and `ray`, which the checks mark as varying, differ. The repository isolation check passes.
+
+**Result:** One crate fewer. hl2-simulation production lines 44,384 (before hl2-shared) -> 44,847 with the code back (hl2-shared had 551); hl2-ui test lines 13,684 -> 13,558 (the test inventory). Behaviour unchanged.
+
+**Still broken or not tested:** nothing new.
+
+**Next:** Step 6: narrow visibility and replace glob imports.
+
 ## 2026-10-24 UI toolkit split, step 4d: Escape, the console toggle and closing windows in the shell
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

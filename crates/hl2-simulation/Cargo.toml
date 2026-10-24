@@ -10,7 +10,6 @@ serde.workspace = true
 source-assets.workspace = true
 glam.workspace = true
 modkit-core.workspace = true
-hl2-shared.workspace = true
 rapier3d = "0.26.1"
 
 hound = "3.5.1"

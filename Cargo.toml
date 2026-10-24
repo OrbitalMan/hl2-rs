@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/modkit-core", "crates/source-assets", "crates/source-ui", "crates/hl2-shared", "crates/hl2-simulation", "crates/hl2-ui", "crates/hl2-bevy"]
+members = ["crates/modkit-core", "crates/source-assets", "crates/source-ui", "crates/hl2-simulation", "crates/hl2-ui", "crates/hl2-bevy"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -10,7 +10,6 @@ glam = { version = "0.27", features = ["serde"] }
 modkit-core = { path = "crates/modkit-core" }
 source-assets = { path = "crates/source-assets" }
 source-ui = { path = "crates/source-ui" }
-hl2-shared = { path = "crates/hl2-shared" }
 hl2-simulation = { path = "crates/hl2-simulation" }
 hl2-ui = { path = "crates/hl2-ui" }
 
