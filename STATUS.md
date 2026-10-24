@@ -2,6 +2,10 @@
  
  Checkpoint: 2026-10-24 (Claude Code desktop, claude-opus-5-5) on orbitalman/hl2-ui. The refactoring series is finished (UI toolkit split, source-ui's own tests, architecture guardrails, AGENTS.md rework); nothing is in progress and the next task comes from the owner. Sections below are newest first.
 
+## Options audit (2026-10-24)
+
+- docs/gameui.md section 23 lists every Mouse, Audio, Video > HDR and Video > Advanced option with its consumer and verdict. HDR is implemented (23a). Unfinished, with reasons: Raw input, Aim-Assist, Speakers, Sound quality, Spoken language, shader/water/shadow detail, color correction, motion blur, classic effects, multicore, D3D9Ex (not applicable); Mute when unfocused is partial.
+
 ## Architecture guardrails (2026-10-24)
 
 - AGENTS.md is rules only (18 KB, was 41 KB): new "Architecture rules" for agents and hard rule 11 (never make the game slower); the UI conventions moved verbatim to docs/gameui.md section 0; the architecture check keeps AGENTS.md under 20 KB.

@@ -1628,7 +1628,7 @@ observed retail behavior, so nothing is implemented).
 | Audio: Sound quality `dsp_slow_cpu`, `snd_pitchquality` | `audio.quality` | nothing | unclear: both live in the engine mixer; the soundscape DSP is not modeled |
 | Audio: Spoken language | `audio.language` | nothing reads it at startup: `gameinfo.txt` names `hl2_sound_vo_english.vpk` and the host mounts it | placeholder; only the English pack is installed, so a switch cannot be observed |
 | Audio: Third-party credits | none | dialog | complete |
-| Video: HDR `mat_hdr_level` | `video.hdr` | nothing: the renderer always runs the full HDR path (HDR lightmap lumps, `.hdr.vtf` cubemaps, auto exposure, bloom) | placeholder |
+| Video: HDR `mat_hdr_level` | `video.hdr` | `assets::load_with_progress` (LDR lumps, cubemaps, `ldr?` vars, sky), `tonemap::update` (exposure, bloom); map reload on change | complete since 2026-10-24 (section 23a; this row was a placeholder when the audit was written) |
 | Advanced: Model detail `r_rootlod` | `advanced.model_detail` | `assets::load_with_config`; map reload on change | complete |
 | Advanced: Texture detail `mat_picmip` | `advanced.texture_detail` | VTF mip skipping; map reload on change | complete |
 | Advanced: Shader detail `mat_reducefillrate` | `advanced.shader_detail` | nothing | placeholder |

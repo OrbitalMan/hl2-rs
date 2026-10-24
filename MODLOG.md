@@ -1,5 +1,25 @@
 # MODLOG
 
+## 2026-10-24 Options audit: Mouse, Audio, Video > Advanced options left unfinished
+
+**Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.
+
+**Changed:** Documentation only (docs/gameui.md section 23, STATUS.md). Per option, left unfinished:
+- Mouse > Raw input: no effect (Bevy's locked-cursor motion is already raw); the unchecked state needs OS pointer-ballistics deltas that cannot be observed or tested here.
+- Mouse > Aim-Assist and its scale: the retail `m_autoaim_*` behavior (Basic/Enhanced, magnetism, dampening) is not in the SDK; also gameplay work outside the UI scope (owner, 2026-10-24).
+- Audio > Speakers, Sound quality: engine mixer behavior; stereo output only. Audio > Spoken language: nothing reads it; only the English pack is installed. Audio > Mute when unfocused: honored, but losing focus pauses the game.
+- Video > Advanced: shader, water, shadow detail, color correction, motion blur, classic effects (no corresponding render pass or particle system; each default would cost frame time, owner chose not to build them now, 2026-10-24); multicore (no Bevy equivalent of `mat_queue_mode`); Windows Aero (no Direct3D 9).
+
+**Why:** Owner decision: implement HDR, leave these documented as unfinished.
+
+**Tested how:** Not applicable (documentation).
+
+**Result:** Audit committed with a verdict per option.
+
+**Still broken or not tested:** All of the above.
+
+**Next:** Owner picks any of them to build.
+
 ## 2026-10-24 Options > Video > HDR (`mat_hdr_level`) takes effect
 
 **Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.
