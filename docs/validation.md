@@ -1,5 +1,15 @@
 # Local validation — 2026-10-05
 
+## Corrected probes and retained failures (2026-10-24)
+
+Read-only verify_seal.py passes new private AT24, AU581, AV27, AW46, AX615, AY9, AZ24, BA26 and BB18 retained-file sets. AU acceptance means intact failed-diagnostic evidence: an owned crash before a window collision, two retained failed reader occurrences, unchanged settings and session closed after exit. It is not damage validation. AW checks a compiled x86 prefix, three sentinel controls and two instrumentation lifecycles. AY checks five loaded-script receipts/29 sites across 18 roots and identifies four incorrect interior call listeners; old roots remain unchanged.
+
+AX checks 48 events/five actual calculator/lookup/selection/damage chains, 67 motion files/6804 samples, 518 trajectory samples, 90744 raw-read occurrences/27431410 bytes and native images. The 1769 legacy named-snapshot reads without per-read hashes remain file/seal-hash protected. Actual table/scale/lookup inputs match reconstruction and health stays 15. The original guard-snapshot overwrite is explicit; independent creation/module/prefix/storage identities remain. Both corrected observers unload/close before native/child exit 0 and unchanged settings.
+
+BA checks 30 events/10 parser pairs/eight sites/192 raw reads/3400 bytes and ordered echo output. Its base-entity snapshots prove unchanged position but omit buttons. AZ checks three exact BLOBs/535 rooted bytes/137 instruction starts and 18 post-vector expression matches. BB checks two reused BLOBs/880 rooted server bytes/273 starts, one missing getter retained as four raw bytes, five caller-site witnesses and 10 entity joins. No full solver, complete ABI, ordinary campaign or Rust parity follows.
+
+Private verify-research-index-20261024bb.py checks 27 roots/5411 file occurrences, 36 exact dependencies against immutable pass14 BLOBs and 19 metadata query cases, including wrong identities and missing-body/no-nearby fallbacks. The first-map audit preserves 16 gap statuses/four missing scene-index entries and first_map_finished:false. Documentation/whitelist checks apply; no Rust build, gameplay rebuild or Rust tests were run. Current checkpoint: work/publishing/research-followup-continuation-20261024bb.md.
+
 ## Aligned release and raw-entry acceptance (2026-10-23)
 
 Read-only verify_seal.py passes private AL618, AN18, AO12, AP15 and AS31 retained-file sets. AL checks65 motion files/6431 samples plus517 trajectory samples,90804 reads/28246816 bytes, observed held/support identities, two unchanged-health throws, images and owned closure/settings. Rejected masked-summary/read-selection drafts remain retained; raw capture bytes are unchanged. AN verifies two retrieval failures, exact target prefix and owned worker closure. AO/AP independently traverse793 exact bytes/253 instruction starts rooted at the four missing entry targets, recheck descriptor/string/pointer stores and eight reused exact body occurrences; no indexed/Ghidra body recovery is asserted. AS compares three exact BLOBs, four missing identities, selected slots and seven rooted accessor graphs173 bytes/60 instructions.

@@ -1,5 +1,17 @@
 # STATUS
 
+## Corrected native impact evidence and instrumentation caveat (2026-10-24)
+
+The interior-hook caveat supersedes older descriptions limited to timing perturbation. Sealed private AW reproduces saved-EDI corruption from Frida object/onEnter call-listener form at an interior instruction; the documented function-callback probe preserves the baseline sentinel. Sealed AY audits 18 selected roots/five loaded scripts/29 sites and identifies four affected interior sites across AF, AR and X. Keep their raw observations, but do not promote their dynamic causal interpretations to unmodified retail behavior. Static body/byte evidence and separate non-Frida controls remain distinct. The X transition is still an observed controlled instrumented event; ordinary first-map completion remains false.
+
+AU is sealed as a failed diagnostic: owned PID 75492 exits after force/torque application and before any window collision witness. Its retained dump places the access violation at preferred server101d77b1. Wrong interior listener form is consistent with the fault; full causal attribution is unproven. Settings unchanged and session closed after exit.
+
+Corrected AX seals 615 files. Five complete collision/calculator/scale/lookup/selection/damage pairs bind the actual glass table and scale 1. Actual lookup values 334.4362, 143.1501, 594.3675, 4.9655 and 0.3967 are below 625; native selection index and damage are 0, with health 15 unchanged. Reconstruction matches each actual argument. Its 48 events, 67 motion files/6804 samples and 518 trajectory samples retain raw provenance and images. This remains instrumented evidence. A later guard accidentally overwrote the original full pre-attach guard file; independent creation/module/prefix/storage records remain and the missing snapshot is explicitly recorded. No crossing was attempted.
+
+BA seals 26 files and corroborates per-line reset versus cumulative same-line wait additions using corrected probes: 10 parser pairs/eight sites/192 raw reads. It submits echo/wait commands in AX's idle owned process; no fixed timing units or button-phase claim follows. Both observers unload/close before normal native exit 0; checked settings unchanged. AZ binds normal velocity to base plus pending increments and matches 18 recorded post vectors. BB binds five actual callback return stacks to PostCollision dispatch. One separate game-data getter remains missing from pass14, with only its four raw entry bytes verified.
+
+Nine new private seals retain 1370 file occurrences. The combined 27-root navigator checks 5411 occurrences/36 exact body dependencies/19 metadata query cases; these are evidence counts, not semantic coverage. Current checkpoint: work/publishing/research-followup-continuation-20261024bb.md. No Rust changes/builds; first_map_finished:false, original 16 gaps/four missing scene-index entries and Rust parity remain open.
+
 ## Aligned-release rejection and exact-entry byte supplements (2026-10-23)
 
 AL seals618 files: a measured platform bypass, confirmed support/held pose, two aligned throws that leave health15, and517 passive release-trajectory samples. Its65 motion files contain6431 samples; verification checks90804 reads/28246816 bytes. Owned game closed/settings unchanged. The south-input summary was initially misread because it masked to jump/duck bits; raw button1024 is present with zero movement. The correction and rejected verifier drafts are preserved, including a separate contextual AM erratum. No crossing was attempted.

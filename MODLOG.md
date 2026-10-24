@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-24: corrected probes, actual glass lookup and velocity boundary
+
+**Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust implementation changes.
+
+**Changed / Why:** Continued private native research under the owner's renewed usage-window request. Found and corrected an instrumentation mistake: interior function-call listeners can trap non-return stack slots. Preserved the failed AU run/dump, tested the mechanism on a disposable 32-bit fixture, audited selected historical captures and ran corrected instruction probes. Bound pending-vector getter arithmetic and the recorded callback's native writer/dispatch layout.
+
+**Tested how / Result:** Nine new seals retain 1370 file occurrences. AX records five actual glass-table/scale/lookup/selection/damage chains; every value is below 625 and matches reconstruction, with damage 0/health 15. Its 48 events, 6804 motion samples and 518 trajectory samples retain raw/image evidence. BA corroborates newline resets and semicolon accumulation through 10 parser pairs/eight sites. AW preserves three fixture controls; AY identifies four affected historical interior sites. AZ matches 18 post vectors to the normal getter expression; BB joins five caller addresses and 10 entity/game-data pairs. The 27-root navigator checks 5411 file occurrences, 36 exact database BLOB dependencies and 19 query cases. Counts do not establish corpus/semantic completeness.
+
+**Still broken or not tested / Next:** AU is a failed diagnostic. Historical AF/AR/X retain the external interception caveat. AX's overwritten original guard snapshot is explicitly limited; independent identities remain. Owned games/instrumentation are closed, checked settings unchanged and corrected run exit 0. Original 16 gaps/four missing scene-index entries, ordinary first-map completion, full solver/ABI and Rust parity remain open. No Rust tests/builds apply. Continue from private research-followup-continuation-20261024bb.md; retrieve further native behavior for a concrete unresolved feature.
+
 ## 2026-10-23: aligned release trace and missing-entry byte supplements
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. No subagents or Rust changes.

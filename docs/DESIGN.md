@@ -1,5 +1,13 @@
 # Design
 
+## Research contract: instruction probes and field boundaries (2026-10-24)
+
+Use documented function-callback probes at interior instructions and function-call listeners at actual entries. A disposable 32-bit baseline/negative/probe fixture demonstrates the distinction: a call listener without a leave callback still traps returns and can alter a saved register, consistent with [Frida's listener/probe distinction](https://frida.re/docs/gum/class.Interceptor.html). Preserve failed captures and audit earlier loaded-script sources; timing perturbation alone is insufficient. Retain raw relocated-prefix equality, source hashes, process creation/module identity, state and owned cleanup. Give each guard stage a separate output path. AX's overwritten original snapshot is a retained limitation, with independent identity/prefix records still available.
+
+Corrected AX records five actual glass lookup chains with scale 1 and zero selected damage below the first threshold. Separate corrected BA probes corroborate per-line reset and cumulative same-line additions; timing units remain unproven. Both are instrumented controls. X remains an observed instrumented transition with the historical-hook caveat; ordinary campaign completion stays false.
+
+Keep field boundaries explicit. The normal velocity getter adds pending increments before coordinate conversion; a sampled base vector alone is incomplete. The implicit getter is separate. Calculator stack slots are reused after entry, so a later frame is not an unchanged typed argument record. Private static bodies, actual lookup values and caller joins support bounded findings without complete ABI/solver certification. No implementation refactor follows automatically. Further research should resolve a concrete consuming-step or authored-scene question while preserving first-map audiovisual/transfer criteria. Current checkpoint: work/publishing/research-followup-continuation-20261024bb.md.
+
 ## Research plan: bounded aligned-impact diagnostic (2026-10-23)
 
 AL's two aligned throws retained attached/support/settled-pose checks but left health15. A single diagnostic replay will observe the native collision callback and computed-damage store around the aligned release, with exact raw prefix/identity checks and separately recorded Frida effects. Capture the actual event, selected physics state and ordinary input; stop after the observation, preserving zero/no-event outcomes. An early passive model snapshot may corroborate the remaining literal candidates before actors are renamed/removed. Do not repeat crossing attempts, invoke native methods or turn this diagnostic into campaign advancement. Keep static byte-flow supplements distinct from recovered indexed bodies and runtime completion.
