@@ -2,6 +2,11 @@
  
  Checkpoint: 2026-10-09 session 10 (Claude Code desktop, claude-opus-5-5) on main. Merged: SDK player damage path, env_global/gordon_invulnerable, trigger_hurt for all touchers, screen fades, HUD damage indicator and HEV suit voice (DESIGN 13a-2). 380 normal tests + owned, strict Clippy/fmt; batch verifiers 26/17/26 (artifacts/damage-regression).
 
+## Exact and local checks (2026-10-24)
+
+- Plan in docs/DESIGN.md (same title): replays that repeat exactly, then tests for the toolkit itself. The current scope is the UI.
+- Step 1 in progress: why `bevy-pallet-gibs-fade`'s kill tick and `bevy-monitors-kleiner-scene`'s gib removals (and the fields already left out of the comparison) vary between runs of one build.
+
 ## UI toolkit split: source-ui and Half-Life 2's UI (2026-10-24)
 
 - Plan in docs/DESIGN.md (same title): a game-agnostic, Source-aware toolkit crate (`source-ui`, like the SDK's `vgui_controls`) and Half-Life 2's own UI (`hl2-ui`: GameUI, HUD, captions, fades, `Config`, console commands), in seven steps, none changing behaviour.

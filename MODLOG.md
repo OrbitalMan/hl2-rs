@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-24 Plan: exact and local checks
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** Documentation only. docs/DESIGN.md "Exact and local checks" records the owner's two-step plan after the architecture review of 2026-10-24: replays that repeat exactly (find why four gameplay fixtures vary between runs of one build; two real attempts, then mark them as varying), then tests for source-ui's own shell, console dialog, command registry, line editor and input frames over a fake app. STATUS gets a section for it.
+
+**Why:** Owner goal: every change cheap to check. During the toolkit split two replay mismatches each needed three reruns to be judged noise, and source-ui's 2,143 lines of window and console code are tested only through hl2-ui's `Console`. Entity and NPC steps from the review were dropped: the current scope is the UI.
+
+**Tested how:** The repository isolation check passes. No code change.
+
+**Result:** Plan recorded.
+
+**Still broken or not tested:** Nothing new.
+
+**Next:** Step 1: repeated runs of the varying fixtures.
+
 ## 2026-10-24 UI toolkit split, step 7: `AiRuntime::think` not split (reported)
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

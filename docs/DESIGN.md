@@ -1,5 +1,52 @@
 # Design
 
+## Exact and local checks (2026-10-24)
+
+Goal (owner, after the architecture review of 2026-10-24): every change is cheap to check. A
+failing check points at its cause, and a replay difference always means a real change. Two steps;
+the current scope is the UI, so entity and NPC work from that review is not part of it.
+
+1. Replays that repeat exactly. The gameplay outcome comparison already leaves out fields that
+   differ between two runs of one build (`hits` and `ray` of three pallet fixtures,
+   `occluded_blast_targets` everywhere), and two more varied during the toolkit split without
+   being left out: `bevy-pallet-gibs-fade`'s kill and gibs at tick 32 instead of 34, and
+   `bevy-monitors-kleiner-scene`'s gib removals (7 instead of 8 at its last two labels).
+   - Method: run each of these four fixtures ten times one game at a time and ten times two at
+     once (how often each field varies, and whether machine load matters); compare every report
+     field of two differing runs to find the earliest sample and field that diverge; trace that
+     field to its inputs.
+   - Hypotheses, in this order: a model the map did not preload, loaded on a worker thread and
+     inserted when ready (`runtime_props`), arriving a tick later under load; iteration over
+     hash-ordered collections (Rust randomizes their order per process; hl2-simulation's physics
+     keeps about twenty); something sampled per rendered frame instead of per fixed tick.
+   - Fix: in the host, the smallest replay-only change that leaves ordinary play unchanged (as
+     `--mute` is); in the simulation, a deterministic order. A field whose cause is fixed leaves
+     the comparison's list of varying fields.
+   - Stop rule: two real attempts at the cause, then the evidence goes into STATUS and the two
+     unmarked fields are marked as varying.
+   - Done when each of the four fixtures gives identical outcomes over ten runs, and every field
+     still listed as varying is explained in STATUS.
+2. Tests for the toolkit itself. Five source-ui files have no tests of their own (`shell.rs`,
+   `console/panel.rs`, `console/editor.rs`, `console/command.rs`, `input.rs`: 2,143 lines, 65
+   public functions); hl2-ui's console tests cover them only through HL2's `Console`.
+   - New tests inside source-ui over a small fake app: a `shell::Host` with two windows, a modal
+     window, the console and a base, recording every hook call so the documented call order is
+     asserted; a minimal `command::Context` with one command, one cvar and one list of names.
+   - Cases: Escape's order (the app's drag, the console's drag, history search or completion, the
+     modal state, the top window, the base) and a held Escape closing on release; the pointer to
+     the topmost window else the base, a press staying with its window until release, a modal
+     window taking every press; key repeat stopping on a mode change and during key capture; the
+     console toggle (blocked, enabled, opening, closed); `close_window`; the console dialog's
+     scrollback and numbering, `replace_snapshot`, filters and timestamps, wrapping, selection
+     and copying, Close and Submit (Enter too); commands (run, unknown, usage, tokenizing); the
+     editor's history and completion through a fake `Completer`; key repeat timing.
+   - hl2-ui's console tests stay: they test HL2's use of the toolkit.
+   - Done when no source-ui file is without tests, and an Escape-order bug introduced on purpose
+     fails a source-ui test (then reverted).
+
+Validation: step 1 with the repeated runs and the full replay suite; step 2 with
+`scripts/checks/validate.sh` and the Windows-target check (tests only, no behaviour change).
+
 ## UI toolkit split: source-ui and Half-Life 2's UI (2026-10-24)
 
 Goal (owner): code that is easy to find and understand. hl2-ui is split into a game-agnostic,
