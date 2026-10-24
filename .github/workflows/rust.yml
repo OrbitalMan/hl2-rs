@@ -19,6 +19,8 @@ jobs:
           persist-credentials: false
       - name: Install stable Rust with formatting and lint tools
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Check architecture guardrails
+        run: python scripts/checks/architecture.py
       - name: Check formatting
         run: cargo +stable fmt --all --check
       - name: Check workspace lints

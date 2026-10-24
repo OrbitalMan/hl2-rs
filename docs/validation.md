@@ -2,7 +2,15 @@
 
 ## Local check scripts (2026-10-17)
 
-`scripts/checks/validate.sh` (`cargo test --workspace --locked`, strict clippy
+`scripts/checks/architecture.py` (2026-10-24; Python 3, standard library, about 4 s) enforces the
+architecture guardrails described in AGENTS.md: function, file and test-file size limits with
+`scripts/checks/architecture-baseline.json` holding the existing offenders (they may only shrink),
+the crate layers and engine-crate owners, no file IO in modkit-core / hl2-simulation / source-ui,
+no HL2 names in source-ui, no new duplicated 8-line blocks, and per-crate counts of mutable
+statics, `too_many_arguments` and `dead_code` allowances and glob imports. validate.sh, CI and the
+local pre-commit hook run it first.
+
+`scripts/checks/validate.sh` (the architecture check, `cargo test --workspace --locked`, strict clippy
 `--workspace --all-targets --locked -D warnings` as CI, `cargo fmt --check`) and
 `scripts/checks/check_windows.sh` (strict clippy of hl2-ui/hl2-bevy for `x86_64-pc-windows-msvc`
 without linking, from macOS/Linux) are bash.

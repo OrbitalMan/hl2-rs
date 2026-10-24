@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Tests, strict clippy (CI flags) and fmt for the workspace.
+# Architecture guardrails, tests, strict clippy (CI flags) and fmt for the workspace.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+
+echo "=== Checking architecture guardrails ==="
+python3 scripts/checks/architecture.py
 
 echo "=== Running workspace tests ==="
 cargo test --workspace --locked

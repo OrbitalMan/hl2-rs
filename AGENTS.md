@@ -39,6 +39,17 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 - Resolution scaling: distinguish window presentation dimensions from internal 3D render target resolution (rendering at a configured lower resolution such as 720p and upscaling/filtering to a higher-resolution fullscreen display for performance).
 - Feature fidelity: prioritize verified behavior of the owned retail game unless the owner explicitly requests a deviation. Consult official SDK references within their license terms and, where legally permitted, targeted private binary analysis. Implement behavior independently in Rust. Never use leaked source or copy or mechanically translate Valve implementation code into the project. Keep native analysis and game assets outside public source checkouts.
 
+## Architecture guardrails
+
+`python3 scripts/checks/architecture.py` must pass (validate.sh, CI and the pre-commit hook run it). It fails, naming the file and the fix, when a change:
+- makes a function longer than 100 lines, a file's production code longer than 1,000 lines or its tests longer than 2,000, or grows one that already is (the existing ones are listed in `scripts/checks/architecture-baseline.json`);
+- adds a crate dependency outside the layers: modkit-core <- source-assets <- source-ui; modkit-core, source-assets <- hl2-simulation; source-ui, hl2-simulation <- hl2-ui <- hl2-bevy. Bevy and rfd only in hl2-bevy; rapier3d, symphonia and hound only in hl2-simulation;
+- reads files in modkit-core, hl2-simulation or source-ui, or names HL2 code (`hl2_ui`, `hl2_simulation`, `hl2_bevy`, `HL2RS_`) in source-ui;
+- repeats 8 or more significant lines that already exist elsewhere;
+- adds a mutable static, a `too_many_arguments` or `dead_code` allowance or a glob import to a crate.
+
+Fix the code, never the limit: extract a function or module, move shared code down a layer, reuse the copy that exists. After an improvement, `UPDATE_BASELINE=1 python3 scripts/checks/architecture.py` locks it in (it only lowers). `ACCEPT_GROWTH=1` records growth: only after merging main (for upstream code) or with the owner's approval, and say so in MODLOG. A new crate needs its layer in the script, decided with the owner.
+
 ## Honesty
 
 - Write **not tested** when applicable. Distinguish unit tests, owned-file checks, controlled replays, native comparisons and ordinary playthroughs.

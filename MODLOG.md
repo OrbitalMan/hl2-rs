@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-24 Architecture guardrails
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New `scripts/checks/architecture.py` and its baseline `scripts/checks/architecture-baseline.json` (narrow `.gitignore` exception): size limits (functions 100 lines, production code 1,000 lines per file, tests 2,000) with a shrink-only baseline of today's offenders, crate layers and engine-crate owners, no file IO in modkit-core / hl2-simulation / source-ui, no HL2 names in source-ui, duplicated 8-line blocks fingerprinted against the baseline, per-crate counts of mutable statics, `too_many_arguments` and `dead_code` allowances and glob imports. Every failure names the file and the fix.
+- validate.sh runs it first; CI runs it before formatting (`python scripts/checks/architecture.py`); the local pre-commit hook (not part of the repository) runs it before the isolation check.
+- AGENTS.md has an "Architecture guardrails" section; docs/validation.md and DESIGN describe the check.
+
+**Why:** Owner: stop the refactoring series and keep the structure from decaying with checks that agents cannot skip, including weaker models.
+
+**Tested how:** The check passes on the current tree (113 long functions, 25 large files, 3 large test files and 143 duplicated blocks recorded). Each rule failed on a deliberate violation, each reverted: a new 101-line function, one more line in `AiRuntime::think` (the function and its file both reported), source-ui depending on hl2-ui and hl2-ui on bevy, `std::fs` and an `HL2RS_` token in source-ui, a pasted 8-line block, a new `dead_code` allowance; an unrecorded improvement failed until `UPDATE_BASELINE=1` lowered the entry. The counting was compared file by file with the first-`#[cfg(test)]` cut the reviews used: equal except four files with an early test item (STATUS). A raw string with backslashes (`r"\\?\UNC\"`) first broke the brace count and made a 13-line function look 461 lines long; raw strings now take no escapes. `scripts/checks/validate.sh` and the repository isolation check pass.
+
+**Result:** New size, coupling and duplication regressions fail locally and in CI. No production code changed.
+
+**Still broken or not tested:** The CI step is not run yet (CI runs on main and pull requests). The pre-commit hook checks the working tree, not only the staged files. Architecture no metric shows (a concern in the wrong crate within the allowed layers, blocking reads in frame systems) still needs review.
+
+**Next:** AGENTS.md rework (shorter, rules only).
+
 ## 2026-10-24 Exact and local checks, step 2: source-ui tests itself
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

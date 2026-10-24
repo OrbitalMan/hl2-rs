@@ -1,5 +1,37 @@
 # Design
 
+## Architecture guardrails (2026-10-24)
+
+Goal (owner): the refactoring series stops; checks keep the structure from decaying instead.
+`scripts/checks/architecture.py` (standard library Python, about 4 s) runs first in validate.sh, in
+CI and in the local pre-commit hook, and names the file and the fix in every failure (rules in
+AGENTS.md "Architecture guardrails").
+
+- Sizes: functions up to 100 lines, a file's production code up to 1,000 lines, its tests up to
+  2,000. Limits apply to new code; the 113 functions, 25 files and 3 test files over them today are
+  listed with their sizes in `architecture-baseline.json` and may only shrink (a ratchet:
+  `UPDATE_BASELINE=1` lowers entries, nothing raises them except `ACCEPT_GROWTH=1`, for merges of
+  main or with the owner's approval). Functions are keyed by file and name, sizes sorted, so
+  reordering or moving within a file changes nothing.
+- Coupling: the allowed edges between workspace crates (any dependency table, dev and target
+  included), the crates that may use bevy/rfd (hl2-bevy) and rapier3d/symphonia/hound
+  (hl2-simulation), no file IO in modkit-core, hl2-simulation and source-ui, no HL2 names in
+  source-ui's code.
+- Duplication: every 8-line window of significant production lines (comments, imports,
+  attributes and lone brackets left out; strings kept) is fingerprinted; a fingerprint seen twice
+  that the baseline does not list fails. Fingerprints follow the text, so moving code keeps them.
+  The 143 known ones are mostly authored data tables (activity tables, default schedules).
+- Counts per crate that may not grow: mutable statics, `too_many_arguments` and `dead_code`
+  allowances, glob imports.
+- Counting: `#[cfg(test)]` items are skipped by matching their braces (not by cutting the file at
+  the first one), and braces inside strings, raw strings, chars and comments are ignored.
+- Proven to bite (each case reverted): a new 101-line function, one more line in
+  `AiRuntime::think`, source-ui depending on hl2-ui, hl2-ui on bevy, file IO and an `HL2RS_` token
+  in source-ui, a pasted 8-line block, a new `dead_code` allowance; an improvement left unrecorded
+  fails until `UPDATE_BASELINE=1` records it.
+- Not covered: architecture that no metric shows (a concern in the wrong crate within the allowed
+  layers, blocking reads in frame systems); review still applies.
+
 ## Exact and local checks (2026-10-24)
 
 Goal (owner, after the architecture review of 2026-10-24): every change is cheap to check. A

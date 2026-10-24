@@ -20,6 +20,7 @@
 !/scripts/clean-target.sh
 !/scripts/checks/*.sh
 !/scripts/checks/*.py
+!/scripts/checks/architecture-baseline.json
 !/test-inputs/*.json
 !/test-inputs/expected/*.json
 !/docs/*.md
