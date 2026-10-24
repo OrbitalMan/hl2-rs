@@ -16,7 +16,7 @@ HL2-RS is an experimental Rust rewrite of Half-Life 2 and relevant Source behavi
 8. User-visible text comes only from installed localization files through `Localization::text("#Token")`; no English literals in UI or HUD code. In-repo text only where no installed token exists: an `HL2RS_` placeholder, or `FALLBACK_STRINGS` for screens shown before resources are mounted (setup, abort dialogs). Details: docs/gameui.md section 0.
 9. Never patch third-party crates (Bevy, winit, Rapier...). Read their code only after their docs and this codebase fail to explain something; adapt on the HL2-RS side.
 10. This repository is self-contained: its files and commit messages never name anything outside it (no workspace folders, scripts, notes, `../` or machine paths); a check that lives elsewhere is described by what it does. The installed game is described by its layout (`hl2/resource/...`), the Source SDK by SDK-relative paths (Source SDK `game/client/...`).
-11. Never make the game slower to get something else (determinism, structure, tidiness, tooling) (owner, 2026-10-24); say how a change to a hot path affects speed, and measure when in doubt.
+11. Never slow the game through careless code or a poor design (owner, 2026-10-24): a requested feature or fidelity change may cost frame time, waste may not (work done while its option is off, per-frame allocation or file access, repeated work that could be cached, a heavier solution than needed); measure hot paths and new render passes, record frame time before and after in MODLOG, and reduce a cost larger than the design needs instead of dropping the feature.
 
 ## How to work
 
