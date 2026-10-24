@@ -124,7 +124,7 @@ mod tests {
     use super::*;
 
     /// A compiled dictionary of `tokens` with one block per entry list chunk of `block_size`.
-    pub(crate) fn compile(tokens: &[(&str, &str)], block_size: usize) -> Vec<u8> {
+    fn compile(tokens: &[(&str, &str)], block_size: usize) -> Vec<u8> {
         let mut blocks: Vec<Vec<u8>> = vec![Vec::new()];
         let mut directory = Vec::new();
         for (token, text) in tokens {

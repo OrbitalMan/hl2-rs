@@ -1,7 +1,18 @@
 //! Menu flow: the main menu and its categories, titles and backgrounds, chapter backgrounds
 //! after a level, and the quit / return-to-menu box.
 
-use super::*;
+use super::{ConfirmKind, Console, Effect, GameMap, Mode};
+use crate::gameui::menu::GameMenu;
+use crate::gameui::menu::MenuOutcome;
+use glam::vec2;
+use glam::Vec2;
+use source_ui::canvas::Rect;
+use source_ui::canvas::Texture2D;
+use source_ui::input::Input;
+use source_ui::input::Key;
+use source_ui::message_box::MessageBox;
+use source_ui::message_box::MessageBoxLayout;
+use source_ui::placement;
 
 impl Console {
     /// The pre-blurred image of `game`'s background map `map`, if loaded.
@@ -205,7 +216,7 @@ impl Console {
 
     /// The chapter `game`'s `map` belongs to: from the index, or worked out for that game now when
     /// the index is not built yet.
-    pub(super) fn chapter_of(&self, game: &str, map: &str) -> Option<String> {
+    fn chapter_of(&self, game: &str, map: &str) -> Option<String> {
         use crate::gameui::chapters;
         if let Some(found) = self.chapter_index.get(game, map) {
             return found.map(str::to_owned);
@@ -219,7 +230,7 @@ impl Console {
     /// game (`gameui::chapters`), else that game's chapter 1 background. It becomes the saved menu
     /// background (written only when it changes), so a Half-Life 2 map played from the Episode
     /// Two menu returns to, and next launches over, a Half-Life 2 background.
-    pub(super) fn remember_chapter_background(&mut self) -> Option<GameMap> {
+    fn remember_chapter_background(&mut self) -> Option<GameMap> {
         let running = self.loaded_map.clone()?;
         let game = running.game;
         let chapter_background = self.chapter_of(&game, &running.map).and_then(|key| {
@@ -240,14 +251,14 @@ impl Console {
 
     /// The background to show when leaving a map for the main menu: the running map's chapter
     /// background (already saved when the map loaded), else the saved one.
-    pub(super) fn menu_background_after_game(&mut self) -> Option<GameMap> {
+    fn menu_background_after_game(&mut self) -> Option<GameMap> {
         self.remember_chapter_background()
             .or_else(|| self.background())
     }
 
     /// Shows a game's menu category over that game's own chapter 1 background, loading it
     /// unless it is already the loaded background level.
-    pub(super) fn show_category(&mut self, category: &str) -> Vec<Effect> {
+    fn show_category(&mut self, category: &str) -> Vec<Effect> {
         let game = self.gameui.category_game(category).to_owned();
         let Some(map) = self.gameui.background_maps.get(&game).cloned() else {
             self.background_transition.set_displayed_category(category);
@@ -379,7 +390,7 @@ impl Console {
     }
 
     /// The menu shown in the current mode, if any.
-    pub(super) fn game_menu(&self) -> Option<&GameMenu> {
+    fn game_menu(&self) -> Option<&GameMenu> {
         match self.base {
             Mode::MainMenu => Some(&self.main_menu),
             Mode::Pause => Some(&self.pause_menu),
@@ -388,7 +399,7 @@ impl Console {
     }
 
     /// One hit rectangle per menu row (spacers included), in canvas pixels.
-    pub(super) fn menu_rows(&self, count: usize) -> Vec<Rect> {
+    fn menu_rows(&self, count: usize) -> Vec<Rect> {
         self.menu_layout
             .geometry_for(self.canvas_size())
             .row_rects(count)

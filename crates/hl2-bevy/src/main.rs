@@ -1134,7 +1134,7 @@ pub(crate) type MapAssets<'a> = (
     &'a mut Assets<effects::EffectMaterial>,
     &'a mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
 );
-pub(crate) fn install_map(
+fn install_map(
     loaded: assets::LoadedMap,
     commands: &mut Commands,
     (meshes, materials, images, sounds, effect_materials, inverse_binds): MapAssets,

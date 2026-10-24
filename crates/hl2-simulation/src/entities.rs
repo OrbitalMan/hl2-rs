@@ -1,12 +1,9 @@
 //! Deterministic map entity I/O. Unsupported inputs are reported instead of silently emulated.
 use crate::physics;
-use glam::{Mat4, Quat, Vec3};
+use glam::{Quat, Vec3};
 use modkit_core::{parse_vec3, Entity, World};
 use serde::Serialize;
-use source_assets::{
-    scenes::{Cache, ChoreoScene, EventType},
-    vpk::Vfs,
-};
+use source_assets::scenes::ChoreoScene;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 

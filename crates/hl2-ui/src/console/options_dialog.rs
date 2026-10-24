@@ -1,8 +1,16 @@
 //! The Options dialog's lifecycle: display modes and recommendations it offers, opening it,
 //! its input, applying settings and reverting a video change.
 
-use super::*;
+use super::{ConfirmKind, Console, Effect, Mode, Window};
+use crate::gameui::display::DisplayModes;
+use crate::gameui::options::OptionsOutcome;
+use crate::gameui::video_confirm::VideoConfirm;
+use crate::gameui::video_confirm::VideoMode;
+use glam::vec2;
+use glam::Vec2;
+use source_ui::input::Input;
 use source_ui::shell;
+use source_ui::widgets::Painter;
 
 impl Console {
     /// Resolutions for the Video page, from the host's monitor query.

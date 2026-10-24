@@ -1,6 +1,6 @@
 //! Map loading: the gameplay loading dialog and the background-map transition.
 
-use super::*;
+use super::Console;
 
 impl Console {
     /// Displays the modal loading dialog for the given map.

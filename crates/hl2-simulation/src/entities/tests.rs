@@ -1,4 +1,7 @@
 use super::*;
+use glam::Mat4;
+use source_assets::scenes::EventType;
+use source_assets::vpk::Vfs;
 #[test]
 fn sequences_finish_at_the_last_visible_cycle_like_studio_frame_advance() {
     let clip = |frames: usize, fps: f32, looping: bool| modkit_core::animation::Clip {

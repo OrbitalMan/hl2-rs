@@ -1,7 +1,10 @@
 //! Scripted sequences and the AI's animation bridge: activities, sequence events, script moves
 //! and scripted_sequence playback.
 
-use super::*;
+use super::{metropolice_idle_activity, number, sequence_finish, Pending, Scene, SceneMoveCommand};
+use crate::physics;
+use glam::Vec3;
+use modkit_core::World;
 
 impl Scene {
     /// The actor belongs to a script: a scripted_sequence, a choreographed scene (as an
@@ -305,7 +308,7 @@ impl Scene {
     }
 
     /// StartSequence: the actor plays m_iszPlay (or ends at once without one).
-    pub(super) fn start_script_play(&mut self, world: &World, id: usize, actor: usize) {
+    fn start_script_play(&mut self, world: &World, id: usize, actor: usize) {
         let script = self.ent(world, id);
         // Another script takes the actor: the old post idle ends (m_hNextCine).
         self.states[actor].script_post_idle = None;

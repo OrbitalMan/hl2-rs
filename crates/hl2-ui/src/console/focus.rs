@@ -1,8 +1,18 @@
 //! Windows and focus: the console's single-focus window stack (Options, the developer
 //! console, their modal layers), Escape, and routing each frame's input to the layers.
 
-use super::*;
+use super::{commands, ConfirmKind, Console, Effect, Mode, Window};
+use glam::vec2;
+use glam::Vec2;
+use source_ui::canvas::Canvas;
+use source_ui::canvas::Rect;
+use source_ui::input::Input;
+use source_ui::input::Key;
+use source_ui::placement::CursorHint;
+use source_ui::shell::Shell;
 use source_ui::shell::{self, Host};
+use source_ui::widgets::Theme;
+use source_ui::windows::Layer;
 
 impl Console {
     pub fn modal_dialog_open(&self) -> bool {
@@ -132,7 +142,7 @@ impl Console {
     }
 
     /// The menu under the windows takes the pointer (gameplay under the console does not).
-    pub(super) fn base_is_menu(&self) -> bool {
+    fn base_is_menu(&self) -> bool {
         matches!(self.base, Mode::MainMenu | Mode::Pause)
     }
 
@@ -146,7 +156,7 @@ impl Console {
 
     /// Whether `point` (canvas pixels) is on a window: its frame, or for the console also its
     /// completion popup, which can reach past the frame.
-    pub(super) fn window_contains(&self, window: Window, point: Vec2) -> bool {
+    fn window_contains(&self, window: Window, point: Vec2) -> bool {
         self.window_bounds(window).contains(point)
             || window == Window::Console
                 && self.completion_bounds().is_some_and(|r| r.contains(point))
@@ -263,7 +273,7 @@ impl Console {
 
     /// Saves the Options dialog's and the console's placement once a drag, resize or reset changed
     /// it (the previous input frame's).
-    pub(super) fn save_placements(&mut self) {
+    fn save_placements(&mut self) {
         let mut changed = false;
         if let Some(options) = self.options.take_placement_changed() {
             self.config.dialogs.options = options;

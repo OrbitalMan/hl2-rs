@@ -76,7 +76,7 @@ pub(crate) fn black_cube() -> Image {
     cube_image(1, false, vec![0; 6 * 4])
 }
 /// A six-layer cube texture: RGBA16F linear halves (HDR) or sRGB-encoded RGBA8 (LDR).
-pub(crate) fn cube_image_filtered(
+fn cube_image_filtered(
     size: u16,
     hdr: bool,
     data: Vec<u8>,
@@ -114,7 +114,7 @@ pub(crate) fn cube_image_filtered(
     });
     image
 }
-pub(crate) fn cube_image(size: u16, hdr: bool, data: Vec<u8>) -> Image {
+fn cube_image(size: u16, hdr: bool, data: Vec<u8>) -> Image {
     cube_image_filtered(size, hdr, data, hl2_ui::config::Filtering::Trilinear)
 }
 /// Source model lighting for one entity: ambient cube plus up to four local
@@ -254,7 +254,7 @@ pub(crate) fn sampler_descriptor(
     }
 }
 
-pub(crate) fn image_filtered(
+fn image_filtered(
     width: u16,
     height: u16,
     rgba: Vec<u8>,
@@ -278,7 +278,7 @@ pub(crate) fn image_filtered(
 
 /// A repeating sRGB texture with its authored VTF mip chain (largest first), sampled
 /// according to the configured filtering mode.
-pub(crate) fn mip_image_filtered(
+fn mip_image_filtered(
     chain: &[source_assets::vtf::Image],
     filtering: hl2_ui::config::Filtering,
 ) -> Image {

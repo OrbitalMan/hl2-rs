@@ -1,6 +1,8 @@
 //! Triggers and touches: soundscapes, trigger_hurt, filters and player containment.
 
-use super::*;
+use super::{number, HurtState, Scene, PLAYER};
+use glam::Vec3;
+use modkit_core::World;
 
 impl Scene {
     /// SDK FrameUpdatePostEntityThink soundscape pass for the player's ear (eye) position,
@@ -69,13 +71,7 @@ impl Scene {
 
     /// CTriggerHurt::HurtEntity: filters and m_takedamage, then TakeDamage (negative
     /// damage heals); the damage comes from the trigger's origin. OnHurtPlayer/OnHurt.
-    pub(super) fn hurt_entity(
-        &mut self,
-        world: &World,
-        id: usize,
-        target: usize,
-        amount: f32,
-    ) -> bool {
+    fn hurt_entity(&mut self, world: &World, id: usize, target: usize, amount: f32) -> bool {
         let e = self.ent(world, id);
         let flags = number(e, "spawnflags", 0.) as u32;
         let kind = number(e, "damagetype", 0.) as u32;

@@ -1,18 +1,17 @@
 //! Parenting: parent frames, attachments and children following their parents.
 
-use super::*;
+use super::{Parent, Scene};
+use glam::Mat4;
+use glam::Quat;
+use glam::Vec3;
+use modkit_core::World;
 
 impl Scene {
     /// Skinning matrices for an actor: current base clip plus scene gesture layers.
     /// Both hosts use this so presentation, eyes and impacts see one pose.
     /// World frame an attached child follows: the parent's origin/rotation, or the
     /// parent's animated attachment (model-scaled). `None` for unknown attachments.
-    pub(super) fn parent_frame(
-        &self,
-        world: &World,
-        parent: usize,
-        attachment: Option<&str>,
-    ) -> Option<Mat4> {
+    fn parent_frame(&self, world: &World, parent: usize, attachment: Option<&str>) -> Option<Mat4> {
         let state = self.states.get(parent)?;
         match attachment.filter(|n| !n.is_empty()) {
             None => Some(Mat4::from_rotation_translation(

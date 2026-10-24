@@ -8,22 +8,20 @@ mod options_dialog;
 mod panel;
 
 use crate::gameui::{
-    display::DisplayModes,
-    menu::{GameMenu, MenuLayout, MenuOutcome},
-    options::{OptionsDialog, OptionsOutcome},
+    menu::{GameMenu, MenuLayout},
+    options::OptionsDialog,
     resources::{self, fallback_game_menu, GameUiResources},
-    video_confirm::{VideoConfirm, VideoMode},
+    video_confirm::VideoConfirm,
 };
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
 use source_ui::{
-    canvas::*,
+    canvas::{Canvas, Color, Rect, Texture2D, WHITE},
     console::panel::Style as ConsoleStyle,
     font::{FontFace, TextOutline},
-    input::{Input, Key},
-    message_box::{MessageBox, MessageBoxLayout},
-    placement::{self, CursorHint, Placement},
+    message_box::MessageBox,
+    placement::Placement,
     shell::Shell,
     widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
     windows::{Layer, WindowId},

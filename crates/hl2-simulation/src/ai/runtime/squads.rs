@@ -1,6 +1,11 @@
 //! Squads: membership, leaving and the squad events members share.
 
-use super::*;
+use super::{
+    humanoid, AiClass, AiRuntime, SquadEvent, COND_SEE_ENEMY, COP_CHATTER_ASK_QUESTION,
+    COP_CHATTER_WAIT_FOR_RESPONSE,
+};
+use crate::entities::Scene;
+use modkit_core::World;
 
 impl AiRuntime {
     /// CAI_BaseNPC::InitSquad for NPCs in the world (map NPCs on the first tick, maker
@@ -27,7 +32,7 @@ impl AiRuntime {
 
     /// CAI_Squad::AddToSquad: join in order; a later member learns the first member's
     /// enemies (UpdateEnemyMemory informed by it, not first-hand).
-    pub(super) fn add_to_squad(&mut self, id: usize, name: &str, now: f64) {
+    fn add_to_squad(&mut self, id: usize, name: &str, now: f64) {
         let squad = self
             .squads
             .entry(name.to_owned())
@@ -55,7 +60,7 @@ impl AiRuntime {
     }
 
     /// CAI_Squad::RemoveFromSquad; on death the remaining members get NotifyDeadFriend.
-    pub(super) fn remove_from_squad(
+    fn remove_from_squad(
         &mut self,
         id: usize,
         name: &str,

@@ -1,7 +1,16 @@
 //! Actors and their weapons: creating an actor for an entity, equipping it, shot regulators
 //! and weapon definitions.
 
-use super::*;
+use super::{
+    humanoid, is_elite_model, zombie, AiActor, AiClass, AiNpc, AiRuntime, Humanoid, Metropolice,
+    PlayerState, Zombie, COP_CHATTER_ASK_QUESTION, PLAYER, SF_NPC_GAG, THINK_INTERVAL,
+};
+use crate::entities::Scene;
+use crate::npc_weapons;
+use crate::npc_weapons::NpcWeapon;
+use crate::npc_weapons::NpcWeaponDef;
+use glam::Vec3;
+use std::collections::BTreeMap;
 
 impl AiRuntime {
     /// A uniform value in [-1, 1) from the AI's stream (shot spread, blood noise).
@@ -143,7 +152,7 @@ impl AiRuntime {
     }
 
     /// OnUpdateShotRegulator of `npc_class` for a gun (Reset(true) at equip).
-    pub(super) fn regulator(
+    fn regulator(
         npc_class: &str,
         weapon: Option<&NpcWeapon>,
         defs: &BTreeMap<String, NpcWeaponDef>,

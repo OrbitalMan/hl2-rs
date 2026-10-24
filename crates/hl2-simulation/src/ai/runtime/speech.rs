@@ -1,6 +1,13 @@
 //! Speech: idle chatter, ally lines, sentences and pain/death sounds.
 
-use super::*;
+use super::{
+    humanoid, sentence_criteria, sentence_priority, speech_group, AiActor, AiClass, AiRuntime,
+    Criteria, IdleThen, NpcState, PlayerState, Speech, COP_CHATTER_ASK_QUESTION,
+    COP_CHATTER_RESPONSE, COP_CHATTER_WAIT_FOR_RESPONSE, PLAYER, SF_NPC_GAG,
+};
+use crate::entities::Scene;
+use glam::Vec3;
+use modkit_core::World;
 
 impl AiRuntime {
     /// IdleSound's lines, and their effects when Speak succeeds.

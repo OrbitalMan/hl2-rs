@@ -2,7 +2,21 @@
 //! sounds and captions, poses, flexes, heads and look targets, scene movement, and the per-tick
 //! scene playback.
 
-use super::*;
+use super::{
+    angle_diff, clamp_yaw, glob, number, resolve_target_slot, scene_actor_class, Choreography,
+    ChoreographyState, MovementAnimation, Playback, Scene, SceneAnimation, SceneAnimationState,
+    SceneMoveCommand, ScenePause,
+};
+use crate::physics;
+use glam::Vec3;
+use modkit_core::World;
+use source_assets::scenes::Cache;
+use source_assets::scenes::ChoreoScene;
+use source_assets::scenes::EventType;
+use source_assets::vpk::Vfs;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::sync::Arc;
 
 impl Scene {
     /// Preload map choreography before simulation; no blocking asset reads in tick.
@@ -71,12 +85,7 @@ impl Scene {
 
     /// Every actor-class entity a scene actor name can resolve to, including killed and
     /// template-pending ones (`!activator` is unknown before playback and resolves to none).
-    pub(super) fn scene_actor_candidates(
-        &self,
-        world: &World,
-        scene: usize,
-        name: &str,
-    ) -> Vec<usize> {
+    fn scene_actor_candidates(&self, world: &World, scene: usize, name: &str) -> Vec<usize> {
         let name = resolve_target_slot(world, scene, name).to_lowercase();
         world
             .entities
@@ -144,7 +153,7 @@ impl Scene {
         true
     }
 
-    pub(super) fn scene_look_target(
+    fn scene_look_target(
         &self,
         world: &World,
         scene: usize,
@@ -189,7 +198,7 @@ impl Scene {
         Some(self.actor_sound_request(world, actor, cue))
     }
 
-    pub(super) fn actor_sound_request(
+    fn actor_sound_request(
         &self,
         world: &World,
         actor: usize,
@@ -219,7 +228,7 @@ impl Scene {
     /// master captions, and only when the player or its view entity is within the caption
     /// radius of one of the sound's origins (the actor, and the speakers of env_microphones
     /// that hear it), unless the event suppresses that check.
-    pub(super) fn scene_caption(
+    fn scene_caption(
         &mut self,
         world: &World,
         scene: &source_assets::scenes::ChoreoScene,
@@ -254,7 +263,7 @@ impl Scene {
     }
 
     /// Enabled env_microphones with a speaker, for caption sound origins.
-    pub(super) fn microphones(&self, world: &World) -> Vec<crate::captions::Microphone> {
+    fn microphones(&self, world: &World) -> Vec<crate::captions::Microphone> {
         let named = |name: &str| {
             if name.eq_ignore_ascii_case("!player") {
                 return Some(self.player_feet);
@@ -609,7 +618,7 @@ impl Scene {
             .collect()
     }
 
-    pub(super) fn restore_scene_animation(&mut self, actor: usize) {
+    fn restore_scene_animation(&mut self, actor: usize) {
         let state = &mut self.states[actor];
         if let Some(animation) = state.scene_animation.take() {
             state.animation = animation.previous;
@@ -618,7 +627,7 @@ impl Scene {
         }
     }
 
-    pub(super) fn clear_scene_animations(&mut self, owner: usize, canceled: bool) {
+    fn clear_scene_animations(&mut self, owner: usize, canceled: bool) {
         self.gestures.release(owner, None, canceled);
         self.movement_commands
             .push(SceneMoveCommand::CancelScene(owner));
@@ -747,13 +756,7 @@ impl Scene {
         }
     }
 
-    pub(super) fn section_blocked(
-        &self,
-        id: usize,
-        scene: &ChoreoScene,
-        play: &Playback,
-        at: f64,
-    ) -> bool {
+    fn section_blocked(&self, id: usize, scene: &ChoreoScene, play: &Playback, at: f64) -> bool {
         scene.events.iter().enumerate().any(|(event, e)| {
             if !e.active() || !e.resume_condition() || e.start as f64 > at {
                 return false;
@@ -803,7 +806,7 @@ impl Scene {
 
     /// ProcessGestureSceneEvent for started events inside their window; RemoveLayer
     /// after the end. Absent or empty gesture names produce no layer (LookupSequence fails).
-    pub(super) fn process_gestures(&mut self, id: usize, scene: &Choreography, play: &Playback) {
+    fn process_gestures(&mut self, id: usize, scene: &Choreography, play: &Playback) {
         for event in self.gestures.active_events(id) {
             let e = &scene.data.events[event];
             if play.elapsed > e.end.unwrap_or(e.start) as f64 {
@@ -848,13 +851,7 @@ impl Scene {
     /// the first process toward the target by event intensity, and the motor turns at most
     /// MaxYawSpeed (45 per 0.1 s) toward it. Facing while moving (AddFacingTarget) is not
     /// implemented; a moving actor only re-latches its initial yaw.
-    pub(super) fn process_faces(
-        &mut self,
-        _id: usize,
-        scene: &Choreography,
-        play: &mut Playback,
-        dt: f32,
-    ) {
+    fn process_faces(&mut self, _id: usize, scene: &Choreography, play: &mut Playback, dt: f32) {
         for &index in scene.order.iter().take(play.next) {
             let event = &scene.data.events[index];
             if event.kind != EventType::Face
@@ -904,7 +901,7 @@ impl Scene {
 
     /// CBaseFlex::AddFlexAnimation: each active track blends its intensity into the actor's
     /// controller value by event intensity; stereo tracks drive right_/left_ controllers.
-    pub(super) fn process_flex_animation(&mut self, scene: &Choreography, play: &Playback) {
+    fn process_flex_animation(&mut self, scene: &Choreography, play: &Playback) {
         let time = play.elapsed as f32;
         for &index in scene.order.iter().take(play.next) {
             let event = &scene.data.events[index];

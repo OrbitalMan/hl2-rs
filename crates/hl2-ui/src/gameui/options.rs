@@ -2053,12 +2053,7 @@ impl OptionsDialog {
     }
 
     /// Returns whether the credits subdialog content fits completely within the window at `canvas` resolution.
-    pub(crate) fn credits_fits_window(
-        &self,
-        sub: Sub,
-        canvas: Vec2,
-        measure_w: impl Fn(&str) -> f32,
-    ) -> bool {
+    fn credits_fits_window(&self, sub: Sub, canvas: Vec2, measure_w: impl Fn(&str) -> f32) -> bool {
         let scale = crate::proportional::dialog_scale(canvas);
         let size = self.sub_frame_size(sub, measure_w);
         size.x * scale <= canvas.x && size.y * scale <= canvas.y

@@ -1,7 +1,15 @@
 //! Applying what thinking decided, and world events that reach the AI: melee hits, thrown
 //! objects, +USE, missiles, lasers, combat sounds and dispositions.
 
-use super::*;
+use super::{
+    classify, senses, yaw_of, AiClass, AiRuntime, Class, Context, CopRequest, Disposition,
+    MeleeHit, PhysicsSight, PlayerHit, PlayerState, SightWorld, PLAYER,
+};
+use crate::entities::Scene;
+use crate::npc::Controller;
+use crate::physics::Physics;
+use glam::Vec3;
+use modkit_core::World;
 
 impl AiRuntime {
     /// Would a stunstick hit knock the player out (the cop's policing goal)?
@@ -326,7 +334,7 @@ impl AiRuntime {
     /// (CTraceFilterMelee only damages hated combat characters). World blocking is not
     /// traced (the player swing does not trace it either).
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn melee_victim(
+    fn melee_victim(
         &self,
         id: usize,
         world: &World,
@@ -365,13 +373,7 @@ impl AiRuntime {
 
     /// AdministerJustice's search: the first other allowed-to-respond cop within 512
     /// units that sees this cop and the player.
-    pub(super) fn call_for_justice(
-        &mut self,
-        id: usize,
-        world: &World,
-        scene: &Scene,
-        physics: &Physics,
-    ) {
+    fn call_for_justice(&mut self, id: usize, world: &World, scene: &Scene, physics: &Physics) {
         let origin = scene.states[id].origin + Vec3::Z * 36.;
         let sight = PhysicsSight { physics, world };
         let helper = self.actors.iter().find_map(|(other, actor)| {

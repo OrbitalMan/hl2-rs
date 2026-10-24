@@ -1,6 +1,8 @@
 //! Entity I/O: firing outputs, resolving targets, queuing and delivering inputs, and +USE.
 
-use super::*;
+use super::{glob, inputs, number, Pending, PhysGunPickup, Scene};
+use glam::Vec3;
+use modkit_core::World;
 
 impl Scene {
     pub fn fire(&mut self, id: usize, name: &str, activator: usize) {
@@ -116,7 +118,7 @@ impl Scene {
         self.use_with_opener(world, id, Some(player_origin));
     }
 
-    pub(super) fn use_with_opener(&mut self, world: &World, id: usize, opener: Option<Vec3>) {
+    fn use_with_opener(&mut self, world: &World, id: usize, opener: Option<Vec3>) {
         let Some(entity) = world.entities.get(id) else {
             return;
         };

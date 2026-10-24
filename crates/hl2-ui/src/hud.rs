@@ -11,7 +11,13 @@ use source_assets::{
     keyvalues::{self, Entry},
     vpk::Vfs,
 };
-use source_ui::{canvas::*, font::FontFace};
+use source_ui::{
+    canvas::{
+        draw_texture_ex, texture, Canvas, Color, DrawTextureParams, FilterMode, MutexCell, Rect,
+        Texture2D, WHITE, YELLOW,
+    },
+    font::FontFace,
+};
 use std::collections::{BTreeMap, HashSet};
 
 fn find<'a>(entries: &'a [Entry], name: &str) -> Option<&'a Entry> {
@@ -2129,7 +2135,7 @@ impl WeaponHud {
                 );
                 let origin = center - vec2((glyph.advance / 2) as f32, (glyph.height / 2) as f32)
                     + glyph.origin;
-                draw_texture(
+                source_ui::canvas::draw_texture(
                     &self.canvas,
                     texture,
                     origin.x,
@@ -2153,6 +2159,7 @@ impl WeaponHud {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use source_ui::canvas::Quad;
 
     #[cfg(windows)]
     #[test]

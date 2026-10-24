@@ -53,7 +53,9 @@ pub(super) fn fade(scene: &mut Scene, d: &Delivery) -> bool {
     let (e, p) = (d.entity, d.pending);
     // CEnvFade::InputFade: SF_FADE_IN 1, MODULATE 2, ONLYONE 4 (the activating
     // player only), STAYOUT 8; everyone else gets FFADE_PURGE.
-    use crate::player_damage::*;
+    use crate::player_damage::{
+        ScreenFade, FFADE_IN, FFADE_MODULATE, FFADE_OUT, FFADE_PURGE, FFADE_STAYOUT,
+    };
     let flags = number(e, "spawnflags", 0.) as u32;
     let mut fade = if flags & 1 != 0 { FFADE_IN } else { FFADE_OUT };
     if flags & 2 != 0 {

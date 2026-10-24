@@ -9,7 +9,8 @@ use source_ui::console::dialog::{
 use source_ui::console::panel::{
     HistoryView, Level, Line, CONSOLE_ROW, NOMINAL_ADVANCE, OUTPUT_LINES, WHEEL_ROWS,
 };
-use source_ui::input::KeyRepeat;
+use source_ui::input::{Input, Key, KeyRepeat};
+use source_ui::placement::CursorHint;
 use source_ui::shell;
 use source_ui::widgets::ScrollMode;
 #[test]

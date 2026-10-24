@@ -1,5 +1,24 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 6: narrower visibility, explicit imports
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- 56 functions used only inside their own module became private, judged by the compiler: every `pub(super) fn` and `pub(crate) fn` in the workspace was made private, and exactly the ones `cargo check --workspace --all-targets` then reported as used elsewhere got their visibility back. `pub(super) fn` 219 -> 182, `pub(crate) fn` 98 -> 79 (hl2-ui, hl2-simulation, hl2-bevy, source-assets).
+- The 15 production `use super::*` imports left by the file splits (hl2-ui `console/*`, hl2-simulation `entities/*`, `ai/runtime/*`) are explicit, and so are the other production glob imports Clippy's `wildcard_imports` fix rewrote in hl2-ui and hl2-simulation (`source_ui::canvas::*`, the AI modules' `conditions::*` and the like). Names a parent only re-imported now come from their real homes (`glam::Vec3`, `source_ui::input::Input`, `crate::entities::Scene`...), and the parents lost the imports only their children used. Test modules keep their conventional `use super::*`; six of them gained the imports they had taken through a parent's glob. One Windows-only call in the HUD names `source_ui::canvas::draw_texture` in full (the fix ran on macOS, where that code is not compiled).
+- rustfmt re-wrapped the signatures that now fit on one line.
+
+**Why:** Step 6 of the review: visibility and imports should say where code is used and where it comes from.
+
+**Tested how:** `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays pass, 10 of 10; the repository isolation check passes.
+
+**Result:** Import-and-visibility changes only. Production lines +31 in hl2-ui and +56 in hl2-simulation (explicit import lists).
+
+**Still broken or not tested:** nothing new.
+
+**Next:** Step 7: `AiRuntime::think`.
+
 ## 2026-10-24 UI toolkit split, step 5: hl2-shared folded back into hl2-simulation
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

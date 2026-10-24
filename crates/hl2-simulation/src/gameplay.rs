@@ -306,7 +306,9 @@ const FUNC_BREAKABLE_DAMAGE: modkit_core::PropData = modkit_core::PropData {
 /// modifiers default 1): bullets x dmg.bullets (buckshot twice that), clubs x dmg.club,
 /// blasts x dmg.explosive, slash + crush x 10, time-based damage none.
 pub fn breakable_damage(amount: f32, kind: u32, data: Option<&modkit_core::PropData>) -> f32 {
-    use crate::player_damage::*;
+    use crate::player_damage::{
+        DMG_BLAST, DMG_BUCKSHOT, DMG_BULLET, DMG_CLUB, DMG_CRUSH, DMG_SLASH, TIME_BASED,
+    };
     let defaults = modkit_core::PropData::default();
     let data = data.unwrap_or(&defaults);
     let mut damage = amount;

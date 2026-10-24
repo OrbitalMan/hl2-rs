@@ -2,9 +2,12 @@
 //! ([`source_ui::console::panel::ConsolePanel`]) with HL2's commands, completion sources, texts
 //! and window look; printing, submitting lines and turning the dialog's actions into effects.
 
-use super::*;
+use super::{commands, complete, Console, Effect, Window, RELEASE_SOUND};
+use source_ui::canvas::Rect;
 use source_ui::console::command;
 use source_ui::console::panel::{Action, Level, Look};
+use source_ui::input::Input;
+use source_ui::windows::Layer;
 
 impl Console {
     pub fn log(&mut self, text: impl Into<String>) {

@@ -8,7 +8,14 @@
 //! throttling, no think staggering). Class layers: npc_metropolice and the humanoids
 //! (npc_citizen, npc_barney, npc_alyx, npc_combine_s); other classes have no AI yet.
 use super::assault;
-use super::conditions::*;
+use super::conditions::{
+    Conditions, COND_CAN_MELEE_ATTACK1, COND_CAN_RANGE_ATTACK1, COND_ENEMY_DEAD,
+    COND_ENEMY_OCCLUDED, COND_ENEMY_WENT_NULL, COND_HEAVY_DAMAGE, COND_LIGHT_DAMAGE,
+    COND_LOST_ENEMY, COND_LOW_PRIMARY_AMMO, COND_NEW_ENEMY, COND_NONE, COND_NOT_FACING_ATTACK,
+    COND_NO_PRIMARY_AMMO, COND_NO_SECONDARY_AMMO, COND_PROVOKED, COND_SEE_ENEMY, COND_SEE_FEAR,
+    COND_SEE_HATE, COND_SEE_PLAYER, COND_TOO_CLOSE_TO_ATTACK, COND_TOO_FAR_TO_ATTACK,
+    COND_WEAPON_HAS_LOS, COND_WEAPON_SIGHT_OCCLUDED,
+};
 use super::host::{yaw_of, PhysicsSight, SceneMotor};
 use super::humanoid::{self, Humanoid};
 use super::metropolice::{CopRequest, Metropolice, PlayerView, PLAYER};

@@ -471,7 +471,7 @@ impl VideoViewport {
 
 /// Applies applied video settings: the window mode at once, the game-frame resolution, and in
 /// windowed mode a window resize carried out by [`resize_window`].
-pub(crate) fn apply_video_config_to_window(
+fn apply_video_config_to_window(
     window: &mut Window,
     cfg: &hl2_ui::config::VideoSettings,
     frame: Option<&mut GameFrame>,

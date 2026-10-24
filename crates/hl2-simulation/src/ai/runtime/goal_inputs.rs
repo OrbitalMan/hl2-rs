@@ -1,7 +1,11 @@
 //! Map inputs to AI goals: ai_goal_actbusy, ai_goal_assault, ai_relationship,
 //! aiscripted_schedule and the other inputs the runtime takes.
 
-use super::*;
+use super::{assault, yaw_keyvalue, AiClass, AiRuntime, Disposition, NpcState, Policing, PLAYER};
+use crate::entities::Scene;
+use crate::npc::Controller;
+use glam::Vec3;
+use modkit_core::World;
 
 impl AiRuntime {
     /// SetPoliceGoal / ActivateBaton on cops and EnableKnockOut / DisableKnockOut on
@@ -103,7 +107,7 @@ impl AiRuntime {
     /// ForceNPCToActBusy ("<npc> [hint] [teleport] [nearest] [$activity] [max time]";
     /// a named hint, teleports and forced activities are not reconstructed) and
     /// SetBusySearchRange. Only metrocops host the behavior so far.
-    pub(super) fn actbusy_goal_input(
+    fn actbusy_goal_input(
         &mut self,
         world: &World,
         scene: &Scene,
@@ -194,7 +198,7 @@ impl AiRuntime {
 
     /// CAI_GoalEntity actors: the NPCs whose targetname (SearchType 0) or classname
     /// (SearchType 1) matches the goal's "actor" keyvalue.
-    pub(super) fn goal_actors(&self, world: &World, goal: usize) -> Vec<usize> {
+    fn goal_actors(&self, world: &World, goal: usize) -> Vec<usize> {
         let Some(e) = world.entities.get(goal) else {
             return Vec::new();
         };
@@ -221,7 +225,7 @@ impl AiRuntime {
 
     /// Entities of a class matching a name (FindEntityByName: a trailing '*' matches
     /// any suffix).
-    pub(super) fn named(world: &World, class: &str, name: &str) -> Vec<usize> {
+    fn named(world: &World, class: &str, name: &str) -> Vec<usize> {
         let name = name.to_lowercase();
         world
             .entities
@@ -236,7 +240,7 @@ impl AiRuntime {
             .collect()
     }
 
-    pub(super) fn assault_point(world: &World, id: usize) -> assault::AssaultPoint {
+    fn assault_point(world: &World, id: usize) -> assault::AssaultPoint {
         let e = &world.entities[id];
         let num = |k: &str, d: f32| e.get(k).and_then(|v| v.trim().parse().ok()).unwrap_or(d);
         let flag = |k: &str| {
@@ -262,13 +266,7 @@ impl AiRuntime {
 
     /// ai_goal_assault inputs: Activate (EnableGoal: SetParameters for each actor),
     /// Deactivate (DisableGoal), BeginAssault (ReceiveAssaultCue(CUE_ENTITY_INPUT)).
-    pub(super) fn assault_goal_input(
-        &mut self,
-        world: &World,
-        scene: &mut Scene,
-        goal: usize,
-        input: &str,
-    ) {
+    fn assault_goal_input(&mut self, world: &World, scene: &mut Scene, goal: usize, input: &str) {
         // Held templates (not spawned yet) and dead NPCs are not actors.
         let actors: Vec<usize> = self
             .goal_actors(world, goal)
@@ -440,13 +438,7 @@ impl AiRuntime {
     /// targetname or classname ("!player" for the player), within `radius` of the entity
     /// when set; disposition 1 hate, 2 fear, 3 like, 4 neutral; Reciprocal applies it both
     /// ways. Revert removes the pairs this entity applied. Rank (priority) is not modeled.
-    pub(super) fn apply_relationship(
-        &mut self,
-        world: &World,
-        scene: &Scene,
-        rel: usize,
-        apply: bool,
-    ) {
+    fn apply_relationship(&mut self, world: &World, scene: &Scene, rel: usize, apply: bool) {
         if let Some(pairs) = self.applied_relationships.remove(&rel) {
             for pair in pairs {
                 self.relationship_overrides.remove(&pair);
@@ -516,14 +508,14 @@ impl AiRuntime {
     }
 
     /// UnlockRallyPoint for an NPC.
-    pub(super) fn release_rally(&mut self, id: usize) {
+    fn release_rally(&mut self, id: usize) {
         self.rally_locks.retain(|_, holder| *holder != id);
     }
 
     /// aiscripted_schedule StartSchedule/StopSchedule (CAI_ScriptedSchedule): walk or run
     /// the m_iszEntity NPC(s) to the goal entity (ScheduledMoveToGoalEntity with
     /// SCHED_IDLE_WALK interrupts); forcestate sets the NPC state first.
-    pub(super) fn scripted_schedule_input(
+    fn scripted_schedule_input(
         &mut self,
         world: &World,
         scene: &mut Scene,
