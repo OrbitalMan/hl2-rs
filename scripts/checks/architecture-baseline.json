@@ -15,9 +15,6 @@
    "glob imports": 4,
    "too_many_arguments allowances": 2
   },
-  "modkit-core": {
-   "glob imports": 0
-  },
   "source-assets": {
    "glob imports": 1
   },
@@ -191,7 +188,7 @@
   "crates/hl2-simulation/src/projectiles.rs": 1219,
   "crates/hl2-simulation/src/sounds.rs": 1208,
   "crates/hl2-ui/src/closecaption.rs": 1182,
-  "crates/hl2-ui/src/console.rs": 1121,
+  "crates/hl2-ui/src/console.rs": 1073,
   "crates/hl2-ui/src/gameui/options.rs": 2738,
   "crates/hl2-ui/src/hud.rs": 2158,
   "crates/source-assets/src/models.rs": 1614,
@@ -239,7 +236,7 @@
    808
   ],
   "crates/hl2-bevy/src/input.rs::controls": [
-   142
+   141
   ],
   "crates/hl2-bevy/src/main.rs::main": [
    333
@@ -272,7 +269,7 @@
    106
   ],
   "crates/hl2-bevy/src/simulation.rs::console_effects": [
-   147
+   140
   ],
   "crates/hl2-bevy/src/simulation.rs::step": [
    244

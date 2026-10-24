@@ -90,6 +90,31 @@ fn console_cvar(
     Ok(None)
 }
 
+pub(super) fn viewmodel_tweak_mode(
+    _console: &mut Console,
+    spec: &'static Spec,
+    args: &[String],
+) -> Outcome {
+    match args {
+        [value] => Ok(Some(Effect::ViewmodelTweakMode(
+            boolean(value).ok_or_else(|| spec.usage())?,
+        ))),
+        _ => Err(spec.usage()),
+    }
+}
+
+pub(super) fn viewmodel_tweak_reset(
+    _console: &mut Console,
+    spec: &'static Spec,
+    args: &[String],
+) -> Outcome {
+    if args.is_empty() {
+        Ok(Some(Effect::ViewmodelTweakReset))
+    } else {
+        Err(spec.usage())
+    }
+}
+
 pub(super) fn con_filter_enable(
     console: &mut Console,
     spec: &'static Spec,

@@ -16,7 +16,9 @@ pub struct ViewmodelDebug {
     pub weapon: String,
     pub profile: Option<hl2_ui::tuning::ViewmodelProfile>,
     pub framing: hl2_ui::tuning::ViewmodelFraming,
-    /// Edits retained for the current F5 session, keyed by weapon classname and direct profile.
+    /// `viewmodel_tweak_reset` ran; `controls` zeroes the selected profile once it is selected.
+    pub reset_pending: bool,
+    /// Edits retained for the current tweak-mode session, keyed by weapon classname and direct profile.
     pub edits:
         BTreeMap<(String, hl2_ui::tuning::ViewmodelProfile), hl2_ui::tuning::ViewmodelFraming>,
 }
@@ -148,7 +150,7 @@ pub struct Simulation {
     /// Keep simulating with idle input after the script ends (`--capture-live` bursts).
     pub run_after_script: bool,
     pub dev_overlay: bool,
-    /// F5 runtime-only viewmodel tuning overlay and active direct-profile edit.
+    /// Runtime-only viewmodel tuning overlay and active direct-profile edit.
     pub viewmodel_debug: ViewmodelDebug,
     pub pending_video_config: Option<hl2_ui::config::VideoSettings>,
     /// Window settings last given to the window: startup values (after command-line overrides)
@@ -236,7 +238,7 @@ impl Simulation {
     pub fn view_fov(&self, player_fov: f32) -> f32 {
         self.zoom_fov.unwrap_or(player_fov)
     }
-    /// The current viewmodel framing, including the selected direct profile while F5 tuning is on.
+    /// The current viewmodel framing, including the selected direct profile while viewmodel tweak mode is on.
     pub fn viewmodel_framing(&self, weapon: &str, aspect: f32) -> hl2_ui::tuning::ViewmodelFraming {
         let profile = hl2_ui::tuning::viewmodel_profile(aspect);
         if self.viewmodel_debug.enabled
@@ -292,6 +294,7 @@ impl Simulation {
         self.player = Player::new(eye);
         self.view_control = None;
         self.zoom_fov = None;
+        self.viewmodel_debug = ViewmodelDebug::default();
         if direct {
             self.fly = false;
             self.yaw = world.spawn().1;
@@ -320,6 +323,29 @@ impl Simulation {
             self.player = Player::new(self.eye);
         }
     }
+    /// `viewmodel_tweak_mode`: only while a gameplay map is loaded.
+    fn viewmodel_tweak_mode(&mut self, ui: &mut crate::ui_host::Console, on: bool) {
+        if !on {
+            self.viewmodel_debug = ViewmodelDebug::default();
+            ui.source.log("viewmodel_tweak_mode 0");
+        } else if self.loading || self.background_level {
+            ui.source
+                .log("viewmodel_tweak_mode needs a loaded gameplay map; start or load one first.");
+        } else {
+            self.viewmodel_debug.enabled = true;
+            ui.source.log("viewmodel_tweak_mode 1");
+        }
+    }
+    /// `viewmodel_tweak_reset`: only while `viewmodel_tweak_mode` is on.
+    fn viewmodel_tweak_reset(&mut self, ui: &mut crate::ui_host::Console) {
+        if self.viewmodel_debug.enabled {
+            self.viewmodel_debug.reset_pending = true;
+            ui.source.log("viewmodel_tweak_reset");
+        } else {
+            ui.source
+                .log("viewmodel_tweak_reset needs viewmodel_tweak_mode 1.");
+        }
+    }
     pub fn console_effects(
         &mut self,
         ui: &mut crate::ui_host::Console,
@@ -329,16 +355,7 @@ impl Simulation {
         use hl2_ui::console::Effect;
         for effect in effects {
             match effect {
-                Effect::Loadout => {
-                    for name in game.weapons.keys() {
-                        game.inventory.give(name, &game.weapons, game.scene.time);
-                    }
-                    game.inventory.refill_ammo(&game.weapons);
-                    game.inventory.suit = true;
-                    game.inventory
-                        .give("weapon_crowbar", &game.weapons, game.scene.time);
-                    ui.source.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
-                }
+                Effect::Loadout => grant_loadout(ui, game),
                 Effect::AiEnable(value) => {
                     let on = value.unwrap_or(!game.ai.enabled);
                     game.ai.enabled = on;
@@ -361,6 +378,8 @@ impl Simulation {
                     self.player = Player::new(self.eye);
                     ui.source.log(format!("noclip {}", u8::from(self.fly)));
                 }
+                Effect::ViewmodelTweakMode(on) => self.viewmodel_tweak_mode(ui, on),
+                Effect::ViewmodelTweakReset => self.viewmodel_tweak_reset(ui),
                 Effect::Getpos => ui.source.log(format!(
                     "setpos {:.6} {:.6} {:.6}; setang {:.6} {:.6} 0",
                     self.eye.x,
@@ -810,6 +829,18 @@ fn fixed_step(
         exit.write(AppExit::Success);
     }
 }
+/// `impulse 101`: the implemented weapons, ammunition and the suit.
+fn grant_loadout(ui: &mut crate::ui_host::Console, game: &mut crate::gameplay::Gameplay) {
+    for name in game.weapons.keys() {
+        game.inventory.give(name, &game.weapons, game.scene.time);
+    }
+    game.inventory.refill_ammo(&game.weapons);
+    game.inventory.suit = true;
+    game.inventory
+        .give("weapon_crowbar", &game.weapons, game.scene.time);
+    ui.source.log("Granted the six implemented weapons, ammunition and suit. Remaining HL2 weapons are not implemented.");
+}
+
 /// The part of the video settings that the window carries: resolution and display mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowSettings {
@@ -1439,6 +1470,36 @@ mod tests {
             hl2_simulation::sounds::SoundRequest::ui("ui/buttonclickrelease.wav")
         );
         assert!(game.sound_requests[1].ui);
+    }
+
+    #[test]
+    fn viewmodel_tweak_commands_follow_the_gameplay_map_state() {
+        use hl2_ui::console::Effect::{ViewmodelTweakMode, ViewmodelTweakReset};
+        let mut sim = Simulation::new(&World::default(), glam::Vec3::ZERO, 0., 0., false, vec![]);
+        let mut game = crate::gameplay::Gameplay::synthetic(World::default());
+        let mut ui = crate::ui_host::Console::new(Default::default());
+        let mut run =
+            |sim: &mut Simulation, effect| sim.console_effects(&mut ui, &mut game, vec![effect]);
+
+        run(&mut sim, ViewmodelTweakReset);
+        assert!(!sim.viewmodel_debug.reset_pending);
+        sim.background_level = true;
+        run(&mut sim, ViewmodelTweakMode(true));
+        assert!(!sim.viewmodel_debug.enabled);
+        sim.background_level = false;
+        sim.loading = true;
+        run(&mut sim, ViewmodelTweakMode(true));
+        assert!(!sim.viewmodel_debug.enabled);
+        sim.loading = false;
+        run(&mut sim, ViewmodelTweakMode(true));
+        assert!(sim.viewmodel_debug.enabled);
+        run(&mut sim, ViewmodelTweakReset);
+        assert!(sim.viewmodel_debug.reset_pending);
+        sim.change_map(&World::default(), glam::Vec3::ZERO, true);
+        assert!(!sim.viewmodel_debug.enabled && !sim.viewmodel_debug.reset_pending);
+        run(&mut sim, ViewmodelTweakMode(true));
+        run(&mut sim, ViewmodelTweakMode(false));
+        assert!(!sim.viewmodel_debug.enabled);
     }
 
     #[test]

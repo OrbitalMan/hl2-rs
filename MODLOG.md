@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-24 Viewmodel tuning moves from F5/F6 to console commands
+
+**Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.
+
+**Changed:** `viewmodel_tweak_mode 1|0` replaces F5 and `viewmodel_tweak_reset` replaces F6 (both key binds removed). The console commands only emit `Effect::ViewmodelTweakMode` / `ViewmodelTweakReset`; the host decides: mode 1 is refused with a logged reason while a map loads or a menu background level runs, reset is refused unless the mode is on. `Simulation::change_map` and a per-frame check in `controls` (loading or background level) turn the mode off, so a map change or leaving to the main menu ends it. The reset is applied by `controls` after the target is selected, also while the console has the game paused. `Effect` and `GameMap` moved to `console/effect.rs`, the `impulse 101` arm to `grant_loadout`, and the new console test to `viewmodel_tests.rs`, so no size baseline grew (three shrank).
+
+**Why:** Owner request: fewer dev key binds, explicit availability rules.
+
+**Tested how:** Unit tests: command parsing and arguments (hl2-ui), host enable/refuse/reset/map-change rules (hl2-bevy). The local validation (`scripts/checks/validate.sh`: tests, strict Clippy, fmt, architecture) passed.
+
+**Result:** The tuner is driven from the console; the overlay hint names the reset command.
+
+**Still broken or not tested:** Packaged console use, and quitting from the game to the main menu with the mode on.
+
+**Next:** Owner tries the commands in a live run.
+
 ## 2026-10-24 AGENTS.md: rules only, architecture rules for agents
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

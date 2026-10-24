@@ -286,15 +286,15 @@ Packaged visual comparison on an actual portrait display remains not tested.
 
 ## Viewmodel tuning overlay (2026-10-22)
 
-F5 toggles a runtime-only viewmodel tuning mode. Its debug overlay reports the current aspect
+`viewmodel_tweak_mode 1|0` (console) toggles a runtime-only viewmodel tuning mode, only while a gameplay map is loaded; a map load, a return to the main menu or a background level ends it. F5 and F6 are not bound. Its debug overlay reports the current aspect
 profile, active weapon classname, and direct profile `fov_offset` / `[forward, left, up]` offsets.
 `[`/`]` adjust FOV, `,`/`.` adjust forward X, Up/Down adjust Z, and Left/Right adjust lateral Y;
 Shift changes each step from 0.1 to 1.0 and Alt/Option to 0.01. Adjust keys autorepeat while held, using the same delay
 and interval as Options > Keyboard list arrows (press once, then repeat after 0.4 s every 0.05 s;
-the latest pressed adjust key is the one that repeats). F6 zeros `fov_offset` and `offset` for the
-selected weapon's current aspect profile and records that as the session edit. F5 only adds the
+the latest pressed adjust key is the one that repeats). `viewmodel_tweak_reset` (only while the mode is on) zeros `fov_offset` and `offset` for the
+selected weapon's current aspect profile and records that as the session edit. The mode only adds the
 editor adjustments; normal mouse look, movement, firing, reloading, and weapon selection continue
-through the ordinary gameplay input path. F1 and F5 overlays may be shown together.
+through the ordinary gameplay input path. F1 and the tweak overlay may be shown together.
 
 The tuning asset gains zero-valued standard profiles so the same workflow works at ordinary aspect
 ratios as well as portrait/ultrawide; their defaults preserve existing standard-aspect rendering.
@@ -305,17 +305,17 @@ toggle state, and adjustment steps/signs. Packaged input capture and visual pres
 runtime checks.
 
 Session editing extension: keep direct edits in memory by `(weapon classname, aspect profile)` for
-the lifetime of one F5 session. Before switching to another weapon/profile, retain the current
+the lifetime of one tweak-mode session. Before switching to another weapon/profile, retain the current
 framing; when revisiting a key, restore its pending edit, otherwise load the asset baseline. Number
 keys 1-6 run the normal slot selection/confirmation path while the tuner is active. The session
 survives Pause/Options so the owner can change resolution/aspect; while paused, input belongs to the
 UI and tuning resumes after returning to gameplay. Each adjustment prints a full tuning snapshot
-with every session edit merged, so the accumulated result can be copied once. F5-off resets the
+with every session edit merged, so the accumulated result can be copied once. Turning the mode off resets the
 entire session. Validation covers switching/restoring independent keys, accumulated serialization,
-and session reset; hold-repeat and F6 zeroing are unit-tested. Packaged interaction remains a
+and session reset; hold-repeat and reset are unit-tested. Packaged interaction remains a
 separate check.
 
-Gameplay-input correction: F5 remains a tuning display, not a gameplay input mode. Keep the existing
+Gameplay-input correction: tweak mode remains a tuning display, not a gameplay input mode. Keep the existing
 target-sync/edit/snapshot path, then continue through normal input sampling so mouse look, movement,
 attacks, reload, and configured weapon selection continue unchanged. Remove the separate slot
 shortcut to avoid duplicating the normal action path. Validate with the host input and gameplay tests

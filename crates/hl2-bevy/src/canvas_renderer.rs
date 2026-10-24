@@ -376,7 +376,7 @@ pub fn present(
             format!("Map reconstruction preview  |  position {:.1}, {:.1}, {:.1}  |  Bevy/wgpu  |  {:.2} ms  |  {} materials / {} colliders / {} bodies", eye.x, eye.y, eye.z, hud.timing.frame_ms, stats.materials, sim.physics.colliders.len(), sim.physics.bodies.len()),
         ];
     }
-    // Overlays stack down the left edge in the order F1, F5, F4; hidden ones leave no gap.
+    // Overlays stack down the left edge in the order F1, viewmodel tweak, F4; hidden ones leave no gap.
     let mut stack_top = 0.;
     if !hud.debug_lines.is_empty() {
         stack_top = ui.source.draw_debug(&hud.debug_lines) + OVERLAY_GAP;
@@ -393,7 +393,7 @@ pub fn present(
                 "offset: [{:.2}, {:.2}, {:.2}]    L/R:Y  U/D:Z  ,/.:X",
                 value.offset[0], value.offset[1], value.offset[2]
             ),
-            "Shift = 1.0  Alt = 0.01    hold to repeat    F6 reset    F5".to_owned(),
+            "Shift = 1.0  Alt = 0.01    hold to repeat    viewmodel_tweak_reset".to_owned(),
         ];
         stack_top = ui.source.draw_viewmodel_debug(&lines, stack_top) + OVERLAY_GAP;
     }

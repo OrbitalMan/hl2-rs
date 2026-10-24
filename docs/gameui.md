@@ -1103,19 +1103,19 @@ Owner list after 10h, extended 2026-10-19 with ultrawide menu background and pre
       are untouched unless a developer edits those values. Because framing is looked up from
       `game.inventory.active`, switching weapons applies the new weapon's framing immediately as its
       draw animation begins.
-  - F5 toggles the runtime-only viewmodel tuning overlay during unpaused gameplay. It shows the
+  - The console command `viewmodel_tweak_mode 1|0` turns the runtime-only viewmodel tuning overlay on or off. It needs a loaded gameplay map (not a menu background level, not while a map loads) and otherwise logs why it refuses; loading another map or returning to the main menu turns it off. F5 and F6 are not bound. The overlay shows the
     active aspect profile, weapon classname, `fov_offset`, and `[x, y, z]` offset. `[`/`]` adjust FOV,
     `,`/`.` lower/raise forward X, Up/Down adjust Z, and Left/Right adjust lateral Y. Steps are
     `0.1`, `1.0` while Shift is held, or `0.01` while Alt/Option is held. Adjust keys repeat while held (same timing as Options >
-    Keyboard list arrows). F6 zeros the selected weapon's current profile `fov_offset` and `offset`.
+    Keyboard list arrows). `viewmodel_tweak_reset` zeros the selected weapon's current profile `fov_offset` and `offset`; it works only while the mode is on.
     Adjustments apply immediately without disabling normal
     mouse look, movement, firing, reloading, or weapon selection. The tuner retains
-    edits in memory by weapon and aspect profile for the current F5 session; number keys 1-6 use
+    edits in memory by weapon and aspect profile for the current tweak-mode session; number keys 1-6 use
     normal weapon selection/confirmation, and revisiting a weapon/profile restores its prior edit. The
     session survives Pause/Options so display resolution and aspect can be changed; while paused,
     keys go to the UI and tuning resumes on return to gameplay. Every adjustment updates one
     replaceable developer-console snapshot containing the complete `tuning.json` with all session
-    edits merged. Turning F5 off ends the session and discards these in-memory edits. The utility
+    edits merged. Turning the mode off ends the session and discards these in-memory edits. The utility
     does not write the asset file; copy the accumulated logged JSON into it to keep changes.
   - Both sliders are applied by the sub-dialog's OK (`Sub::apply_on_ok`) and saved in `hl2-config.json`
     (out-of-range values are clamped on load). Ranges and the other numbers are in

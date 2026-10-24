@@ -282,15 +282,11 @@ pub(crate) fn controls(
         sim.dev_overlay = !sim.dev_overlay;
     }
     let aspect = crate::video::frame_aspect(frame.as_deref());
-    if keys.just_pressed(KeyCode::F5)
-        && window.focused
-        && sim.commands.is_empty()
-        && let Some(game) = game.as_deref()
-        && (sim.viewmodel_debug.enabled || !sim.paused())
-    {
-        toggle_viewmodel_debug(&mut sim.viewmodel_debug, &game.inventory.active, aspect);
+    // Loading a map or returning to a background level ends tweak mode.
+    if sim.loading() || sim.background_level {
+        sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
     }
-    if sim.viewmodel_debug.enabled && !sim.paused() && !sim.transition {
+    if sim.viewmodel_debug.enabled {
         let Some(weapon) = game.as_deref().map(|game| game.inventory.active.clone()) else {
             sim.viewmodel_debug = crate::simulation::ViewmodelDebug::default();
             *viewmodel_repeat = ViewmodelAdjustRepeat::default();
@@ -298,14 +294,17 @@ pub(crate) fn controls(
         };
         let profile = hl2_ui::tuning::viewmodel_profile(aspect);
         select_viewmodel_debug_target(&mut sim.viewmodel_debug, &weapon, profile);
-        let time = real_time.as_deref().map(Time::elapsed_secs_f64);
-        let fired = viewmodel_repeat.update(&keys, time);
-        let step = viewmodel_adjust_step(&keys);
-        let reset = window.focused && keys.just_pressed(KeyCode::F6);
-        let changed = if reset {
+        let adjusting = !sim.paused() && !sim.transition;
+        let changed = if std::mem::take(&mut sim.viewmodel_debug.reset_pending) {
             reset_viewmodel_debug_weapon(&mut sim.viewmodel_debug)
-        } else {
+        } else if adjusting {
+            let time = real_time.as_deref().map(Time::elapsed_secs_f64);
+            let fired = viewmodel_repeat.update(&keys, time);
+            let step = viewmodel_adjust_step(&keys);
             adjust_viewmodel_framing(&mut sim.viewmodel_debug.framing, &fired, step)
+        } else {
+            *viewmodel_repeat = ViewmodelAdjustRepeat::default();
+            false
         };
         if changed {
             commit_viewmodel_debug_edit(
@@ -400,22 +399,6 @@ pub(crate) fn controls(
         // max_speed and the ground surface are set per fixed step by the simulation.
         ..Input::default()
     };
-}
-
-fn toggle_viewmodel_debug(
-    debug: &mut crate::simulation::ViewmodelDebug,
-    weapon: &str,
-    aspect: f32,
-) {
-    if debug.enabled {
-        *debug = crate::simulation::ViewmodelDebug::default();
-        return;
-    }
-    let profile = hl2_ui::tuning::viewmodel_profile(aspect);
-    debug.enabled = true;
-    debug.weapon = weapon.to_owned();
-    debug.profile = Some(profile);
-    debug.framing = hl2_ui::tuning::viewmodel_profile_framing(weapon, profile);
 }
 
 fn select_viewmodel_debug_target(
@@ -553,10 +536,20 @@ mod tests {
     use super::*;
     use source_ui::keys::NAMED_KEYS;
 
+    /// What `controls` does the frame after `viewmodel_tweak_mode 1`.
+    fn enable_viewmodel_debug(
+        debug: &mut crate::simulation::ViewmodelDebug,
+        weapon: &str,
+        aspect: f32,
+    ) {
+        debug.enabled = true;
+        select_viewmodel_debug_target(debug, weapon, hl2_ui::tuning::viewmodel_profile(aspect));
+    }
+
     #[test]
-    fn f5_viewmodel_debug_toggle_loads_the_selected_direct_profile() {
+    fn tweak_mode_loads_the_selected_direct_profile() {
         let mut debug = crate::simulation::ViewmodelDebug::default();
-        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        enable_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
         assert!(debug.enabled);
         assert_eq!(debug.weapon, "weapon_physcannon");
         assert_eq!(
@@ -571,7 +564,7 @@ mod tests {
             )
         );
 
-        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        debug = crate::simulation::ViewmodelDebug::default();
         assert!(!debug.enabled);
         assert!(debug.edits.is_empty());
     }
@@ -581,7 +574,7 @@ mod tests {
         use hl2_ui::tuning::{ViewmodelFraming, ViewmodelProfile};
 
         let mut debug = crate::simulation::ViewmodelDebug::default();
-        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        enable_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
         debug.framing.fov_offset = 1.25;
         select_viewmodel_debug_target(&mut debug, "weapon_pistol", ViewmodelProfile::Portrait);
         assert_eq!(
@@ -596,7 +589,7 @@ mod tests {
         select_viewmodel_debug_target(&mut debug, "weapon_pistol", ViewmodelProfile::Portrait);
         assert_eq!(debug.framing.offset[2], -2.75);
 
-        toggle_viewmodel_debug(&mut debug, "weapon_pistol", 9. / 16.);
+        debug = crate::simulation::ViewmodelDebug::default();
         assert!(!debug.enabled);
         assert!(debug.edits.is_empty());
     }
@@ -679,11 +672,11 @@ mod tests {
     }
 
     #[test]
-    fn f6_resets_the_selected_weapon_profile_to_zero_offsets() {
+    fn reset_zeroes_the_selected_weapon_profile_to_zero_offsets() {
         use hl2_ui::tuning::ViewmodelProfile;
 
         let mut debug = crate::simulation::ViewmodelDebug::default();
-        toggle_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
+        enable_viewmodel_debug(&mut debug, "weapon_physcannon", 9. / 16.);
         debug.framing.fov_offset = 1.5;
         debug.framing.offset = [2.0, -3.0, -4.0];
         debug.edits.insert(

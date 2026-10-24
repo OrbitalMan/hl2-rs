@@ -1,6 +1,7 @@
 //! A bounded standalone console. Commands without a Rust implementation report an error.
 pub mod commands;
 pub mod complete;
+mod effect;
 mod focus;
 mod loading;
 mod menu_flow;
@@ -13,6 +14,7 @@ use crate::gameui::{
     resources::{self, fallback_game_menu, GameUiResources},
     video_confirm::VideoConfirm,
 };
+pub use effect::{Effect, GameMap};
 use glam::{vec2, Vec2};
 use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
@@ -57,56 +59,6 @@ pub enum Mode {
     Console,
     MainMenu,
     Options,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Effect {
-    Loadout,
-    /// ai_enable: None toggles.
-    AiEnable(Option<bool>),
-    /// ai_disable (CC_AI_Disable): toggle the AI, Source's messages.
-    AiDisable,
-    /// npc_create / npc_create_aimed / npc_create_equipment / prop_physics_create /
-    /// ent_create, the whole line.
-    NpcCommand(String),
-    Noclip(Option<bool>),
-    Getpos,
-    Setpos {
-        x: f32,
-        y: f32,
-        z: Option<f32>,
-    },
-    Setang(glam::Vec3),
-    Map(String),
-    Fire {
-        target: String,
-        input: String,
-        parameter: String,
-        delay: f64,
-    },
-    Quit,
-    ApplyConfig(Box<crate::config::Config>),
-    /// Load a game's main-menu background map and show the main menu over it.
-    MainMenuMap(GameMap),
-    /// Play a UI sound cue (e.g. button hover or release activation).
-    PlaySound(String),
-}
-
-/// A map of one installed game, named by the game's installation folder (`hl2`, `episodic`,
-/// `ep2`, `lostcoast`): Half-Life 2 and Lost Coast both ship a `background01`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GameMap {
-    pub game: String,
-    pub map: String,
-}
-
-impl GameMap {
-    pub fn new(game: impl Into<String>, map: impl Into<String>) -> Self {
-        Self {
-            game: game.into(),
-            map: map.into(),
-        }
-    }
 }
 
 /// Action to perform upon confirming a message box dialog.
@@ -353,7 +305,7 @@ impl Default for Console {
     }
 }
 
-/// Height of the F1 developer overlay's header, and of the F5 viewmodel overlay panel.
+/// Height of the F1 developer overlay's header, and of the viewmodel tweak overlay panel.
 const DEBUG_HEADER_HEIGHT: f32 = 105.;
 const VIEWMODEL_DEBUG_HEIGHT: f32 = 130.;
 
@@ -1121,3 +1073,5 @@ fn vector(args: &[String]) -> Option<glam::Vec3> {
 }
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod viewmodel_tests;
