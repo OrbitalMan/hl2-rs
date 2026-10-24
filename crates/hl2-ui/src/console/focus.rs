@@ -26,17 +26,17 @@ impl Console {
                 if !self.background_level && self.base == Mode::Gameplay {
                     self.base = Mode::Pause;
                 }
-                self.windows.open(Window::Options);
+                self.shell.windows.open(Window::Options);
             }
             Mode::Console => {
                 if !self.background_level && self.base == Mode::Gameplay {
                     self.base = Mode::Pause;
                 }
-                self.windows.open(Window::Console);
+                self.shell.windows.open(Window::Console);
             }
             base => {
                 self.base = base;
-                self.windows.clear();
+                self.shell.windows.clear();
             }
         }
         self.sync_mode();
@@ -44,7 +44,7 @@ impl Console {
 
     /// Keeps `mode` on the focused layer after the windows changed.
     pub(super) fn sync_mode(&mut self) {
-        self.mode = match self.windows.focus() {
+        self.mode = match self.shell.windows.focus() {
             Layer::Window(Window::Options | Window::SubDialog) => Mode::Options,
             Layer::Window(Window::Console) => Mode::Console,
             Layer::Window(Window::Confirmation) => {
@@ -58,9 +58,9 @@ impl Console {
         };
     }
 
-    /// Synchronizes sub-dialog and confirmation modal windows in `self.windows`.
+    /// Synchronizes sub-dialog and confirmation modal windows in `self.shell.windows`.
     pub(crate) fn sync_dialog_windows(&mut self) {
-        let closed = self.windows.clean_closed();
+        let closed = self.shell.windows.clean_closed();
         for w in closed {
             match w {
                 Window::SubDialog => self.options.closing_sub = None,
@@ -75,41 +75,45 @@ impl Console {
         let has_sub = self.options.has_sub();
         let has_confirm = self.confirm_box.is_some() || self.options.has_confirm();
 
-        if has_sub && !self.windows.is_active(Window::SubDialog) {
-            self.windows.open(Window::SubDialog);
-        } else if !has_sub && self.windows.is_active(Window::SubDialog) {
-            self.windows.close(Window::SubDialog);
+        if has_sub && !self.shell.windows.is_active(Window::SubDialog) {
+            self.shell.windows.open(Window::SubDialog);
+        } else if !has_sub && self.shell.windows.is_active(Window::SubDialog) {
+            self.shell.windows.close(Window::SubDialog);
         }
 
-        if has_confirm && !self.windows.is_active(Window::Confirmation) {
-            self.windows.open(Window::Confirmation);
-        } else if !has_confirm && self.windows.is_active(Window::Confirmation) {
-            self.windows.close(Window::Confirmation);
+        if has_confirm && !self.shell.windows.is_active(Window::Confirmation) {
+            self.shell.windows.open(Window::Confirmation);
+        } else if !has_confirm && self.shell.windows.is_active(Window::Confirmation) {
+            self.shell.windows.close(Window::Confirmation);
         }
 
         let time = self.ui_clock;
-        self.options.sub_alpha = self.windows.window_composite_alpha(Window::SubDialog, time);
+        self.options.sub_alpha = self
+            .shell
+            .windows
+            .window_composite_alpha(Window::SubDialog, time);
         self.options.confirm_alpha = self
+            .shell
             .windows
             .window_composite_alpha(Window::Confirmation, time);
-        self.options.sub_theme = if self.windows.is_open(Window::SubDialog) {
+        self.options.sub_theme = if self.shell.windows.is_open(Window::SubDialog) {
             Some(self.window_theme(Window::SubDialog, time))
         } else {
             None
         };
-        self.options.confirm_theme = if self.windows.is_open(Window::Confirmation) {
+        self.options.confirm_theme = if self.shell.windows.is_open(Window::Confirmation) {
             Some(self.window_theme(Window::Confirmation, time))
         } else {
             None
         };
-        self.options.parent_focused = self.windows.focus() == Layer::Window(Window::Options);
+        self.options.parent_focused = self.shell.windows.focus() == Layer::Window(Window::Options);
 
         self.sync_mode();
     }
 
     /// The open windows, bottom to top.
     pub fn open_windows(&self) -> Vec<Window> {
-        self.windows.active_order().collect()
+        self.shell.windows.active_order().collect()
     }
 
     /// The developer console's frame `[x, y, width, height]` in canvas pixels while it is open,
@@ -123,7 +127,7 @@ impl Console {
 
     /// The developer console is open (focused or not).
     pub fn console_open(&self) -> bool {
-        self.windows.is_active(Window::Console)
+        self.shell.windows.is_active(Window::Console)
     }
 
     /// The menu under the windows takes the pointer (gameplay under the console does not).
@@ -133,15 +137,15 @@ impl Console {
 
     pub(super) fn close_window(&mut self, window: Window) {
         if window == Window::Console {
-            self.panel.placement.end();
+            self.shell.panel.placement.end();
         }
-        self.escape_held = false;
+        self.shell.escape_held = false;
         self.options.escape_held = false;
         if let Some((box_, _)) = &mut self.confirm_box {
             box_.escape_held = false;
         }
         self.options.set_confirm_escape_held(false);
-        self.windows.close(window);
+        self.shell.windows.close(window);
         self.reset_menu_interaction();
         self.sync_mode();
     }
@@ -149,8 +153,8 @@ impl Console {
     /// A window's frame look: faded towards its focused look (SDK `Frame` focus).
     pub(super) fn window_theme(&self, window: Window, time: f64) -> Theme {
         self.theme.focus_faded(
-            self.windows.focus_amount(window, time),
-            self.windows.focus() == Layer::Window(window),
+            self.shell.windows.focus_amount(window, time),
+            self.shell.windows.focus() == Layer::Window(window),
         )
     }
 
@@ -164,7 +168,8 @@ impl Console {
 
     /// The console's completion popup on the canvas, while it shows.
     pub(super) fn completion_bounds(&self) -> Option<Rect> {
-        self.panel
+        self.shell
+            .panel
             .completion_bounds(&self.canvas, &self.theme, commands::COMMANDS, self)
     }
 
@@ -174,7 +179,7 @@ impl Console {
         match window {
             Window::Options => self.options.frame_bounds(canvas),
             Window::Console => {
-                let layout = self.panel.dialog_layout(&self.canvas);
+                let layout = self.shell.panel.dialog_layout(&self.canvas);
                 Rect::new(
                     layout.origin.x,
                     layout.origin.y,
@@ -228,7 +233,11 @@ impl Console {
     /// Whether a point in canvas coordinates is covered by a modal dialog or an open window.
     pub fn is_occluded(&self, point: Vec2) -> bool {
         self.modal_bounds().is_some_and(|b| b.contains(point))
-            || self.windows.order().any(|w| self.window_contains(w, point))
+            || self
+                .shell
+                .windows
+                .order()
+                .any(|w| self.window_contains(w, point))
     }
 
     pub fn paused(&self) -> bool {
@@ -242,12 +251,12 @@ impl Console {
     pub fn escape_pressed(&mut self) {
         self.sync_dialog_windows();
         if self.escape_closes_dialog() {
-            self.escape_held = true;
+            self.shell.escape_held = true;
             self.options.escape_held = matches!(
-                self.windows.top(),
+                self.shell.windows.top(),
                 Some(Window::Options | Window::SubDialog)
             );
-            let is_confirm = self.windows.top() == Some(Window::Confirmation);
+            let is_confirm = self.shell.windows.top() == Some(Window::Confirmation);
             if let Some((box_, _)) = &mut self.confirm_box {
                 box_.escape_held = is_confirm;
             }
@@ -260,7 +269,7 @@ impl Console {
     /// Escape went up: closes the dialog whose close button or cancel button it held.
     pub fn escape_released(&mut self) {
         self.sync_dialog_windows();
-        if std::mem::take(&mut self.escape_held) {
+        if std::mem::take(&mut self.shell.escape_held) {
             self.options.escape_held = false;
             if let Some((box_, _)) = &mut self.confirm_box {
                 box_.escape_held = false;
@@ -276,10 +285,10 @@ impl Console {
         if self.loading_dialog.is_some() || self.quit_placement.active() {
             return false;
         }
-        match self.windows.top() {
+        match self.shell.windows.top() {
             Some(Window::Options | Window::SubDialog) => self.options.escape_closes(),
             Some(Window::Console) => {
-                !self.panel.placement.active() && !self.panel.editor.can_dismiss()
+                !self.shell.panel.placement.active() && !self.shell.panel.editor.can_dismiss()
             }
             Some(Window::Confirmation) => {
                 if self.confirm_box.is_some() {
@@ -294,12 +303,12 @@ impl Console {
 
     pub fn escape(&mut self) {
         // A drag or resize in progress is undone first.
-        let console_on_top = self.windows.top() == Some(Window::Console);
-        if self.quit_placement.cancel() || (console_on_top && self.panel.placement.cancel()) {
+        let console_on_top = self.shell.windows.top() == Some(Window::Console);
+        if self.quit_placement.cancel() || (console_on_top && self.shell.panel.placement.cancel()) {
             return;
         }
         // In the console Escape first ends a history search, then hides the completion list.
-        if console_on_top && self.panel.editor.dismiss() {
+        if console_on_top && self.shell.panel.editor.dismiss() {
             return;
         }
         if let Some(loading) = &self.loading_dialog {
@@ -323,7 +332,7 @@ impl Console {
             return;
         }
         // Escape closes the top window first, whichever layer has the focus.
-        match self.windows.top() {
+        match self.shell.windows.top() {
             Some(Window::Confirmation) => {
                 if !self.options.escape_closes() {
                     self.options.escape();
@@ -381,7 +390,7 @@ impl Console {
     /// Opens the console on top with the focus, or closes it (focused or not); it opens only
     /// while `con_enable` is on. Blocked when a modal dialog or blocking subdialog is open.
     pub fn toggle(&mut self) {
-        if self.windows.has_modal()
+        if self.shell.windows.has_modal()
             || self.modal_dialog_open()
             || self.options.has_sub()
             || self.options.has_confirm()
@@ -396,10 +405,10 @@ impl Console {
             if !self.background_level && self.base == Mode::Gameplay {
                 self.base = Mode::Pause;
             }
-            self.windows.open(Window::Console);
+            self.shell.windows.open(Window::Console);
             self.sync_mode();
-            let frame = self.panel.frame(&self.canvas);
-            self.panel.placement.reset_if_off_screen(&frame);
+            let frame = self.shell.panel.frame(&self.canvas);
+            self.shell.panel.placement.reset_if_off_screen(&frame);
         }
     }
 
@@ -415,21 +424,21 @@ impl Console {
         // Held keys repeat for every layer below, except into a key binding being captured.
         let mut repeated = input.clone();
         if self.options_open() && self.options.capturing_key() {
-            self.key_repeat.cancel();
+            self.shell.key_repeat.cancel();
         } else {
-            self.key_repeat.apply(&mut repeated);
+            self.shell.key_repeat.apply(&mut repeated);
         }
         let mode = self.mode;
         let effects = self.layer_input(&repeated);
         if self.mode != mode {
-            self.key_repeat.cancel();
+            self.shell.key_repeat.cancel();
         }
         effects
     }
 
     pub(super) fn layer_input(&mut self, input: &Input) -> Vec<Effect> {
         if let Some(time) = input.time {
-            self.windows.set_time(time);
+            self.shell.windows.set_time(time);
         }
         if self.modal_dialog_open() {
             // The menus are occluded: keep their tracker on the physical button so the rest of
@@ -460,10 +469,10 @@ impl Console {
         self.sync_dialog_windows();
         let active_options_window = if self.confirm_box.is_none()
             && self.options.has_confirm()
-            && self.windows.is_open(Window::Confirmation)
+            && self.shell.windows.is_open(Window::Confirmation)
         {
             Window::Confirmation
-        } else if self.options.has_sub() && self.windows.is_open(Window::SubDialog) {
+        } else if self.options.has_sub() && self.shell.windows.is_open(Window::SubDialog) {
             Window::SubDialog
         } else {
             Window::Options
@@ -475,6 +484,7 @@ impl Console {
         };
         let completion = self.completion_bounds();
         let bounds: Vec<(Window, Rect)> = self
+            .shell
             .windows
             .order()
             .map(|w| (w, self.window_bounds(w)))
@@ -487,17 +497,18 @@ impl Console {
         };
         let base_takes_pointer = self.base_is_menu();
         let owner = self
+            .shell
             .windows
             .route(pointer, modal, base_takes_pointer, |window, at| {
                 bounds.iter().any(|(w, r)| *w == window && r.contains(at))
                     || window == Window::Console && completion.is_some_and(|r| r.contains(at))
             });
         self.sync_mode();
-        let focus = self.windows.focus();
+        let focus = self.shell.windows.focus();
         let mut effects = Vec::new();
-        let windows: Vec<Window> = self.windows.order().collect();
+        let windows: Vec<Window> = self.shell.windows.order().collect();
         for window in windows {
-            if !self.windows.is_open(window) {
+            if !self.shell.windows.is_open(window) {
                 continue;
             }
             let layer = Layer::Window(window);
@@ -531,7 +542,7 @@ impl Console {
                 // A window has the pointer: the menu only follows the button (occluded).
                 self.menu_tracker.occlude(input.click || input.held);
             }
-            let focus = self.windows.focus();
+            let focus = self.shell.windows.focus();
             let share = input.share(owns, focus == Layer::Base);
             effects.extend(self.menu_input(&share, owns));
         }
@@ -546,8 +557,8 @@ impl Console {
             self.config.dialogs.options = options;
             changed = true;
         }
-        if self.panel.placement.take_changed() {
-            self.config.dialogs.console = self.panel.placement.saved();
+        if self.shell.panel.placement.take_changed() {
+            self.config.dialogs.console = self.shell.panel.placement.saved();
             changed = true;
         }
         if changed {
@@ -563,8 +574,9 @@ impl Console {
         if !self.console_open() || self.confirm_box.is_some() {
             return CursorHint::Arrow;
         }
-        self.panel
+        self.shell
+            .panel
             .placement
-            .hint(&self.panel.frame(&self.canvas), self.pointer)
+            .hint(&self.shell.panel.frame(&self.canvas), self.shell.pointer)
     }
 }

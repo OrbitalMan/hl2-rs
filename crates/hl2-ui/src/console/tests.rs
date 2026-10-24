@@ -9,6 +9,7 @@ use source_ui::console::dialog::{
 use source_ui::console::panel::{
     HistoryView, Level, Line, CONSOLE_ROW, NOMINAL_ADVANCE, OUTPUT_LINES, WHEEL_ROWS,
 };
+use source_ui::input::KeyRepeat;
 use source_ui::widgets::ScrollMode;
 #[test]
 fn cell_metrics_rejects_missing_font() {
@@ -81,11 +82,12 @@ fn quoted_separators_are_text_and_bad_quotes_execute_nothing() {
     let mut console = Console::default();
     console.submit("echo \"hello; world\"; echo done");
     assert!(console
+        .shell
         .panel
         .output
         .iter()
         .any(|line| line == "hello; world"));
-    assert!(console.panel.output.iter().any(|line| line == "done"));
+    assert!(console.shell.panel.output.iter().any(|line| line == "done"));
     console.submit("sv_cheats 1; echo \"unfinished");
     assert!(!console.cheats);
 }
@@ -221,7 +223,12 @@ fn explicit_text_input_edits_unicode_at_boundaries_and_completes_commands() {
     );
     keys(&mut console, &[Key::Enter]);
     assert!(console.input_line().is_empty());
-    assert!(console.panel.output.iter().any(|s| s.contains("sv_cheats")));
+    assert!(console
+        .shell
+        .panel
+        .output
+        .iter()
+        .any(|s| s.contains("sv_cheats")));
 }
 #[test]
 fn console_shortcuts_search_paste_filter_and_timestamps() {
@@ -238,7 +245,10 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         text: "fov".into(),
         ..Default::default()
     });
-    assert_eq!(console.panel.editor.search(), Some(("fov", Some("fov 90"))));
+    assert_eq!(
+        console.shell.panel.editor.search(),
+        Some(("fov", Some("fov 90")))
+    );
     console.escape();
     assert_eq!(
         console.mode(),
@@ -265,7 +275,7 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         console.cvar_value("con_filter_text").as_deref(),
         Some("Loaded")
     );
-    assert!(console.panel.con_timestamp);
+    assert!(console.shell.panel.con_timestamp);
     assert!(console.submit("con_filter_enable 3").is_empty());
     assert_eq!(
         console.cvar_value("con_filter_enable").as_deref(),
@@ -276,7 +286,7 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         text: "Loaded hl2/background01".into(),
         time: 0.,
     };
-    assert!(console.panel.filter_match(&loaded));
+    assert!(console.shell.panel.filter_match(&loaded));
     assert_eq!(
         serde_json::to_string(&loaded).unwrap(),
         "\"Loaded hl2/background01\"",
@@ -287,16 +297,23 @@ fn console_shortcuts_search_paste_filter_and_timestamps() {
         binding_keys: vec!["KeyL".into()],
         ..Default::default()
     });
-    assert!(console.panel.output.is_empty(), "Ctrl+L clears the output");
+    assert!(
+        console.shell.panel.output.is_empty(),
+        "Ctrl+L clears the output"
+    );
 }
 /// Canvas point at the middle of a frame-relative layout rectangle of the console dialog.
 fn dialog_point(console: &Console, rect: Rect) -> Vec2 {
-    let r = console.panel.dialog_layout(&console.canvas).canvas(rect);
+    let r = console
+        .shell
+        .panel
+        .dialog_layout(&console.canvas)
+        .canvas(rect);
     vec2(r.x + r.w * 0.5, r.y + r.h * 0.5)
 }
 /// Canvas point on the history row `row` (0 is the top row shown).
 fn history_point(console: &Console, row: usize) -> Vec2 {
-    let layout = console.panel.dialog_layout(&console.canvas);
+    let layout = console.shell.panel.dialog_layout(&console.canvas);
     let text = layout.canvas(HistoryView::new(&layout).text);
     vec2(
         text.x + 10.,
@@ -434,10 +451,10 @@ fn the_console_moves_by_its_caption_and_escape_undoes_a_drag() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    let start = console.panel.dialog_layout(&console.canvas);
+    let start = console.shell.panel.dialog_layout(&console.canvas);
     let caption = start.origin + vec2(100., 10.) * start.scale;
     pointer_drag(&mut console, caption, caption - vec2(200., 50.));
-    let moved = console.panel.dialog_layout(&console.canvas);
+    let moved = console.shell.panel.dialog_layout(&console.canvas);
     assert_eq!(moved.origin, start.origin - vec2(200., 50.));
     assert_eq!(moved.size, start.size);
     // The caption press is the placement's: no history row selection started.
@@ -453,14 +470,14 @@ fn the_console_moves_by_its_caption_and_escape_undoes_a_drag() {
     console.escape();
     assert_eq!(console.mode(), Mode::Console);
     assert_eq!(
-        console.panel.dialog_layout(&console.canvas).origin,
+        console.shell.panel.dialog_layout(&console.canvas).origin,
         moved.origin
     );
     // Closing and reopening keeps the place.
     console.toggle();
     console.toggle();
     assert_eq!(
-        console.panel.dialog_layout(&console.canvas).origin,
+        console.shell.panel.dialog_layout(&console.canvas).origin,
         moved.origin
     );
 }
@@ -470,28 +487,33 @@ fn the_console_resizes_by_its_corners_within_limits() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    let start = console.panel.dialog_layout(&console.canvas);
+    let start = console.shell.panel.dialog_layout(&console.canvas);
     let corner = start.origin + start.size * start.scale - Vec2::splat(4.);
-    console.pointer = Some(corner);
+    console.shell.pointer = Some(corner);
     assert_eq!(console.cursor_hint(), CursorHint::ResizeNwSe);
     pointer_drag(&mut console, corner, corner + vec2(-100., -60.));
-    let resized = console.panel.dialog_layout(&console.canvas);
+    let resized = console.shell.panel.dialog_layout(&console.canvas);
     assert_eq!(resized.origin, start.origin, "the top-left stays");
     assert!((resized.size.x - (start.size.x - 100. / start.scale)).abs() <= 1.);
     assert!(resized.entry.w > 0. && resized.history.h > 0.);
     // Way past the minimum: the layout keeps every control.
     let corner = resized.origin + resized.size * resized.scale - Vec2::splat(4.);
     pointer_drag(&mut console, corner, start.origin);
-    assert_eq!(console.panel.dialog_layout(&console.canvas).size, MIN_SIZE);
+    assert_eq!(
+        console.shell.panel.dialog_layout(&console.canvas).size,
+        MIN_SIZE
+    );
     // The top-left grip shows the same diagonal; the caption keeps the arrow.
-    console.pointer = Some(console.panel.dialog_layout(&console.canvas).origin + Vec2::splat(2.));
+    console.shell.pointer =
+        Some(console.shell.panel.dialog_layout(&console.canvas).origin + Vec2::splat(2.));
     assert_eq!(console.cursor_hint(), CursorHint::ResizeNwSe);
-    console.pointer =
-        Some(console.panel.dialog_layout(&console.canvas).origin + vec2(60., 10.) * start.scale);
+    console.shell.pointer = Some(
+        console.shell.panel.dialog_layout(&console.canvas).origin + vec2(60., 10.) * start.scale,
+    );
     assert_eq!(console.cursor_hint(), CursorHint::Arrow);
     // A smaller window never leaves the console larger than it or off it.
     console.canvas.resize(640., 480.);
-    let small = console.panel.dialog_layout(&console.canvas);
+    let small = console.shell.panel.dialog_layout(&console.canvas);
     assert!(small.origin.x >= 0. && small.origin.y >= 0.);
     assert!(small.origin.x + small.size.x * small.scale <= 640.);
     assert!(small.origin.y + small.size.y * small.scale <= 480.);
@@ -502,11 +524,11 @@ fn console_placement_survives_a_restart_and_resets_off_screen() {
     let mut console = Console::default();
     console.canvas.resize(1920., 1080.);
     console.toggle();
-    let start = console.panel.dialog_layout(&console.canvas);
+    let start = console.shell.panel.dialog_layout(&console.canvas);
     let caption = start.origin + vec2(100., 10.) * start.scale;
     pointer_drag(&mut console, caption, caption - vec2(600., 0.));
-    let corner = console.panel.dialog_layout(&console.canvas).origin
-        + console.panel.dialog_layout(&console.canvas).size * start.scale
+    let corner = console.shell.panel.dialog_layout(&console.canvas).origin
+        + console.shell.panel.dialog_layout(&console.canvas).size * start.scale
         - Vec2::splat(4.);
     pointer_drag(&mut console, corner, corner - vec2(100., 100.));
     console.input(&Input::default());
@@ -515,20 +537,20 @@ fn console_placement_survives_a_restart_and_resets_off_screen() {
         .dialogs
         .console
         .expect("saved after the gesture");
-    let placed = console.panel.dialog_layout(&console.canvas);
+    let placed = console.shell.panel.dialog_layout(&console.canvas);
     // The next run restores it.
     let mut next = Console::default();
     next.canvas.resize(1920., 1080.);
-    next.panel.placement = Placement::from_saved(Some(saved));
+    next.shell.panel.placement = Placement::from_saved(Some(saved));
     next.toggle();
-    assert_eq!(next.panel.dialog_layout(&next.canvas), placed);
+    assert_eq!(next.shell.panel.dialog_layout(&next.canvas), placed);
     // Opened on a smaller window where it would not fit as saved: the default frame.
     let mut small = Console::default();
     small.canvas.resize(800., 600.);
-    small.panel.placement = Placement::from_saved(Some(saved));
+    small.shell.panel.placement = Placement::from_saved(Some(saved));
     small.toggle();
     assert_eq!(
-        small.panel.dialog_layout(&small.canvas),
+        small.shell.panel.dialog_layout(&small.canvas),
         DialogLayout::new(vec2(800., 600.), proportional::SCALING)
     );
     small.input(&Input::default());
@@ -566,7 +588,7 @@ fn dragging_over_history_rows_selects_them_for_copy() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    console.panel.output.clear();
+    console.shell.panel.output.clear();
     for i in 0..5 {
         console.log(format!("line {i}"));
     }
@@ -583,15 +605,15 @@ fn dragging_over_history_rows_selects_them_for_copy() {
         console.log(format!("line {i}"));
     }
     assert_eq!(copy(&mut console), None, "the selected lines scrolled out");
-    console.panel.output.clear();
-    console.panel.output_start = 0;
+    console.shell.panel.output.clear();
+    console.shell.panel.output_start = 0;
     for i in 0..5 {
         console.log(format!("line {i}"));
     }
     drag(&mut console, 2, 2);
     console.log("printed after");
-    console.panel.output.pop_front();
-    console.panel.output_start += 1;
+    console.shell.panel.output.pop_front();
+    console.shell.panel.output_start += 1;
     assert_eq!(copy(&mut console).as_deref(), Some("line 2"));
 
     // Copying follows what the history shows: the filter and timestamps.
@@ -618,22 +640,22 @@ fn dragging_over_history_rows_selects_them_for_copy() {
 #[test]
 fn live_viewmodel_tuning_log_replaces_its_snapshot_and_keeps_other_output() {
     let mut console = Console::default();
-    console.panel.clear_output();
+    console.shell.panel.clear_output();
     console.log("before snapshot");
     console.log_viewmodel_tuning("{\"fov_offset\": 0.1}");
     console.log("unrelated output");
     console.log_viewmodel_tuning("{\"fov_offset\": 0.2}");
 
-    assert_eq!(console.panel.output.len(), 3);
-    assert_eq!(console.panel.output[0].text, "before snapshot");
-    assert_eq!(console.panel.output[1].level, Level::Snapshot);
-    assert_eq!(console.panel.output[1].text, "{\"fov_offset\": 0.2}");
-    assert_eq!(console.panel.output[2].text, "unrelated output");
+    assert_eq!(console.shell.panel.output.len(), 3);
+    assert_eq!(console.shell.panel.output[0].text, "before snapshot");
+    assert_eq!(console.shell.panel.output[1].level, Level::Snapshot);
+    assert_eq!(console.shell.panel.output[1].text, "{\"fov_offset\": 0.2}");
+    assert_eq!(console.shell.panel.output[2].text, "unrelated output");
 
-    console.panel.clear_output();
+    console.shell.panel.clear_output();
     console.log_viewmodel_tuning("{\"fov_offset\": 0.3}");
-    assert_eq!(console.panel.output.len(), 1);
-    assert_eq!(console.panel.output[0].text, "{\"fov_offset\": 0.3}");
+    assert_eq!(console.shell.panel.output.len(), 1);
+    assert_eq!(console.shell.panel.output[0].text, "{\"fov_offset\": 0.3}");
 }
 
 #[test]
@@ -649,31 +671,31 @@ fn scrolled_back_history_stays_put_while_output_arrives() {
         ..Default::default()
     });
     let rows = 2 * ScrollMode::platform().rows_per_step(WHEEL_ROWS);
-    assert_eq!(console.panel.scroll, rows);
+    assert_eq!(console.shell.panel.scroll, rows);
     console.log("more");
-    assert_eq!(console.panel.scroll, rows + 1);
+    assert_eq!(console.shell.panel.scroll, rows + 1);
     keys(&mut console, &[Key::Enter]);
     assert_eq!(
-        console.panel.scroll, 0,
+        console.shell.panel.scroll, 0,
         "submitting returns to the newest output"
     );
 }
 
 /// Characters that fit a history row with the nominal advance of a console without fonts.
 fn row_chars(console: &Console) -> usize {
-    let metrics = console.panel.wrap_metrics(&console.canvas);
+    let metrics = console.shell.panel.wrap_metrics(&console.canvas);
     (metrics.width / (metrics.em * NOMINAL_ADVANCE)) as usize
 }
 /// The top history row shown: its line number and text.
 fn top_row(console: &Console) -> (u64, String) {
-    let rows = HistoryView::new(&console.panel.dialog_layout(&console.canvas)).rows;
-    let history = console.panel.history_rows(&console.canvas);
+    let rows = HistoryView::new(&console.shell.panel.dialog_layout(&console.canvas)).rows;
+    let history = console.shell.panel.history_rows(&console.canvas);
     let shown = rows.min(history.len());
-    let first = history.len() - shown - console.panel.scroll.min(history.len() - shown);
+    let first = history.len() - shown - console.shell.panel.scroll.min(history.len() - shown);
     let row = &history[first];
     (
         row.number,
-        console.panel.shown_text(row.line)[row.text.clone()].to_owned(),
+        console.shell.panel.shown_text(row.line)[row.text.clone()].to_owned(),
     )
 }
 /// Words long enough to wrap to at least `rows` history rows.
@@ -690,8 +712,8 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    console.panel.output.clear();
-    console.panel.output_start = 0;
+    console.shell.panel.output.clear();
+    console.shell.panel.output_start = 0;
     let long = long_line(&console, 3);
     let warning = "Encountered an error in command `<Enable the debug feature to see the name>`:\n\
                        Entity despawned: The entity with ID 2224v1 is invalid";
@@ -699,14 +721,14 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     console.log(long.clone());
     console.print(Level::Warning, warning);
     console.log("last");
-    let metrics = console.panel.wrap_metrics(&console.canvas);
-    let history = console.panel.history_rows(&console.canvas);
+    let metrics = console.shell.panel.wrap_metrics(&console.canvas);
+    let history = console.shell.panel.history_rows(&console.canvas);
     let rows: Vec<(u64, String)> = history
         .iter()
         .map(|row| {
             (
                 row.number,
-                console.panel.shown_text(row.line)[row.text.clone()].to_owned(),
+                console.shell.panel.shown_text(row.line)[row.text.clone()].to_owned(),
             )
         })
         .collect();
@@ -716,7 +738,7 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     for (_, text) in &rows {
         let width: f32 = text
             .chars()
-            .map(|c| console.panel.advance(c, metrics.em))
+            .map(|c| console.shell.panel.advance(c, metrics.em))
             .sum();
         assert!(width <= metrics.width, "{text}");
         assert!(!text.starts_with(' ') && !text.ends_with(' '), "{text:?}");
@@ -765,8 +787,9 @@ fn long_lines_wrap_to_rows_and_newlines_start_rows() {
     // The filter keeps or hides whole lines, all their rows.
     // (Set directly: the echo of a `con_filter_text` command contains its text.)
     console.submit("con_timestamp 0; con_filter_enable 1");
-    console.panel.con_filter_text = "despawned".into();
+    console.shell.panel.con_filter_text = "despawned".into();
     let shown: Vec<u64> = console
+        .shell
         .panel
         .history_rows(&console.canvas)
         .iter()
@@ -780,8 +803,8 @@ fn scrolled_back_wrapped_history_stays_put_and_reaches_the_top() {
     let mut console = Console::default();
     console.canvas.resize(1024., 768.);
     console.toggle();
-    console.panel.output.clear();
-    console.panel.output_start = 0;
+    console.shell.panel.output.clear();
+    console.shell.panel.output_start = 0;
     let long = long_line(&console, 2);
     for i in 0..100 {
         console.log(if i % 2 == 0 {
@@ -795,20 +818,21 @@ fn scrolled_back_wrapped_history_stays_put_and_reaches_the_top() {
         ..Default::default()
     });
     let top = top_row(&console);
-    let scroll = console.panel.scroll;
+    let scroll = console.shell.panel.scroll;
     assert!(scroll > 0);
     // New output below adds its rows to the scroll, so the shown rows stay.
     console.log(long.clone());
     let added = console
+        .shell
         .panel
         .history_rows(&console.canvas)
         .iter()
         .filter(|r| r.number == 100)
         .count();
     assert!(added >= 2);
-    assert_eq!(console.panel.scroll, scroll + added);
+    assert_eq!(console.shell.panel.scroll, scroll + added);
     console.log("one\ntwo");
-    assert_eq!(console.panel.scroll, scroll + added + 2);
+    assert_eq!(console.shell.panel.scroll, scroll + added + 2);
     assert_eq!(top_row(&console), top);
     console.input(&Input::default());
     assert_eq!(top_row(&console), top, "the next frame keeps the view");
@@ -832,7 +856,7 @@ fn scrolled_back_wrapped_history_stays_put_and_reaches_the_top() {
         ctrl: true,
         ..Default::default()
     });
-    assert_eq!(console.panel.scroll, 0);
+    assert_eq!(console.shell.panel.scroll, 0);
 }
 
 #[test]
@@ -848,7 +872,7 @@ fn submit_button_runs_the_line_and_close_button_closes_the_console() {
     });
     let submit = dialog_point(
         &console,
-        console.panel.dialog_layout(&console.canvas).submit,
+        console.shell.panel.dialog_layout(&console.canvas).submit,
     );
     press(&mut console, submit);
     assert_eq!(console.input_line(), "echo clicked", "runs on release");
@@ -858,11 +882,14 @@ fn submit_button_runs_the_line_and_close_button_closes_the_console() {
     );
     assert_eq!(console.input_line(), "");
     assert_eq!(
-        console.panel.output.back().map(|l| l.text.as_str()),
+        console.shell.panel.output.back().map(|l| l.text.as_str()),
         Some("clicked")
     );
 
-    let close = dialog_point(&console, console.panel.dialog_layout(&console.canvas).close);
+    let close = dialog_point(
+        &console,
+        console.shell.panel.dialog_layout(&console.canvas).close,
+    );
     press(&mut console, close);
     assert_eq!(console.mode(), Mode::Console);
     release(&mut console, close);
@@ -952,6 +979,7 @@ fn pause_menu_entries_activate_by_pointer_and_keyboard() {
     );
     assert_eq!(console.mode(), Mode::Pause);
     assert!(console
+        .shell
         .panel
         .output
         .back()
@@ -1633,7 +1661,7 @@ fn a_held_escape_presses_the_close_button_and_the_release_closes() {
     assert!(!console.options.escape_held);
     // Escape that does not close a dialog acts at once: the main menu has no dialog to close.
     console.escape_pressed();
-    assert!(!console.escape_held);
+    assert!(!console.shell.escape_held);
 }
 
 #[test]
@@ -1645,7 +1673,7 @@ fn a_held_escape_presses_subdialog_close_button_and_release_closes_it() {
         .options
         .open_sub(crate::gameui::options::Sub::VideoAdvanced);
     console.sync_dialog_windows();
-    assert_eq!(console.windows.top(), Some(Window::SubDialog));
+    assert_eq!(console.shell.windows.top(), Some(Window::SubDialog));
     assert!(console.options.has_sub());
 
     // Press Escape while SubDialog is top: subdialog close button shows pressed
@@ -1671,7 +1699,7 @@ fn a_held_escape_presses_subdialog_close_button_and_release_closes_it() {
         "subdialog closed on Escape release"
     );
     assert_eq!(
-        console.windows.top(),
+        console.shell.windows.top(),
         Some(Window::Options),
         "Options dialog is now top"
     );
@@ -1721,7 +1749,7 @@ fn a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it() {
     console.set_mode(Mode::MainMenu);
     console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     console.sync_dialog_windows();
-    assert_eq!(console.windows.top(), Some(Window::Confirmation));
+    assert_eq!(console.shell.windows.top(), Some(Window::Confirmation));
     assert!(console.confirm_box.is_some());
 
     // Press Escape while confirmation is top: Cancel button shows armed/pressed, box stays open
@@ -1746,7 +1774,7 @@ fn a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it() {
         "confirm box dismissed on Escape release"
     );
     assert_ne!(
-        console.windows.top(),
+        console.shell.windows.top(),
         Some(Window::Confirmation),
         "Confirmation window closed"
     );
@@ -1793,20 +1821,20 @@ fn a_held_escape_presses_confirmation_cancel_button_and_release_cancels_it() {
         Some("Cancel".into()),
     ));
     console.sync_dialog_windows();
-    assert_eq!(console.windows.top(), Some(Window::Confirmation));
+    assert_eq!(console.shell.windows.top(), Some(Window::Confirmation));
     assert!(console.options.has_confirm());
 
     // Escape pressed: options confirm has escape_held = true
     console.escape_pressed();
     assert!(console.options.has_confirm());
-    assert!(console.escape_held);
+    assert!(console.shell.escape_held);
 
     console.draw(0.0);
 
     // Escape released: options confirm closed
     console.escape_released();
     assert!(!console.options.has_confirm());
-    assert_eq!(console.windows.top(), Some(Window::Options));
+    assert_eq!(console.shell.windows.top(), Some(Window::Options));
 }
 
 #[test]
@@ -1816,6 +1844,7 @@ fn background_map_and_map_background_console_commands() {
     let effects = console.submit("background_map");
     assert!(effects.is_empty());
     assert!(console
+        .shell
         .panel
         .output
         .iter()
@@ -2246,6 +2275,7 @@ fn lostcoast_navigation_and_missing_content_error_recovery() {
     assert_eq!(console.main_menu.entries()[1].label, "WORKSHOP");
     console.activate_menu(1);
     assert!(console
+        .shell
         .panel
         .output
         .iter()
@@ -3334,7 +3364,7 @@ fn quit_from_the_menu_is_modal_over_options_and_cancel_returns_to_it() {
 #[test]
 fn a_submenu_background_loading_behind_options_keeps_it_open() {
     let mut console = menu_with_options(720.);
-    console.windows.focus_base();
+    console.shell.windows.focus_base();
     console.sync_mode();
     console.level_loaded(true);
     assert!(console.options_open());
@@ -3403,7 +3433,7 @@ fn the_topmost_window_takes_the_overlap_and_a_press_raises_the_other() {
         Mode::Options,
         "the press raised and focused Options"
     );
-    assert_eq!(console.windows.top(), Some(Window::Options));
+    assert_eq!(console.shell.windows.top(), Some(Window::Options));
     assert!(console.console_open(), "the console stays open below");
     keys(&mut console, &[Key::Tab]);
     assert_eq!(
@@ -3420,10 +3450,11 @@ fn the_console_completion_popup_past_its_frame_is_part_of_the_console() {
     console.canvas.resize(1280., 720.);
     console.toggle();
     // At the top of the canvas, so the list opens below the entry line, past the frame.
-    console.panel.placement = Placement::from_saved(Some(source_ui::placement::DialogPlacement {
-        offset: [0., -2000.],
-        size: None,
-    }));
+    console.shell.panel.placement =
+        Placement::from_saved(Some(source_ui::placement::DialogPlacement {
+            offset: [0., -2000.],
+            size: None,
+        }));
     console.input(&Input {
         text: "s".into(),
         ..Default::default()
@@ -3495,7 +3526,7 @@ fn an_unfocused_window_fades_to_its_out_of_focus_look() {
 fn escape_closes_the_top_window_even_while_the_menu_has_the_focus() {
     let mut console = menu_with_options(720.);
     console.toggle();
-    console.windows.focus_base();
+    console.shell.windows.focus_base();
     console.sync_mode();
     console.escape();
     assert!(!console.console_open(), "the console was on top");
@@ -3512,40 +3543,52 @@ fn main_menu_loses_focus_and_becomes_translucent_when_dialog_opens_and_restores_
     console.canvas.resize(1280., 720.);
 
     // Initially main menu has focus
-    assert_eq!(console.windows.focus(), Layer::Base);
-    assert_eq!(console.windows.base_focus_amount(0.0), 1.0);
+    assert_eq!(console.shell.windows.focus(), Layer::Base);
+    assert_eq!(console.shell.windows.base_focus_amount(0.0), 1.0);
 
     // Open Options dialog: main menu loses focus and becomes translucent
     console.open_options();
-    console.windows.set_time(0.0);
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Options));
-    assert_eq!(console.windows.focus_amount(Window::Options, 0.0), 1.0);
+    console.shell.windows.set_time(0.0);
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Options)
+    );
+    assert_eq!(
+        console.shell.windows.focus_amount(Window::Options, 0.0),
+        1.0
+    );
     // Base fades to 0.0
-    assert!((console.windows.base_focus_amount(0.3) - 0.0).abs() < 1e-4);
+    assert!((console.shell.windows.base_focus_amount(0.3) - 0.0).abs() < 1e-4);
 
     // Open SubDialog inside Options
     console
         .options
         .open_sub(crate::gameui::options::Sub::VideoAdvanced);
     console.sync_dialog_windows();
-    console.windows.set_time(1.0);
-    assert_eq!(console.windows.focus(), Layer::Window(Window::SubDialog));
+    console.shell.windows.set_time(1.0);
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::SubDialog)
+    );
     // Parent options is now unfocused
-    assert!((console.windows.focus_amount(Window::Options, 1.3) - 0.0).abs() < 1e-4);
+    assert!((console.shell.windows.focus_amount(Window::Options, 1.3) - 0.0).abs() < 1e-4);
 
     // Close SubDialog: restores focus to Options
     console.options.cancel_sub();
     console.sync_dialog_windows();
-    console.windows.set_time(2.0);
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Options));
-    assert!((console.windows.focus_amount(Window::Options, 2.3) - 1.0).abs() < 1e-4);
+    console.shell.windows.set_time(2.0);
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Options)
+    );
+    assert!((console.shell.windows.focus_amount(Window::Options, 2.3) - 1.0).abs() < 1e-4);
 
     // Close Options: restores focus to MainMenu (Base)
     console.close_window(Window::Options);
     console.sync_dialog_windows();
-    console.windows.set_time(3.0);
-    assert_eq!(console.windows.focus(), Layer::Base);
-    assert!((console.windows.base_focus_amount(3.3) - 1.0).abs() < 1e-4);
+    console.shell.windows.set_time(3.0);
+    assert_eq!(console.shell.windows.focus(), Layer::Base);
+    assert!((console.shell.windows.base_focus_amount(3.3) - 1.0).abs() < 1e-4);
 }
 
 #[test]
@@ -3565,7 +3608,10 @@ fn subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused() 
     console.tick(1.0);
 
     // SubDialog is focused immediately:
-    assert_eq!(console.windows.focus(), Layer::Window(Window::SubDialog));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::SubDialog)
+    );
     let sub_theme = console.options.sub_theme.as_ref().expect("sub theme");
     assert!(
         (sub_theme.frame_bg.a - console.theme.frame_bg.a).abs() < 1e-4,
@@ -3597,7 +3643,10 @@ fn subdialog_in_focus_renders_focused_frame_while_parent_options_is_unfocused() 
         .options
         .command(crate::gameui::settings::Command::KeyDefaults);
     console.tick(2.0);
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Confirmation));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Confirmation)
+    );
 
     // After 0.3s fade-in transition:
     console.tick(2.3);
@@ -3639,14 +3688,14 @@ fn context_aware_background_dim_overlay_across_all_four_cases() {
     let mut console = installed_console();
     console.background_level = true;
     console.set_mode(Mode::MainMenu);
-    console.windows.set_time(0.0);
+    console.shell.windows.set_time(0.0);
     assert_eq!(console.dim_overlay_alpha(0.0), 0.0);
 
     // 2. Menu background unfocused with dialog open: dim active (backdrop opacity ~0.6118)
     assert!((Console::dim_overlay_opacity(false, true, 0.0) - backdrop).abs() < 1e-4);
 
     console.open_options();
-    console.windows.set_time(0.0);
+    console.shell.windows.set_time(0.0);
     // At t=0.0: just opened, base_focus is still 1.0, dim is 0.0
     assert_eq!(console.dim_overlay_alpha(0.0), 0.0);
     // At t=0.15 (halfway): base_focus is 0.5, dim is halfway
@@ -3655,7 +3704,7 @@ fn context_aware_background_dim_overlay_across_all_four_cases() {
     assert!((console.dim_overlay_alpha(0.30) - backdrop).abs() < 1e-4);
 
     // Close options at t=1.0: restores focus to menu, fading dim out
-    console.windows.set_time(1.0);
+    console.shell.windows.set_time(1.0);
     console.close_window(Window::Options);
     console.sync_dialog_windows();
     assert!((console.dim_overlay_alpha(1.0) - backdrop).abs() < 1e-4);
@@ -3668,14 +3717,14 @@ fn context_aware_background_dim_overlay_across_all_four_cases() {
     let mut play_console = installed_console();
     play_console.background_level = false;
     play_console.set_mode(Mode::Pause);
-    play_console.windows.set_time(2.0);
+    play_console.shell.windows.set_time(2.0);
     assert!((play_console.dim_overlay_alpha(2.0) - gameplay_dim).abs() < 1e-4);
 
     // 4. Mid-gameplay with a dialog open: coordinated transition to backdrop dim (~0.6118)
     assert!((Console::dim_overlay_opacity(true, true, 0.0) - backdrop).abs() < 1e-4);
 
     play_console.open_options();
-    play_console.windows.set_time(2.0);
+    play_console.shell.windows.set_time(2.0);
     // At t=2.0: options just opened, dim starts at gameplay_dim
     assert!((play_console.dim_overlay_alpha(2.0) - gameplay_dim).abs() < 1e-4);
     // At t=2.15: halfway between gameplay_dim and backdrop
@@ -3685,7 +3734,7 @@ fn context_aware_background_dim_overlay_across_all_four_cases() {
     assert!((play_console.dim_overlay_alpha(2.30) - backdrop).abs() < 1e-4);
 
     // Close options at t=3.0: fades back down to gameplay_dim
-    play_console.windows.set_time(3.0);
+    play_console.shell.windows.set_time(3.0);
     play_console.close_window(Window::Options);
     play_console.sync_dialog_windows();
     assert!((play_console.dim_overlay_alpha(3.0) - backdrop).abs() < 1e-4);
@@ -3705,14 +3754,17 @@ fn mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus() {
     assert_eq!(console.mode(), Mode::Gameplay);
     assert_eq!(console.base, Mode::Gameplay);
     assert!(!console.paused());
-    assert_eq!(console.windows.focus(), Layer::Base);
+    assert_eq!(console.shell.windows.focus(), Layer::Base);
 
     // 2. Press tilde mid-gameplay: opens main menu as active base (paused) with dev console focused
     console.toggle();
     assert_eq!(console.mode(), Mode::Console);
     assert_eq!(console.base, Mode::Pause);
     assert!(console.paused());
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Console)
+    );
 
     // 3. Close the dev console via toggle (pressing tilde again):
     // Leaves the main/pause menu open, active, and focused
@@ -3720,13 +3772,16 @@ fn mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus() {
     assert_eq!(console.mode(), Mode::Pause);
     assert_eq!(console.base, Mode::Pause);
     assert!(console.paused());
-    assert_eq!(console.windows.focus(), Layer::Base);
+    assert_eq!(console.shell.windows.focus(), Layer::Base);
 
     // 4. Pressing tilde again from the pause menu opens dev console over pause menu
     console.toggle();
     assert_eq!(console.mode(), Mode::Console);
     assert_eq!(console.base, Mode::Pause);
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Console)
+    );
 
     // 5. Closing dev console via Escape also leaves main/pause menu active and focused
     console.escape_pressed();
@@ -3734,7 +3789,7 @@ fn mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus() {
     assert_eq!(console.mode(), Mode::Pause);
     assert_eq!(console.base, Mode::Pause);
     assert!(console.paused());
-    assert_eq!(console.windows.focus(), Layer::Base);
+    assert_eq!(console.shell.windows.focus(), Layer::Base);
 
     // 6. Resuming from the main/pause menu returns to active gameplay
     console.escape_pressed();
@@ -3742,7 +3797,7 @@ fn mid_gameplay_tilde_dev_console_transition_and_pause_menu_focus() {
     assert_eq!(console.mode(), Mode::Gameplay);
     assert_eq!(console.base, Mode::Gameplay);
     assert!(!console.paused());
-    assert_eq!(console.windows.focus(), Layer::Base);
+    assert_eq!(console.shell.windows.focus(), Layer::Base);
 }
 
 #[test]
@@ -3759,7 +3814,7 @@ fn subdialog_buttons_can_be_activated_by_mouse_click() {
         .open_sub(crate::gameui::options::Sub::VideoAdvanced);
     console.sync_dialog_windows();
     assert!(console.options.has_sub());
-    assert!(console.windows.is_active(Window::SubDialog));
+    assert!(console.shell.windows.is_active(Window::SubDialog));
     let bounds = console.window_bounds(Window::SubDialog);
     assert!(bounds.w > 0. && bounds.h > 0.);
     // OK button in test layout VIDEO_ADVANCED is at (290, 316, 80, 24)
@@ -3884,7 +3939,7 @@ fn keyboard_use_defaults_confirmation_works_with_click_and_keys() {
         .command(crate::gameui::settings::Command::KeyDefaults);
     console.sync_dialog_windows();
     assert!(console.options.has_confirm());
-    assert!(console.windows.is_active(Window::Confirmation));
+    assert!(console.shell.windows.is_active(Window::Confirmation));
 
     // Idle frame: confirmation dialog persists across frames
     console.input(&Input::default());
@@ -3982,13 +4037,13 @@ fn out_of_focus_menu_title_and_subtitle_are_translucent_without_black_outline() 
     console.canvas.resize(1280., 720.);
 
     // When menu is focused (t=0.0):
-    console.windows.set_time(0.0);
-    assert_eq!(console.windows.base_focus_amount(0.0), 1.0);
+    console.shell.windows.set_time(0.0);
+    assert_eq!(console.shell.windows.base_focus_amount(0.0), 1.0);
 
     // Open options: base menu focus fades out to 0.0 at t=0.3
     console.open_options();
-    console.windows.set_time(0.0);
-    let base_focus = console.windows.base_focus_amount(0.3);
+    console.shell.windows.set_time(0.0);
+    let base_focus = console.shell.windows.base_focus_amount(0.3);
     assert!(base_focus < 1e-4);
 
     // Draw menu when fully out of focus (t=0.3)
@@ -4037,7 +4092,7 @@ fn console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open() {
         .open_sub(crate::gameui::options::Sub::VideoAdvanced);
     console.sync_dialog_windows();
     assert!(console.options.has_sub());
-    assert!(console.windows.has_modal());
+    assert!(console.shell.windows.has_modal());
 
     console.toggle();
     assert!(
@@ -4049,7 +4104,7 @@ fn console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open() {
     console.options.cancel_sub();
     console.sync_dialog_windows();
     assert!(!console.options.has_sub());
-    assert!(!console.windows.has_modal());
+    assert!(!console.shell.windows.has_modal());
 
     console.toggle();
     assert!(
@@ -4065,7 +4120,7 @@ fn console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open() {
         .command(crate::gameui::settings::Command::KeyDefaults);
     console.sync_dialog_windows();
     assert!(console.options.has_confirm());
-    assert!(console.windows.has_modal());
+    assert!(console.shell.windows.has_modal());
 
     console.toggle();
     assert!(
@@ -4077,7 +4132,7 @@ fn console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open() {
     console.options.dismiss_confirm();
     console.sync_dialog_windows();
     assert!(!console.options.has_confirm());
-    assert!(!console.windows.has_modal());
+    assert!(!console.shell.windows.has_modal());
 
     console.toggle();
     assert!(
@@ -4102,13 +4157,16 @@ fn console_invocation_is_blocked_when_blocking_subdialog_or_modal_is_open() {
 #[test]
 fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
     let mut console = Console::default();
-    console.windows.set_time(-1.0);
-    console.windows.open(Window::Console);
-    console.windows.set_time(0.0);
+    console.shell.windows.set_time(-1.0);
+    console.shell.windows.open(Window::Console);
+    console.shell.windows.set_time(0.0);
     console.sync_dialog_windows();
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Console)
+    );
 
-    let layout = console.panel.dialog_layout(&console.canvas);
+    let layout = console.shell.panel.dialog_layout(&console.canvas);
     let entry_canvas = layout.canvas(layout.entry);
     let caret_h = (layout.entry.h - 8.) * layout.scale;
 
@@ -4146,7 +4204,10 @@ fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
     // 2. Options window is opened and raised over Console:
     console.open_options();
     console.sync_dialog_windows();
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Options));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Options)
+    );
 
     // When Console is out of focus, its entry caret must be strictly hidden at all times!
     console.draw(0.0);
@@ -4166,12 +4227,18 @@ fn console_entry_cursor_blinks_when_focused_and_hides_when_unfocused() {
     // 3. When Quit confirmation box appears over console:
     console.close_window(Window::Options);
     console.sync_dialog_windows();
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Console));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Console)
+    );
 
     let loc = console.gameui.localization.clone();
     console.confirm_box = Some((crate::gameui::menu::quit_box(&loc), ConfirmKind::Quit));
     console.sync_dialog_windows();
-    assert_eq!(console.windows.focus(), Layer::Window(Window::Confirmation));
+    assert_eq!(
+        console.shell.windows.focus(),
+        Layer::Window(Window::Confirmation)
+    );
 
     console.draw(0.0);
     let quads_confirm = console.canvas.drain();
@@ -4762,7 +4829,7 @@ fn gameplay_skill_cvar_and_migrate_command() {
     // Query skill
     console.submit("skill");
     assert_eq!(
-        console.panel.output.back().unwrap().text,
+        console.shell.panel.output.back().unwrap().text,
         "\"skill\" = \"2\""
     );
 
@@ -4785,7 +4852,7 @@ fn gameplay_skill_cvar_and_migrate_command() {
     // Placeholder migrate_episodic_data command
     console.submit("migrate_episodic_data");
     assert_eq!(
-        console.panel.output.back().unwrap().text,
+        console.shell.panel.output.back().unwrap().text,
         "migrate_episodic_data: save data migration is not implemented in this build"
     );
 }

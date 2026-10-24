@@ -86,7 +86,7 @@ impl Console {
         );
         let is_mid_gameplay =
             !self.background_level && matches!(self.base, Mode::Pause | Mode::Gameplay);
-        let base_focus = self.windows.base_focus_amount(time);
+        let base_focus = self.shell.windows.base_focus_amount(time);
         Self::dim_overlay_opacity(is_mid_gameplay, menu_open, base_focus)
     }
 
@@ -500,7 +500,7 @@ impl Console {
             }
             // Starting a game closes the windows (Options without applying).
             MenuOutcome::NewGame(map) => {
-                self.windows.clear();
+                self.shell.windows.clear();
                 self.sync_mode();
                 self.clear_menu_hover();
                 self.start_loading(&map);

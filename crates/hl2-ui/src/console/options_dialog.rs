@@ -24,7 +24,7 @@ impl Console {
 
     /// The Options dialog is open (focused or not).
     pub fn options_open(&self) -> bool {
-        self.windows.is_active(Window::Options)
+        self.shell.windows.is_active(Window::Options)
     }
 
     /// Opens the Options dialog with the applied settings, or raises it as it is when open
@@ -38,7 +38,7 @@ impl Console {
         if !self.background_level && self.base == Mode::Gameplay {
             self.base = Mode::Pause;
         }
-        self.windows.open(Window::Options);
+        self.shell.windows.open(Window::Options);
         self.reset_menu_interaction();
         self.sync_mode();
     }

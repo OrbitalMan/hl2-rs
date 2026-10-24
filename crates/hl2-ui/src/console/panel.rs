@@ -13,12 +13,12 @@ impl Console {
 
     /// Updates the most recent live viewmodel tuning snapshot instead of growing scrollback.
     pub fn log_viewmodel_tuning(&mut self, text: impl Into<String>) {
-        self.panel.replace_snapshot(&self.canvas, text);
+        self.shell.panel.replace_snapshot(&self.canvas, text);
     }
 
     /// Prints a line at `level`, stamped with the current time.
     pub fn print(&mut self, level: Level, text: impl Into<String>) {
-        self.panel.print(&self.canvas, level, text);
+        self.shell.panel.print(&self.canvas, level, text);
     }
 
     pub fn submit(&mut self, line: &str) -> Vec<Effect> {
@@ -57,33 +57,38 @@ impl Console {
 
     /// The text being typed on the console line.
     pub fn input_line(&self) -> &str {
-        self.panel.editor.text()
+        self.shell.panel.editor.text()
     }
 
     /// Names that command arguments complete from (installed maps, the loaded map's entities).
     pub fn set_completion_sources(&mut self, sources: complete::Sources) {
         self.completion = sources;
-        self.panel.editor.refresh(&self.completion);
+        self.shell.panel.editor.refresh(&self.completion);
     }
 
     /// Restores the command history the host saved.
     pub fn set_history(&mut self, history: Vec<String>) {
-        self.panel.editor.set_history(history);
+        self.shell.panel.editor.set_history(history);
     }
 
     /// The command history, once after it changed (the host saves it then).
     pub fn take_changed_history(&mut self) -> Option<Vec<String>> {
-        self.panel
+        self.shell
+            .panel
             .editor
             .take_history_changed()
-            .then(|| self.panel.editor.history().to_vec())
+            .then(|| self.shell.panel.editor.history().to_vec())
     }
 
     /// Input of the focused console: the dialog edits, scrolls and selects; a click on Close
     /// closes it and a submitted line runs (both buttons play their release sound).
     pub(super) fn console_input(&mut self, input: &Input) -> Vec<Effect> {
-        self.pointer = input.pointer;
-        match self.panel.input(&self.canvas, input, &self.completion) {
+        self.shell.pointer = input.pointer;
+        match self
+            .shell
+            .panel
+            .input(&self.canvas, input, &self.completion)
+        {
             Action::None => Vec::new(),
             Action::Close => {
                 self.toggle();
@@ -102,7 +107,7 @@ impl Console {
 
     /// Text the copy shortcut copied from the history, for the host to put on the clipboard.
     pub fn take_copied(&mut self) -> Option<String> {
-        self.panel.take_copied()
+        self.shell.panel.take_copied()
     }
 
     /// The console dialog with HL2's texts, the console window's look and focus, under
@@ -121,11 +126,11 @@ impl Console {
             title: &title,
             submit: &submit,
             reverse_search: &reverse_search,
-            focused: self.windows.focus() == Layer::Window(Window::Console),
-            closing: self.escape_held && self.windows.top() == Some(Window::Console),
+            focused: self.shell.windows.focus() == Layer::Window(Window::Console),
+            closing: self.shell.escape_held && self.shell.windows.top() == Some(Window::Console),
             commands: commands::COMMANDS,
             context: self,
         };
-        self.panel.draw(&self.canvas, &look, time, occluders);
+        self.shell.panel.draw(&self.canvas, &look, time, occluders);
     }
 }

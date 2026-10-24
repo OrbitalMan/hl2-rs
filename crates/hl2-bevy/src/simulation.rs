@@ -1067,6 +1067,7 @@ mod tests {
         assert_eq!(sim.eye, glam::Vec3::new(10., 20., 94.));
         let position = ui
             .source
+            .shell
             .panel
             .output
             .iter()
@@ -1476,6 +1477,7 @@ mod tests {
         assert!(!ui.background_request);
         assert!(
             ui.source
+                .shell
                 .panel
                 .output
                 .iter()

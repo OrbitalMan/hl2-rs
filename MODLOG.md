@@ -1,5 +1,22 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 4b: the shell's state
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:**
+- New `source_ui::shell::Shell<W>`: the window stack (`windows`), the developer console dialog (`panel`), whether Escape is held, the key repeat and the latest pointer. They moved from `Console`'s fields into `console.shell`; every use follows (`self.windows` -> `self.shell.windows` and the like; tests and hl2-bevy: `console.panel` -> `console.shell.panel`, `source.panel.output` -> `source.shell.panel.output`).
+
+**Why:** Step 4 of the toolkit split (DESIGN "Step 4 design"): the shell owns its state; the control flow follows in 4c and 4d.
+
+**Tested how:** Every test passes with path changes only. `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays pass, 10 of 10; the repository isolation check passes.
+
+**Result:** `Console` loses five fields to the shell. No behaviour change.
+
+**Still broken or not tested:** The control flow is still `Console`'s (4c, 4d).
+
+**Next:** 4c: input routing over `shell::Host`.
+
 ## 2026-10-24 UI toolkit split, step 4a: generic window stack; the step 4 design
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

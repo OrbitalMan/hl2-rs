@@ -15,6 +15,7 @@ pub mod message_box;
 pub mod native_font;
 pub mod placement;
 pub mod scheme_fonts;
+pub mod shell;
 pub mod viewport;
 pub mod widgets;
 pub mod windows;

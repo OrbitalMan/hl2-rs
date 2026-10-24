@@ -823,7 +823,7 @@ mod tests {
 
         let ui = app.world().resource::<ui_host::Console>();
         assert!(
-            ui.source.panel.output.iter().any(|line| line
+            ui.source.shell.panel.output.iter().any(|line| line
                 .contains("Warning: background map invalid_nonexistent_background_map failed")),
             "warning logged to console"
         );

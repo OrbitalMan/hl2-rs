@@ -19,13 +19,14 @@ use serde::Serialize;
 use source_assets::{keyvalues, vpk::Vfs};
 use source_ui::{
     canvas::*,
-    console::panel::{ConsolePanel, Style as ConsoleStyle},
+    console::panel::Style as ConsoleStyle,
     font::{FontFace, TextOutline},
-    input::{Input, Key, KeyRepeat},
+    input::{Input, Key},
     message_box::{MessageBox, MessageBoxLayout},
     placement::{self, CursorHint, Placement},
+    shell::Shell,
     widgets::{scheme_color, ButtonTracker, Fonts, Painter, Theme},
-    windows::{Layer, Pointer, WindowId, Windows},
+    windows::{Layer, Pointer, WindowId},
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -126,20 +127,12 @@ pub struct Console {
     mode: Mode,
     /// What the windows are over: the main menu, the pause menu or the game.
     base: Mode,
-    /// The Options dialog and the console: non-modal windows over the base (retail VGUI
-    /// frames), in z-order with the keyboard focus (`source_ui::windows`).
-    windows: Windows<Window>,
+    /// The window stack and focus (the Options dialog and the console), the console dialog,
+    /// Escape held over a dialog, key repeat and the latest pointer.
+    pub shell: Shell<Window>,
     pub cheats: bool,
-    /// The developer console dialog: output, history, command line, completion, its placement
-    /// and drawing (kept while the game runs).
-    pub panel: ConsolePanel,
     /// Where the quit / main-menu box was dragged (centered on opening).
     quit_placement: Placement,
-    /// The pointer of the latest input frame (cursor hints).
-    pointer: Option<Vec2>,
-    /// Escape is held and closes the top dialog on release ([`Console::escape_pressed`]).
-    escape_held: bool,
-    key_repeat: KeyRepeat,
     /// Names arguments complete from (installed maps, the loaded map's entities), set by the host.
     completion: complete::Sources,
     font: Option<FontFace>,
@@ -311,13 +304,13 @@ impl Default for Console {
             mode: Mode::Gameplay,
             base: Mode::Gameplay,
             // `Frame.FocusTransitionEffectTime` of the installed desktop scheme.
-            windows: Windows::new(0.3, crate::tuning::unfocused_alpha_factor()),
+            shell: Shell::new(
+                0.3,
+                crate::tuning::unfocused_alpha_factor(),
+                crate::proportional::SCALING,
+            ),
             cheats: false,
-            panel: ConsolePanel::new(crate::proportional::SCALING),
             quit_placement: Placement::default(),
-            pointer: None,
-            escape_held: false,
-            key_repeat: KeyRepeat::default(),
             completion: complete::Sources::default(),
             font: None,
             menu_font: None,
@@ -425,8 +418,8 @@ impl Console {
         }
         console.set_resources(gameui);
         // Saved dialog placements (checked against the canvas when each dialog opens).
-        console.panel.font = console.mono.clone();
-        console.panel.placement = Placement::from_saved(console.config.dialogs.console);
+        console.shell.panel.font = console.mono.clone();
+        console.shell.panel.placement = Placement::from_saved(console.config.dialogs.console);
         console
             .options
             .set_placement(Placement::from_saved(console.config.dialogs.options));
@@ -521,7 +514,7 @@ impl Console {
                 .and_then(|e| e.text())
                 .and_then(|t| t.trim().parse::<f32>().ok())
             {
-                console.windows.fade_time = time;
+                console.shell.windows.fade_time = time;
             }
             console.style = Style {
                 menu: scheme_color(&root, "MainMenu.TextColor").unwrap_or(console.style.menu),
@@ -529,7 +522,7 @@ impl Console {
                     .unwrap_or(console.style.menu_armed),
                 panel: scheme_color(&root, "Frame.BgColor").unwrap_or(console.style.panel),
             };
-            let style = &mut console.panel.style;
+            let style = &mut console.shell.panel.style;
             *style = ConsoleStyle {
                 entry: scheme_color(&root, "RichText.BgColor").unwrap_or(style.entry),
                 text: scheme_color(&root, "Console.TextColor").unwrap_or(style.text),
@@ -546,16 +539,19 @@ impl Console {
             .and_then(|roots| roots.into_iter().next())
         {
             for (name, color) in [
-                ("Console.TextColor", &mut console.panel.style.text),
-                ("Console.DevTextColor", &mut console.panel.style.dev_text),
-                ("RichText.BgColor", &mut console.panel.style.entry),
+                ("Console.TextColor", &mut console.shell.panel.style.text),
+                (
+                    "Console.DevTextColor",
+                    &mut console.shell.panel.style.dev_text,
+                ),
+                ("RichText.BgColor", &mut console.shell.panel.style.entry),
                 (
                     "RichText.SelectedBgColor",
-                    &mut console.panel.style.selected_bg,
+                    &mut console.shell.panel.style.selected_bg,
                 ),
                 (
                     "RichText.SelectedTextColor",
-                    &mut console.panel.style.selected_text,
+                    &mut console.shell.panel.style.selected_text,
                 ),
             ] {
                 if let Some(value) = scheme_color(&root, name) {
@@ -614,7 +610,7 @@ impl Console {
     /// (scripted replays too): a keep-video confirmation counts down and reverts at its timeout.
     pub fn tick(&mut self, now: f64) -> Vec<Effect> {
         self.ui_clock = now;
-        self.windows.set_time(now);
+        self.shell.windows.set_time(now);
         if let Some((confirm, ConfirmKind::KeepVideo(keep))) = &mut self.confirm_box {
             if keep.expired(now) {
                 let previous = keep.previous;
@@ -797,7 +793,7 @@ impl Console {
             }
             let geometry = self.menu_layout.geometry_for(self.canvas_size());
             let title = self.current_title();
-            let base_focus = self.windows.base_focus_amount(time);
+            let base_focus = self.shell.windows.base_focus_amount(time);
             let unfocused_alpha = crate::tuning::unfocused_alpha_factor();
             let alpha_mult = unfocused_alpha + (1.0 - unfocused_alpha) * base_focus;
 
@@ -967,7 +963,7 @@ impl Console {
             };
             // With the keyboard elsewhere (a window has the focus), a row is armed only under
             // the pointer or while pressed.
-            let menu_keyboard = self.windows.focus() == Layer::Base;
+            let menu_keyboard = self.shell.windows.focus() == Layer::Base;
             let modal_open = self.modal_dialog_open();
             for (i, entry) in menu.entries().iter().enumerate() {
                 if entry.spacer {
@@ -1035,7 +1031,7 @@ impl Console {
             )
         });
 
-        let active_windows: Vec<Window> = self.windows.order().collect();
+        let active_windows: Vec<Window> = self.shell.windows.order().collect();
         for (idx, &window) in active_windows.iter().enumerate() {
             let mut occluders = Vec::new();
             if let Some(qb) = quit_bounds {
@@ -1052,9 +1048,13 @@ impl Console {
             match window {
                 Window::Options => {
                     let theme = self.window_theme(window, time);
-                    let alpha = self.windows.window_composite_alpha(Window::Options, time);
+                    let alpha = self
+                        .shell
+                        .windows
+                        .window_composite_alpha(Window::Options, time);
                     let old_alpha = self.canvas.set_alpha_multiplier(alpha);
-                    let options_focused = self.windows.focus() == Layer::Window(Window::Options);
+                    let options_focused =
+                        self.shell.windows.focus() == Layer::Window(Window::Options);
                     self.options.draw_with_occluders(
                         &Painter {
                             theme: &theme,
@@ -1067,7 +1067,10 @@ impl Console {
                     self.canvas.set_alpha_multiplier(old_alpha);
                 }
                 Window::Console => {
-                    let alpha = self.windows.window_composite_alpha(Window::Console, time);
+                    let alpha = self
+                        .shell
+                        .windows
+                        .window_composite_alpha(Window::Console, time);
                     let old_alpha = self.canvas.set_alpha_multiplier(alpha);
                     self.draw_console_with_occluders(time, &occluders);
                     self.canvas.set_alpha_multiplier(old_alpha);
@@ -1081,6 +1084,7 @@ impl Console {
             let painter = self.painter(origin, scale);
             let theme = self.window_theme(Window::Confirmation, time);
             let alpha = self
+                .shell
                 .windows
                 .window_composite_alpha(Window::Confirmation, time);
             let old_alpha = self.canvas.set_alpha_multiplier(alpha);
