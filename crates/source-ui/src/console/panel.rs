@@ -8,7 +8,7 @@ use super::command::{self, Context, Spec};
 use super::complete::{self, Completer};
 use super::dialog::{wrap, DialogLayout, Scaling, Selection, MIN_SIZE};
 use super::editor::LineEditor;
-use crate::canvas::*;
+use crate::canvas::{Canvas, Color, Rect, WHITE};
 use crate::font::FontFace;
 use crate::input::{Input, Key};
 use crate::placement::{self, Placement};

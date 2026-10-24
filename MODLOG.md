@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-24 UI toolkit split, step 6 follow-up: source-ui's glob imports
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** source-ui's last production glob imports (`use crate::canvas::*` in `font.rs` and `console/panel.rs`) are explicit (Clippy's `wildcard_imports` fix); the font test imports `WHITE`, which it took through the glob. The production globs left in the workspace are the Bevy and Rapier preludes (`bevy::prelude::*`, `rapier3d::prelude::*`) and the two enum-variant imports of the AI relationship table (`use Class::*; use Disposition::*;`); test modules keep `use super::*`.
+
+**Why:** Step 6 covered hl2-ui and hl2-simulation; source-ui had two more.
+
+**Tested how:** `scripts/checks/validate.sh` (tests, strict Clippy, fmt) and the Windows-target check pass; the packaged console and UI replays pass, 10 of 10; the repository isolation check passes.
+
+**Result:** Imports only.
+
+**Still broken or not tested:** nothing new.
+
+**Next:** Step 7.
+
 ## 2026-10-24 UI toolkit split, step 6: narrower visibility, explicit imports
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

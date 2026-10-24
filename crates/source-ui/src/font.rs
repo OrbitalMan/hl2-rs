@@ -1,6 +1,9 @@
 //! Font faces drawn into a [`Canvas`]: character-cell sizing like the retail `CWin32Font`,
 //! a glyph cache, optional blur and scanlines, and letter-edge outlines.
-use crate::canvas::*;
+use crate::canvas::{
+    draw_texture, draw_texture_ex, Canvas, Color, DrawTextureParams, FilterMode, MutexCell, Rect,
+    Texture2D,
+};
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
 use std::{collections::HashMap, sync::Arc};
@@ -353,6 +356,7 @@ fn gaussian_blur(bitmap: &[f32], width: usize, height: usize, radius: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::WHITE;
 
     #[test]
     fn font_draw_baseline_and_cell_outlined_emits_glyph_edge_contours() {
