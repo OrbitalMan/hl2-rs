@@ -47,3 +47,30 @@ pub fn present(
         }
     }
 }
+
+/// Each two-texture draw's frames and texture transform (run reports).
+pub fn report<'a>(
+    draws: impl Iterator<
+        Item = (
+            &'a bevy::ecs::name::Name,
+            &'a TwoTextureDraw,
+            &'a bevy::pbr::MeshMaterial3d<crate::rendering::SourceMaterial>,
+        ),
+    >,
+    materials: &bevy::asset::Assets<crate::rendering::SourceMaterial>,
+    time: f64,
+) -> serde_json::Value {
+    let entries: Vec<_> = draws
+        .filter_map(|(name, draw, handle)| {
+            let material = materials.get(&handle.0)?;
+            Some(
+                serde_json::json!({"name":name.as_str(),"entity":draw.entity,
+                "base_frames":draw.base.len(),"second_frames":draw.second.len(),
+                "base_frame":draw.base.iter().position(|h|h==&material.base),
+                "second_frame":draw.second.iter().position(|h|h==&material.iris),
+                "secondary_uv":material.secondary_uv.to_cols_array(),"time":time}),
+            )
+        })
+        .collect();
+    serde_json::json!(entries)
+}

@@ -115,23 +115,7 @@ pub fn install(
             commands.spawn((
                 crate::campaign::MapOwned,
                 Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(materials.add(rendering::SourceMaterial {
-                    tint: Vec4::ONE,
-                    parameters: Vec4::new(0., 1., 0., if linear { -2. } else { 0. }),
-                    base,
-                    lightmap: white.clone(),
-                    iris: white.clone(),
-                    secondary_uv: Mat3::IDENTITY,
-                    lighting: Default::default(),
-                    envmap: black_cube.clone(),
-                    envmap_tint: Vec4::ZERO,
-                    envmap_contrast: Vec4::ZERO,
-                    envmap_saturation: Vec4::ZERO,
-                    envmap_mask: white.clone(),
-                    self_illum: Vec4::ZERO,
-                    alpha: AlphaMode::Opaque,
-                    two_sided: true,
-                })),
+                MeshMaterial3d(materials.add(face_material(base, linear, (&white, &black_cube)))),
                 Transform::IDENTITY,
                 RenderLayers::layer(3),
             ));
@@ -215,5 +199,34 @@ pub fn present(
                 source_to_bevy(Vec3::from_array((b.origin + eye / b.scale).to_array()))
             })
         };
+    }
+}
+
+/// A 2D sky face's material: its texture unlit (`linear`: already linear HDR), no flashlight.
+fn face_material(
+    base: Handle<Image>,
+    linear: bool,
+    (white, black_cube): (&Handle<Image>, &Handle<Image>),
+) -> rendering::SourceMaterial {
+    rendering::SourceMaterial {
+        tint: Vec4::ONE,
+        parameters: Vec4::new(0., 1., 0., if linear { -2. } else { 0. }),
+        base,
+        lightmap: white.clone(),
+        iris: white.clone(),
+        secondary_uv: Mat3::IDENTITY,
+        lighting: rendering::ModelLighting {
+            params: Vec4::W,
+            ..Default::default()
+        },
+        flashlight: white.clone(),
+        envmap: black_cube.clone(),
+        envmap_tint: Vec4::ZERO,
+        envmap_contrast: Vec4::ZERO,
+        envmap_saturation: Vec4::ZERO,
+        envmap_mask: white.clone(),
+        self_illum: Vec4::ZERO,
+        alpha: AlphaMode::Opaque,
+        two_sided: true,
     }
 }

@@ -1,5 +1,8 @@
 //! Read owned Source assets before constructing the Bevy app; no system performs file I/O.
 mod faces;
+mod names;
+use names::rendered_material_names;
+pub(crate) use names::visible_entity;
 mod vmt_vars;
 use anyhow::{Context, Result, bail};
 use modkit_core::World;
@@ -11,11 +14,7 @@ use source_assets::{
     vpk::{self, Vfs},
     vtf::{self, Image},
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 use vmt_vars::{direct_properties, material_properties};
 
 const MAX_TEXTURE_DIMENSION: usize = 2048;
@@ -51,6 +50,8 @@ pub struct LoadedMap {
     pub bsp: Bsp,
     pub revision: u32,
     pub materials: BTreeMap<String, MaterialData>,
+    /// The flashlight's projected texture.
+    pub flashlight_cookie: Option<Arc<Image>>,
     /// The world triangles projected shadows land on.
     pub shadow_receivers: Arc<hl2_simulation::shadows::receivers::Receivers>,
     pub texture_errors: Vec<String>,
@@ -368,10 +369,10 @@ pub fn load_with_progress(
             .add_sentence(&wave, sentence, seconds);
     }
     let sky = load_sky(&vfs, &world, hdr, &mut texture_errors);
-    let shadow_receivers = Arc::new(crate::shadows::receivers(&world, &materials));
     progress.report(1.0, "LoadingProgress_SignonLocal");
     Ok(LoadedMap {
-        shadow_receivers,
+        shadow_receivers: Arc::new(crate::shadows::receivers(&world, &materials)),
+        flashlight_cookie: crate::flashlight::load_cookie(&vfs).map(Arc::new),
         game: game.to_owned(),
         console,
         effects,
@@ -557,50 +558,6 @@ fn normalize_bsp_render_winding(world: &mut World) {
 }
 
 /// Initial static visibility only. Runtime I/O and animated render effects are separate.
-pub(crate) fn visible_entity(world: &World, id: usize) -> bool {
-    world.entities.get(id).is_some_and(|entity| {
-        !entity.class().starts_with("trigger_") && !entity.class().starts_with("func_areaportal")
-    })
-}
-
-fn rendered_material_names(world: &World) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    let mut append = |surfaces: &[modkit_core::Surface]| {
-        names.extend(
-            surfaces
-                .iter()
-                .filter(|surface| !surface.indices.is_empty())
-                .map(|surface| surface.material.clone()),
-        );
-    };
-    // Includes displacements and already-transformed static props. terrain is a
-    // duplicate collision representation, and unused model_assets are not draws.
-    append(&world.surfaces);
-    append(&world.overlays);
-    for (id, entity) in world.entities.iter().enumerate() {
-        if !visible_entity(world, id) {
-            continue;
-        }
-        if let Some(brush) = entity
-            .get("model")
-            .and_then(|name| name.strip_prefix('*'))
-            .and_then(|id| id.parse::<usize>().ok())
-            .and_then(|id| world.brush_models.iter().find(|model| model.id == id))
-        {
-            append(&brush.surfaces);
-        }
-    }
-    for instance in &world.model_instances {
-        if !instance.entity.is_some_and(|id| visible_entity(world, id)) {
-            continue;
-        }
-        if let Some(surfaces) = world.model_assets.get(&instance.asset_key()) {
-            append(surfaces);
-        }
-    }
-    names
-}
-
 struct Definition {
     shader: String,
     properties: BTreeMap<String, String>,
@@ -1170,6 +1127,7 @@ fn cached_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn self_illum_needs_a_translucent_base() {

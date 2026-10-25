@@ -12,6 +12,7 @@ pub mod actors;
 pub mod ai;
 pub mod citizens;
 pub mod entities;
+pub mod flashlight;
 pub mod footsteps;
 pub mod gameplay;
 pub mod gibs;

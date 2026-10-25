@@ -1,5 +1,19 @@
 # MODLOG
 
+## 2026-10-25 The flashlight (step 4 of Shadow detail), in progress: toggle, power, light
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Stopped at the owner's request (usage limit); handoff below.
+
+**Changed:** `hl2_simulation::flashlight` (new): suit power (`SuitPower`: drain, 0.1-rate cost on removal, 12.5 %/s recharge after 0.5 s), the legacy flashlight on suit power (2.222 %/s, 1.111 with `hl2_episodic`, halved on Easy; off below 4.8 %), Episode Two's own battery (1.1111 / 50 %/s), `impulse 100` toggle with `HL2Player.FlashLightOn/Off`, `DisableFlashlight`-style enable flag, and `Placer::place` (`UpdateLightNew`: 20 below the eye, swing when looking down, pull-back from near surfaces, low-power flicker). Host `flashlight.rs`: F key (`impulse 100`, the installed default bind) and the console command count toggles on `Simulation`; power runs per frame; the light is a Bevy `SpotLight` (radius = linear attenuation, cone = the square frustum's corners, near plane field = near) read by `source.wgsl`, which projects the installed `effects/flashlight_border` cookie (bound in every `SourceMaterial`, binding 18/19) with `saturate(100 / d)`, Lambert and the far fade, times albedo; unlit, camera, additive, sky and viewmodel draws skip it (`ModelLighting.params.w`). Report: `presentation.flashlight`. Size limits kept by moving the material helpers to `rendering/material.rs`, capture helpers to `capture.rs`, effect model reading to `effects/model_reading.rs`, the preloaded sound list to `audio/cues.rs`, `rendered_material_names` to `assets/names.rs`, the sky face material and two-texture report to functions.
+
+**Why:** Owner request. Evidence: Source SDK `player.cpp`, `hl2_player.cpp`, `flashlighteffect.cpp`, `common_flashlight_fxc.h`, `hud_suitpower.cpp`, `hud_flashlight.cpp`; the installed `kb_act.lst`, `config_default.cfg`, `hudlayout.res`, `hudanimations.txt`, `flashlight_border.vtf`; control flow and constants of the installed server and client (both drain rates in one device, the episodic flicker compiled in).
+
+**Tested how:** 6 unit tests (`flashlight`); owned test (cookie 64x64, black border); validate.sh passes. Packaged, `d1_trainstation_02` spawn corridor with a scripted `impulse 101; impulse 100`: a round soft-edged spot on the stairs and walls (difference to off up to 209 levels), suit power 91.65 after about 3.75 s.
+
+**Still broken or not tested:** frame time not measured yet (a packaged base/off/on run was in progress); the aux power HUD (`HudSuitPower`, `HudFlashlight` for Episode Two) is not drawn; High's depth shadows (step 5) not started; viewmodel not lit by the flashlight; the bump-mapped normal is not used; placement traces use `impact_hull` (shot mask) for both of the engine's masks; NPC flashlight reactions not modelled.
+
+**Next:** Measure off/on; HUD aux power element in hl2-ui (layout and animations listed in docs/DESIGN.md handoff); step 5: set `shadow_maps_enabled` on the spot light at High and sample `bevy_pbr::shadows::fetch_spot_shadow` in `flashlight()` with the shadow atten 0.35 blend.
+
 ## 2026-10-25 Shadow detail, step 3: render-to-texture shadows at Medium and High
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

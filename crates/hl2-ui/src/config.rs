@@ -614,6 +614,8 @@ impl Default for Config {
         keys.insert("invprev".into(), "MWHEELUP".into());
         keys.insert("invnext".into(), "MWHEELDOWN".into());
         keys.insert("impulse".into(), "KeyG".into());
+        // config_default.cfg: `bind "f" "impulse 100"`.
+        keys.insert("impulse 100".into(), "KeyF".into());
         keys.insert("loadout".into(), "F3".into());
         keys.insert("slot1".into(), "Digit1".into());
         keys.insert("slot2".into(), "Digit2".into());

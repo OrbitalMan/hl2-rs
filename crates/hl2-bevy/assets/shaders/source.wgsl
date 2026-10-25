@@ -1,5 +1,6 @@
 #import bevy_pbr::forward_io::VertexOutput
-#import bevy_pbr::mesh_view_bindings::view
+#import bevy_pbr::mesh_view_bindings::{view, clustered_lights}
+#import bevy_pbr::clustered_forward
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> tint: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var base_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var base_sampler: sampler;
@@ -28,6 +29,8 @@ struct ModelLighting {
 @group(#{MATERIAL_BIND_GROUP}) @binding(15) var envmap_mask_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(16) var envmap_mask_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(17) var<uniform> self_illum: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(18) var flashlight_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(19) var flashlight_sampler: sampler;
 // SDK lightmappedgeneric_ps2_3_x.h CUBEMAP: reflection of the eye vector about the face
 // normal, sampled in Source axes. Retail integer HDR stores cubemaps as linear/16 and
 // multiplies by ENV_MAP_SCALE 16 (shaderapidx9 c30.z), so texels are capped at 16.
@@ -114,6 +117,38 @@ fn model_light(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     return sum;
 }
+// The HEV flashlight (SDK common_flashlight_fxc.h DoFlashlight), from the host's spot light: its cone
+// spans the square frustum's corners (tan / sqrt 2 is the half field of view), its radius is the
+// linear attenuation, its range the far plane, its near-plane field the near plane. The projected
+// cookie times saturate(linear / d), the Lambert term and the far fade (from 60 % of far).
+fn flashlight(world_position: vec4<f32>, n: vec3<f32>, frag_coord: vec2<f32>) -> vec3<f32> {
+    let view_z = (view.view_from_world * vec4(world_position.xyz, 1.0)).z;
+    let cluster = clustered_forward::view_fragment_cluster_index(frag_coord, view_z, false);
+    let ranges = clustered_forward::unpack_clusterable_object_index_ranges(cluster);
+    for (var i = ranges.first_spot_light_index_offset; i < ranges.first_reflection_probe_index_offset; i++) {
+        let light = &clustered_lights.data[clustered_forward::get_clusterable_object_id(i)];
+        var d = vec3((*light).light_custom_data.x, 0.0, (*light).light_custom_data.y);
+        d.y = sqrt(max(0.0, 1.0 - d.x * d.x - d.z * d.z));
+        if ((*light).flags & 2u) != 0u { d.y = -d.y; }
+        var up = vec3(0.0, 1.0, 0.0) - d * d.y;
+        if dot(up, up) < 1e-6 { up = vec3(0.0, 0.0, -1.0); }
+        up = normalize(up);
+        let right = cross(d, up);
+        let to = world_position.xyz - (*light).position_radius.xyz;
+        let z = dot(to, d);
+        if z <= (*light).shadow_map_near_z { return vec3(0.0); }
+        let tan_half = (*light).spot_light_tan_angle * 0.70710678;
+        let xy = vec2(dot(to, right), dot(to, up)) / (z * tan_half);
+        if abs(xy.x) > 1.0 || abs(xy.y) > 1.0 { return vec3(0.0); }
+        let cookie = textureSampleLevel(flashlight_texture, flashlight_sampler, vec2(xy.x, -xy.y) * 0.5 + 0.5, 0.0).rgb;
+        let dist = max(length(to), 1e-3);
+        let atten = saturate((*light).position_radius.w / dist);
+        let far = (*light).range;
+        let fade = clamp((dist - far) / (-0.4 * far), 0.0, 1.0);
+        return cookie * atten * saturate(dot(n, -to / dist)) * fade;
+    }
+    return vec3(0.0);
+}
 @fragment
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     var base = textureSample(base_texture, base_sampler, mesh.uv);
@@ -143,6 +178,9 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
         let p = (lighting.basis * vec4(mesh.world_position.xyz, 1.0)).xyz;
         let n = normalize((lighting.basis * vec4(mesh.world_normal, 0.0)).xyz);
         rgb = srgb_to_linear(base.rgb) * model_light(p, n);
+    }
+    if lighting.params.w < 0.5 {
+        rgb += srgb_to_linear(base.rgb) * flashlight(mesh.world_position, normalize(mesh.world_normal), mesh.position.xy);
     }
     // SDK $selfillum: diffuse = lerp(diffuse, tint * albedo, base alpha), before specular.
     if self_illum.w > 0.5 {

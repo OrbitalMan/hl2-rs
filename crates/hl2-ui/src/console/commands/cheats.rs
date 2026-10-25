@@ -30,12 +30,16 @@ pub(super) fn sv_cheats_value(console: &Console) -> Option<String> {
     Some(u8::from(console.cheats).to_string())
 }
 
+/// `impulse 100` toggles the flashlight (not a cheat); `impulse 101` grants the loadout (a cheat).
 pub(super) fn impulse(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {
-    if args != ["101"] {
-        return Err(spec.usage());
+    match args {
+        [n] if n == "100" => Ok(Some(Effect::Flashlight)),
+        [n] if n == "101" => {
+            cheat(console, spec)?;
+            Ok(Some(Effect::Loadout))
+        }
+        _ => Err(spec.usage()),
     }
-    cheat(console, spec)?;
-    Ok(Some(Effect::Loadout))
 }
 
 pub(super) fn noclip(console: &mut Console, spec: &'static Spec, args: &[String]) -> Outcome {

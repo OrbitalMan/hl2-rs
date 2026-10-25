@@ -169,6 +169,8 @@ pub struct Simulation {
     pub viewmodel_fov: f32,
     /// PlayerDeathThink: every button must be released before one press respawns.
     death_buttons_released: bool,
+    /// `impulse 100` presses and commands since the flashlight last read them.
+    pub flashlight_toggles: u32,
 }
 impl Simulation {
     pub fn new(
@@ -213,6 +215,7 @@ impl Simulation {
             vertical_fov: 0.,
             viewmodel_fov: hl2_simulation::viewmodel_effects::VIEWMODEL_FOV,
             death_buttons_released: true,
+            flashlight_toggles: 0,
         }
     }
     /// The player's eye.
@@ -357,21 +360,14 @@ impl Simulation {
             match effect {
                 Effect::Loadout => grant_loadout(ui, game),
                 Effect::AiEnable(value) => {
-                    let on = value.unwrap_or(!game.ai.enabled);
-                    game.ai.enabled = on;
-                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+                    let on = set_ai(game, value.unwrap_or(!game.ai.enabled));
                     ui.source.log(format!("ai_enable {}", u8::from(on)));
                 }
                 // CC_AI_Disable: a toggle; DevMsg "AI Disabled." / "AI Enabled.".
                 Effect::AiDisable => {
-                    let on = !game.ai.enabled;
-                    game.ai.enabled = on;
-                    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
-                    ui.source.log(String::from(if on {
-                        "AI Enabled."
-                    } else {
-                        "AI Disabled."
-                    }));
+                    let on = set_ai(game, !game.ai.enabled);
+                    ui.source
+                        .log(if on { "AI Enabled." } else { "AI Disabled." });
                 }
                 Effect::Noclip(value) => {
                     self.fly = value.unwrap_or(!self.fly);
@@ -379,6 +375,7 @@ impl Simulation {
                     ui.source.log(format!("noclip {}", u8::from(self.fly)));
                 }
                 Effect::ViewmodelTweakMode(on) => self.viewmodel_tweak_mode(ui, on),
+                Effect::Flashlight => self.flashlight_toggles += 1,
                 Effect::ViewmodelTweakReset => self.viewmodel_tweak_reset(ui),
                 Effect::Getpos => ui.source.log(format!(
                     "setpos {:.6} {:.6} {:.6}; setang {:.6} {:.6} 0",
@@ -870,6 +867,13 @@ impl WindowSettings {
         Self::new(video.width, video.height, video.display_mode)
             .with_flexible_aspect(video.flexible_aspect)
     }
+}
+
+/// Turns the AI on or off; returns the new state.
+fn set_ai(game: &mut crate::gameplay::Gameplay, on: bool) -> bool {
+    game.ai.enabled = on;
+    crate::gameplay::AI_ENABLED.store(on, std::sync::atomic::Ordering::Relaxed);
+    on
 }
 
 #[cfg(test)]

@@ -170,7 +170,7 @@ pub const COMMANDS: &[Spec] = &[
     ),
     command(
         "impulse",
-        "impulse 101: grant the six implemented weapons, ammunition and suit (cheat)",
+        "impulse 100: toggle the flashlight; impulse 101: grant the six implemented weapons, ammunition and suit (cheat)",
         &[Arg::Values(&["101"])],
         cheats::impulse,
     ),

@@ -168,12 +168,12 @@
   "fed629d3999b"
  ],
  "files": {
-  "crates/hl2-bevy/src/assets.rs": 1169,
-  "crates/hl2-bevy/src/audio.rs": 1298,
-  "crates/hl2-bevy/src/effects.rs": 1298,
+  "crates/hl2-bevy/src/assets.rs": 1126,
+  "crates/hl2-bevy/src/audio.rs": 1250,
+  "crates/hl2-bevy/src/effects.rs": 1255,
   "crates/hl2-bevy/src/gameplay.rs": 1643,
-  "crates/hl2-bevy/src/main.rs": 1360,
-  "crates/hl2-bevy/src/rendering.rs": 2088,
+  "crates/hl2-bevy/src/main.rs": 1325,
+  "crates/hl2-bevy/src/rendering.rs": 1876,
   "crates/hl2-bevy/src/video.rs": 1191,
   "crates/hl2-simulation/src/ai/default_schedules.rs": 1247,
   "crates/hl2-simulation/src/ai/runtime.rs": 2621,
@@ -201,7 +201,7 @@
    195
   ],
   "crates/hl2-bevy/src/audio.rs::load": [
-   245
+   195
   ],
   "crates/hl2-bevy/src/audio.rs::queue": [
    327
@@ -234,13 +234,13 @@
    808
   ],
   "crates/hl2-bevy/src/input.rs::controls": [
-   141
+   138
   ],
   "crates/hl2-bevy/src/main.rs::main": [
    331
   ],
   "crates/hl2-bevy/src/main.rs::monitor": [
-   160
+   148
   ],
   "crates/hl2-bevy/src/main.rs::parse_from": [
    343
@@ -258,7 +258,7 @@
    208
   ],
   "crates/hl2-bevy/src/rendering.rs::spawn_map_filtered": [
-   665
+   657
   ],
   "crates/hl2-bevy/src/rendering.rs::spawn_runtime_draws": [
    151
@@ -267,13 +267,10 @@
    106
   ],
   "crates/hl2-bevy/src/simulation.rs::console_effects": [
-   137
+   131
   ],
   "crates/hl2-bevy/src/simulation.rs::step": [
    244
-  ],
-  "crates/hl2-bevy/src/sky.rs::install": [
-   116
   ],
   "crates/hl2-bevy/src/spawn_panel.rs::draw": [
    120

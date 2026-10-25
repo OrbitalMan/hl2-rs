@@ -1,4 +1,5 @@
 //! Depth-tested host adapter for shared owned projectile sprites and impact marks.
+mod model_reading;
 use crate::{assets::LoadedMap, gameplay::Gameplay, rendering, simulation::Simulation};
 use bevy::{
     asset::RenderAssetUsages,
@@ -13,9 +14,12 @@ use bevy::{
     shader::ShaderRef,
 };
 use hl2_simulation::{projectile_visuals::ProjectileVisuals, projectiles::ProjectileKind};
+pub(crate) use model_reading::read_effect_model_lod;
 use modkit_core::Surface;
-use source_assets::{models, vpk::Vfs};
+use source_assets::vpk::Vfs;
 use std::collections::BTreeMap;
+
+const TRILINEAR: hl2_ui::config::Filtering = hl2_ui::config::Filtering::Trilinear;
 
 pub struct PreparedEffects {
     pub sprites: ProjectileVisuals,
@@ -51,22 +55,6 @@ pub fn gib_models(world: &modkit_core::World) -> std::collections::BTreeSet<(Str
         }
     }
     gibs
-}
-/// One projectile/gib model posed at sequence 0 frame 0 (setup or worker threads).
-#[allow(dead_code)]
-pub fn read_effect_model(vfs: &Vfs, path: &str, skin: i32) -> anyhow::Result<Vec<Surface>> {
-    read_effect_model_lod(vfs, path, skin, 0)
-}
-/// One projectile/gib model posed at sequence 0 frame 0 with specified root LOD.
-pub fn read_effect_model_lod(
-    vfs: &Vfs,
-    path: &str,
-    skin: i32,
-    root_lod: usize,
-) -> anyhow::Result<Vec<Surface>> {
-    let mut surfaces = models::read_model_lod(vfs, path, skin.max(0) as usize, root_lod)?;
-    pose_sequence_zero(vfs, path, &mut surfaces)?;
-    Ok(surfaces)
 }
 impl PreparedEffects {
     #[allow(dead_code)]
@@ -106,37 +94,6 @@ impl PreparedEffects {
             model_errors,
         }
     }
-}
-
-/// Studio models draw through their bone pose, not the VVD reference pose: projectile
-/// entities never set a sequence, so sequence 0 frame 0 applies (crossbow_bolt.mdl and
-/// w_missile*.mdl point along +x only after their root-bone animation). Setup only.
-fn pose_sequence_zero(vfs: &Vfs, path: &str, surfaces: &mut [Surface]) -> anyhow::Result<()> {
-    use anyhow::Context;
-    let Some(first) = source_assets::animation::first_sequence_name(vfs, path)? else {
-        return Ok(());
-    };
-    let rig = source_assets::animation::load(vfs, path, &[first.clone()].into())?;
-    let matrices = rig.matrices(&first, 0.);
-    for vertex in surfaces.iter_mut().flat_map(|s| s.vertices.iter_mut()) {
-        let weights = vertex.skin.as_ref();
-        let matrix = match weights {
-            Some(w) => {
-                let mut blended = glam::Mat4::ZERO;
-                for (&bone, &weight) in w.bones.iter().zip(&w.weights) {
-                    blended += *matrices
-                        .get(bone as usize)
-                        .context("vertex bone out of range")?
-                        * weight;
-                }
-                blended
-            }
-            None => matrices.first().copied().unwrap_or(glam::Mat4::IDENTITY),
-        };
-        vertex.position = matrix.transform_point3(vertex.position);
-        vertex.normal = matrix.transform_vector3(vertex.normal).normalize_or_zero();
-    }
-    Ok(())
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -283,7 +240,7 @@ impl Effects {
                         base,
                         cache.white.clone(),
                         None,
-                        (&cache.white, &cache.black_cube),
+                        (&cache.white, &cache.black_cube, &cache.flashlight),
                     ));
                     (
                         meshes.add(rendering::mesh_from_surface(surface, definition)),
@@ -430,8 +387,8 @@ pub fn install(
             }),
         );
     }
-    let white = images.add(rendering::image(1, 1, vec![255; 4], false));
-    let black_cube = images.add(rendering::black_cube());
+    let cookie = loaded.flashlight_cookie.as_deref();
+    let (white, black_cube, flashlight, _) = rendering::fallback_images(images, cookie, TRILINEAR);
     let mut grenade_meshes = BTreeMap::new();
     let mut bases = BTreeMap::new();
     for (model, surface) in loaded
@@ -456,7 +413,7 @@ pub fn install(
             base,
             white.clone(),
             None,
-            (&white, &black_cube),
+            (&white, &black_cube, &flashlight),
         ));
         grenade_meshes.entry(model).or_insert_with(Vec::new).push((
             meshes.add(rendering::mesh_from_surface(surface, definition)),

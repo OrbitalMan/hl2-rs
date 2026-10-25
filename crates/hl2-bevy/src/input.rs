@@ -201,6 +201,9 @@ pub fn parse_binding(name: &str) -> Option<Trigger> {
 
 /// The input bound to `action`: the configured binding, or the default binding when the
 /// configuration has no entry for it.
+/// The weapon slot commands, slot 0 first.
+const SLOTS: [&str; 6] = ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"];
+
 fn trigger(action: &str, config: Option<&Config>) -> Option<Trigger> {
     let default = DEFAULTS.keys.get(action).map_or("", String::as_str);
     parse_binding(hl2_ui::input::binding(config, action, default))
@@ -362,14 +365,11 @@ pub(crate) fn controls(
                 game.actions.push(action);
             }
         }
-        for (slot, name) in ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]
-            .into_iter()
-            .enumerate()
-        {
-            if devices.just_pressed(name, cfg) {
-                game.actions.push(Action::Slot { slot });
-            }
-        }
+        let pressed = |(_, name): &(usize, &str)| devices.just_pressed(name, cfg);
+        let slots = SLOTS.iter().copied().enumerate().filter(pressed);
+        game.actions
+            .extend(slots.map(|(slot, _)| Action::Slot { slot }));
+        sim.flashlight_toggles += u32::from(devices.just_pressed("impulse 100", cfg));
     }
     if typing {
         return;

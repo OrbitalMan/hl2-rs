@@ -32,6 +32,8 @@ pub enum Effect {
     /// viewmodel_tweak_mode: the host enables or disables the tuning overlay, or refuses with its
     /// reason.
     ViewmodelTweakMode(bool),
+    /// `impulse 100`: the flashlight toggles (CBasePlayer::ImpulseCommands).
+    Flashlight,
     /// viewmodel_tweak_reset: the host zeroes the selected weapon's framing, if the mode is on.
     ViewmodelTweakReset,
     /// Play a UI sound cue (e.g. button hover or release activation).

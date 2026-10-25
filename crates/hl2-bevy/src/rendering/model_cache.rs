@@ -18,6 +18,7 @@ pub struct ModelCache {
     pub definitions: BTreeMap<String, MaterialData>,
     pub white: Handle<Image>,
     pub black_cube: Handle<Image>,
+    pub flashlight: Handle<Image>,
     pub missing: Handle<Image>,
 }
 impl ModelCache {

@@ -5,10 +5,14 @@ mod bloom;
 mod camera;
 mod campaign;
 mod canvas_renderer;
+mod capture;
 mod console_host;
 mod coords;
+use capture::{capture_complete, monitor_capture_complete, save_capture};
+use {flashlight::FlashlightPlugin, shadows::ShadowPlugin};
 mod effects;
 mod eyes;
+mod flashlight;
 mod gameplay;
 mod gpu_skinning;
 mod input;
@@ -35,10 +39,7 @@ use bevy::{
     asset::AssetPlugin,
     core_pipeline::tonemapping::Tonemapping,
     prelude::*,
-    render::{
-        renderer::RenderAdapterInfo,
-        view::screenshot::{Screenshot, ScreenshotCaptured},
-    },
+    render::{renderer::RenderAdapterInfo, view::screenshot::Screenshot},
     window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowResolution},
 };
 pub(crate) use map_install::install_map;
@@ -751,7 +752,7 @@ fn main() -> Result<()> {
             video::PresentMaterial,
         >::default())
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
-        .add_plugins((bloom::SourceBloomPlugin, shadows::ShadowPlugin))
+        .add_plugins((bloom::SourceBloomPlugin, ShadowPlugin, FlashlightPlugin))
         .add_plugins(bevy::sprite_render::Material2dPlugin::<
             canvas_renderer::HudMaterial,
         >::default())
@@ -1139,6 +1140,7 @@ type HostResources<'w> = (
     Res<'w, ui_host::Console>,
     Res<'w, campaign::Campaign>,
     Option<Res<'w, shadows::MapShadows>>,
+    Res<'w, flashlight::HostFlashlight>,
 );
 type DiagnosticQueries<'w, 's> = (
     Query<'w, 's, &'static Transform, With<FlyCamera>>,
@@ -1187,6 +1189,7 @@ fn monitor(
         console,
         campaign,
         shadows,
+        flashlight,
     ): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
@@ -1241,23 +1244,10 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),"shadows":shadows.as_deref().map(shadows::MapShadows::report),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),"shadows":shadows.as_deref().map(shadows::MapShadows::report),"flashlight":flashlight.report(),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
-        report.presentation["two_texture_materials"] = serde_json::json!(
-            two_textures
-                .iter()
-                .filter_map(|(name, draw, handle)| {
-                    let material = source_materials.get(&handle.0)?;
-                    Some(
-                        serde_json::json!({"name":name.as_str(),"entity":draw.entity,
-                "base_frames":draw.base.len(),"second_frames":draw.second.len(),
-                "base_frame":draw.base.iter().position(|h|h==&material.base),
-                "second_frame":draw.second.iter().position(|h|h==&material.iris),
-                "secondary_uv":material.secondary_uv.to_cols_array(),"time":game.scene.time}),
-                    )
-                })
-                .collect::<Vec<_>>()
-        );
+        report.presentation["two_texture_materials"] =
+            material_proxies::report(two_textures.iter(), &source_materials, game.scene.time);
         report.presentation["render_candidates"] = performance::render_candidates(geometry.iter());
         if let Some(performance) = performance.as_deref() {
             report.presentation["cpu_stages"] = performance.report();
@@ -1330,31 +1320,6 @@ fn monitor(
         {
             exit.write(AppExit::error());
         }
-    }
-}
-fn capture_complete(event: On<ScreenshotCaptured>, status: Res<Status>) {
-    let mut report = status.0.lock().expect("status lock");
-    report.capture_completed = true;
-    report.capture_size = Some([event.image.width(), event.image.height()]);
-    report.captured_image = Some(event.image.clone());
-}
-fn monitor_capture_complete(event: On<ScreenshotCaptured>, status: Res<Status>) {
-    let mut report = status.0.lock().expect("monitor capture");
-    report.monitor_capture_completed = true;
-    report.monitor_image = Some(event.image.clone());
-}
-fn save_capture(image: Option<Image>, path: Option<&PathBuf>) -> Option<String> {
-    let path = path?;
-    match image {
-        Some(image) => match image.try_into_dynamic() {
-            Ok(image) => image
-                .to_rgb8()
-                .save(path)
-                .err()
-                .map(|error| error.to_string()),
-            Err(error) => Some(format!("screenshot conversion: {error}")),
-        },
-        None => Some("screenshot readback did not finish".into()),
     }
 }
 

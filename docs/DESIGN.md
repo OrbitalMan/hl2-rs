@@ -56,6 +56,19 @@ level off and on (packaged, `d1_trainstation_02` plaza and a citizen-heavy view)
 
 Not planned: receivers on brush entities (doors, trains), shadows of brush physboxes.
 
+Handoff (2026-10-25): steps 1-3 are committed (blob shadows at Low, render-to-texture at Medium/High). Step 4 is
+committed in part: `hl2_simulation::flashlight` (power, toggle, placement, flicker) and `hl2-bevy` `flashlight.rs`
+(input, sounds, a Bevy `SpotLight` read by `source.wgsl`'s `flashlight()`). Left for step 4: frame time off/on
+(packaged, the spawn corridor of `d1_trainstation_02`, eye -4304 -224 64, yaw -90, pitch -10, with and without
+`impulse 100`, against the previous commit); the HUD: `HudSuitPower` from `hl2/scripts/hudlayout.res` (16/420,
+102x48, bar inset 8/15 width 92 height 4, chunks 6 gap 3, label 8/4, device lines from 8/22 every 10, colours 255 220
+0 220 / low 255 0 0 220, exhausted alpha 70), its `SuitAuxPower*` animations in `hudanimations.txt`, tokens
+`#Valve_Hud_AUX_POWER` and `#Valve_Hud_FLASHLIGHT`, fed from the host's `HostFlashlight` (suit power, flashlight
+on); Episode Two's `HudFlashlight` (WeaponIconsSmall glyphs 169/174 and a 28-wide bar). Step 5 (High): turn on
+`shadow_maps_enabled` on the flashlight spot light only at High, sample `fetch_spot_shadow` with the light id found
+in `flashlight()`, blend toward 1 by `r_flashlightshadowatten` 0.35 as `DoFlashlight` does; custom materials need a
+shadow (prepass) shader that discards alpha-tested texels.
+
 ## Architecture guardrails (2026-10-24)
 
 Goal (owner): the refactoring series stops; checks keep the structure from decaying instead.
