@@ -58,9 +58,8 @@ Not planned: receivers on brush entities (doors, trains), shadows of brush physb
 
 Handoff (2026-10-25): steps 1-3 are committed (blob shadows at Low, render-to-texture at Medium/High). Step 4 is
 committed in part: `hl2_simulation::flashlight` (power, toggle, placement, flicker) and `hl2-bevy` `flashlight.rs`
-(input, sounds, a Bevy `SpotLight` read by `source.wgsl`'s `flashlight()`). Left for step 4: frame time off/on
-(packaged, the spawn corridor of `d1_trainstation_02`, eye -4304 -224 64, yaw -90, pitch -10, with and without
-`impulse 100`, against the previous commit); the HUD: `HudSuitPower` from `hl2/scripts/hudlayout.res` (16/420,
+(input, sounds, a Bevy `SpotLight` read by `source.wgsl`'s `flashlight()`). Frame time is measured (spawn corridor of `d1_trainstation_02`,
+eye -4304 -224 64, yaw -90, pitch -10: previous commit 18.40, off 18.40, on 18.39 ms). Left for step 4: the HUD: `HudSuitPower` from `hl2/scripts/hudlayout.res` (16/420,
 102x48, bar inset 8/15 width 92 height 4, chunks 6 gap 3, label 8/4, device lines from 8/22 every 10, colours 255 220
 0 220 / low 255 0 0 220, exhausted alpha 70), its `SuitAuxPower*` animations in `hudanimations.txt`, tokens
 `#Valve_Hud_AUX_POWER` and `#Valve_Hud_FLASHLIGHT`, fed from the host's `HostFlashlight` (suit power, flashlight

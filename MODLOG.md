@@ -8,11 +8,11 @@
 
 **Why:** Owner request. Evidence: Source SDK `player.cpp`, `hl2_player.cpp`, `flashlighteffect.cpp`, `common_flashlight_fxc.h`, `hud_suitpower.cpp`, `hud_flashlight.cpp`; the installed `kb_act.lst`, `config_default.cfg`, `hudlayout.res`, `hudanimations.txt`, `flashlight_border.vtf`; control flow and constants of the installed server and client (both drain rates in one device, the episodic flicker compiled in).
 
-**Tested how:** 6 unit tests (`flashlight`); owned test (cookie 64x64, black border); validate.sh passes. Packaged, `d1_trainstation_02` spawn corridor with a scripted `impulse 101; impulse 100`: a round soft-edged spot on the stairs and walls (difference to off up to 209 levels), suit power 91.65 after about 3.75 s.
+**Tested how:** 6 unit tests (`flashlight`); owned test (cookie 64x64, black border); validate.sh passes. Packaged, `d1_trainstation_02` spawn corridor with a scripted `impulse 101; impulse 100`: a round soft-edged spot on the stairs and walls (difference to off up to 209 levels), suit power 91.65 after about 3.75 s. Frame time, packaged headless 1920x1080, the same corridor view, 3 rotating runs each: previous commit 18.40 ms, flashlight off 18.40 ms, on 18.39 ms mean frame (no measurable cost either way).
 
-**Still broken or not tested:** frame time not measured yet (a packaged base/off/on run was in progress); the aux power HUD (`HudSuitPower`, `HudFlashlight` for Episode Two) is not drawn; High's depth shadows (step 5) not started; viewmodel not lit by the flashlight; the bump-mapped normal is not used; placement traces use `impact_hull` (shot mask) for both of the engine's masks; NPC flashlight reactions not modelled.
+**Still broken or not tested:** the aux power HUD (`HudSuitPower`, `HudFlashlight` for Episode Two) is not drawn; High's depth shadows (step 5) not started; viewmodel not lit by the flashlight; the bump-mapped normal is not used; placement traces use `impact_hull` (shot mask) for both of the engine's masks; NPC flashlight reactions not modelled.
 
-**Next:** Measure off/on; HUD aux power element in hl2-ui (layout and animations listed in docs/DESIGN.md handoff); step 5: set `shadow_maps_enabled` on the spot light at High and sample `bevy_pbr::shadows::fetch_spot_shadow` in `flashlight()` with the shadow atten 0.35 blend.
+**Next:** HUD aux power element in hl2-ui (layout and animations listed in docs/DESIGN.md handoff); step 5: set `shadow_maps_enabled` on the spot light at High and sample `bevy_pbr::shadows::fetch_spot_shadow` in `flashlight()` with the shadow atten 0.35 blend.
 
 ## 2026-10-25 Shadow detail, step 3: render-to-texture shadows at Medium and High
 
