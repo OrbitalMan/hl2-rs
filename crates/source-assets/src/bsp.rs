@@ -313,20 +313,15 @@ impl Bsp {
                 continue;
             }
             let td = texdata[index(i32le(info, 68)?, texdata.len())?];
-            let name_id = i32le(td, 12)?;
-            let offset = u32le(table, index(name_id, table.len() / 4)? * 4)? as usize;
-            let tail = strings
-                .get(offset..)
-                .context("texture string outside lump")?;
-            let end = tail
-                .iter()
-                .position(|b| *b == 0)
-                .context("unterminated texture string")?;
-            let material = std::str::from_utf8(&tail[..end])?.to_lowercase();
+            let material = texinfo_material(&texinfo, &texdata, strings, table, ti)?;
             // Compile tools are invisible, except toolsblack (an UnlitGeneric black texture),
             // e.g. the frame around trainstation_02's Combine slate.
             if material.starts_with("tools/") && !material.starts_with("tools/toolsblack") {
                 continue;
+            }
+            // SURF_NOSHADOWS (vbsp sets it on water): no projected shadow lands here.
+            if flags & 0x1000 != 0 && !world.no_shadow_materials.contains(&material) {
+                world.no_shadow_materials.insert(material.clone());
             }
             let width = i32le(td, 16)?.max(1) as f32;
             let height = i32le(td, 20)?.max(1) as f32;

@@ -157,6 +157,10 @@ pub struct World {
     /// Resolved surfaceproperties entries (lowercase name, "base" inheritance applied).
     #[serde(default)]
     pub surface_materials: std::collections::BTreeMap<String, SurfaceMaterial>,
+    /// Materials of world faces flagged `SURF_NOSHADOWS` (water): no projected shadow lands on
+    /// them.
+    #[serde(default)]
+    pub no_shadow_materials: std::collections::BTreeSet<String>,
 }
 /// One .phy "solid" block. Defaults follow SDK g_PhysDefaultObjectParams
 /// (physics_shared.cpp): mass 1, inertia 1, damping 0.1, rotdamping 0.1, "DEFAULT".

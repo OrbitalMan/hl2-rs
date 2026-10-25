@@ -205,3 +205,30 @@ pub fn install(app: &mut App) {
         render.add_systems(Render, (begin, end));
     }
 }
+/// Draw candidates and their triangles, all and visible in any view.
+pub fn render_candidates<'a>(
+    geometry: impl Iterator<
+        Item = (
+            &'a bevy::camera::visibility::ViewVisibility,
+            &'a crate::rendering::DrawTriangles,
+        ),
+    >,
+) -> serde_json::Value {
+    let mut visible_meshes = 0;
+    let mut visible_triangles = 0;
+    let mut total_triangles = 0;
+    let mut meshes = 0;
+    for (visible, triangles) in geometry {
+        meshes += 1;
+        total_triangles += triangles.0;
+        if visible.get() {
+            visible_meshes += 1;
+            visible_triangles += triangles.0;
+        }
+    }
+    serde_json::json!({
+        "tagged_meshes":meshes,"tagged_triangles":total_triangles,
+        "visible_any_view_meshes":visible_meshes,"visible_any_view_triangles":visible_triangles,
+        "scope":"world/entity candidates after PVS/frustum/layer checks; excludes sky and viewmodels; union of all views, not GPU draw-call counts"
+    })
+}

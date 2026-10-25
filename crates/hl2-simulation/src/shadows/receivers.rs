@@ -51,14 +51,26 @@ pub struct Receivers {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Decal {
     pub positions: Vec<Vec3>,
+    /// The receiving plane's normal.
+    pub normals: Vec<Vec3>,
     pub uvs: Vec<Vec2>,
     pub fades: Vec<u8>,
     pub indices: Vec<u32>,
 }
 
+/// How one caster's shadow is laid: whether static props receive it, its falloff bias and how far
+/// its geometry sits off the receivers (a drawing offset against depth fighting).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Cast {
+    pub static_props: bool,
+    pub bias: u8,
+    pub lift: f32,
+}
+
 impl Decal {
     pub fn clear(&mut self) {
         self.positions.clear();
+        self.normals.clear();
         self.uvs.clear();
         self.fades.clear();
         self.indices.clear();
@@ -167,15 +179,8 @@ impl Receivers {
         self.triangles.is_empty()
     }
 
-    /// Writes into `out` the decal `frame` lays on the receivers (static props only when
-    /// `static_props`), its vertices faded with the caster's falloff `bias`.
-    pub fn decal(
-        &self,
-        frame: &Frame,
-        (static_props, bias): (bool, u8),
-        scratch: &mut Scratch,
-        out: &mut Decal,
-    ) {
+    /// Writes into `out` the decal `frame` lays on the receivers as `cast` asks.
+    pub fn decal(&self, frame: &Frame, cast: Cast, scratch: &mut Scratch, out: &mut Decal) {
         out.clear();
         let (lo, hi) = reach(frame);
         scratch.ids.clear();
@@ -190,7 +195,7 @@ impl Receivers {
         scratch.ids.dedup();
         for &id in &scratch.ids {
             let t = &self.triangles[id as usize];
-            if t.kind == Kind::StaticProp && !static_props {
+            if t.kind == Kind::StaticProp && !cast.static_props {
                 continue;
             }
             let [a, b, c] = t.points;
@@ -201,7 +206,7 @@ impl Receivers {
                 continue;
             }
             clip_triangle(frame, t.points, &mut scratch.polygon);
-            emit(frame, bias, &scratch.polygon.points, out);
+            emit(frame, (cast, t.normal), &scratch.polygon.points, out);
         }
     }
 }
@@ -279,16 +284,17 @@ fn clip(polygon: &mut Vec<Point>, out: &mut Vec<Point>, side: impl Fn(&Point) ->
     std::mem::swap(polygon, out);
 }
 
-/// Appends a clipped polygon as a triangle fan.
-fn emit(frame: &Frame, bias: u8, polygon: &[Point], out: &mut Decal) {
+/// Appends a clipped polygon on a receiver with `normal` as a triangle fan.
+fn emit(frame: &Frame, (cast, normal): (Cast, Vec3), polygon: &[Point], out: &mut Decal) {
     if polygon.len() < 3 {
         return;
     }
     let base = out.positions.len() as u32;
     for v in polygon {
-        out.positions.push(v.p);
+        out.positions.push(v.p + normal * cast.lift);
+        out.normals.push(normal);
         out.uvs.push(v.uvw.truncate());
-        out.fades.push(frame.fade(v.uvw.z, bias));
+        out.fades.push(frame.fade(v.uvw.z, cast.bias));
     }
     for i in 1..polygon.len() as u32 - 1 {
         out.indices.extend([base, base + i, base + i + 1]);

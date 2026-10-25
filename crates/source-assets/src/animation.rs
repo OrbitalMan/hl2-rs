@@ -293,6 +293,7 @@ pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
     let base = bones(&data)?;
     let mut rig = Rig {
         bones: base.iter().map(|b| b.bone.clone()).collect(),
+        view_bounds: view_bounds(&data)?,
         ..Default::default()
     };
     let mut state = LoadState::default();
@@ -315,6 +316,15 @@ pub fn load(vfs: &Vfs, path: &str, wanted: &BTreeSet<String>) -> Result<Rig> {
         Err(e) => rig.warnings.push(format!("{path}: hitboxes: {e:#}")),
     }
     Ok(rig)
+}
+/// The studio header's view box (`view_bbmin`/`view_bbmax` @128/@140), or its hull
+/// (`hull_min`/`hull_max` @104/@116) when the view box is all zero.
+fn view_bounds(data: &[u8]) -> Result<(Vec3, Vec3)> {
+    let view = (vec3(data, 128)?, vec3(data, 140)?);
+    if view.0 != Vec3::ZERO || view.1 != Vec3::ZERO {
+        return Ok(view);
+    }
+    Ok((vec3(data, 104)?, vec3(data, 116)?))
 }
 /// Hitbox set 0 (studiohdr_t numhitboxsets @172, hitboxsetindex @176; mstudiohitboxset_t
 /// name, numhitboxes, hitboxindex; mstudiobbox_t 68 bytes: bone, group, bbmin, bbmax).
@@ -417,6 +427,7 @@ fn sequence_metadata(data: &[u8], at: usize) -> Result<modkit_core::animation::S
         activity,
         weight: i32le(data, at + 20)?,
         order: 0,
+        bounds: (vec3(data, at + 32)?, vec3(data, at + 44)?),
     })
 }
 /// mstudioposeparamdesc_t table (header 300/304, stride 20).

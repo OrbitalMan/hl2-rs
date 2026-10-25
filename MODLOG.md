@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-25 Shadow detail, step 2: blob shadows at Low
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** Host module `shadows` (new): `MapShadows` (per map: receivers, `shadow_control`, one entry per caster), `update` (PostUpdate after entities are posed: finds casters, rebuilds a caster's decal only when it moved a quarter shadow texel, turned or changed sequence, rewrites its mesh in place, hides it with its caster), `ShadowMaterial` + `assets/shaders/shadow.wgsl` (multiply blend `ZERO, SRC_COLOR`, 5-tap coverage blur one texel apart, minus the vertex fade, colour gamma-to-linear); the receiver grid is built on the map worker (`LoadedMap::shadow_receivers`). Data: `Sequence::bounds` and `Rig::view_bounds` (studio header view box or hull) read by the animation loader for `GetRenderBounds`; `World::no_shadow_materials` from faces flagged `SURF_NOSHADOWS`; `Cast` (static props, bias, lift) and receiver normals in `shadows::receivers`. Report: `presentation.shadows`; CPU stage `shadows`. Size limits kept by moving `install_map` into `map_install.rs`, facial data loading into `assets/faces.rs`, the render-candidate statistics into `performance.rs`, reusing `texinfo_material` in the BSP face loop and `Sequence::new` in tests; baselines tightened.
+
+**Why:** Owner request (Shadow detail). Evidence: Source SDK `clientshadowmgr.cpp` (`GetShadowDirection` is straight down without render-to-texture, `BuildOrthoShadow`, `ShouldUseParentShadow` / `WillParentRenderBlobbyShadow`, `SetShadowColor` modulates the blob material too), `c_baseanimating.cpp` (`ShadowCastType`, `GetRenderBounds`), `shadow.cpp` (jitter = one texel of the bound texture), the installed `decals/simpleshadow` material.
+
+**Tested how:** 11 unit tests in `shadows` (one new: lift and bias); Clippy, `scripts/checks/validate.sh`. Packaged release, headless: `d1_trainstation_02` playground (`--fly --position -4520 -3700 120 --yaw 90 --pitch -35`) at Low against High (no shadows yet): blobs under the swing seat, the pot and the three tic-tac-toe columns, nothing elsewhere (5,896 pixels differ by more than 2, at most 45 levels). Plaza view (`--fly --position -3104 -2018 200 --yaw 12`, 1920x1080, 600 frames, 3 rotating runs each): off (High) 18.86 ms, Low 19.03 ms mean frame, run spread 18.68-19.17; the update costs 0.021 ms CPU a frame (p95 0.027); 246 casters, 81 with geometry, 536 decal triangles, 87,710 receiver triangles.
+
+**Result:** Low shows retail's blob shadows; no measurable frame-time cost.
+
+**Still broken or not tested:** Medium and High draw no shadows yet (step 3, then the flashlight); a side-by-side with the retail game; the falloff bias of fading entities; Windows. Receiver counts depend on Model detail (static props are baked at the chosen root LOD): 135,040 at High model detail, 87,710 at Low.
+
+**Next:** Step 3: render-to-texture shadows at Medium.
+
 ## 2026-10-25 Shadow detail, step 1: shadow geometry in hl2-simulation
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

@@ -12,12 +12,14 @@ mod eyes;
 mod gameplay;
 mod gpu_skinning;
 mod input;
+mod map_install;
 mod material_proxies;
 mod monitors;
 mod performance;
 mod rendering;
 mod runtime_props;
 mod setup;
+mod shadows;
 mod simulation;
 mod sky;
 mod spawn_panel;
@@ -39,6 +41,7 @@ use bevy::{
     },
     window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowResolution},
 };
+pub(crate) use map_install::install_map;
 use serde::Serialize;
 use std::{
     path::PathBuf,
@@ -748,7 +751,7 @@ fn main() -> Result<()> {
             video::PresentMaterial,
         >::default())
         .add_plugins(MaterialPlugin::<effects::EffectMaterial>::default())
-        .add_plugins(bloom::SourceBloomPlugin)
+        .add_plugins((bloom::SourceBloomPlugin, shadows::ShadowPlugin))
         .add_plugins(bevy::sprite_render::Material2dPlugin::<
             canvas_renderer::HudMaterial,
         >::default())
@@ -1112,79 +1115,6 @@ fn setup(
         bevy::camera::visibility::RenderLayers::layer(0).with(5),
     ));
 }
-pub(crate) type MapAssets<'a> = (
-    &'a mut Assets<Mesh>,
-    &'a mut Assets<rendering::SourceMaterial>,
-    &'a mut Assets<Image>,
-    &'a mut Assets<AudioSource>,
-    &'a mut Assets<effects::EffectMaterial>,
-    &'a mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
-);
-fn install_map(
-    loaded: assets::LoadedMap,
-    commands: &mut Commands,
-    (meshes, materials, images, sounds, effect_materials, inverse_binds): MapAssets,
-    status: &Status,
-    (cpu_skinning, no_pvs, world_partition): (bool, bool, bool),
-    filtering: hl2_ui::config::Filtering,
-    mute: bool,
-) -> hl2_ui::console::Console {
-    {
-        let mut stats = status.0.lock().expect("map stats");
-        stats.meshes = 0;
-        stats.partitioned_world_batches = 0;
-        stats.gpu_skinned_meshes = 0;
-        stats.cpu_skinned_meshes = 0;
-        stats.skin_joints = 0;
-        stats.triangles = 0;
-        stats.materials = 0;
-        stats.skipped_background_surfaces = 0;
-    }
-    commands.insert_resource(visibility::SourceVisibility::new(
-        loaded.bsp.visibility_index(),
-        no_pvs,
-    ));
-    commands.insert_resource(rendering::FlexModels(loaded.flexes.clone()));
-    commands.insert_resource(runtime_props::RuntimeProps::new(loaded.vfs.clone()));
-    let camera_target = monitors::install(&loaded, commands, images);
-    rendering::spawn_map_filtered(
-        &loaded,
-        commands,
-        (meshes, inverse_binds),
-        materials,
-        images,
-        status,
-        (&camera_target, cpu_skinning, world_partition),
-        filtering,
-    );
-    effects::install(
-        &loaded,
-        commands,
-        meshes,
-        materials,
-        effect_materials,
-        images,
-    );
-    commands.insert_resource(eyes::Eyes::new(&loaded));
-    commands.insert_resource(console_host::MapEntityNames::of(&loaded.world.entities));
-    sky::install(&loaded, commands, meshes, materials, images);
-    commands.insert_resource(sky::Sky::new(
-        loaded.bsp,
-        loaded.world.background_camera.clone(),
-        loaded.sky.as_ref(),
-    ));
-    effects::adopt(loaded.effects.sprites, commands);
-    commands.insert_resource(loaded.gameplay);
-    // Studio decal draws went with the old map; its entity indices now name the new map's.
-    commands.queue(|world: &mut World| {
-        if let Some(mut decals) = world.get_resource_mut::<studio_decals::StudioDecals>() {
-            decals.new_map();
-        }
-    });
-    commands.insert_resource(canvas_renderer::Hud::new(loaded.hud));
-    audio::install(commands, sounds, loaded.audio, mute);
-    loaded.console
-}
 type EntityDrawQuery<'w, 's> = Query<
     'w,
     's,
@@ -1208,6 +1138,7 @@ type HostResources<'w> = (
     Res<'w, effects::Effects>,
     Res<'w, ui_host::Console>,
     Res<'w, campaign::Campaign>,
+    Option<Res<'w, shadows::MapShadows>>,
 );
 type DiagnosticQueries<'w, 's> = (
     Query<'w, 's, &'static Transform, With<FlyCamera>>,
@@ -1243,7 +1174,20 @@ type ExitResources<'w> = (
 );
 fn monitor(
     mut commands: Commands,
-    (options, simulation, game, hud, audio, sky, monitors, eyes, effects, console, campaign): HostResources,
+    (
+        options,
+        simulation,
+        game,
+        hud,
+        audio,
+        sky,
+        monitors,
+        eyes,
+        effects,
+        console,
+        campaign,
+        shadows,
+    ): HostResources,
     mut control: ResMut<CaptureControl>,
     status: Res<Status>,
     (adapter, pvs, tonemap, source_materials): RenderResources,
@@ -1297,7 +1241,7 @@ fn monitor(
                 "bevy_rotation":transform.rotation.to_array(),"hidden":hidden}));
             }
         }
-        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),
+        report.presentation = serde_json::json!({"source_visibility":pvs.report(),"owned_meshes":owned_meshes,"pose_or_visibility_mismatches":mismatches,"station_entrance_draws":doors,"hud":hud.report(),"audio":audio.report(),"sky":sky.report(),"monitors":monitors.report(&game),"eyes":eyes.report(),"effects":effects.report(),"studio_decals":studio.report(),"console":console.report(),"campaign":campaign.report(),"tonemap":tonemap.report(),"shadows":shadows.as_deref().map(shadows::MapShadows::report),
         "lifecycle":{"map_entities":map_entities.iter().count(),"cameras":all_cameras.iter().count(),"live_mesh_assets":meshes.len(),"live_image_assets":images.len()}});
         report.presentation["two_texture_materials"] = serde_json::json!(
             two_textures
@@ -1314,21 +1258,7 @@ fn monitor(
                 })
                 .collect::<Vec<_>>()
         );
-        let mut visible_meshes = 0;
-        let mut visible_triangles = 0;
-        let mut total_triangles = 0;
-        for (visible, triangles) in &geometry {
-            total_triangles += triangles.0;
-            if visible.get() {
-                visible_meshes += 1;
-                visible_triangles += triangles.0;
-            }
-        }
-        report.presentation["render_candidates"] = serde_json::json!({
-            "tagged_meshes":geometry.iter().count(),"tagged_triangles":total_triangles,
-            "visible_any_view_meshes":visible_meshes,"visible_any_view_triangles":visible_triangles,
-            "scope":"world/entity candidates after PVS/frustum/layer checks; excludes sky and viewmodels; union of all views, not GPU draw-call counts"
-        });
+        report.presentation["render_candidates"] = performance::render_candidates(geometry.iter());
         if let Some(performance) = performance.as_deref() {
             report.presentation["cpu_stages"] = performance.report();
             if let Some(diagnostics) = render_diagnostics.as_deref() {

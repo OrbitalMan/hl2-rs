@@ -1,5 +1,5 @@
 use super::frame::{Frame, Placement};
-use super::receivers::{Decal, Receivers, Scratch};
+use super::receivers::{Cast, Decal, Receivers, Scratch};
 use super::*;
 use glam::{Quat, Vec2};
 use modkit_core::{Entity, Surface, Vertex};
@@ -169,13 +169,23 @@ fn area(decal: &Decal) -> f32 {
         .sum()
 }
 
-fn decal_on(surfaces: &[Surface], static_props: bool) -> Decal {
+fn decal_with(surfaces: &[Surface], cast: Cast) -> Decal {
     let (bounds, at) = crate_box();
     let f = Frame::render_to_texture(bounds, &at, Vec3::NEG_Z, 50.);
     let receivers = Receivers::new(surfaces, |_| true);
     let mut decal = Decal::default();
-    receivers.decal(&f, (static_props, 0), &mut Scratch::default(), &mut decal);
+    receivers.decal(&f, cast, &mut Scratch::default(), &mut decal);
     decal
+}
+
+fn decal_on(surfaces: &[Surface], static_props: bool) -> Decal {
+    decal_with(
+        surfaces,
+        Cast {
+            static_props,
+            ..Cast::default()
+        },
+    )
 }
 
 #[test]
@@ -190,6 +200,20 @@ fn a_floor_under_the_caster_gets_the_clipped_square_unfaded() {
         .iter()
         .all(|uv| (0.0..=1.).contains(&uv.x) && (0.0..=1.).contains(&uv.y)));
     assert_eq!(decal.positions.len(), decal.uvs.len());
+    assert!(decal.normals.iter().all(|n| *n == Vec3::Z));
+}
+
+#[test]
+fn the_decal_sits_its_lift_off_the_receiver_with_the_bias_in_its_fade() {
+    let cast = Cast {
+        static_props: false,
+        bias: 30,
+        lift: 0.25,
+    };
+    let decal = decal_with(&[square(0., 100., Vec3::Z, false)], cast);
+    assert!(!decal.is_empty());
+    assert!(decal.positions.iter().all(|p| (p.z - 0.25).abs() < 1e-5));
+    assert!(decal.fades.iter().all(|f| *f == 30));
 }
 
 #[test]
@@ -234,7 +258,7 @@ fn materials_that_do_not_receive_and_background_surfaces_are_left_out() {
     let receivers = Receivers::new(&surfaces, |_| true);
     assert_eq!(receivers.len(), 2);
     let mut decal = Decal::default();
-    receivers.decal(&f, (false, 0), &mut Scratch::default(), &mut decal);
+    receivers.decal(&f, Cast::default(), &mut Scratch::default(), &mut decal);
     assert!(!decal.is_empty());
 }
 
@@ -257,7 +281,7 @@ fn a_slanted_shadow_reaches_a_wall_behind_the_caster() {
     };
     let receivers = Receivers::new([&wall], |_| true);
     let mut decal = Decal::default();
-    receivers.decal(&f, (false, 0), &mut Scratch::default(), &mut decal);
+    receivers.decal(&f, Cast::default(), &mut Scratch::default(), &mut decal);
     assert!(area(&decal) > 100.);
     assert!(decal.positions.iter().all(|p| (p.x - 30.).abs() < 1e-3));
 }

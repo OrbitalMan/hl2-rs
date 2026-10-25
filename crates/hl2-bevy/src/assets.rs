@@ -1,4 +1,5 @@
 //! Read owned Source assets before constructing the Bevy app; no system performs file I/O.
+mod faces;
 mod vmt_vars;
 use anyhow::{Context, Result, bail};
 use modkit_core::World;
@@ -50,6 +51,8 @@ pub struct LoadedMap {
     pub bsp: Bsp,
     pub revision: u32,
     pub materials: BTreeMap<String, MaterialData>,
+    /// The world triangles projected shadows land on.
+    pub shadow_receivers: Arc<hl2_simulation::shadows::receivers::Receivers>,
     pub texture_errors: Vec<String>,
     pub models: serde_json::Value,
     /// The map's mounted content (its pak included) for runtime model loads.
@@ -302,6 +305,7 @@ pub fn load_with_progress(
     let world = gameplay.world.clone();
     let effects = crate::effects::PreparedEffects::load_with_lod(&vfs, &world, root_lod);
     let mut names = rendered_material_names(&world);
+    names.insert(crate::shadows::BLOB_MATERIAL.to_owned());
     names.extend(
         effects
             .models
@@ -353,57 +357,7 @@ pub fn load_with_progress(
         materials.insert(name, material);
     }
     progress.report(0.90, "LoadingProgress_SignonLocal");
-    let mut eyes = BTreeMap::new();
-    let mut gaze = BTreeMap::new();
-    let mut flexes = BTreeMap::new();
-    for (key, surfaces) in &world.model_assets {
-        let model = key.split('#').next().unwrap_or(key);
-        let mut face = None;
-        if world.model_instances.iter().any(|i| {
-            i.asset_key() == *key
-                && i.entity
-                    .is_some_and(|id| world.entities[id].class().starts_with("npc_"))
-        }) {
-            match vfs
-                .read(model)
-                .and_then(|d| d.ok_or_else(|| anyhow::anyhow!("model missing")))
-                .and_then(|d| source_assets::flexes::read_flexes(&d))
-            {
-                Ok(model) if !model.meshes.is_empty() => {
-                    face = Some(model);
-                }
-                Ok(_) => {}
-                Err(e) => texture_errors.push(format!("{model}: facial flexes: {e:#}")),
-            }
-            match source_assets::eyes::load_gaze(&vfs, model) {
-                Ok(metadata) => {
-                    gaze.insert(key.clone(), metadata);
-                }
-                Err(e) => texture_errors.push(format!("{model}: gaze attachment metadata: {e:#}")),
-            }
-        }
-        match source_assets::eyes::load(&vfs, model) {
-            Ok(records) => {
-                if let Some(flex) = face.take() {
-                    flexes.insert(
-                        key.clone(),
-                        Arc::new(source_assets::flexes::FaceModel {
-                            flex,
-                            eyes: records.clone(),
-                        }),
-                    );
-                }
-                for eye in records {
-                    if let Some(surface) = surfaces.get(eye.surface) {
-                        eyes.insert((key.clone(), surface.material.clone()), eye);
-                    } else {
-                        texture_errors.push(format!("{model}: eyeball mesh missing"));
-                    }
-                }
-            }
-            Err(e) => texture_errors.push(format!("{model}: eyeball metadata: {e:#}")),
-        }
-    }
+    let faces = faces::load(&vfs, &world, &mut texture_errors);
     let hud = hl2_ui::hud::WeaponHud::load(&vfs, canvas)?;
     let console = hl2_ui::console::Console::load(&vfs, hud.canvas.clone());
     let mut audio = crate::audio::PreparedAudio::load(&vfs, &gameplay);
@@ -414,14 +368,16 @@ pub fn load_with_progress(
             .add_sentence(&wave, sentence, seconds);
     }
     let sky = load_sky(&vfs, &world, hdr, &mut texture_errors);
+    let shadow_receivers = Arc::new(crate::shadows::receivers(&world, &materials));
     progress.report(1.0, "LoadingProgress_SignonLocal");
     Ok(LoadedMap {
+        shadow_receivers,
         game: game.to_owned(),
         console,
         effects,
-        eyes,
-        gaze,
-        flexes,
+        eyes: faces.eyes,
+        gaze: faces.gaze,
+        flexes: faces.flexes,
         sky,
         audio,
         hud,

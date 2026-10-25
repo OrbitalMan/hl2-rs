@@ -1633,7 +1633,7 @@ observed retail behavior, so nothing is implemented).
 | Advanced: Texture detail `mat_picmip` | `advanced.texture_detail` | VTF mip skipping; map reload on change | complete |
 | Advanced: Shader detail `mat_reducefillrate` | `advanced.shader_detail` | nothing | placeholder |
 | Advanced: Water detail | `advanced.water_detail` | nothing: no reflection or refraction pass exists | placeholder |
-| Advanced: Shadow detail | `advanced.shadow_detail` | nothing: no render-to-texture or flashlight shadows exist | placeholder |
+| Advanced: Shadow detail | `advanced.shadow_detail` | `hl2_simulation::shadows` (frames, receivers, decal clipping), `hl2-bevy` `shadows` (one decal mesh per caster, `ShadowMaterial`, `shadow.wgsl`): Low draws blob shadows; Medium and High draw nothing yet (render-to-texture and the flashlight follow) | partial since 2026-10-25 (section 23e) |
 | Advanced: Color correction `mat_colorcorrection` | `advanced.color_correction` | `hl2_simulation::color_correction` (entities, fades, weights), `hl2-bevy` `bloom::color_correction` (lookup volumes, per-frame weights), the bloom composite (`bloom.wgsl`) | complete since 2026-10-24 (section 23b); base HL2 and Lost Coast maps have no such entity, so it changes only Episode One and Two |
 | Advanced: Antialiasing | `advanced.antialiasing` | `video::sync_antialiasing` (MSAA, limited to the adapter) | complete |
 | Advanced: Filtering | `advanced.filtering` | `video::sync_filtering` (sampler anisotropy and mip filter) | complete |
@@ -1740,3 +1740,24 @@ the projected height difference times half the viewport height. So the metric is
   CPU-skinned meshes, viewmodels and bone-merged NPC weapons keep the root LOD.
 - Not modeled: `r_lod` (forcing a level); per-view levels (monitor cameras use the main view's); material replacements
   of a level (`replacematerial`, already ignored at the root LOD); studio decals stay on the root LOD's surface.
+
+### 23e. Video > Advanced > Shadow detail (`r_shadowrendertotexture`, `r_flashlightdepthtexture`), in progress (2026-10-25)
+
+Plan: docs/DESIGN.md "Shadow detail and the flashlight". Evidence: Source SDK `game/client/clientshadowmgr.cpp`,
+`c_baseanimating.cpp` (`ShadowCastType`, `GetRenderBounds`), `c_shadowcontrol.cpp`, `materialsystem/stdshaders/shadow.cpp`
+and `shadow_ps2x.fxc`, `utils/vbsp/textures.cpp`; the engine's shadow clipper (not in the SDK) as the retail engine runs
+it (MODLOG 2026-10-25, step 1).
+
+- Low (done): every caster gets the installed `decals/simpleshadow` blob straight down (`BuildOrthoShadow`: the two box
+  axes most across the light, 10 units bigger, origin backed up twice and snapped to half a unit), cast distance and
+  colour from `shadow_control` (or the level defaults), faded per vertex as the engine does and multiplied over the
+  world with the 5-tap blur. Casters: studio-model entities with a rig, without `disableshadows`, drawn, and with no
+  caster up their parent chain; bounds are the model's view box (or hull) with the current sequence's box. Receivers:
+  the world's brush faces, displacements and baked static props (props only for NPC shadows at render-to-texture
+  detail), not translucent, alpha-tested, additive or `SURF_NOSHADOWS` (water). Each caster keeps one mesh, rewritten
+  in place when it moved a quarter shadow texel, turned or changed sequence; the report carries
+  `presentation.shadows` (casters, shadows with geometry, decal triangles, rebuilds).
+- Medium (render-to-texture silhouettes along the map's direction) and High (the flashlight's depth shadows) are next;
+  until then both draw no shadows.
+- Not modeled: the falloff bias of fading entities (always 0), receivers on brush entities, two-sided receivers seen
+  from behind, fog (the world has none yet).

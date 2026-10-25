@@ -3311,6 +3311,7 @@ mod tests {
             rigs: BTreeMap::from([(
                 key,
                 Rig {
+                    view_bounds: Default::default(),
                     pose_parameters: Vec::new(),
                     autoplay: Vec::new(),
                     attachments: Vec::new(),

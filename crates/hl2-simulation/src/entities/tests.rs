@@ -1359,12 +1359,7 @@ fn metrocops_idle_on_their_weapon_translated_idle_activity() {
         looping: true,
         frames: vec![vec![]; 10],
     };
-    let seq = |name: &str, activity: &str, weight: i32, order: u32| Sequence {
-        name: name.into(),
-        activity: activity.into(),
-        weight,
-        order,
-    };
+    let seq = Sequence::new;
     let w = World {
         entities: vec![
             entity(
@@ -1434,12 +1429,7 @@ fn combine_cameras_deploy_retract_and_redeploy() {
         looping,
         frames: vec![vec![]; frames],
     };
-    let seq = |name: &str, activity: &str, order: u32| Sequence {
-        name: name.into(),
-        activity: activity.into(),
-        weight: 1,
-        order,
-    };
+    let seq = |name: &str, activity: &str, order: u32| Sequence::new(name, activity, 1, order);
     let w = World {
         entities: vec![
             entity("npc_combine_camera", "cam", &[]),
@@ -1911,12 +1901,7 @@ fn implicit_idle_and_scripted_activity_use_real_clip_and_deadlines() {
                         frames: vec![vec![]; 5],
                     },
                 )]),
-                sequences: vec![Sequence {
-                    name: "model_idle".into(),
-                    activity: "ACT_IDLE".into(),
-                    weight: 1,
-                    order: 0,
-                }],
+                sequences: vec![Sequence::new("model_idle", "ACT_IDLE", 1, 0)],
                 ..Default::default()
             },
         )]),
