@@ -7,15 +7,12 @@ use crate::{
 use bevy::{
     asset::RenderAssetUsages,
     camera::primitives::{Aabb, MeshAabb},
-    mesh::{Indices, MeshVertexBufferLayoutRef},
-    pbr::{MaterialPipeline, MaterialPipelineKey},
+    mesh::Indices,
     prelude::*,
     reflect::TypePath,
     render::render_resource::{
-        AsBindGroup, Extent3d, FrontFace, PrimitiveTopology, RenderPipelineDescriptor, ShaderType,
-        SpecializedMeshPipelineError, TextureDimension, TextureFormat,
+        AsBindGroup, Extent3d, PrimitiveTopology, ShaderType, TextureDimension, TextureFormat,
     },
-    shader::ShaderRef,
 };
 use modkit_core::Surface;
 use std::collections::{BTreeMap, BTreeSet};
@@ -167,28 +164,6 @@ impl From<&SourceMaterial> for MaterialKey {
         Self {
             two_sided: material.two_sided,
         }
-    }
-}
-impl Material for SourceMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/source.wgsl".into()
-    }
-    fn alpha_mode(&self) -> AlphaMode {
-        self.alpha
-    }
-    fn specialize(
-        _: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        _: &MeshVertexBufferLayoutRef,
-        key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        // BSP render triangles are normalized before model append; vmdl already
-        // supplies CCW model triangles. Both now use Bevy's CCW front face.
-        descriptor.primitive.front_face = FrontFace::Ccw;
-        if key.bind_group_data.two_sided {
-            descriptor.primitive.cull_mode = None;
-        }
-        Ok(())
     }
 }
 

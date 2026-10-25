@@ -1757,7 +1757,7 @@ it (MODLOG 2026-10-25, step 1).
   detail), not translucent, alpha-tested, additive or `SURF_NOSHADOWS` (water). Each caster keeps one mesh, rewritten
   in place when it moved a quarter shadow texel, turned or changed sequence; the report carries
   `presentation.shadows` (casters, shadows with geometry, decal triangles, rebuilds).
-- Medium (done; High draws the same until flashlight depth shadows are implemented): shadows along the map's `shadow_control` direction
+- Medium (done): shadows along the map's `shadow_control` direction
   from each caster's silhouette. Each frame the shadows in view (the camera frustum around the caster's sphere
   stretched along the cast distance, and the PVS of its draws) are ranked by screen area (`ComputeScreenArea`); the 32
   largest (`r_shadowmaxrendered`) get a fragment of a 1024-texel coverage page with the engine's allocator (blocks of
@@ -1766,6 +1766,21 @@ it (MODLOG 2026-10-25, step 1).
   the caster moved, or it has pose parameters (NPCs, every frame they are ranked); the others show the blob picture
   on the same projection without clip planes (`DrawRenderToTextureShadowLOD`). NPC shadows reach static props.
   Silhouettes: the coarsest drawable level, posed, both faces, translucent and alpha-tested parts by texture alpha.
+- High: Medium plus the flashlight's 1024-square spotlight depth map, enabled only while
+  the flashlight contributes light at High (dark battery flicker skips it). It uses Bevy's visibility, shadow views and posed skinning;
+  `source_depth.wgsl` applies the colour material's base alpha/ignore-alpha/tint/cutoff rules.
+  Opaque depth draws use Bevy's existing path without a fragment stage; no duplicate
+  shadow renderer is added. Viewmodel and sky layers do not cast into this map.
+- Only the flashlight's added light samples the map, preserving baked/model light. The
+  filter uses eight rotated Poisson comparison taps at the SDK's six-texel offset scale,
+  followed by the 0.35 attenuation blend and the distance-attenuation blend. The cookie and
+  depth projection now use the same 45-degree frustum (narrowing with low-power flicker).
+  The owned cookie is black outside the circular cone; matched Medium fence captures
+  agree with the preceding build within one channel level.
+- Depth-filter limits: a deterministic 32-pixel rotation tile substitutes for the engine's
+  generated noise/jitter stream; the receiver uses reverse-depth bias 0.0005, without the
+  native raster slope bias 16. Exact native filtering, per-entity shadow-disable inputs
+  for this depth path and Windows runtime rendering are **not tested**.
 - The atlas material is marked changed after silhouettes are drawn: a Bevy material keeps the texture as it was
   prepared, so an edited image alone never reached the shader.
 - Not modeled: the falloff bias of fading entities (always 0), receivers on brush entities, two-sided receivers seen
@@ -1790,6 +1805,6 @@ and the dim off state; it never draws the flashlight as a suit device. Both disp
 a live suited player, draw inside the HUD aspect frame, and are hidden in background levels.
 The host presents the HUD after updating the flashlight.
 
-Scope: sprint and oxygen are not connected to auxiliary power yet. High's flashlight
-shadows and flashlight lighting on the viewmodel remain unfinished. A native side-by-side
+Scope: sprint and oxygen are not connected to auxiliary power yet. Flashlight lighting on
+the viewmodel remains unfinished; High's depth shadows are covered in section 23e. A native side-by-side
 and Windows runtime capture are **not tested**. Packaged validation: `docs/validation.md`.

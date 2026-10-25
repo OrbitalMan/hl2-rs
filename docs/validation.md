@@ -1,5 +1,52 @@
 # Local validation — 2026-10-05
 
+## High flashlight shadows (2026-10-25, macOS Apple Silicon)
+
+Passed: `scripts/checks/validate.sh` (1,101 Rust tests, 88 ignored; 3 Python image-reader
+unit tests; architecture, strict Clippy and formatting), `scripts/checks/check_windows.sh`,
+and `cargo test -p hl2-bevy flashlight --locked -- --include-ignored` (4 passed, including
+2 owned-install checks). The owned cookie is black outside the cone; the map has real
+cutouts with both transparent and opaque texels. Projection tests cover the narrowed
+flicker frustum and pulled-back near plane; a dark battery-flicker sample skips the depth pass. Windows runtime rendering is **not tested**.
+
+Packaged groups `hud`, `power_hud`, `flashlight_shadows` and `coverage` passed. Reproduce
+with `NO_BUILD=1 ONLY='flashlight_shadows power_hud hud coverage' python3 scripts/checks/replays.py`
+after `scripts/build-bevy.sh`; expected: all 4 groups pass. The shadow check pins 1920x1080
+and HDR None, asserts High/on gating, checks Low/Medium/off, confirms current posed bounds,
+and compares real captures with a dependency-free PNG decoder. That decoder is tested on
+all five PNG filters and RGB/RGBA captures; it also matched an independent decoder byte
+for byte on a game capture.
+
+- High vs Medium darkens over 1,000 pixels above threshold 8 in both the posed-cop and
+  fence views. Baked light is retained: the new shadow affects the added flashlight term.
+- Negative control: the disposable copy's depth shader temporarily makes all cutouts solid;
+  its colour shader stays unchanged. The normal shader lets light through the fence holes
+  that the control blocks (171,663 brighter pixels above threshold 8 in the first accepted
+  run). The depth shader is restored in `finally` before any following check.
+- Final constant-tap shader: the fence capture has identical decoded RGB pixels to the accepted image;
+  the posed-cop capture differs by at most one channel level (zero pixels above threshold 2).
+- Source comparison at fixed exposure: the previous build's Medium fence view and the new
+  Medium view differ by at most one level. The seeded cop comparison had 9 pixels above 2;
+  no broad image-equivalence claim is made for animated/physics scenes.
+
+Evidence: `artifacts/replays/flashlight_depth_*` and
+`artifacts/flashlight-shadows/constant-tap-pixel-comparison.json`. The posed-cop fixture
+seeds an actor for this test; it does not establish ordinary campaign playback. Native
+side-by-side, exact generated noise/jitter, native slope bias, per-entity shadow-disable
+inputs and viewmodel lighting are **not tested** here.
+
+Rejected evidence is retained in `artifacts/flashlight-shadows`: initial captures restored
+1280x720 settings when a video cvar was applied and had varying HDR exposure; two attempted
+fence views hit solid walls. After those two attempts, an owned-mesh data check located
+the real fence triangles before the next capture. The first combined replay invocation
+also caught a fixture-registration edit accidentally added as call arguments (power HUD
+TypeError and missing coverage); both affected checks passed after correction. Two Clippy
+warnings in the new owned-data test were fixed with array chunks. The final shadow checks
+were rerun after the shader change. Logs: `replays.log`, `replays-fixed.log`,
+`replays-constant-taps.log`, `replays-complete.log`, `validate-complete.log`,
+`windows-complete.log` and `owned-complete.log`. Frame-time evidence
+and its limits are in `docs/performance.md`.
+
 ## Flashlight power HUD (2026-10-25, macOS Apple Silicon)
 
 - `scripts/checks/validate.sh`: passes (1,099 tests passed, 87 owned-install/other ignored

@@ -6,6 +6,9 @@ cd "$(dirname "$0")/../.."
 echo "=== Checking architecture guardrails ==="
 python3 scripts/checks/architecture.py
 
+echo "=== Checking capture image helpers ==="
+python3 -m unittest discover -s scripts/checks -p 'test_images.py'
+
 echo "=== Running workspace tests ==="
 cargo test --workspace --locked
 

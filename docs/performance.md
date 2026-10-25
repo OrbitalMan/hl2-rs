@@ -1,5 +1,70 @@
 # Performance measurements - 2026-10-05
 
+## High flashlight depth shadows (2026-10-25)
+
+Packaged Metal on Apple M1 Pro, `d1_trainstation_02`, 1920x1080, HDR Full,
+600 frames, profiling on. Prior package: `f0d6945` (High still had no flashlight depth
+map); new package: this continuation's constant-tap filter. Three runs per state,
+without concurrent builds/replays. Cameras: plaza eye -3104 -2018 200, yaw 12, pitch -10;
+citizen queue eye -4040 -2460 136, yaw 90, pitch -8. The queue capture visibly contains
+three ordinary citizen NPCs. Scripts grant the suit/toggle the light at tick 1, finish
+at tick 240 and leave the simulation running until the frame bound.
+
+| View and state | Mean frame | Median | Run range |
+| --- | ---: | ---: | ---: |
+| Plaza, prior High (no depth) | 20.044 ms | 19.943 ms | 19.066-21.124 ms |
+| Plaza, new Medium | 20.600 ms | 20.758 ms | 20.274-20.768 ms |
+| Plaza, new High | 21.979 ms | 22.052 ms | 21.377-22.507 ms |
+| Three citizens, prior High (no depth) | 17.525 ms | 17.456 ms | 17.070-18.049 ms |
+| Three citizens, new Medium | 17.576 ms | 17.266 ms | 17.135-18.326 ms |
+| Three citizens, new High | 21.359 ms | 20.205 ms | 19.821-24.050 ms |
+
+High minus Medium adds about 1.38 ms in the plaza and 3.78 ms mean in the citizen
+view (2.94 ms by medians). The citizen High result includes a 24.05 ms outlier. These
+are total frame costs of the requested depth pass and filter, not isolated GPU timings
+or FPS guarantees. The plaza's shared lit path is 0.56 ms above the prior mean, within
+the prior run range; that difference has not been isolated. In the citizen view the
+Medium/prior means differ by 0.05 ms.
+
+A later paired flashlight-off plaza set has prior/new medians 19.422/19.286 ms,
+means 21.171/19.310 ms and ranges 19.289-24.803 / 19.185-19.458 ms. The prior set has a
+large outlier; it does not demonstrate a speedup. No off regression was measured in these
+runs. Off, Low/Medium and zero-brightness battery flicker create no depth pass. The final
+battery-flicker guard was added after these timed runs; its normal lit-beam path is
+unchanged and the packaged image checks were repeated afterward.
+
+Cost controls: only High/lit enables the 1024-square map; cookie-zero, far-faded and
+back-facing fragments skip its eight comparison samples. Existing Bevy visibility,
+GPU skinning and opaque draws are reused; alpha-tested casters sample alpha in the
+custom depth fragment. Inspection established that Bevy already omits the opaque fragment
+stage, so a redundant override was removed. Moving the Poisson table to shader constants
+preserved decoded capture pixels (fence identical, actor max one level); no measurable
+speedup is claimed. A single depth-only control (maps rendered, filter bypassed) was too
+noisy to isolate filter cost. Render-graph wall times include waits; GPU timestamps were
+unavailable, so those times are not attributed to the shadow pass. Further batching or
+filter tradeoffs need new evidence and fidelity review; no extra batching mode was enabled.
+
+Evidence in `artifacts/flashlight-shadows`: `timing-summary.json`,
+`perf-baseline-plaza-high-*`, `opt-plaza-{medium,high}-*`,
+`final-crowd-{baseline-high,optimized-medium,optimized-high}-*`,
+`final-plaza-{baseline,optimized}-off-*` reports and logs. Earlier `citizens`-named runs
+showed mostly cops/benches; they are retained as a supplemental view, excluded from the
+citizen table. Initial mismatched-resolution/HDR captures and two wall-facing fence views
+are rejected, as recorded in STATUS and validation. No native timing comparison or
+Windows runtime measurement was performed.
+
+Reproduce a timed High run from the disposable package and its retained timing script:
+
+```sh
+artifacts/flashlight-shadows/optimized/hl2-bevy --background --no-setup --mute --map d1_trainstation_02 --width 1920 --height 1080 --frames 600 --profile --movement-script artifacts/flashlight-shadows/perf-crowd-high.json --report artifacts/flashlight-shadows/reproduce.json
+```
+
+Reset the copy's saved video settings to 1920x1080, HDR Full before each run; repeat
+High/Medium three times using `perf-crowd-medium.json` for Medium. Use
+`perf-plaza-{high,medium,off}.json` for the plaza. Public capture fixtures pause at tick
+120 and are not timing substitutes. The optimized copy retains the timed package; the
+final package adds only the zero-brightness gate described above.
+
 ## Flashlight power HUD (2026-10-25)
 
 Packaged Metal, Apple M1 Pro, `d1_trainstation_02` spawn corridor, eye -4304 -224 64,

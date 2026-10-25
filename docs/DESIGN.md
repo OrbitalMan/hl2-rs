@@ -96,6 +96,39 @@ show the legacy device line, recharge fade and Episode Two's separate battery; s
 `docs/validation.md`. No High depth-shadow implementation is included in this step.
 
 
+### Continuation: High flashlight depth shadows (2026-10-25)
+
+Bounded step 5: enable a 1024-square spotlight depth map only for High while the
+flashlight contributes light (skip zero-brightness battery flicker). Reuse Bevy's shadow views, visibility and GPU skinning; all material
+logic stays in this host. Source materials get a depth-only fragment shader that discards
+base-texture alpha at the same cutoff as their colour shader. Preserve two-sided meshes,
+exclude the viewmodel/sky through their existing render layers, and test opaque/cutout
+casters as well as a posed NPC. Keep Medium and Low free of the depth pass.
+
+The flashlight alone samples that map: eight rotated Poisson comparison samples at the
+SDK filter footprint, then the 0.35 shadow-attenuation blend with distance attenuation.
+Use the spotlight's actual square projection and a stable screen-space rotation; the
+engine's generated noise texture/jitter sequence is not available as installed content,
+so exact native noise matching remains unverified. Check the spotlight/cookie frustum
+agreement against Medium captures before accepting any cone change. Keep the installed
+cookie and surface lighting intact. Depth bias and any sampling difference must be recorded.
+
+Validate pure High/on gating, the depth material contract and owned cutout data; then
+packaged High/Medium/off captures with report assertions and pixel comparisons. Run local
+validation, Windows-target checking and the relevant packaged checks. Measure baseline
+and new frame/render-stage time in the plaza and a citizen-heavy view, without concurrent
+builds or replays. Retain failed captures.
+
+Completed: High/on gating, cookie/depth projection tests and two owned-data checks pass;
+packaged actor and fence captures, a solid-cutout negative control and Low/Medium/off
+checks pass. Bevy already omits the opaque fragment stage; no extra opaque-path override
+was retained. The eight offsets are shader constants; no speedup is claimed from that
+change. The filter uses reverse-depth receiver bias 0.0005 and no raster slope bias;
+native slope bias 16 and generated noise/jitter matching remain unverified. Frame cost is
+about 1.4 ms in the plaza and 3.8 ms mean in the three-citizen view (noisy). Full cost and
+validation evidence: docs/performance.md and docs/validation.md. Next bounded step:
+flashlight lighting on the viewmodel.
+
 ## Architecture guardrails (2026-10-24)
 
 Goal (owner): the refactoring series stops; checks keep the structure from decaying instead.

@@ -1,5 +1,6 @@
 #import bevy_pbr::forward_io::VertexOutput
-#import bevy_pbr::mesh_view_bindings::{view, clustered_lights}
+#import bevy_pbr::mesh_view_bindings::{view, clustered_lights, lights, directional_shadow_textures, directional_shadow_textures_comparison_sampler}
+#import bevy_render::maths::orthonormalize
 #import bevy_pbr::clustered_forward
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> tint: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var base_texture: texture_2d<f32>;
@@ -117,8 +118,37 @@ fn model_light(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     return sum;
 }
+// Eight-sample Poisson footprint (SDK shader's sampling data), independently applied to
+// Bevy's reverse-Z spotlight map. The engine-generated noise/jitter stream is not installed;
+// this stable 32-pixel tile supplies rotation without a per-frame texture or CPU update.
+const FLASHLIGHT_POISSON = array<vec2<f32>, 8>(
+        vec2(0.3475, 0.0042), vec2(0.8806, 0.3430), vec2(-0.0041, -0.6197), vec2(0.0472, 0.4964),
+        vec2(-0.3730, 0.0874), vec2(-0.9217, -0.3177), vec2(-0.6289, 0.7388), vec2(0.5744, -0.7741));
+fn flashlight_shadow(id: u32, delta: vec3<f32>, direction: vec3<f32>, pixel: vec2<f32>) -> f32 {
+    let light = &clustered_lights.data[id];
+    let projected = transpose(orthonormalize(-direction)) * delta;
+    let distance = -projected.z;
+    let uv = projected.xy / (distance * (*light).spot_light_tan_angle) * vec2(0.5, -0.5) + vec2(0.5);
+    let depth = min(1.0, (*light).shadow_map_near_z / distance + 0.0005);
+    let tile = vec2<u32>(pixel) % vec2<u32>(32u);
+    var hash = tile.x * 1664525u + tile.y * 1013904223u + 2246822519u;
+    hash = (hash ^ (hash >> 16u)) * 3266489917u;
+    let rotation = normalize(vec2<f32>(f32(hash & 65535u), f32(hash >> 16u)) / 32767.5 - vec2(1.0));
+
+    var coverage = 0.0;
+    for (var sample = 0u; sample < 8u; sample++) {
+        let offset = mat2x2(rotation, vec2(-rotation.y, rotation.x)) * FLASHLIGHT_POISSON[sample] * (6.0 / 1024.0);
+#ifdef NO_ARRAY_TEXTURES_SUPPORT
+        coverage += textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_comparison_sampler, uv + offset, depth);
+#else
+        coverage += textureSampleCompareLevel(directional_shadow_textures, directional_shadow_textures_comparison_sampler,
+            uv + offset, i32(id) + lights.spot_light_shadowmap_offset, depth);
+#endif
+    }
+    return coverage * 0.125;
+}
 // The HEV flashlight (SDK common_flashlight_fxc.h DoFlashlight), from the host's spot light: its cone
-// spans the square frustum's corners (tan / sqrt 2 is the half field of view), its radius is the
+// uses the cookie's square projection (the round cookie fits the cone), its radius is the
 // linear attenuation, its range the far plane, its near-plane field the near plane. The projected
 // cookie times saturate(linear / d), the Lambert term and the far fade (from 60 % of far).
 fn flashlight(world_position: vec4<f32>, n: vec3<f32>, frag_coord: vec2<f32>) -> vec3<f32> {
@@ -126,7 +156,9 @@ fn flashlight(world_position: vec4<f32>, n: vec3<f32>, frag_coord: vec2<f32>) ->
     let cluster = clustered_forward::view_fragment_cluster_index(frag_coord, view_z, false);
     let ranges = clustered_forward::unpack_clusterable_object_index_ranges(cluster);
     for (var i = ranges.first_spot_light_index_offset; i < ranges.first_reflection_probe_index_offset; i++) {
-        let light = &clustered_lights.data[clustered_forward::get_clusterable_object_id(i)];
+        let light_id = clustered_forward::get_clusterable_object_id(i);
+        let light = &clustered_lights.data[light_id];
+        if (*light).position_radius.w <= 0.0 { return vec3(0.0); }
         var d = vec3((*light).light_custom_data.x, 0.0, (*light).light_custom_data.y);
         d.y = sqrt(max(0.0, 1.0 - d.x * d.x - d.z * d.z));
         if ((*light).flags & 2u) != 0u { d.y = -d.y; }
@@ -137,7 +169,7 @@ fn flashlight(world_position: vec4<f32>, n: vec3<f32>, frag_coord: vec2<f32>) ->
         let to = world_position.xyz - (*light).position_radius.xyz;
         let z = dot(to, d);
         if z <= (*light).shadow_map_near_z { return vec3(0.0); }
-        let tan_half = (*light).spot_light_tan_angle * 0.70710678;
+        let tan_half = (*light).spot_light_tan_angle;
         let xy = vec2(dot(to, right), dot(to, up)) / (z * tan_half);
         if abs(xy.x) > 1.0 || abs(xy.y) > 1.0 { return vec3(0.0); }
         let cookie = textureSampleLevel(flashlight_texture, flashlight_sampler, vec2(xy.x, -xy.y) * 0.5 + 0.5, 0.0).rgb;
@@ -145,7 +177,16 @@ fn flashlight(world_position: vec4<f32>, n: vec3<f32>, frag_coord: vec2<f32>) ->
         let atten = saturate((*light).position_radius.w / dist);
         let far = (*light).range;
         let fade = clamp((dist - far) / (-0.4 * far), 0.0, 1.0);
-        return cookie * atten * saturate(dot(n, -to / dist)) * fade;
+        let lambert = saturate(dot(n, -to / dist));
+        // Do not sample eight shadow taps where the flashlight contributes nothing.
+        if fade <= 0.0 || lambert <= 0.0 || all(cookie <= vec3(0.0)) { return vec3(0.0); }
+        var shadow = 1.0;
+        if ((*light).flags & 1u) != 0u {
+            let visibility = flashlight_shadow(light_id, to, d, frag_coord);
+            // SDK DoFlashlight: the 0.35 fill light is reduced with distance attenuation.
+            shadow = mix(mix(visibility, 1.0, 0.35), visibility, atten);
+        }
+        return cookie * atten * lambert * fade * shadow;
     }
     return vec3(0.0);
 }

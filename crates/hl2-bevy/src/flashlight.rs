@@ -2,14 +2,15 @@
 //! frame ([`hl2_simulation::flashlight`]), its sounds play, and its light is a Bevy `SpotLight` placed as
 //! `UpdateLightNew` places the flashlight. `source.wgsl` reads that light: it projects the installed cookie
 //! (`effects/flashlight_border`, bound in every Source material) with the engine's attenuation, Lambert term
-//! and far fade; the light's radius carries the linear attenuation (the low-power flicker) and its cone spans
-//! the corners of the square frustum. Episode Two keeps its own battery; HL2, Episode One and Lost Coast run
-//! the flashlight on suit power.
+//! and far fade; the light's radius carries the linear attenuation (the low-power flicker). Its square
+//! depth frustum matches the cookie; the circle-bounded cookie fits the spotlight cone. Episode Two keeps
+//! its own battery; HL2, Episode One and Lost Coast run the flashlight on suit power.
+mod depth;
+
 use crate::{
     FlyCamera, campaign::Campaign, gameplay::Gameplay, simulation::Simulation, ui_host::Console,
 };
 use bevy::{
-    color::Color,
     ecs::{
         entity::Entity,
         query::{With, Without},
@@ -51,6 +52,7 @@ pub struct HostFlashlight {
     placer: Placer,
     light: Option<Light>,
     entity: Option<Entity>,
+    depth_shadows: bool,
 }
 
 impl HostFlashlight {
@@ -59,7 +61,7 @@ impl HostFlashlight {
     }
 
     pub fn report(&self) -> serde_json::Value {
-        serde_json::json!({"state": self.state, "light": self.light})
+        serde_json::json!({"state": self.state, "light": self.light, "depth_shadows":self.depth_shadows, "depth_resolution":depth::RESOLUTION})
     }
 }
 
@@ -146,12 +148,11 @@ pub(crate) fn update(
             .place(view(camera), &trace, (power, game.scene.time as f32))
     });
     host.light = placed;
+    let detail = ui
+        .as_ref()
+        .map(|ui| ui.source.config.video.advanced.shadow_detail);
+    host.depth_shadows = depth::enabled(placed, detail == Some(hl2_ui::config::ShadowDetail::High));
     show(&mut commands, host, &mut lights);
-}
-
-/// The square frustum's corner angle for a field of view (degrees): the cone the spot light covers.
-fn corner_angle(fov: f32) -> f32 {
-    ((fov.to_radians() / 2.).tan() * std::f32::consts::SQRT_2).atan()
 }
 
 /// Spawns, moves or removes the flashlight's spot light.
@@ -169,18 +170,7 @@ fn show(
     let bevy = |v: glam::Vec3| crate::source_to_bevy(Vec3::from_array(v.to_array()));
     let transform = Transform::from_translation(bevy(light.origin))
         .looking_to(bevy(light.direction), bevy(light.up));
-    let angle = corner_angle(light.fov);
-    let spot = SpotLight {
-        color: Color::WHITE,
-        intensity: 1.,
-        range: light.far,
-        radius: light.attenuation[1],
-        shadow_maps_enabled: false,
-        shadow_map_near_z: light.near,
-        inner_angle: angle,
-        outer_angle: angle,
-        ..SpotLight::default()
-    };
+    let spot = depth::spot(light, host.depth_shadows);
     match host.entity.and_then(|e| lights.get_mut(e).ok()) {
         Some((mut current, mut current_spot)) => {
             *current = transform;
@@ -196,7 +186,11 @@ pub struct FlashlightPlugin;
 impl bevy::app::Plugin for FlashlightPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         use bevy::ecs::schedule::IntoScheduleConfigs;
-        app.init_resource::<HostFlashlight>().add_systems(
+        app.insert_resource(bevy::light::DirectionalLightShadowMap {
+            size: depth::RESOLUTION,
+        })
+        .init_resource::<HostFlashlight>()
+        .add_systems(
             bevy::app::PostUpdate,
             update.before(bevy::transform::TransformSystems::Propagate),
         );
@@ -224,5 +218,19 @@ mod tests {
         assert_eq!(w, h);
         assert!(centre > 300, "a bright centre");
         assert!(edge < 30, "a black border");
+        let outside_circle = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let dx = (x as f32 + 0.5) * 2. / w as f32 - 1.;
+                let dy = (y as f32 + 0.5) * 2. / h as f32 - 1.;
+                dx * dx + dy * dy > 1.
+            })
+            .map(|(x, y)| texel(x, y).iter().copied().max().unwrap())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            outside_circle <= 1,
+            "the cookie fits the matching spotlight cone: {outside_circle}"
+        );
     }
 }

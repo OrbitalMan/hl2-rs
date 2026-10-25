@@ -50,6 +50,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from images import pixel_changes
 from typing import Callable, Optional
 
 REPO = Path(__file__).resolve().parents[2]
@@ -661,6 +662,46 @@ def check_power_hud():
           and power["suit_power"] == 100 and 90 < state["battery"] < 100 and state["on"], power)
 
 
+def check_flashlight_shadows():
+    """High has posed and cutout depth shadows; Low/Medium/off have no depth pass."""
+    def run(view: str, detail: str, suffix: str = "") -> Run:
+        settings(video={"width": 1920, "height": 1080, "hdr": "none", "hdr_migrated": True,
+                        "advanced": {"shadow_detail": detail}})
+        fixture = ("bevy-flashlight-hud-recharged" if view == "off"
+                   else f"bevy-flashlight-depth-{view}")
+        result = game(f"flashlight_depth_{view}_{detail}{suffix}", "--map", "d1_trainstation_02",
+                      "--width", "1920", "--height", "1080",
+                      "--movement-script", f"test-inputs/{fixture}.json")
+        holds("script completed", result.report["render"]["simulation"]["script_finished"])
+        holds("capture exists", result.capture is not None and result.capture.exists())
+        expect("fixed capture dimensions", png_size(result.capture), [1920, 1080])
+        presentation = result.report["render"]["presentation"]
+        expect("depth map only for High/on", presentation["flashlight"]["depth_shadows"],
+               detail == "high" and view != "off")
+        expect("current posed bounds", presentation["pose_or_visibility_mismatches"], 0)
+        expect("depth resolution", presentation["flashlight"]["depth_resolution"], 1024)
+        return result
+    for view in ("actor", "fence"):
+        medium, high = run(view, "medium"), run(view, "high")
+        changes = pixel_changes(medium.capture, high.capture, threshold=8)
+        holds(f"{view}: actual depth occlusion", changes["darker"] > 1000, changes)
+    run("actor", "low")
+    off = run("off", "high")
+    expect("off light removed", off.report["render"]["presentation"]["flashlight"]["light"], None)
+    # Negative control: only the private packaged copy's depth shader treats cutouts as solid.
+    # The colour shader and installation stay untouched; always restore before another check.
+    depth = GAME / "bevy-assets/shaders/source_depth.wgsl"
+    original = depth.read_text(encoding="utf-8")
+    try:
+        depth.write_text("#import bevy_pbr::prepass_io::VertexOutput\n@fragment\nfn fragment(mesh: VertexOutput) {}\n", encoding="utf-8")
+        solid = run("fence", "high", "_solid_control")
+    finally:
+        depth.write_text(original, encoding="utf-8")
+    normal = OUT / "flashlight_depth_fence_high.png"
+    changes = pixel_changes(solid.capture, normal, threshold=8)
+    holds("alpha cutout holes transmit the flashlight", changes["brighter"] > 1000, changes)
+
+
 def check_hud_aspect():
     """Options > Video > HUD Aspect Ratio: the HUD panels sit inside a centered frame of the chosen
     aspect (report `hud.frame` = [x, width] and `hud.panels` = health, suit, ammo, secondary ammo
@@ -741,7 +782,8 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-video-8k", "bevy-menu-resolution-stress",
                "bevy-menu-resolution-stress-windowed", "bevy-menu-video-portrait",
                "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
-               "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged")
+               "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged",
+               "bevy-flashlight-depth-actor", "bevy-flashlight-depth-fence")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1286,6 +1328,7 @@ CHECKS = [
     Check("hud", check_hud, "shared"),
     Check("hud_aspect", check_hud_aspect, "shared"),
     Check("power_hud", check_power_hud, "shared"),
+    Check("flashlight_shadows", check_flashlight_shadows, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),

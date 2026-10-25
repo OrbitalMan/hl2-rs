@@ -1,5 +1,52 @@
 # MODLOG
 
+## 2026-10-25 High flashlight shadows: posed and alpha-tested casters
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** High enables a 1024-square flashlight depth map through Bevy's existing
+shadow views, visibility and GPU skinning. Source materials use a depth fragment that
+preserves base alpha, ignore-alpha, tint and cutoff; opaque draws retain Bevy's existing
+fragment-free path. The flashlight alone samples eight rotated Poisson comparison taps
+at the SDK footprint and applies the shadow/distance attenuation blend. Cookie and depth
+map now share the 45-degree square projection (the installed round cookie is black outside
+the cone). Low/Medium/off and dark battery flicker skip the depth pass. Moved the material
+implementation to its child module and tightened the size baseline. Added actor/fence
+replays, a dependency-free PNG comparison helper and its tests.
+
+**Why:** Complete DESIGN step 5 while retaining baked lighting and allowing light through
+fence holes. Evidence: Source SDK `materialsystem/stdshaders/common_flashlight_fxc.h`,
+`game/client/flashlighteffect.cpp`, the installed cookie and owned station mesh/alpha data.
+The filter and projection were implemented independently against Bevy's reverse depth.
+
+**Tested how:** `scripts/checks/validate.sh` (1,101 Rust tests passed, 88 ignored; 3 Python
+image-reader tests; architecture, strict Clippy/fmt), `scripts/checks/check_windows.sh`,
+`cargo test -p hl2-bevy flashlight --locked -- --include-ignored` (4 passed, 2 owned-install).
+Release package built by `scripts/build-bevy.sh`; packaged `flashlight_shadows`, `power_hud`,
+`hud` and `coverage` groups pass. Final shadow group repeated after the dark-flicker guard.
+Inspected cop/staircase, fence and three-citizen captures. The negative control temporarily
+made cutouts solid only in the disposable package, then restored the shader. Detailed
+commands, retained failures and capture evidence: docs/validation.md.
+
+**Result:** High produces posed depth shadows and light passes through alpha holes
+(171,663 brighter pixels above threshold 8 against the solid-depth control). Matched Medium
+fence captures differ from the prior build by at most one level. Packaged 1920x1080 Metal
+frame mean, three runs/state: plaza prior/Medium/High 20.04/20.60/21.98 ms; citizen queue
+17.52/17.58/21.36 ms. High adds about 1.4 ms plaza and 3.8 ms mean citizen view; the latter
+ranges 19.82-24.05 ms. Paired flashlight-off prior/new medians 19.42/19.29 ms. Shared lit-path
+cost is not isolated; no FPS guarantee. Avoided redundant opaque fragment work, skipped
+zero-contribution sampling and dark flicker passes. Constant-table and depth-only controls
+do not establish a filter speedup or exact GPU cost. Details: docs/performance.md.
+
+**Still broken or not tested:** Exact native noise/jitter (procedural stable rotation
+substitutes), native slope bias 16 (receiver bias 0.0005 only), per-entity depth-shadow
+disable inputs, native side-by-side, Windows runtime, ordinary playthroughs and viewmodel
+lighting. Initial captures had restored resolution/exposure problems; two guessed fence
+views hit walls before an owned-mesh probe located the real fence. A replay registration
+mistake and Clippy warnings were fixed; rejected evidence is retained.
+
+**Next:** Flashlight lighting on the viewmodel; preserve the separate viewmodel render layer.
+
 ## 2026-10-25 Flashlight power HUD: auxiliary panel and Episode Two battery
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

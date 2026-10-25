@@ -257,3 +257,29 @@ pub(crate) fn fallback_images(
         images.add(image_filtered(2, 2, missing, true, filtering)),
     )
 }
+
+impl bevy::pbr::Material for SourceMaterial {
+    fn fragment_shader() -> bevy::shader::ShaderRef {
+        "shaders/source.wgsl".into()
+    }
+    fn prepass_fragment_shader() -> bevy::shader::ShaderRef {
+        "shaders/source_depth.wgsl".into()
+    }
+    fn alpha_mode(&self) -> AlphaMode {
+        self.alpha
+    }
+    fn specialize(
+        _: &bevy::pbr::MaterialPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _: &bevy::mesh::MeshVertexBufferLayoutRef,
+        key: bevy::pbr::MaterialPipelineKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        // BSP render triangles are normalized before model append; vmdl already
+        // supplies CCW model triangles. Both now use Bevy's CCW front face.
+        descriptor.primitive.front_face = bevy::render::render_resource::FrontFace::Ccw;
+        if key.bind_group_data.two_sided {
+            descriptor.primitive.cull_mode = None;
+        }
+        Ok(())
+    }
+}
