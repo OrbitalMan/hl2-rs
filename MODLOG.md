@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-25 Model detail: entity models switch levels of detail by distance
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5` (this session started on `claude-sonnet-5-5`). No subagents.
+
+**Changed:** `source_assets::models::read_model_levels` (in the new `models/geometry.rs`, which now also holds `read_model_variant`, moved out of `models.rs`) reads a model's root LOD and every coarser drawable level from one parse; `World::model_lods` keeps them for entity instances (`ModelLevels::store`; static props stay baked at the root LOD); `World::merge_model_tables` merges late-loaded model tables (was a list of loops in `Gameplay::merge_model`). Host: `rendering/lod.rs` (`ModelLevels` per draw, `switch_levels` each frame in PostUpdate after `present_entities`), attached in the map build, `build_model_draws` and the template copies of `spawn_runtime_draws`; the retail metric `100 * depth * tan(vfov/2) / viewport height` and `GetLODForMetric`. Draw triangle counts follow the level. Size limits kept by moving `ModelCache` into `rendering/model_cache.rs`, the coordinate helpers into `coords.rs`, `AnimatedMesh::from_batch` / `copy_for` and `copy_asset` replacing five repeated constructions, and two schedule entries merged in `main`; baselines tightened.
+
+**Why:** Owner request (distance-based LOD switching). Evidence: Source SDK `public/studio.h` (`LODMetric`, `GetLODForMetric`), `imaterialsystem.h` (`ComputePixelWidthOfSphere` returns twice the diameter); the retail engine passes the render origin with radius 0.5 and the material system measures the diameter as the projected height difference times half the viewport height (control flow of the installed binaries; constants 0.5 and 100 read from them).
+
+**Tested how:** Unit tests (metric, level choice); owned-install test (Barney: every level equals a separate root-LOD read, switch points climb, model detail Low drops two levels); `scripts/checks/validate.sh` and the isolation check pass. Packaged release, headless (`--background`), 1920x1080, 600 frames, four rotating runs per build against the previous commit: `d1_trainstation_02` plaza view (`--fly --position -3104 -2018 200 --yaw 12`) visible triangles 126,141 -> 110,349, mean frame 19.99 -> 20.03 / 20.06 ms; at spawn all model triangles 1,018,533 -> 892,782 (visible ones near and at LOD 0); image difference to the previous build 0.14 per channel. `d1_trainstation_01` (flex faces) runs 600 frames without errors.
+
+**Result:** Fewer triangles drawn for distant props and NPCs as retail picks them; no measurable frame-time change in these CPU-bound views.
+
+**Still broken or not tested:** Windows; a GPU-bound scene where the triangle saving would show; `r_lod`; per-view levels for monitor cameras; `replacematerial` levels; studio decals on coarser levels; load-time and memory cost of the extra levels not measured.
+
+**Next:** Shadow detail.
+
 ## 2026-10-24 Options > Video > Advanced > Motion blur takes effect
 
 **Agent/model:** Claude Code desktop, `claude-sonnet-5-5`. No subagents.

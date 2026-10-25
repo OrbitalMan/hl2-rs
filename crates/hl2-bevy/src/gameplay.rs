@@ -735,35 +735,7 @@ impl Gameplay {
         if Arc::strong_count(&self.world) > 1 {
             self.world_copies += 1;
         }
-        let world = Arc::make_mut(&mut self.world);
-        for (k, v) in loaded.model_assets {
-            world.model_assets.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.model_collision {
-            world.model_collision.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.rigs {
-            world.rigs.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.illumination {
-            world.illumination.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.model_physics {
-            world.model_physics.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.model_mass {
-            world.model_mass.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.model_prop_health {
-            world.model_prop_health.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.model_prop_data {
-            world.model_prop_data.entry(k).or_insert(v);
-        }
-        for (k, v) in loaded.model_breaks {
-            world.model_breaks.entry(k).or_insert(v);
-        }
-        world.warnings.extend(loaded.warnings);
+        Arc::make_mut(&mut self.world).merge_model_tables(loaded);
     }
     /// The F4/npc_create part: a class template, then the request's weapon, side and
     /// grenades.

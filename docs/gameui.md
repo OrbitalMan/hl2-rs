@@ -1629,7 +1629,7 @@ observed retail behavior, so nothing is implemented).
 | Audio: Spoken language | `audio.language` | nothing reads it at startup: `gameinfo.txt` names `hl2_sound_vo_english.vpk` and the host mounts it | placeholder; only the English pack is installed, so a switch cannot be observed |
 | Audio: Third-party credits | none | dialog | complete |
 | Video: HDR `mat_hdr_level` | `video.hdr` | `assets::load_with_progress` (LDR lumps, cubemaps, `ldr?` vars, sky), `tonemap::update` (exposure, bloom); map reload on change | complete since 2026-10-24 (section 23a; this row was a placeholder when the audit was written) |
-| Advanced: Model detail `r_rootlod` | `advanced.model_detail` | `assets::load_with_config`; map reload on change | complete |
+| Advanced: Model detail `r_rootlod` | `advanced.model_detail` | `assets::load_with_config` (the finest level loaded; map reload on change); `rendering::lod` (each entity model draws the level its screen size asks for) | complete; levels switch by distance since 2026-10-25 (section 23d) |
 | Advanced: Texture detail `mat_picmip` | `advanced.texture_detail` | VTF mip skipping; map reload on change | complete |
 | Advanced: Shader detail `mat_reducefillrate` | `advanced.shader_detail` | nothing | placeholder |
 | Advanced: Water detail | `advanced.water_detail` | nothing: no reflection or refraction pass exists | placeholder |
@@ -1720,3 +1720,23 @@ research notes for this option.
   view one scratch texture is kept and no pass runs.
 - Not matched: retail averages gamma-space values in an LDR frame (HL2RS averages linear at every level);
   the `mat_motion_blur_*` cvars have no console commands. Not tested: Windows.
+
+### 23d. Model detail: levels of detail switch with distance (2026-10-25)
+
+Evidence: Source SDK `public/studio.h` (`studiohwdata_t::LODMetric` = 100 / unit-sphere size, `GetLODForMetric`: the
+last level whose switch point the metric reached, from the root LOD, a trailing negative switch point being the shadow
+LOD) and `public/materialsystem/imaterialsystem.h` (`ComputePixelWidthOfSphere` returns twice the sphere's pixel
+diameter); in the retail engine the model renderer passes the render origin and radius 0.5, and the pixel diameter is
+the projected height difference times half the viewport height. So the metric is
+`100 * depth * tan(vfov / 2) / viewport height`: resolution dependent, independent of the model's size.
+
+- `source_assets::models::read_model_levels` reads a model's root LOD and every coarser drawable level in one parse
+  (materials resolved once); entity instances keep them in `World::model_lods` (static props are baked into the world's
+  batches at load and keep the root LOD, as before).
+- `rendering::lod`: each map or runtime entity draw (one mesh per material) holds its levels' meshes for that material
+  ([`ModelLevels`]) and `switch_levels` swaps the `Mesh3d` handle each frame its depth in the world camera's view asks
+  for another level (and the facial-flex vertex data of a flex draw); a material a coarser level drops (`removemesh`)
+  draws a collapsed triangle. GPU-skinned NPCs switch like props (the levels share the skeleton). Eye meshes,
+  CPU-skinned meshes, viewmodels and bone-merged NPC weapons keep the root LOD.
+- Not modeled: `r_lod` (forcing a level); per-view levels (monitor cameras use the main view's); material replacements
+  of a level (`replacematerial`, already ignored at the root LOD); studio decals stay on the root LOD's surface.

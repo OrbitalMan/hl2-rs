@@ -22,6 +22,11 @@ use bevy::{
 use modkit_core::Surface;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(crate) mod lod;
+mod model_cache;
+pub use model_cache::ModelCache;
+use model_cache::strip_pixels;
+
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(MaterialKey)]
 pub struct SourceMaterial {
@@ -489,6 +494,58 @@ pub struct AnimatedMesh {
     flex: Vec<Option<[u16; 3]>>,
     flex_base: Vec<glam::Vec3>,
     flex_signature: u64,
+}
+impl AnimatedMesh {
+    /// A batch's animation data (its skin taken; facial flexes only for an entity's own model).
+    fn from_batch(
+        batch: &mut Batch,
+        (entity, weapon): (Option<usize>, Option<String>),
+        (key, scale): (String, f32),
+        flexes: bool,
+    ) -> Self {
+        Self {
+            sampled: None,
+            gpu: None,
+            entity,
+            weapon,
+            key,
+            scale,
+            flex_base: if flexes {
+                batch.skin.iter().map(|(p, _)| *p).collect()
+            } else {
+                Vec::new()
+            },
+            normals: batch.normals.clone(),
+            bind: std::mem::take(&mut batch.skin),
+            flex: if flexes {
+                std::mem::take(&mut batch.flex)
+            } else {
+                Vec::new()
+            },
+            flex_signature: 0,
+        }
+    }
+    /// A template draw's animation for another entity on its own skeleton.
+    fn copy_for(&self, entity: usize, gpu: Option<crate::gpu_skinning::Skeleton>) -> Self {
+        Self {
+            sampled: None,
+            gpu,
+            entity: Some(entity),
+            weapon: self.weapon.clone(),
+            key: self.key.clone(),
+            scale: self.scale,
+            bind: self.bind.clone(),
+            normals: self.normals.clone(),
+            flex: self.flex.clone(),
+            flex_base: self.flex_base.clone(),
+            flex_signature: 0,
+        }
+    }
+}
+/// A private copy of an asset (a mesh or material an entity changes on its own).
+fn copy_asset<A: Asset + Clone>(assets: &mut Assets<A>, handle: &Handle<A>) -> Option<Handle<A>> {
+    let copy = assets.get(handle)?.clone();
+    Some(assets.add(copy))
 }
 /// Facial flex and eyeball data per model asset key (setup-loaded; no frame IO).
 #[derive(Resource, Default)]
@@ -1304,54 +1361,36 @@ pub fn spawn_map_filtered(
                     .model_instances
                     .iter()
                     .find(|i| i.entity == Some(*id))
-                    .map(|instance| AnimatedMesh {
-                        sampled: None,
-                        gpu: None,
-                        entity: Some(*id),
-                        weapon: None,
-                        key: instance.asset_key(),
-                        scale: instance.scale,
-                        flex_base: batch.skin.iter().map(|(p, _)| *p).collect(),
-                        normals: batch.normals.clone(),
-                        bind: std::mem::take(&mut batch.skin),
-                        flex: std::mem::take(&mut batch.flex),
-                        flex_signature: 0,
+                    .map(|instance| {
+                        let model = (instance.asset_key(), instance.scale);
+                        AnimatedMesh::from_batch(&mut batch, (Some(*id), None), model, true)
                     }),
                 // `weapon` with an entity marks a bone-merged mesh: its joints are the
                 // owner's, posed by the owner's own AnimatedMesh.
-                Owner::NpcWeapon(id, key) => Some(AnimatedMesh {
-                    sampled: None,
-                    gpu: None,
-                    entity: Some(*id),
-                    weapon: Some(key.clone()),
-                    key: key.clone(),
-                    scale: world
+                Owner::NpcWeapon(id, key) => {
+                    let scale = world
                         .model_instances
                         .iter()
                         .find(|i| i.entity == Some(*id))
-                        .map_or(1., |i| i.scale),
-                    normals: batch.normals.clone(),
-                    bind: std::mem::take(&mut batch.skin),
-                    flex: Vec::new(),
-                    flex_base: Vec::new(),
-                    flex_signature: 0,
-                }),
-                Owner::Weapon(name) => Some(AnimatedMesh {
-                    sampled: None,
-                    gpu: None,
-                    entity: None,
-                    weapon: Some(name.clone()),
-                    key: format!(
-                        "{}#0",
-                        loaded.gameplay.weapons[name].viewmodel.to_lowercase()
-                    ),
-                    scale: 1.,
-                    normals: batch.normals.clone(),
-                    bind: std::mem::take(&mut batch.skin),
-                    flex: Vec::new(),
-                    flex_base: Vec::new(),
-                    flex_signature: 0,
-                }),
+                        .map_or(1., |i| i.scale);
+                    let owner = (Some(*id), Some(key.clone()));
+                    Some(AnimatedMesh::from_batch(
+                        &mut batch,
+                        owner,
+                        (key.clone(), scale),
+                        false,
+                    ))
+                }
+                Owner::Weapon(name) => {
+                    let key = loaded.gameplay.weapons[name].viewmodel.to_lowercase();
+                    let owner = (None, Some(name.clone()));
+                    Some(AnimatedMesh::from_batch(
+                        &mut batch,
+                        owner,
+                        (format!("{key}#0"), 1.),
+                        false,
+                    ))
+                }
                 Owner::World | Owner::SkyWorld => None,
             }
         } else {
@@ -1430,10 +1469,11 @@ pub fn spawn_map_filtered(
             let state = &loaded.gameplay.scene.states[id];
             entity_transform(state.origin, state.rotation)
         });
+        let handle = meshes.add(mesh);
         let mut draw = commands.spawn((
             crate::campaign::MapOwned,
             Name::new(name.clone()),
-            Mesh3d(meshes.add(mesh)),
+            Mesh3d(handle.clone()),
             MeshMaterial3d(material),
             transform,
         ));
@@ -1498,6 +1538,15 @@ pub fn spawn_map_filtered(
                     eye: eye.clone(),
                     scale: instance.scale,
                 });
+            } else if let Some(levels) = lod::levels_for_draw(
+                world,
+                id,
+                &name,
+                definition,
+                (&handle, animation.as_ref()),
+                meshes,
+            ) {
+                draw.insert(levels);
             }
             let state = &loaded.gameplay.scene.states[id];
             if !state.visible || state.killed {
@@ -1601,6 +1650,7 @@ type TemplateDraw<'a> = (
     Option<&'a ModelLit>,
     Option<&'a AnimatedMesh>,
     Has<crate::visibility::PvsDraw>,
+    Option<&'a lod::ModelLevels>,
 );
 /// Runtime spawns (DESIGN 14r part A): build the new entity's draws from its template's
 /// draws built at map load. Static GPU-skinned meshes are shared; meshes the CPU
@@ -1664,8 +1714,20 @@ pub fn spawn_runtime_draws(
         // The body first: bone-merged weapons follow its skeleton.
         let (body, weapons): (Vec<_>, Vec<_>) =
             template_draws.into_iter().partition(|d| d.6.is_none());
-        for (_, mesh, material, name, layers, triangles, weapon, eye, lit, animation, pvs) in
-            body.into_iter().chain(weapons)
+        for (
+            _,
+            mesh,
+            material,
+            name,
+            layers,
+            triangles,
+            weapon,
+            eye,
+            lit,
+            animation,
+            pvs,
+            levels,
+        ) in body.into_iter().chain(weapons)
         {
             let gpu = match (animation.and_then(|a| a.gpu.as_ref()), weapon) {
                 (None, _) => None,
@@ -1707,21 +1769,18 @@ pub fn spawn_runtime_draws(
             };
             let private_mesh =
                 eye.is_some() || animation.is_some_and(|a| a.gpu.is_none() || !a.flex.is_empty());
-            let mesh = if private_mesh {
-                match meshes.get(&mesh.0).cloned() {
-                    Some(copy) => meshes.add(copy),
-                    None => continue,
-                }
-            } else {
-                mesh.0.clone()
+            let levels = levels.and_then(|l| l.copy_for(&mut meshes, private_mesh));
+            let mesh = match (&levels, private_mesh) {
+                (Some(levels), _) => Some(levels.root()),
+                (None, true) => copy_asset(&mut meshes, &mesh.0),
+                (None, false) => Some(mesh.0.clone()),
             };
-            let material = if lit.is_some() {
-                match materials.get(&material.0).cloned() {
-                    Some(copy) => materials.add(copy),
-                    None => continue,
-                }
-            } else {
-                material.0.clone()
+            let material = match lit {
+                Some(_) => copy_asset(&mut materials, &material.0),
+                None => Some(material.0.clone()),
+            };
+            let (Some(mesh), Some(material)) = (mesh, material) else {
+                continue;
             };
             let mut draw = commands.spawn((
                 crate::campaign::MapOwned,
@@ -1738,6 +1797,9 @@ pub fn spawn_runtime_draws(
             }
             if pvs {
                 draw.insert(crate::visibility::PvsDraw::default());
+            }
+            if let Some(levels) = levels {
+                draw.insert(levels);
             }
             if let Some(triangles) = triangles {
                 draw.insert(DrawTriangles(triangles.0));
@@ -1769,87 +1831,10 @@ pub fn spawn_runtime_draws(
                         bevy::camera::visibility::DynamicSkinnedMeshBounds,
                     ));
                 }
-                draw.insert(AnimatedMesh {
-                    sampled: None,
-                    gpu,
-                    entity: Some(id),
-                    weapon: animation.weapon.clone(),
-                    key: animation.key.clone(),
-                    scale: animation.scale,
-                    bind: animation.bind.clone(),
-                    normals: animation.normals.clone(),
-                    flex: animation.flex.clone(),
-                    flex_base: animation.flex_base.clone(),
-                    flex_signature: 0,
-                });
+                draw.insert(animation.copy_for(id, gpu));
             }
         }
     }
-}
-/// The loaded map's GPU textures and material definitions, kept for models drawn after
-/// the map load (DESIGN 14r part B): texture handles by VTF path (shared with the map's
-/// draws) and definitions without their decoded pixels.
-#[derive(Resource, Default)]
-pub struct ModelCache {
-    pub textures: BTreeMap<String, Handle<Image>>,
-    pub definitions: BTreeMap<String, MaterialData>,
-    pub white: Handle<Image>,
-    pub black_cube: Handle<Image>,
-    pub missing: Handle<Image>,
-}
-impl ModelCache {
-    /// Upload a late-loaded model's materials: textures not on the GPU yet, then the
-    /// definitions without pixels.
-    pub fn add_materials(
-        &mut self,
-        images: &mut Assets<Image>,
-        loaded: BTreeMap<String, MaterialData>,
-    ) {
-        self.add_materials_filtered(images, loaded, hl2_ui::config::Filtering::Trilinear);
-    }
-
-    pub fn add_materials_filtered(
-        &mut self,
-        images: &mut Assets<Image>,
-        loaded: BTreeMap<String, MaterialData>,
-        filtering: hl2_ui::config::Filtering,
-    ) {
-        for (name, mut material) in loaded {
-            if let (Some(base), Some(path)) = (&material.base, &material.base_path) {
-                self.textures.entry(path.clone()).or_insert_with(|| {
-                    images.add(image_filtered(
-                        base.width,
-                        base.height,
-                        base.rgba.clone(),
-                        true,
-                        filtering,
-                    ))
-                });
-            }
-            if let (Some(iris), Some(path)) = (&material.iris, &material.iris_path) {
-                self.textures.entry(path.clone()).or_insert_with(|| {
-                    images.add(image_filtered(
-                        iris.width,
-                        iris.height,
-                        iris.rgba.clone(),
-                        false,
-                        filtering,
-                    ))
-                });
-            }
-            strip_pixels(&mut material);
-            self.definitions.entry(name).or_insert(material);
-        }
-    }
-}
-/// A material definition without decoded images (their GPU copies stay in ModelCache).
-fn strip_pixels(material: &mut MaterialData) {
-    material.base = None;
-    material.iris = None;
-    material.camera_overlay = None;
-    material.envmap = None;
-    material.envmap_mask = None;
-    material.two_texture = None;
 }
 /// One runtime entity's studio-model draws (DESIGN 14r part B: models loaded after the
 /// map): one mesh per material like the map build's entity batches, lit per entity,
@@ -1916,23 +1901,10 @@ pub(crate) fn build_model_draws(
         }
         let material = materials.add(material);
         let triangles = batch.indices.len() / 3;
-        let mut animation = batch
-            .skin
-            .iter()
-            .any(|(_, w)| w.is_some())
-            .then(|| AnimatedMesh {
-                sampled: None,
-                gpu: None,
-                entity: Some(id),
-                weapon: None,
-                key: instance.asset_key(),
-                scale: instance.scale,
-                flex_base: batch.skin.iter().map(|(p, _)| *p).collect(),
-                normals: batch.normals.clone(),
-                bind: std::mem::take(&mut batch.skin),
-                flex: std::mem::take(&mut batch.flex),
-                flex_signature: 0,
-            });
+        let mut animation = batch.skin.iter().any(|(_, w)| w.is_some()).then(|| {
+            let model = (instance.asset_key(), instance.scale);
+            AnimatedMesh::from_batch(&mut batch, (Some(id), None), model, true)
+        });
         if let (Some(animation), Some(rig)) = (&mut animation, rig) {
             if skeleton.is_none() {
                 let root = commands
@@ -1962,16 +1934,27 @@ pub(crate) fn build_model_draws(
         if animation.is_some() {
             mesh.asset_usage = RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
         }
+        let handle = meshes.add(mesh);
         let mut draw = commands.spawn((
             crate::campaign::MapOwned,
             Name::new(name.clone()),
-            Mesh3d(meshes.add(mesh)),
+            Mesh3d(handle.clone()),
             MeshMaterial3d(material),
             transform,
             SourceEntity(id),
             crate::visibility::PvsDraw::default(),
             DrawTriangles(triangles),
         ));
+        if let Some(levels) = lod::levels_for_draw(
+            world,
+            id,
+            &name,
+            definition,
+            (&handle, animation.as_ref()),
+            meshes,
+        ) {
+            draw.insert(levels);
+        }
         if lit {
             draw.insert(ModelLit {
                 entity: Some(id),

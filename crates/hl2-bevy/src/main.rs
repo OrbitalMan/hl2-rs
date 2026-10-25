@@ -6,6 +6,7 @@ mod camera;
 mod campaign;
 mod canvas_renderer;
 mod console_host;
+mod coords;
 mod effects;
 mod eyes;
 mod gameplay;
@@ -519,20 +520,7 @@ struct CaptureControl {
     requested_frame: Option<u64>,
     completed_frame: Option<u64>,
 }
-/// Source right-handed Z-up coordinates become Bevy right-handed Y-up.
-fn source_to_bevy(p: Vec3) -> Vec3 {
-    Vec3::new(p.x, p.z, -p.y)
-}
-fn bevy_to_source(p: Vec3) -> Vec3 {
-    Vec3::new(p.x, -p.z, p.y)
-}
-fn source_direction(yaw: f32, pitch: f32) -> Vec3 {
-    Vec3::new(
-        pitch.cos() * yaw.cos(),
-        pitch.cos() * yaw.sin(),
-        pitch.sin(),
-    )
-}
+use coords::{bevy_to_source, source_direction, source_to_bevy};
 
 /// Loads the startup map and says whether it is a main-menu background level. A gameplay
 /// `--map` is loaded directly, without a menu background first: the background's freed memory
@@ -803,6 +791,7 @@ fn main() -> Result<()> {
             PostUpdate,
             (
                 rendering::present_entities,
+                rendering::lod::switch_levels.after(rendering::present_entities),
                 rendering::present_weapons,
                 effects::present,
                 effects::present_gibs,
@@ -813,6 +802,7 @@ fn main() -> Result<()> {
                 eyes::attention_pvs,
                 material_proxies::present,
                 canvas_renderer::present,
+                tonemap::update,
             )
                 .before(TransformSystems::Propagate),
         )
@@ -824,13 +814,13 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
-            rendering::spawn_runtime_draws
+            (
+                rendering::despawn_killed_runtime_draws,
+                rendering::spawn_runtime_draws,
+            )
+                .chain()
                 .before(rendering::present_entities)
                 .before(eyes::present),
-        )
-        .add_systems(
-            PostUpdate,
-            rendering::despawn_killed_runtime_draws.before(rendering::spawn_runtime_draws),
         )
         .add_systems(
             PostUpdate,
@@ -852,10 +842,6 @@ fn main() -> Result<()> {
                 .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         )
         .add_systems(Startup, setup)
-        .add_systems(
-            PostUpdate,
-            tonemap::update.before(TransformSystems::Propagate),
-        )
         .add_systems(
             PostUpdate,
             audio::queue

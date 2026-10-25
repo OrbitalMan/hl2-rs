@@ -1,7 +1,7 @@
 //! Static-prop game lumps, model meshes, and installed sequence adapters.
 use crate::{bytes, f32le, i16le, i32le, u16le, u32le, vec3, vpk::Vfs};
 use anyhow::{bail, Context, Result};
-use glam::{Mat3, Vec2, Vec3};
+use glam::{Mat3, Vec3};
 use modkit_core::{parse_vec3, ModelInstance, Surface, Vertex, World};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -512,6 +512,9 @@ fn parse_static(data: &[u8], version: u16) -> Result<Vec<ModelInstance>> {
     }
     Ok(props)
 }
+mod geometry;
+pub use geometry::{read_model_levels, read_model_variant, root_lod_index, ModelLevels};
+
 pub fn read_model(vfs: &Vfs, path: &str, skin: usize) -> Result<Vec<Surface>> {
     read_model_variant(vfs, path, skin, 0, 0)
 }
@@ -522,194 +525,6 @@ pub fn read_model_body(vfs: &Vfs, path: &str, skin: usize, body: i32) -> Result<
 /// The model's meshes for a skin with body 0 at a root LOD (`r_rootlod`).
 pub fn read_model_lod(vfs: &Vfs, path: &str, skin: usize, root_lod: usize) -> Result<Vec<Surface>> {
     read_model_variant(vfs, path, skin, 0, root_lod)
-}
-/// Index of the LOD drawn for `root_lod`: clamped to the authored LODs, excluding a
-/// trailing shadow LOD (negative switch point).
-pub fn root_lod_index(switch_points: &[f32], root_lod: usize) -> usize {
-    let valid_count = if switch_points.last().is_some_and(|s| *s < 0.0) {
-        switch_points.len().saturating_sub(1)
-    } else {
-        switch_points.len()
-    };
-    root_lod.min(valid_count.saturating_sub(1))
-}
-/// The model's meshes for a skin and a body value (each body part draws the submodel
-/// the body selects; body 0 is every part's first submodel) at a root LOD.
-pub fn read_model_variant(
-    vfs: &Vfs,
-    path: &str,
-    skin: usize,
-    body: i32,
-    root_lod: usize,
-) -> Result<Vec<Surface>> {
-    let stem = path.trim_end_matches(".mdl");
-    let mdl_bytes = vfs.read(path)?.context("MDL missing")?;
-    let vvd_bytes = vfs.read(&format!("{stem}.vvd"))?.context("VVD missing")?;
-    let vtx_bytes = vfs
-        .read(&format!("{stem}.dx90.vtx"))?
-        .context("DX90 VTX missing")?;
-    if bytes(&mdl_bytes, 0, 4)? != b"IDST" || bytes(&vvd_bytes, 0, 4)? != b"IDSV" {
-        bail!("model magic mismatch");
-    }
-    if !(44..=49).contains(&u32le(&mdl_bytes, 4)?)
-        || u32le(&vvd_bytes, 4)? != 4
-        || u32le(&vtx_bytes, 0)? != 7
-    {
-        bail!("unsupported MDL/VVD/VTX version");
-    }
-    let checksum = u32le(&mdl_bytes, 8)?;
-    if checksum != u32le(&vvd_bytes, 8)? || checksum != u32le(&vtx_bytes, 16)? {
-        bail!("model companion checksum mismatch");
-    }
-    // Geometry loading must not enter vmdl's unimplemented external animation-block path.
-    let mut geometry_bytes = mdl_bytes.clone();
-    bytes(&geometry_bytes, 180, 4)?;
-    geometry_bytes[180..184].copy_from_slice(&0i32.to_le_bytes());
-    let mdl = vmdl::Mdl::read(&geometry_bytes)?;
-    let skin_reference_count = usize::try_from(i32le(&mdl_bytes, 220)?)?;
-    let vvd = vmdl::Vvd::read(&vvd_bytes)?;
-    let vtx = vmdl::Vtx::read(&vtx_bytes)?;
-    let selection = if body == 0 {
-        Vec::new()
-    } else {
-        body_selection(&body_parts(&mdl_bytes)?, body)
-    };
-    let submodels = studio_submodels(&mdl_bytes)?;
-    let mut surfaces = Vec::new();
-    for (body_index, (part, topology)) in submodels.iter().zip(&vtx.body_parts).enumerate() {
-        let model_index = selection.get(body_index).copied().unwrap_or(0);
-        let Some(model) = part.get(model_index) else {
-            continue;
-        };
-        let lod = topology
-            .models
-            .get(model_index)
-            .and_then(|m| {
-                let switch_points: Vec<f32> = m.lods.iter().map(|l| l.switch_point).collect();
-                m.lods
-                    .get(root_lod_index(&switch_points, root_lod))
-                    .or_else(|| m.lods.first())
-            })
-            .context("missing model LOD")?;
-        for (mesh_index, (&(mesh_material, mesh_vertex_offset), topology)) in
-            model.meshes.iter().zip(&lod.meshes).enumerate()
-        {
-            let material = usize::try_from(mesh_material)?;
-            let texture_index = if skin_reference_count > 0 {
-                let index = skin
-                    .checked_mul(skin_reference_count)
-                    .and_then(|i| i.checked_add(material))
-                    .context("skin overflow")?;
-                *mdl.skin_table
-                    .get(index)
-                    .or_else(|| mdl.skin_table.get(material))
-                    .context("skin material missing")? as usize
-            } else {
-                material
-            };
-            let texture = mdl
-                .textures
-                .get(texture_index)
-                .context("model texture index outside table")?;
-            let candidates = mdl
-                .texture_paths
-                .iter()
-                .map(|p| format!("{}{}", p.replace('\\', "/"), texture.name))
-                .chain(std::iter::once(texture.name.clone()));
-            let mut material_name = texture.name.clone();
-            if let Some(resolved) = vfs.resolve_material_name(&texture.name) {
-                material_name = resolved;
-            }
-            for candidate in candidates {
-                if vfs.read(&format!("materials/{candidate}.vmt"))?.is_some() {
-                    material_name = candidate;
-                    break;
-                }
-            }
-            let mut surface = Surface {
-                background: false,
-                material: material_name,
-                lightmap: None,
-                vertices: Vec::new(),
-                indices: Vec::new(),
-                flex_source: None,
-            };
-            let mut vertex_ids = Vec::new();
-            let base = model
-                .vertex_offset
-                .checked_add(mesh_vertex_offset)
-                .context("model vertex overflow")?;
-            for group in &topology.strip_groups {
-                for strip in &group.strips {
-                    let mut indices: Vec<_> = strip.indices().collect();
-                    // vmdl 0.2 expands two extra triangles for a triangle strip.
-                    if strip.flags.contains(vmdl::vtx::StripFlags::IS_TRI_STRIP) {
-                        indices.truncate(indices.len().saturating_sub(6));
-                    }
-                    for triangle in indices.as_chunks::<3>().0 {
-                        for &index in triangle {
-                            let group_index = *group
-                                .indices
-                                .get(index)
-                                .context("strip index out of range")?
-                                as usize;
-                            let vertex_id = group
-                                .vertices
-                                .get(group_index)
-                                .context("VTX vertex missing")?
-                                .original_mesh_vertex_id
-                                as usize;
-                            let vertex = vvd
-                                .vertices
-                                .get(base + vertex_id)
-                                .context("VVD vertex missing")?;
-                            surface.indices.push(surface.vertices.len() as u32);
-                            vertex_ids.push(
-                                u16::try_from(vertex_id).context("mesh vertex id exceeds u16")?,
-                            );
-                            surface.vertices.push(Vertex {
-                                normal: Vec3::new(
-                                    vertex.normal.x,
-                                    vertex.normal.y,
-                                    vertex.normal.z,
-                                ),
-                                position: Vec3::new(
-                                    vertex.position.x,
-                                    vertex.position.y,
-                                    vertex.position.z,
-                                ),
-                                uv: Vec2::from_array(vertex.texture_coordinates),
-                                color: [180, 180, 180, 255],
-                                light_uv: Vec2::ZERO,
-                                skin: Some({
-                                    let mut bones = [0; 3];
-                                    let mut weights = [0.; 3];
-                                    for (i, w) in vertex.bone_weights.weights().enumerate() {
-                                        bones[i] = w.bone_id;
-                                        weights[i] = w.weight;
-                                    }
-                                    modkit_core::animation::Weights { bones, weights }
-                                }),
-                            });
-                        }
-                    }
-                }
-            }
-            if !surface.indices.is_empty() {
-                surface.flex_source = Some(modkit_core::FlexSource {
-                    bodypart: body_index,
-                    model: model_index,
-                    mesh: mesh_index,
-                    vertex_ids,
-                });
-                surfaces.push(surface);
-            }
-        }
-    }
-    if surfaces.is_empty() {
-        bail!("model has no default-bodygroup triangles");
-    }
-    Ok(surfaces)
 }
 pub fn rotation(angles: Vec3) -> Mat3 {
     Mat3::from_rotation_z(angles.y.to_radians())
@@ -839,7 +654,7 @@ pub fn append_models_lod(world: &mut World, vfs: &Vfs, root_lod: usize) -> Model
             });
         }
     }
-    let mut cache: BTreeMap<(String, usize, i32), Option<Vec<Surface>>> = BTreeMap::new();
+    let mut cache: BTreeMap<(String, usize, i32), Option<ModelLevels>> = BTreeMap::new();
     let mut report = ModelReport::default();
     let mut collision_attempted = BTreeSet::new();
     let mut collision_modes_reported = BTreeSet::new();
@@ -852,7 +667,7 @@ pub fn append_models_lod(world: &mut World, vfs: &Vfs, root_lod: usize) -> Model
         let key = (instance.model.to_lowercase(), instance.skin, instance.body);
         let model = cache.entry(key.clone()).or_insert_with(|| {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                read_model_variant(vfs, &key.0, key.1, key.2, root_lod)
+                read_model_levels(vfs, &key.0, key.1, key.2, root_lod)
             })) {
                 Ok(Ok(s)) => {
                     report.unique_models += 1;
@@ -875,10 +690,7 @@ pub fn append_models_lod(world: &mut World, vfs: &Vfs, root_lod: usize) -> Model
         let Some(model) = model else {
             continue;
         };
-        world
-            .model_assets
-            .entry(instance.asset_key())
-            .or_insert_with(|| model.clone());
+        model.store(instance, (&mut world.model_assets, &mut world.model_lods));
         // Only static props with a proved identity-root transform use PHY yet.
         // Animated doors, dynamic props and ragdolls retain explicit fallback.
         if instance.solid
@@ -1076,7 +888,7 @@ pub fn append_models_lod(world: &mut World, vfs: &Vfs, root_lod: usize) -> Model
             }
             state
         });
-        for surface in model {
+        for surface in &model.root {
             let out = batches
                 .entry((
                     surface.material.clone(),
@@ -1891,6 +1703,39 @@ mod tests {
         println!("Barney indices: lod0={indices0}, lod1={indices1}, lod2={indices2}");
         assert!(indices0 > indices1);
         assert!(indices1 > indices2);
+    }
+    #[test]
+    #[ignore]
+    fn owned_barney_levels_match_each_root_lod_read_and_climb_in_switch_points() {
+        let game = crate::install::discover().unwrap();
+        let vfs = Vfs::mount(&game).unwrap();
+        let levels = read_model_levels(&vfs, "models/barney.mdl", 0, 0, 0).unwrap();
+        let count = |s: &[Surface]| s.iter().map(|s| s.indices.len()).sum::<usize>();
+        assert_eq!(
+            count(&levels.root),
+            count(&read_model_lod(&vfs, "models/barney.mdl", 0, 0).unwrap())
+        );
+        assert!(!levels.lower.is_empty());
+        for (i, level) in levels.lower.iter().enumerate() {
+            let alone = read_model_lod(&vfs, "models/barney.mdl", 0, i + 1).unwrap();
+            assert_eq!(count(&level.surfaces), count(&alone), "level {}", i + 1);
+            assert!(level.switch_point > 0.);
+        }
+        assert!(levels
+            .lower
+            .windows(2)
+            .all(|w| w[0].switch_point < w[1].switch_point));
+        println!(
+            "Barney switch points: {:?}",
+            levels
+                .lower
+                .iter()
+                .map(|l| l.switch_point)
+                .collect::<Vec<_>>()
+        );
+        // Model detail Low starts two levels down: two fewer coarser levels.
+        let low = read_model_levels(&vfs, "models/barney.mdl", 0, 0, 2).unwrap();
+        assert_eq!(low.lower.len() + 2, levels.lower.len());
     }
     #[test]
     fn root_lod_index_clamps_to_authored_lods_without_shadow_lod() {
