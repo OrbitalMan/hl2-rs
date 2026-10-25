@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-25 Shadow detail, step 1: shadow geometry in hl2-simulation
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `hl2_simulation::shadows` (new, not yet drawn): `ShadowControl` (the map's `shadow_control`: angles, the all-zero (80, 30) fallback, the legacy `direction`, colour, distance, `disableallshadows`; without one the level defaults: direction (0.1, 0.1, -1), distance 50, colour `3 * ambient + 0.3` from the sky ambient light), `linear_color` (the receiver shader's gamma-to-linear); `shadows::frame` (`Frame::render_to_texture` and `Frame::blob`: origin, axes, size, falloff start, end, clip planes, texture coordinates and the per-vertex fade byte); `shadows::receivers` (`Receivers`: the world's receiver triangles on a 64-unit X/Y grid, static props told apart by their bone weights; `Receivers::decal`: one shadow's decal geometry, buffers reused). Design section "Shadow detail and the flashlight" (DESIGN.md) records the plan and corrects step 1 with the engine findings.
+
+**Why:** Owner request (Shadow detail at all levels, the flashlight, retail first). Evidence: Source SDK `game/client/clientshadowmgr.cpp` (`BuildRenderToTextureShadow`, `BuildOrthoShadow`, `ComputeLocalShadowOrigin`, `ComputeExtraClipPlanes`, `AddShadowToReceiver`, the level defaults), `c_shadowcontrol.cpp`, `public/engine/ishadowmgr.h`, `utils/vbsp/textures.cpp` (`SURF_NOSHADOWS` on water), `materialsystem/stdshaders/shadow.cpp` and `shadow_ps2x.fxc`. The engine's clipper is not in the SDK; its rules come from the installed engine's control flow and constants: receivers face the light (`n . d <= -0.01`) and have the shadow origin in front of them; translucent, alpha-tested and no-shadow surfaces do not receive; a polygon is kept when a vertex is short of the cast end, clipped to the texture square, to depth 0 and to the clip planes (`n . p < dist`), and each vertex carries `min(255, 240 * max(0, (z - falloff start) / (end - falloff start)) + bias)` as its fade byte. So a shadow is 240/255 faded at its cast distance and fades on past it; nothing cuts it there.
+
+**Tested how:** 10 unit tests (shadow_control keys and defaults, ambient colour, gamma-to-linear, the straight-down frame of a 32 x 32 x 48 box: origin at its top, falloff start 56.985, end 106.985, size 36; the blob frame: size 42, origin backed up and snapped; the fade ramp; decals on a floor (the clip planes trim the two bloat strips of the light-side faces: 34 x 34), a ceiling, a floor above the origin, a floor past the end, a slanted shadow on a wall, static props only when asked, non-receiving and background surfaces); Clippy and `scripts/checks/validate.sh`.
+
+**Result:** The geometry the host will draw, independent of Bevy.
+
+**Still broken or not tested:** Nothing draws it yet (steps 2 and 3); displacement receivers are tested per triangle against their base face's normal (the engine tests the base face plane); two-sided (`$nocull`) receivers that face away are skipped (the engine lets them receive from behind).
+
+**Next:** Step 2: Low (blob shadows) in the host.
+
 ## 2026-10-25 Model detail: entity models switch levels of detail by distance
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5` (this session started on `claude-sonnet-5-5`). No subagents.

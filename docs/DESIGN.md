@@ -1,5 +1,59 @@
 # Design
 
+## Shadow detail and the flashlight (2026-10-25)
+
+Goal (owner): Options > Video > Advanced > Shadow detail at all three levels, and the flashlight that High
+needs. Retail sources: Source SDK `game/client/clientshadowmgr.cpp` (casters, frames, atlas, blob and
+render-to-texture shadows), `materialsystem/stdshaders/shadow_ps2x.fxc` (the receiver), `flashlighteffect.cpp`
+and `common_flashlight_fxc.h` (the flashlight light and its depth shadow), `game/server/hl2/hl2_player.cpp`
+(suit power, `impulse 100`); the installed `decals/simpleshadow`, `decals/rendershadow`, `effects/flashlight*`
+materials and the maps' `shadow_control` entities (66 of 78 base maps).
+
+Levels: Low = `r_shadowrendertotexture 0` (every caster a blob of `decals/simpleshadow` straight down), Medium =
+render-to-texture silhouettes along the map's shadow direction, High = Medium plus the flashlight's depth-map
+shadows (`r_flashlightdepthtexture 1`). Shadows exist at every level (retail has no "off" in the dialog).
+
+Steps, each committed on its own:
+
+1. Shadow geometry, pure and tested in hl2-simulation (`shadows`): `shadow_control` settings and the
+   no-entity defaults; one caster's projected frame (origin, axes, size, falloff start, cast distance, the
+   light-facing box faces); the receiver grid over the world's triangles (brush faces and displacements;
+   static props, baked into the world's batches and told apart by their bone weights, receive only NPC
+   shadows at render-to-texture detail, as `AddShadowToReceiver` rules); the engine's clipper as the retail
+   engine runs it: receivers facing the light (`n . d <= -0.01`) with the shadow origin in front of them,
+   polygons kept when a vertex is short of the cast end, clipped to the texture square, to depth 0 and to
+   the light faces, each vertex given the fade byte `min(255, 240 * (z - falloff start) / span + bias)`
+   (240 at the cast end, fading on past it: nothing is clipped there); the blob frame (+10 units, origin
+   backed up twice, snapped to 0.5).
+2. Low: host module `hl2-bevy` `shadows/`: the receiver grid built on the map worker (translucent,
+   alpha-tested, additive and `SURF_NOSHADOWS` water materials do not receive); one shadow mesh per caster
+   entity (studio-model entities without `disableshadows`, bounds as `C_BaseAnimating::GetRenderBounds`: the
+   model's view box or hull with the current sequence's box), rewritten in place when its caster moved by a
+   quarter shadow texel; a `ShadowMaterial` (multiply blend, the 5-tap coverage blur, colour gamma-to-linear
+   from `shadow_control`, no fog term as the world has none yet) drawn with other translucent geometry; the
+   blob picture from the installed `decals/simpleshadow`.
+3. Medium: silhouettes rasterized on the CPU into a shared R8 atlas (2 texels per unit, 16 to 256): from the
+   caster's coarsest level (its `$shadowlod` when it has one, as the engine draws shadows), posed with the
+   actor's bone matrices for animated casters (redrawn when the pose changes), translucent and alpha-tested
+   parts by texture alpha; only the redrawn cells of the atlas image change.
+4. The flashlight: `impulse 100` and the default F bind, suit power drain and recharge and the HUD's power
+   bar device line, the on/off sounds, and the light itself: the projected `effects/flashlight_border`
+   texture with the SDK's attenuation (constant 0, linear 100), far fade (750 units, from 60 %) and Lambert
+   term added to world and model shading in `source.wgsl` (one pass instead of the engine's extra additive
+   pass), the origin pull-back trace of `UpdateLightNew`.
+5. High: a depth map rendered from the flashlight's frustum (`r_flashlightdepthres` 1024) sampled by the
+   flashlight term with the SDK's Poisson filter and shadow attenuation (`r_flashlightshadowatten` 0.35);
+   rendered only while the flashlight is on at High.
+
+Performance rules: no shadow work for a caster that did not move and is not animating (its mesh and cell are
+kept); the receiver grid is built once per map off the main thread; silhouettes of animated casters only when
+their pose sample changes; the flashlight term costs nothing while it is off (a uniform flag, no texture
+binding change), its depth pass exists only at High with the light on. Each step measures frame time with the
+level off and on (packaged, `d1_trainstation_02` plaza and a citizen-heavy view) and records it in MODLOG.
+
+Not planned: the 32-shadows-per-frame limit with blob fallback, receivers on brush entities (doors, trains),
+shadows of brush physboxes, per-screen-size atlas cells.
+
 ## Architecture guardrails (2026-10-24)
 
 Goal (owner): the refactoring series stops; checks keep the structure from decaying instead.
