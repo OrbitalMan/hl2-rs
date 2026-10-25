@@ -285,3 +285,95 @@ fn a_slanted_shadow_reaches_a_wall_behind_the_caster() {
     assert!(area(&decal) > 100.);
     assert!(decal.positions.iter().all(|p| (p.x - 30.).abs() < 1e-3));
 }
+
+#[test]
+fn cell_sizes_follow_twice_the_largest_dimension() {
+    use super::silhouette::cell_size;
+    let size = |x: f32, y: f32, z: f32| cell_size((Vec3::ZERO, Vec3::new(x, y, z)));
+    assert_eq!(size(30., 30., 10.), 64);
+    assert_eq!(size(28., 28., 46.), 128);
+    assert_eq!(size(32., 32., 72.), 256);
+    assert_eq!(size(6., 6., 8.), 16);
+    assert_eq!(size(32., 32., 300.), 256);
+}
+
+#[test]
+fn a_silhouette_covers_the_caster_and_saturates_where_parts_overlap() {
+    use super::silhouette::{clear, draw};
+    let (bounds, at) = crate_box();
+    let f = Frame::render_to_texture(bounds, &at, Vec3::NEG_Z, 50.);
+    let n = 36;
+    let mut cell = Vec::new();
+    clear(&mut cell, n);
+    // The box's top face, two triangles, drawn twice.
+    let top = [
+        Vec3::new(-16., -16., 48.),
+        Vec3::new(16., -16., 48.),
+        Vec3::new(16., 16., 48.),
+        Vec3::new(-16., 16., 48.),
+    ];
+    for _ in 0..2 {
+        for t in [[0, 1, 2], [0, 2, 3]] {
+            draw(&mut cell, n, &f, (t.map(|i| top[i]), [Vec2::ZERO; 3]), None);
+        }
+    }
+    let covered = cell.iter().filter(|c| **c > 0.).count();
+    assert_eq!(
+        covered,
+        32 * 32,
+        "one texel per unit, the 2-unit margin empty"
+    );
+    assert!(cell.iter().all(|c| *c == 0. || *c == 1.));
+    // A half-transparent part covers half.
+    clear(&mut cell, n);
+    let half = |_: Vec2| 0.5;
+    draw(
+        &mut cell,
+        n,
+        &f,
+        ([top[0], top[1], top[2]], [Vec2::ZERO; 3]),
+        Some(&half),
+    );
+    assert!(cell.contains(&0.5));
+}
+
+#[test]
+fn fragments_follow_screen_area_up_to_the_texture_size() {
+    use super::allocator::{uv_rect, Allocator};
+    let mut page = Allocator::new();
+    let prop = page.allocate(128);
+    // 30 px across: area 900 asks for 32 texels.
+    assert!(page.use_texture(prop, false, 900.));
+    assert_eq!(page.rect(prop).map(|r| r.1), Some(32));
+    // Nothing changed: kept, no redraw.
+    page.advance_frame();
+    assert!(!page.use_texture(prop, false, 900.));
+    // One size up and not redrawn anyway: kept (within one step).
+    page.advance_frame();
+    assert!(!page.use_texture(prop, false, 3000.));
+    assert_eq!(page.rect(prop).map(|r| r.1), Some(32));
+    // Much bigger on screen: capped at its own 128.
+    page.advance_frame();
+    assert!(page.use_texture(prop, false, 50_000.));
+    assert_eq!(page.rect(prop).map(|r| r.1), Some(128));
+    let rect = page.rect(prop).unwrap();
+    let (origin, size) = uv_rect(rect);
+    assert_eq!(size, glam::Vec2::splat(127. / 1024.));
+    assert_eq!(origin, (rect.0.as_vec2() + 0.5) / 1024.);
+}
+
+#[test]
+fn a_size_used_up_this_frame_falls_back_to_a_smaller_one() {
+    use super::allocator::Allocator;
+    let mut page = Allocator::new();
+    // Six 256 fragments: the seventh caster of one frame gets a 128.
+    let casters: Vec<_> = (0..7).map(|_| page.allocate(256)).collect();
+    for &c in &casters {
+        assert!(page.use_texture(c, true, 1e6));
+    }
+    let sizes: Vec<_> = casters.iter().map(|&c| page.rect(c).unwrap().1).collect();
+    assert_eq!(sizes, [256, 256, 256, 256, 256, 256, 128]);
+    // 256 fragments sit in the last six blocks of the page.
+    let (at, _) = page.rect(casters[0]).unwrap();
+    assert!(at.y >= 512);
+}

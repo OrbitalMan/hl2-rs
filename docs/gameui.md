@@ -1633,7 +1633,7 @@ observed retail behavior, so nothing is implemented).
 | Advanced: Texture detail `mat_picmip` | `advanced.texture_detail` | VTF mip skipping; map reload on change | complete |
 | Advanced: Shader detail `mat_reducefillrate` | `advanced.shader_detail` | nothing | placeholder |
 | Advanced: Water detail | `advanced.water_detail` | nothing: no reflection or refraction pass exists | placeholder |
-| Advanced: Shadow detail | `advanced.shadow_detail` | `hl2_simulation::shadows` (frames, receivers, decal clipping), `hl2-bevy` `shadows` (one decal mesh per caster, `ShadowMaterial`, `shadow.wgsl`): Low draws blob shadows; Medium and High draw nothing yet (render-to-texture and the flashlight follow) | partial since 2026-10-25 (section 23e) |
+| Advanced: Shadow detail | `advanced.shadow_detail` | `hl2_simulation::shadows` (frames, receivers, decal clipping), `hl2-bevy` `shadows` (one decal mesh per caster, `ShadowMaterial`, `shadow.wgsl`): Low draws blob shadows; Medium and High render-to-texture shadows (High's flashlight shadows follow) | partial since 2026-10-25 (section 23e) |
 | Advanced: Color correction `mat_colorcorrection` | `advanced.color_correction` | `hl2_simulation::color_correction` (entities, fades, weights), `hl2-bevy` `bloom::color_correction` (lookup volumes, per-frame weights), the bloom composite (`bloom.wgsl`) | complete since 2026-10-24 (section 23b); base HL2 and Lost Coast maps have no such entity, so it changes only Episode One and Two |
 | Advanced: Antialiasing | `advanced.antialiasing` | `video::sync_antialiasing` (MSAA, limited to the adapter) | complete |
 | Advanced: Filtering | `advanced.filtering` | `video::sync_filtering` (sampler anisotropy and mip filter) | complete |
@@ -1757,7 +1757,17 @@ it (MODLOG 2026-10-25, step 1).
   detail), not translucent, alpha-tested, additive or `SURF_NOSHADOWS` (water). Each caster keeps one mesh, rewritten
   in place when it moved a quarter shadow texel, turned or changed sequence; the report carries
   `presentation.shadows` (casters, shadows with geometry, decal triangles, rebuilds).
-- Medium (render-to-texture silhouettes along the map's direction) and High (the flashlight's depth shadows) are next;
-  until then both draw no shadows.
+- Medium (done; High draws the same until the flashlight exists): shadows along the map's `shadow_control` direction
+  from each caster's silhouette. Each frame the shadows in view (the camera frustum around the caster's sphere
+  stretched along the cast distance, and the PVS of its draws) are ranked by screen area (`ComputeScreenArea`); the 32
+  largest (`r_shadowmaxrendered`) get a fragment of a 1024-texel coverage page with the engine's allocator (blocks of
+  16 to 256 texels, an LRU per size, the size from the screen area up to the caster's own 2-texels-per-unit size, a
+  smaller one when a size is used up this frame) and their silhouette is rasterized there when the fragment is new,
+  the caster moved, or it has pose parameters (NPCs, every frame they are ranked); the others show the blob picture
+  on the same projection without clip planes (`DrawRenderToTextureShadowLOD`). NPC shadows reach static props.
+  Silhouettes: the coarsest drawable level, posed, both faces, translucent and alpha-tested parts by texture alpha.
+- The atlas material is marked changed after silhouettes are drawn: a Bevy material keeps the texture as it was
+  prepared, so an edited image alone never reached the shader.
 - Not modeled: the falloff bias of fading entities (always 0), receivers on brush entities, two-sided receivers seen
-  from behind, fog (the world has none yet).
+  from behind, fog (the world has none yet), a model's `$shadowlod` (the coarsest drawable level stands in),
+  children's bounds and silhouettes in their parent's shadow (bone-merged NPC weapons cast nothing).

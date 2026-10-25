@@ -32,10 +32,13 @@ Steps, each committed on its own:
    quarter shadow texel; a `ShadowMaterial` (multiply blend, the 5-tap coverage blur, colour gamma-to-linear
    from `shadow_control`, no fog term as the world has none yet) drawn with other translucent geometry; the
    blob picture from the installed `decals/simpleshadow`.
-3. Medium: silhouettes rasterized on the CPU into a shared R8 atlas (2 texels per unit, 16 to 256): from the
-   caster's coarsest level (its `$shadowlod` when it has one, as the engine draws shadows), posed with the
-   actor's bone matrices for animated casters (redrawn when the pose changes), translucent and alpha-tested
-   parts by texture alpha; only the redrawn cells of the atlas image change.
+3. Medium: the engine's per-frame flow. Shadows in view (frustum and PVS) are ranked by screen area; the 32
+   largest get a fragment of the 1024-texel page (`CTextureAllocator`: blocks of 16 to 256 texels, an LRU
+   per size, sized by screen area up to the caster's own 2-texels-per-unit size) and their silhouette is
+   rasterized on the CPU into it when the fragment is new, the caster moved, or it has pose parameters;
+   the rest show the blob picture on the same projection without clip planes. Silhouettes come from the
+   caster's coarsest drawable level (a trailing `$shadowlod` is not read yet), posed with its bone
+   matrices, translucent and alpha-tested parts by texture alpha.
 4. The flashlight: `impulse 100` and the default F bind, suit power drain and recharge and the HUD's power
    bar device line, the on/off sounds, and the light itself: the projected `effects/flashlight_border`
    texture with the SDK's attenuation (constant 0, linear 100), far fade (750 units, from 60 %) and Lambert
@@ -51,8 +54,7 @@ their pose sample changes; the flashlight term costs nothing while it is off (a 
 binding change), its depth pass exists only at High with the light on. Each step measures frame time with the
 level off and on (packaged, `d1_trainstation_02` plaza and a citizen-heavy view) and records it in MODLOG.
 
-Not planned: the 32-shadows-per-frame limit with blob fallback, receivers on brush entities (doors, trains),
-shadows of brush physboxes, per-screen-size atlas cells.
+Not planned: receivers on brush entities (doors, trains), shadows of brush physboxes.
 
 ## Architecture guardrails (2026-10-24)
 

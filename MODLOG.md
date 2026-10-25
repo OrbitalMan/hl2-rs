@@ -1,5 +1,21 @@
 # MODLOG
 
+## 2026-10-25 Shadow detail, step 3: render-to-texture shadows at Medium and High
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed:** `hl2_simulation::shadows::allocator` (new: the engine's shadow texture page, 16 blocks cut into 16- to 256-texel fragments with an LRU per size, `use_texture` by screen area, `rect`, `uv_rect`) and `shadows::silhouette` (new: cell size from the bounds, a span rasterizer for the silhouette, both faces, saturating, texture alpha for translucent parts). Host `shadows` split into `caster.rs` (casters, bounds, frame placement, bounding sphere, posed silhouette from the coarsest level), `draw.rs` (mesh writing, now with a texture rectangle and material per look), `texture.rs` (the blob material and the R8 coverage page with its material); `shadows.rs` runs three phases a frame: place the frames, rank the shadows in view (frustum around the stretched sphere, PVS of the caster's draws) and give the 32 largest fragments and silhouettes, then rewrite the decals whose geometry or look changed (blob, render-to-texture blob without clip planes, or a fragment). The coverage material is marked changed after silhouettes are drawn (a Bevy material keeps the texture it was prepared with). Report: `in_view`, `textured`, `silhouettes`.
+
+**Why:** Owner request (Shadow detail). Evidence: Source SDK `clientshadowmgr.cpp` (`CVisibleShadowList::EnumShadow`, `ComputeScreenArea`, `PrioritySort`, `ComputeShadowTextures` with `r_shadowmaxrendered` 32, `DrawRenderToTextureShadow` / `DrawRenderToTextureShadowLOD`, `CTextureAllocator` layout and `UseTexture`, `SetupRenderToTextureShadow`, `SetRenderToTextureShadowTexCoords`, `AddShadowToReceiver`), `c_baseanimating.cpp` (`SHADOWS_RENDER_TO_TEXTURE_DYNAMIC` for pose parameters).
+
+**Tested how:** 15 unit tests in `shadows` (new: cell sizes, silhouette coverage and saturation, translucent coverage, fragment sizes by area with the keep rule and the cap, falling back to a smaller size when one is used up). Packaged release, headless, `d1_trainstation_02`: the playground shows the tic-tac-toe blocks' shadows offset along the map direction; a citizen's 256-texel cell dumped during development showed its posed silhouette from above. Plaza view, 1920x1080, 600 frames, 3 rotating runs each: Low 19.36 ms, Medium 19.69 ms mean frame (spread 18.9-20.1); shadow update 0.52 ms CPU at Medium (7 shadows in view, about 5 silhouettes a frame) against 0.025 ms at Low. First versions cost 3.7 ms (every caster at its full cell size, never-drawn casters counted as in view); the engine's ranking, screen-area fragments, PVS and the span rasterizer brought it down.
+
+**Result:** Medium and High show render-to-texture shadows as the engine draws them.
+
+**Still broken or not tested:** `$shadowlod` (the coarsest drawable level stands in), children's bounds and silhouettes in their parent's shadow (NPC weapons), High's flashlight shadows (next steps), a side-by-side with retail, Windows. The silhouettes cost CPU time the engine spends on the GPU.
+
+**Next:** The flashlight.
+
 ## 2026-10-25 Shadow detail, step 2: blob shadows at Low
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.

@@ -3,8 +3,10 @@
 //! decal geometry clipped onto the world's triangles ([`receivers`]). Source units, Z up. The
 //! host rasterizes and draws them; this module has no engine.
 
+pub mod allocator;
 pub mod frame;
 pub mod receivers;
+pub mod silhouette;
 
 use glam::Vec3;
 use modkit_core::{lighting::EmitType, World};
