@@ -637,6 +637,30 @@ def check_hud():
     holds("HUD quads drawn", run.report["render"]["presentation"]["hud"]["quads"] > 0)
 
 
+def check_power_hud():
+    """Legacy auxiliary power and Episode Two's separate flashlight battery."""
+    def run(name: str, map_name: str, fixture: str) -> dict:
+        result = game(name, "--map", map_name, "--width", "1920", "--height", "1080",
+                      "--movement-script", f"test-inputs/{fixture}.json")
+        holds("capture exists", result.capture is not None and result.capture.exists())
+        holds("script completed", result.report["render"]["simulation"]["script_finished"])
+        return result.report["render"]["presentation"]
+    on = run("power_hud_on", "d1_trainstation_02", "bevy-flashlight-hud-on")
+    power = on["hud"]["power"]
+    holds("legacy device and charge", power["device"] and 90 < power["suit_power"] < 100, power)
+    holds("auxiliary panel visible", power["color"][3] > 0.8, power)
+    expect("one-device layout", power["rect"], [36, 877, 229, 81])
+    off = run("power_hud_recharged", "d1_trainstation_02", "bevy-flashlight-hud-recharged")
+    power = off["hud"]["power"]
+    holds("recharged and faded", not power["device"] and power["suit_power"] == 100
+          and power["color"][3] == 0, power)
+    ep2 = run("power_hud_ep2", "ep2_background01", "bevy-flashlight-hud-on")
+    power = ep2["hud"]["power"]
+    state = ep2["flashlight"]["state"]
+    holds("Episode Two battery", power["battery_initialized"] and not power["device"]
+          and power["suit_power"] == 100 and 90 < state["battery"] < 100 and state["on"], power)
+
+
 def check_hud_aspect():
     """Options > Video > HUD Aspect Ratio: the HUD panels sit inside a centered frame of the chosen
     aspect (report `hud.frame` = [x, width] and `hud.panels` = health, suit, ammo, secondary ammo
@@ -717,7 +741,7 @@ UI_FIXTURES = ("bevy-menu-submenus", "bevy-menu-return", "bevy-menu-chapter-retu
                "bevy-menu-video-8k", "bevy-menu-resolution-stress",
                "bevy-menu-resolution-stress-windowed", "bevy-menu-video-portrait",
                "bevy-menu-video-keep-timeout", "bevy-menu-video-keep-ok", "bevy-menu-video-keep-escape",
-               "bevy-console-open")
+               "bevy-console-open", "bevy-flashlight-hud-on", "bevy-flashlight-hud-recharged")
 SKIPPED: dict[str, str] = {}  # fixture: why it is not run
 # Sounds the installed maps reference but the installation does not have.
 MISSING_SOUNDS = {"d1_trainstation_01": {"Intro.zoomout", "ambience/particle_suck1.wav",
@@ -1261,6 +1285,7 @@ CHECKS = [
     Check("dev_overlay", check_dev_overlay, "shared"),
     Check("hud", check_hud, "shared"),
     Check("hud_aspect", check_hud_aspect, "shared"),
+    Check("power_hud", check_power_hud, "shared"),
     Check("window", check_window, "windowed"),
     Check("window_place", check_window_place, "macos"),
     Check("no_border", check_no_border, "windows"),

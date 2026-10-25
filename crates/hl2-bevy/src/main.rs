@@ -805,7 +805,7 @@ fn main() -> Result<()> {
                 monitors::present_materials,
                 eyes::attention_pvs,
                 material_proxies::present,
-                canvas_renderer::present,
+                canvas_renderer::present.after(flashlight::update),
                 tonemap::update,
             )
                 .before(TransformSystems::Propagate),

@@ -1,10 +1,30 @@
 # STATUS
  
- Checkpoint: 2026-10-24 (Claude Code desktop, claude-opus-5-5) on orbitalman/hl2-ui. The refactoring series is finished (UI toolkit split, source-ui's own tests, architecture guardrails, AGENTS.md rework); nothing is in progress and the next task comes from the owner. Sections below are newest first.
+ Checkpoint: 2026-10-25 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. The flashlight power HUD is implemented and validated; High's depth shadows and viewmodel flashlight lighting remain unfinished. Sections below are newest first.
+
+## Power HUD continuation (2026-10-25)
+
+- Implemented: auxiliary power panel, its active FLASHLIGHT line and Episode Two's independent
+  battery icon/bar, using installed layouts, localization, fonts and shared animation tracks.
+  Fixed text/icons are prepared on the map worker; no runtime font rasterization is added.
+- Verified: validate.sh (1,099 tests, strict Clippy/fmt/architecture), Windows-target check,
+  all 5 power HUD tests including 2 owned-install tests, 6 packaged HUD/UI check groups.
+  Captures inspected: `power_hud_on`, `power_hud_recharged`, `power_hud_ep2` under
+  `artifacts/replays/`. The Episode Two image has magenta world surfaces; only the HUD
+  was validated here, not that map's rendering. Detailed commands: docs/validation.md.
+- Performance: prior/new corridor mean frame off 18.33/18.24 ms, on 18.51/18.67 ms; active
+  HUD CPU 0.0383/0.0566 ms (about +0.018 ms). New on runs span 18.40-19.15 ms; frame
+  comparison is noisy. Evidence: docs/performance.md.
+- Next: High's flashlight depth shadows (DESIGN step 5), then flashlight lighting on the
+  viewmodel. Native side-by-side, Windows runtime, sprint/oxygen power devices and ordinary
+  gameplay are **not tested** in this continuation.
+- Rejected benchmark evidence is retained in `artifacts/power-hud`: sandbox launches cannot see
+  the Metal GPU; the first GPU baseline also rejected an unfinished 900-tick script with a
+  600-frame bound. Accepted baselines use the completed 240-tick script and GPU access.
 
 ## Options audit (2026-10-24)
 
-- Flashlight (in progress, MODLOG 2026-10-25): F / `impulse 100` toggles it on suit power (Episode Two: its own battery), its light is drawn with the installed cookie; still missing: the aux power HUD, High's flashlight depth shadows (frame time: no measurable cost, 18.40 / 18.40 / 18.39 ms previous / off / on). Handoff: docs/DESIGN.md "Shadow detail and the flashlight", section "Handoff".
+- Flashlight (in progress, MODLOG 2026-10-25): F / `impulse 100` toggles it on suit power (Episode Two: its own battery), its light is drawn with the installed cookie; power HUD completed in the continuation above; still missing: High's flashlight depth shadows (frame time: no measurable cost, 18.40 / 18.40 / 18.39 ms previous / off / on). Handoff: docs/DESIGN.md "Shadow detail and the flashlight", section "Handoff".
 - Shadow detail: Low draws blob shadows, Medium/High render-to-texture shadows with the engine's ranking and page allocator (docs/gameui.md 23e); the flashlight and High's depth shadows are in progress. Medium on the plaza: 19.69 ms vs Low 19.36 ms mean frame (3 rotating runs, spread about 1 ms), shadow update 0.52 ms CPU. Plaza view of `d1_trainstation_02` (1920x1080, 3 rotating runs each): off 18.86 ms, Low 19.03 ms mean frame (spread 18.68-19.17); the shadow update costs 0.021 ms CPU a frame (246 casters, 81 with geometry).
 - Model detail: entity models (props, NPCs) now switch levels of detail by distance with the retail metric (docs/gameui.md 23d). Plaza view of `d1_trainstation_02` at 1920x1080: visible triangles 126,141 -> 110,349, all model triangles 1,018,533 -> 892,782 at spawn; frame time 19.99 -> 20.03-20.06 ms (4 rotating runs, within noise; this view is CPU bound). Not tested: Windows; GPU-bound scenes where fewer triangles would show as frame time.
 - Motion blur implemented (docs/gameui.md 23c): packaged `d1_trainstation_02` turn capture shows the world blurred, the weapon and HUD sharp; frame time (6 rotating runs each, 1920x1080) previous commit 21.22 / off 21.66 / on 21.72 ms stop-start turning, 17.60 / 18.05 / 18.07 ms still: on vs off within noise, but off is about 0.45 ms slower than the previous commit for a reason not found (see MODLOG). Not tested: Windows, real mouse look (scripted turns step once per simulation tick), a retail comparison.

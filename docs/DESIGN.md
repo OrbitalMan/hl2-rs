@@ -57,9 +57,9 @@ level off and on (packaged, `d1_trainstation_02` plaza and a citizen-heavy view)
 Not planned: receivers on brush entities (doors, trains), shadows of brush physboxes.
 
 Handoff (2026-10-25): steps 1-3 are committed (blob shadows at Low, render-to-texture at Medium/High). Step 4 is
-committed in part: `hl2_simulation::flashlight` (power, toggle, placement, flicker) and `hl2-bevy` `flashlight.rs`
+committed in part at that checkpoint: `hl2_simulation::flashlight` (power, toggle, placement, flicker) and `hl2-bevy` `flashlight.rs`
 (input, sounds, a Bevy `SpotLight` read by `source.wgsl`'s `flashlight()`). Frame time is measured (spawn corridor of `d1_trainstation_02`,
-eye -4304 -224 64, yaw -90, pitch -10: previous commit 18.40, off 18.40, on 18.39 ms). Left for step 4: the HUD: `HudSuitPower` from `hl2/scripts/hudlayout.res` (16/420,
+eye -4304 -224 64, yaw -90, pitch -10: previous commit 18.40, off 18.40, on 18.39 ms). Left for step 4 at that checkpoint (completed by the continuation below): the HUD: `HudSuitPower` from `hl2/scripts/hudlayout.res` (16/420,
 102x48, bar inset 8/15 width 92 height 4, chunks 6 gap 3, label 8/4, device lines from 8/22 every 10, colours 255 220
 0 220 / low 255 0 0 220, exhausted alpha 70), its `SuitAuxPower*` animations in `hudanimations.txt`, tokens
 `#Valve_Hud_AUX_POWER` and `#Valve_Hud_FLASHLIGHT`, fed from the host's `HostFlashlight` (suit power, flashlight
@@ -67,6 +67,34 @@ on); Episode Two's `HudFlashlight` (WeaponIconsSmall glyphs 169/174 and a 28-wid
 `shadow_maps_enabled` on the flashlight spot light only at High, sample `fetch_spot_shadow` with the light id found
 in `flashlight()`, blend toward 1 by `r_flashlightshadowatten` 0.35 as `DoFlashlight` does; custom materials need a
 shadow (prepass) shader that discards alpha-tested texels.
+
+### Continuation: power HUD (2026-10-25)
+
+Bounded step: complete the remaining HUD part of step 4 before High's depth shadows.
+Read the owned `HudSuitPower` / `HudFlashlight` layouts, fonts, colours, localization and
+animation sequences on the map worker. Reuse the HUD animation controller and rounded
+panel painter; keep the new power element in its own child module and extract the existing
+font helper to keep the HUD file smaller. Pass the host flashlight state as a borrowed value
+and present it after its update. Do no asset reads or text lookup in frame systems.
+
+Legacy: rounded chunk count, device line, maximum-charge fade, low-charge colour and
+active-device geometry from the installed sequences. Episode Two: independent battery,
+on/off glyphs, charge bar and exhausted alpha, with no legacy flashlight device line.
+Sprint and oxygen devices remain outside this flashlight step (simulation does not yet
+supply them). Preserve suit/death/background visibility and proportional/HUD aspect layout.
+
+Validation: unit tests for chunk boundaries, state transitions, animation fade/geometry,
+battery separation and draw visibility; owned-file tests for both mounted games. Run
+`validate.sh`, `check_windows.sh`, packaged captures and relevant HUD/UI replays. Measure
+packaged corridor frame time and HUD CPU time against the preceding packaged build;
+retain rejected evidence alongside accepted captures in ignored `artifacts/`.
+
+Validation completed: all 5 power HUD tests (including the 2 owned-install tests),
+validate.sh, Windows-target Clippy, and 6 packaged HUD/UI check groups pass. Active HUD CPU rises about 0.018 ms; frame
+timing remains noisy (docs/performance.md). Captures
+show the legacy device line, recharge fade and Episode Two's separate battery; see
+`docs/validation.md`. No High depth-shadow implementation is included in this step.
+
 
 ## Architecture guardrails (2026-10-24)
 

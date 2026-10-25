@@ -54,6 +54,10 @@ pub struct HostFlashlight {
 }
 
 impl HostFlashlight {
+    pub fn state(&self) -> Option<&Flashlight> {
+        self.state.as_ref()
+    }
+
     pub fn report(&self) -> serde_json::Value {
         serde_json::json!({"state": self.state, "light": self.light})
     }

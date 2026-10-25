@@ -1,5 +1,33 @@
 # Local validation — 2026-10-05
 
+## Flashlight power HUD (2026-10-25, macOS Apple Silicon)
+
+- `scripts/checks/validate.sh`: passes (1,099 tests passed, 87 owned-install/other ignored
+  tests not run by this command), strict Clippy, formatting and the architecture check.
+- `scripts/checks/check_windows.sh`: passes strict Windows-target Clippy; a Windows
+  executable and Windows runtime are **not tested**.
+- `cargo test -p hl2-ui hud::power --locked -- --include-ignored`: 5 passed, including
+  2 owned-install tests discovered with `source_assets::install::discover()`. Coverage:
+  chunk rounding, once-per-transition events, shared animation colour/fade/geometry,
+  suit/death hiding, portrait resizing and Episode Two's battery separation.
+- `NO_BUILD=1 ONLY='power_hud hud hud_aspect console options coverage' python3 scripts/checks/replays.py`:
+  6 check groups passed, zero failed. The new `power_hud` check runs 3 packaged captures:
+  legacy on (charge/device/colour and one-device geometry), off/recharged (100 percent,
+  no device and fully faded), and Episode Two (battery in use, suit power still 100).
+- Inspected `artifacts/replays/power_hud_on.png`, `power_hud_recharged.png` and
+  `power_hud_ep2.png`: the localized auxiliary label, bar and device line appear above
+  health, disappear after recharging, and Episode Two instead has the flashlight icon
+  and its own bar. The Episode Two image validates the HUD only; magenta world surfaces
+  are visible and their cause/regression status was not investigated in this step.
+- The release package was built with `scripts/build-bevy.sh`. All games ran in the
+  background and muted from copies with separate settings. No ordinary playthrough,
+  native side-by-side or High flashlight depth shadow validation was performed.
+
+Rejected performance launches remain in `artifacts/power-hud`: sandbox runs could not
+find the Metal GPU; the first GPU baseline rejected an unfinished 900-tick script at its
+600-frame bound. Accepted timing runs use a completed 240-tick script and GPU access.
+Timings: `docs/performance.md` and MODLOG.
+
 ## Local check scripts (2026-10-17)
 
 `scripts/checks/architecture.py` (2026-10-24; Python 3, standard library, about 4 s) enforces the

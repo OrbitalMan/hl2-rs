@@ -1757,7 +1757,7 @@ it (MODLOG 2026-10-25, step 1).
   detail), not translucent, alpha-tested, additive or `SURF_NOSHADOWS` (water). Each caster keeps one mesh, rewritten
   in place when it moved a quarter shadow texel, turned or changed sequence; the report carries
   `presentation.shadows` (casters, shadows with geometry, decal triangles, rebuilds).
-- Medium (done; High draws the same until the flashlight exists): shadows along the map's `shadow_control` direction
+- Medium (done; High draws the same until flashlight depth shadows are implemented): shadows along the map's `shadow_control` direction
   from each caster's silhouette. Each frame the shadows in view (the camera frustum around the caster's sphere
   stretched along the cast distance, and the PVS of its draws) are ranked by screen area (`ComputeScreenArea`); the 32
   largest (`r_shadowmaxrendered`) get a fragment of a 1024-texel coverage page with the engine's allocator (blocks of
@@ -1771,3 +1771,25 @@ it (MODLOG 2026-10-25, step 1).
 - Not modeled: the falloff bias of fading entities (always 0), receivers on brush entities, two-sided receivers seen
   from behind, fog (the world has none yet), a model's `$shadowlod` (the coarsest drawable level stands in),
   children's bounds and silhouettes in their parent's shadow (bone-merged NPC weapons cast nothing).
+
+
+### 23f. Flashlight power HUD (2026-10-25)
+
+`hud::power` reads `HudSuitPower` and `HudFlashlight` through the running game's VFS on the
+map worker. Labels resolve `#Valve_Hud_AUX_POWER` and `#Valve_Hud_FLASHLIGHT` at load time;
+font ranges, chunk geometry and colours come from the owned resources. Fixed text/icon
+quads are prepared on that worker. Resizing selects an authored font range and scales the
+prepared glyphs; frame systems do no font rasterization or text lookup for this element.
+
+The auxiliary panel shares `NumericHudEffects` with the numeric HUD: `AuxPowerColor`,
+`BgColor`, position and size are animated from the installed `SuitAuxPower*` sequences.
+Chunk rounding sets the low-power threshold; the device line is present while the legacy
+flashlight is on. Full recharge fades the panel away. Episode Two instead uses glyphs
+169/174 from its installed HUD icon font, normal/caution colours, a separate chunk bar,
+and the dim off state; it never draws the flashlight as a suit device. Both displays need
+a live suited player, draw inside the HUD aspect frame, and are hidden in background levels.
+The host presents the HUD after updating the flashlight.
+
+Scope: sprint and oxygen are not connected to auxiliary power yet. High's flashlight
+shadows and flashlight lighting on the viewmodel remain unfinished. A native side-by-side
+and Windows runtime capture are **not tested**. Packaged validation: `docs/validation.md`.

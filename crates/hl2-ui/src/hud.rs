@@ -1,5 +1,9 @@
 //! The PC HL2 HUD layout is read from the owned game's scheme and resource files.
 //! Bucket positioning and visibility follow CHudWeaponSelection, rather than a new UI design.
+mod font;
+mod power;
+use font::HudFont;
+
 use crate::gameui::localize::Localization;
 use anyhow::{Context, Result};
 use glam::{vec2, Vec2};
@@ -53,100 +57,6 @@ fn alpha(mut color: Color, amount: f32) -> Color {
 fn uses_secondary_ammo(weapon: &Weapon) -> bool {
     !weapon.secondary_ammo_type.is_empty()
         && !weapon.secondary_ammo_type.eq_ignore_ascii_case("none")
-}
-
-struct FontRange {
-    minimum: f32,
-    maximum: f32,
-    tall: f32,
-    proportional: bool,
-    blur: f32,
-    scanlines: f32,
-    #[cfg(windows)]
-    antialias: bool,
-}
-struct HudFont {
-    face: FontFace,
-    ranges: Vec<FontRange>,
-}
-#[cfg(windows)]
-impl FontRange {
-    fn monochrome_crosshair(&self) -> bool {
-        !self.antialias && !self.proportional && self.blur == 0. && self.scanlines == 0.
-    }
-}
-impl HudFont {
-    fn read(fonts: &Entry, name: &str, face: FontFace, fallback: f32) -> Self {
-        let ranges = fonts
-            .get(name)
-            .map(Entry::children)
-            .unwrap_or_default()
-            .iter()
-            .map(|entry| {
-                let resolution = entry.get("yres").and_then(Entry::text).and_then(|s| {
-                    let values = s
-                        .split_whitespace()
-                        .map(str::parse::<f32>)
-                        .collect::<std::result::Result<Vec<_>, _>>()
-                        .ok()?;
-                    (values.len() == 2).then_some((values[0], values[1]))
-                });
-                FontRange {
-                    minimum: resolution.map_or(0., |r| r.0),
-                    maximum: resolution.map_or(f32::MAX, |r| r.1),
-                    tall: number(entry, "tall", fallback),
-                    proportional: resolution.is_none(),
-                    blur: number(entry, "blur", 0.),
-                    scanlines: number(entry, "scanlines", 0.),
-                    #[cfg(windows)]
-                    antialias: number(entry, "antialias", 1.) != 0.,
-                }
-            })
-            .collect();
-        Self { face, ranges }
-    }
-    fn size(&self) -> f32 {
-        let height = self.design_height();
-        let range = self
-            .ranges
-            .iter()
-            .find(|r| height >= r.minimum && height <= r.maximum);
-        range.map_or(12., |r| {
-            r.tall * if r.proportional { height / 480. } else { 1. }
-        })
-    }
-    fn design_height(&self) -> f32 {
-        crate::proportional::design_height(vec2(
-            self.face.canvas.width(),
-            self.face.canvas.height(),
-        ))
-    }
-    fn effects(&self) -> (u16, u16) {
-        let height = self.design_height();
-        let range = self
-            .ranges
-            .iter()
-            .find(|r| height >= r.minimum && height <= r.maximum);
-        range.map_or((0, 0), |r| {
-            let scale = if r.proportional { height / 480. } else { 1. };
-            (
-                (r.blur * scale).round() as u16,
-                (r.scanlines * scale).round() as u16,
-            )
-        })
-    }
-    fn draw(&self, value: &str, x: f32, y: f32, color: Color) {
-        let (blur, scanlines) = self.effects();
-        self.face
-            .draw(value, x, y, self.size(), (blur, scanlines), color);
-    }
-    fn width(&self, value: &str) -> f32 {
-        self.face.width(value, self.size())
-    }
-    fn draw_cropped(&self, value: &str, origin: Vec2, rows: Vec2, color: Color) {
-        self.face
-            .draw_cropped(value, origin, self.size(), self.effects(), color, rows);
-    }
 }
 
 #[derive(Clone)]
@@ -379,6 +289,8 @@ enum NumericPanel {
     Ammo,
     AmmoSecondary,
     DamageIndicator,
+    SuitPower,
+    Flashlight,
 }
 impl NumericPanel {
     fn read(name: &str) -> Option<Self> {
@@ -388,6 +300,8 @@ impl NumericPanel {
             "hudammo" => Some(Self::Ammo),
             "hudammosecondary" => Some(Self::AmmoSecondary),
             "huddamageindicator" => Some(Self::DamageIndicator),
+            "hudsuitpower" => Some(Self::SuitPower),
+            "hudflashlight" => Some(Self::Flashlight),
             _ => None,
         }
     }
@@ -407,6 +321,7 @@ enum NumericProperty {
     DmgHighColorLeft,
     DmgHighColorRight,
     DmgFullscreenColor,
+    AuxPowerColor,
 }
 impl NumericProperty {
     fn read(name: &str) -> Option<Self> {
@@ -424,6 +339,7 @@ impl NumericProperty {
             "dmghighcolorleft" => Some(Self::DmgHighColorLeft),
             "dmghighcolorright" => Some(Self::DmgHighColorRight),
             "dmgfullscreencolor" => Some(Self::DmgFullscreenColor),
+            "auxpowercolor" => Some(Self::AuxPowerColor),
             _ => None,
         }
     }
@@ -439,6 +355,7 @@ impl NumericProperty {
                 | Self::DmgHighColorLeft
                 | Self::DmgHighColorRight
                 | Self::DmgFullscreenColor
+                | Self::AuxPowerColor
         )
     }
     fn geometry(self) -> bool {
@@ -484,7 +401,7 @@ impl NumericProperty {
 }
 #[derive(Clone, Copy)]
 struct PanelEffects {
-    values: [[f32; 4]; 13],
+    values: [[f32; 4]; 14],
 }
 impl PanelEffects {
     fn new(settings: &Entry) -> Self {
@@ -507,6 +424,7 @@ impl PanelEffects {
                 [255., 0., 0., 0.],
                 [255., 0., 0., 0.],
                 [255., 0., 0., 0.],
+                [255., 0., 0., 255.],
             ],
         }
     }
@@ -562,7 +480,7 @@ struct PostedEvent {
     property: Option<String>,
 }
 struct NumericHudEffects {
-    panels: [PanelEffects; 5],
+    panels: [PanelEffects; 7],
     animations: Vec<PropertyAnimation>,
     posted: Vec<PostedEvent>,
     health: i32,
@@ -578,7 +496,7 @@ struct NumericHudEffects {
 }
 impl NumericHudEffects {
     fn new(settings: &Entry) -> Self {
-        let mut panels = [PanelEffects::new(settings); 5];
+        let mut panels = [PanelEffects::new(settings); 7];
         // CHudSecondaryAmmo::Reset starts hidden until a secondary-ammo weapon is observed.
         panels[NumericPanel::AmmoSecondary as usize].values[NumericProperty::Alpha as usize][0] =
             0.;
@@ -1231,6 +1149,7 @@ pub struct WeaponHud {
     ammo_panel: PanelLayout,
     secondary_ammo_panel: PanelLayout,
     quick_info: QuickInfoHud,
+    power: power::PowerHud,
     /// HudDamageIndicator dmg_xpos, dmg_ypos, dmg_wide, dmg_tall1, dmg_tall2
     /// (proportional, 480-line units).
     damage_layout: [f32; 5],
@@ -1443,11 +1362,9 @@ impl WeaponHud {
             canvas.clone(),
             crate::closecaption::LANGUAGE,
         );
-        let health_label = loc.text("#Valve_Hud_HEALTH");
-        let suit_label = loc.text("#Valve_Hud_SUIT");
-        let ammo_label = loc.text("#Valve_Hud_AMMO");
-        let alt_label = loc.text("#Valve_Hud_AMMO_ALT");
+        let power = power::PowerHud::load(layout, fonts, &loc, bold.clone(), face.clone())?;
         Ok(Self {
+            power,
             aspect: crate::config::HudAspect::default(),
             corners,
             canvas,
@@ -1506,10 +1423,10 @@ impl WeaponHud {
                 ]
             },
             fades: MutexCell::new(Default::default()),
-            health_label,
-            suit_label,
-            ammo_label,
-            alt_label,
+            health_label: loc.text("#Valve_Hud_HEALTH"),
+            suit_label: loc.text("#Valve_Hud_SUIT"),
+            ammo_label: loc.text("#Valve_Hud_AMMO"),
+            alt_label: loc.text("#Valve_Hud_AMMO_ALT"),
             captions,
         })
     }

@@ -1,4 +1,6 @@
 //! Bevy presentation and WGPU 2D batch rendering for the shared Source UI Canvas.
+mod game_hud;
+
 use bevy::{
     asset::RenderAssetUsages,
     camera::{
@@ -164,7 +166,7 @@ impl Hud {
         let state = captions.state.borrow();
         let captions = serde_json::json!({"dictionaries":captions.captions.dictionaries.iter().map(|d| d.len()).collect::<Vec<_>>(),
             "errors":captions.errors,"processed":state.processed,"queued":state.streams().collect::<Vec<_>>(),"recent":state.recent,"missing":state.missing});
-        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "frame":self.source.frame(), "panels":self.source.panel_rects(), "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"captions":captions, "spawn_overlay":self.spawn_panel})
+        serde_json::json!({"quads":self.quads,"pooled_meshes":self.pool.len(),"owned_textures":self.textures.len(),"viewport":[self.source.canvas.width(),self.source.canvas.height()], "frame":self.source.frame(), "panels":self.source.panel_rects(), "power":self.source.power_report(), "developer_overlay":{"visible":!self.debug_lines.is_empty(),"fps":self.timing.fps(),"frame_ms":self.timing.frame_ms,"benchmark":self.timing.benchmark(),"lines":self.debug_lines},"captions":captions, "spawn_overlay":self.spawn_panel})
     }
     pub fn new(source: hl2_ui::hud::WeaponHud) -> Self {
         Self {
@@ -294,13 +296,14 @@ type HudResources<'w> = (
     Res<'w, crate::simulation::Simulation>,
     Res<'w, crate::Status>,
     Option<Res<'w, crate::performance::Performance>>,
+    Res<'w, crate::flashlight::HostFlashlight>,
 );
 #[allow(clippy::too_many_arguments)]
 pub fn present(
     mut commands: Commands,
     mut hud: ResMut<Hud>,
     mut game: ResMut<crate::gameplay::Gameplay>,
-    (ui, clock, sim, status, performance): HudResources,
+    (ui, clock, sim, status, performance, flashlight): HudResources,
     windows: Query<&Window, With<PrimaryWindow>>,
     video_viewport: Option<Res<crate::video::VideoViewport>>,
     (mut images, mut materials, mut meshes): HudAssets,
@@ -344,21 +347,7 @@ pub fn present(
     hud.source.draw_captions(&captions, time);
     // Background levels behind the main menu draw no HUD.
     if !ui.source.background_level() {
-        hud.source.draw_status(
-            &game.inventory,
-            &game.weapons,
-            &game.selection,
-            game.scene.time,
-        );
-        hud.source.draw_selection(
-            &game.selection,
-            &game.inventory,
-            &game.weapons,
-            game.scene.time,
-        );
-        if !ui.source.paused() {
-            hud.source.draw_crosshair(&game.inventory);
-        }
+        game_hud::draw(&hud, &game, &ui, &flashlight);
     }
     hud.timing.observe(clock.elapsed_secs_f64());
     hud.debug_lines.clear();

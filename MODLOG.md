@@ -1,5 +1,49 @@
 # MODLOG
 
+## 2026-10-25 Flashlight power HUD: auxiliary panel and Episode Two battery
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** `hl2-ui` `hud::power`: the installed auxiliary-power layout, localized labels,
+chunk bar, active FLASHLIGHT line and `SuitAuxPower*` colour/fade/geometry animations through
+the existing HUD animation controller. Episode Two draws its separate flashlight icon and
+battery bar with the installed font/layout and native on/off alpha rules. Fixed labels and
+icons are prepared on the loading worker; frame drawing does no new font rasterization,
+asset reads, localization lookup or temporary glyph-list construction. The host borrows
+`HostFlashlight` state and presents the HUD after its update. Existing HUD font helpers and
+host gameplay-HUD calls moved to child modules; size baselines tightened. Added 2 replay
+fixtures and a `power_hud` check with assertions on the packaged reports.
+
+**Why:** Complete the HUD portion of DESIGN step 4. Evidence: the owned layouts, fonts,
+localization and animation scripts; the existing flashlight research findings; Source SDK
+`game/client/hl2/hud_suitpower.cpp`, `hud_suitpower.h` and `hud_flashlight.cpp`. Behaviour was
+implemented independently in Rust using the existing HUD renderer and animation controller.
+
+**Tested how:** `scripts/checks/validate.sh` (1,099 passed, 87 ignored, strict Clippy/fmt and
+architecture); `scripts/checks/check_windows.sh`; `cargo test -p hl2-ui hud::power --locked --
+--include-ignored` (all 5 passed, including 2 owned-install tests); packaged release built
+with `scripts/build-bevy.sh`; `NO_BUILD=1 ONLY='power_hud hud hud_aspect console options coverage'
+python3 scripts/checks/replays.py` (6 check groups, zero failures). Inspected legacy on,
+recharged and Episode Two captures. Tests cover chunk thresholds, transition latches,
+animation fade/geometry, suit/death visibility, portrait resize and separate battery use.
+
+**Result:** The auxiliary panel appears above health while the legacy flashlight drains
+power, then fades out after recharge. Episode Two shows its own icon/bar, without charging
+its flashlight to suit power. Packaged corridor timings at 1920x1080, 600 frames, 3 alternating
+off/on runs per build: prior/new frame time off 18.33/18.24 ms, on 18.51/18.67 ms; HUD CPU
+off 0.0365/0.0390 ms, on 0.0383/0.0566 ms (active HUD adds about 0.018 ms CPU). New on runs
+span 18.40-19.15 ms: the frame comparison is noisy, not a zero-cost or FPS guarantee.
+Details and reproduction: docs/performance.md. Rejected sandbox GPU launches and the first
+GPU run's incomplete script are retained, excluded from the timings.
+
+**Still broken or not tested:** High's flashlight depth shadows, viewmodel flashlight
+lighting, sprint/oxygen power devices, native side-by-side, Windows runtime, ordinary
+playthroughs. The Episode Two capture has magenta world surfaces; its HUD was checked,
+not that map's rendering or the cause/regression status of those surfaces.
+
+**Next:** DESIGN step 5: High's flashlight depth shadows, including alpha-tested casters;
+then flashlight lighting on the viewmodel.
+
 ## 2026-10-25 The flashlight (step 4 of Shadow detail), in progress: toggle, power, light
 
 **Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents. Stopped at the owner's request (usage limit); handoff below.

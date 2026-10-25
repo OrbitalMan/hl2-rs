@@ -1,5 +1,40 @@
 # Performance measurements - 2026-10-05
 
+## Flashlight power HUD (2026-10-25)
+
+Packaged Metal, Apple M1 Pro, `d1_trainstation_02` spawn corridor, eye -4304 -224 64,
+yaw -90, pitch -10, 1920x1080, 600 frames, profiling on. Three alternating flashlight-off
+and flashlight-on runs of each build, without a build or another replay running alongside.
+Baseline package: `822e5f8`; new package: power HUD changes atop that revision. Copies use
+the same saved settings; timing scripts give the suit and toggle the flashlight at tick 1,
+then finish at tick 240. The scene continues until the frame bound.
+
+| State | Prior mean frame | New mean frame | Prior HUD CPU | New HUD CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Off / fully recharged | 18.330 ms | 18.243 ms | 0.0365 ms | 0.0390 ms |
+| On / auxiliary panel visible | 18.509 ms | 18.672 ms | 0.0383 ms | 0.0566 ms |
+
+The active HUD adds about 0.018 ms CPU to the prior on case, emitting 55 HUD quads instead
+of 20. Off emits the same 20 quads. New on runs are 19.147, 18.470 and 18.399 ms, versus
+18.536, 18.544 and 18.446 ms before. Frame time is noisy; the mean increase does not isolate
+the GPU cost of this small panel or establish an FPS guarantee. No render pass was added.
+Labels/icons are prepared on the map worker; drawing uses retained glyph quads.
+
+Evidence: `artifacts/power-hud/timing-summary.json`, `base_bounded_{off,on}_{1,2,3}.json`,
+`current_{off,on}_{1,2,3}.json` and their logs. With the completed 240-tick evidence script,
+run the packaged copy as follows (substitute `off` for the other state):
+
+```sh
+artifacts/power-hud/current/hl2-bevy --background --no-setup --mute --map d1_trainstation_02 --width 1920 --height 1080 --frames 600 --profile --movement-script artifacts/power-hud/bounded_script_on.json --report artifacts/power-hud/reproduce.json
+```
+
+Those scripts preserve the camera above and do not pause at the end. Repeat off/on three
+times per build. The replay fixtures also validate the HUD but pause for their final capture,
+so they are not substitutes for the timing scripts.
+Rejected sandbox launches could not access Metal. The first GPU launch rejected a 900-tick
+script before completion at 600 frames; none of those rejected runs enter the table.
+
+
 2026-10-08 owner-report milestone: prepared frame textures are shared and frame updates perform no asset I/O. Encoded/decoded budgets are bounded. Performance impact and FPS on the new material path are **not tested**; capture bursts verify visibility stability, not throughput. Existing measurements below retain their original scope.
 
 Performance is a current limitation, not a completed migration milestone. The user reported about22 FPS versus about60 in the retained build. A local packaged station02 spawn run reproduced about30 FPS at1920x1080 on the RTX3070/Vulkan adapter. The hosts use different texture mip limits (Bevy2048, retained512); neither a matched native benchmark nor144 FPS is established.
