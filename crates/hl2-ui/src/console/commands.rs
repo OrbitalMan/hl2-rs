@@ -853,7 +853,9 @@ mod tests {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(&path, &transcript).unwrap();
         }
-        let expected = std::fs::read_to_string(&path).unwrap_or_default();
+        let expected = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         assert!(
             transcript == expected,
             "cvar transcript differs from {} (rerun with UPDATE_GOLDEN=1 after review):\n{transcript}",

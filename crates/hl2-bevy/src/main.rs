@@ -27,6 +27,7 @@ mod shadows;
 mod simulation;
 mod sky;
 mod spawn_panel;
+mod startup;
 mod studio_decals;
 mod tonemap;
 mod ui_host;
@@ -138,10 +139,16 @@ fn startup_display_mode(
 }
 impl Options {
     fn parse() -> Result<Self> {
-        Self::parse_from(std::env::args().skip(1))
+        let (options, installation) = Self::parse_from(
+            std::env::args().skip(1),
+            hl2_ui::config::Config::load_or_default(),
+        )?;
+        options.finish_startup(installation)
     }
-    fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Self> {
-        let config = hl2_ui::config::Config::load_or_default();
+    fn parse_from(
+        args: impl IntoIterator<Item = String>,
+        config: hl2_ui::config::Config,
+    ) -> Result<(Self, startup::InstallationRequest)> {
         let mut args = args.into_iter();
         let mut game = None;
         let mut show_setup = false;
@@ -459,29 +466,13 @@ impl Options {
         if (show_setup || setup_preview.is_some()) && no_setup {
             bail!("--setup and --no-setup cannot be used together");
         }
-        options.game = match setup::resolve(
-            game,
-            options.map.as_deref(),
-            show_setup || setup_preview.is_some(),
-            no_setup || unattended || options.no_focus || options.background,
-            setup_preview,
-        )? {
-            Some(path) => path,
-            None => std::process::exit(0), // Setup cancelled; no game was loaded.
+        let installation = startup::InstallationRequest {
+            explicit: game,
+            force: show_setup || setup_preview.is_some(),
+            noninteractive: no_setup || unattended || options.no_focus || options.background,
+            preview: setup_preview,
         };
-        for path in [
-            Some(&options.report),
-            options.capture.as_ref(),
-            options.monitor_capture.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        Ok(options)
+        Ok((options, installation))
     }
 }
 #[derive(Resource)]
@@ -1367,7 +1358,7 @@ mod tests {
             (&["--capture-burst", "4"], "--capture-burst"),
             (&["--capture-monitor", "m.png"], "--capture-monitor"),
         ] {
-            let error = Options::parse_from(args(list))
+            let error = Options::parse_from(args(list), Default::default())
                 .err()
                 .expect(flag)
                 .to_string();
@@ -1396,14 +1387,20 @@ mod tests {
     fn a_bad_fake_monitor_fails_the_launch() {
         for spec in ["8k", "320x240", "1920x1080,3840x2160"] {
             let args = ["--fake-monitor".to_owned(), spec.to_owned()];
-            let error = Options::parse_from(args).err().expect(spec).to_string();
+            let error = Options::parse_from(args, Default::default())
+                .err()
+                .expect(spec)
+                .to_string();
             assert!(error.contains("--fake-monitor"), "{error}");
         }
     }
     #[test]
     fn startup_parses_background_map_override() {
         let args = ["--background-map".to_owned(), "background02".to_owned()];
-        let parsed = Options::parse_from(args).expect("parse options with background map");
+        let (parsed, installation) = Options::parse_from(args, Default::default())
+            .expect("parse options with background map");
+        assert!(installation.explicit.is_none());
+        assert!(parsed.game.as_os_str().is_empty());
         assert_eq!(parsed.background_map.as_deref(), Some("background02"));
     }
     #[test]

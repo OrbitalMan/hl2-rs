@@ -28,4 +28,4 @@ jobs:
       - name: Check workspace lints
         run: cargo +stable clippy --workspace --all-targets --locked -- -D warnings
       - name: Run unit tests
-        run: cargo +stable test --workspace --locked
+        run: cargo +stable test --workspace --locked --no-fail-fast

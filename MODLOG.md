@@ -1,5 +1,39 @@
 # MODLOG
 
+## 2026-10-26 Checkpoint: Windows CI test portability
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Gate the Retina visible-frame test to macOS, matching its margin constant.
+Separate CLI flag parsing/validation from installation resolution and output preparation.
+Parser tests inject Config values and receive an unresolved installation request; they do
+not discover or remember a game, create output directories or launch setup. Production
+startup still resolves installation and prepares outputs in the same order. Owned/fixture
+campaign tests explicitly use that startup step. Golden transcript comparison normalizes
+CRLF only. Local and CI workspace tests use --no-fail-fast. Architecture bounds tightened.
+
+**Why:** kvalls reported three Windows failures at 4405064: a macOS-only geometry assertion,
+a parser test invoking setup without an installed game, and CRLF golden-file comparison.
+The report's Windows reproductions are contributor evidence, not a local Windows run.
+
+**Tested how:** validate.sh: 1,125 Rust tests pass, 92 ignored; 13 Python tests, architecture,
+strict Clippy and fmt pass. Windows-target Clippy passes. Four startup tests pass, including
+missing installation strings and explicit setup requests without resolving them. The actual
+626-line golden fixture was temporarily converted to CRLF: its full cvar test passes; the
+original bytes were restored and hash-checked. Release build and packaged bg_compare/hud/
+coverage checks pass; explicit missing --game with --no-setup exits 1 without setup UI.
+Package hashes are verified. Details and retained evidence: docs/validation.md.
+
+**Result:** The three reported causes are fixed; all local checks pass. No frame-system or
+shader behavior changed, so no frame-time measurement was needed. Initial compilation
+caught three campaign test callers of the old parser API; a shared fixture startup helper
+corrected them before validation.
+
+**Still broken or not tested:** Native Windows execution and the next Windows CI run remain
+not tested here. Cross-target Clippy and CRLF simulation do not establish a Windows pass.
+
+**Next:** Run Windows CI for the updated revision before merging.
+
 ## 2026-10-26 Checkpoint: PR readiness maintenance fixes
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.

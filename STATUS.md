@@ -2,6 +2,24 @@
 
  Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
 
+## Windows CI test portability (2026-10-26)
+
+- Addressed kvalls's three reported causes at 4405064: macOS-only Retina test is gated,
+  argument parsing no longer resolves installations or launches setup, and the cvar golden
+  comparison normalizes CRLF without changing other transcript content. CI/local workspace
+  tests use --no-fail-fast so later crates run even if an earlier test binary fails.
+- Production initialization retains installation/output preparation after parsing; unit
+  parsing receives Config directly. Campaign test fixtures explicitly complete startup.
+  Architecture baseline tightens main.rs and its existing oversized parser.
+- Verified locally: 1,125 Rust tests/92 ignored +13 Python, strict Clippy/fmt/architecture,
+  Windows-target Clippy, full transcript test with actual CRLF fixture (bytes restored),
+  release build, bg_compare/hud/coverage packaged checks and missing-install exit 1 without
+  setup UI. Source game/shader/frame-loop behavior is unchanged. No frame-time rerun needed.
+- Initial compiler failure found three campaign test callers needing the new split API;
+  fixed through their shared test helper. Evidence: artifacts/pr-readiness; validation docs.
+- kvalls's Windows reproduction is contributor evidence. Native Windows execution and the
+  new Windows CI run are not tested here; next: require that run before merge.
+
 ## PR readiness maintenance fixes (2026-10-26)
 
 - Resolved both P2 findings: incremental candidates are workspace-only; stale pruning holds

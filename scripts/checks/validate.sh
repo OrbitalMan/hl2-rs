@@ -10,7 +10,7 @@ echo "=== Checking Python helpers ==="
 python3 -m unittest discover -s scripts/checks -p 'test_*.py'
 
 echo "=== Running workspace tests ==="
-cargo test --workspace --locked
+cargo test --workspace --locked --no-fail-fast
 
 echo "=== Running cargo clippy ==="
 cargo clippy --workspace --all-targets --locked -- -D warnings

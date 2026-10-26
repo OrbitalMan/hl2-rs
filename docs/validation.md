@@ -1,5 +1,35 @@
 # Local validation — 2026-10-05
 
+## Windows unit-test portability (2026-10-26)
+
+Contributor kvalls reports three failures on Windows 11 at 4405064 using
+`cargo test --workspace --locked --no-fail-fast`. The fixes gate the macOS-specific Retina
+assertion, defer installation/setup/output effects until after flag parsing, and normalize
+CRLF in the cvar golden comparison. Local validation and CI now use --no-fail-fast.
+
+`scripts/checks/validate.sh` passes: 1,125 Rust tests, 92 ignored, 13 Python tests,
+architecture, strict Clippy and fmt. `scripts/checks/check_windows.sh` passes. Parser tests
+supply Config directly and assert unresolved installation requests, background override,
+setup conflict validation and noninteractive flags. The initial compiler run exposed three
+campaign test callers of the old API; they now share an explicit fixture-startup helper.
+
+The actual cvars.golden was changed temporarily to 626 CRLF lines, then
+`cargo test -p hl2-ui --locked every_cvar_matches_its_golden_transcript -- --nocapture`
+passed. A finally block restored the original file bytes and verified its SHA-256; the
+fixture has no source diff. Evidence: windows-crlf-golden.log/windows-crlf-fixture.json.
+
+`scripts/build-bevy.sh` rebuilds the release package. Muted, background
+`NO_BUILD=1 ONLY='bg_compare hud coverage' python3 -u scripts/checks/replays.py` passes:
+default/menu startup across the four installed games and direct-map HUD startup. An explicit
+missing installation with --no-setup --background --frames 30 exits 1 with an installation
+error and no setup-window launch. Eleven executable/shader package hashes are verified.
+Logs/reports are under artifacts/pr-readiness and artifacts/replays. The startup split adds
+no per-frame work or render pass; no new frame-time comparison is needed.
+
+Windows execution and the new Windows CI run are not tested locally. Cross-target Clippy,
+macOS unit execution and CRLF simulation are distinct evidence and are not a Windows pass.
+
+
 ## PR readiness and automatic target maintenance (2026-10-26)
 
 Runtime baseline 4405064: `NO_BUILD=1 JOBS=2 python3 -u scripts/checks/replays.py`

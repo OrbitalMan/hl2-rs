@@ -1,5 +1,17 @@
 # Design
 
+## Windows unit-test portability follow-up (2026-10-26)
+
+Keep the Retina clamp assertion macOS-only, matching its margin constant. Separate flag
+parsing/validation from installation discovery, setup UI and output-directory creation;
+unit tests inject Config defaults and inspect an unresolved installation request. Production
+startup still resolves installation and prepares output directories in the same order.
+Normalize only CRLF in the golden transcript comparison, preserving all other bytes.
+CI and local workspace tests use --no-fail-fast so one crate cannot hide other failures.
+Validate owning tests, an actual CRLF golden fixture, full checks and Windows-target Clippy;
+rebuild and smoke-test the packaged startup path. Record Windows execution as not tested
+unless a Windows run is available; no native-game parity claim follows from these fixes.
+
 ## PR readiness maintenance (2026-10-26)
 
 Owner keeps pre-build automatic stale cleanup by default, with --no-clean as a launcher-only

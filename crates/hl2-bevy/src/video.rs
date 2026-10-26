@@ -1527,6 +1527,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn oversized_retina_windowed_resolution_clamps_cleanly_on_macos() {
         let window = window(1000, 600, 2.0, WindowMode::Windowed);
         let retina = monitor(3456, 2234, 2.0);

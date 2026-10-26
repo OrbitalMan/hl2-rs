@@ -309,17 +309,25 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::WindowResolution;
 
+    fn test_options(game: &std::path::Path) -> crate::Options {
+        let args = [
+            "--no-setup".to_owned(),
+            "--game".to_owned(),
+            game.to_string_lossy().to_string(),
+        ];
+        let (options, installation) =
+            crate::Options::parse_from(args, Default::default()).expect("valid options");
+        options
+            .finish_startup(installation)
+            .expect("fixture installation")
+    }
+
     #[test]
     #[ignore = "requires owned HL2 installation"]
     fn headless_bevy_app_submenu_entry_switches_background_map_and_scene() {
         let game = source_assets::install::discover().expect("owned install");
         let mut app = App::new();
-        let options = crate::Options::parse_from([
-            "--no-setup".to_owned(),
-            "--game".to_owned(),
-            game.to_string_lossy().to_string(),
-        ])
-        .expect("valid options");
+        let options = test_options(&game);
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<crate::rendering::SourceMaterial>>()
             .init_resource::<Assets<Image>>()
@@ -616,12 +624,7 @@ mod tests {
     fn headless_bevy_app_ep2_submenu_entry_switches_background_map() {
         let game = source_assets::install::discover().expect("owned install");
         let mut app = App::new();
-        let options = crate::Options::parse_from([
-            "--no-setup".to_owned(),
-            "--game".to_owned(),
-            game.to_string_lossy().to_string(),
-        ])
-        .expect("valid options");
+        let options = test_options(&game);
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<crate::rendering::SourceMaterial>>()
             .init_resource::<Assets<Image>>()
@@ -753,12 +756,7 @@ mod tests {
             let _ = std::fs::create_dir_all(path.parent().unwrap());
             let _ = std::fs::write(path, b"fixture");
         }
-        let options = crate::Options::parse_from([
-            "--no-setup".to_owned(),
-            "--game".to_owned(),
-            temp.to_string_lossy().to_string(),
-        ])
-        .expect("valid options");
+        let options = test_options(&temp);
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<crate::rendering::SourceMaterial>>()
             .init_resource::<Assets<Image>>()
