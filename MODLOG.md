@@ -1,5 +1,15 @@
 # MODLOG
 
+## 2026-10-26 session 32: ragdoll playtest fixes and friendly damage immunity
+
+**Agent/model:** Claude Code desktop, `claude-opus-5-5`. No subagents.
+
+**Changed / Why:** Owner playtest of session 31: ragdolls blocked the player, only the revolver seemed to push, corpses ignored later shots and blasts, crossbow bolts did not pin bodies; later, the player could kill citizens. Fixed the player's convex SAT hull path (it missed the ragdoll group); ported FireBullets multidamage (pellets add up per target, applied on target change; later pellets add force to a corpse killed by the same shot), m_nForceBone and the blast/crossbow death forces; client ragdoll effects from the SDK and retail client.dll (FX_AffectRagdolls 4000 per shot on the root; explosion temp entities x500 per retail, the SDK source says 4000; BoltImpact StickRagdollNow: mass x2 + ball-socket to the wall); CAI_BaseNPC::PassesDamageFilter for friendly-immune NPCs with an F4 debug option to allow it. The native oracle now opens on the second monitor. Ragdoll fade: retail LRU (hl2_episodic 0 branch), oldest out-of-view first, 600 alpha/s.
+
+**Tested how / Result:** Unit tests (player hull through a ragdoll fails before the fix; ragdoll ray/impulse/pin; multidamage force). Packaged hall fixtures (artifacts/s32): walk-through, lined-up cops killed by one shotgun shot, 8 corpse pushes, frag push, crossbow pins at a wall and into a corpse, citizen keeps 40 HP; owned suite 61 pass; regression 17/17, 26/26, 25/26 (doll01). LRU fade by unit test only (packaged fade not tested). Native A/B (oracle, metropolice, same camera): shotgun corpse displacement native ~73/83 vs ours 47/107 units (sideways/front), pistol ~12/11 vs 31/29.
+
+**Still broken or not tested / Next:** Frag push on a corpse and crossbow pins are not native-compared; our pistol corpses drift ~18 units more; the player's projectiles and blasts still hurt friends; ai_relationship overrides and weapon lowering at friends are not ported. `ent_fire <npc> sethealth 0` does not kill. Next: prop_ragdoll, headcrab release, burning ragdolls.
+
 ## 2026-10-26: native first-map AV evidence and controller consumption phase
 
 **Agent/model:** Codex desktop, GPT-6 family; exact identifier unavailable. Material subagents firstmap_gap_audit (gap/harness/raw-trace/audio audit) and physics_phase_static (exact controller/setter research), same exposed family; exact identifiers unavailable. Claude owns Rust implementation.
