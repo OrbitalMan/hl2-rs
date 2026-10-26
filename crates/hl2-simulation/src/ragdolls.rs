@@ -17,6 +17,8 @@ pub const MAX_RAGDOLLS: usize = 8;
 /// shots, 500 for blasts; the 2013 SDK source has 4000 for both).
 const SHOT_IMPULSE: f32 = 4000.;
 const BLAST_IMPULSE: f32 = 500.;
+/// g_ragdoll_fadespeed: alpha per second while a retired ragdoll fades out.
+const FADE_SPEED: f32 = 600.;
 
 /// Client-side effects that strike existing ragdolls.
 #[derive(Clone, Copy, Debug)]
@@ -54,6 +56,8 @@ pub struct Ragdoll {
     born: f64,
     /// World anchors of crossbow pins (StickRagdollNow ball-sockets).
     pins: Vec<RigidBodyHandle>,
+    /// Render alpha once retired (C_ClientRagdoll::SUB_Remove starts FadeOut).
+    fade: Option<f32>,
 }
 
 #[derive(Default)]
@@ -187,20 +191,71 @@ impl Ragdolls {
                 serial: self.serial,
                 born: scene.time,
                 pins: Vec::new(),
+                fade: None,
             },
         );
         self.spawned += 1;
-        while self.active.len() > MAX_RAGDOLLS {
-            let Some(oldest) = self
-                .active
-                .iter()
-                .min_by_key(|(_, r)| r.serial)
-                .map(|(id, _)| *id)
-            else {
-                break;
+    }
+    /// CRagdollLRURetirement::Update as retail runs it for HL2 (client.dll FUN_101aa3a0
+    /// takes the SDK's non-episodic branch while hl2_episodic is 0): beyond
+    /// g_ragdoll_maxcount, the oldest ragdoll outside the view (CullBox; the view-cluster
+    /// PVS test is not modeled) starts fading, one per update; else the oldest ones fade
+    /// until the count fits. Fading ones lose 600 alpha per second and are released at 0.
+    pub fn retire(
+        &mut self,
+        scene: &mut Scene,
+        physics: &mut Physics,
+        eye: Vec3,
+        forward: Vec3,
+        dt: f32,
+    ) {
+        let mut lru: Vec<(u64, usize)> = self
+            .active
+            .iter()
+            .filter(|(_, r)| r.fade.is_none())
+            .map(|(&id, r)| (r.serial, id))
+            .collect();
+        lru.sort_unstable();
+        if lru.len() > MAX_RAGDOLLS {
+            // A wide frustum test on the root solid (the 4:3 fov 75 view is ~91 degrees
+            // across at 16:9), padded by the body's reach.
+            let outside = |id: usize| {
+                let to = scene.states[id].origin - eye;
+                let distance = to.length();
+                distance > 48. && to.dot(forward) < distance * (55f32).to_radians().cos() - 48.
             };
-            self.remove(scene, physics, oldest);
+            let start = match lru.iter().find(|(_, id)| outside(*id)) {
+                Some(&(_, id)) => vec![id],
+                None => lru[..lru.len() - MAX_RAGDOLLS]
+                    .iter()
+                    .map(|(_, id)| *id)
+                    .collect(),
+            };
+            for id in start {
+                if let Some(r) = self.active.get_mut(&id) {
+                    r.fade = Some(255.);
+                }
+            }
         }
+        let mut done = Vec::new();
+        for (&id, r) in &mut self.active {
+            if let Some(alpha) = &mut r.fade {
+                *alpha = (*alpha - FADE_SPEED * dt).max(0.);
+                if *alpha == 0. {
+                    done.push(id);
+                }
+            }
+        }
+        for id in done {
+            self.remove(scene, physics, id);
+        }
+    }
+    /// A fading ragdoll's render alpha (0-1), for the host's blend.
+    pub fn fade_alpha(&self, id: usize) -> Option<f32> {
+        self.active.get(&id)?.fade.map(|a| a / 255.)
+    }
+    pub fn fading(&self) -> usize {
+        self.active.values().filter(|r| r.fade.is_some()).count()
     }
     pub fn remove(&mut self, scene: &mut Scene, physics: &mut Physics, id: usize) {
         if let Some(r) = self.active.remove(&id) {
@@ -384,5 +439,67 @@ impl Ragdolls {
             );
         }
         scene.ragdoll_frame = scene.ragdoll_frame.wrapping_add(1);
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_lru_fades_out_of_view_ragdolls_first_then_the_oldest() {
+        // Ten corpses north of a player looking north; the second oldest lies behind him.
+        let world = World {
+            entities: (0..10)
+                .map(|i| modkit_core::Entity {
+                    properties: vec![
+                        ("classname".into(), "npc_metropolice".into()),
+                        ("origin".into(), format!("0 {} 0", 100 + 20 * i)),
+                    ],
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let mut scene = Scene::new(&world);
+        scene.states[1].origin = Vec3::new(0., -300., 0.);
+        let mut physics = Physics::new(&world);
+        let mut ragdolls = Ragdolls::default();
+        for id in 0..10 {
+            ragdolls.active.insert(
+                id,
+                Ragdoll {
+                    model: Arc::new(RagdollModel {
+                        bodies: Vec::new(),
+                        joints: Vec::new(),
+                        self_collisions: false,
+                        collision_pairs: Vec::new(),
+                    }),
+                    bodies: Vec::new(),
+                    parents: Vec::new(),
+                    locals: Vec::new(),
+                    inverse_binds: Vec::new(),
+                    scale: 1.,
+                    serial: id as u64,
+                    born: 0.,
+                    pins: Vec::new(),
+                    fade: None,
+                },
+            );
+        }
+        let (eye, forward) = (Vec3::new(0., 0., 64.), Vec3::Y);
+        // One per update while one is out of view: the one behind the player first.
+        ragdolls.retire(&mut scene, &mut physics, eye, forward, 0.015);
+        assert_eq!(ragdolls.fading(), 1);
+        assert!(ragdolls.fade_alpha(1).is_some());
+        // Then, all in view, the oldest beyond eight (corpse 0).
+        ragdolls.retire(&mut scene, &mut physics, eye, forward, 0.015);
+        assert_eq!(ragdolls.fading(), 2);
+        assert!(ragdolls.fade_alpha(0).is_some());
+        // 600 alpha per second: released after ~0.43 s.
+        for _ in 0..30 {
+            ragdolls.retire(&mut scene, &mut physics, eye, forward, 0.015);
+        }
+        assert_eq!(ragdolls.active.len(), 8);
+        assert_eq!(ragdolls.fading(), 0);
+        assert_eq!(ragdolls.removed, 2);
     }
 }

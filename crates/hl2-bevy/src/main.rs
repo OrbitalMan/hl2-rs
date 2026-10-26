@@ -466,6 +466,10 @@ fn main() -> Result<()> {
         )
         .add_systems(
             PostUpdate,
+            rendering::present_ragdoll_fades.after(rendering::present_entities),
+        )
+        .add_systems(
+            PostUpdate,
             rendering::present_lighting
                 .after(rendering::present_entities)
                 .after(effects::present)

@@ -788,6 +788,27 @@ pub fn present_lighting(
         lit.last = Some((origin, lit.half_lambert));
     }
 }
+/// C_ClientRagdoll::FadeOut: a retired ragdoll's model blends out (kRenderTransAlpha).
+pub fn present_ragdoll_fades(
+    game: Res<crate::gameplay::Gameplay>,
+    draws: Query<(&ModelLit, &MeshMaterial3d<SourceMaterial>)>,
+    mut materials: ResMut<Assets<SourceMaterial>>,
+) {
+    if game.ragdolls.fading() == 0 {
+        return;
+    }
+    for (lit, material) in &draws {
+        let Some(alpha) = lit.entity.and_then(|id| game.ragdolls.fade_alpha(id)) else {
+            continue;
+        };
+        if let Some(mut m) = materials.get_mut(&material.0)
+            && m.tint.w != alpha
+        {
+            m.tint.w = alpha;
+            m.alpha = AlphaMode::Blend;
+        }
+    }
+}
 /// Rotate a bind normal by the weighted bone matrices (CPU skinning path).
 fn skin_normal(
     normal: glam::Vec3,
