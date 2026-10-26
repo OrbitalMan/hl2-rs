@@ -1,5 +1,16 @@
 # STATUS
 
+## Chapter selection in progress (2026-10-27)
+
+- Research/design checkpoint committed separately from implementation: owned MOD chapter
+  configs, localization, layouts and materials plus identity-pinned retail GameUI evidence.
+  Details: docs/chapter-selection.md and docs/DESIGN.md.
+- Browser implementation is under validation. Initial packaged capture revealed stretched
+  padded thumbnails; rejected. SDK ImagePanel confirms native-size clipping is needed.
+- Next: fix thumbnail sampling, commit the validated implementation, then complete packaged
+  expansion chapter-load/capture checks and frame-time comparison. Native UI parity is not tested.
+
+
  Checkpoint: 2026-10-26 (Codex desktop, GPT-6 family; exact model identifier not exposed) on orbitalman/hl2-ui. PR readiness maintenance findings are fixed; runtime behavior is unchanged. Advanced weapon blur now spreads silhouettes with a longer exposure and dense sampling; Disabled/Enabled retain retail behavior. Lighting and Options checkpoints below remain implemented; native parity remains unverified. Sections below are newest first.
 
 ## Windows CI test portability (2026-10-26)

@@ -1086,3 +1086,26 @@ Unstarted pass15 (dropped): trace unresolved dispatchers from raw instruction ed
 ## Publication validation
 
 Public changes for this pass are documentation only: preserve history/invariants and the source-only whitelist, update evidence and the private checkpoint, check links and audit the public snapshot, then commit/push to bevy-migration. Do not rebuild/replay unchanged runtime code.
+
+## Chapter selection (2026-10-27, bounded plan)
+
+New Game opens a non-modal chapter browser owned by hl2-ui over source-ui; it no
+longer submits chapter 1 immediately. Discover nonempty chapter configs from the
+selected game's own mounted content, not inherited expansion/base configs or the
+background-map index. Resolve names with installed localization and thumbnails
+with that game's material/VTF search path. Installed NewGameDialog and
+NewGameChapterPanel layouts supply frame and control geometry. Keep game/map
+identity explicit when Start New Game submits the selected chapter's first map
+to the existing asynchronous loader. Resource loading/decoding is startup work.
+
+1. Record SDK, owned resources and identity-pinned private native findings;
+   separate observed static behavior from untested native UI interaction.
+2. Add independently tested chapter catalog/model and shared-widget dialog,
+   then wire its window, cancellation and loading effect without gameplay changes.
+3. Validate discovery against all installed expansions, pointer/keyboard/focus
+   cancellation and map identity; run local/Windows checks, packaged captures
+   and replays. Measure menu frame time before/after and document limitations.
+
+Owner requests selectable chapter starts. Progress locking/commentary and intro
+movie playback are separate unfinished gameplay features; expose all discovered
+launchable chapters rather than inventing progress from installed save files.

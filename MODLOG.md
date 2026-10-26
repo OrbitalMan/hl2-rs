@@ -1,5 +1,31 @@
 # MODLOG
 
+## 2026-10-27 Checkpoint: chapter selection research and plan
+
+**Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
+
+**Changed:** Recorded the bounded chapter browser design and identity-pinned retail/SDK
+findings, including MOD-scoped config discovery, localized chapter tokens, thumbnail materials,
+layout resources, fractional chapter ordering and explicit expansion/map identity.
+
+**Why:** New Game must open chapter selection rather than immediately loading chapter 1.
+Installed resources take precedence over in-repository assets and constants.
+
+**Tested how:** Read owned configs/layouts/localization/materials and retrieved five successful
+original GameUI exports from the pass14 index. Public SDK inspected; wiki access returned 403.
+Document whitespace checked. No native UI interaction or pixel parity claim.
+
+**Result:** Resource model established: base game 15 configs including credits, Episode One 5,
+Episode Two 7, Lost Coast 1. Implementation and packaged verification are in progress.
+
+**Still broken or not tested:** Initial implementation capture stretches padded thumbnail
+textures; rejected pending SDK-confirmed native-size clipping fix. Progress locking, commentary,
+intro movies and native desktop comparison are not implemented/tested by this checkpoint.
+
+**Next:** Finish thumbnail rendering, commit the tested implementation, then record packaged
+chapter loads, accepted captures and measured frame times in a separate checkpoint.
+
+
 ## 2026-10-26 Checkpoint: Windows CI test portability
 
 **Agent/model:** Codex desktop, GPT-6 family; exact model identifier not exposed. No subagents.
